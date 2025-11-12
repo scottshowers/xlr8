@@ -1,0 +1,28 @@
+📋 START HERE - READ THIS FIRST!
+================================
+
+🎯 YOU'RE IN THE RIGHT PLACE!
+
+This folder contains your XLR8 application, ready to deploy.
+
+👉 OPEN THIS FILE FIRST:
+   📄 SIMPLE_DEPLOY_GUIDE.md
+
+That guide will walk you through deploying this app in about 7 minutes with ZERO technical skills.
+
+You just need:
+✅ A GitHub account (free)
+✅ A Railway account (free)  
+✅ These files (you already have them!)
+
+NO CODING. NO COMMAND LINE. NO TECHNICAL KNOWLEDGE NEEDED.
+
+---
+
+Quick Links:
+• GitHub (sign up): https://github.com
+• Railway (sign up): https://railway.app
+
+---
+
+🚀 Next Step: Open SIMPLE_DEPLOY_GUIDE.md and follow along!
