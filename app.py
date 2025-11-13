@@ -11,6 +11,7 @@ import zipfile
 from datetime import datetime
 import pandas as pd
 from utils.secure_pdf_parser import SecurePayrollParser
+from secure_pdf_parser import process_parsed_pdf_for_ukg
 
 # Page configuration
 st.set_page_config(
@@ -706,16 +707,16 @@ with tab2:
                                         except Exception as concat_err:
                                             st.warning(f"Could not combine tables: {str(concat_err)}")
                                 
-                                # Direct download button
+                            # 🆕 Magic UKG Export
+                                excel_buffer = process_parsed_pdf_for_ukg(all_tables)
+
                                 st.download_button(
-                                    label="📥 Download Excel",
-                                    data=output_buffer.getvalue(),
-                                    file_name=f"{uploaded_file.name.replace('.pdf', '')}_parsed.xlsx",
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                    use_container_width=True,
-                                    key="download_excel_direct"
+                                        label="📊 Download UKG Excel",
+                                        data=excel_buffer,
+                                        file_name="UKG_Import_Data.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                                 )
-                                
+
                             except Exception as e:
                                 st.error(f"❌ Error creating Excel: {str(e)}")
                                 st.code(str(e))
