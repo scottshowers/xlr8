@@ -1,325 +1,301 @@
 """
-Advanced PDF Parser with Custom Mapping Support
-Supports downloadable JSON configs and custom field mappings
+Advanced PDF Parser for XLR8
+Handles complex pay register parsing with custom field mappings
 """
 
+import pdfplumber
+import pandas as pd
 import io
 import json
-from typing import Dict, List, Any, Optional, Tuple
-import pandas as pd
-import pdfplumber
+from typing import Dict, List, Any, Optional
 from datetime import datetime
+
 
 class AdvancedPDFParser:
     """
-    Advanced PDF parser with custom mapping configuration support.
-    Allows consultants to define custom field mappings per customer.
+    Advanced PDF parser with custom field mapping support
     """
     
-    # Default field patterns for auto-detection
-    DEFAULT_PAY_REGISTER_FIELDS = {
-        'employee_id': ['emp id', 'employee id', 'empid', 'id', 'employee number', 'emp #', 'ee id'],
-        'employee_name': ['name', 'employee name', 'emp name', 'full name', 'employee'],
-        'gross_pay': ['gross', 'gross pay', 'gross earnings', 'total gross'],
-        'net_pay': ['net', 'net pay', 'take home', 'net amount'],
-        'hours': ['hours', 'hours worked', 'regular hours', 'total hours', 'hrs'],
-        'rate': ['rate', 'pay rate', 'hourly rate', 'hr rate'],
-        'deductions': ['deductions', 'total deductions', 'withheld'],
-        'taxes': ['tax', 'taxes', 'federal', 'fica', 'medicare', 'withholding'],
-        'ytd': ['ytd', 'year to date', 'ytd total'],
-        'department': ['dept', 'department', 'cost center', 'division'],
-        'position': ['position', 'job', 'title', 'job title'],
-        'date': ['date', 'pay date', 'check date', 'period']
-    }
-    
     def __init__(self):
-        self.custom_mapping = None
-        self.parsing_results = {}
-    
-    def parse_pdf(
-        self, 
-        pdf_content: bytes, 
-        filename: str,
-        custom_mapping: Optional[Dict] = None,
-        extract_all_tables: bool = True
-    ) -> Dict[str, Any]:
+        self.detected_tables = []
+        self.detected_columns = []
+        self.parsed_data = None
+        
+    def parse_pdf(self, pdf_file, custom_mapping: Optional[Dict] = None) -> Dict[str, Any]:
         """
-        Parse PDF and extract tables with optional custom mapping.
+        Parse PDF file and extract tables
         
         Args:
-            pdf_content: PDF file content as bytes
-            filename: Name of the PDF file
-            custom_mapping: Optional custom field mapping dictionary
-            extract_all_tables: Whether to extract all tables or stop after first
+            pdf_file: Uploaded PDF file object
+            custom_mapping: Optional dictionary mapping PDF columns to target fields
             
         Returns:
-            Dictionary containing parsing results
+            Dictionary containing parsed data and metadata
         """
         try:
-            pdf_file = io.BytesIO(pdf_content)
+            # Reset state
+            self.detected_tables = []
+            self.detected_columns = []
             
+            # Open PDF with pdfplumber
             with pdfplumber.open(pdf_file) as pdf:
-                total_pages = len(pdf.pages)
-                all_tables = []
-                all_text = []
-                
-                # Extract from each page
+                # Extract tables from all pages
                 for page_num, page in enumerate(pdf.pages, 1):
-                    # Extract text
-                    page_text = page.extract_text()
-                    if page_text:
-                        all_text.append(page_text)
-                    
-                    # Extract tables
                     tables = page.extract_tables()
+                    
                     if tables:
                         for table_num, table in enumerate(tables, 1):
-                            if table and len(table) > 0:
-                                all_tables.append({
+                            if table and len(table) > 1:  # Has header and data
+                                # Convert to DataFrame
+                                df = pd.DataFrame(table[1:], columns=table[0])
+                                
+                                # Clean the data
+                                df = self._clean_dataframe(df)
+                                
+                                # Apply custom mapping if provided
+                                if custom_mapping and 'field_mappings' in custom_mapping:
+                                    df = self._apply_custom_mapping(df, custom_mapping['field_mappings'])
+                                
+                                self.detected_tables.append({
                                     'page': page_num,
                                     'table_num': table_num,
-                                    'data': table
+                                    'data': df,
+                                    'rows': len(df),
+                                    'columns': list(df.columns)
                                 })
-                
-                # Analyze document
-                is_pay_register = self._detect_pay_register(all_text, all_tables)
-                
-                # Convert tables to DataFrames
-                dataframes = []
-                for table_info in all_tables:
-                    df = self._table_to_dataframe(table_info['data'])
-                    if df is not None and not df.empty:
-                        df['source_page'] = table_info['page']
-                        df['source_table'] = table_info['table_num']
-                        dataframes.append(df)
-                
-                # Apply field mapping if provided or auto-detect
-                mapped_data = []
-                if custom_mapping:
-                    for df in dataframes:
-                        mapped_df = self._apply_custom_mapping(df, custom_mapping)
-                        mapped_data.append(mapped_df)
-                elif is_pay_register:
-                    for df in dataframes:
-                        mapped_df = self._auto_detect_fields(df)
-                        mapped_data.append(mapped_df)
-                else:
-                    mapped_data = dataframes
-                
-                # Calculate statistics
-                total_records = sum(len(df) for df in dataframes)
-                
+                                
+                                # Store unique columns
+                                for col in df.columns:
+                                    if col and col not in self.detected_columns:
+                                        self.detected_columns.append(col)
+            
+            # Generate results
+            if self.detected_tables:
+                self.parsed_data = self._generate_results()
                 return {
                     'success': True,
-                    'filename': filename,
-                    'total_pages': total_pages,
-                    'tables_found': len(all_tables),
-                    'is_pay_register': is_pay_register,
-                    'total_records': total_records,
-                    'dataframes': mapped_data,
-                    'raw_dataframes': dataframes,
-                    'detected_fields': self._get_detected_fields(dataframes),
-                    'parsing_metadata': {
-                        'parsed_at': datetime.now().isoformat(),
-                        'custom_mapping_used': custom_mapping is not None,
-                        'pages_processed': total_pages
-                    }
+                    'tables_found': len(self.detected_tables),
+                    'total_rows': sum(t['rows'] for t in self.detected_tables),
+                    'columns': self.detected_columns,
+                    'data': self.parsed_data,
+                    'timestamp': datetime.now().isoformat()
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': 'No tables detected in PDF',
+                    'message': 'The PDF may not contain structured tables or might be image-based'
                 }
                 
         except Exception as e:
             return {
                 'success': False,
                 'error': str(e),
-                'filename': filename
+                'message': 'Error parsing PDF. Please ensure the PDF is text-based and contains tables.'
             }
     
-    def _table_to_dataframe(self, table: List[List]) -> Optional[pd.DataFrame]:
-        """Convert extracted table to DataFrame"""
-        try:
-            if not table or len(table) < 2:
-                return None
-            
-            # First row as headers
-            headers = table[0]
-            data = table[1:]
-            
-            # Clean headers
-            headers = [str(h).strip() if h else f'Column_{i}' for i, h in enumerate(headers)]
-            
-            # Create DataFrame
-            df = pd.DataFrame(data, columns=headers)
-            
-            # Remove empty rows
-            df = df.dropna(how='all')
-            
-            return df
-        except Exception as e:
-            return None
-    
-    def _detect_pay_register(self, texts: List[str], tables: List[Dict]) -> bool:
-        """Detect if document is a pay register"""
-        keywords = [
-            'payroll', 'pay register', 'earnings', 'gross pay', 'net pay',
-            'deductions', 'employee', 'hours worked', 'pay period'
-        ]
+    def _clean_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Clean and normalize dataframe"""
+        # Remove completely empty rows
+        df = df.dropna(how='all')
         
-        # Check text content
-        text_content = ' '.join(texts).lower()
-        keyword_matches = sum(1 for kw in keywords if kw in text_content)
+        # Clean column names
+        df.columns = [str(col).strip() if col else f'Column_{i}' 
+                     for i, col in enumerate(df.columns)]
         
-        # Check table headers
-        if tables:
-            for table_info in tables:
-                table = table_info['data']
-                if table and len(table) > 0:
-                    headers = ' '.join([str(h).lower() for h in table[0] if h])
-                    keyword_matches += sum(1 for kw in keywords if kw in headers)
+        # Remove None values
+        df = df.fillna('')
         
-        return keyword_matches >= 3
-    
-    def _auto_detect_fields(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Auto-detect pay register fields in DataFrame"""
-        field_mapping = {}
-        
+        # Strip whitespace from string columns
         for col in df.columns:
-            col_lower = str(col).lower().strip()
-            
-            # Check against known patterns
-            for field_name, patterns in self.DEFAULT_PAY_REGISTER_FIELDS.items():
-                for pattern in patterns:
-                    if pattern in col_lower:
-                        field_mapping[col] = field_name
-                        break
-                if col in field_mapping:
-                    break
+            if df[col].dtype == 'object':
+                df[col] = df[col].astype(str).str.strip()
         
-        # Store detected mapping
-        df.attrs['field_mapping'] = field_mapping
         return df
     
-    def _apply_custom_mapping(self, df: pd.DataFrame, mapping: Dict[str, str]) -> pd.DataFrame:
-        """Apply custom field mapping to DataFrame"""
-        # Create new DataFrame with mapped column names
-        renamed_df = df.copy()
+    def _apply_custom_mapping(self, df: pd.DataFrame, mappings: Dict[str, str]) -> pd.DataFrame:
+        """Apply custom field mappings to dataframe"""
+        # Create mapping dictionary
+        rename_dict = {}
+        for pdf_col, target_field in mappings.items():
+            if pdf_col in df.columns and target_field:
+                rename_dict[pdf_col] = target_field
         
-        # Apply mapping
-        for original_col, target_field in mapping.items():
-            if original_col in df.columns:
-                renamed_df = renamed_df.rename(columns={original_col: target_field})
+        # Rename columns
+        if rename_dict:
+            df = df.rename(columns=rename_dict)
         
-        renamed_df.attrs['custom_mapping_applied'] = True
-        return renamed_df
+        return df
     
-    def _get_detected_fields(self, dataframes: List[pd.DataFrame]) -> Dict[str, List[str]]:
-        """Get all detected fields across all DataFrames"""
-        all_fields = {}
+    def _generate_results(self) -> Dict[str, Any]:
+        """Generate comprehensive results from parsed tables"""
+        results = {
+            'tables': [],
+            'summary': {},
+            'all_data': None
+        }
         
-        for df in dataframes:
-            if hasattr(df, 'attrs') and 'field_mapping' in df.attrs:
-                mapping = df.attrs['field_mapping']
-                for original, detected in mapping.items():
-                    if detected not in all_fields:
-                        all_fields[detected] = []
-                    all_fields[detected].append(original)
+        all_dfs = []
         
-        return all_fields
+        for table in self.detected_tables:
+            df = table['data']
+            
+            table_info = {
+                'page': table['page'],
+                'table_num': table['table_num'],
+                'rows': table['rows'],
+                'columns': table['columns'],
+                'data': df
+            }
+            
+            results['tables'].append(table_info)
+            all_dfs.append(df)
+        
+        # Combine all tables
+        if all_dfs:
+            results['all_data'] = pd.concat(all_dfs, ignore_index=True)
+        
+        # Generate summary
+        results['summary'] = {
+            'total_tables': len(self.detected_tables),
+            'total_rows': sum(t['rows'] for t in self.detected_tables),
+            'unique_columns': len(self.detected_columns),
+            'column_list': self.detected_columns
+        }
+        
+        return results
     
-    def generate_mapping_config(self, pdf_content: bytes, filename: str) -> Dict[str, Any]:
+    def export_to_excel(self, output_path: str = None) -> io.BytesIO:
         """
-        Generate a mapping configuration template based on PDF structure.
-        This can be downloaded, edited, and re-uploaded.
+        Export parsed data to Excel with multiple sheets
+        
+        Returns:
+            BytesIO object containing Excel file
         """
-        # Parse PDF to get structure
-        result = self.parse_pdf(pdf_content, filename)
+        if not self.parsed_data or not self.parsed_data['tables']:
+            raise ValueError("No data to export. Parse a PDF first.")
+        
+        output = io.BytesIO()
+        
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            # Summary sheet
+            summary_df = pd.DataFrame([self.parsed_data['summary']])
+            summary_df.to_excel(writer, sheet_name='Summary', index=False)
+            
+            # Individual table sheets
+            for i, table in enumerate(self.parsed_data['tables'], 1):
+                sheet_name = f"Page{table['page']}_Table{table['table_num']}"
+                table['data'].to_excel(writer, sheet_name=sheet_name, index=False)
+            
+            # Combined data sheet
+            if self.parsed_data['all_data'] is not None:
+                self.parsed_data['all_data'].to_excel(writer, sheet_name='All_Data', index=False)
+        
+        output.seek(0)
+        return output
+    
+    def export_to_csv(self) -> io.StringIO:
+        """
+        Export all parsed data to CSV
+        
+        Returns:
+            StringIO object containing CSV data
+        """
+        if not self.parsed_data or self.parsed_data['all_data'] is None:
+            raise ValueError("No data to export. Parse a PDF first.")
+        
+        output = io.StringIO()
+        self.parsed_data['all_data'].to_csv(output, index=False)
+        output.seek(0)
+        return output
+    
+    def generate_mapping_template(self, pdf_file) -> Dict[str, Any]:
+        """
+        Generate a mapping template from detected PDF columns
+        
+        Args:
+            pdf_file: Uploaded PDF file object
+            
+        Returns:
+            Dictionary containing mapping template
+        """
+        # First, detect columns by parsing the PDF
+        result = self.parse_pdf(pdf_file)
         
         if not result['success']:
             return result
         
-        # Generate mapping template
-        mapping_config = {
+        # Create mapping template
+        template = {
             'document_info': {
-                'filename': filename,
-                'generated_at': datetime.now().isoformat(),
-                'total_pages': result['total_pages'],
-                'tables_found': result['tables_found'],
-                'is_pay_register': result['is_pay_register']
+                'filename': getattr(pdf_file, 'name', 'unknown.pdf'),
+                'created_date': datetime.now().isoformat(),
+                'tables_detected': result['tables_found'],
+                'total_rows': result['total_rows']
             },
+            'detected_columns': result['columns'],
             'field_mappings': {},
-            'instructions': {
-                'how_to_use': 'Edit the field_mappings section to map source columns to target fields',
-                'example': {'Original Column Name': 'target_field_name'},
-                'available_fields': list(self.DEFAULT_PAY_REGISTER_FIELDS.keys())
-            },
-            'detected_columns': []
+            'target_fields': [
+                'employee_id',
+                'employee_name', 
+                'gross_pay',
+                'net_pay',
+                'hours',
+                'rate',
+                'deductions',
+                'taxes',
+                'ytd',
+                'department',
+                'position',
+                'date',
+                'custom'
+            ]
         }
         
-        # Add all detected columns
-        all_columns = set()
-        for df in result['raw_dataframes']:
-            all_columns.update(df.columns)
-        
-        mapping_config['detected_columns'] = sorted(list(all_columns))
-        
-        # Add suggested mappings based on auto-detection
-        if result['detected_fields']:
-            suggestions = {}
-            for target_field, source_columns in result['detected_fields'].items():
-                for source_col in source_columns:
-                    suggestions[source_col] = target_field
-            mapping_config['field_mappings'] = suggestions
+        # Initialize mappings (empty for user to fill)
+        for col in result['columns']:
+            template['field_mappings'][col] = ''
         
         return {
             'success': True,
-            'config': mapping_config,
-            'filename': filename
+            'template': template
         }
+
+
+def create_mapping_editor_html(template: Dict[str, Any], color_scheme: Dict[str, str] = None) -> str:
+    """
+    Create an HTML mapping editor with TWO PAGES for section/field mapping
     
-    def export_to_excel(
-        self, 
-        dataframes: List[pd.DataFrame], 
-        filename: str,
-        include_summary: bool = True
-    ) -> bytes:
-        """Export parsed data to Excel with multiple sheets"""
-        output = io.BytesIO()
+    Args:
+        template: Mapping template dictionary
+        color_scheme: Optional color scheme dictionary
         
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            # Write each table to separate sheet
-            for i, df in enumerate(dataframes, 1):
-                sheet_name = f'Table_{i}'
-                if 'source_page' in df.columns:
-                    page = df['source_page'].iloc[0]
-                    sheet_name = f'Page{page}_T{i}'
-                
-                df.to_excel(writer, sheet_name=sheet_name, index=False)
-            
-            # Add summary sheet if requested
-            if include_summary and dataframes:
-                summary_data = {
-                    'Metric': ['Total Tables', 'Total Records', 'Total Columns'],
-                    'Value': [
-                        len(dataframes),
-                        sum(len(df) for df in dataframes),
-                        sum(len(df.columns) for df in dataframes)
-                    ]
-                }
-                summary_df = pd.DataFrame(summary_data)
-                summary_df.to_excel(writer, sheet_name='Summary', index=False)
-        
-        output.seek(0)
-        return output.getvalue()
-
-
-def create_mapping_editor_html(mapping_config: Dict[str, Any]) -> str:
+    Returns:
+        HTML string for the mapping editor
     """
-    Generate an HTML file that allows offline editing of field mappings.
-    """
-    html_template = f"""<!DOCTYPE html>
+    # Use provided color scheme or defaults
+    colors = color_scheme or {
+        'primary': '#6d8aa0',
+        'secondary': '#7d96a8',
+        'tertiary': '#8ca6be',
+        'background': '#e8edf2',
+        'card_bg': '#ffffff',
+        'text': '#1a2332',
+        'text_secondary': '#6c757d',
+        'border': '#d1dce5',
+        'success': '#6d8aa0'
+    }
+    
+    # Generate column options for dropdowns
+    detected_cols = template.get('detected_columns', [])
+    target_fields = template.get('target_fields', [])
+    
+    html = f'''<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>XLR8 PDF Mapping Editor</title>
+    <title>XLR8 PDF Mapping Editor - Two Page Mode</title>
     <style>
         * {{
             margin: 0;
@@ -328,318 +304,665 @@ def create_mapping_editor_html(mapping_config: Dict[str, Any]) -> str:
         }}
         
         body {{
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif;
+            background: {colors['background']};
             padding: 20px;
-            min-height: 100vh;
+            color: {colors['text']};
         }}
         
         .container {{
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
-            background: white;
-            border-radius: 10px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            background: {colors['card_bg']};
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(109, 138, 160, 0.15);
             overflow: hidden;
         }}
         
+        /* Header */
         .header {{
-            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            background: linear-gradient(135deg, {colors['primary']} 0%, {colors['secondary']} 100%);
             color: white;
-            padding: 30px;
+            padding: 2rem 3rem;
             text-align: center;
         }}
         
         .header h1 {{
-            font-size: 2.5rem;
-            margin-bottom: 10px;
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+            font-weight: 700;
         }}
         
-        .content {{
-            padding: 30px;
+        .header p {{
+            opacity: 0.95;
+            font-size: 1rem;
         }}
         
-        .info-box {{
-            background: #f8f9fa;
-            border-left: 4px solid #28a745;
-            padding: 20px;
-            margin-bottom: 30px;
-            border-radius: 5px;
-        }}
-        
-        .info-box h3 {{
-            color: #28a745;
-            margin-bottom: 10px;
-        }}
-        
-        .info-row {{
+        /* Page Navigation */
+        .page-nav {{
+            background: {colors['card_bg']};
+            border-bottom: 2px solid {colors['border']};
+            padding: 1rem 3rem;
             display: flex;
-            justify-content: space-between;
-            padding: 5px 0;
+            gap: 1rem;
         }}
         
-        .mapping-section {{
-            margin-top: 30px;
-        }}
-        
-        .mapping-table {{
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-        }}
-        
-        .mapping-table th,
-        .mapping-table td {{
-            padding: 15px;
-            text-align: left;
-            border-bottom: 1px solid #dee2e6;
-        }}
-        
-        .mapping-table th {{
-            background: #28a745;
-            color: white;
-            font-weight: 600;
-        }}
-        
-        .mapping-table tr:hover {{
-            background: #f8f9fa;
-        }}
-        
-        input[type="text"],
-        select {{
-            width: 100%;
-            padding: 10px;
-            border: 2px solid #dee2e6;
-            border-radius: 5px;
-            font-size: 14px;
-        }}
-        
-        input[type="text"]:focus,
-        select:focus {{
-            outline: none;
-            border-color: #28a745;
-        }}
-        
-        .button-group {{
-            margin-top: 30px;
-            display: flex;
-            gap: 15px;
-            justify-content: center;
-        }}
-        
-        button {{
-            padding: 15px 40px;
-            font-size: 16px;
-            font-weight: 600;
+        .page-btn {{
+            padding: 0.75rem 2rem;
             border: none;
-            border-radius: 5px;
+            background: transparent;
+            color: {colors['text_secondary']};
+            font-size: 1rem;
+            font-weight: 600;
             cursor: pointer;
+            border-bottom: 3px solid transparent;
             transition: all 0.3s;
         }}
         
+        .page-btn:hover {{
+            color: {colors['primary']};
+            background: rgba(109, 138, 160, 0.05);
+        }}
+        
+        .page-btn.active {{
+            color: {colors['primary']};
+            border-bottom-color: {colors['primary']};
+        }}
+        
+        /* Pages */
+        .page {{
+            display: none;
+            padding: 3rem;
+        }}
+        
+        .page.active {{
+            display: block;
+        }}
+        
+        /* Info Box */
+        .info-box {{
+            background: rgba(109, 138, 160, 0.1);
+            border-left: 4px solid {colors['primary']};
+            padding: 1.5rem;
+            border-radius: 8px;
+            margin-bottom: 2rem;
+        }}
+        
+        .info-box h3 {{
+            color: {colors['primary']};
+            margin-bottom: 0.5rem;
+            font-size: 1.1rem;
+        }}
+        
+        .info-box p {{
+            color: {colors['text_secondary']};
+            line-height: 1.6;
+        }}
+        
+        /* Canvas Container */
+        .canvas-container {{
+            position: relative;
+            background: white;
+            border: 2px solid {colors['border']};
+            border-radius: 8px;
+            margin: 2rem 0;
+            overflow: auto;
+            max-height: 600px;
+        }}
+        
+        #pdfCanvas {{
+            display: block;
+            cursor: crosshair;
+        }}
+        
+        /* Section List */
+        .section-list {{
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 1rem;
+            margin-top: 2rem;
+        }}
+        
+        .section-card {{
+            background: {colors['card_bg']};
+            border: 2px solid {colors['border']};
+            border-radius: 8px;
+            padding: 1.5rem;
+            transition: all 0.3s;
+        }}
+        
+        .section-card:hover {{
+            border-color: {colors['primary']};
+            box-shadow: 0 4px 12px rgba(109, 138, 160, 0.15);
+        }}
+        
+        .section-card h4 {{
+            color: {colors['primary']};
+            margin-bottom: 1rem;
+            font-size: 1rem;
+        }}
+        
+        .section-card input, .section-card select {{
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid {colors['border']};
+            border-radius: 6px;
+            margin-bottom: 0.75rem;
+            font-size: 0.95rem;
+            transition: all 0.3s;
+        }}
+        
+        .section-card input:focus, .section-card select:focus {{
+            outline: none;
+            border-color: {colors['primary']};
+            box-shadow: 0 0 0 3px rgba(109, 138, 160, 0.1);
+        }}
+        
+        .field-list {{
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid {colors['border']};
+        }}
+        
+        .field-item {{
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }}
+        
+        .field-item input {{
+            flex: 1;
+            margin-bottom: 0;
+        }}
+        
+        .field-item button {{
+            padding: 0.5rem;
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85rem;
+        }}
+        
+        /* Buttons */
+        .btn {{
+            padding: 0.85rem 2rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-right: 1rem;
+        }}
+        
         .btn-primary {{
-            background: #28a745;
+            background: {colors['primary']};
             color: white;
         }}
         
         .btn-primary:hover {{
-            background: #218838;
+            background: {colors['secondary']};
             transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(40, 167, 69, 0.3);
+            box-shadow: 0 6px 16px rgba(109, 138, 160, 0.3);
         }}
         
         .btn-secondary {{
-            background: #6c757d;
-            color: white;
+            background: transparent;
+            color: {colors['primary']};
+            border: 2px solid {colors['primary']};
         }}
         
         .btn-secondary:hover {{
-            background: #5a6268;
+            background: rgba(109, 138, 160, 0.1);
         }}
         
-        .instructions {{
-            background: #fff3cd;
-            border-left: 4px solid #ffc107;
-            padding: 20px;
-            margin-top: 30px;
-            border-radius: 5px;
+        .btn-success {{
+            background: {colors['success']};
+            color: white;
         }}
         
-        .instructions h4 {{
-            color: #856404;
-            margin-bottom: 10px;
+        /* Action Bar */
+        .action-bar {{
+            position: sticky;
+            bottom: 0;
+            background: {colors['card_bg']};
+            border-top: 2px solid {colors['border']};
+            padding: 1.5rem 3rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 -4px 12px rgba(0,0,0,0.05);
         }}
         
-        .instructions ul {{
-            margin-left: 20px;
-            margin-top: 10px;
+        .progress-info {{
+            color: {colors['text_secondary']};
+            font-size: 0.95rem;
         }}
         
-        .instructions li {{
-            margin: 5px 0;
-            color: #856404;
+        /* Success Message */
+        .success-message {{
+            display: none;
+            background: rgba(109, 138, 160, 0.1);
+            border: 2px solid {colors['success']};
+            padding: 1.5rem;
+            border-radius: 8px;
+            text-align: center;
+            margin: 2rem 0;
+        }}
+        
+        .success-message.show {{
+            display: block;
+        }}
+        
+        .success-message h3 {{
+            color: {colors['success']};
+            margin-bottom: 1rem;
         }}
     </style>
 </head>
 <body>
     <div class="container">
+        <!-- Header -->
         <div class="header">
             <h1>⚡ XLR8 PDF Mapping Editor</h1>
-            <p>Configure custom field mappings for pay register parsing</p>
+            <p>Two-Page Mode: Define Sections & Fields for Excel Export</p>
         </div>
         
-        <div class="content">
+        <!-- Page Navigation -->
+        <div class="page-nav">
+            <button class="page-btn active" onclick="switchPage('page1')">
+                📄 Page 1: Define Sections
+            </button>
+            <button class="page-btn" onclick="switchPage('page2')">
+                📋 Page 2: Define Fields
+            </button>
+        </div>
+        
+        <!-- Page 1: Define Sections -->
+        <div id="page1" class="page active">
             <div class="info-box">
-                <h3>📄 Document Information</h3>
-                <div class="info-row">
-                    <strong>Filename:</strong>
-                    <span id="filename">{mapping_config['document_info']['filename']}</span>
-                </div>
-                <div class="info-row">
-                    <strong>Pages:</strong>
-                    <span>{mapping_config['document_info']['total_pages']}</span>
-                </div>
-                <div class="info-row">
-                    <strong>Tables Found:</strong>
-                    <span>{mapping_config['document_info']['tables_found']}</span>
-                </div>
-                <div class="info-row">
-                    <strong>Pay Register:</strong>
-                    <span>{"Yes" if mapping_config['document_info']['is_pay_register'] else "No"}</span>
-                </div>
+                <h3>📄 Page 1: Define Sections</h3>
+                <p>
+                    Draw boxes around SECTIONS in your PDF. Each section will become its own tab in the Excel workbook.
+                    For example: "Employee Information", "Earnings", "Deductions", "YTD Totals"
+                </p>
             </div>
             
-            <div class="instructions">
-                <h4>📋 Instructions</h4>
-                <ul>
-                    <li>Review the detected columns below</li>
-                    <li>Map each source column to a target field using the dropdowns</li>
-                    <li>You can also type custom field names</li>
-                    <li>Click "Download Configuration" to save as JSON</li>
-                    <li>Upload the JSON back to XLR8 to apply the mappings</li>
-                </ul>
+            <div class="canvas-container">
+                <canvas id="pdfCanvas" width="800" height="1000"></canvas>
             </div>
             
-            <div class="mapping-section">
-                <h3>🎯 Field Mappings</h3>
-                <table class="mapping-table">
-                    <thead>
-                        <tr>
-                            <th>Source Column (from PDF)</th>
-                            <th>Target Field (UKG/System)</th>
-                            <th>Auto-Detected</th>
-                        </tr>
-                    </thead>
-                    <tbody id="mappingTableBody">
-                    </tbody>
-                </table>
+            <div class="section-list" id="sectionList">
+                <!-- Sections will be added here -->
             </div>
             
-            <div class="button-group">
-                <button class="btn-primary" onclick="downloadConfig()">
-                    💾 Download Configuration (JSON)
+            <button class="btn btn-primary" onclick="addSection()">
+                ➕ Add New Section
+            </button>
+        </div>
+        
+        <!-- Page 2: Define Fields -->
+        <div id="page2" class="page">
+            <div class="info-box">
+                <h3>📋 Page 2: Define Fields Within Sections</h3>
+                <p>
+                    For each section, define the FIELDS that will appear as columns in Excel (left to right).
+                    Each employee will be a row. Example fields: "Employee ID", "Name", "Gross Pay", "Net Pay"
+                </p>
+            </div>
+            
+            <div id="fieldSections">
+                <!-- Field definition areas will be populated based on sections -->
+            </div>
+        </div>
+        
+        <!-- Action Bar -->
+        <div class="action-bar">
+            <div class="progress-info">
+                <span id="progressText">Sections: 0 | Total Fields: 0</span>
+            </div>
+            <div>
+                <button class="btn btn-secondary" onclick="resetMapping()">
+                    🔄 Reset All
                 </button>
-                <button class="btn-secondary" onclick="addCustomMapping()">
-                    ➕ Add Custom Mapping
+                <button class="btn btn-primary" onclick="previewConfig()">
+                    👁️ Preview Config
+                </button>
+                <button class="btn btn-success" onclick="downloadConfig()">
+                    💾 Download Configuration
                 </button>
             </div>
+        </div>
+        
+        <!-- Success Message -->
+        <div class="success-message" id="successMessage">
+            <h3>✅ Configuration Saved!</h3>
+            <p>Your mapping configuration has been downloaded. Upload it to XLR8 to parse the PDF with your custom mappings.</p>
         </div>
     </div>
     
     <script>
-        const configData = {json.dumps(mapping_config, indent=2)};
+        // State management
+        let sections = [];
+        let currentPage = 'page1';
+        let canvas = document.getElementById('pdfCanvas');
+        let ctx = canvas.getContext('2d');
+        let isDrawing = false;
+        let startX, startY;
+        let currentBox = null;
         
-        const availableFields = [
-            'employee_id', 'employee_name', 'gross_pay', 'net_pay', 
-            'hours', 'rate', 'deductions', 'taxes', 'ytd', 
-            'department', 'position', 'date', 'custom'
-        ];
-        
-        function initializeMappings() {{
-            const tbody = document.getElementById('mappingTableBody');
-            tbody.innerHTML = '';
+        // Initialize
+        function init() {{
+            // Draw sample PDF representation
+            drawSamplePDF();
             
-            const detectedColumns = configData.detected_columns || [];
-            const existingMappings = configData.field_mappings || {{}};
-            
-            detectedColumns.forEach(column => {{
-                addMappingRow(column, existingMappings[column] || '');
-            }});
+            // Add first section by default
+            addSection();
         }}
         
-        function addMappingRow(sourceColumn, targetField) {{
-            const tbody = document.getElementById('mappingTableBody');
-            const row = tbody.insertRow();
+        function drawSamplePDF() {{
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
             
-            const cell1 = row.insertCell(0);
-            const cell2 = row.insertCell(1);
-            const cell3 = row.insertCell(2);
+            ctx.fillStyle = '#e8edf2';
+            ctx.font = '16px Arial';
+            ctx.fillText('Sample PDF Document', 50, 50);
+            ctx.fillText('(Draw boxes around sections you want to extract)', 50, 80);
             
-            cell1.textContent = sourceColumn;
+            // Draw sample table
+            ctx.strokeStyle = '#d1dce5';
+            ctx.lineWidth = 1;
+            for (let i = 0; i < 10; i++) {{
+                ctx.strokeRect(50, 120 + i * 40, 700, 40);
+            }}
             
-            const select = document.createElement('select');
-            select.className = 'field-select';
-            select.dataset.source = sourceColumn;
+            ctx.fillStyle = '{colors["text_secondary"]}';
+            ctx.font = '12px Arial';
+            ctx.fillText('Employee Info', 60, 145);
+            ctx.fillText('Earnings', 250, 145);
+            ctx.fillText('Deductions', 450, 145);
+            ctx.fillText('Net Pay', 650, 145);
+        }}
+        
+        // Canvas drawing
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', stopDrawing);
+        
+        function startDrawing(e) {{
+            isDrawing = true;
+            const rect = canvas.getBoundingClientRect();
+            startX = e.clientX - rect.left;
+            startY = e.clientY - rect.top;
+        }}
+        
+        function draw(e) {{
+            if (!isDrawing) return;
             
-            const emptyOption = document.createElement('option');
-            emptyOption.value = '';
-            emptyOption.textContent = '-- Select Field --';
-            select.appendChild(emptyOption);
+            const rect = canvas.getBoundingClientRect();
+            const currentX = e.clientX - rect.left;
+            const currentY = e.clientY - rect.top;
             
-            availableFields.forEach(field => {{
-                const option = document.createElement('option');
-                option.value = field;
-                option.textContent = field.replace(/_/g, ' ').replace(/\\b\\w/g, l => l.toUpperCase());
-                if (field === targetField) {{
-                    option.selected = true;
+            // Redraw base
+            drawSamplePDF();
+            
+            // Draw existing boxes
+            sections.forEach(section => {{
+                if (section.box) {{
+                    ctx.strokeStyle = '{colors["primary"]}';
+                    ctx.lineWidth = 3;
+                    ctx.strokeRect(section.box.x, section.box.y, section.box.width, section.box.height);
+                    ctx.fillStyle = 'rgba(109, 138, 160, 0.2)';
+                    ctx.fillRect(section.box.x, section.box.y, section.box.width, section.box.height);
                 }}
-                select.appendChild(option);
             }});
             
-            cell2.appendChild(select);
-            cell3.textContent = targetField ? '✓' : '';
+            // Draw current box
+            ctx.strokeStyle = '{colors["secondary"]}';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.strokeRect(startX, startY, currentX - startX, currentY - startY);
+            ctx.setLineDash([]);
         }}
         
-        function addCustomMapping() {{
-            const sourceColumn = prompt('Enter source column name:');
-            if (sourceColumn) {{
-                addMappingRow(sourceColumn, '');
+        function stopDrawing(e) {{
+            if (!isDrawing) return;
+            isDrawing = false;
+            
+            const rect = canvas.getBoundingClientRect();
+            const endX = e.clientX - rect.left;
+            const endY = e.clientY - rect.top;
+            
+            currentBox = {{
+                x: Math.min(startX, endX),
+                y: Math.min(startY, endY),
+                width: Math.abs(endX - startX),
+                height: Math.abs(endY - startY)
+            }};
+            
+            // Save to last section if available
+            if (sections.length > 0) {{
+                const lastSection = sections[sections.length - 1];
+                if (!lastSection.box) {{
+                    lastSection.box = currentBox;
+                    renderSections();
+                }}
             }}
         }}
         
-        function downloadConfig() {{
-            const selects = document.querySelectorAll('.field-select');
-            const mappings = {{}};
+        // Section management
+        function addSection() {{
+            const sectionId = Date.now();
+            sections.push({{
+                id: sectionId,
+                name: '',
+                box: null,
+                fields: []
+            }});
+            renderSections();
+            updateProgress();
+        }}
+        
+        function removeSection(sectionId) {{
+            sections = sections.filter(s => s.id !== sectionId);
+            renderSections();
+            updateProgress();
+        }}
+        
+        function renderSections() {{
+            const sectionList = document.getElementById('sectionList');
+            sectionList.innerHTML = '';
             
-            selects.forEach(select => {{
-                if (select.value) {{
-                    mappings[select.dataset.source] = select.value;
-                }}
+            sections.forEach((section, index) => {{
+                const card = document.createElement('div');
+                card.className = 'section-card';
+                card.innerHTML = `
+                    <h4>Section ${{index + 1}}</h4>
+                    <input 
+                        type="text" 
+                        placeholder="Section Name (e.g., Employee Information)" 
+                        value="${{section.name}}"
+                        onchange="updateSectionName(${{section.id}}, this.value)"
+                    >
+                    <p style="color: {colors["text_secondary"]}; font-size: 0.85rem;">
+                        ${{section.box ? '✓ Box drawn on canvas' : '⚠ Draw a box on the canvas above'}}
+                    </p>
+                    <button onclick="removeSection(${{section.id}})" style="background: #dc3545; color: white; border: none; padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; margin-top: 0.5rem;">
+                        🗑️ Remove Section
+                    </button>
+                `;
+                sectionList.appendChild(card);
             }});
             
-            const updatedConfig = {{
-                ...configData,
-                field_mappings: mappings,
-                modified_at: new Date().toISOString()
-            }};
+            renderFieldSections();
+        }}
+        
+        function updateSectionName(sectionId, name) {{
+            const section = sections.find(s => s.id === sectionId);
+            if (section) {{
+                section.name = name;
+                renderFieldSections();
+            }}
+        }}
+        
+        // Field management
+        function renderFieldSections() {{
+            const fieldSections = document.getElementById('fieldSections');
+            fieldSections.innerHTML = '';
             
-            const blob = new Blob([JSON.stringify(updatedConfig, null, 2)], {{type: 'application/json'}});
+            sections.forEach(section => {{
+                const sectionDiv = document.createElement('div');
+                sectionDiv.className = 'section-card';
+                sectionDiv.innerHTML = `
+                    <h4>${{section.name || 'Unnamed Section'}}</h4>
+                    <div class="field-list" id="fields_${{section.id}}">
+                        <!-- Fields will be added here -->
+                    </div>
+                    <button class="btn btn-secondary" onclick="addField(${{section.id}})">
+                        ➕ Add Field
+                    </button>
+                `;
+                fieldSections.appendChild(sectionDiv);
+                
+                // Render existing fields
+                section.fields.forEach((field, index) => {{
+                    renderField(section.id, field, index);
+                }});
+            }});
+            
+            updateProgress();
+        }}
+        
+        function addField(sectionId) {{
+            const section = sections.find(s => s.id === sectionId);
+            if (section) {{
+                section.fields.push({{
+                    name: '',
+                    pdfColumn: ''
+                }});
+                renderFieldSections();
+            }}
+        }}
+        
+        function renderField(sectionId, field, index) {{
+            const fieldList = document.getElementById(`fields_${{sectionId}}`);
+            const fieldDiv = document.createElement('div');
+            fieldDiv.className = 'field-item';
+            fieldDiv.innerHTML = `
+                <input 
+                    type="text" 
+                    placeholder="Field Name (e.g., Employee ID)" 
+                    value="${{field.name}}"
+                    onchange="updateField(${{sectionId}}, ${{index}}, 'name', this.value)"
+                >
+                <input 
+                    type="text" 
+                    placeholder="PDF Column" 
+                    value="${{field.pdfColumn}}"
+                    onchange="updateField(${{sectionId}}, ${{index}}, 'pdfColumn', this.value)"
+                >
+                <button onclick="removeField(${{sectionId}}, ${{index}})">🗑️</button>
+            `;
+            fieldList.appendChild(fieldDiv);
+        }}
+        
+        function updateField(sectionId, fieldIndex, property, value) {{
+            const section = sections.find(s => s.id === sectionId);
+            if (section && section.fields[fieldIndex]) {{
+                section.fields[fieldIndex][property] = value;
+                updateProgress();
+            }}
+        }}
+        
+        function removeField(sectionId, fieldIndex) {{
+            const section = sections.find(s => s.id === sectionId);
+            if (section) {{
+                section.fields.splice(fieldIndex, 1);
+                renderFieldSections();
+            }}
+        }}
+        
+        // Navigation
+        function switchPage(pageId) {{
+            // Hide all pages
+            document.querySelectorAll('.page').forEach(page => {{
+                page.classList.remove('active');
+            }});
+            
+            // Remove active from all buttons
+            document.querySelectorAll('.page-btn').forEach(btn => {{
+                btn.classList.remove('active');
+            }});
+            
+            // Show selected page
+            document.getElementById(pageId).classList.add('active');
+            event.target.classList.add('active');
+            
+            currentPage = pageId;
+        }}
+        
+        // Progress tracking
+        function updateProgress() {{
+            const totalFields = sections.reduce((sum, section) => sum + section.fields.length, 0);
+            document.getElementById('progressText').textContent = 
+                `Sections: ${{sections.length}} | Total Fields: ${{totalFields}}`;
+        }}
+        
+        // Configuration management
+        function previewConfig() {{
+            const config = generateConfig();
+            alert(JSON.stringify(config, null, 2));
+        }}
+        
+        function generateConfig() {{
+            return {{
+                document_info: {{
+                    created_date: new Date().toISOString(),
+                    editor_version: '2.0',
+                    mode: 'two-page-section-field'
+                }},
+                sections: sections.map(section => ({{
+                    name: section.name,
+                    box: section.box,
+                    fields: section.fields,
+                    excel_tab: section.name.replace(/[^a-zA-Z0-9]/g, '_')
+                }}))
+            }};
+        }}
+        
+        function downloadConfig() {{
+            const config = generateConfig();
+            const blob = new Blob([JSON.stringify(config, null, 2)], {{ type: 'application/json' }});
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `mapping_${{configData.document_info.filename.replace('.pdf', '')}}.json`;
+            a.download = 'xlr8_mapping_config.json';
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
             
-            alert('Configuration downloaded! Upload this JSON file back to XLR8 to apply the mappings.');
+            // Show success message
+            document.getElementById('successMessage').classList.add('show');
+            setTimeout(() => {{
+                document.getElementById('successMessage').classList.remove('show');
+            }}, 5000);
+        }}
+        
+        function resetMapping() {{
+            if (confirm('Reset all sections and fields? This cannot be undone.')) {{
+                sections = [];
+                addSection();
+                drawSamplePDF();
+                renderSections();
+            }}
         }}
         
         // Initialize on load
-        window.onload = initializeMappings;
+        init();
     </script>
 </body>
-</html>"""
-    
-    return html_template
+</html>''

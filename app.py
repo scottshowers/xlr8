@@ -582,95 +582,86 @@ with tab4:
     admin_col1, admin_col2 = st.columns([2, 1])
     
     with admin_col1:
-        # Live Chat with Claude
-        st.markdown("### 💬 Live Chat with Claude")
+        # Direct Communication with Claude
+        st.markdown("### 💬 Communicate with Claude")
         st.markdown("""
         <div class='info-box' style='font-size: 0.9rem;'>
-        Ask questions, request changes, report bugs - Claude will respond directly here!
+        <strong>Important:</strong> This panel is for logging issues and requests. Your messages are recorded below 
+        so you can copy them to share with Claude in your main conversation for immediate fixes.
         </div>
         """, unsafe_allow_html=True)
         
-        # Initialize chat history in session state
-        if 'admin_chat_history' not in st.session_state:
-            st.session_state.admin_chat_history = []
+        # Initialize messages list in session state
+        if 'admin_messages' not in st.session_state:
+            st.session_state.admin_messages = []
         
-        # Display chat history
-        chat_container = st.container()
-        with chat_container:
-            for i, msg in enumerate(st.session_state.admin_chat_history):
-                if msg['role'] == 'user':
-                    st.markdown(f"""
-                    <div style='background: #6d8aa0; color: white; padding: 0.75rem; border-radius: 8px; margin: 0.5rem 0; margin-left: 20%;'>
-                        <strong>You:</strong><br>{msg['content']}
-                    </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    st.markdown(f"""
-                    <div style='background: #e8edf2; color: #1a2332; padding: 0.75rem; border-radius: 8px; margin: 0.5rem 0; margin-right: 20%; border-left: 4px solid #6d8aa0;'>
-                        <strong>🤖 Claude:</strong><br>{msg['content']}
-                    </div>
-                    """, unsafe_allow_html=True)
-        
-        # Chat input
+        # Message input
         user_message = st.text_area(
-            "Your message to Claude:",
-            key="admin_chat_input",
-            height=100,
-            placeholder="Example: 'The PDF parser isn't detecting tables correctly' or 'Can you make the buttons bigger?'"
+            "Describe the issue or request:",
+            key="admin_message_input",
+            height=120,
+            placeholder="Example: 'The PDF parser isn't detecting tables correctly' or 'Can you make the buttons bigger?' or 'Parser not creating any output'"
         )
         
-        col_send, col_clear = st.columns([3, 1])
-        with col_send:
-            if st.button("📤 Send to Claude", use_container_width=True):
+        col_log, col_copy, col_clear = st.columns([2, 2, 1])
+        with col_log:
+            if st.button("📝 Log Message", use_container_width=True):
                 if user_message:
-                    # Add user message to history
-                    st.session_state.admin_chat_history.append({
-                        'role': 'user',
-                        'content': user_message
+                    # Add message with timestamp
+                    st.session_state.admin_messages.append({
+                        'timestamp': datetime.now().strftime("%H:%M:%S"),
+                        'message': user_message
                     })
-                    
-                    # Create Claude's response
-                    # Note: In a real deployment, this would call the Claude API
-                    # For now, we'll provide helpful templated responses
-                    response = f"""Thanks for your message! 
-
-Here's how to handle this:
-
-**For Bug Reports:**
-1. Go to Railway → View Logs
-2. Copy any error messages
-3. Share them with me in our main chat
-4. I'll create a fix and give you the updated file
-
-**For Feature Requests:**
-1. Describe what you want
-2. I'll code it and give you the new files
-3. Upload to GitHub
-4. Railway auto-deploys
-
-**For UI Changes:**
-1. Use the Color Tester below to preview
-2. Tell me which colors you like
-3. I'll update the config
-
-**To Apply Changes Without Redeploy:**
-Some changes (like colors in config.toml) require Railway restart, but you can test them below first!
-
-Need me to fix something specific? Share the details in our main conversation and I'll create the fix immediately!"""
-                    
-                    st.session_state.admin_chat_history.append({
-                        'role': 'assistant',
-                        'content': response
-                    })
-                    
-                    st.rerun()
+                    st.success("✅ Message logged!")
                 else:
                     st.warning("Please enter a message")
         
+        with col_copy:
+            if st.button("📋 Copy All Messages", use_container_width=True):
+                if st.session_state.admin_messages:
+                    all_messages = "\n\n---\n\n".join([
+                        f"[{msg['timestamp']}] {msg['message']}" 
+                        for msg in st.session_state.admin_messages
+                    ])
+                    st.code(all_messages, language=None)
+                    st.info("👆 Copy the text above and paste it into your Claude conversation")
+                else:
+                    st.warning("No messages logged yet")
+        
         with col_clear:
-            if st.button("🗑️ Clear", use_container_width=True):
-                st.session_state.admin_chat_history = []
-                st.rerun()
+            if st.button("🗑️", use_container_width=True):
+                st.session_state.admin_messages = []
+                st.success("Cleared!")
+        
+        # Display logged messages
+        if st.session_state.admin_messages:
+            st.markdown("---")
+            st.markdown("**📋 Logged Messages:**")
+            
+            for i, msg in enumerate(st.session_state.admin_messages):
+                st.markdown(f"""
+                <div style='background: #e8edf2; color: #1a2332; padding: 0.75rem; border-radius: 6px; margin: 0.5rem 0; border-left: 4px solid #6d8aa0;'>
+                    <small style='color: #6c757d;'>{msg['timestamp']}</small><br>
+                    {msg['message']}
+                </div>
+                """, unsafe_allow_html=True)
+        
+        st.markdown("---")
+        
+        # Quick Help
+        st.markdown("### 📖 How This Works")
+        st.markdown("""
+        <div style='font-size: 0.85rem; line-height: 1.6; color: #6c757d;'>
+        1. <strong>Describe your issue</strong> above<br>
+        2. <strong>Click "Log Message"</strong> to save it<br>
+        3. <strong>Click "Copy All Messages"</strong> when ready<br>
+        4. <strong>Go to your Claude chat</strong> (where you're talking to me)<br>
+        5. <strong>Paste the messages</strong> and I'll fix everything immediately!<br>
+        <br>
+        <strong>Why this way?</strong> I can't directly access this panel, but I can read your messages 
+        in our main conversation and provide instant fixes!
+        </div>
+        """, unsafe_allow_html=True)
         
         st.markdown("---")
         
@@ -755,7 +746,7 @@ textColor="{test_text}"
 
 **Session State:**
 - Active Project: {st.session_state.current_project or 'None'}
-- Chat History: {len(st.session_state.admin_chat_history)} messages
+- Logged Messages: {len(st.session_state.get('admin_messages', [])) messages
         """
         
         st.markdown(system_info)
