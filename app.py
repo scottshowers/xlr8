@@ -746,7 +746,7 @@ textColor="{test_text}"
 
 **Session State:**
 - Active Project: {st.session_state.current_project or 'None'}
-- Logged Messages: {len(st.session_state.get('admin_messages', [])) messages
+- Logged Messages: {len(st.session_state.get('admin_messages', []))} messages
         """
         
         st.markdown(system_info)
