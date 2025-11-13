@@ -21,13 +21,16 @@ class AdvancedPDFParser:
         self.detected_columns = []
         self.parsed_data = None
         
-    def parse_pdf(self, pdf_file, custom_mapping: Optional[Dict] = None) -> Dict[str, Any]:
+    def parse_pdf(self, pdf_content=None, pdf_file=None, filename=None, custom_mapping: Optional[Dict] = None, extract_all_tables: bool = True) -> Dict[str, Any]:
         """
         Parse PDF file and extract tables
         
         Args:
-            pdf_file: Uploaded PDF file object
+            pdf_content: PDF content as bytes (from Streamlit file uploader)
+            pdf_file: Alternative - PDF file object
+            filename: Original filename
             custom_mapping: Optional dictionary mapping PDF columns to target fields
+            extract_all_tables: Whether to extract all tables or just first
             
         Returns:
             Dictionary containing parsed data and metadata
@@ -37,8 +40,20 @@ class AdvancedPDFParser:
             self.detected_tables = []
             self.detected_columns = []
             
+            # Handle both pdf_content (bytes) and pdf_file (file object)
+            if pdf_content is not None:
+                pdf_data = io.BytesIO(pdf_content)
+            elif pdf_file is not None:
+                pdf_data = pdf_file
+            else:
+                return {
+                    'success': False,
+                    'error': 'No PDF provided',
+                    'message': 'Please provide either pdf_content or pdf_file'
+                }
+            
             # Open PDF with pdfplumber
-            with pdfplumber.open(pdf_file) as pdf:
+            with pdfplumber.open(pdf_data) as pdf:
                 # Extract tables from all pages
                 for page_num, page in enumerate(pdf.pages, 1):
                     tables = page.extract_tables()
@@ -209,18 +224,31 @@ class AdvancedPDFParser:
         output.seek(0)
         return output
     
-    def generate_mapping_template(self, pdf_file) -> Dict[str, Any]:
+    def generate_mapping_template(self, pdf_content=None, pdf_file=None, filename=None) -> Dict[str, Any]:
         """
         Generate a mapping template from detected PDF columns
         
         Args:
-            pdf_file: Uploaded PDF file object
+            pdf_content: PDF content as bytes
+            pdf_file: Alternative - PDF file object
+            filename: Original filename
             
         Returns:
             Dictionary containing mapping template
         """
+        # Handle both pdf_content and pdf_file
+        if pdf_content is not None:
+            pdf_data = io.BytesIO(pdf_content)
+        elif pdf_file is not None:
+            pdf_data = pdf_file
+        else:
+            return {
+                'success': False,
+                'error': 'No PDF provided'
+            }
+        
         # First, detect columns by parsing the PDF
-        result = self.parse_pdf(pdf_file)
+        result = self.parse_pdf(pdf_content=pdf_content, pdf_file=pdf_file, filename=filename)
         
         if not result['success']:
             return result
@@ -260,6 +288,27 @@ class AdvancedPDFParser:
             'success': True,
             'template': template
         }
+    
+    def generate_mapping_config(self, pdf_content=None, pdf_file=None, filename=None) -> Dict[str, Any]:
+        """
+        Generate a mapping configuration from detected PDF columns
+        Alias for generate_mapping_template but returns 'config' instead of 'template'
+        
+        Args:
+            pdf_content: PDF content as bytes
+            pdf_file: Alternative - PDF file object
+            filename: Original filename
+            
+        Returns:
+            Dictionary containing mapping config
+        """
+        result = self.generate_mapping_template(pdf_content=pdf_content, pdf_file=pdf_file, filename=filename)
+        
+        # Convert 'template' to 'config' for compatibility with app.py
+        if result.get('success') and 'template' in result:
+            result['config'] = result.pop('template')
+        
+        return result
 
 
 def create_mapping_editor_html(template: Dict[str, Any], color_scheme: Dict[str, str] = None) -> str:
