@@ -269,7 +269,7 @@ class EnhancedPayrollParser:
     def __init__(self):
         self.categorizer = PayrollFieldCategories()
     
-    def parse_pdf(self, pdf_file=None, pdf_content=None, filename=None, pages='all', timeout=30, progress_callback=None, **kwargs):
+    def parse_pdf(self, pdf_file=None, pdf_content=None, filename=None, pages='all', timeout=30, progress_callback=None, try_all_strategies=False, **kwargs):
         """
         Parse PDF using Railway-compatible strategies (no OCR)
         Accepts any parameter name for maximum compatibility
@@ -281,10 +281,12 @@ class EnhancedPayrollParser:
             pages: Pages to parse (default: 'all')
             timeout: Timeout in seconds for each strategy
             progress_callback: Optional callback function for progress updates
+            try_all_strategies: If True, tries all strategies and returns all results for comparison
             **kwargs: Accept any other parameters for compatibility
             
         Returns:
             Dictionary with 'tables' (list of table info dicts) and 'method' (str)
+            If try_all_strategies=True, returns dict with 'all_results' containing results from each strategy
         """
         import time
         start_time = time.time()
@@ -344,6 +346,7 @@ class EnhancedPayrollParser:
                 total_pages = 0
             
             # Now pdf_source should be a file path
+            all_strategy_results = {} if try_all_strategies else None
             raw_tables = []
             method_used = "none"
             errors = []  # Track errors from each strategy
@@ -357,13 +360,29 @@ class EnhancedPayrollParser:
                 import camelot
                 tables = camelot.read_pdf(pdf_source, pages=pages, flavor='lattice')
                 if tables and len(tables) > 0:
-                    raw_tables = [table.df for table in tables]
-                    method_used = "camelot"
+                    camelot_tables = [table.df for table in tables]
+                    if try_all_strategies:
+                        all_strategy_results['camelot'] = {
+                            'tables': camelot_tables,
+                            'success': True,
+                            'num_tables': len(camelot_tables),
+                            'error': None
+                        }
+                    else:
+                        raw_tables = camelot_tables
+                        method_used = "camelot"
             except Exception as e:
                 errors.append(f"Camelot: {str(e)}")
+                if try_all_strategies:
+                    all_strategy_results['camelot'] = {
+                        'tables': [],
+                        'success': False,
+                        'num_tables': 0,
+                        'error': str(e)
+                    }
             
             # Strategy 2: Tabula (good for most PDFs)
-            if not raw_tables:
+            if not raw_tables or try_all_strategies:
                 if progress_callback:
                     progress_callback("Trying Tabula parser...")
                 strategies_attempted.append('tabula')
@@ -371,19 +390,36 @@ class EnhancedPayrollParser:
                     import tabula
                     tables = tabula.read_pdf(pdf_source, pages=pages, multiple_tables=True)
                     if tables and len(tables) > 0:
-                        raw_tables = [df for df in tables if not df.empty]
-                        if raw_tables:
-                            method_used = "tabula"
+                        tabula_tables = [df for df in tables if not df.empty]
+                        if tabula_tables:
+                            if try_all_strategies:
+                                all_strategy_results['tabula'] = {
+                                    'tables': tabula_tables,
+                                    'success': True,
+                                    'num_tables': len(tabula_tables),
+                                    'error': None
+                                }
+                            elif not raw_tables:
+                                raw_tables = tabula_tables
+                                method_used = "tabula"
                 except Exception as e:
                     errors.append(f"Tabula: {str(e)}")
+                    if try_all_strategies:
+                        all_strategy_results['tabula'] = {
+                            'tables': [],
+                            'success': False,
+                            'num_tables': 0,
+                            'error': str(e)
+                        }
             
             # Strategy 3: pdfplumber (detailed extraction)
-            if not raw_tables:
+            if not raw_tables or try_all_strategies:
                 if progress_callback:
                     progress_callback("Trying pdfplumber parser...")
                 strategies_attempted.append('pdfplumber')
                 try:
                     import pdfplumber
+                    pdfplumber_tables = []
                     with pdfplumber.open(pdf_source) as pdf:
                         for page in pdf.pages:
                             tables = page.extract_tables()
@@ -391,19 +427,36 @@ class EnhancedPayrollParser:
                                 for table in tables:
                                     if table and len(table) > 1:
                                         df = pd.DataFrame(table[1:], columns=table[0])
-                                        raw_tables.append(df)
-                        if raw_tables:
-                            method_used = "pdfplumber"
+                                        pdfplumber_tables.append(df)
+                        if pdfplumber_tables:
+                            if try_all_strategies:
+                                all_strategy_results['pdfplumber'] = {
+                                    'tables': pdfplumber_tables,
+                                    'success': True,
+                                    'num_tables': len(pdfplumber_tables),
+                                    'error': None
+                                }
+                            elif not raw_tables:
+                                raw_tables = pdfplumber_tables
+                                method_used = "pdfplumber"
                 except Exception as e:
                     errors.append(f"pdfplumber: {str(e)}")
+                    if try_all_strategies:
+                        all_strategy_results['pdfplumber'] = {
+                            'tables': [],
+                            'success': False,
+                            'num_tables': 0,
+                            'error': str(e)
+                        }
             
             # Strategy 4: PyMuPDF (fast text extraction)
-            if not raw_tables:
+            if not raw_tables or try_all_strategies:
                 if progress_callback:
                     progress_callback("Trying PyMuPDF parser...")
                 strategies_attempted.append('pymupdf')
                 try:
                     import fitz
+                    pymupdf_tables = []
                     doc = fitz.open(pdf_source)
                     for page in doc:
                         tables = page.find_tables()
@@ -411,11 +464,41 @@ class EnhancedPayrollParser:
                             for table in tables:
                                 df = pd.DataFrame(table.extract())
                                 if not df.empty:
-                                    raw_tables.append(df)
-                    if raw_tables:
-                        method_used = "pymupdf"
+                                    pymupdf_tables.append(df)
+                    if pymupdf_tables:
+                        if try_all_strategies:
+                            all_strategy_results['pymupdf'] = {
+                                'tables': pymupdf_tables,
+                                'success': True,
+                                'num_tables': len(pymupdf_tables),
+                                'error': None
+                            }
+                        elif not raw_tables:
+                            raw_tables = pymupdf_tables
+                            method_used = "pymupdf"
                 except Exception as e:
                     errors.append(f"PyMuPDF: {str(e)}")
+                    if try_all_strategies:
+                        all_strategy_results['pymupdf'] = {
+                            'tables': [],
+                            'success': False,
+                            'num_tables': 0,
+                            'error': str(e)
+                        }
+            
+            # If try_all_strategies mode, return comparison results
+            if try_all_strategies:
+                processing_time = time.time() - start_time
+                return {
+                    'success': True,
+                    'mode': 'comparison',
+                    'all_results': all_strategy_results,
+                    'filename': display_filename,
+                    'parsed_at': datetime.now().isoformat(),
+                    'processing_time': processing_time,
+                    'strategies_used': strategies_attempted,
+                    'metadata': {'total_pages': total_pages}
+                }
             
             # Format tables for app.py compatibility
             formatted_tables = []
@@ -526,10 +609,83 @@ class EnhancedPayrollParser:
         
         return categorized_data
     
+    def get_column_categories(self, df: pd.DataFrame) -> Dict[str, Dict[str, str]]:
+        """
+        Get the auto-detected category for each column
+        
+        Args:
+            df: DataFrame to analyze
+            
+        Returns:
+            Dict mapping column names to {'field_type': str, 'category': str}
+        """
+        column_mapping = {}
+        for col in df.columns:
+            field_type, category = self.categorizer.categorize_column(str(col))
+            column_mapping[str(col)] = {'field_type': field_type, 'category': category}
+        return column_mapping
+    
+    def categorize_with_overrides(self, df: pd.DataFrame, overrides: Dict[str, str] = None, table_name: str = "") -> Dict[str, pd.DataFrame]:
+        """
+        Categorize with manual overrides for specific columns
+        
+        Args:
+            df: DataFrame to categorize
+            overrides: Dict mapping column names to category overrides
+                      e.g. {'Column1': 'Earnings', 'Column2': 'Deductions'}
+            table_name: Optional name for tracking source
+            
+        Returns:
+            Dictionary mapping category names to DataFrames (5 tabs: Employee Info, Earnings, Deductions, Taxes, Check Info)
+        """
+        overrides = overrides or {}
+        categorized_data = {cat: pd.DataFrame() for cat in self.categorizer.get_all_categories()}
+        categorized_data['Uncategorized'] = pd.DataFrame()
+        
+        # Track which columns go to which category
+        column_mapping = {}
+        
+        for col in df.columns:
+            # Check if there's a manual override
+            if str(col) in overrides:
+                category = overrides[str(col)]
+                field_type = None  # Manual override, no auto-detected type
+            else:
+                field_type, category = self.categorizer.categorize_column(str(col))
+            
+            column_mapping[col] = {'field_type': field_type, 'category': category}
+        
+        # Create separate DataFrames for each category
+        for col, mapping_info in column_mapping.items():
+            category = mapping_info['category']
+            if category not in categorized_data:
+                categorized_data[category] = pd.DataFrame()
+            
+            if categorized_data[category].empty:
+                categorized_data[category] = df[[col]].copy()
+            else:
+                categorized_data[category] = pd.concat(
+                    [categorized_data[category], df[[col]]], 
+                    axis=1
+                )
+        
+        # Remove empty categories
+        categorized_data = {k: v for k, v in categorized_data.items() if not v.empty}
+        
+        return categorized_data
+    
     def export_to_ukg_excel(self, categorized_data: Dict[str, pd.DataFrame], 
                            output_path: str, source_filename: str = ""):
         """
-        Export categorized data to a UKG-ready Excel file with multiple tabs
+        Export categorized data to a UKG-ready Excel file with 5 organized tabs + Summary
+        
+        Tabs created (in order):
+        1. Employee Info
+        2. Earnings
+        3. Deductions
+        4. Taxes
+        5. Check Info
+        6. Metadata (Summary)
         
         Args:
             categorized_data: Dictionary mapping category names to DataFrames
@@ -539,22 +695,26 @@ class EnhancedPayrollParser:
         Returns:
             Path to created Excel file
         """
+        # Define the correct order for UKG tabs
+        tab_order = ['Employee Info', 'Earnings', 'Deductions', 'Taxes', 'Check Info', 'Uncategorized']
+        
         with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-            # Write each category to its own sheet
-            for category, df in categorized_data.items():
-                if not df.empty:
+            # Write each category to its own sheet in the correct order
+            for category in tab_order:
+                if category in categorized_data and not categorized_data[category].empty:
                     # Clean sheet name (Excel has 31 char limit)
                     sheet_name = category[:31]
-                    df.to_excel(writer, sheet_name=sheet_name, index=False)
+                    categorized_data[category].to_excel(writer, sheet_name=sheet_name, index=False)
             
-            # Add metadata sheet
+            # Add metadata/summary sheet at the end
             metadata = pd.DataFrame({
-                'Property': ['Source File', 'Parsed At', 'Total Columns', 'Categories'],
+                'Property': ['Source File', 'Parsed At', 'Total Columns', 'Categories', 'Total Rows'],
                 'Value': [
                     source_filename,
                     datetime.now().isoformat(),
                     sum(len(df.columns) for df in categorized_data.values()),
-                    ', '.join(categorized_data.keys())
+                    ', '.join([k for k in tab_order if k in categorized_data and not categorized_data[k].empty]),
+                    sum(len(df) for df in categorized_data.values())
                 ]
             })
             metadata.to_excel(writer, sheet_name='Metadata', index=False)
@@ -562,20 +722,32 @@ class EnhancedPayrollParser:
         return output_path
 
 
-def process_parsed_pdf_for_ukg(parsed_result_or_tables, parser: EnhancedPayrollParser = None, filename: str = "parsed_payroll.pdf"):
+def process_parsed_pdf_for_ukg(parsed_result_or_tables, parser: EnhancedPayrollParser = None, filename: str = "parsed_payroll.pdf", column_overrides: Dict[str, str] = None):
     """
-    Process a parsed PDF result and categorize for UKG, returning Excel buffer
+    Process a parsed PDF result and categorize for UKG, returning Excel buffer with 5 tabs
+    
+    Tabs created (in order):
+    1. Employee Info
+    2. Earnings  
+    3. Deductions
+    4. Taxes
+    5. Check Info
+    6. Metadata (Summary)
     
     Args:
         parsed_result_or_tables: Either a result dict from parse_pdf() OR a list of table dicts
         parser: EnhancedPayrollParser instance (creates new one if None)
         filename: Original filename for metadata
+        column_overrides: Optional dict mapping column names to categories for manual remapping
+                         e.g. {'Column1': 'Earnings', 'Column2': 'Deductions'}
         
     Returns:
-        BytesIO buffer containing the UKG-formatted Excel file
+        BytesIO buffer containing the UKG-formatted Excel file with 5 organized tabs
     """
     if parser is None:
         parser = EnhancedPayrollParser()
+    
+    column_overrides = column_overrides or {}
     
     # Handle both input formats
     if isinstance(parsed_result_or_tables, dict):
@@ -629,11 +801,16 @@ def process_parsed_pdf_for_ukg(parsed_result_or_tables, parser: EnhancedPayrollP
         output.seek(0)
         return output
     
-    # Categorize all tables
+    # Categorize all tables (with overrides if provided)
     all_categorized = {}
     for i, table_df in enumerate(all_dataframes):
         table_name = f"Table_{i+1}"
-        categorized = parser.categorize_dataframe(table_df, table_name)
+        
+        # Use categorize_with_overrides if we have overrides, otherwise use regular categorize
+        if column_overrides:
+            categorized = parser.categorize_with_overrides(table_df, column_overrides, table_name)
+        else:
+            categorized = parser.categorize_dataframe(table_df, table_name)
         
         # Merge categorized data
         for category, df in categorized.items():
@@ -647,25 +824,29 @@ def process_parsed_pdf_for_ukg(parsed_result_or_tables, parser: EnhancedPayrollP
                     ignore_index=True
                 )
     
-    # Create Excel file in memory
+    # Define the correct order for UKG tabs
+    tab_order = ['Employee Info', 'Earnings', 'Deductions', 'Taxes', 'Check Info', 'Uncategorized']
+    
+    # Create Excel file in memory with tabs in correct order
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # Write each category to its own sheet
-        for category, df in all_categorized.items():
-            if not df.empty:
+        # Write each category to its own sheet in the correct order
+        for category in tab_order:
+            if category in all_categorized and not all_categorized[category].empty:
                 # Clean sheet name (Excel has 31 char limit)
                 sheet_name = category[:31]
-                df.to_excel(writer, sheet_name=sheet_name, index=False)
+                all_categorized[category].to_excel(writer, sheet_name=sheet_name, index=False)
         
-        # Add metadata sheet
+        # Add metadata/summary sheet at the end
         metadata = pd.DataFrame({
-            'Property': ['Source File', 'Processed At', 'Total Columns', 'Categories', 'Total Rows'],
+            'Property': ['Source File', 'Processed At', 'Total Columns', 'Categories', 'Total Rows', 'Manual Overrides'],
             'Value': [
                 filename,
                 datetime.now().isoformat(),
                 sum(len(df.columns) for df in all_categorized.values()),
-                ', '.join(all_categorized.keys()),
-                sum(len(df) for df in all_categorized.values())
+                ', '.join([k for k in tab_order if k in all_categorized and not all_categorized[k].empty]),
+                sum(len(df) for df in all_categorized.values()),
+                'Yes' if column_overrides else 'No'
             ]
         })
         metadata.to_excel(writer, sheet_name='Metadata', index=False)
