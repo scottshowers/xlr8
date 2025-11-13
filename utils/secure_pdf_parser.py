@@ -293,7 +293,16 @@ class EnhancedPayrollParser:
         pdf_source = pdf_content or pdf_file or filename or kwargs.get('file') or kwargs.get('uploaded_file')
         
         if pdf_source is None:
-            return {'tables': [], 'method': 'none', 'error': 'No PDF provided'}
+            from datetime import datetime
+            return {
+                'tables': [], 
+                'method': 'none', 
+                'error': 'No PDF provided',
+                'parsed_at': datetime.now().isoformat(),
+                'num_tables': 0,
+                'num_rows': 0,
+                'success': False
+            }
         
         all_tables = []
         method_used = "none"
@@ -305,7 +314,15 @@ class EnhancedPayrollParser:
             if tables and len(tables) > 0:
                 all_tables = [table.df for table in tables]
                 method_used = "camelot"
-                return {'tables': all_tables, 'method': method_used}
+                from datetime import datetime
+                return {
+                    'tables': all_tables, 
+                    'method': method_used,
+                    'parsed_at': datetime.now().isoformat(),
+                    'num_tables': len(all_tables),
+                    'num_rows': sum(len(df) for df in all_tables),
+                    'success': True
+                }
         except Exception as e:
             pass
         
@@ -317,7 +334,15 @@ class EnhancedPayrollParser:
                 all_tables = [df for df in tables if not df.empty]
                 if all_tables:
                     method_used = "tabula"
-                    return {'tables': all_tables, 'method': method_used}
+                    from datetime import datetime
+                    return {
+                        'tables': all_tables, 
+                        'method': method_used,
+                        'parsed_at': datetime.now().isoformat(),
+                        'num_tables': len(all_tables),
+                        'num_rows': sum(len(df) for df in all_tables),
+                        'success': True
+                    }
         except Exception as e:
             pass
         
@@ -334,7 +359,15 @@ class EnhancedPayrollParser:
                                 all_tables.append(df)
                 if all_tables:
                     method_used = "pdfplumber"
-                    return {'tables': all_tables, 'method': method_used}
+                    from datetime import datetime
+                    return {
+                        'tables': all_tables, 
+                        'method': method_used,
+                        'parsed_at': datetime.now().isoformat(),
+                        'num_tables': len(all_tables),
+                        'num_rows': sum(len(df) for df in all_tables),
+                        'success': True
+                    }
         except Exception as e:
             pass
         
@@ -351,13 +384,31 @@ class EnhancedPayrollParser:
                             all_tables.append(df)
             if all_tables:
                 method_used = "pymupdf"
-                return {'tables': all_tables, 'method': method_used}
+                from datetime import datetime
+                return {
+                    'tables': all_tables, 
+                    'method': method_used,
+                    'parsed_at': datetime.now().isoformat(),
+                    'num_tables': len(all_tables),
+                    'num_rows': sum(len(df) for df in all_tables),
+                    'success': True
+                }
         except Exception as e:
             pass
         
         # Note: OCR strategy removed for Railway compatibility
         
-        return {'tables': [], 'method': 'none'}
+        # If nothing worked, return empty result with all expected fields
+        from datetime import datetime
+        return {
+            'tables': [], 
+            'method': 'none',
+            'parsed_at': datetime.now().isoformat(),
+            'num_tables': 0,
+            'num_rows': 0,
+            'success': False,
+            'error': 'No parsing method succeeded'
+        }
     
     def categorize_dataframe(self, df: pd.DataFrame, table_name: str = "") -> Dict[str, pd.DataFrame]:
         """
