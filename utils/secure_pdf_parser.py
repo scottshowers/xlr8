@@ -273,25 +273,32 @@ class EnhancedPayrollParser:
     def __init__(self):
         self.categorizer = PayrollFieldCategories()
     
-    def parse_pdf(self, pdf_file, pages='all', timeout=30):
+    def parse_pdf(self, pdf_file=None, pdf_content=None, pages='all', timeout=30):
         """
         Parse PDF using Railway-compatible strategies (no OCR)
         
         Args:
-            pdf_file: File-like object or path to PDF
+            pdf_file: File-like object or path to PDF (legacy parameter)
+            pdf_content: File-like object or path to PDF (new parameter)
             pages: Pages to parse (default: 'all')
             timeout: Timeout in seconds for each strategy
             
         Returns:
             Dictionary with 'tables' (list of DataFrames) and 'method' (str)
         """
+        # Accept either pdf_file or pdf_content
+        pdf_source = pdf_content if pdf_content is not None else pdf_file
+        
+        if pdf_source is None:
+            return {'tables': [], 'method': 'none', 'error': 'No PDF provided'}
+        
         all_tables = []
         method_used = "none"
         
         # Strategy 1: Camelot (best for structured tables)
         try:
             import camelot
-            tables = camelot.read_pdf(pdf_file, pages=pages, flavor='lattice')
+            tables = camelot.read_pdf(pdf_source, pages=pages, flavor='lattice')
             if tables and len(tables) > 0:
                 all_tables = [table.df for table in tables]
                 method_used = "camelot"
@@ -302,7 +309,7 @@ class EnhancedPayrollParser:
         # Strategy 2: Tabula (good for most PDFs)
         try:
             import tabula
-            tables = tabula.read_pdf(pdf_file, pages=pages, multiple_tables=True)
+            tables = tabula.read_pdf(pdf_source, pages=pages, multiple_tables=True)
             if tables and len(tables) > 0:
                 all_tables = [df for df in tables if not df.empty]
                 if all_tables:
@@ -314,7 +321,7 @@ class EnhancedPayrollParser:
         # Strategy 3: pdfplumber (detailed extraction)
         try:
             import pdfplumber
-            with pdfplumber.open(pdf_file) as pdf:
+            with pdfplumber.open(pdf_source) as pdf:
                 for page in pdf.pages:
                     tables = page.extract_tables()
                     if tables:
@@ -331,7 +338,7 @@ class EnhancedPayrollParser:
         # Strategy 4: PyMuPDF (fast text extraction)
         try:
             import fitz
-            doc = fitz.open(pdf_file)
+            doc = fitz.open(pdf_source)
             for page in doc:
                 tables = page.find_tables()
                 if tables:
