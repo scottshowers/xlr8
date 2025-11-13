@@ -1,18 +1,12 @@
 """
-Complete Secure PDF Parser with UKG Categorization
-Combines PDF parsing with automatic field categorization for UKG import
+Railway-Compatible PDF Parser with UKG Categorization
+Works without OCR or image processing dependencies
 """
 
 import re
 from typing import Dict, List, Tuple, Optional
 import pandas as pd
 from io import BytesIO
-import camelot
-import tabula
-import pdfplumber
-import fitz  # PyMuPDF
-from PIL import Image
-import pytesseract
 
 
 class PayrollFieldCategories:
@@ -274,14 +268,14 @@ class PayrollFieldCategories:
 
 
 class EnhancedPayrollParser:
-    """Enhanced parser with BOTH PDF parsing and UKG categorization"""
+    """Railway-compatible parser with PDF parsing and UKG categorization"""
     
     def __init__(self):
         self.categorizer = PayrollFieldCategories()
     
     def parse_pdf(self, pdf_file, pages='all', timeout=30):
         """
-        Parse PDF using multi-strategy approach
+        Parse PDF using Railway-compatible strategies (no OCR)
         
         Args:
             pdf_file: File-like object or path to PDF
@@ -296,27 +290,30 @@ class EnhancedPayrollParser:
         
         # Strategy 1: Camelot (best for structured tables)
         try:
+            import camelot
             tables = camelot.read_pdf(pdf_file, pages=pages, flavor='lattice')
             if tables and len(tables) > 0:
                 all_tables = [table.df for table in tables]
                 method_used = "camelot"
                 return {'tables': all_tables, 'method': method_used}
-        except Exception:
+        except Exception as e:
             pass
         
         # Strategy 2: Tabula (good for most PDFs)
         try:
+            import tabula
             tables = tabula.read_pdf(pdf_file, pages=pages, multiple_tables=True)
             if tables and len(tables) > 0:
                 all_tables = [df for df in tables if not df.empty]
                 if all_tables:
                     method_used = "tabula"
                     return {'tables': all_tables, 'method': method_used}
-        except Exception:
+        except Exception as e:
             pass
         
         # Strategy 3: pdfplumber (detailed extraction)
         try:
+            import pdfplumber
             with pdfplumber.open(pdf_file) as pdf:
                 for page in pdf.pages:
                     tables = page.extract_tables()
@@ -328,11 +325,12 @@ class EnhancedPayrollParser:
                 if all_tables:
                     method_used = "pdfplumber"
                     return {'tables': all_tables, 'method': method_used}
-        except Exception:
+        except Exception as e:
             pass
         
         # Strategy 4: PyMuPDF (fast text extraction)
         try:
+            import fitz
             doc = fitz.open(pdf_file)
             for page in doc:
                 tables = page.find_tables()
@@ -344,28 +342,10 @@ class EnhancedPayrollParser:
             if all_tables:
                 method_used = "pymupdf"
                 return {'tables': all_tables, 'method': method_used}
-        except Exception:
+        except Exception as e:
             pass
         
-        # Strategy 5: OCR (last resort)
-        try:
-            doc = fitz.open(pdf_file)
-            for page_num in range(len(doc)):
-                page = doc[page_num]
-                pix = page.get_pixmap()
-                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                text = pytesseract.image_to_string(img)
-                # Simple table extraction from OCR text (basic)
-                lines = text.split('\n')
-                if len(lines) > 1:
-                    df = pd.DataFrame([line.split() for line in lines if line.strip()])
-                    if not df.empty:
-                        all_tables.append(df)
-            if all_tables:
-                method_used = "ocr"
-                return {'tables': all_tables, 'method': method_used}
-        except Exception:
-            pass
+        # Note: OCR strategy removed for Railway compatibility
         
         return {'tables': [], 'method': 'none'}
     
