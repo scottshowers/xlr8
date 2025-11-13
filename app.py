@@ -10,8 +10,11 @@ import os
 import zipfile
 from datetime import datetime
 import pandas as pd
-from utils.secure_pdf_parser import SecurePayrollParser
-from secure_pdf_parser import process_parsed_pdf_for_ukg
+from utils.secure_pdf_parser import (
+    EnhancedPayrollParser,
+    process_parsed_pdf_for_ukg
+)
+
 
 # Page configuration
 st.set_page_config(
@@ -29,7 +32,7 @@ if 'projects' not in st.session_state:
 if 'api_credentials' not in st.session_state:
     st.session_state.api_credentials = {'pro': {}, 'wfm': {}}
 if 'pdf_parser' not in st.session_state:
-    st.session_state.pdf_parser = SecurePayrollParser()
+    st.session_state.pdf_parser = EnhancedPayrollParser()
 if 'parsed_results' not in st.session_state:
     st.session_state.parsed_results = None
 if 'foundation_files' not in st.session_state:
