@@ -301,7 +301,9 @@ class EnhancedPayrollParser:
                 'parsed_at': datetime.now().isoformat(),
                 'num_tables': 0,
                 'num_rows': 0,
-                'success': False
+                'success': False,
+                'strategies_used': [],
+                'primary_method': 'none'
             }
         
         all_tables = []
@@ -321,7 +323,9 @@ class EnhancedPayrollParser:
                     'parsed_at': datetime.now().isoformat(),
                     'num_tables': len(all_tables),
                     'num_rows': sum(len(df) for df in all_tables),
-                    'success': True
+                    'success': True,
+                    'strategies_used': ['camelot'],
+                    'primary_method': 'camelot'
                 }
         except Exception as e:
             pass
@@ -341,7 +345,9 @@ class EnhancedPayrollParser:
                         'parsed_at': datetime.now().isoformat(),
                         'num_tables': len(all_tables),
                         'num_rows': sum(len(df) for df in all_tables),
-                        'success': True
+                        'success': True,
+                        'strategies_used': ['camelot', 'tabula'],
+                        'primary_method': 'tabula'
                     }
         except Exception as e:
             pass
@@ -366,7 +372,9 @@ class EnhancedPayrollParser:
                         'parsed_at': datetime.now().isoformat(),
                         'num_tables': len(all_tables),
                         'num_rows': sum(len(df) for df in all_tables),
-                        'success': True
+                        'success': True,
+                        'strategies_used': ['camelot', 'tabula', 'pdfplumber'],
+                        'primary_method': 'pdfplumber'
                     }
         except Exception as e:
             pass
@@ -391,7 +399,9 @@ class EnhancedPayrollParser:
                     'parsed_at': datetime.now().isoformat(),
                     'num_tables': len(all_tables),
                     'num_rows': sum(len(df) for df in all_tables),
-                    'success': True
+                    'success': True,
+                    'strategies_used': ['camelot', 'tabula', 'pdfplumber', 'pymupdf'],
+                    'primary_method': 'pymupdf'
                 }
         except Exception as e:
             pass
@@ -407,7 +417,9 @@ class EnhancedPayrollParser:
             'num_tables': 0,
             'num_rows': 0,
             'success': False,
-            'error': 'No parsing method succeeded'
+            'error': 'No parsing method succeeded',
+            'strategies_used': ['camelot', 'tabula', 'pdfplumber', 'pymupdf'],
+            'primary_method': 'none'
         }
     
     def categorize_dataframe(self, df: pd.DataFrame, table_name: str = "") -> Dict[str, pd.DataFrame]:
