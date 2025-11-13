@@ -676,3 +676,4 @@ def process_parsed_pdf_for_ukg(parsed_result_or_tables, parser: EnhancedPayrollP
 
 # Backwards compatibility
 SecurePayrollParser = EnhancedPayrollParser
+create_ukg_excel_export = process_parsed_pdf_for_ukg  # Alias for backwards compatibility
