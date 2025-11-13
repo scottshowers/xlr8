@@ -711,13 +711,17 @@ with tab2:
                                             st.warning(f"Could not combine tables: {str(concat_err)}")
                                 
                             # 🆕 Magic UKG Export
-                                excel_buffer = process_parsed_pdf_for_ukg(all_tables)
+                                excel_buffer = process_parsed_pdf_for_ukg(
+                                    result,
+                                    filename=uploaded_file.name
+                                )
 
                                 st.download_button(
                                         label="📊 Download UKG Excel",
                                         data=excel_buffer,
                                         file_name="UKG_Import_Data.xlsx",
-                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        use_container_width=True
                                 )
 
                             except Exception as e:
