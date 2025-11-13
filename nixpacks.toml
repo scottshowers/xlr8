@@ -1,0 +1,8 @@
+[phases.setup]
+aptPkgs = [
+    "ghostscript",
+    "python3-tk",
+    "poppler-utils",
+    "tesseract-ocr",
+    "default-jre"
+]
