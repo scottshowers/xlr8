@@ -1,20 +1,20 @@
 """
-Utils package for XLR8
+Utils package for XLR8 by HCMPACT
 """
 
 from .secure_pdf_parser import (
     EnhancedPayrollParser,
     SecurePayrollParser,
     PayrollFieldCategories,
-    create_ukg_excel_export,
-    process_parsed_pdf_for_ukg
+    process_parsed_pdf_for_ukg,
+    create_ukg_excel_export  # Alias for backwards compatibility
 )
 
 __all__ = [
     'EnhancedPayrollParser',
     'SecurePayrollParser',
     'PayrollFieldCategories',
-    'create_ukg_excel_export',
-    'process_parsed_pdf_for_ukg'
+    'process_parsed_pdf_for_ukg',
+    'create_ukg_excel_export'
 ]
 
