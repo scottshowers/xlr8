@@ -308,6 +308,7 @@ class EnhancedPayrollParser:
         
         all_tables = []
         method_used = "none"
+        errors = []  # Track errors from each strategy
         
         # Strategy 1: Camelot (best for structured tables)
         try:
@@ -328,6 +329,7 @@ class EnhancedPayrollParser:
                     'primary_method': 'camelot'
                 }
         except Exception as e:
+            errors.append(f"Camelot: {str(e)}")
             pass
         
         # Strategy 2: Tabula (good for most PDFs)
@@ -350,6 +352,7 @@ class EnhancedPayrollParser:
                         'primary_method': 'tabula'
                     }
         except Exception as e:
+            errors.append(f"Tabula: {str(e)}")
             pass
         
         # Strategy 3: pdfplumber (detailed extraction)
@@ -377,6 +380,7 @@ class EnhancedPayrollParser:
                         'primary_method': 'pdfplumber'
                     }
         except Exception as e:
+            errors.append(f"pdfplumber: {str(e)}")
             pass
         
         # Strategy 4: PyMuPDF (fast text extraction)
@@ -404,12 +408,14 @@ class EnhancedPayrollParser:
                     'primary_method': 'pymupdf'
                 }
         except Exception as e:
+            errors.append(f"PyMuPDF: {str(e)}")
             pass
         
         # Note: OCR strategy removed for Railway compatibility
         
         # If nothing worked, return empty result with all expected fields
         from datetime import datetime
+        error_msg = "No parsing method succeeded. Errors: " + " | ".join(errors) if errors else "No parsing method succeeded"
         return {
             'tables': [], 
             'method': 'none',
@@ -417,9 +423,10 @@ class EnhancedPayrollParser:
             'num_tables': 0,
             'num_rows': 0,
             'success': False,
-            'error': 'No parsing method succeeded',
+            'error': error_msg,
             'strategies_used': ['camelot', 'tabula', 'pdfplumber', 'pymupdf'],
-            'primary_method': 'none'
+            'primary_method': 'none',
+            'errors': errors
         }
     
     def categorize_dataframe(self, df: pd.DataFrame, table_name: str = "") -> Dict[str, pd.DataFrame]:
