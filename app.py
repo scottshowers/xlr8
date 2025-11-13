@@ -537,10 +537,33 @@ with tab2:
             
             st.markdown("---")
             
-            # Step 2: Parse Button
+            # Step 2: Parse PDF
             st.markdown("### Step 2: Parse PDF")
             
-            if st.button("🚀 Parse PDF with Multi-Strategy Parser", type="primary", use_container_width=True):
+            # Add comparison mode toggle
+            st.markdown("**⚙️ Parsing Options:**")
+            
+            compare_mode = st.checkbox(
+                "🔍 **Compare All 4 Parsers** (Camelot, Tabula, pdfplumber, PyMuPDF)", 
+                value=False, 
+                help="Tries all parsing strategies side-by-side so you can pick which one extracted your data best. Slower but recommended if parsing quality is poor."
+            )
+            
+            if compare_mode:
+                st.warning("🔍 **Comparison Mode Active:** You'll see results from all 4 parsers. Click the 'Use [Parser]' button to select the best one.")
+            else:
+                st.info("💡 **Quick Mode:** Uses first successful parser. If results are poor, enable 'Compare All 4 Parsers' above.")
+            
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                parse_button = st.button("🚀 Parse PDF", type="primary", use_container_width=True)
+            with col2:
+                if st.button("Clear", help="Reset parsing results"):
+                    st.session_state.parsed_results = None
+                    st.session_state.field_overrides = {}
+                    st.rerun()
+            
+            if parse_button:
                 # Progress tracking
                 progress_container = st.container()
                 progress_text = progress_container.empty()
@@ -557,11 +580,12 @@ with tab2:
                         pdf_content = uploaded_file.read()
                         progress_bar.progress(20)
                     
-                    # Parse with progress updates
+                    # Parse with progress updates and comparison mode
                     result = st.session_state.pdf_parser.parse_pdf(
                         pdf_content=pdf_content,
                         filename=uploaded_file.name,
-                        progress_callback=update_progress
+                        progress_callback=update_progress,
+                        try_all_strategies=compare_mode
                     )
                     progress_bar.progress(90)
                     
@@ -569,24 +593,137 @@ with tab2:
                     progress_text.empty()
                     progress_bar.empty()
                     
-                    # Store results
-                    st.session_state.parsed_results = result
-                    
-                    # Save to project
-                    if st.session_state.current_project:
-                        if 'data_sources' not in st.session_state.projects[st.session_state.current_project]:
-                            st.session_state.projects[st.session_state.current_project]['data_sources'] = []
+                    # Handle comparison mode
+                    if result.get('mode') == 'comparison':
+                        st.success("✅ Comparison complete!")
                         
-                        st.session_state.projects[st.session_state.current_project]['data_sources'].append({
-                            'filename': uploaded_file.name,
-                            'type': 'PDF',
-                            'parsed_at': result['parsed_at'],
-                            'tables_found': len(result['tables']),
-                            'strategies_used': result['strategies_used']
-                        })
+                        # BIG CLEAR INSTRUCTIONS
+                        st.markdown("### 📋 How to Use Comparison Mode")
+                        st.markdown("""
+                        **3 Simple Steps:**
+                        1. 👀 Review each parser's results in the tabs below
+                        2. ✅ Click the **"USE [PARSER] RESULTS"** button for the best one
+                        3. 🔧 On the next screen, you can remap any fields that went to the wrong tab
+                        """)
+                        
+                        # Show strategy comparison table
+                        st.markdown("### 📊 Parser Comparison Summary")
+                        comparison_data = []
+                        for strategy, data in result['all_results'].items():
+                            comparison_data.append({
+                                'Parser': strategy.upper(),
+                                'Status': '✅ Success' if data['success'] else '❌ Failed',
+                                'Tables Found': data['num_tables'],
+                                'Quality': '⭐⭐⭐' if data['success'] and data['num_tables'] > 0 else '⭐'
+                            })
+                        
+                        st.dataframe(pd.DataFrame(comparison_data), use_container_width=True, hide_index=True)
+                        
+                        # Let user select which parser to use
+                        st.markdown("### 👇 Select Best Parser")
+                        st.info("Review the previews below and select which parser extracted your data best")
+                        
+                        # Create tabs for each strategy
+                        successful_strategies = {k: v for k, v in result['all_results'].items() if v['success'] and v['num_tables'] > 0}
+                        
+                        if successful_strategies:
+                            tab_names = [f"{k.upper()} ({v['num_tables']} tables)" for k, v in successful_strategies.items()]
+                            tabs = st.tabs(tab_names)
+                            
+                            for idx, (strategy, data) in enumerate(successful_strategies.items()):
+                                with tabs[idx]:
+                                    st.markdown(f"#### {strategy.upper()} Results")
+                                    
+                                    for table_idx, table_df in enumerate(data['tables']):
+                                        st.markdown(f"**Table {table_idx + 1}** - {len(table_df)} rows × {len(table_df.columns)} columns")
+                                        st.dataframe(table_df.head(15), use_container_width=True)
+                                        
+                                        # Show field categorization for this table
+                                        with st.expander("🏷️ See UKG tab assignments for this table"):
+                                            categories = st.session_state.pdf_parser.get_column_categories(table_df)
+                                            cat_preview = pd.DataFrame([
+                                                {'Column Name': col, 'UKG Tab': info['category']}
+                                                for col, info in categories.items()
+                                            ])
+                                            st.dataframe(cat_preview, use_container_width=True)
+                                    
+                                    # Make the selection button VERY prominent
+                                    st.markdown("---")
+                                    st.markdown(f"### ✅ Select This Parser")
+                                    st.markdown(f"**Click below if {strategy.upper()} extracted your data correctly:**")
+                                    
+                                    if st.button(
+                                        f"✅ USE {strategy.upper()} RESULTS", 
+                                        key=f"select_{strategy}", 
+                                        use_container_width=True, 
+                                        type="primary",
+                                        help=f"Select {strategy.upper()} as your parser and continue to field mapping"
+                                    ):
+                                        # Re-parse with only this strategy by storing selection
+                                        st.session_state.selected_strategy = strategy
+                                        st.session_state.comparison_result = result
+                                        
+                                        # Convert to standard result format
+                                        formatted_tables = []
+                                        for idx, df in enumerate(data['tables']):
+                                            formatted_tables.append({
+                                                'page': 1,
+                                                'table_num': idx + 1,
+                                                'row_count': len(df),
+                                                'col_count': len(df.columns),
+                                                'data': df
+                                            })
+                                        
+                                        # Identify fields
+                                        identified_fields = {}
+                                        for table_idx, table_info in enumerate(formatted_tables):
+                                            df = table_info['data']
+                                            for col in df.columns:
+                                                field_type, category = st.session_state.pdf_parser.categorizer.categorize_column(str(col))
+                                                if field_type:
+                                                    if field_type not in identified_fields:
+                                                        identified_fields[field_type] = []
+                                                    identified_fields[field_type].append({
+                                                        'table': f"Table_{table_idx + 1}",
+                                                        'column': str(col)
+                                                    })
+                                        
+                                        selected_result = {
+                                            'success': True,
+                                            'tables': formatted_tables,
+                                            'filename': uploaded_file.name,
+                                            'method': strategy,
+                                            'parsed_at': result['parsed_at'],
+                                            'processing_time': result['processing_time'],
+                                            'strategies_used': [strategy],
+                                            'metadata': result['metadata'],
+                                            'identified_fields': identified_fields if identified_fields else None
+                                        }
+                                        
+                                        st.session_state.parsed_results = selected_result
+                                        st.rerun()
+                        else:
+                            st.error("❌ None of the parsing strategies found any tables. The PDF may not contain extractable table data.")
                     
-                    # Display results
-                    if result['success']:
+                    else:
+                        # Normal mode - single strategy result
+                        st.session_state.parsed_results = result
+                        
+                        # Save to project
+                        if st.session_state.current_project:
+                            if 'data_sources' not in st.session_state.projects[st.session_state.current_project]:
+                                st.session_state.projects[st.session_state.current_project]['data_sources'] = []
+                            
+                            st.session_state.projects[st.session_state.current_project]['data_sources'].append({
+                                'filename': uploaded_file.name,
+                                'type': 'PDF',
+                                'parsed_at': result['parsed_at'],
+                                'tables_found': len(result.get('tables', [])),
+                                'strategies_used': result.get('strategies_used', [])
+                            })
+                    
+                    # Display results for selected strategy
+                    if result.get('success'):
                         # Success message
                         st.success(f"✅ Parsing complete in {result['processing_time']:.2f} seconds!")
                         
@@ -659,10 +796,120 @@ with tab2:
                         
                         st.markdown("---")
                         
-                        # Export section - SIMPLIFIED
-                        st.markdown("### 💾 Export Options")
+                        # NEW: UKG Field Categorization and Remapping
+                        st.markdown("### 🏷️ UKG Field Categorization")
+                        st.info("Review how columns will be organized into UKG tabs. Click 'Remap Fields' to make corrections.")
                         
-                        st.info("Click any button below to download your data")
+                        # Get all unique columns across all tables
+                        all_columns = {}
+                        for table_idx, table in enumerate(result['tables']):
+                            df = table['data']
+                            categories = st.session_state.pdf_parser.get_column_categories(df)
+                            for col, cat_info in categories.items():
+                                all_columns[f"Table{table_idx+1}:{col}"] = {
+                                    'table': f"Table {table_idx+1}",
+                                    'column': col,
+                                    'category': cat_info['category'],
+                                    'field_type': cat_info['field_type']
+                                }
+                        
+                        # Display current categorization
+                        cat_display = pd.DataFrame([
+                            {
+                                'Table': v['table'],
+                                'Column Name': v['column'],
+                                'UKG Tab': v['category'],
+                                'Auto-Detected Type': v['field_type'] or 'Custom'
+                            }
+                            for k, v in all_columns.items()
+                        ])
+                        
+                        st.dataframe(cat_display, use_container_width=True)
+                        
+                        # Show tab summary
+                        tab_counts = cat_display['UKG Tab'].value_counts()
+                        cols = st.columns(len(tab_counts))
+                        for idx, (tab, count) in enumerate(tab_counts.items()):
+                            with cols[idx]:
+                                st.metric(tab, count, help=f"{count} columns → {tab} tab")
+                        
+                        st.markdown("---")
+                        
+                        # Field Remapping UI - MAKE IT PROMINENT
+                        st.markdown("### 🔧 Step 3: Fix Field Categorization (Optional)")
+                        st.markdown("**Review the table above. If any column went to the wrong UKG tab, remap it here:**")
+                        
+                        with st.expander("📝 **Click here to remap fields**", expanded=False):
+                            
+                            # Initialize overrides in session state
+                            if 'field_overrides' not in st.session_state:
+                                st.session_state.field_overrides = {}
+                            
+                            st.markdown("""
+                            **How to use:**
+                            1. Select a column that's in the wrong tab
+                            2. Choose the correct UKG tab for it
+                            3. Click 'Add Remap'
+                            4. Repeat for any other incorrect columns
+                            5. Download your UKG Excel - corrections will be applied automatically
+                            """)
+                            
+                            st.markdown("---")
+                            
+                            # Remapping interface
+                            col1, col2, col3 = st.columns([2, 2, 1])
+                            
+                            with col1:
+                                # Get all column names (without table prefix for user)
+                                column_options = [v['column'] for v in all_columns.values()]
+                                selected_column = st.selectbox(
+                                    "❶ Column to remap:",
+                                    options=column_options,
+                                    key="remap_column_select"
+                                )
+                            
+                            with col2:
+                                new_tab = st.selectbox(
+                                    "❷ Move to tab:",
+                                    options=['Employee Info', 'Earnings', 'Deductions', 'Taxes', 'Check Info', 'Uncategorized'],
+                                    key="remap_tab_select"
+                                )
+                            
+                            with col3:
+                                st.write("")  # Spacing
+                                st.write("")  # Spacing
+                                if st.button("❸ Add Remap", key="add_remap_btn", use_container_width=True, type="primary"):
+                                    st.session_state.field_overrides[selected_column] = new_tab
+                                    st.success(f"✅ {selected_column} → {new_tab}")
+                                    st.rerun()
+                            
+                            # Show current overrides
+                            if st.session_state.field_overrides:
+                                st.markdown("---")
+                                st.markdown("### ✅ Active Remappings")
+                                st.info(f"🎯 {len(st.session_state.field_overrides)} field(s) will be moved when you download the UKG Excel")
+                                
+                                for col, tab in list(st.session_state.field_overrides.items()):
+                                    cols = st.columns([5, 1])
+                                    cols[0].markdown(f"• **{col}** → {tab} tab")
+                                    if cols[1].button("🗑️", key=f"remove_{col}", help="Remove this remapping"):
+                                        del st.session_state.field_overrides[col]
+                                        st.rerun()
+                                
+                                if st.button("🔄 Clear All Remappings", key="clear_remaps"):
+                                    st.session_state.field_overrides = {}
+                                    st.rerun()
+                            else:
+                                st.info("💡 No remappings yet. Add them above if needed.")
+                        
+                        st.markdown("---")
+                        
+                        # Export section with clear UKG focus
+                        st.markdown("### 💾 Step 4: Download Your Data")
+                        
+                        # Show remapping status prominently
+                        if st.session_state.get('field_overrides'):
+                            st.success(f"✅ {len(st.session_state.field_overrides)} manual correction(s) will be applied to UKG export")
                         
                         col1, col2, col3 = st.columns(3)
                         
@@ -710,18 +957,37 @@ with tab2:
                                         except Exception as concat_err:
                                             st.warning(f"Could not combine tables: {str(concat_err)}")
                                 
-                            # 🆕 Magic UKG Export
+                            # 🆕 UKG Export - PRIMARY BUTTON
+                                st.markdown("#### 📊 **UKG Ready Export**")
+                                st.markdown("**Creates 5 organized tabs:**")
+                                st.markdown("""
+                                - Employee Info
+                                - Earnings
+                                - Deductions
+                                - Taxes
+                                - Check Info
+                                """)
+                                
                                 excel_buffer = process_parsed_pdf_for_ukg(
                                     result,
-                                    filename=uploaded_file.name
+                                    filename=uploaded_file.name,
+                                    column_overrides=st.session_state.get('field_overrides', {})
                                 )
+                                
+                                # Build label based on overrides
+                                override_count = len(st.session_state.get('field_overrides', {}))
+                                button_label = "📊 Download UKG Excel (5 Tabs)"
+                                if override_count > 0:
+                                    button_label = f"📊 Download UKG Excel ({override_count} corrections applied)"
 
                                 st.download_button(
-                                        label="📊 Download UKG Excel",
+                                        label=button_label,
                                         data=excel_buffer,
-                                        file_name="UKG_Import_Data.xlsx",
+                                        file_name=f"UKG_{uploaded_file.name.replace('.pdf', '')}.xlsx",
                                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                        use_container_width=True
+                                        use_container_width=True,
+                                        type="primary",
+                                        help="Downloads Excel with 5 UKG-ready tabs + Metadata"
                                 )
 
                             except Exception as e:
