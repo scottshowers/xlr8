@@ -273,21 +273,24 @@ class EnhancedPayrollParser:
     def __init__(self):
         self.categorizer = PayrollFieldCategories()
     
-    def parse_pdf(self, pdf_file=None, pdf_content=None, pages='all', timeout=30):
+    def parse_pdf(self, pdf_file=None, pdf_content=None, filename=None, pages='all', timeout=30, **kwargs):
         """
         Parse PDF using Railway-compatible strategies (no OCR)
+        Accepts any parameter name for maximum compatibility
         
         Args:
-            pdf_file: File-like object or path to PDF (legacy parameter)
-            pdf_content: File-like object or path to PDF (new parameter)
+            pdf_file: File-like object or path to PDF
+            pdf_content: File-like object or path to PDF
+            filename: File-like object or path to PDF
             pages: Pages to parse (default: 'all')
             timeout: Timeout in seconds for each strategy
+            **kwargs: Accept any other parameters for compatibility
             
         Returns:
             Dictionary with 'tables' (list of DataFrames) and 'method' (str)
         """
-        # Accept either pdf_file or pdf_content
-        pdf_source = pdf_content if pdf_content is not None else pdf_file
+        # Accept pdf_content, pdf_file, filename, or any other parameter
+        pdf_source = pdf_content or pdf_file or filename or kwargs.get('file') or kwargs.get('uploaded_file')
         
         if pdf_source is None:
             return {'tables': [], 'method': 'none', 'error': 'No PDF provided'}
