@@ -965,4 +965,4 @@ def create_mapping_editor_html(template: Dict[str, Any], color_scheme: Dict[str,
         init();
     </script>
 </body>
-</html>''
+</html>'''
