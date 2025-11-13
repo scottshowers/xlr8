@@ -351,7 +351,7 @@ class EnhancedPayrollParser:
             
             # Strategy 1: Camelot (best for structured tables)
             if progress_callback:
-                progress_callback(30, "Trying Camelot parser...")
+                progress_callback("Trying Camelot parser...")
             strategies_attempted.append('camelot')
             try:
                 import camelot
@@ -365,7 +365,7 @@ class EnhancedPayrollParser:
             # Strategy 2: Tabula (good for most PDFs)
             if not raw_tables:
                 if progress_callback:
-                    progress_callback(45, "Trying Tabula parser...")
+                    progress_callback("Trying Tabula parser...")
                 strategies_attempted.append('tabula')
                 try:
                     import tabula
@@ -380,7 +380,7 @@ class EnhancedPayrollParser:
             # Strategy 3: pdfplumber (detailed extraction)
             if not raw_tables:
                 if progress_callback:
-                    progress_callback(60, "Trying pdfplumber parser...")
+                    progress_callback("Trying pdfplumber parser...")
                 strategies_attempted.append('pdfplumber')
                 try:
                     import pdfplumber
@@ -400,7 +400,7 @@ class EnhancedPayrollParser:
             # Strategy 4: PyMuPDF (fast text extraction)
             if not raw_tables:
                 if progress_callback:
-                    progress_callback(75, "Trying PyMuPDF parser...")
+                    progress_callback("Trying PyMuPDF parser...")
                 strategies_attempted.append('pymupdf')
                 try:
                     import fitz
