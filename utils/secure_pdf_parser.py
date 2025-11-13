@@ -1,12 +1,19 @@
 """
-Enhanced PDF Parser with UKG Categorization for XLR8
-Parses payroll PDFs and categorizes data into UKG-ready tabs
+Complete Secure PDF Parser with UKG Categorization
+Combines PDF parsing with automatic field categorization for UKG import
 """
 
 import re
 from typing import Dict, List, Tuple, Optional
 import pandas as pd
 from io import BytesIO
+import camelot
+import tabula
+import pdfplumber
+import fitz  # PyMuPDF
+from PIL import Image
+import pytesseract
+
 
 class PayrollFieldCategories:
     """Defines field patterns and their UKG category mappings"""
@@ -267,11 +274,101 @@ class PayrollFieldCategories:
 
 
 class EnhancedPayrollParser:
-    """Enhanced parser with field categorization for UKG export"""
+    """Enhanced parser with BOTH PDF parsing and UKG categorization"""
     
     def __init__(self):
         self.categorizer = PayrollFieldCategories()
+    
+    def parse_pdf(self, pdf_file, pages='all', timeout=30):
+        """
+        Parse PDF using multi-strategy approach
         
+        Args:
+            pdf_file: File-like object or path to PDF
+            pages: Pages to parse (default: 'all')
+            timeout: Timeout in seconds for each strategy
+            
+        Returns:
+            Dictionary with 'tables' (list of DataFrames) and 'method' (str)
+        """
+        all_tables = []
+        method_used = "none"
+        
+        # Strategy 1: Camelot (best for structured tables)
+        try:
+            tables = camelot.read_pdf(pdf_file, pages=pages, flavor='lattice')
+            if tables and len(tables) > 0:
+                all_tables = [table.df for table in tables]
+                method_used = "camelot"
+                return {'tables': all_tables, 'method': method_used}
+        except Exception:
+            pass
+        
+        # Strategy 2: Tabula (good for most PDFs)
+        try:
+            tables = tabula.read_pdf(pdf_file, pages=pages, multiple_tables=True)
+            if tables and len(tables) > 0:
+                all_tables = [df for df in tables if not df.empty]
+                if all_tables:
+                    method_used = "tabula"
+                    return {'tables': all_tables, 'method': method_used}
+        except Exception:
+            pass
+        
+        # Strategy 3: pdfplumber (detailed extraction)
+        try:
+            with pdfplumber.open(pdf_file) as pdf:
+                for page in pdf.pages:
+                    tables = page.extract_tables()
+                    if tables:
+                        for table in tables:
+                            if table and len(table) > 1:
+                                df = pd.DataFrame(table[1:], columns=table[0])
+                                all_tables.append(df)
+                if all_tables:
+                    method_used = "pdfplumber"
+                    return {'tables': all_tables, 'method': method_used}
+        except Exception:
+            pass
+        
+        # Strategy 4: PyMuPDF (fast text extraction)
+        try:
+            doc = fitz.open(pdf_file)
+            for page in doc:
+                tables = page.find_tables()
+                if tables:
+                    for table in tables:
+                        df = pd.DataFrame(table.extract())
+                        if not df.empty:
+                            all_tables.append(df)
+            if all_tables:
+                method_used = "pymupdf"
+                return {'tables': all_tables, 'method': method_used}
+        except Exception:
+            pass
+        
+        # Strategy 5: OCR (last resort)
+        try:
+            doc = fitz.open(pdf_file)
+            for page_num in range(len(doc)):
+                page = doc[page_num]
+                pix = page.get_pixmap()
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                text = pytesseract.image_to_string(img)
+                # Simple table extraction from OCR text (basic)
+                lines = text.split('\n')
+                if len(lines) > 1:
+                    df = pd.DataFrame([line.split() for line in lines if line.strip()])
+                    if not df.empty:
+                        all_tables.append(df)
+            if all_tables:
+                method_used = "ocr"
+                return {'tables': all_tables, 'method': method_used}
+        except Exception:
+            pass
+        
+        return {'tables': [], 'method': 'none'}
+    
     def categorize_dataframe(self, df: pd.DataFrame, table_name: str = "") -> Dict[str, pd.DataFrame]:
         """
         Categorize a dataframe's columns into UKG-ready tabs
@@ -392,25 +489,6 @@ class EnhancedPayrollParser:
         except Exception:
             # Fallback: just concatenate
             return pd.concat(df_list, ignore_index=True, sort=False)
-    
-    def _identify_payroll_fields(self, df: pd.DataFrame) -> Dict[str, List[str]]:
-        """
-        Enhanced field identification with categorization
-        
-        Args:
-            df: DataFrame to analyze
-            
-        Returns:
-            Dictionary mapping categories to column lists
-        """
-        field_categories = {cat: [] for cat in self.categorizer.get_all_categories()}
-        field_categories['Uncategorized'] = []
-        
-        for col in df.columns:
-            _, category = self.categorizer.categorize_column(str(col))
-            field_categories[category].append(col)
-        
-        return field_categories
 
 
 def create_ukg_excel_export(categorized_data: Dict[str, pd.DataFrame], 
@@ -520,7 +598,6 @@ def create_ukg_excel_export(categorized_data: Dict[str, pd.DataFrame],
     return output
 
 
-# Example usage function for integration
 def process_parsed_pdf_for_ukg(all_dataframes: List[pd.DataFrame], 
                                table_names: List[str] = None) -> BytesIO:
     """
@@ -542,10 +619,6 @@ def process_parsed_pdf_for_ukg(all_dataframes: List[pd.DataFrame],
     excel_file = create_ukg_excel_export(categorized_data)
     
     return excel_file
-
-
-# Backwards compatibility alias for existing code
-SecurePayrollParser = EnhancedPayrollParser
 
 
 # Backwards compatibility alias
