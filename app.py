@@ -693,10 +693,10 @@ with tab2:
                                             'tables': formatted_tables,
                                             'filename': uploaded_file.name,
                                             'method': strategy,
-                                            'parsed_at': result['parsed_at'],
-                                            'processing_time': result['processing_time'],
+                                            'parsed_at': result.get('parsed_at', datetime.now().isoformat()),
+                                            'processing_time': result.get('processing_time', 0),
                                             'strategies_used': [strategy],
-                                            'metadata': result['metadata'],
+                                            'metadata': result.get('metadata', {'total_pages': 0}),
                                             'identified_fields': identified_fields if identified_fields else None
                                         }
                                         
@@ -717,18 +717,21 @@ with tab2:
                             st.session_state.projects[st.session_state.current_project]['data_sources'].append({
                                 'filename': uploaded_file.name,
                                 'type': 'PDF',
-                                'parsed_at': result['parsed_at'],
+                                'parsed_at': result.get('parsed_at', datetime.now().isoformat()),
                                 'tables_found': len(result.get('tables', [])),
                                 'strategies_used': result.get('strategies_used', [])
                             })
                     
-                    # Display results for selected strategy
-                    if result.get('success'):
+                    # Display results for selected strategy (skip if in comparison mode waiting for selection)
+                    if result.get('mode') == 'comparison':
+                        # User needs to select a parser first - don't show results section yet
+                        pass
+                    elif result.get('success') and result.get('tables'):
                         # Success message
-                        st.success(f"✅ Parsing complete in {result['processing_time']:.2f} seconds!")
+                        st.success(f"✅ Parsing complete in {result.get('processing_time', 0):.2f} seconds!")
                         
                         # Strategy info
-                        st.info(f"📊 **Strategy Used:** {', '.join(result['strategies_used'])}")
+                        st.info(f"📊 **Strategy Used:** {', '.join(result.get('strategies_used', []))}")
                         
                         st.markdown("---")
                         
@@ -739,12 +742,12 @@ with tab2:
                         with col1:
                             st.metric(
                                 "Tables Found",
-                                len(result['tables']),
+                                len(result.get('tables', [])),
                                 help="Number of tables extracted from PDF"
                             )
                         
                         with col2:
-                            total_rows = sum(t['row_count'] for t in result['tables'])
+                            total_rows = sum(t.get('row_count', 0) for t in result.get('tables', []))
                             st.metric(
                                 "Total Rows",
                                 total_rows,
@@ -752,7 +755,7 @@ with tab2:
                             )
                         
                         with col3:
-                            total_cols = sum(t['col_count'] for t in result['tables'])
+                            total_cols = sum(t.get('col_count', 0) for t in result.get('tables', []))
                             st.metric(
                                 "Total Columns",
                                 total_cols,
@@ -790,8 +793,8 @@ with tab2:
                         # Preview tables
                         st.markdown("### 📊 Extracted Tables")
                         
-                        for table in result['tables']:
-                            with st.expander(f"📄 Page {table['page']}, Table {table['table_num']} ({table['row_count']} rows × {table['col_count']} cols)"):
+                        for table in result.get('tables', []):
+                            with st.expander(f"📄 Page {table.get('page', 1)}, Table {table.get('table_num', 1)} ({table.get('row_count', 0)} rows × {table.get('col_count', 0)} cols)"):
                                 st.dataframe(table['data'], use_container_width=True)
                         
                         st.markdown("---")
@@ -802,12 +805,13 @@ with tab2:
                         
                         # Get all unique columns across all tables
                         all_columns = {}
-                        for table_idx, table in enumerate(result['tables']):
-                            df = table['data']
-                            categories = st.session_state.pdf_parser.get_column_categories(df)
-                            for col, cat_info in categories.items():
-                                all_columns[f"Table{table_idx+1}:{col}"] = {
-                                    'table': f"Table {table_idx+1}",
+                        for table_idx, table in enumerate(result.get('tables', [])):
+                            df = table.get('data')
+                            if df is not None:
+                                categories = st.session_state.pdf_parser.get_column_categories(df)
+                                for col, cat_info in categories.items():
+                                    all_columns[f"Table{table_idx+1}:{col}"] = {
+                                        'table': f"Table {table_idx+1}",
                                     'column': col,
                                     'category': cat_info['category'],
                                     'field_type': cat_info['field_type']
@@ -920,11 +924,11 @@ with tab2:
                                 with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
                                     # Summary sheet
                                     summary_data = {
-                                        'Filename': [result['filename']],
-                                        'Parsed At': [result['parsed_at']],
-                                        'Total Tables': [len(result['tables'])],
+                                        'Filename': [result.get('filename', 'unknown.pdf')],
+                                        'Parsed At': [result.get('parsed_at', datetime.now().isoformat())],
+                                        'Total Tables': [len(result.get('tables', []))],
                                         'Processing Time (s)': [result.get('processing_time', 0)],
-                                        'Strategies Used': [', '.join(result['strategies_used'])]
+                                        'Strategies Used': [', '.join(result.get('strategies_used', []))]
                                     }
                                     summary_df = pd.DataFrame(summary_data)
                                     summary_df.to_excel(writer, sheet_name='Summary', index=False)
@@ -932,27 +936,28 @@ with tab2:
                                     # Identified fields
                                     if result.get('identified_fields'):
                                         fields_data = []
-                                        for field, locations in result['identified_fields'].items():
+                                        for field, locations in result.get('identified_fields', {}).items():
                                             for loc in locations:
                                                 fields_data.append({
                                                     'Field': field,
-                                                    'Table': loc['table'],
-                                                    'Column': loc['column']
+                                                    'Table': loc.get('table', 'Unknown'),
+                                                    'Column': loc.get('column', 'Unknown')
                                                 })
                                         if fields_data:
                                             fields_df = pd.DataFrame(fields_data)
                                             fields_df.to_excel(writer, sheet_name='Identified Fields', index=False)
                                     
                                     # Individual tables
-                                    for table in result['tables']:
-                                        sheet_name = f"P{table['page']}_T{table['table_num']}"
+                                    for table in result.get('tables', []):
+                                        sheet_name = f"P{table.get('page', 1)}_T{table.get('table_num', 1)}"
                                         sheet_name = sheet_name[:31]  # Excel limit
                                         table['data'].to_excel(writer, sheet_name=sheet_name, index=False)
                                     
                                     # Combined data
-                                    if len(result['tables']) > 1:
+                                    tables = result.get('tables', [])
+                                    if len(tables) > 1:
                                         try:
-                                            all_data = pd.concat([t['data'] for t in result['tables']], ignore_index=True)
+                                            all_data = pd.concat([t['data'] for t in tables], ignore_index=True)
                                             all_data.to_excel(writer, sheet_name='All Data', index=False)
                                         except Exception as concat_err:
                                             st.warning(f"Could not combine tables: {str(concat_err)}")
@@ -997,8 +1002,9 @@ with tab2:
                         with col2:
                             # CSV export - DIRECT
                             try:
-                                if len(result['tables']) > 0:
-                                    all_data = pd.concat([t['data'] for t in result['tables']], ignore_index=True)
+                                tables = result.get('tables', [])
+                                if len(tables) > 0:
+                                    all_data = pd.concat([t['data'] for t in tables], ignore_index=True)
                                     csv_data = all_data.to_csv(index=False)
                                     
                                     st.download_button(
@@ -1019,14 +1025,15 @@ with tab2:
                         with col3:
                             # ZIP for manual editing - DIRECT
                             try:
-                                if len(result['tables']) > 0:
+                                tables = result.get('tables', [])
+                                if len(tables) > 0:
                                     zip_buffer = io.BytesIO()
                                     
                                     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
                                         # Add each table as separate CSV
-                                        for table in result['tables']:
+                                        for table in tables:
                                             csv_data = table['data'].to_csv(index=False)
-                                            filename = f"Page{table['page']}_Table{table['table_num']}.csv"
+                                            filename = f"Page{table.get('page', 1)}_Table{table.get('table_num', 1)}.csv"
                                             zip_file.writestr(filename, csv_data)
                                         
                                         # Add instructions
@@ -1074,7 +1081,23 @@ Note: Keep column names in first row for re-import
                     
                     else:
                         # Parsing failed
-                        st.error(f"❌ Parsing failed: {result.get('error', 'Unknown error')}")
+                        st.error("❌ Parsing Failed - No Tables Found")
+                        
+                        error_msg = result.get('error', 'Unknown error')
+                        st.warning(f"**Error Details:** {error_msg}")
+                        
+                        st.markdown("### 💡 Try This:")
+                        st.info("""
+                        **Option 1: Enable Comparison Mode**
+                        - ✅ Check the "🔍 Compare All 4 Parsers" box above
+                        - Click "Parse PDF" again
+                        - Try each parser to see which works best
+                        
+                        **Option 2: Check Your PDF**
+                        - Is it a scanned/image PDF? (OCR not supported on Railway)
+                        - Is it password-protected?
+                        - Does it actually contain tables?
+                        """)
                         
                         st.markdown("### 🔍 Troubleshooting")
                         
