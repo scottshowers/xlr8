@@ -218,28 +218,24 @@ with st.sidebar:
         st.markdown("**Local LLM Knowledge Base**")
         st.markdown("""
         <div style='font-size: 0.85rem; color: #6c757d; margin-bottom: 1rem;'>
-        Upload industry knowledge, best practices, and templates that apply across all projects.
+        Upload your company standards, best practices, and templates in the 
+        <strong>Foundation Data Library</strong> tab (Tab 3 → 4th tab).
         </div>
         """, unsafe_allow_html=True)
         
-        foundation_files = st.file_uploader(
-            "Upload Foundation Files",
-            type=['pdf', 'docx', 'txt', 'md', 'xlsx', 'csv'],
-            accept_multiple_files=True,
-            key="foundation_uploader",
-            help="UKG guides, best practices, templates, standards"
-        )
-        
-        if foundation_files:
-            st.session_state.foundation_files = foundation_files
-            st.success(f"✅ {len(foundation_files)} file(s) loaded")
-            for file in foundation_files:
-                st.markdown(f"<div style='font-size: 0.8rem; padding: 0.25rem 0;'>📄 {file.name}</div>", unsafe_allow_html=True)
+        # Show current foundation status
+        valid_foundation_files = [f for f in st.session_state.foundation_files if isinstance(f, dict)]
+        if valid_foundation_files:
+            enabled_count = len([f for f in valid_foundation_files if f.get('enabled', False)])
+            st.success(f"✅ {len(valid_foundation_files)} foundation file(s) | {enabled_count} enabled")
+            for file in valid_foundation_files[:5]:  # Show first 5
+                status_icon = "✅" if file.get('enabled', False) else "⭕"
+                st.markdown(f"<div style='font-size: 0.8rem; padding: 0.25rem 0;'>{status_icon} {file['name']}</div>", unsafe_allow_html=True)
+            if len(valid_foundation_files) > 5:
+                st.markdown(f"<div style='font-size: 0.8rem; padding: 0.25rem 0; color: #6c757d;'>... and {len(valid_foundation_files) - 5} more</div>", unsafe_allow_html=True)
         else:
-            if st.session_state.foundation_files:
-                st.info(f"📚 {len(st.session_state.foundation_files)} files loaded")
-            else:
-                st.info("No foundation files uploaded yet")
+            st.info("📋 No foundation files yet")
+            st.markdown("<small>Go to Foundation Data Library tab to upload</small>", unsafe_allow_html=True)
         
         st.markdown("""
         <div style='font-size: 0.75rem; color: #6c757d; margin-top: 1rem; line-height: 1.4;'>
@@ -1388,7 +1384,9 @@ with tab3:
             """, unsafe_allow_html=True)
             
             # Foundation Intelligence Status
-            enabled_foundation_count = len([f for f in st.session_state.foundation_files if f.get('enabled', False)])
+            # Filter to only include dictionaries (not UploadedFile objects)
+            valid_foundation_files = [f for f in st.session_state.foundation_files if isinstance(f, dict)]
+            enabled_foundation_count = len([f for f in valid_foundation_files if f.get('enabled', False)])
             if st.session_state.get('foundation_enabled', True) and enabled_foundation_count > 0:
                 st.markdown(f"""
                 <div style='background-color: rgba(109, 138, 160, 0.15); padding: 0.75rem; border-radius: 6px; border-left: 4px solid #6d8aa0; margin: 1rem 0;'>
@@ -1673,7 +1671,9 @@ with tab3:
                             
                             # BUILD FOUNDATION DATA CONTEXT (if enabled)
                             foundation_context = ""
-                            enabled_foundation_files = [f for f in st.session_state.foundation_files if f.get('enabled', False)]
+                            # Filter to only include dictionaries (not UploadedFile objects)
+                            valid_foundation_files = [f for f in st.session_state.foundation_files if isinstance(f, dict)]
+                            enabled_foundation_files = [f for f in valid_foundation_files if f.get('enabled', False)]
                             
                             if enabled_foundation_files:
                                 foundation_context = """
@@ -2096,7 +2096,9 @@ End of Report
                 
                 # Add foundation context if enabled
                 foundation_chat_context = ""
-                enabled_foundation_files = [f for f in st.session_state.foundation_files if f.get('enabled', False)]
+                # Filter to only include dictionaries (not UploadedFile objects)
+                valid_foundation_files = [f for f in st.session_state.foundation_files if isinstance(f, dict)]
+                enabled_foundation_files = [f for f in valid_foundation_files if f.get('enabled', False)]
                 if enabled_foundation_files:
                     foundation_chat_context = "\n\nFOUNDATION STANDARDS (Your Company's Approach):\n"
                     for foundation_file in enabled_foundation_files:
@@ -2190,8 +2192,10 @@ Provide a helpful, specific answer based on the context and your UKG expertise."
                 st.session_state.foundation_enabled = foundation_toggle
             
             # Status indicators
-            enabled_count = len([f for f in st.session_state.foundation_files if f.get('enabled', False)])
-            total_count = len(st.session_state.foundation_files)
+            # Filter to only include dictionaries (not UploadedFile objects)
+            valid_foundation_files = [f for f in st.session_state.foundation_files if isinstance(f, dict)]
+            enabled_count = len([f for f in valid_foundation_files if f.get('enabled', False)])
+            total_count = len(valid_foundation_files)
             
             status_col1, status_col2, status_col3 = st.columns(3)
             with status_col1:
@@ -2270,6 +2274,9 @@ Provide a helpful, specific answer based on the context and your UKG expertise."
             # Display foundation library
             st.markdown("### 📚 Foundation Library")
             
+            # Clean up any invalid entries (UploadedFile objects)
+            st.session_state.foundation_files = [f for f in st.session_state.foundation_files if isinstance(f, dict)]
+            
             if not st.session_state.foundation_files:
                 st.info("""
                 📋 **No foundation documents yet**
@@ -2340,13 +2347,15 @@ Provide a helpful, specific answer based on the context and your UKG expertise."
                 with bulk_col1:
                     if st.button("✅ Enable All", use_container_width=True):
                         for file in st.session_state.foundation_files:
-                            file['enabled'] = True
+                            if isinstance(file, dict):
+                                file['enabled'] = True
                         st.rerun()
                 
                 with bulk_col2:
                     if st.button("⭕ Disable All", use_container_width=True):
                         for file in st.session_state.foundation_files:
-                            file['enabled'] = False
+                            if isinstance(file, dict):
+                                file['enabled'] = False
                         st.rerun()
                 
                 with bulk_col3:
