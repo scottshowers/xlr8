@@ -1167,10 +1167,11 @@ with tab3:
         st.info(f"📁 **Active Project:** {st.session_state.current_project}")
         
         # Create sub-tabs for different analysis modes
-        analysis_tab1, analysis_tab2, analysis_tab3 = st.tabs([
+        analysis_tab1, analysis_tab2, analysis_tab3, analysis_tab4 = st.tabs([
             "📂 Basic Data Analysis", 
             "🤖 AI Document Analysis (Secure)", 
-            "💬 AI Chat Assistant"
+            "💬 AI Chat Assistant",
+            "📚 Foundation Data Library"
         ])
         
         # ============================================================================
@@ -1385,6 +1386,24 @@ with tab3:
                 </ul>
             </div>
             """, unsafe_allow_html=True)
+            
+            # Foundation Intelligence Status
+            enabled_foundation_count = len([f for f in st.session_state.foundation_files if f.get('enabled', False)])
+            if st.session_state.get('foundation_enabled', True) and enabled_foundation_count > 0:
+                st.markdown(f"""
+                <div style='background-color: rgba(109, 138, 160, 0.15); padding: 0.75rem; border-radius: 6px; border-left: 4px solid #6d8aa0; margin: 1rem 0;'>
+                    <strong>🧠 Foundation Intelligence: ACTIVE</strong><br>
+                    <small>{enabled_foundation_count} foundation document(s) will be used to compare against your standards</small><br>
+                    <small>Manage in the "Foundation Data Library" tab</small>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown("""
+                <div style='background-color: rgba(158, 158, 158, 0.1); padding: 0.75rem; border-radius: 6px; border-left: 4px solid #9E9E9E; margin: 1rem 0;'>
+                    <strong>ℹ️ Foundation Intelligence: Not Active</strong><br>
+                    <small>Analysis will use general UKG best practices. Add foundation documents in "Foundation Data Library" tab to compare against YOUR standards.</small>
+                </div>
+                """, unsafe_allow_html=True)
             
             # Configuration section
             with st.expander("⚙️ AI Configuration", expanded=True):
@@ -1652,9 +1671,49 @@ with tab3:
                             
                             status_text.text("Sending to AI for analysis...")
                             
+                            # BUILD FOUNDATION DATA CONTEXT (if enabled)
+                            foundation_context = ""
+                            enabled_foundation_files = [f for f in st.session_state.foundation_files if f.get('enabled', False)]
+                            
+                            if enabled_foundation_files:
+                                foundation_context = """
+================================================================================
+🧠 FOUNDATION KNOWLEDGE (Your Company Standards)
+================================================================================
+
+You are analyzing customer data using HCMPACT's standard UKG implementation 
+approach. The following foundation documents contain YOUR company's:
+- Standard UKG mappings and configurations
+- Pay code and deduction code standards
+- Organizational structure best practices
+- Implementation methodologies and checklists
+
+CRITICAL: Compare the customer's data to these foundation standards and 
+recommend configurations that align with HCMPACT's proven approach.
+
+FOUNDATION DOCUMENTS:
+"""
+                                for idx, foundation_file in enumerate(enabled_foundation_files, 1):
+                                    foundation_context += f"""
+
+{'='*80}
+FOUNDATION FILE {idx}: {foundation_file['name']}
+Category: {foundation_file.get('category', 'Uncategorized')}
+{'='*80}
+{foundation_file['content']}
+"""
+                                
+                                foundation_context += """
+
+================================================================================
+📊 CUSTOMER DATA (To Be Analyzed Against Foundation Standards)
+================================================================================
+
+"""
+                            
                             # Prepare AI prompt
                             analysis_prompt = f"""You are an expert UKG Pro/WFM implementation consultant analyzing customer documents.
-
+{foundation_context}
 CONTEXT:
 - Customer: {st.session_state.current_project}
 - Number of documents: {len(doc_summaries)}
@@ -1693,7 +1752,24 @@ ANALYZE AND PROVIDE:
    - Leave/absence types
    - Overtime rules
 
-5. UKG MAPPING RECOMMENDATIONS
+5. UKG MAPPING RECOMMENDATIONS"""
+                            
+                            # Add foundation-specific guidance if foundation files are loaded
+                            if enabled_foundation_files:
+                                analysis_prompt += """
+   ⭐ COMPARE TO FOUNDATION STANDARDS:
+   - How does customer data align with your foundation pay code mappings?
+   - What deductions match your standard configurations?
+   - Does their org structure fit your recommended hierarchy?
+   - Which foundation best practices should be applied?
+   - Recommend configurations that match your proven foundation approach
+   
+   Standard UKG Mapping Recommendations:"""
+                            else:
+                                analysis_prompt += """
+   Standard UKG Mapping Recommendations:"""
+                            
+                            analysis_prompt += """
    - Pay code mappings
    - Deduction mappings
    - Org hierarchy in UKG
@@ -1716,7 +1792,14 @@ ANALYZE AND PROVIDE:
    - Complexity (Low/Medium/High)
    - Effort estimate
    - Key risks
-   - Success factors
+   - Success factors"""
+                            
+                            if enabled_foundation_files:
+                                analysis_prompt += """
+   - Alignment with HCMPACT foundation standards (%)
+   - Recommended foundation templates to use"""
+                            
+                            analysis_prompt += """
 
 Provide specific, actionable recommendations. Use headers and bullet points.
 """
@@ -2011,14 +2094,22 @@ End of Report
                 if st.session_state.get('ai_analysis_results'):
                     context = f"\n\nCONTEXT:\n{st.session_state.ai_analysis_results['analysis']}"
                 
+                # Add foundation context if enabled
+                foundation_chat_context = ""
+                enabled_foundation_files = [f for f in st.session_state.foundation_files if f.get('enabled', False)]
+                if enabled_foundation_files:
+                    foundation_chat_context = "\n\nFOUNDATION STANDARDS (Your Company's Approach):\n"
+                    for foundation_file in enabled_foundation_files:
+                        foundation_chat_context += f"\n{foundation_file['name']} ({foundation_file.get('category', 'General')}):\n"
+                        foundation_chat_context += foundation_file['content'][:500] + "...\n"  # Truncated for chat
+                
                 chat_prompt = f"""You are a UKG implementation expert for project: {st.session_state.current_project}.
-
+{foundation_chat_context}
 {context}
 
 USER: {user_question}
 
-Provide a helpful, specific answer based on the context and your UKG expertise.
-"""
+Provide a helpful, specific answer based on the context and your UKG expertise."""
                 
                 try:
                     import requests
@@ -2069,6 +2160,244 @@ Provide a helpful, specific answer based on the context and your UKG expertise.
                 if st.button("🗑️ Clear Chat"):
                     st.session_state.chat_history = []
                     st.rerun()
+        
+        # ============================================================================
+        # FOUNDATION DATA LIBRARY
+        # ============================================================================
+        with analysis_tab4:
+            st.markdown("""
+            <div class='info-box'>
+                <h3>📚 Foundation Data Library</h3>
+                <p>Upload your company's standard UKG configurations, pay code mappings, deduction codes, 
+                org structures, and best practices. When enabled, the AI will compare customer data to 
+                YOUR standards and provide recommendations based on YOUR proven approach.</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Foundation Intelligence toggle
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.markdown("### 🧠 Foundation Intelligence Status")
+            with col2:
+                if 'foundation_enabled' not in st.session_state:
+                    st.session_state.foundation_enabled = True
+                
+                foundation_toggle = st.toggle(
+                    "Enable Foundation",
+                    value=st.session_state.foundation_enabled,
+                    key="foundation_toggle_ui"
+                )
+                st.session_state.foundation_enabled = foundation_toggle
+            
+            # Status indicators
+            enabled_count = len([f for f in st.session_state.foundation_files if f.get('enabled', False)])
+            total_count = len(st.session_state.foundation_files)
+            
+            status_col1, status_col2, status_col3 = st.columns(3)
+            with status_col1:
+                st.metric("Total Files", total_count)
+            with status_col2:
+                st.metric("Enabled Files", enabled_count)
+            with status_col3:
+                if st.session_state.foundation_enabled and enabled_count > 0:
+                    st.markdown("""
+                    <div style='background-color: rgba(76, 175, 80, 0.2); padding: 0.75rem; border-radius: 6px; text-align: center;'>
+                        <strong style='color: #2E7D32;'>✅ ACTIVE</strong>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown("""
+                    <div style='background-color: rgba(255, 152, 0, 0.2); padding: 0.75rem; border-radius: 6px; text-align: center;'>
+                        <strong style='color: #E65100;'>⚠️ INACTIVE</strong>
+                    </div>
+                    """, unsafe_allow_html=True)
+            
+            st.markdown("---")
+            
+            # Upload new foundation file
+            st.markdown("### ➕ Add Foundation Document")
+            
+            upload_col1, upload_col2 = st.columns([3, 1])
+            with upload_col1:
+                foundation_upload = st.file_uploader(
+                    "Upload Foundation Document",
+                    type=['txt', 'md', 'csv', 'xlsx', 'xls', 'docx', 'pdf'],
+                    key="foundation_uploader",
+                    help="Upload your standard UKG configurations, mappings, or best practices"
+                )
+            
+            with upload_col2:
+                foundation_category = st.selectbox(
+                    "Category",
+                    ["Pay Codes", "Deductions", "Org Structure", "Best Practices", 
+                     "Time & Attendance", "Benefits", "Reporting", "Other"],
+                    key="foundation_category"
+                )
+            
+            if foundation_upload:
+                if st.button("📥 Add to Foundation Library", type="primary", use_container_width=True):
+                    try:
+                        # Read file content
+                        if foundation_upload.name.endswith(('.txt', '.md')):
+                            content = foundation_upload.read().decode('utf-8')
+                        elif foundation_upload.name.endswith('.csv'):
+                            df = pd.read_csv(foundation_upload)
+                            content = f"CSV Data:\n{df.to_string()}"
+                        elif foundation_upload.name.endswith(('.xlsx', '.xls')):
+                            df = pd.read_excel(foundation_upload)
+                            content = f"Excel Data:\n{df.to_string()}"
+                        else:
+                            content = f"[Binary file: {foundation_upload.name}]"
+                        
+                        # Add to foundation library
+                        new_foundation_file = {
+                            'name': foundation_upload.name,
+                            'content': content,
+                            'category': foundation_category,
+                            'enabled': True,
+                            'uploaded_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        }
+                        
+                        st.session_state.foundation_files.append(new_foundation_file)
+                        st.success(f"✅ Added '{foundation_upload.name}' to Foundation Library!")
+                        st.rerun()
+                    
+                    except Exception as e:
+                        st.error(f"❌ Error reading file: {str(e)}")
+            
+            st.markdown("---")
+            
+            # Display foundation library
+            st.markdown("### 📚 Foundation Library")
+            
+            if not st.session_state.foundation_files:
+                st.info("""
+                📋 **No foundation documents yet**
+                
+                Upload your standard UKG configurations to enable Foundation Intelligence:
+                - Pay code mappings (standard rates, overtime rules, etc.)
+                - Deduction code mappings (401k, health insurance, etc.)
+                - Org structure templates (levels, hierarchies, etc.)
+                - Implementation best practices and checklists
+                """)
+            else:
+                # Group by category
+                categories = {}
+                for file in st.session_state.foundation_files:
+                    cat = file.get('category', 'Other')
+                    if cat not in categories:
+                        categories[cat] = []
+                    categories[cat].append(file)
+                
+                # Display by category
+                for category, files in sorted(categories.items()):
+                    with st.expander(f"📁 {category} ({len(files)} files)", expanded=True):
+                        for idx, file in enumerate(files):
+                            file_col1, file_col2, file_col3 = st.columns([4, 1, 1])
+                            
+                            with file_col1:
+                                # File name with status indicator
+                                status_icon = "✅" if file.get('enabled', False) else "⭕"
+                                st.markdown(f"""
+                                <div style='padding: 0.5rem; background: {"rgba(76, 175, 80, 0.1)" if file.get("enabled", False) else "rgba(158, 158, 158, 0.1)"}; 
+                                    border-radius: 6px; border-left: 3px solid {"#4CAF50" if file.get("enabled", False) else "#9E9E9E"};'>
+                                    <strong>{status_icon} {file['name']}</strong><br>
+                                    <small style='color: #666;'>Uploaded: {file.get('uploaded_at', 'N/A')}</small>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            
+                            with file_col2:
+                                # Toggle enable/disable
+                                toggle_key = f"toggle_{category}_{idx}"
+                                new_state = st.checkbox(
+                                    "Enable",
+                                    value=file.get('enabled', False),
+                                    key=toggle_key
+                                )
+                                if new_state != file.get('enabled', False):
+                                    file['enabled'] = new_state
+                                    st.rerun()
+                            
+                            with file_col3:
+                                # Delete button
+                                if st.button("🗑️", key=f"del_{category}_{idx}"):
+                                    st.session_state.foundation_files.remove(file)
+                                    st.rerun()
+                            
+                            # Preview content
+                            with st.expander(f"👁️ Preview: {file['name']}", expanded=False):
+                                preview_content = file['content'][:1000]
+                                if len(file['content']) > 1000:
+                                    preview_content += "\n\n... (truncated)"
+                                st.code(preview_content, language=None)
+                
+                st.markdown("---")
+                
+                # Bulk actions
+                st.markdown("### ⚡ Bulk Actions")
+                bulk_col1, bulk_col2, bulk_col3 = st.columns(3)
+                
+                with bulk_col1:
+                    if st.button("✅ Enable All", use_container_width=True):
+                        for file in st.session_state.foundation_files:
+                            file['enabled'] = True
+                        st.rerun()
+                
+                with bulk_col2:
+                    if st.button("⭕ Disable All", use_container_width=True):
+                        for file in st.session_state.foundation_files:
+                            file['enabled'] = False
+                        st.rerun()
+                
+                with bulk_col3:
+                    if st.button("🗑️ Clear All", use_container_width=True, type="secondary"):
+                        if st.session_state.get('confirm_clear_foundation'):
+                            st.session_state.foundation_files = []
+                            st.session_state.confirm_clear_foundation = False
+                            st.rerun()
+                        else:
+                            st.session_state.confirm_clear_foundation = True
+                            st.warning("⚠️ Click again to confirm deletion of all foundation files")
+            
+            # How it works
+            st.markdown("---")
+            with st.expander("💡 How Foundation Intelligence Works", expanded=False):
+                st.markdown("""
+                ### How It Works
+                
+                **1. Upload Foundation Documents**
+                - Add your company's standard UKG configurations
+                - Include pay codes, deductions, org structures, best practices
+                - Categorize documents for easy management
+                
+                **2. Enable Foundation Intelligence**
+                - Toggle the "Enable Foundation" switch at the top
+                - Enable/disable individual files as needed
+                - Only enabled files are included in AI analysis
+                
+                **3. Analyze Customer Documents**
+                - Go to "AI Document Analysis" tab
+                - Upload customer documents as usual
+                - Click "Analyze All Documents"
+                
+                **4. Get Foundation-Based Recommendations**
+                - AI compares customer data to YOUR standards
+                - Recommendations align with YOUR proven approach
+                - Identifies gaps between customer and foundation standards
+                - Suggests configurations that match YOUR methodology
+                
+                **Example Use Cases:**
+                - "Compare customer pay codes to our standard 50 pay code mappings"
+                - "Analyze their org structure against our 5-level hierarchy model"
+                - "Check deductions against our standard benefits package codes"
+                - "Recommend time tracking based on our shift differential best practices"
+                
+                **Pro Tips:**
+                - Keep foundation documents up-to-date
+                - Use consistent naming and categories
+                - Enable only relevant files for each analysis
+                - Start with core mappings (pay codes, deductions, org structure)
+                """)
 
 # TAB 4: SECTION-BASED TEMPLATE SYSTEM
 
