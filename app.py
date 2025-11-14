@@ -1753,244 +1753,405 @@ with tab4:
                             f"{name}.json", key=f"e_{name}")
 
 
+# TAB 5 - ENHANCED CONFIGURATION WITH API PLAYGROUND
+
 with tab5:
-    st.markdown("## ⚙️ Configuration")
+    st.markdown("## ⚙️ Configuration & API Playground")
     
-    st.markdown("""
-    <div class='warning-box'>
-        <h4>🔧 System Configuration</h4>
-        <p>Configure API connections, security settings, and system preferences.</p>
-    </div>
-    """, unsafe_allow_html=True)
+    # Initialize API state
+    if 'ukg_wfm_token' not in st.session_state:
+        st.session_state.ukg_wfm_token = None
+    if 'ukg_wfm_token_expiry' not in st.session_state:
+        st.session_state.ukg_wfm_token_expiry = None
+    if 'ukg_hcm_auth' not in st.session_state:
+        st.session_state.ukg_hcm_auth = None
+    if 'api_response' not in st.session_state:
+        st.session_state.api_response = None
+    if 'saved_endpoints' not in st.session_state:
+        st.session_state.saved_endpoints = {}
     
-    # UKG API Configuration
-    st.markdown("### 🔌 UKG API Connections")
+    # Sub-tabs
+    config_tab1, config_tab2, config_tab3 = st.tabs([
+        "🔐 API Credentials",
+        "🎮 API Playground", 
+        "📚 Saved Endpoints"
+    ])
     
-    api_tab1, api_tab2 = st.tabs(["🔵 UKG Pro", "🟢 UKG WFM"])
-    
-    with api_tab1:
-        st.markdown("#### UKG Pro API Configuration")
+    # ====================
+    # TAB 1: CREDENTIALS
+    # ====================
+    with config_tab1:
+        st.header("API Credentials Configuration")
         
-        with st.form("ukg_pro_config"):
-            st.markdown("**Environment Settings**")
-            
-            pro_env = st.selectbox(
-                "Environment",
-                ["Production", "Sandbox"],
-                key="pro_env"
-            )
-            
-            pro_tenant = st.text_input(
-                "Tenant ID",
-                value=st.session_state.api_credentials['pro'].get('tenant', ''),
-                placeholder="e.g., your-company-name",
-                help="Your UKG Pro tenant identifier"
-            )
-            
-            pro_api_url = st.text_input(
-                "API URL",
-                value=st.session_state.api_credentials['pro'].get('api_url', ''),
-                placeholder="e.g., https://service.ultipro.com",
-                help="Base URL for UKG Pro API"
-            )
-            
-            st.markdown("**Authentication**")
-            
-            pro_username = st.text_input(
-                "Username / Service Account",
-                value=st.session_state.api_credentials['pro'].get('username', ''),
-                placeholder="API service account username"
-            )
-            
-            pro_password = st.text_input(
-                "Password / API Key",
-                value=st.session_state.api_credentials['pro'].get('password', ''),
-                type="password",
-                placeholder="API password or key"
-            )
-            
-            pro_client_id = st.text_input(
-                "Client ID (Optional)",
-                value=st.session_state.api_credentials['pro'].get('client_id', ''),
-                placeholder="OAuth client ID if applicable"
-            )
-            
-            pro_client_secret = st.text_input(
-                "Client Secret (Optional)",
-                value=st.session_state.api_credentials['pro'].get('client_secret', ''),
-                type="password",
-                placeholder="OAuth client secret if applicable"
-            )
-            
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                pro_submit = st.form_submit_button("💾 Save UKG Pro Configuration", use_container_width=True)
-            with col2:
-                pro_test = st.form_submit_button("🧪 Test Connection", use_container_width=True)
-            
-            if pro_submit:
-                st.session_state.api_credentials['pro'] = {
-                    'environment': pro_env,
-                    'tenant': pro_tenant,
-                    'api_url': pro_api_url,
-                    'username': pro_username,
-                    'password': pro_password,
-                    'client_id': pro_client_id,
-                    'client_secret': pro_client_secret,
-                    'configured_at': datetime.now().isoformat()
-                }
-                st.success("✅ UKG Pro configuration saved!")
-            
-            if pro_test:
-                if not pro_tenant or not pro_api_url:
-                    st.error("❌ Please configure API URL and Tenant ID first")
-                else:
-                    st.info("🧪 Connection test functionality will be implemented in next phase")
-                    st.markdown("""
-                    **Test will verify:**
-                    - API endpoint accessibility
-                    - Authentication credentials
-                    - Required permissions
-                    - API version compatibility
-                    """)
-    
-    with api_tab2:
-        st.markdown("#### UKG WFM API Configuration")
+        st.markdown("""
+        <div class='info-box'>
+            <h4>🔐 Secure Credential Storage</h4>
+            <p>Configure your UKG Pro WFM and HCM API credentials. Credentials are stored in your session and not persisted.</p>
+        </div>
+        """, unsafe_allow_html=True)
         
-        with st.form("ukg_wfm_config"):
-            st.markdown("**Environment Settings**")
-            
-            wfm_env = st.selectbox(
-                "Environment",
-                ["Production", "Sandbox"],
-                key="wfm_env"
+        # WFM CREDENTIALS
+        st.markdown("---")
+        st.markdown("### 🟢 UKG Pro WFM (OAuth 2.0)")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            wfm_hostname = st.text_input(
+                "WFM Hostname",
+                placeholder="mytenant.mykronos.com",
+                help="Your tenant-specific hostname (without https://)",
+                key="wfm_hostname"
             )
-            
-            wfm_tenant = st.text_input(
-                "Tenant ID",
-                value=st.session_state.api_credentials['wfm'].get('tenant', ''),
-                placeholder="e.g., your-wfm-tenant",
-                help="Your UKG WFM tenant identifier"
-            )
-            
-            wfm_api_url = st.text_input(
-                "API URL",
-                value=st.session_state.api_credentials['wfm'].get('api_url', ''),
-                placeholder="e.g., https://api.workforce.com",
-                help="Base URL for UKG WFM API"
-            )
-            
-            st.markdown("**Authentication**")
-            
             wfm_username = st.text_input(
-                "Username / Service Account",
-                value=st.session_state.api_credentials['wfm'].get('username', ''),
-                placeholder="API service account username"
+                "WFM Username",
+                placeholder="api.user@company.com",
+                key="wfm_username"
             )
-            
             wfm_password = st.text_input(
-                "Password / API Key",
-                value=st.session_state.api_credentials['wfm'].get('password', ''),
+                "WFM Password",
                 type="password",
-                placeholder="API password or key"
+                key="wfm_password"
             )
-            
-            wfm_app_key = st.text_input(
-                "Application Key",
-                value=st.session_state.api_credentials['wfm'].get('app_key', ''),
+        
+        with col2:
+            wfm_client_id = st.text_input(
+                "Client ID",
+                placeholder="your-client-id",
+                key="wfm_client_id"
+            )
+            wfm_client_secret = st.text_input(
+                "Client Secret",
                 type="password",
-                placeholder="WFM application key"
+                key="wfm_client_secret"
             )
-            
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                wfm_submit = st.form_submit_button("💾 Save UKG WFM Configuration", use_container_width=True)
-            with col2:
-                wfm_test = st.form_submit_button("🧪 Test Connection", use_container_width=True)
-            
-            if wfm_submit:
-                st.session_state.api_credentials['wfm'] = {
-                    'environment': wfm_env,
-                    'tenant': wfm_tenant,
-                    'api_url': wfm_api_url,
-                    'username': wfm_username,
-                    'password': wfm_password,
-                    'app_key': wfm_app_key,
-                    'configured_at': datetime.now().isoformat()
-                }
-                st.success("✅ UKG WFM configuration saved!")
-            
-            if wfm_test:
-                if not wfm_tenant or not wfm_api_url:
-                    st.error("❌ Please configure API URL and Tenant ID first")
+            wfm_auth_chain = st.text_input(
+                "Auth Chain",
+                value="OAuthLdapService",
+                key="wfm_auth_chain",
+                help="Typically OAuthLdapService"
+            )
+        
+        if st.button("🔌 Test WFM Connection", type="primary", use_container_width=True):
+            if not all([wfm_hostname, wfm_username, wfm_password, wfm_client_id, wfm_client_secret]):
+                st.error("⚠️ Please fill in all WFM credentials")
+            else:
+                with st.spinner("Testing WFM connection..."):
+                    try:
+                        import requests
+                        from datetime import datetime, timedelta
+                        
+                        url = f"https://{wfm_hostname}/api/authentication/access_token"
+                        
+                        data = {
+                            'username': wfm_username,
+                            'password': wfm_password,
+                            'client_id': wfm_client_id,
+                            'client_secret': wfm_client_secret,
+                            'grant_type': 'password',
+                            'auth_chain': wfm_auth_chain
+                        }
+                        
+                        headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+                        
+                        response = requests.post(url, data=data, headers=headers)
+                        
+                        if response.status_code == 200:
+                            token_data = response.json()
+                            st.session_state.ukg_wfm_token = token_data['access_token']
+                            expires_in = token_data.get('expires_in', 3600)
+                            st.session_state.ukg_wfm_token_expiry = datetime.now() + timedelta(seconds=expires_in)
+                            st.session_state.ukg_wfm_refresh_token = token_data.get('refresh_token')
+                            
+                            st.success("✅ WFM Connection Successful!")
+                            st.info(f"Token expires in {expires_in} seconds")
+                        else:
+                            st.error(f"❌ Connection Failed: {response.status_code}")
+                            st.code(response.text)
+                    
+                    except Exception as e:
+                        st.error(f"❌ Error: {str(e)}")
+        
+        # Show token status
+        if st.session_state.ukg_wfm_token:
+            if st.session_state.ukg_wfm_token_expiry > datetime.now():
+                st.success(f"✅ WFM Token Active (expires {st.session_state.ukg_wfm_token_expiry.strftime('%H:%M:%S')})")
+            else:
+                st.warning("⚠️ WFM Token Expired - Test connection again")
+        
+        # HCM CREDENTIALS
+        st.markdown("---")
+        st.markdown("### 🔵 UKG Pro HCM (Basic Auth + API Keys)")
+        
+        st.info("⚠️ HCM configuration pending - need base URL and API key details")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            hcm_base_url = st.text_input(
+                "HCM Base URL",
+                placeholder="https://service.ultipro.com/",
+                help="Pending: Actual base URL",
+                key="hcm_base_url"
+            )
+            hcm_username = st.text_input(
+                "HCM Service Account Username",
+                placeholder="service.account",
+                key="hcm_username"
+            )
+            hcm_password = st.text_input(
+                "HCM Service Account Password",
+                type="password",
+                key="hcm_password"
+            )
+        
+        with col2:
+            hcm_customer_key = st.text_input(
+                "Customer API Key",
+                placeholder="5-character key",
+                help="US-Customer-Api-Key",
+                max_chars=5,
+                key="hcm_customer_key"
+            )
+            hcm_user_key = st.text_input(
+                "User API Key",
+                placeholder="User key",
+                help="Pending: Exact header name",
+                key="hcm_user_key"
+            )
+        
+        if st.button("🔌 Test HCM Connection", type="primary", use_container_width=True, disabled=True):
+            st.warning("⚠️ HCM testing disabled - need endpoint details")
+    
+    # ====================
+    # TAB 2: API PLAYGROUND
+    # ====================
+    with config_tab2:
+        st.header("API Playground")
+        
+        st.markdown("""
+        <div class='success-box'>
+            <h4>🎮 Make API Calls</h4>
+            <p>Test any UKG API endpoint directly. Select product, method, endpoint, and send.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Product selector
+        api_product = st.radio(
+            "Select Product",
+            ["🟢 UKG Pro WFM", "🔵 UKG Pro HCM"],
+            horizontal=True
+        )
+        
+        if api_product == "🟢 UKG Pro WFM":
+            # Check if authenticated
+            if not st.session_state.ukg_wfm_token:
+                st.warning("⚠️ Please configure and test WFM credentials in the 'API Credentials' tab first")
+            else:
+                st.markdown("---")
+                
+                # HTTP Method
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    http_method = st.selectbox("Method", ["GET", "POST", "PUT", "DELETE"])
+                
+                with col2:
+                    wfm_endpoint = st.text_input(
+                        "Endpoint",
+                        placeholder="/v1/commons/persons/{personId}",
+                        help="Path after /api/ (include /v1/...)"
+                    )
+                
+                # Request body (for POST/PUT)
+                if http_method in ["POST", "PUT"]:
+                    st.markdown("**Request Body (JSON):**")
+                    request_body = st.text_area(
+                        "Body",
+                        placeholder='{\n  "key": "value"\n}',
+                        height=150,
+                        label_visibility="collapsed"
+                    )
                 else:
-                    st.info("🧪 Connection test functionality will be implemented in next phase")
-                    st.markdown("""
-                    **Test will verify:**
-                    - API endpoint accessibility
-                    - Authentication credentials
-                    - Required permissions
-                    - API version compatibility
-                    """)
-    
-    st.markdown("---")
-    
-    # Security Settings
-    st.markdown("### 🔐 Security Settings")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("**Data Protection**")
-        encryption_enabled = st.checkbox("Enable AES-256 Encryption", value=True, disabled=True)
-        pii_detection = st.checkbox("Auto-detect PII", value=True, disabled=True)
-        anonymize_data = st.checkbox("Anonymize sensitive data", value=True, disabled=True)
+                    request_body = None
+                
+                # Query parameters
+                with st.expander("➕ Query Parameters (Optional)"):
+                    num_params = st.number_input("Number of parameters", 0, 10, 0)
+                    query_params = {}
+                    for i in range(num_params):
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            key = st.text_input(f"Key {i+1}", key=f"qp_key_{i}")
+                        with c2:
+                            value = st.text_input(f"Value {i+1}", key=f"qp_val_{i}")
+                        if key:
+                            query_params[key] = value
+                
+                # Send button
+                if st.button("🚀 Send API Request", type="primary", use_container_width=True):
+                    try:
+                        import requests
+                        
+                        # Build URL
+                        hostname = st.session_state.get('wfm_hostname', '')
+                        url = f"https://{hostname}/api{wfm_endpoint}"
+                        
+                        # Headers
+                        headers = {
+                            'Content-Type': 'application/json',
+                            'Authorization': st.session_state.ukg_wfm_token
+                        }
+                        
+                        # Make request
+                        with st.spinner(f"Making {http_method} request..."):
+                            if http_method == "GET":
+                                response = requests.get(url, headers=headers, params=query_params)
+                            elif http_method == "POST":
+                                response = requests.post(url, headers=headers, json=json.loads(request_body) if request_body else {})
+                            elif http_method == "PUT":
+                                response = requests.put(url, headers=headers, json=json.loads(request_body) if request_body else {})
+                            elif http_method == "DELETE":
+                                response = requests.delete(url, headers=headers)
+                        
+                        # Store response
+                        st.session_state.api_response = {
+                            'status_code': response.status_code,
+                            'headers': dict(response.headers),
+                            'body': response.json() if response.text else None,
+                            'url': url,
+                            'method': http_method
+                        }
+                        
+                        # Display response
+                        st.markdown("---")
+                        st.markdown("### 📥 Response")
+                        
+                        # Status code
+                        if response.status_code == 200:
+                            st.success(f"✅ Status: {response.status_code} OK")
+                        elif response.status_code < 300:
+                            st.info(f"ℹ️ Status: {response.status_code}")
+                        elif response.status_code < 500:
+                            st.warning(f"⚠️ Status: {response.status_code}")
+                        else:
+                            st.error(f"❌ Status: {response.status_code}")
+                        
+                        # Response body
+                        st.markdown("**Response Body:**")
+                        if response.json():
+                            st.json(response.json())
+                        else:
+                            st.code(response.text)
+                        
+                        # Response headers
+                        with st.expander("📋 Response Headers"):
+                            st.json(dict(response.headers))
+                    
+                    except json.JSONDecodeError:
+                        st.error("❌ Invalid JSON in request body")
+                    except Exception as e:
+                        st.error(f"❌ Request failed: {str(e)}")
+                
+                # Common endpoints quick access
+                st.markdown("---")
+                st.markdown("### ⚡ Common Endpoints")
+                
+                common_endpoints = {
+                    "Get Person by ID": {
+                        "method": "GET",
+                        "endpoint": "/v1/commons/persons/{personId}",
+                        "description": "Retrieve person details"
+                    },
+                    "Get Multiple Persons": {
+                        "method": "POST",
+                        "endpoint": "/v1/commons/persons/multi_read",
+                        "description": "Batch retrieve persons",
+                        "body": '{\n  "keys": [{"id": "123"}]\n}'
+                    },
+                    "Get Timecard": {
+                        "method": "GET",
+                        "endpoint": "/v1/timekeeping/timecard",
+                        "description": "Retrieve employee timecard"
+                    },
+                    "Get Schedule": {
+                        "method": "POST",
+                        "endpoint": "/v1/scheduling/schedule/multi_read",
+                        "description": "Retrieve schedule for employees"
+                    }
+                }
+                
+                cols = st.columns(2)
+                for idx, (name, details) in enumerate(common_endpoints.items()):
+                    with cols[idx % 2]:
+                        with st.expander(f"📌 {name}"):
+                            st.markdown(f"**Method:** {details['method']}")
+                            st.markdown(f"**Endpoint:** `{details['endpoint']}`")
+                            st.markdown(f"**Description:** {details['description']}")
+                            if 'body' in details:
+                                st.code(details['body'], language='json')
         
-        st.info("Core security features are always enabled and cannot be disabled")
+        else:  # HCM
+            st.warning("⚠️ HCM API Playground coming soon - configure credentials first")
     
-    with col2:
-        st.markdown("**Audit & Logging**")
-        audit_logging = st.checkbox("Enable audit logging", value=True)
-        detailed_logs = st.checkbox("Detailed operation logs", value=False)
-        log_retention = st.slider("Log retention (days)", 7, 90, 30)
-    
-    st.markdown("---")
-    
-    # System Preferences
-    st.markdown("### 🎨 System Preferences")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("**Display Options**")
-        date_format = st.selectbox(
-            "Date Format",
-            ["MM/DD/YYYY", "DD/MM/YYYY", "YYYY-MM-DD"],
-            index=0
-        )
+    # ====================
+    # TAB 3: SAVED ENDPOINTS
+    # ====================
+    with config_tab3:
+        st.header("Saved Endpoints")
         
-        time_format = st.selectbox(
-            "Time Format",
-            ["12-hour (AM/PM)", "24-hour"],
-            index=0
-        )
+        st.markdown("""
+        <div class='info-box'>
+            <h4>📚 Endpoint Library</h4>
+            <p>Save frequently used endpoints for quick access.</p>
+        </div>
+        """, unsafe_allow_html=True)
         
-        timezone = st.selectbox(
-            "Timezone",
-            ["US/Eastern", "US/Central", "US/Mountain", "US/Pacific", "UTC"],
-            index=0
-        )
-    
-    with col2:
-        st.markdown("**Performance**")
-        max_upload_size = st.slider("Max upload size (MB)", 10, 200, 100)
-        concurrent_processes = st.slider("Concurrent parsing processes", 1, 5, 2)
-        cache_results = st.checkbox("Cache parsing results", value=True)
-    
-    st.markdown("---")
-    
-    if st.button("💾 Save All Settings", type="primary", use_container_width=True):
-        st.success("✅ Configuration saved successfully!")
+        # Add new endpoint
+        with st.expander("➕ Save New Endpoint"):
+            save_name = st.text_input("Endpoint Name", placeholder="Get All Employees")
+            save_product = st.selectbox("Product", ["WFM", "HCM"])
+            save_method = st.selectbox("Method", ["GET", "POST", "PUT", "DELETE"])
+            save_endpoint = st.text_input("Endpoint Path", placeholder="/v1/...")
+            save_description = st.text_area("Description")
+            save_body = st.text_area("Default Body (if applicable)")
+            
+            if st.button("💾 Save Endpoint"):
+                if save_name and save_endpoint:
+                    st.session_state.saved_endpoints[save_name] = {
+                        'product': save_product,
+                        'method': save_method,
+                        'endpoint': save_endpoint,
+                        'description': save_description,
+                        'body': save_body
+                    }
+                    st.success(f"✅ Saved '{save_name}'")
+                    st.rerun()
+        
+        # Display saved endpoints
+        if st.session_state.saved_endpoints:
+            st.markdown("---")
+            st.markdown("### 📋 Your Saved Endpoints")
+            
+            for name, details in st.session_state.saved_endpoints.items():
+                with st.expander(f"📌 {name}"):
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.markdown(f"**Product:** {details['product']}")
+                        st.markdown(f"**Method:** {details['method']}")
+                        st.markdown(f"**Endpoint:** `{details['endpoint']}`")
+                        if details['description']:
+                            st.markdown(f"**Description:** {details['description']}")
+                        if details['body']:
+                            st.markdown("**Default Body:**")
+                            st.code(details['body'], language='json')
+                    
+                    with col2:
+                        if st.button("🗑️ Delete", key=f"del_{name}"):
+                            del st.session_state.saved_endpoints[name]
+                            st.rerun()
+        else:
+            st.info("📋 No saved endpoints yet. Add one above!")
+
 
 with tab6:
     st.markdown("## 🛠️ Admin Panel")
