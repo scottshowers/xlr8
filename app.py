@@ -1155,141 +1155,690 @@ Note: Keep column names in first row for re-import
         - ✅ Complete data privacy guaranteed
         """)
 
+# TAB 3: ENHANCED DATA ANALYSIS WITH AI CAPABILITIES
+# This replaces lines 1158-1292 in the original app.py
+
 with tab3:
-    st.markdown("## 📊 Data Analysis")
+    st.markdown("## 📊 Data Analysis & AI Document Intelligence")
     
     if not st.session_state.current_project:
         st.warning("⚠️ Please create or select a project first (Home tab)")
     else:
         st.info(f"📁 **Active Project:** {st.session_state.current_project}")
         
-        st.markdown("""
-        <div class='info-box'>
-            <h4>📂 Multi-Source Data Upload</h4>
-            <p>Upload Excel, CSV, or other data files for cross-reference analysis. 
-            XLR8 will identify patterns, detect potential join keys, and help populate UKG templates.</p>
-        </div>
-        """, unsafe_allow_html=True)
+        # Create sub-tabs for different analysis modes
+        analysis_tab1, analysis_tab2, analysis_tab3 = st.tabs([
+            "📂 Basic Data Analysis", 
+            "🤖 AI Document Analysis", 
+            "💬 AI Chat Assistant"
+        ])
         
-        # File uploader
-        data_files = st.file_uploader(
-            "Upload Data Files (Excel, CSV)",
-            type=['xlsx', 'xls', 'csv', 'txt'],
-            accept_multiple_files=True,
-            key="data_analysis_uploader"
-        )
-        
-        if data_files:
-            st.success(f"✅ Loaded {len(data_files)} file(s)")
-            
-            # Analyze each file
-            for file in data_files:
-                with st.expander(f"📁 {file.name}", expanded=True):
-                    try:
-                        # Read file
-                        if file.name.endswith(('.xlsx', '.xls')):
-                            df = pd.read_excel(file)
-                        elif file.name.endswith('.csv'):
-                            df = pd.read_csv(file)
-                        else:
-                            df = pd.read_csv(file, sep='\t')
-                        
-                        # File stats
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.metric("Rows", len(df))
-                        with col2:
-                            st.metric("Columns", len(df.columns))
-                        with col3:
-                            st.metric("Memory", f"{df.memory_usage(deep=True).sum() / 1024:.1f} KB")
-                        
-                        # Data preview
-                        st.markdown("**Preview (first 10 rows):**")
-                        st.dataframe(df.head(10), use_container_width=True)
-                        
-                        # Column analysis
-                        st.markdown("**Column Analysis:**")
-                        col_info = []
-                        for col in df.columns:
-                            col_info.append({
-                                'Column': col,
-                                'Type': str(df[col].dtype),
-                                'Non-Null': df[col].notna().sum(),
-                                'Unique': df[col].nunique(),
-                                'Sample': str(df[col].iloc[0]) if len(df) > 0 else ''
-                            })
-                        
-                        st.dataframe(pd.DataFrame(col_info), use_container_width=True)
-                        
-                        # Potential payroll fields
-                        st.markdown("**🔍 Potential Payroll Fields:**")
-                        payroll_keywords = {
-                            'employee': ['employee', 'emp', 'ee', 'person', 'name'],
-                            'id': ['id', 'number', 'badge', 'ssn'],
-                            'pay': ['pay', 'wage', 'salary', 'rate', 'amount'],
-                            'hours': ['hours', 'hrs', 'time'],
-                            'date': ['date', 'period'],
-                            'department': ['dept', 'department', 'division', 'location']
-                        }
-                        
-                        detected_fields = {}
-                        for col in df.columns:
-                            col_lower = col.lower()
-                            for field_type, keywords in payroll_keywords.items():
-                                if any(keyword in col_lower for keyword in keywords):
-                                    if field_type not in detected_fields:
-                                        detected_fields[field_type] = []
-                                    detected_fields[field_type].append(col)
-                        
-                        if detected_fields:
-                            for field_type, columns in detected_fields.items():
-                                st.markdown(f"**{field_type.title()}:** {', '.join(columns)}")
-                        else:
-                            st.info("No standard payroll fields auto-detected")
-                        
-                        # Export options
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            if st.button(f"📥 Download as Excel", key=f"excel_{file.name}"):
-                                output = io.BytesIO()
-                                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                                    df.to_excel(writer, index=False, sheet_name='Data')
-                                
-                                st.download_button(
-                                    "Download",
-                                    data=output.getvalue(),
-                                    file_name=f"{file.name.split('.')[0]}_analyzed.xlsx",
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                )
-                        
-                        with col2:
-                            if st.button(f"📄 Download as CSV", key=f"csv_{file.name}"):
-                                csv = df.to_csv(index=False)
-                                st.download_button(
-                                    "Download",
-                                    data=csv,
-                                    file_name=f"{file.name.split('.')[0]}_analyzed.csv",
-                                    mime="text/csv"
-                                )
-                    
-                    except Exception as e:
-                        st.error(f"Error reading file: {str(e)}")
-        
-        else:
+        # ============================================================================
+        # BASIC DATA ANALYSIS (Original functionality preserved)
+        # ============================================================================
+        with analysis_tab1:
             st.markdown("""
-            <div class='warning-box'>
-                <h4>📤 No Data Files Uploaded</h4>
-                <p>Upload Excel or CSV files containing:</p>
+            <div class='info-box'>
+                <h4>📂 Multi-Source Data Upload</h4>
+                <p>Upload Excel, CSV, or other data files for cross-reference analysis. 
+                XLR8 will identify patterns, detect potential join keys, and help populate UKG templates.</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # File uploader
+            data_files = st.file_uploader(
+                "Upload Data Files (Excel, CSV)",
+                type=['xlsx', 'xls', 'csv', 'txt'],
+                accept_multiple_files=True,
+                key="data_analysis_uploader"
+            )
+            
+            if data_files:
+                st.success(f"✅ Loaded {len(data_files)} file(s)")
+                
+                # Analyze each file
+                for file in data_files:
+                    with st.expander(f"📁 {file.name}", expanded=True):
+                        try:
+                            # Read file
+                            if file.name.endswith(('.xlsx', '.xls')):
+                                df = pd.read_excel(file)
+                            elif file.name.endswith('.csv'):
+                                df = pd.read_csv(file)
+                            else:
+                                df = pd.read_csv(file, sep='\t')
+                            
+                            # File stats
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("Rows", len(df))
+                            with col2:
+                                st.metric("Columns", len(df.columns))
+                            with col3:
+                                st.metric("Memory", f"{df.memory_usage(deep=True).sum() / 1024:.1f} KB")
+                            
+                            # Data preview
+                            st.markdown("**Preview (first 10 rows):**")
+                            st.dataframe(df.head(10), use_container_width=True)
+                            
+                            # Column analysis
+                            st.markdown("**Column Analysis:**")
+                            col_info = []
+                            for col in df.columns:
+                                col_info.append({
+                                    'Column': col,
+                                    'Type': str(df[col].dtype),
+                                    'Non-Null': df[col].notna().sum(),
+                                    'Unique': df[col].nunique(),
+                                    'Sample': str(df[col].iloc[0]) if len(df) > 0 else ''
+                                })
+                            
+                            st.dataframe(pd.DataFrame(col_info), use_container_width=True)
+                            
+                            # Potential payroll fields
+                            st.markdown("**🔍 Potential Payroll Fields:**")
+                            payroll_keywords = {
+                                'employee': ['employee', 'emp', 'ee', 'person', 'name'],
+                                'id': ['id', 'number', 'badge', 'ssn'],
+                                'pay': ['pay', 'wage', 'salary', 'rate', 'amount'],
+                                'hours': ['hours', 'hrs', 'time'],
+                                'date': ['date', 'period'],
+                                'department': ['dept', 'department', 'division', 'location']
+                            }
+                            
+                            detected_fields = {}
+                            for col in df.columns:
+                                col_lower = col.lower()
+                                for field_type, keywords in payroll_keywords.items():
+                                    if any(keyword in col_lower for keyword in keywords):
+                                        if field_type not in detected_fields:
+                                            detected_fields[field_type] = []
+                                        detected_fields[field_type].append(col)
+                            
+                            if detected_fields:
+                                for field_type, columns in detected_fields.items():
+                                    st.markdown(f"**{field_type.title()}:** {', '.join(columns)}")
+                            else:
+                                st.info("No standard payroll fields auto-detected")
+                            
+                            # Export options
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                if st.button(f"📥 Download as Excel", key=f"excel_{file.name}"):
+                                    output = io.BytesIO()
+                                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                                        df.to_excel(writer, index=False, sheet_name='Data')
+                                    
+                                    st.download_button(
+                                        "Download",
+                                        data=output.getvalue(),
+                                        file_name=f"{file.name.split('.')[0]}_analyzed.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                    )
+                            
+                            with col2:
+                                if st.button(f"📄 Download as CSV", key=f"csv_{file.name}"):
+                                    csv = df.to_csv(index=False)
+                                    st.download_button(
+                                        "Download",
+                                        data=csv,
+                                        file_name=f"{file.name.split('.')[0]}_analyzed.csv",
+                                        mime="text/csv"
+                                    )
+                        
+                        except Exception as e:
+                            st.error(f"Error reading file: {str(e)}")
+            
+            else:
+                st.markdown("""
+                <div class='warning-box'>
+                    <h4>📤 No Data Files Uploaded</h4>
+                    <p>Upload Excel or CSV files containing:</p>
+                    <ul>
+                        <li>Employee master data</li>
+                        <li>Existing payroll exports</li>
+                        <li>Organizational hierarchy</li>
+                        <li>Time & attendance records</li>
+                        <li>Benefits enrollment data</li>
+                    </ul>
+                </div>
+                """, unsafe_allow_html=True)
+        
+        # ============================================================================
+        # AI DOCUMENT ANALYSIS (NEW FEATURE)
+        # ============================================================================
+        with analysis_tab2:
+            # Initialize AI analysis state
+            if 'uploaded_docs' not in st.session_state:
+                st.session_state.uploaded_docs = []
+            if 'ai_analysis_results' not in st.session_state:
+                st.session_state.ai_analysis_results = None
+            if 'doc_contents' not in st.session_state:
+                st.session_state.doc_contents = {}
+            
+            st.markdown("""
+            <div class='success-box'>
+                <h3>🤖 AI-Powered Document Analysis</h3>
+                <p><strong>Upload 100+ customer documents</strong> and let AI analyze them to:</p>
                 <ul>
-                    <li>Employee master data</li>
-                    <li>Existing payroll exports</li>
-                    <li>Organizational hierarchy</li>
-                    <li>Time & attendance records</li>
-                    <li>Benefits enrollment data</li>
+                    <li>🔍 Extract employee data structures</li>
+                    <li>🗺️ Map pay codes, deductions, and benefits to UKG</li>
+                    <li>🏢 Identify organizational hierarchies</li>
+                    <li>⚙️ Suggest UKG configurations</li>
+                    <li>📋 Generate implementation checklists</li>
+                    <li>⚠️ Highlight potential data quality issues</li>
                 </ul>
             </div>
             """, unsafe_allow_html=True)
+            
+            # Configuration section
+            with st.expander("⚙️ AI Configuration", expanded=False):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown("**API Settings**")
+                    use_anthropic_api = st.checkbox(
+                        "Use Claude API (Anthropic)", 
+                        value=True,
+                        help="Uses Claude AI for document analysis"
+                    )
+                    
+                    if use_anthropic_api:
+                        api_key = st.text_input(
+                            "Anthropic API Key",
+                            type="password",
+                            help="Get your key from https://console.anthropic.com"
+                        )
+                        if api_key:
+                            st.session_state.anthropic_api_key = api_key
+                        else:
+                            if 'anthropic_api_key' not in st.session_state:
+                                st.session_state.anthropic_api_key = None
+                        
+                        if not st.session_state.get('anthropic_api_key'):
+                            st.warning("⚠️ API key required for AI analysis. Sign up at https://console.anthropic.com")
+                
+                with col2:
+                    st.markdown("**Analysis Options**")
+                    analysis_depth = st.select_slider(
+                        "Analysis Depth",
+                        options=["Quick", "Standard", "Deep"],
+                        value="Standard",
+                        help="Quick: Fast overview | Standard: Balanced | Deep: Comprehensive analysis"
+                    )
+                    
+                    include_recommendations = st.checkbox(
+                        "Include UKG Recommendations", 
+                        value=True,
+                        help="Generate specific UKG configuration suggestions"
+                    )
+            
+            # Document upload section
+            st.markdown("### 📤 Upload Customer Documents")
+            
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                uploaded_files = st.file_uploader(
+                    "Upload Documents (PDFs, Excel, Word, CSV, Text)",
+                    type=['pdf', 'xlsx', 'xls', 'csv', 'docx', 'txt', 'doc'],
+                    accept_multiple_files=True,
+                    key="ai_document_uploader",
+                    help="Upload all customer documents for batch analysis"
+                )
+            
+            with col2:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if uploaded_files:
+                    st.metric("Files Loaded", len(uploaded_files))
+                    if st.button("🗑️ Clear All", use_container_width=True):
+                        st.session_state.uploaded_docs = []
+                        st.session_state.doc_contents = {}
+                        st.session_state.ai_analysis_results = None
+                        st.rerun()
+            
+            # Display uploaded files
+            if uploaded_files:
+                st.success(f"✅ {len(uploaded_files)} document(s) loaded and ready for analysis")
+                
+                # Show file list in expandable section
+                with st.expander(f"📋 View Uploaded Files ({len(uploaded_files)})", expanded=False):
+                    for idx, file in enumerate(uploaded_files, 1):
+                        file_size = len(file.getvalue()) / 1024  # KB
+                        st.markdown(f"{idx}. **{file.name}** - {file_size:.1f} KB ({file.type})")
+                
+                # Analysis button
+                st.markdown("---")
+                col1, col2, col3 = st.columns([2, 1, 2])
+                with col2:
+                    analyze_button = st.button(
+                        "🚀 Analyze All Documents", 
+                        type="primary",
+                        use_container_width=True,
+                        disabled=not (use_anthropic_api and st.session_state.get('anthropic_api_key'))
+                    )
+                
+                # Perform analysis
+                if analyze_button:
+                    with st.spinner("🤖 AI is analyzing your documents... This may take a few minutes..."):
+                        try:
+                            # Prepare document contents
+                            doc_summaries = []
+                            progress_bar = st.progress(0)
+                            status_text = st.empty()
+                            
+                            for idx, file in enumerate(uploaded_files):
+                                status_text.text(f"Processing {file.name}... ({idx+1}/{len(uploaded_files)})")
+                                progress_bar.progress((idx + 1) / len(uploaded_files))
+                                
+                                file_content = ""
+                                try:
+                                    if file.name.endswith('.pdf'):
+                                        # For PDFs, extract text
+                                        try:
+                                            from pdf2image import convert_from_bytes
+                                            import pytesseract
+                                            images = convert_from_bytes(file.read(), dpi=150)
+                                            for img in images[:3]:  # First 3 pages only for speed
+                                                file_content += pytesseract.image_to_string(img) + "\n\n"
+                                        except:
+                                            file_content = f"PDF file: {file.name} (Text extraction requires pdf2image and pytesseract)"
+                                    
+                                    elif file.name.endswith(('.xlsx', '.xls')):
+                                        # For Excel, read and summarize
+                                        df = pd.read_excel(file)
+                                        file_content = f"Columns: {', '.join(df.columns)}\n"
+                                        file_content += f"Rows: {len(df)}\n"
+                                        file_content += f"Sample data:\n{df.head(5).to_string()}"
+                                    
+                                    elif file.name.endswith('.csv'):
+                                        df = pd.read_csv(file)
+                                        file_content = f"Columns: {', '.join(df.columns)}\n"
+                                        file_content += f"Rows: {len(df)}\n"
+                                        file_content += f"Sample data:\n{df.head(5).to_string()}"
+                                    
+                                    elif file.name.endswith('.txt'):
+                                        file_content = file.read().decode('utf-8', errors='ignore')
+                                    
+                                    else:
+                                        file_content = f"File: {file.name} (Content extraction not yet supported for this type)"
+                                    
+                                    doc_summaries.append({
+                                        'name': file.name,
+                                        'type': file.type,
+                                        'content': file_content[:5000]  # Limit to first 5000 chars per doc
+                                    })
+                                
+                                except Exception as e:
+                                    doc_summaries.append({
+                                        'name': file.name,
+                                        'type': file.type,
+                                        'content': f"Error extracting content: {str(e)}"
+                                    })
+                            
+                            status_text.text("Sending to AI for analysis...")
+                            
+                            # Prepare AI prompt
+                            analysis_prompt = f"""You are an expert UKG Pro/WFM implementation consultant analyzing customer documents for a new implementation.
 
+CONTEXT:
+- Customer: {st.session_state.current_project}
+- Number of documents: {len(doc_summaries)}
+- Analysis depth requested: {analysis_depth}
+
+DOCUMENTS TO ANALYZE:
+"""
+                            for doc in doc_summaries:
+                                analysis_prompt += f"\n\n{'='*80}\nFILE: {doc['name']} (Type: {doc['type']})\n{'='*80}\n"
+                                analysis_prompt += doc['content']
+                            
+                            analysis_prompt += f"""
+
+PLEASE ANALYZE THESE DOCUMENTS AND PROVIDE:
+
+1. **EMPLOYEE DATA STRUCTURE**
+   - What employee data fields are present?
+   - How many employees approximately?
+   - What unique identifiers are used?
+   - What demographics are captured?
+
+2. **PAY COMPONENTS**
+   - List all pay codes/earnings found
+   - List all deduction codes found
+   - List any benefits or insurance codes
+   - Identify regular vs. overtime pay structures
+
+3. **ORGANIZATIONAL STRUCTURE**
+   - What organizational levels exist? (departments, divisions, locations, etc.)
+   - What is the reporting hierarchy?
+   - Are there multiple locations/sites?
+
+4. **TIME & ATTENDANCE**
+   - What time tracking methods are evident?
+   - Are there shift differentials?
+   - What leave/absence types exist?
+
+5. **UKG MAPPING RECOMMENDATIONS**
+   - Suggest how to map pay codes to UKG pay codes
+   - Suggest how to map deductions to UKG deductions
+   - Suggest organizational hierarchy structure in UKG
+   - Recommend any custom fields needed
+
+6. **DATA QUALITY ISSUES**
+   - Highlight any inconsistencies
+   - Identify missing data
+   - Note any formatting issues
+   - Flag potential migration challenges
+
+7. **IMPLEMENTATION CHECKLIST**
+   - List key configuration tasks needed
+   - Identify decision points that need customer input
+   - Suggest implementation sequence
+
+8. **SUMMARY**
+   - Overall complexity assessment (Low/Medium/High)
+   - Estimated configuration effort
+   - Key risks or concerns
+
+Please be specific and provide actionable recommendations. Format your response clearly with headers and bullet points.
+"""
+                            
+                            # Call Claude API
+                            import requests
+                            
+                            # Use Anthropic API endpoint
+                            api_endpoint = "https://api.anthropic.com/v1/messages"
+                            
+                            headers = {
+                                "Content-Type": "application/json",
+                                "anthropic-version": "2023-06-01",
+                                "x-api-key": st.session_state.anthropic_api_key
+                            }
+                            
+                            payload = {
+                                "model": "claude-sonnet-4-20250514",
+                                "max_tokens": 4000 if analysis_depth == "Deep" else (2000 if analysis_depth == "Standard" else 1000),
+                                "messages": [
+                                    {
+                                        "role": "user",
+                                        "content": analysis_prompt
+                                    }
+                                ]
+                            }
+                            
+                            try:
+                                response = requests.post(api_endpoint, headers=headers, json=payload, timeout=120)
+                                
+                                if response.status_code == 200:
+                                    result = response.json()
+                                    analysis_text = result['content'][0]['text']
+                                    
+                                    # Store results
+                                    st.session_state.ai_analysis_results = {
+                                        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                        'num_documents': len(uploaded_files),
+                                        'analysis': analysis_text,
+                                        'depth': analysis_depth
+                                    }
+                                    
+                                    progress_bar.empty()
+                                    status_text.empty()
+                                    st.success("✅ Analysis complete!")
+                                    st.rerun()
+                                
+                                else:
+                                    progress_bar.empty()
+                                    status_text.empty()
+                                    st.error(f"❌ API Error: {response.status_code} - {response.text}")
+                                    if response.status_code == 401:
+                                        st.info("💡 Please provide a valid Anthropic API key in the configuration section above.")
+                            
+                            except requests.exceptions.Timeout:
+                                progress_bar.empty()
+                                status_text.empty()
+                                st.error("⏱️ Analysis timed out. Try with fewer documents or Quick analysis mode.")
+                            except Exception as e:
+                                progress_bar.empty()
+                                status_text.empty()
+                                st.error(f"❌ Error: {str(e)}")
+                        
+                        except Exception as e:
+                            st.error(f"❌ Error preparing documents: {str(e)}")
+                
+                # Display analysis results
+                if st.session_state.ai_analysis_results:
+                    st.markdown("---")
+                    st.markdown("### 📊 Analysis Results")
+                    
+                    result = st.session_state.ai_analysis_results
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Documents Analyzed", result['num_documents'])
+                    with col2:
+                        st.metric("Analysis Depth", result['depth'])
+                    with col3:
+                        st.metric("Generated At", result['timestamp'].split()[1])
+                    
+                    # Display the analysis
+                    st.markdown("---")
+                    st.markdown(result['analysis'])
+                    
+                    # Export options
+                    st.markdown("---")
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        # Export as text
+                        report_text = f"""XLR8 AI DOCUMENT ANALYSIS REPORT
+Project: {st.session_state.current_project}
+Generated: {result['timestamp']}
+Documents Analyzed: {result['num_documents']}
+Analysis Depth: {result['depth']}
+
+{'='*80}
+ANALYSIS RESULTS
+{'='*80}
+
+{result['analysis']}
+
+{'='*80}
+End of Report
+"""
+                        st.download_button(
+                            "📄 Download Text Report",
+                            data=report_text,
+                            file_name=f"XLR8_Analysis_{st.session_state.current_project}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                            mime="text/plain",
+                            use_container_width=True
+                        )
+                    
+                    with col2:
+                        # Export as markdown
+                        report_md = f"""# XLR8 AI Document Analysis Report
+
+**Project:** {st.session_state.current_project}  
+**Generated:** {result['timestamp']}  
+**Documents Analyzed:** {result['num_documents']}  
+**Analysis Depth:** {result['depth']}
+
+---
+
+{result['analysis']}
+
+---
+*Generated by XLR8 AI Document Analysis*
+"""
+                        st.download_button(
+                            "📝 Download Markdown",
+                            data=report_md,
+                            file_name=f"XLR8_Analysis_{st.session_state.current_project}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
+                            mime="text/markdown",
+                            use_container_width=True
+                        )
+                    
+                    with col3:
+                        # Re-analyze button
+                        if st.button("🔄 Re-Analyze", use_container_width=True):
+                            st.session_state.ai_analysis_results = None
+                            st.rerun()
+            
+            else:
+                st.markdown("""
+                <div class='warning-box'>
+                    <h4>📤 No Documents Uploaded</h4>
+                    <p><strong>To use AI Document Analysis:</strong></p>
+                    <ol>
+                        <li>Upload all customer documents (PDFs, Excel, Word, etc.)</li>
+                        <li>Configure AI settings if needed</li>
+                        <li>Click "Analyze All Documents"</li>
+                        <li>Review the comprehensive analysis and recommendations</li>
+                        <li>Export reports for your team</li>
+                    </ol>
+                    <p><strong>Typical documents to upload:</strong></p>
+                    <ul>
+                        <li>Payroll registers and reports</li>
+                        <li>Benefits enrollment files</li>
+                        <li>Employee master data exports</li>
+                        <li>Organizational charts</li>
+                        <li>Time and attendance records</li>
+                        <li>Pay code/deduction code lists</li>
+                        <li>Current system configuration docs</li>
+                    </ul>
+                </div>
+                """, unsafe_allow_html=True)
+        
+        # ============================================================================
+        # AI CHAT ASSISTANT (NEW FEATURE)
+        # ============================================================================
+        with analysis_tab3:
+            # Initialize chat state
+            if 'chat_history' not in st.session_state:
+                st.session_state.chat_history = []
+            
+            st.markdown("""
+            <div class='info-box'>
+                <h3>💬 AI Chat Assistant</h3>
+                <p>Ask questions about your uploaded documents, UKG configurations, or implementation planning.</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Check if documents are loaded
+            if not st.session_state.get('ai_analysis_results'):
+                st.warning("⚠️ Upload and analyze documents in the 'AI Document Analysis' tab first to enable contextual chat.")
+            
+            # Chat interface
+            st.markdown("### 💬 Chat with AI")
+            
+            # Display chat history
+            for idx, message in enumerate(st.session_state.chat_history):
+                if message['role'] == 'user':
+                    st.markdown(f"""
+                    <div style='background-color: rgba(109, 138, 160, 0.1); padding: 1rem; border-radius: 8px; margin: 0.5rem 0;'>
+                        <strong>You:</strong> {message['content']}
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown(f"""
+                    <div style='background-color: rgba(125, 150, 168, 0.1); padding: 1rem; border-radius: 8px; margin: 0.5rem 0;'>
+                        <strong>AI Assistant:</strong><br>{message['content']}
+                    </div>
+                    """, unsafe_allow_html=True)
+            
+            # Chat input
+            user_question = st.text_input(
+                "Ask a question",
+                placeholder="e.g., 'How many pay codes do I need to configure?' or 'What organizational levels should I create?'",
+                key="chat_input"
+            )
+            
+            col1, col2 = st.columns([5, 1])
+            with col2:
+                send_button = st.button("Send", use_container_width=True, type="primary")
+            
+            # Handle chat
+            if send_button and user_question and st.session_state.get('anthropic_api_key'):
+                # Add user message
+                st.session_state.chat_history.append({
+                    'role': 'user',
+                    'content': user_question
+                })
+                
+                # Prepare context from documents if available
+                context = ""
+                if st.session_state.get('ai_analysis_results'):
+                    context = f"\n\nPREVIOUS ANALYSIS CONTEXT:\n{st.session_state.ai_analysis_results['analysis']}"
+                
+                # Create chat prompt
+                chat_prompt = f"""You are a UKG Pro/WFM implementation expert helping with project: {st.session_state.current_project}.
+
+{context}
+
+CONVERSATION HISTORY:
+{chr(10).join([f"{msg['role'].upper()}: {msg['content']}" for msg in st.session_state.chat_history[-5:]])}
+
+USER QUESTION: {user_question}
+
+Provide a helpful, specific answer based on the analysis context and your UKG expertise. Be concise but thorough.
+"""
+                
+                # Call API
+                try:
+                    import requests
+                    
+                    api_endpoint = "https://api.anthropic.com/v1/messages"
+                    headers = {
+                        "Content-Type": "application/json",
+                        "anthropic-version": "2023-06-01",
+                        "x-api-key": st.session_state.anthropic_api_key
+                    }
+                    
+                    payload = {
+                        "model": "claude-sonnet-4-20250514",
+                        "max_tokens": 1000,
+                        "messages": [{"role": "user", "content": chat_prompt}]
+                    }
+                    
+                    with st.spinner("🤖 Thinking..."):
+                        response = requests.post(api_endpoint, headers=headers, json=payload, timeout=30)
+                        
+                        if response.status_code == 200:
+                            result = response.json()
+                            ai_response = result['content'][0]['text']
+                            
+                            st.session_state.chat_history.append({
+                                'role': 'assistant',
+                                'content': ai_response
+                            })
+                            st.rerun()
+                        else:
+                            st.error(f"API Error: {response.status_code}")
+                
+                except Exception as e:
+                    st.error(f"Error: {str(e)}")
+            
+            # Clear chat button
+            if st.session_state.chat_history:
+                if st.button("🗑️ Clear Chat History"):
+                    st.session_state.chat_history = []
+                    st.rerun()
+            
+            # Tips
+            with st.expander("💡 Chat Tips", expanded=False):
+                st.markdown("""
+                **Sample questions you can ask:**
+                - "What pay codes need to be configured?"
+                - "How should I structure the organizational hierarchy?"
+                - "What are the main data quality issues to address?"
+                - "What custom fields will I need?"
+                - "What's the recommended implementation sequence?"
+                - "How complex is this implementation?"
+                - "What decisions need customer input?"
+                
+                **Pro Tips:**
+                - Upload and analyze documents first for best results
+                - Ask specific questions about your implementation
+                - Reference items from the analysis report
+                - Ask follow-up questions to drill deeper
+                """)
 
 # TAB 4: SECTION-BASED TEMPLATE SYSTEM
 
