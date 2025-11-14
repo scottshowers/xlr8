@@ -1318,9 +1318,58 @@ with tab3:
             if 'llm_provider' not in st.session_state:
                 st.session_state.llm_provider = 'local'
             if 'local_llm_endpoint' not in st.session_state:
-                st.session_state.local_llm_endpoint = 'http://localhost:11434'
+                st.session_state.local_llm_endpoint = 'http://178.156.190.64:11434'
             if 'local_llm_model' not in st.session_state:
-                st.session_state.local_llm_model = 'llama3:70b'
+                st.session_state.local_llm_model = 'mixtral:8x7b'
+            
+            # Add localStorage persistence via HTML/JavaScript
+            st.markdown("""
+            <script>
+            // Load saved config from localStorage on page load
+            window.addEventListener('load', function() {
+                const savedEndpoint = localStorage.getItem('xlr8_llm_endpoint');
+                const savedModel = localStorage.getItem('xlr8_llm_model');
+                
+                if (savedEndpoint) {
+                    const endpointInput = document.querySelector('input[aria-label="Local LLM Endpoint"]');
+                    if (endpointInput) endpointInput.value = savedEndpoint;
+                }
+                
+                if (savedModel) {
+                    const modelInput = document.querySelector('input[aria-label="Model Name"]');
+                    if (modelInput) modelInput.value = savedModel;
+                }
+            });
+            
+            // Save config to localStorage when changed
+            function saveConfig() {
+                const endpointInput = document.querySelector('input[aria-label="Local LLM Endpoint"]');
+                const modelInput = document.querySelector('input[aria-label="Model Name"]');
+                
+                if (endpointInput) {
+                    localStorage.setItem('xlr8_llm_endpoint', endpointInput.value);
+                }
+                if (modelInput) {
+                    localStorage.setItem('xlr8_llm_model', modelInput.value);
+                }
+            }
+            
+            // Auto-save on input change
+            setTimeout(function() {
+                const endpointInput = document.querySelector('input[aria-label="Local LLM Endpoint"]');
+                const modelInput = document.querySelector('input[aria-label="Model Name"]');
+                
+                if (endpointInput) {
+                    endpointInput.addEventListener('change', saveConfig);
+                    endpointInput.addEventListener('blur', saveConfig);
+                }
+                if (modelInput) {
+                    modelInput.addEventListener('change', saveConfig);
+                    modelInput.addEventListener('blur', saveConfig);
+                }
+            }, 1000);
+            </script>
+            """, unsafe_allow_html=True)
             
             # Security banner
             st.markdown("""
@@ -1381,16 +1430,25 @@ with tab3:
                         endpoint = st.text_input(
                             "Local LLM Endpoint",
                             value=st.session_state.local_llm_endpoint,
-                            help="Default for Ollama: http://localhost:11434"
+                            help="Default for Ollama: http://localhost:11434 | Your server: http://178.156.190.64:11434",
+                            key="local_llm_endpoint_input"
                         )
                         st.session_state.local_llm_endpoint = endpoint
                         
                         model = st.text_input(
                             "Model Name",
                             value=st.session_state.local_llm_model,
-                            help="Examples: llama3:70b, mixtral:8x7b, mistral:7b"
+                            help="Examples: mixtral:8x7b (recommended for 32GB), llama3:70b (needs 64GB), mistral:7b (fast)",
+                            key="local_llm_model_input"
                         )
                         st.session_state.local_llm_model = model
+                        
+                        # Show save indicator
+                        st.markdown("""
+                        <div style='background-color: rgba(76, 175, 80, 0.1); padding: 0.5rem; border-radius: 6px; margin-top: 0.5rem;'>
+                            <small>💾 Settings auto-saved to browser (persists across sessions)</small>
+                        </div>
+                        """, unsafe_allow_html=True)
                         
                         # Test connection button
                         if st.button("🔌 Test Connection", key="test_local"):
