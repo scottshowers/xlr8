@@ -1155,8 +1155,8 @@ Note: Keep column names in first row for re-import
         - ✅ Complete data privacy guaranteed
         """)
 
-# TAB 3: ENHANCED DATA ANALYSIS WITH AI CAPABILITIES
-# This replaces lines 1158-1292 in the original app.py
+# TAB 3: SECURE DATA ANALYSIS WITH LOCAL LLM (HR/PAYROLL COMPLIANT)
+# This is the secure version that keeps data in your infrastructure
 
 with tab3:
     st.markdown("## 📊 Data Analysis & AI Document Intelligence")
@@ -1169,7 +1169,7 @@ with tab3:
         # Create sub-tabs for different analysis modes
         analysis_tab1, analysis_tab2, analysis_tab3 = st.tabs([
             "📂 Basic Data Analysis", 
-            "🤖 AI Document Analysis", 
+            "🤖 AI Document Analysis (Secure)", 
             "💬 AI Chat Assistant"
         ])
         
@@ -1305,7 +1305,7 @@ with tab3:
                 """, unsafe_allow_html=True)
         
         # ============================================================================
-        # AI DOCUMENT ANALYSIS (NEW FEATURE)
+        # SECURE AI DOCUMENT ANALYSIS WITH LOCAL LLM
         # ============================================================================
         with analysis_tab2:
             # Initialize AI analysis state
@@ -1315,64 +1315,164 @@ with tab3:
                 st.session_state.ai_analysis_results = None
             if 'doc_contents' not in st.session_state:
                 st.session_state.doc_contents = {}
+            if 'llm_provider' not in st.session_state:
+                st.session_state.llm_provider = 'local'
+            if 'local_llm_endpoint' not in st.session_state:
+                st.session_state.local_llm_endpoint = 'http://localhost:11434'
+            if 'local_llm_model' not in st.session_state:
+                st.session_state.local_llm_model = 'llama3:70b'
             
+            # Security banner
             st.markdown("""
             <div class='success-box'>
-                <h3>🤖 AI-Powered Document Analysis</h3>
-                <p><strong>Upload 100+ customer documents</strong> and let AI analyze them to:</p>
+                <h3>🔐 SECURE AI Document Analysis</h3>
+                <p><strong>HR/Payroll Compliant:</strong> Uses LOCAL AI to keep your data secure.</p>
                 <ul>
-                    <li>🔍 Extract employee data structures</li>
-                    <li>🗺️ Map pay codes, deductions, and benefits to UKG</li>
-                    <li>🏢 Identify organizational hierarchies</li>
-                    <li>⚙️ Suggest UKG configurations</li>
-                    <li>📋 Generate implementation checklists</li>
-                    <li>⚠️ Highlight potential data quality issues</li>
+                    <li>✅ <strong>Data stays in your infrastructure</strong> - Never leaves your servers</li>
+                    <li>✅ <strong>HIPAA/Compliance friendly</strong> - No third-party data processing</li>
+                    <li>✅ <strong>No per-use costs</strong> - Free unlimited analysis</li>
+                    <li>✅ <strong>Works offline</strong> - No internet required</li>
+                    <li>✅ <strong>Complete privacy</strong> - No logs, no tracking</li>
                 </ul>
             </div>
             """, unsafe_allow_html=True)
             
             # Configuration section
-            with st.expander("⚙️ AI Configuration", expanded=False):
+            with st.expander("⚙️ AI Configuration", expanded=True):
+                st.markdown("### 🔐 Security & Privacy Settings")
+                
                 col1, col2 = st.columns(2)
+                
                 with col1:
-                    st.markdown("**API Settings**")
-                    use_anthropic_api = st.checkbox(
-                        "Use Claude API (Anthropic)", 
-                        value=True,
-                        help="Uses Claude AI for document analysis"
+                    st.markdown("**AI Provider Selection**")
+                    
+                    llm_provider = st.radio(
+                        "Choose AI Provider",
+                        options=['local', 'anthropic'],
+                        format_func=lambda x: '🏠 Local LLM (Secure - RECOMMENDED)' if x == 'local' else '☁️ Anthropic API (Cloud - Demo Only)',
+                        key='llm_provider_select',
+                        help="Local LLM keeps data in your infrastructure. Anthropic sends data to cloud."
                     )
                     
-                    if use_anthropic_api:
+                    st.session_state.llm_provider = llm_provider
+                    
+                    # Show security indicator
+                    if llm_provider == 'local':
+                        st.markdown("""
+                        <div style='background-color: rgba(76, 175, 80, 0.1); padding: 0.75rem; border-radius: 6px; border-left: 4px solid #4CAF50;'>
+                            <strong>✅ SECURE MODE</strong><br>
+                            <small>Data stays in your infrastructure</small>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        st.markdown("""
+                        <div style='background-color: rgba(255, 152, 0, 0.1); padding: 0.75rem; border-radius: 6px; border-left: 4px solid #FF9800;'>
+                            <strong>⚠️ CLOUD MODE</strong><br>
+                            <small>Data will be sent to Anthropic servers</small><br>
+                            <small><strong>USE ONLY FOR DEMOS WITH FAKE DATA</strong></small>
+                        </div>
+                        """, unsafe_allow_html=True)
+                
+                with col2:
+                    st.markdown("**Provider Configuration**")
+                    
+                    if llm_provider == 'local':
+                        # Local LLM settings
+                        endpoint = st.text_input(
+                            "Local LLM Endpoint",
+                            value=st.session_state.local_llm_endpoint,
+                            help="Default for Ollama: http://localhost:11434"
+                        )
+                        st.session_state.local_llm_endpoint = endpoint
+                        
+                        model = st.text_input(
+                            "Model Name",
+                            value=st.session_state.local_llm_model,
+                            help="Examples: llama3:70b, mixtral:8x7b, mistral:7b"
+                        )
+                        st.session_state.local_llm_model = model
+                        
+                        # Test connection button
+                        if st.button("🔌 Test Connection", key="test_local"):
+                            with st.spinner("Testing connection..."):
+                                try:
+                                    import requests
+                                    test_url = f"{endpoint}/api/tags"
+                                    response = requests.get(test_url, timeout=5)
+                                    if response.status_code == 200:
+                                        st.success("✅ Connected to local LLM!")
+                                        models = response.json().get('models', [])
+                                        if models:
+                                            st.info(f"Available models: {', '.join([m['name'] for m in models])}")
+                                    else:
+                                        st.error(f"❌ Connection failed: {response.status_code}")
+                                except Exception as e:
+                                    st.error(f"❌ Cannot connect: {str(e)}")
+                                    st.info("💡 Is Ollama running? Start with: `ollama serve`")
+                    
+                    else:
+                        # Anthropic API settings
+                        st.warning("⚠️ DEMO ONLY - Do not use with real customer data!")
                         api_key = st.text_input(
                             "Anthropic API Key",
                             type="password",
-                            help="Get your key from https://console.anthropic.com"
+                            help="Get from https://console.anthropic.com"
                         )
                         if api_key:
                             st.session_state.anthropic_api_key = api_key
-                        else:
-                            if 'anthropic_api_key' not in st.session_state:
-                                st.session_state.anthropic_api_key = None
                         
-                        if not st.session_state.get('anthropic_api_key'):
-                            st.warning("⚠️ API key required for AI analysis. Sign up at https://console.anthropic.com")
+                        st.error("🚨 Real HR/Payroll data will be sent to Anthropic's servers!")
                 
-                with col2:
-                    st.markdown("**Analysis Options**")
+                # Analysis options
+                st.markdown("---")
+                st.markdown("**Analysis Options**")
+                
+                col1, col2 = st.columns(2)
+                with col1:
                     analysis_depth = st.select_slider(
                         "Analysis Depth",
                         options=["Quick", "Standard", "Deep"],
                         value="Standard",
-                        help="Quick: Fast overview | Standard: Balanced | Deep: Comprehensive analysis"
+                        help="Quick: Fast overview | Standard: Balanced | Deep: Comprehensive"
                     )
-                    
-                    include_recommendations = st.checkbox(
-                        "Include UKG Recommendations", 
-                        value=True,
-                        help="Generate specific UKG configuration suggestions"
+                
+                with col2:
+                    max_tokens = st.number_input(
+                        "Max Response Tokens",
+                        min_value=500,
+                        max_value=8000,
+                        value=2000 if analysis_depth == "Standard" else (1000 if analysis_depth == "Quick" else 4000),
+                        step=500,
+                        help="Higher = more detailed but slower"
                     )
             
+            # PII Detection Warning
+            st.markdown("---")
+            st.markdown("### ⚠️ Data Privacy & PII Protection")
+            
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                st.markdown("""
+                <div class='warning-box'>
+                    <strong>Before uploading documents:</strong>
+                    <ul>
+                        <li>Remove or redact Social Security Numbers (SSNs)</li>
+                        <li>Consider removing exact salaries (use ranges)</li>
+                        <li>Use sample data (10-20 employees) not full databases</li>
+                        <li>Remove home addresses if not needed</li>
+                        <li>Remove dates of birth if not needed</li>
+                    </ul>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col2:
+                pii_acknowledged = st.checkbox(
+                    "✅ I have reviewed documents for PII",
+                    help="Confirm you've removed/redacted sensitive information"
+                )
+            
             # Document upload section
+            st.markdown("---")
             st.markdown("### 📤 Upload Customer Documents")
             
             col1, col2 = st.columns([3, 1])
@@ -1399,25 +1499,45 @@ with tab3:
             if uploaded_files:
                 st.success(f"✅ {len(uploaded_files)} document(s) loaded and ready for analysis")
                 
-                # Show file list in expandable section
+                # Show file list
                 with st.expander(f"📋 View Uploaded Files ({len(uploaded_files)})", expanded=False):
                     for idx, file in enumerate(uploaded_files, 1):
                         file_size = len(file.getvalue()) / 1024  # KB
                         st.markdown(f"{idx}. **{file.name}** - {file_size:.1f} KB ({file.type})")
                 
+                # Data residency indicator
+                if st.session_state.llm_provider == 'local':
+                    st.info("🏠 **Data Residency:** All processing will occur in your infrastructure. No data leaves your servers.")
+                else:
+                    st.warning("☁️ **Data Residency:** Data will be sent to Anthropic's cloud servers for processing. Use only with demo/fake data!")
+                
                 # Analysis button
                 st.markdown("---")
                 col1, col2, col3 = st.columns([2, 1, 2])
                 with col2:
+                    # Enable button based on provider and requirements
+                    can_analyze = False
+                    button_label = "🚀 Analyze All Documents"
+                    
+                    if not pii_acknowledged:
+                        button_label = "⚠️ Review PII Warning First"
+                    elif st.session_state.llm_provider == 'local':
+                        can_analyze = True
+                    elif st.session_state.llm_provider == 'anthropic' and st.session_state.get('anthropic_api_key'):
+                        can_analyze = True
+                        button_label = "⚠️ Analyze (Cloud)"
+                    else:
+                        button_label = "🔑 Enter API Key First"
+                    
                     analyze_button = st.button(
-                        "🚀 Analyze All Documents", 
+                        button_label,
                         type="primary",
                         use_container_width=True,
-                        disabled=not (use_anthropic_api and st.session_state.get('anthropic_api_key'))
+                        disabled=not can_analyze
                     )
                 
                 # Perform analysis
-                if analyze_button:
+                if analyze_button and can_analyze:
                     with st.spinner("🤖 AI is analyzing your documents... This may take a few minutes..."):
                         try:
                             # Prepare document contents
@@ -1432,18 +1552,16 @@ with tab3:
                                 file_content = ""
                                 try:
                                     if file.name.endswith('.pdf'):
-                                        # For PDFs, extract text
                                         try:
                                             from pdf2image import convert_from_bytes
                                             import pytesseract
                                             images = convert_from_bytes(file.read(), dpi=150)
-                                            for img in images[:3]:  # First 3 pages only for speed
+                                            for img in images[:3]:
                                                 file_content += pytesseract.image_to_string(img) + "\n\n"
                                         except:
                                             file_content = f"PDF file: {file.name} (Text extraction requires pdf2image and pytesseract)"
                                     
                                     elif file.name.endswith(('.xlsx', '.xls')):
-                                        # For Excel, read and summarize
                                         df = pd.read_excel(file)
                                         file_content = f"Columns: {', '.join(df.columns)}\n"
                                         file_content += f"Rows: {len(df)}\n"
@@ -1459,146 +1577,191 @@ with tab3:
                                         file_content = file.read().decode('utf-8', errors='ignore')
                                     
                                     else:
-                                        file_content = f"File: {file.name} (Content extraction not yet supported for this type)"
+                                        file_content = f"File: {file.name}"
                                     
                                     doc_summaries.append({
                                         'name': file.name,
                                         'type': file.type,
-                                        'content': file_content[:5000]  # Limit to first 5000 chars per doc
+                                        'content': file_content[:5000]
                                     })
                                 
                                 except Exception as e:
                                     doc_summaries.append({
                                         'name': file.name,
                                         'type': file.type,
-                                        'content': f"Error extracting content: {str(e)}"
+                                        'content': f"Error: {str(e)}"
                                     })
                             
                             status_text.text("Sending to AI for analysis...")
                             
                             # Prepare AI prompt
-                            analysis_prompt = f"""You are an expert UKG Pro/WFM implementation consultant analyzing customer documents for a new implementation.
+                            analysis_prompt = f"""You are an expert UKG Pro/WFM implementation consultant analyzing customer documents.
 
 CONTEXT:
 - Customer: {st.session_state.current_project}
 - Number of documents: {len(doc_summaries)}
-- Analysis depth requested: {analysis_depth}
+- Analysis depth: {analysis_depth}
 
 DOCUMENTS TO ANALYZE:
 """
                             for doc in doc_summaries:
-                                analysis_prompt += f"\n\n{'='*80}\nFILE: {doc['name']} (Type: {doc['type']})\n{'='*80}\n"
-                                analysis_prompt += doc['content']
+                                analysis_prompt += f"\n\n{'='*80}\nFILE: {doc['name']}\n{'='*80}\n{doc['content']}"
                             
-                            analysis_prompt += f"""
+                            analysis_prompt += """
 
-PLEASE ANALYZE THESE DOCUMENTS AND PROVIDE:
+ANALYZE AND PROVIDE:
 
-1. **EMPLOYEE DATA STRUCTURE**
-   - What employee data fields are present?
-   - How many employees approximately?
-   - What unique identifiers are used?
-   - What demographics are captured?
+1. EMPLOYEE DATA STRUCTURE
+   - Data fields present
+   - Approximate employee count
+   - Unique identifiers
+   - Demographics captured
 
-2. **PAY COMPONENTS**
-   - List all pay codes/earnings found
-   - List all deduction codes found
-   - List any benefits or insurance codes
-   - Identify regular vs. overtime pay structures
+2. PAY COMPONENTS
+   - All earnings/pay codes
+   - All deduction codes
+   - Benefits/insurance codes
+   - Regular vs overtime structure
 
-3. **ORGANIZATIONAL STRUCTURE**
-   - What organizational levels exist? (departments, divisions, locations, etc.)
-   - What is the reporting hierarchy?
-   - Are there multiple locations/sites?
+3. ORGANIZATIONAL STRUCTURE
+   - Organizational levels
+   - Reporting hierarchy
+   - Multiple locations/sites
+   - Business units
 
-4. **TIME & ATTENDANCE**
-   - What time tracking methods are evident?
-   - Are there shift differentials?
-   - What leave/absence types exist?
+4. TIME & ATTENDANCE
+   - Time tracking methods
+   - Shift differentials
+   - Leave/absence types
+   - Overtime rules
 
-5. **UKG MAPPING RECOMMENDATIONS**
-   - Suggest how to map pay codes to UKG pay codes
-   - Suggest how to map deductions to UKG deductions
-   - Suggest organizational hierarchy structure in UKG
-   - Recommend any custom fields needed
+5. UKG MAPPING RECOMMENDATIONS
+   - Pay code mappings
+   - Deduction mappings
+   - Org hierarchy in UKG
+   - Custom fields needed
+   - Configuration suggestions
 
-6. **DATA QUALITY ISSUES**
-   - Highlight any inconsistencies
-   - Identify missing data
-   - Note any formatting issues
-   - Flag potential migration challenges
+6. DATA QUALITY ISSUES
+   - Inconsistencies
+   - Missing data
+   - Formatting problems
+   - Migration challenges
 
-7. **IMPLEMENTATION CHECKLIST**
-   - List key configuration tasks needed
-   - Identify decision points that need customer input
-   - Suggest implementation sequence
+7. IMPLEMENTATION CHECKLIST
+   - Configuration tasks
+   - Decision points
+   - Implementation sequence
+   - Timeline estimates
 
-8. **SUMMARY**
-   - Overall complexity assessment (Low/Medium/High)
-   - Estimated configuration effort
-   - Key risks or concerns
+8. SUMMARY
+   - Complexity (Low/Medium/High)
+   - Effort estimate
+   - Key risks
+   - Success factors
 
-Please be specific and provide actionable recommendations. Format your response clearly with headers and bullet points.
+Provide specific, actionable recommendations. Use headers and bullet points.
 """
                             
-                            # Call Claude API
+                            # Call AI based on provider
                             import requests
                             
-                            # Use Anthropic API endpoint
-                            api_endpoint = "https://api.anthropic.com/v1/messages"
-                            
-                            headers = {
-                                "Content-Type": "application/json",
-                                "anthropic-version": "2023-06-01",
-                                "x-api-key": st.session_state.anthropic_api_key
-                            }
-                            
-                            payload = {
-                                "model": "claude-sonnet-4-20250514",
-                                "max_tokens": 4000 if analysis_depth == "Deep" else (2000 if analysis_depth == "Standard" else 1000),
-                                "messages": [
-                                    {
-                                        "role": "user",
-                                        "content": analysis_prompt
-                                    }
-                                ]
-                            }
-                            
-                            try:
-                                response = requests.post(api_endpoint, headers=headers, json=payload, timeout=120)
+                            if st.session_state.llm_provider == 'local':
+                                # Local LLM (Ollama)
+                                api_url = f"{st.session_state.local_llm_endpoint}/api/generate"
                                 
-                                if response.status_code == 200:
-                                    result = response.json()
-                                    analysis_text = result['content'][0]['text']
-                                    
-                                    # Store results
-                                    st.session_state.ai_analysis_results = {
-                                        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                        'num_documents': len(uploaded_files),
-                                        'analysis': analysis_text,
-                                        'depth': analysis_depth
+                                payload = {
+                                    "model": st.session_state.local_llm_model,
+                                    "prompt": analysis_prompt,
+                                    "stream": False,
+                                    "options": {
+                                        "num_predict": max_tokens,
+                                        "temperature": 0.7
                                     }
+                                }
+                                
+                                try:
+                                    response = requests.post(api_url, json=payload, timeout=300)
                                     
+                                    if response.status_code == 200:
+                                        result = response.json()
+                                        analysis_text = result.get('response', 'No response generated')
+                                        
+                                        st.session_state.ai_analysis_results = {
+                                            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                            'num_documents': len(uploaded_files),
+                                            'analysis': analysis_text,
+                                            'depth': analysis_depth,
+                                            'provider': 'Local LLM (Secure)',
+                                            'model': st.session_state.local_llm_model,
+                                            'data_residency': 'On-Premises'
+                                        }
+                                        
+                                        progress_bar.empty()
+                                        status_text.empty()
+                                        st.success("✅ Analysis complete! Data stayed secure in your infrastructure.")
+                                        st.rerun()
+                                    else:
+                                        progress_bar.empty()
+                                        status_text.empty()
+                                        st.error(f"❌ Local LLM Error: {response.status_code}")
+                                        st.info("💡 Check that Ollama is running and the model is pulled: `ollama pull " + st.session_state.local_llm_model + "`")
+                                
+                                except requests.exceptions.Timeout:
                                     progress_bar.empty()
                                     status_text.empty()
-                                    st.success("✅ Analysis complete!")
-                                    st.rerun()
-                                
-                                else:
+                                    st.error("⏱️ Analysis timed out. Try Quick mode or fewer documents.")
+                                except Exception as e:
                                     progress_bar.empty()
                                     status_text.empty()
-                                    st.error(f"❌ API Error: {response.status_code} - {response.text}")
-                                    if response.status_code == 401:
-                                        st.info("💡 Please provide a valid Anthropic API key in the configuration section above.")
+                                    st.error(f"❌ Error: {str(e)}")
                             
-                            except requests.exceptions.Timeout:
-                                progress_bar.empty()
-                                status_text.empty()
-                                st.error("⏱️ Analysis timed out. Try with fewer documents or Quick analysis mode.")
-                            except Exception as e:
-                                progress_bar.empty()
-                                status_text.empty()
-                                st.error(f"❌ Error: {str(e)}")
+                            else:
+                                # Anthropic API (Cloud)
+                                api_url = "https://api.anthropic.com/v1/messages"
+                                
+                                headers = {
+                                    "Content-Type": "application/json",
+                                    "anthropic-version": "2023-06-01",
+                                    "x-api-key": st.session_state.anthropic_api_key
+                                }
+                                
+                                payload = {
+                                    "model": "claude-sonnet-4-20250514",
+                                    "max_tokens": max_tokens,
+                                    "messages": [{"role": "user", "content": analysis_prompt}]
+                                }
+                                
+                                try:
+                                    response = requests.post(api_url, headers=headers, json=payload, timeout=120)
+                                    
+                                    if response.status_code == 200:
+                                        result = response.json()
+                                        analysis_text = result['content'][0]['text']
+                                        
+                                        st.session_state.ai_analysis_results = {
+                                            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                            'num_documents': len(uploaded_files),
+                                            'analysis': analysis_text,
+                                            'depth': analysis_depth,
+                                            'provider': 'Anthropic API (Cloud)',
+                                            'model': 'Claude Sonnet 4',
+                                            'data_residency': 'Anthropic Cloud Servers'
+                                        }
+                                        
+                                        progress_bar.empty()
+                                        status_text.empty()
+                                        st.warning("⚠️ Analysis complete. Data was processed on Anthropic's servers.")
+                                        st.rerun()
+                                    else:
+                                        progress_bar.empty()
+                                        status_text.empty()
+                                        st.error(f"❌ API Error: {response.status_code}")
+                                
+                                except Exception as e:
+                                    progress_bar.empty()
+                                    status_text.empty()
+                                    st.error(f"❌ Error: {str(e)}")
                         
                         except Exception as e:
                             st.error(f"❌ Error preparing documents: {str(e)}")
@@ -1610,15 +1773,30 @@ Please be specific and provide actionable recommendations. Format your response 
                     
                     result = st.session_state.ai_analysis_results
                     
-                    col1, col2, col3 = st.columns(3)
+                    # Metrics row
+                    col1, col2, col3, col4 = st.columns(4)
                     with col1:
-                        st.metric("Documents Analyzed", result['num_documents'])
+                        st.metric("Documents", result['num_documents'])
                     with col2:
-                        st.metric("Analysis Depth", result['depth'])
+                        st.metric("Depth", result['depth'])
                     with col3:
-                        st.metric("Generated At", result['timestamp'].split()[1])
+                        st.metric("Provider", result['provider'])
+                    with col4:
+                        # Color-code data residency
+                        if 'On-Premises' in result['data_residency']:
+                            st.markdown(f"""
+                            <div style='background-color: rgba(76, 175, 80, 0.2); padding: 0.5rem; border-radius: 6px; text-align: center;'>
+                                <small style='color: #2E7D32;'><strong>🔐 {result['data_residency']}</strong></small>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        else:
+                            st.markdown(f"""
+                            <div style='background-color: rgba(255, 152, 0, 0.2); padding: 0.5rem; border-radius: 6px; text-align: center;'>
+                                <small style='color: #E65100;'><strong>☁️ {result['data_residency']}</strong></small>
+                            </div>
+                            """, unsafe_allow_html=True)
                     
-                    # Display the analysis
+                    # Display analysis
                     st.markdown("---")
                     st.markdown(result['analysis'])
                     
@@ -1627,12 +1805,13 @@ Please be specific and provide actionable recommendations. Format your response 
                     col1, col2, col3 = st.columns(3)
                     
                     with col1:
-                        # Export as text
-                        report_text = f"""XLR8 AI DOCUMENT ANALYSIS REPORT
+                        report_text = f"""XLR8 SECURE AI DOCUMENT ANALYSIS REPORT
 Project: {st.session_state.current_project}
 Generated: {result['timestamp']}
 Documents Analyzed: {result['num_documents']}
 Analysis Depth: {result['depth']}
+AI Provider: {result['provider']}
+Data Residency: {result['data_residency']}
 
 {'='*80}
 ANALYSIS RESULTS
@@ -1641,95 +1820,107 @@ ANALYSIS RESULTS
 {result['analysis']}
 
 {'='*80}
+Security Note: {'Data processed locally in your infrastructure' if 'On-Premises' in result['data_residency'] else 'Data processed on cloud servers'}
 End of Report
 """
                         st.download_button(
-                            "📄 Download Text Report",
+                            "📄 Download Report",
                             data=report_text,
-                            file_name=f"XLR8_Analysis_{st.session_state.current_project}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                            file_name=f"XLR8_Secure_Analysis_{st.session_state.current_project}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
                             mime="text/plain",
                             use_container_width=True
                         )
                     
                     with col2:
-                        # Export as markdown
-                        report_md = f"""# XLR8 AI Document Analysis Report
-
-**Project:** {st.session_state.current_project}  
-**Generated:** {result['timestamp']}  
-**Documents Analyzed:** {result['num_documents']}  
-**Analysis Depth:** {result['depth']}
-
----
-
-{result['analysis']}
-
----
-*Generated by XLR8 AI Document Analysis*
-"""
-                        st.download_button(
-                            "📝 Download Markdown",
-                            data=report_md,
-                            file_name=f"XLR8_Analysis_{st.session_state.current_project}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
-                            mime="text/markdown",
-                            use_container_width=True
-                        )
-                    
-                    with col3:
-                        # Re-analyze button
                         if st.button("🔄 Re-Analyze", use_container_width=True):
                             st.session_state.ai_analysis_results = None
+                            st.rerun()
+                    
+                    with col3:
+                        if st.button("🗑️ Clear Results", use_container_width=True):
+                            st.session_state.ai_analysis_results = None
+                            st.session_state.uploaded_docs = []
                             st.rerun()
             
             else:
                 st.markdown("""
                 <div class='warning-box'>
                     <h4>📤 No Documents Uploaded</h4>
-                    <p><strong>To use AI Document Analysis:</strong></p>
+                    <p><strong>To use Secure AI Analysis:</strong></p>
                     <ol>
-                        <li>Upload all customer documents (PDFs, Excel, Word, etc.)</li>
-                        <li>Configure AI settings if needed</li>
+                        <li>Set up local LLM (Ollama recommended)</li>
+                        <li>Remove PII from customer documents</li>
+                        <li>Upload documents (PDFs, Excel, Word, CSV)</li>
+                        <li>Acknowledge PII review</li>
                         <li>Click "Analyze All Documents"</li>
-                        <li>Review the comprehensive analysis and recommendations</li>
-                        <li>Export reports for your team</li>
+                        <li>Review analysis and export reports</li>
                     </ol>
-                    <p><strong>Typical documents to upload:</strong></p>
+                    <p><strong>Why Local LLM?</strong></p>
                     <ul>
-                        <li>Payroll registers and reports</li>
-                        <li>Benefits enrollment files</li>
-                        <li>Employee master data exports</li>
-                        <li>Organizational charts</li>
-                        <li>Time and attendance records</li>
-                        <li>Pay code/deduction code lists</li>
-                        <li>Current system configuration docs</li>
+                        <li>Data stays in your infrastructure</li>
+                        <li>HIPAA/compliance friendly</li>
+                        <li>No per-use costs</li>
+                        <li>Complete privacy and control</li>
                     </ul>
                 </div>
                 """, unsafe_allow_html=True)
+                
+                # Setup instructions
+                with st.expander("💡 How to Set Up Local LLM (Ollama)", expanded=False):
+                    st.markdown("""
+                    ### Quick Setup (5 minutes):
+                    
+                    **1. Install Ollama:**
+                    - Mac/Linux: `curl -fsSL https://ollama.ai/install.sh | sh`
+                    - Windows: Download from https://ollama.ai
+                    
+                    **2. Start Ollama:**
+                    ```bash
+                    ollama serve
+                    ```
+                    
+                    **3. Pull a Model:**
+                    ```bash
+                    # Recommended models:
+                    ollama pull llama3:70b      # Best quality (needs ~40GB RAM)
+                    ollama pull mixtral:8x7b    # Good balance (needs ~24GB RAM)
+                    ollama pull mistral:7b      # Fast (needs ~8GB RAM)
+                    ```
+                    
+                    **4. Configure XLR8:**
+                    - Endpoint: `http://localhost:11434` (default)
+                    - Model: The model you pulled above
+                    - Click "Test Connection"
+                    
+                    **That's it!** Your data will now stay secure in your infrastructure.
+                    """)
         
         # ============================================================================
-        # AI CHAT ASSISTANT (NEW FEATURE)
+        # AI CHAT ASSISTANT
         # ============================================================================
         with analysis_tab3:
-            # Initialize chat state
             if 'chat_history' not in st.session_state:
                 st.session_state.chat_history = []
             
             st.markdown("""
             <div class='info-box'>
-                <h3>💬 AI Chat Assistant</h3>
-                <p>Ask questions about your uploaded documents, UKG configurations, or implementation planning.</p>
+                <h3>💬 Secure AI Chat Assistant</h3>
+                <p>Ask questions about your analyzed documents. Uses the same secure provider configured in Analysis tab.</p>
             </div>
             """, unsafe_allow_html=True)
             
-            # Check if documents are loaded
-            if not st.session_state.get('ai_analysis_results'):
-                st.warning("⚠️ Upload and analyze documents in the 'AI Document Analysis' tab first to enable contextual chat.")
+            # Security indicator
+            if st.session_state.llm_provider == 'local':
+                st.success("🔐 Using Local LLM - Chat data stays in your infrastructure")
+            else:
+                st.warning("☁️ Using Cloud API - Chat data sent to Anthropic servers")
             
-            # Chat interface
-            st.markdown("### 💬 Chat with AI")
+            # Check if analysis exists
+            if not st.session_state.get('ai_analysis_results'):
+                st.info("💡 Upload and analyze documents first to enable contextual chat.")
             
             # Display chat history
-            for idx, message in enumerate(st.session_state.chat_history):
+            for message in st.session_state.chat_history:
                 if message['role'] == 'user':
                     st.markdown(f"""
                     <div style='background-color: rgba(109, 138, 160, 0.1); padding: 1rem; border-radius: 8px; margin: 0.5rem 0;'>
@@ -1739,14 +1930,14 @@ End of Report
                 else:
                     st.markdown(f"""
                     <div style='background-color: rgba(125, 150, 168, 0.1); padding: 1rem; border-radius: 8px; margin: 0.5rem 0;'>
-                        <strong>AI Assistant:</strong><br>{message['content']}
+                        <strong>AI:</strong><br>{message['content']}
                     </div>
                     """, unsafe_allow_html=True)
             
             # Chat input
             user_question = st.text_input(
                 "Ask a question",
-                placeholder="e.g., 'How many pay codes do I need to configure?' or 'What organizational levels should I create?'",
+                placeholder="e.g., 'How many pay codes should I configure?' or 'What org levels do I need?'",
                 key="chat_input"
             )
             
@@ -1755,90 +1946,71 @@ End of Report
                 send_button = st.button("Send", use_container_width=True, type="primary")
             
             # Handle chat
-            if send_button and user_question and st.session_state.get('anthropic_api_key'):
-                # Add user message
-                st.session_state.chat_history.append({
-                    'role': 'user',
-                    'content': user_question
-                })
+            if send_button and user_question:
+                st.session_state.chat_history.append({'role': 'user', 'content': user_question})
                 
-                # Prepare context from documents if available
                 context = ""
                 if st.session_state.get('ai_analysis_results'):
-                    context = f"\n\nPREVIOUS ANALYSIS CONTEXT:\n{st.session_state.ai_analysis_results['analysis']}"
+                    context = f"\n\nCONTEXT:\n{st.session_state.ai_analysis_results['analysis']}"
                 
-                # Create chat prompt
-                chat_prompt = f"""You are a UKG Pro/WFM implementation expert helping with project: {st.session_state.current_project}.
+                chat_prompt = f"""You are a UKG implementation expert for project: {st.session_state.current_project}.
 
 {context}
 
-CONVERSATION HISTORY:
-{chr(10).join([f"{msg['role'].upper()}: {msg['content']}" for msg in st.session_state.chat_history[-5:]])}
+USER: {user_question}
 
-USER QUESTION: {user_question}
-
-Provide a helpful, specific answer based on the analysis context and your UKG expertise. Be concise but thorough.
+Provide a helpful, specific answer based on the context and your UKG expertise.
 """
                 
-                # Call API
                 try:
                     import requests
                     
-                    api_endpoint = "https://api.anthropic.com/v1/messages"
-                    headers = {
-                        "Content-Type": "application/json",
-                        "anthropic-version": "2023-06-01",
-                        "x-api-key": st.session_state.anthropic_api_key
-                    }
-                    
-                    payload = {
-                        "model": "claude-sonnet-4-20250514",
-                        "max_tokens": 1000,
-                        "messages": [{"role": "user", "content": chat_prompt}]
-                    }
-                    
                     with st.spinner("🤖 Thinking..."):
-                        response = requests.post(api_endpoint, headers=headers, json=payload, timeout=30)
-                        
-                        if response.status_code == 200:
-                            result = response.json()
-                            ai_response = result['content'][0]['text']
+                        if st.session_state.llm_provider == 'local':
+                            api_url = f"{st.session_state.local_llm_endpoint}/api/generate"
+                            payload = {
+                                "model": st.session_state.local_llm_model,
+                                "prompt": chat_prompt,
+                                "stream": False,
+                                "options": {"num_predict": 500}
+                            }
+                            response = requests.post(api_url, json=payload, timeout=60)
                             
-                            st.session_state.chat_history.append({
-                                'role': 'assistant',
-                                'content': ai_response
-                            })
-                            st.rerun()
+                            if response.status_code == 200:
+                                ai_response = response.json().get('response', 'No response')
+                                st.session_state.chat_history.append({'role': 'assistant', 'content': ai_response})
+                                st.rerun()
+                        
                         else:
-                            st.error(f"API Error: {response.status_code}")
+                            if st.session_state.get('anthropic_api_key'):
+                                api_url = "https://api.anthropic.com/v1/messages"
+                                headers = {
+                                    "Content-Type": "application/json",
+                                    "anthropic-version": "2023-06-01",
+                                    "x-api-key": st.session_state.anthropic_api_key
+                                }
+                                payload = {
+                                    "model": "claude-sonnet-4-20250514",
+                                    "max_tokens": 500,
+                                    "messages": [{"role": "user", "content": chat_prompt}]
+                                }
+                                response = requests.post(api_url, headers=headers, json=payload, timeout=30)
+                                
+                                if response.status_code == 200:
+                                    ai_response = response.json()['content'][0]['text']
+                                    st.session_state.chat_history.append({'role': 'assistant', 'content': ai_response})
+                                    st.rerun()
+                            else:
+                                st.error("API key required for cloud mode")
                 
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
             
-            # Clear chat button
+            # Clear chat
             if st.session_state.chat_history:
-                if st.button("🗑️ Clear Chat History"):
+                if st.button("🗑️ Clear Chat"):
                     st.session_state.chat_history = []
                     st.rerun()
-            
-            # Tips
-            with st.expander("💡 Chat Tips", expanded=False):
-                st.markdown("""
-                **Sample questions you can ask:**
-                - "What pay codes need to be configured?"
-                - "How should I structure the organizational hierarchy?"
-                - "What are the main data quality issues to address?"
-                - "What custom fields will I need?"
-                - "What's the recommended implementation sequence?"
-                - "How complex is this implementation?"
-                - "What decisions need customer input?"
-                
-                **Pro Tips:**
-                - Upload and analyze documents first for best results
-                - Ask specific questions about your implementation
-                - Reference items from the analysis report
-                - Ask follow-up questions to drill deeper
-                """)
 
 # TAB 4: SECTION-BASED TEMPLATE SYSTEM
 
