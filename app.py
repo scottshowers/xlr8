@@ -1,6 +1,6 @@
 """
-XLR8 by HCMPACT - UKG Pro/WFM Implementation Accelerator  
-Full-Featured Application with Integrated Payroll Template System
+XLR8 by HCMPACT - UKG Pro/WFM Implementation Accelerator
+Full-Featured Application with Project Management, API Connections, and Secure PDF Parser
 """
 
 import streamlit as st
@@ -9,27 +9,22 @@ import io
 import os
 import zipfile
 from datetime import datetime
-from pathlib import Path
 import pandas as pd
-
-# PDF Template System imports
+from utils.secure_pdf_parser import (
+    EnhancedPayrollParser,
+    process_parsed_pdf_for_ukg
+)
+# Section-Based Template System imports
 try:
     from pdf2image import convert_from_bytes
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image
     import pytesseract
-    PDF_FEATURES_AVAILABLE = True
+    from streamlit_drawable_canvas import st_canvas
+    DRAWING_AVAILABLE = True
 except ImportError:
-    PDF_FEATURES_AVAILABLE = False
+    DRAWING_AVAILABLE = False
 
-# Secure PDF Parser imports
-try:
-    from utils.secure_pdf_parser import (
-        EnhancedPayrollParser,
-        process_parsed_pdf_for_ukg
-    )
-    SECURE_PARSER_AVAILABLE = True
-except ImportError:
-    SECURE_PARSER_AVAILABLE = False
+
 
 # Page configuration
 st.set_page_config(
@@ -46,71 +41,13 @@ if 'projects' not in st.session_state:
     st.session_state.projects = {}
 if 'api_credentials' not in st.session_state:
     st.session_state.api_credentials = {'pro': {}, 'wfm': {}}
+if 'pdf_parser' not in st.session_state:
+    st.session_state.pdf_parser = EnhancedPayrollParser()
+if 'parsed_results' not in st.session_state:
+    st.session_state.parsed_results = None
 if 'foundation_files' not in st.session_state:
     st.session_state.foundation_files = []
 
-# Secure PDF Parser state
-if SECURE_PARSER_AVAILABLE:
-    if 'pdf_parser' not in st.session_state:
-        st.session_state.pdf_parser = EnhancedPayrollParser()
-    if 'parsed_results' not in st.session_state:
-        st.session_state.parsed_results = None
-
-# Template System state
-if 'templates' not in st.session_state:
-    st.session_state.templates = {}
-if 'pdf_images' not in st.session_state:
-    st.session_state.pdf_images = []
-if 'extracted_data' not in st.session_state:
-    st.session_state.extracted_data = None
-if 'temp_columns' not in st.session_state:
-    st.session_state.temp_columns = []
-
-# Template directory
-TEMPLATE_DIR = Path("templates")
-TEMPLATE_DIR.mkdir(exist_ok=True)
-
-# Template system functions
-def load_templates():
-    """Load all saved templates from disk"""
-    templates = {}
-    for file in TEMPLATE_DIR.glob("*.json"):
-        try:
-            with open(file, 'r') as f:
-                templates[file.stem] = json.load(f)
-        except:
-            pass
-    return templates
-
-def save_template(name, template_data):
-    """Save template to disk"""
-    filepath = TEMPLATE_DIR / f"{name}.json"
-    with open(filepath, 'w') as f:
-        json.dump(template_data, f, indent=2)
-
-def extract_text_from_region(image, x1, y1, x2, y2):
-    """Extract text from a specific region using OCR"""
-    if not PDF_FEATURES_AVAILABLE:
-        return "PDF features not available"
-    cropped = image.crop((x1, y1, x2, y2))
-    text = pytesseract.image_to_string(cropped, config='--psm 6')
-    return text.strip()
-
-def apply_template(image, template):
-    """Apply template to extract data from image"""
-    extracted = {}
-    for column in template['columns']:
-        x1, y1, x2, y2 = column['x1'], column['y1'], column['x2'], column['y2']
-        text = extract_text_from_region(image, x1, y1, x2, y2)
-        lines = [line.strip() for line in text.split('\n') if line.strip()]
-        category = column['category']
-        if category not in extracted:
-            extracted[category] = []
-        extracted[category].extend(lines)
-    return extracted
-
-# Load existing templates
-st.session_state.templates = load_templates()
 # Custom CSS - Darker Muted Blue Theme
 st.markdown("""
 <style>
@@ -1353,381 +1290,467 @@ with tab3:
             """, unsafe_allow_html=True)
 
 
-# TAB 4: PAYROLL TEMPLATE SYSTEM
+# TAB 4: SECTION-BASED TEMPLATE SYSTEM
+
 with tab4:
-    st.markdown("## 🎯 Payroll Template System")
-    st.markdown("**Create templates once for each vendor, process unlimited PDFs**")
+    st.markdown("## 🎯 Advanced Payroll Template System")
+    st.markdown("**Define sections + fields to capture all line items from variable-height employee blocks**")
     
-    if not PDF_FEATURES_AVAILABLE:
-        st.error("""
-        ⚠️ **PDF Template Features Not Available**
+    # Initialize state
+    if 'templates' not in st.session_state:
+        st.session_state.templates = {}
+    if 'pdf_images' not in st.session_state:
+        st.session_state.pdf_images = []
+    if 'extracted_data' not in st.session_state:
+        st.session_state.extracted_data = None
+    if 'section_box' not in st.session_state:
+        st.session_state.section_box = None
+    if 'name_box' not in st.session_state:
+        st.session_state.name_box = None
+    if 'field_columns' not in st.session_state:
+        st.session_state.field_columns = []
+    if 'template_step' not in st.session_state:
+        st.session_state.template_step = 1
+    
+    # Template directory
+    TEMPLATE_DIR = Path("templates")
+    TEMPLATE_DIR.mkdir(exist_ok=True)
+    
+    # Helper functions
+    def load_templates():
+        templates = {}
+        for file in TEMPLATE_DIR.glob("*.json"):
+            try:
+                with open(file, 'r') as f:
+                    templates[file.stem] = json.load(f)
+            except:
+                pass
+        return templates
+    
+    def save_template(name, template_data):
+        filepath = TEMPLATE_DIR / f"{name}.json"
+        with open(filepath, 'w') as f:
+            json.dump(template_data, f, indent=2)
+    
+    def ocr_region(image, x1, y1, x2, y2):
+        """Extract text from region"""
+        try:
+            import pytesseract
+            cropped = image.crop((int(x1), int(y1), int(x2), int(y2)))
+            text = pytesseract.image_to_string(cropped, config='--psm 6')
+            return text.strip()
+        except:
+            return ""
+    
+    def ocr_with_line_positions(image, x1, y1, x2, y2):
+        """Get text with Y positions for each line"""
+        try:
+            import pytesseract
+            from PIL import Image
+            cropped = image.crop((int(x1), int(y1), int(x2), int(y2)))
+            
+            # Get detailed OCR data
+            data = pytesseract.image_to_data(cropped, output_type=pytesseract.Output.DICT)
+            
+            # Group by line (block_num + par_num + line_num)
+            lines = {}
+            for i, text in enumerate(data['text']):
+                if text.strip():
+                    line_id = f"{data['block_num'][i]}_{data['par_num'][i]}_{data['line_num'][i]}"
+                    y_pos = int(y1) + data['top'][i]
+                    if line_id not in lines:
+                        lines[line_id] = {'text': '', 'y': y_pos}
+                    lines[line_id]['text'] += ' ' + text
+            
+            # Return sorted by Y position
+            result = [(line['text'].strip(), line['y']) for line in lines.values()]
+            result.sort(key=lambda x: x[1])
+            return result
+        except:
+            return []
+    
+    def find_employee_sections(image, name_box, image_width):
+        """Find all employee sections by detecting names"""
+        x1, y1, x2, y2 = name_box['x1'], name_box['y1'], name_box['x2'], name_box['y2']
         
-        Required packages:
-        - pdf2image, Pillow, pytesseract
-        - poppler-utils (system), tesseract-ocr (system)
+        # Get all text with positions in name column
+        lines = ocr_with_line_positions(image, x1, 0, x2, image.height)
         
-        Add to requirements.txt and create Aptfile with system packages.
-        """)
+        # Filter to likely employee names (in the reference Y range)
+        employees = []
+        for text, y_pos in lines:
+            # Basic name detection: has letters, reasonable length
+            if len(text) > 3 and any(c.isalpha() for c in text):
+                employees.append({'name': text, 'y_start': y_pos})
+        
+        # Create sections
+        sections = []
+        for i, emp in enumerate(employees):
+            y_start = emp['y_start']
+            y_end = employees[i+1]['y_start'] - 5 if i+1 < len(employees) else image.height
+            sections.append({
+                'employee': emp['name'],
+                'y_start': y_start,
+                'y_end': y_end
+            })
+        
+        return sections
+    
+    def extract_column_from_section(image, section, column):
+        """Extract all lines from one column within one section"""
+        x1 = column['x1']
+        x2 = column['x2']
+        y1 = section['y_start']
+        y2 = section['y_end']
+        
+        # Get all lines in this region
+        text = ocr_region(image, x1, y1, x2, y2)
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        
+        return [{
+            'employee': section['employee'],
+            'category': column['category'],
+            'field': column['name'],
+            'value': line
+        } for line in lines]
+    
+    # Load templates
+    st.session_state.templates = load_templates()
+    
+    # Check dependencies
+    try:
+        from streamlit_drawable_canvas import st_canvas
+        from pdf2image import convert_from_bytes
+        DRAWING_AVAILABLE = True
+    except ImportError:
+        DRAWING_AVAILABLE = False
+    
+    if not DRAWING_AVAILABLE:
+        st.error("⚠️ Install: streamlit-drawable-canvas, pdf2image, Pillow, pytesseract")
     else:
-        # Template System Sub-tabs
-        ttab1, ttab2, ttab3 = st.tabs(["📝 Create Template", "⚡ Process PDF", "📚 Manage Templates"])
+        # Sub-tabs
+        ttab1, ttab2, ttab3 = st.tabs(["📝 Create Template", "⚡ Process PDF", "📚 Manage"])
         
-        # CREATE TEMPLATE TAB
+        # CREATE TEMPLATE
         with ttab1:
-            st.header("Create New Template")
+            st.header("Create Section + Field Template")
             
+            # Template info
             col1, col2 = st.columns([2, 1])
-            
             with col1:
-                st.markdown("### Step 1: Upload Sample PDF")
-                uploaded_file = st.file_uploader(
-                    "Upload a sample PDF from this vendor",
-                    type=['pdf'],
-                    key="template_creator_upload",
-                    help="Upload one sample payroll PDF to create a reusable template"
-                )
-            
+                uploaded_file = st.file_uploader("Upload Sample PDF", type=['pdf'], key="template_upload")
             with col2:
-                st.markdown("### Template Info")
-                template_name = st.text_input(
-                    "Template Name",
-                    placeholder="e.g., Dayforce_Register",
-                    help="Use vendor name + report type"
-                )
-                template_vendor = st.text_input(
-                    "Vendor",
-                    placeholder="e.g., Dayforce, ADP, Gusto"
-                )
+                template_name = st.text_input("Template Name", placeholder="Dayforce_Register")
+                template_vendor = st.text_input("Vendor", placeholder="Dayforce")
             
             if uploaded_file and template_name:
-                # Convert first page to image
-                if not st.session_state.pdf_images or st.session_state.get('last_upload_name') != uploaded_file.name:
-                    with st.spinner("Converting PDF to image (300 DPI)..."):
+                # Convert PDF
+                if not st.session_state.pdf_images or st.session_state.get('last_upload') != uploaded_file.name:
+                    with st.spinner("Converting..."):
                         pdf_bytes = uploaded_file.read()
-                        st.session_state.pdf_images = convert_from_bytes(
-                            pdf_bytes,
-                            dpi=300,
-                            first_page=1,
-                            last_page=1
-                        )
-                        st.session_state.last_upload_name = uploaded_file.name
+                        st.session_state.pdf_images = convert_from_bytes(pdf_bytes, dpi=200, first_page=1, last_page=1)
+                        st.session_state.last_upload = uploaded_file.name
+                        st.session_state.template_step = 1
+                        st.session_state.section_box = None
+                        st.session_state.name_box = None
+                        st.session_state.field_columns = []
                 
                 image = st.session_state.pdf_images[0]
-                img_width, img_height = image.size
+                img_w, img_h = image.size
                 
-                st.success(f"✅ Image loaded: {img_width}px × {img_height}px")
-                
-                st.markdown("---")
-                st.markdown("### Step 2: View PDF Layout")
-                st.info("📐 Look at the PDF below to identify column boundaries")
-                
-                # Display image
-                st.image(image, caption="PDF Preview - Identify column X/Y coordinates", use_column_width=False)
+                # STEP INDICATOR
+                steps = ["1️⃣ Section Box", "2️⃣ Name Location", "3️⃣ Field Columns"]
+                st.markdown(f"**Current Step:** {steps[st.session_state.template_step - 1]}")
+                st.progress(st.session_state.template_step / 3)
                 
                 st.markdown("---")
-                st.markdown("### Step 3: Add Columns to Template")
-                st.markdown("Define each column/section by specifying its boundaries and category")
                 
-                # Column input form
-                with st.form("add_column_form"):
-                    col_input1, col_input2 = st.columns(2)
+                # STEP 1: Draw section box
+                if st.session_state.template_step == 1:
+                    st.markdown("### Step 1: Draw Section Boundary")
+                    st.info("📦 Draw ONE box around a complete employee's section (from name to last line)")
                     
-                    with col_input1:
-                        st.markdown("**Column Boundaries (X coordinates)**")
-                        col_x1 = st.number_input("Left X", min_value=0, max_value=img_width, value=0, step=10)
-                        col_x2 = st.number_input("Right X", min_value=0, max_value=img_width, value=200, step=10)
-                        
-                    with col_input2:
-                        st.markdown("**Vertical Range (Y coordinates)**")
-                        col_y1 = st.number_input("Top Y", min_value=0, max_value=img_height, value=0, step=10)
-                        col_y2 = st.number_input("Bottom Y", min_value=0, max_value=img_height, value=img_height, step=10)
-                    
-                    col_name = st.text_input("Column/Section Name", placeholder="e.g., Employee Name, Regular Hours")
-                    col_category = st.selectbox(
-                        "UKG Category",
-                        ["Employee Info", "Earnings", "Deductions", "Taxes", "Check Info", "Uncategorized"],
-                        help="Select the UKG category this data belongs to"
+                    canvas_result = st_canvas(
+                        fill_color="rgba(0,255,0,0.1)",
+                        stroke_width=3,
+                        stroke_color="#00FF00",
+                        background_image=image,
+                        update_streamlit=True,
+                        height=img_h,
+                        width=img_w,
+                        drawing_mode="rect",
+                        key="canvas_section"
                     )
                     
-                    col_description = st.text_area(
-                        "Description (optional)",
-                        placeholder="Any notes about this column..."
-                    )
-                    
-                    submitted = st.form_submit_button("➕ Add Column to Template", use_container_width=True, type="primary")
-                    
-                    if submitted:
-                        if not col_name:
-                            st.error("Please enter a column name")
-                        elif col_x2 <= col_x1:
-                            st.error("Right X must be greater than Left X")
-                        elif col_y2 <= col_y1:
-                            st.error("Bottom Y must be greater than Top Y")
-                        else:
-                            st.session_state.temp_columns.append({
-                                'name': col_name,
-                                'x1': col_x1,
-                                'y1': col_y1,
-                                'x2': col_x2,
-                                'y2': col_y2,
-                                'category': col_category,
-                                'description': col_description
-                            })
-                            st.success(f"✅ Added '{col_name}' to {col_category}")
-                            st.rerun()
-                
-                # Display current template columns
-                if st.session_state.temp_columns:
-                    st.markdown("---")
-                    st.markdown("### 📋 Template Preview")
-                    
-                    # Preview image with boxes
-                    preview_img = image.copy()
-                    draw = ImageDraw.Draw(preview_img)
-                    
-                    try:
-                        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 16)
-                    except:
-                        font = ImageFont.load_default()
-                    
-                    # Color mapping for categories
-                    category_colors = {
-                        'Employee Info': 'blue',
-                        'Earnings': 'green',
-                        'Deductions': 'orange',
-                        'Taxes': 'red',
-                        'Check Info': 'purple',
-                        'Uncategorized': 'gray'
-                    }
-                    
-                    for i, col in enumerate(st.session_state.temp_columns):
-                        color = category_colors.get(col['category'], 'black')
-                        draw.rectangle(
-                            [col['x1'], col['y1'], col['x2'], col['y2']],
-                            outline=color,
-                            width=3
-                        )
-                        draw.text(
-                            (col['x1'] + 5, col['y1'] + 5),
-                            f"{i+1}. {col['name']}",
-                            fill=color,
-                            font=font
-                        )
-                    
-                    st.image(preview_img, caption="Template Preview with Column Boundaries", use_column_width=False)
-                    
-                    # Table of columns
-                    st.markdown("**Columns in Template:**")
-                    for i, col in enumerate(st.session_state.temp_columns):
-                        cols = st.columns([4, 1])
-                        cols[0].markdown(
-                            f"**{i+1}. {col['name']}** → {col['category']} "
-                            f"| X: ({col['x1']}, {col['x2']}) Y: ({col['y1']}, {col['y2']})"
-                        )
-                        if cols[1].button("🗑️", key=f"del_col_{i}"):
-                            st.session_state.temp_columns.pop(i)
-                            st.rerun()
-                    
-                    # Category summary
-                    st.markdown("---")
-                    st.markdown("**Category Summary:**")
-                    category_counts = {}
-                    for col in st.session_state.temp_columns:
-                        cat = col['category']
-                        category_counts[cat] = category_counts.get(cat, 0) + 1
-                    
-                    if category_counts:
-                        cols = st.columns(len(category_counts))
-                        for idx, (cat, count) in enumerate(category_counts.items()):
-                            cols[idx].metric(cat, count)
-                    
-                    # Save template
-                    st.markdown("---")
-                    col1, col2 = st.columns([3, 1])
-                    
-                    with col1:
-                        if st.button("💾 Save Template", type="primary", use_container_width=True):
-                            template_data = {
-                                'name': template_name,
-                                'vendor': template_vendor,
-                                'created_at': datetime.now().isoformat(),
-                                'image_dimensions': {'width': img_width, 'height': img_height},
-                                'columns': st.session_state.temp_columns
+                    if canvas_result.json_data:
+                        objects = [obj for obj in canvas_result.json_data.get("objects", []) if obj["type"] == "rect"]
+                        if objects:
+                            rect = objects[0]  # Use first rectangle
+                            st.session_state.section_box = {
+                                'x1': int(rect['left']),
+                                'y1': int(rect['top']),
+                                'x2': int(rect['left'] + rect['width']),
+                                'y2': int(rect['top'] + rect['height'])
                             }
                             
-                            save_template(template_name, template_data)
-                            st.session_state.templates[template_name] = template_data
-                            st.success(f"✅ Template '{template_name}' saved successfully!")
-                            st.session_state.temp_columns = []
-                            st.session_state.pdf_images = []
-                            st.balloons()
+                            if st.button("✅ Continue to Name Location", type="primary"):
+                                st.session_state.template_step = 2
+                                st.rerun()
+                
+                # STEP 2: Draw name box
+                elif st.session_state.template_step == 2:
+                    st.markdown("### Step 2: Mark Employee Name Location")
+                    st.info("📍 Draw a box around just the employee NAME (where names appear in all sections)")
                     
-                    with col2:
-                        if st.button("🔄 Clear All", use_container_width=True):
-                            st.session_state.temp_columns = []
+                    canvas_result = st_canvas(
+                        fill_color="rgba(0,0,255,0.1)",
+                        stroke_width=3,
+                        stroke_color="#0000FF",
+                        background_image=image,
+                        update_streamlit=True,
+                        height=img_h,
+                        width=img_w,
+                        drawing_mode="rect",
+                        key="canvas_name"
+                    )
+                    
+                    if canvas_result.json_data:
+                        objects = [obj for obj in canvas_result.json_data.get("objects", []) if obj["type"] == "rect"]
+                        if objects:
+                            rect = objects[0]
+                            st.session_state.name_box = {
+                                'x1': int(rect['left']),
+                                'y1': int(rect['top']),
+                                'x2': int(rect['left'] + rect['width']),
+                                'y2': int(rect['top'] + rect['height'])
+                            }
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                if st.button("⬅️ Back to Section"):
+                                    st.session_state.template_step = 1
+                                    st.rerun()
+                            with col2:
+                                if st.button("✅ Continue to Fields", type="primary"):
+                                    st.session_state.template_step = 3
+                                    st.rerun()
+                
+                # STEP 3: Draw field columns
+                elif st.session_state.template_step == 3:
+                    st.markdown("### Step 3: Define Field Columns")
+                    st.info("📊 Draw VERTICAL strips for each field type (Earnings, Deductions, etc.)")
+                    
+                    col_canvas, col_controls = st.columns([3, 1])
+                    
+                    with col_controls:
+                        st.markdown("**Controls:**")
+                        if st.button("🗑️ Clear Columns"):
+                            st.session_state.field_columns = []
                             st.rerun()
+                        if st.button("⬅️ Back to Name"):
+                            st.session_state.template_step = 2
+                            st.rerun()
+                    
+                    with col_canvas:
+                        canvas_result = st_canvas(
+                            fill_color="rgba(255,0,0,0.1)",
+                            stroke_width=3,
+                            stroke_color="#FF0000",
+                            background_image=image,
+                            update_streamlit=True,
+                            height=img_h,
+                            width=img_w,
+                            drawing_mode="rect",
+                            key="canvas_columns"
+                        )
+                    
+                    if canvas_result.json_data:
+                        objects = [obj for obj in canvas_result.json_data.get("objects", []) if obj["type"] == "rect"]
+                        
+                        if objects:
+                            st.markdown("---")
+                            st.markdown(f"### Label {len(objects)} Column(s)")
+                            
+                            # Update field_columns
+                            temp_cols = []
+                            for idx, rect in enumerate(objects):
+                                with st.expander(f"Column {idx+1}", expanded=True):
+                                    x1 = int(rect['left'])
+                                    x2 = x1 + int(rect['width'])
+                                    
+                                    c1, c2 = st.columns(2)
+                                    with c1:
+                                        name = st.text_input("Field Name", key=f"fn_{idx}", placeholder="Earnings")
+                                    with c2:
+                                        cat = st.selectbox("Category", 
+                                            ["Employee Info", "Earnings", "Deductions", "Taxes", "Check Info"],
+                                            key=f"fc_{idx}")
+                                    
+                                    if name:
+                                        temp_cols.append({
+                                            'id': idx,
+                                            'name': name,
+                                            'category': cat,
+                                            'x1': x1,
+                                            'x2': x2
+                                        })
+                            
+                            st.session_state.field_columns = temp_cols
+                            
+                            # Save button
+                            if len(temp_cols) == len(objects) and len(objects) > 0:
+                                st.markdown("---")
+                                if st.button("💾 Save Complete Template", type="primary", use_container_width=True):
+                                    template_data = {
+                                        'name': template_name,
+                                        'vendor': template_vendor,
+                                        'created_at': datetime.now().isoformat(),
+                                        'type': 'section_based',
+                                        'section_template': {
+                                            'section_box': st.session_state.section_box,
+                                            'name_location': st.session_state.name_box
+                                        },
+                                        'field_columns': [{k: v for k, v in c.items() if k != 'id'} for c in temp_cols]
+                                    }
+                                    
+                                    save_template(template_name, template_data)
+                                    st.session_state.templates[template_name] = template_data
+                                    st.success(f"✅ Template '{template_name}' saved!")
+                                    st.balloons()
+                                    
+                                    # Reset
+                                    st.session_state.template_step = 1
+                                    st.session_state.section_box = None
+                                    st.session_state.name_box = None
+                                    st.session_state.field_columns = []
+                                    st.session_state.pdf_images = []
+                                    st.rerun()
+                            else:
+                                st.warning("⚠️ Name all columns to save")
         
-        # PROCESS PDF TAB
+        # PROCESS PDF
         with ttab2:
-            st.header("Process PDF with Template")
+            st.header("Process PDF with Section Template")
             
             if not st.session_state.templates:
-                st.warning("⚠️ No templates found. Create a template first in the 'Create Template' tab.")
+                st.warning("⚠️ Create a template first")
             else:
-                col1, col2 = st.columns([2, 1])
+                # Check for section-based templates
+                section_templates = {k: v for k, v in st.session_state.templates.items() 
+                                   if v.get('type') == 'section_based'}
                 
-                with col1:
-                    st.markdown("### Step 1: Upload PDF to Process")
-                    process_file = st.file_uploader(
-                        "Upload payroll PDF",
-                        type=['pdf'],
-                        key="process_upload",
-                        help="Upload any PDF from the same vendor as your template"
-                    )
-                
-                with col2:
-                    st.markdown("### Step 2: Select Template")
-                    selected_template = st.selectbox(
-                        "Choose template",
-                        options=list(st.session_state.templates.keys()),
-                        format_func=lambda x: f"{x} ({st.session_state.templates[x].get('vendor', 'Unknown')})"
-                    )
-                
-                if process_file and selected_template:
-                    template = st.session_state.templates[selected_template]
+                if not section_templates:
+                    st.warning("⚠️ No section-based templates found. Create one in the 'Create Template' tab.")
+                else:
+                    c1, c2 = st.columns([2, 1])
+                    with c1:
+                        process_file = st.file_uploader("Upload PDF", type=['pdf'], key="process")
+                    with c2:
+                        selected = st.selectbox("Template", list(section_templates.keys()))
                     
-                    # Convert PDF
-                    with st.spinner("Converting PDF to images..."):
-                        pdf_bytes = process_file.read()
-                        process_images = convert_from_bytes(
-                            pdf_bytes,
-                            dpi=300,
-                            first_page=1,
-                            last_page=3  # Process first 3 pages
-                        )
-                    
-                    st.success(f"✅ Loaded {len(process_images)} page(s)")
-                    
-                    # Extract button
-                    if st.button("🚀 Extract Data Using Template", type="primary", use_container_width=True):
-                        with st.spinner("Extracting data from all pages..."):
-                            all_extracted = {}
-                            
-                            for page_idx, image in enumerate(process_images):
-                                st.info(f"Processing page {page_idx + 1}...")
-                                page_data = apply_template(image, template)
+                    if process_file and selected:
+                        template = section_templates[selected]
+                        
+                        with st.spinner("Converting PDF..."):
+                            pdf_bytes = process_file.read()
+                            images = convert_from_bytes(pdf_bytes, dpi=300, first_page=1, last_page=3)
+                        
+                        st.success(f"✅ {len(images)} page(s)")
+                        
+                        if st.button("🚀 Extract All Line Items", type="primary", use_container_width=True):
+                            with st.spinner("Finding employee sections and extracting data..."):
+                                all_data = []
                                 
-                                # Merge with all_extracted
-                                for category, lines in page_data.items():
-                                    if category not in all_extracted:
-                                        all_extracted[category] = []
-                                    all_extracted[category].extend(lines)
-                            
-                            st.session_state.extracted_data = all_extracted
-                            st.success("✅ Extraction complete!")
-                        
-                        # Display extracted data
-                        st.markdown("---")
-                        st.markdown("### 📊 Extracted Data")
-                        
-                        for category in ['Employee Info', 'Earnings', 'Deductions', 'Taxes', 'Check Info']:
-                            if category in st.session_state.extracted_data:
-                                with st.expander(f"📁 {category} ({len(st.session_state.extracted_data[category])} lines)", expanded=True):
-                                    lines = st.session_state.extracted_data[category]
+                                for page_idx, image in enumerate(images):
+                                    st.info(f"Processing page {page_idx + 1}...")
                                     
-                                    # Try to create dataframe
-                                    if len(lines) > 1:
-                                        df = pd.DataFrame({'Text': lines})
-                                        st.dataframe(df, use_container_width=True)
-                                    else:
-                                        st.text('\n'.join(lines))
-                        
-                        # Export to Excel
-                        st.markdown("---")
-                        st.markdown("### 💾 Export to UKG Excel")
-                        
-                        output = io.BytesIO()
-                        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                            # Write each category
-                            for category in ['Employee Info', 'Earnings', 'Deductions', 'Taxes', 'Check Info']:
-                                if category in st.session_state.extracted_data:
-                                    lines = st.session_state.extracted_data[category]
-                                    df = pd.DataFrame({'Data': lines})
-                                    df.to_excel(writer, sheet_name=category[:31], index=False)
+                                    # Find employee sections
+                                    sections = find_employee_sections(
+                                        image,
+                                        template['section_template']['name_location'],
+                                        image.width
+                                    )
+                                    
+                                    st.info(f"Found {len(sections)} employees on page {page_idx + 1}")
+                                    
+                                    # Extract from each section
+                                    for section in sections:
+                                        for column in template['field_columns']:
+                                            items = extract_column_from_section(image, section, column)
+                                            all_data.extend(items)
+                                
+                                st.session_state.extracted_data = all_data
+                                st.success(f"✅ Extracted {len(all_data)} line items!")
                             
-                            # Metadata
-                            metadata = pd.DataFrame({
-                                'Property': ['Source File', 'Template Used', 'Processed At', 'Pages Processed'],
-                                'Value': [
-                                    process_file.name,
-                                    selected_template,
-                                    datetime.now().isoformat(),
-                                    len(process_images)
-                                ]
-                            })
-                            metadata.to_excel(writer, sheet_name='Metadata', index=False)
-                        
-                        output.seek(0)
-                        
-                        st.download_button(
-                            label="📥 Download UKG Excel (5 Tabs)",
-                            data=output,
-                            file_name=f"UKG_Extract_{process_file.name.replace('.pdf', '')}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            type="primary",
-                            use_container_width=True
-                        )
+                            # Display preview
+                            if all_data:
+                                st.markdown("---")
+                                st.markdown("### 📊 Extracted Data Preview")
+                                
+                                # Group by category
+                                by_category = {}
+                                for item in all_data:
+                                    cat = item['category']
+                                    if cat not in by_category:
+                                        by_category[cat] = []
+                                    by_category[cat].append(item)
+                                
+                                for cat in ['Employee Info', 'Earnings', 'Deductions', 'Taxes', 'Check Info']:
+                                    if cat in by_category:
+                                        with st.expander(f"{cat} ({len(by_category[cat])} items)"):
+                                            df = pd.DataFrame(by_category[cat])
+                                            st.dataframe(df, use_container_width=True)
+                                
+                                # Export to Excel
+                                st.markdown("---")
+                                output = io.BytesIO()
+                                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                                    # Write by category
+                                    for cat in ['Employee Info', 'Earnings', 'Deductions', 'Taxes', 'Check Info']:
+                                        if cat in by_category:
+                                            df = pd.DataFrame(by_category[cat])
+                                            df.to_excel(writer, sheet_name=cat[:31], index=False)
+                                    
+                                    # Metadata
+                                    pd.DataFrame({
+                                        'Property': ['File', 'Template', 'Date', 'Pages', 'Total Items'],
+                                        'Value': [process_file.name, selected, datetime.now().isoformat(), 
+                                                len(images), len(all_data)]
+                                    }).to_excel(writer, sheet_name='Metadata', index=False)
+                                
+                                output.seek(0)
+                                st.download_button(
+                                    "📥 Download Excel with All Line Items",
+                                    output,
+                                    f"UKG_LineItems_{process_file.name.replace('.pdf', '')}.xlsx",
+                                    type="primary",
+                                    use_container_width=True
+                                )
         
-        # MANAGE TEMPLATES TAB
+        # MANAGE TEMPLATES
         with ttab3:
             st.header("Manage Templates")
             
             if not st.session_state.templates:
-                st.info("📋 No templates yet. Create one in the 'Create Template' tab!")
+                st.info("📋 No templates")
             else:
-                st.markdown(f"### 📚 {len(st.session_state.templates)} Template(s) Available")
-                
-                for template_name, template_data in st.session_state.templates.items():
-                    with st.expander(f"📄 {template_name}", expanded=False):
-                        col1, col2 = st.columns([3, 1])
-                        
-                        with col1:
-                            st.markdown(f"**Vendor:** {template_data.get('vendor', 'N/A')}")
-                            st.markdown(f"**Created:** {template_data.get('created_at', 'N/A')}")
-                            st.markdown(f"**Columns:** {len(template_data.get('columns', []))}")
-                            
-                            # Show columns by category
-                            columns_by_cat = {}
-                            for col in template_data.get('columns', []):
-                                cat = col['category']
-                                if cat not in columns_by_cat:
-                                    columns_by_cat[cat] = []
-                                columns_by_cat[cat].append(col['name'])
-                            
-                            st.markdown("**Categories:**")
-                            for cat, cols in columns_by_cat.items():
-                                st.markdown(f"- **{cat}:** {', '.join(cols)}")
-                        
-                        with col2:
-                            if st.button("🗑️ Delete", key=f"delete_template_{template_name}"):
-                                # Delete from disk
-                                filepath = TEMPLATE_DIR / f"{template_name}.json"
-                                if filepath.exists():
-                                    filepath.unlink()
-                                # Delete from session
-                                del st.session_state.templates[template_name]
-                                st.success(f"Deleted {template_name}")
+                for name, data in st.session_state.templates.items():
+                    with st.expander(f"📄 {name}"):
+                        c1, c2 = st.columns([3, 1])
+                        with c1:
+                            st.markdown(f"**Vendor:** {data.get('vendor', 'N/A')}")
+                            st.markdown(f"**Type:** {data.get('type', 'basic')}")
+                            if data.get('type') == 'section_based':
+                                st.markdown(f"**Field Columns:** {len(data.get('field_columns', []))}")
+                        with c2:
+                            if st.button("🗑️", key=f"d_{name}"):
+                                (TEMPLATE_DIR / f"{name}.json").unlink(missing_ok=True)
+                                del st.session_state.templates[name]
                                 st.rerun()
                         
-                        # Export template
-                        template_json = json.dumps(template_data, indent=2)
-                        st.download_button(
-                            label="📤 Export Template JSON",
-                            data=template_json,
-                            file_name=f"{template_name}.json",
-                            mime="application/json",
-                            key=f"export_template_{template_name}"
-                        )
+                        st.download_button("📤 Export", json.dumps(data, indent=2),
+                            f"{name}.json", key=f"e_{name}")
+
 
 with tab5:
     st.markdown("## ⚙️ Configuration")
