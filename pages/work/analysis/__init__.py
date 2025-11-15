@@ -29,9 +29,10 @@ def render_analysis_page():
     """, unsafe_allow_html=True)
     
     # Check for active project
-    if not st.session_state.current_project:
-        st.warning("⚠️ No active project selected. Please select or create a project in Setup → Projects")
-        return
+        if st.session_state.current_project:
+            st.success(f"📁 Active Project: {st.session_state.current_project}")
+        else:
+            st.info("💡 No project selected - analyzing in standalone mode")
     
     st.success(f"📁 Active Project: {st.session_state.current_project}")
     
