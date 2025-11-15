@@ -448,6 +448,33 @@ class AdvancedRAGHandler:
         
         return compressed_docs
     
+    def search(self, query: str, n_results: int = 5, category_filter: str = None) -> List[Dict[str, Any]]:
+        """
+        Basic search method for backwards compatibility
+        Uses hybrid search by default
+        
+        Args:
+            query: Search query
+            n_results: Number of results
+            category_filter: Optional category filter
+        
+        Returns:
+            List of search results
+        """
+        # Use hybrid search as default
+        results = self.hybrid_search(
+            query=query,
+            n_results=n_results,
+            alpha=0.5,
+            strategy='semantic'
+        )
+        
+        # Apply category filter if provided
+        if category_filter:
+            results = [r for r in results if r.get('metadata', {}).get('category') == category_filter]
+        
+        return results
+    
     # ========================================================================
     # DOCUMENT MANAGEMENT
     # ========================================================================
