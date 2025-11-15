@@ -213,13 +213,13 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Foundation Intelligence for Local LLM
-    with st.expander("🧠 Foundation Intelligence", expanded=False):
+    # HCMPACT Intelligence for Local LLM
+    with st.expander("🧠 HCMPACT Intelligence", expanded=False):
         st.markdown("**Local LLM Knowledge Base**")
         st.markdown("""
         <div style='font-size: 0.85rem; color: #6c757d; margin-bottom: 1rem;'>
-        Upload your company standards, best practices, and templates in the 
-        <strong>Foundation Data Library</strong> tab (Tab 3 → 4th tab).
+        Upload HCMPACT's standards, best practices, and templates in the 
+        <strong>Seed HCMPACT LLM</strong> tab (Tab 3 → 4th tab).
         </div>
         """, unsafe_allow_html=True)
         
@@ -227,15 +227,15 @@ with st.sidebar:
         valid_foundation_files = [f for f in st.session_state.foundation_files if isinstance(f, dict)]
         if valid_foundation_files:
             enabled_count = len([f for f in valid_foundation_files if f.get('enabled', False)])
-            st.success(f"✅ {len(valid_foundation_files)} foundation file(s) | {enabled_count} enabled")
+            st.success(f"✅ {len(valid_foundation_files)} HCMPACT standard(s) | {enabled_count} enabled")
             for file in valid_foundation_files[:5]:  # Show first 5
                 status_icon = "✅" if file.get('enabled', False) else "⭕"
                 st.markdown(f"<div style='font-size: 0.8rem; padding: 0.25rem 0;'>{status_icon} {file['name']}</div>", unsafe_allow_html=True)
             if len(valid_foundation_files) > 5:
                 st.markdown(f"<div style='font-size: 0.8rem; padding: 0.25rem 0; color: #6c757d;'>... and {len(valid_foundation_files) - 5} more</div>", unsafe_allow_html=True)
         else:
-            st.info("📋 No foundation files yet")
-            st.markdown("<small>Go to Foundation Data Library tab to upload</small>", unsafe_allow_html=True)
+            st.info("📋 No HCMPACT standards yet")
+            st.markdown("<small>Go to Seed HCMPACT LLM tab to upload</small>", unsafe_allow_html=True)
         
         st.markdown("""
         <div style='font-size: 0.75rem; color: #6c757d; margin-top: 1rem; line-height: 1.4;'>
@@ -1157,23 +1157,23 @@ Note: Keep column names in first row for re-import
 with tab3:
     st.markdown("## 📊 Data Analysis & AI Document Intelligence")
     
-    if not st.session_state.current_project:
-        st.warning("⚠️ Please create or select a project first (Home tab)")
-    else:
-        st.info(f"📁 **Active Project:** {st.session_state.current_project}")
-        
-        # Create sub-tabs for different analysis modes
-        analysis_tab1, analysis_tab2, analysis_tab3, analysis_tab4 = st.tabs([
-            "📂 Basic Data Analysis", 
-            "🤖 AI Document Analysis (Secure)", 
-            "💬 AI Chat Assistant",
-            "📚 Foundation Data Library"
-        ])
-        
-        # ============================================================================
-        # BASIC DATA ANALYSIS (Original functionality preserved)
-        # ============================================================================
-        with analysis_tab1:
+    # Create sub-tabs for different analysis modes
+    analysis_tab1, analysis_tab2, analysis_tab3, analysis_tab4 = st.tabs([
+        "📂 Basic Data Analysis", 
+        "🤖 AI Document Analysis (Secure)", 
+        "💬 AI Chat Assistant",
+        "🌱 Seed HCMPACT LLM"
+    ])
+    
+    # ============================================================================
+    # BASIC DATA ANALYSIS (Original functionality preserved)
+    # ============================================================================
+    with analysis_tab1:
+        if not st.session_state.current_project:
+            st.warning("⚠️ Please create or select a project first (Home tab)")
+        else:
+            st.info(f"📁 **Active Project:** {st.session_state.current_project}")
+            
             st.markdown("""
             <div class='info-box'>
                 <h4>📂 Multi-Source Data Upload</h4>
@@ -1383,23 +1383,23 @@ with tab3:
             </div>
             """, unsafe_allow_html=True)
             
-            # Foundation Intelligence Status
+            # HCMPACT Intelligence Status
             # Filter to only include dictionaries (not UploadedFile objects)
             valid_foundation_files = [f for f in st.session_state.foundation_files if isinstance(f, dict)]
             enabled_foundation_count = len([f for f in valid_foundation_files if f.get('enabled', False)])
             if st.session_state.get('foundation_enabled', True) and enabled_foundation_count > 0:
                 st.markdown(f"""
                 <div style='background-color: rgba(109, 138, 160, 0.15); padding: 0.75rem; border-radius: 6px; border-left: 4px solid #6d8aa0; margin: 1rem 0;'>
-                    <strong>🧠 Foundation Intelligence: ACTIVE</strong><br>
-                    <small>{enabled_foundation_count} foundation document(s) will be used to compare against your standards</small><br>
-                    <small>Manage in the "Foundation Data Library" tab</small>
+                    <strong>🧠 HCMPACT Intelligence: ACTIVE</strong><br>
+                    <small>{enabled_foundation_count} HCMPACT standard(s) will be used to compare against customer data</small><br>
+                    <small>Manage in the "Seed HCMPACT LLM" tab</small>
                 </div>
                 """, unsafe_allow_html=True)
             else:
                 st.markdown("""
                 <div style='background-color: rgba(158, 158, 158, 0.1); padding: 0.75rem; border-radius: 6px; border-left: 4px solid #9E9E9E; margin: 1rem 0;'>
-                    <strong>ℹ️ Foundation Intelligence: Not Active</strong><br>
-                    <small>Analysis will use general UKG best practices. Add foundation documents in "Foundation Data Library" tab to compare against YOUR standards.</small>
+                    <strong>ℹ️ HCMPACT Intelligence: Not Active</strong><br>
+                    <small>Analysis will use general UKG best practices. Add HCMPACT standards in "Seed HCMPACT LLM" tab to compare against HCMPACT's proven methodology.</small>
                 </div>
                 """, unsafe_allow_html=True)
             
@@ -1678,26 +1678,26 @@ with tab3:
                             if enabled_foundation_files:
                                 foundation_context = """
 ================================================================================
-🧠 FOUNDATION KNOWLEDGE (Your Company Standards)
+🧠 HCMPACT KNOWLEDGE BASE (HCMPACT's Proven Standards)
 ================================================================================
 
 You are analyzing customer data using HCMPACT's standard UKG implementation 
-approach. The following foundation documents contain YOUR company's:
+approach. The following documents contain HCMPACT's:
 - Standard UKG mappings and configurations
 - Pay code and deduction code standards
 - Organizational structure best practices
 - Implementation methodologies and checklists
 
-CRITICAL: Compare the customer's data to these foundation standards and 
+CRITICAL: Compare the customer's data to HCMPACT's standards and 
 recommend configurations that align with HCMPACT's proven approach.
 
-FOUNDATION DOCUMENTS:
+HCMPACT STANDARDS:
 """
                                 for idx, foundation_file in enumerate(enabled_foundation_files, 1):
                                     foundation_context += f"""
 
 {'='*80}
-FOUNDATION FILE {idx}: {foundation_file['name']}
+HCMPACT STANDARD {idx}: {foundation_file['name']}
 Category: {foundation_file.get('category', 'Uncategorized')}
 {'='*80}
 {foundation_file['content']}
@@ -1706,7 +1706,7 @@ Category: {foundation_file.get('category', 'Uncategorized')}
                                 foundation_context += """
 
 ================================================================================
-📊 CUSTOMER DATA (To Be Analyzed Against Foundation Standards)
+📊 CUSTOMER DATA (To Be Analyzed Against HCMPACT Standards)
 ================================================================================
 
 """
@@ -1754,17 +1754,17 @@ ANALYZE AND PROVIDE:
 
 5. UKG MAPPING RECOMMENDATIONS"""
                             
-                            # Add foundation-specific guidance if foundation files are loaded
+                            # Add HCMPACT-specific guidance if standards are loaded
                             if enabled_foundation_files:
                                 analysis_prompt += """
-   ⭐ COMPARE TO FOUNDATION STANDARDS:
-   - How does customer data align with your foundation pay code mappings?
-   - What deductions match your standard configurations?
-   - Does their org structure fit your recommended hierarchy?
-   - Which foundation best practices should be applied?
-   - Recommend configurations that match your proven foundation approach
+   ⭐ COMPARE TO HCMPACT STANDARDS:
+   - How does customer data align with HCMPACT's pay code mappings?
+   - What deductions match HCMPACT's standard configurations?
+   - Does their org structure fit HCMPACT's recommended hierarchy?
+   - Which HCMPACT best practices should be applied?
+   - Recommend configurations that match HCMPACT's proven approach
    
-   Standard UKG Mapping Recommendations:"""
+   HCMPACT-Based UKG Mapping Recommendations:"""
                             else:
                                 analysis_prompt += """
    Standard UKG Mapping Recommendations:"""
@@ -1796,8 +1796,8 @@ ANALYZE AND PROVIDE:
                             
                             if enabled_foundation_files:
                                 analysis_prompt += """
-   - Alignment with HCMPACT foundation standards (%)
-   - Recommended foundation templates to use"""
+   - Alignment with HCMPACT standards (%)
+   - Recommended HCMPACT templates to use"""
                             
                             analysis_prompt += """
 
@@ -2169,23 +2169,25 @@ Provide a helpful, specific answer based on the context and your UKG expertise."
         with analysis_tab4:
             st.markdown("""
             <div class='info-box'>
-                <h3>📚 Foundation Data Library</h3>
-                <p>Upload your company's standard UKG configurations, pay code mappings, deduction codes, 
-                org structures, and best practices. When enabled, the AI will compare customer data to 
-                YOUR standards and provide recommendations based on YOUR proven approach.</p>
+                <h3>🌱 Seed HCMPACT LLM</h3>
+                <p>Upload HCMPACT's knowledge base across all service areas: PRO Core, WFM, Templates, 
+                Prompts, Talent Management (Recruiting, Onboarding, Performance, Compensation, Succession), 
+                Service Delivery, Project Management, Change Management, and Industry Research. 
+                When enabled, the AI will compare customer data to 
+                <strong>HCMPACT's proven standards</strong> and provide recommendations based on <strong>HCMPACT's methodology</strong>.</p>
             </div>
             """, unsafe_allow_html=True)
             
-            # Foundation Intelligence toggle
+            # HCMPACT Intelligence toggle
             col1, col2 = st.columns([3, 1])
             with col1:
-                st.markdown("### 🧠 Foundation Intelligence Status")
+                st.markdown("### 🧠 HCMPACT Intelligence Status")
             with col2:
                 if 'foundation_enabled' not in st.session_state:
                     st.session_state.foundation_enabled = True
                 
                 foundation_toggle = st.toggle(
-                    "Enable Foundation",
+                    "Enable HCMPACT",
                     value=st.session_state.foundation_enabled,
                     key="foundation_toggle_ui"
                 )
@@ -2218,28 +2220,31 @@ Provide a helpful, specific answer based on the context and your UKG expertise."
             
             st.markdown("---")
             
-            # Upload new foundation file
-            st.markdown("### ➕ Add Foundation Document")
+            # Upload new HCMPACT standard file
+            st.markdown("### ➕ Add HCMPACT Standard")
             
             upload_col1, upload_col2 = st.columns([3, 1])
             with upload_col1:
                 foundation_upload = st.file_uploader(
-                    "Upload Foundation Document",
+                    "Upload HCMPACT Standard Document",
                     type=['txt', 'md', 'csv', 'xlsx', 'xls', 'docx', 'pdf'],
                     key="foundation_uploader",
-                    help="Upload your standard UKG configurations, mappings, or best practices"
+                    help="Upload HCMPACT's standard UKG configurations, mappings, or best practices"
                 )
             
             with upload_col2:
                 foundation_category = st.selectbox(
                     "Category",
-                    ["Pay Codes", "Deductions", "Org Structure", "Best Practices", 
-                     "Time & Attendance", "Benefits", "Reporting", "Other"],
+                    ["PRO Core", "WFM", "Templates", "Prompts", "Ben Admin", 
+                     "Recruiting", "Onboarding", "Performance", "Compensation", 
+                     "Succession", "Doc Manager", "UKG Service Delivery", 
+                     "Project Management", "Search & Selection", "Change Management", 
+                     "HCMPACT Service Delivery", "Industry Research"],
                     key="foundation_category"
                 )
             
             if foundation_upload:
-                if st.button("📥 Add to Foundation Library", type="primary", use_container_width=True):
+                if st.button("📥 Add to HCMPACT Knowledge Base", type="primary", use_container_width=True):
                     try:
                         # Read file content
                         if foundation_upload.name.endswith(('.txt', '.md')):
@@ -2263,7 +2268,7 @@ Provide a helpful, specific answer based on the context and your UKG expertise."
                         }
                         
                         st.session_state.foundation_files.append(new_foundation_file)
-                        st.success(f"✅ Added '{foundation_upload.name}' to Foundation Library!")
+                        st.success(f"✅ Added '{foundation_upload.name}' to HCMPACT Knowledge Base!")
                         st.rerun()
                     
                     except Exception as e:
@@ -2272,20 +2277,24 @@ Provide a helpful, specific answer based on the context and your UKG expertise."
             st.markdown("---")
             
             # Display foundation library
-            st.markdown("### 📚 Foundation Library")
+            st.markdown("### 📚 HCMPACT Knowledge Base")
             
             # Clean up any invalid entries (UploadedFile objects)
             st.session_state.foundation_files = [f for f in st.session_state.foundation_files if isinstance(f, dict)]
             
             if not st.session_state.foundation_files:
                 st.info("""
-                📋 **No foundation documents yet**
+                📋 **No HCMPACT standards loaded yet**
                 
-                Upload your standard UKG configurations to enable Foundation Intelligence:
-                - Pay code mappings (standard rates, overtime rules, etc.)
-                - Deduction code mappings (401k, health insurance, etc.)
-                - Org structure templates (levels, hierarchies, etc.)
-                - Implementation best practices and checklists
+                Upload HCMPACT's knowledge base organized by service area:
+                - **PRO Core / WFM**: Configuration guides, standard mappings, best practices
+                - **Templates**: Standard deliverables, documents, configurations
+                - **Prompts**: AI prompts, analysis frameworks, question libraries
+                - **Service Delivery**: UKG & HCMPACT service delivery methodologies
+                - **Project Management**: Implementation checklists, timelines, methodologies
+                - **Talent Management**: Recruiting, Onboarding, Performance, Compensation, Succession
+                - **Change Management**: Change frameworks, communication templates
+                - **Industry Research**: Sector-specific insights, benchmarks, trends
                 """)
             else:
                 # Group by category
@@ -2370,17 +2379,17 @@ Provide a helpful, specific answer based on the context and your UKG expertise."
             
             # How it works
             st.markdown("---")
-            with st.expander("💡 How Foundation Intelligence Works", expanded=False):
+            with st.expander("💡 How Seeding HCMPACT LLM Works", expanded=False):
                 st.markdown("""
                 ### How It Works
                 
-                **1. Upload Foundation Documents**
-                - Add your company's standard UKG configurations
+                **1. Upload HCMPACT Standards**
+                - Add HCMPACT's standard UKG configurations
                 - Include pay codes, deductions, org structures, best practices
                 - Categorize documents for easy management
                 
-                **2. Enable Foundation Intelligence**
-                - Toggle the "Enable Foundation" switch at the top
+                **2. Enable HCMPACT Intelligence**
+                - Toggle the "Enable HCMPACT" switch at the top
                 - Enable/disable individual files as needed
                 - Only enabled files are included in AI analysis
                 
@@ -2389,23 +2398,26 @@ Provide a helpful, specific answer based on the context and your UKG expertise."
                 - Upload customer documents as usual
                 - Click "Analyze All Documents"
                 
-                **4. Get Foundation-Based Recommendations**
-                - AI compares customer data to YOUR standards
-                - Recommendations align with YOUR proven approach
-                - Identifies gaps between customer and foundation standards
-                - Suggests configurations that match YOUR methodology
+                **4. Get HCMPACT-Based Recommendations**
+                - AI compares customer data to HCMPACT's standards
+                - Recommendations align with HCMPACT's proven approach
+                - Identifies gaps between customer and HCMPACT standards
+                - Suggests configurations that match HCMPACT's methodology
                 
                 **Example Use Cases:**
-                - "Compare customer pay codes to our standard 50 pay code mappings"
-                - "Analyze their org structure against our 5-level hierarchy model"
-                - "Check deductions against our standard benefits package codes"
-                - "Recommend time tracking based on our shift differential best practices"
+                - **PRO Core**: "Compare customer configuration to HCMPACT's PRO Core best practices"
+                - **WFM**: "Analyze time tracking setup against HCMPACT's WFM standards"
+                - **Templates**: "Apply HCMPACT's standard deliverable templates to this project"
+                - **Prompts**: "Use HCMPACT's discovery prompts for requirements gathering"
+                - **Change Management**: "Recommend HCMPACT's change management framework"
+                - **Industry Research**: "Compare to HCMPACT's healthcare sector benchmarks"
                 
                 **Pro Tips:**
-                - Keep foundation documents up-to-date
-                - Use consistent naming and categories
-                - Enable only relevant files for each analysis
-                - Start with core mappings (pay codes, deductions, org structure)
+                - **Organize by service area**: Use categories to match HCMPACT's service lines
+                - **Start with core areas**: Begin with PRO Core, WFM, and Templates
+                - **Add industry-specific**: Include relevant Industry Research for each client
+                - **Keep current**: Update standards as HCMPACT methodology evolves
+                - **Enable strategically**: Turn on only relevant categories per project
                 """)
 
 # TAB 4: SECTION-BASED TEMPLATE SYSTEM
