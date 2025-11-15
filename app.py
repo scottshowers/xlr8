@@ -2309,7 +2309,7 @@ Provide a helpful, specific answer based on the context and your UKG expertise."
                 for category, files in sorted(categories.items()):
                     with st.expander(f"📁 {category} ({len(files)} files)", expanded=True):
                         for idx, file in enumerate(files):
-                            file_col1, file_col2, file_col3 = st.columns([4, 1, 1])
+                            file_col1, file_col2, file_col3, file_col4 = st.columns([3, 1, 1, 1])
                             
                             with file_col1:
                                 # File name with status indicator
@@ -2335,17 +2335,27 @@ Provide a helpful, specific answer based on the context and your UKG expertise."
                                     st.rerun()
                             
                             with file_col3:
+                                # Preview button
+                                preview_key = f"preview_{category}_{idx}"
+                                if st.button("👁️", key=preview_key, help="Preview content"):
+                                    st.session_state[f'show_preview_{category}_{idx}'] = not st.session_state.get(f'show_preview_{category}_{idx}', False)
+                                    st.rerun()
+                            
+                            with file_col4:
                                 # Delete button
-                                if st.button("🗑️", key=f"del_{category}_{idx}"):
+                                if st.button("🗑️", key=f"del_{category}_{idx}", help="Delete file"):
                                     st.session_state.foundation_files.remove(file)
                                     st.rerun()
                             
-                            # Preview content
-                            with st.expander(f"👁️ Preview: {file['name']}", expanded=False):
+                            # Show preview if toggled
+                            if st.session_state.get(f'show_preview_{category}_{idx}', False):
                                 preview_content = file['content'][:1000]
                                 if len(file['content']) > 1000:
                                     preview_content += "\n\n... (truncated)"
+                                st.markdown(f"**Preview: {file['name']}**")
                                 st.code(preview_content, language=None)
+                                st.markdown("---")
+
                 
                 st.markdown("---")
                 
