@@ -8,8 +8,8 @@ import re
 from datetime import datetime
 import requests
 
-# Page config
-st.set_page_config(page_title="XLR8", layout="wide", initial_sidebar_state="collapsed")
+# Page config - sidebar EXPANDED by default
+st.set_page_config(page_title="XLR8", layout="wide", initial_sidebar_state="expanded")
 
 # Initialize session state
 if 'projects' not in st.session_state:
@@ -108,6 +108,71 @@ def get_hcmpact_context():
         return "HCMPACT Standards and Best Practices:\n\n" + "\n".join(context_parts)
     return ""
 
+# ===== SIDEBAR =====
+with st.sidebar:
+    st.title("🚀 XLR8")
+    st.caption("UKG Implementation Accelerator")
+    
+    st.divider()
+    
+    # Project Selection
+    st.subheader("📁 Active Project")
+    
+    if st.session_state.projects:
+        project_names = [p['name'] for p in st.session_state.projects]
+        current_idx = 0
+        
+        if st.session_state.current_project:
+            try:
+                current_idx = project_names.index(st.session_state.current_project)
+            except ValueError:
+                current_idx = 0
+        
+        selected_project = st.selectbox(
+            "Select Project",
+            ["None"] + project_names,
+            index=current_idx + 1 if st.session_state.current_project else 0,
+            key="sidebar_project_select"
+        )
+        
+        if selected_project != "None":
+            st.session_state.current_project = selected_project
+            
+            # Show project details
+            for project in st.session_state.projects:
+                if project['name'] == selected_project:
+                    st.success(f"✅ {selected_project}")
+                    st.caption(f"Created: {project['created']}")
+                    st.caption(f"Files: {len(project.get('files', []))}")
+                    break
+        else:
+            st.session_state.current_project = None
+            st.info("No project selected")
+    else:
+        st.info("No projects created yet")
+        st.caption("Go to Home & Projects to create a project")
+    
+    st.divider()
+    
+    # Quick Stats
+    st.subheader("📊 Quick Stats")
+    st.metric("Total Projects", len(st.session_state.projects))
+    
+    total_hcmpact = sum(len(files) for files in st.session_state.hcmpact_files.values())
+    st.metric("HCMPACT Docs", total_hcmpact)
+    
+    st.divider()
+    
+    # LLM Status
+    st.subheader("🤖 AI Status")
+    if 'llm_base_url' in st.session_state:
+        st.success("✅ LLM Configured")
+        if st.session_state.get('llm_username'):
+            st.caption("🔒 Auth Enabled")
+    else:
+        st.warning("⚠️ LLM Not Configured")
+        st.caption("Configure in Connectivity tab")
+
 # Main app
 st.title("🚀 XLR8 - UKG Implementation Accelerator")
 
@@ -144,29 +209,37 @@ with tab1:
                 }
                 st.session_state.projects.append(new_project)
                 st.success(f"Project '{project_name}' created!")
+                st.rerun()
     
     with col2:
-        st.subheader("Active Project")
-        if st.session_state.projects:
-            project_names = [p['name'] for p in st.session_state.projects]
-            selected = st.selectbox("Select Project", ["None"] + project_names)
-            
-            if selected != "None":
-                st.session_state.current_project = selected
-                st.success(f"Active: {selected}")
-            else:
-                st.session_state.current_project = None
+        st.subheader("Current Project")
+        if st.session_state.current_project:
+            st.success(f"✅ {st.session_state.current_project}")
         else:
-            st.info("No projects yet")
+            st.info("No project selected")
     
     # Display existing projects
     if st.session_state.projects:
+        st.divider()
         st.subheader("Existing Projects")
-        for project in st.session_state.projects:
-            with st.expander(f"📁 {project['name']}"):
+        for idx, project in enumerate(st.session_state.projects):
+            with st.expander(f"📁 {project['name']}", expanded=False):
                 st.write(f"**Description:** {project['description']}")
                 st.write(f"**Created:** {project['created']}")
                 st.write(f"**Files:** {len(project.get('files', []))}")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("Set as Active", key=f"activate_{idx}"):
+                        st.session_state.current_project = project['name']
+                        st.rerun()
+                
+                with col2:
+                    if st.button("Delete Project", key=f"delete_{idx}"):
+                        st.session_state.projects.pop(idx)
+                        if st.session_state.current_project == project['name']:
+                            st.session_state.current_project = None
+                        st.rerun()
 
 # TAB 2: Admin
 with tab2:
@@ -195,12 +268,14 @@ with tab3:
     with config_tab1:
         st.subheader("Local LLM Configuration")
         
+        st.info("💡 Configure your Ollama LLM connection with authentication support")
+        
         col1, col2 = st.columns(2)
         with col1:
             llm_base_url = st.text_input(
                 "Base URL",
-                value=st.session_state.get('llm_base_url', 'http://localhost:11434'),
-                help="URL of your Ollama server"
+                value=st.session_state.get('llm_base_url', 'http://178.156.190.64:11435'),
+                help="URL of your Ollama server (use port 11435 for authenticated endpoint)"
             )
             llm_model = st.text_input(
                 "Model",
@@ -210,18 +285,18 @@ with tab3:
         
         with col2:
             llm_username = st.text_input(
-                "Username (optional)",
+                "Username",
                 value=st.session_state.get('llm_username', ''),
-                help="Username for authenticated endpoints"
+                help="Username for authenticated endpoints (e.g., xlr8)"
             )
             llm_password = st.text_input(
-                "Password (optional)",
+                "Password",
                 value=st.session_state.get('llm_password', ''),
                 type="password",
                 help="Password for authenticated endpoints"
             )
         
-        if st.button("Save & Test LLM Connection"):
+        if st.button("💾 Save & Test LLM Connection", type="primary"):
             st.session_state.llm_base_url = llm_base_url
             st.session_state.llm_model = llm_model
             st.session_state.llm_username = llm_username
@@ -237,7 +312,7 @@ with tab3:
                 )
                 
                 if "Error" in test_response:
-                    st.error(f"Connection failed: {test_response}")
+                    st.error(f"❌ Connection failed: {test_response}")
                 else:
                     st.success("✅ LLM Connection successful!")
                     st.info(f"Response: {test_response}")
@@ -245,12 +320,19 @@ with tab3:
         # Display current config
         if 'llm_base_url' in st.session_state:
             st.divider()
-            st.write("**Current Configuration:**")
-            st.write(f"- Base URL: `{st.session_state.llm_base_url}`")
-            st.write(f"- Model: `{st.session_state.llm_model}`")
-            if st.session_state.get('llm_username'):
-                st.write(f"- Username: `{st.session_state.llm_username}`")
-                st.write(f"- Authentication: ✅ Enabled")
+            st.subheader("Current Configuration")
+            
+            config_col1, config_col2 = st.columns(2)
+            with config_col1:
+                st.write(f"**Base URL:** `{st.session_state.llm_base_url}`")
+                st.write(f"**Model:** `{st.session_state.llm_model}`")
+            
+            with config_col2:
+                if st.session_state.get('llm_username'):
+                    st.write(f"**Username:** `{st.session_state.llm_username}`")
+                    st.write(f"**Authentication:** ✅ Enabled")
+                else:
+                    st.write(f"**Authentication:** ⚠️ Not configured")
     
     with config_tab2:
         st.subheader("UKG API Configuration")
@@ -265,24 +347,24 @@ with tab4:
     st.header("AI-Powered PDF Document Parser")
     
     if st.session_state.current_project:
-        st.success(f"Active Project: {st.session_state.current_project}")
+        st.success(f"📁 Active Project: {st.session_state.current_project}")
     else:
         st.warning("⚠️ No active project selected. Go to Home & Projects to create/select a project.")
     
     uploaded_file = st.file_uploader("Upload PDF Document", type=['pdf'], key="ai_pdf_upload")
     
     if uploaded_file:
-        st.success(f"Uploaded: {uploaded_file.name}")
+        st.success(f"✅ Uploaded: {uploaded_file.name}")
         
         # Extract text
         with st.spinner("Extracting text from PDF..."):
             text_content = extract_text_from_pdf(uploaded_file)
         
         if text_content:
-            st.info(f"Extracted {len(text_content)} characters")
+            st.info(f"📄 Extracted {len(text_content)} characters")
             
             # Show preview
-            with st.expander("View Extracted Text"):
+            with st.expander("👁️ View Extracted Text"):
                 st.text_area("Content Preview", text_content[:1000] + "...", height=200)
             
             # AI Analysis options
@@ -296,7 +378,7 @@ with tab4:
             if analysis_type == "Custom Prompt":
                 custom_prompt = st.text_area("Enter your custom prompt")
             
-            if st.button("🤖 Analyze with AI"):
+            if st.button("🤖 Analyze with AI", type="primary"):
                 # Get HCMPACT context
                 hcmpact_context = get_hcmpact_context()
                 
@@ -313,7 +395,7 @@ with tab4:
                 with st.spinner("Analyzing with AI..."):
                     result = call_local_llm(prompt, context=hcmpact_context)
                     
-                    st.subheader("Analysis Result")
+                    st.subheader("📊 Analysis Result")
                     st.write(result)
                     
                     # Save to project if active
@@ -338,7 +420,7 @@ with tab5:
     st.header("Template-Based Document Parser")
     
     if st.session_state.current_project:
-        st.success(f"Active Project: {st.session_state.current_project}")
+        st.success(f"📁 Active Project: {st.session_state.current_project}")
     else:
         st.warning("⚠️ No active project selected. Go to Home & Projects to create/select a project.")
     
@@ -394,7 +476,7 @@ with tab6:
         )
         
         if uploaded_standards:
-            if st.button("Process & Save HCMPACT Documents"):
+            if st.button("📥 Process & Save HCMPACT Documents", type="primary"):
                 with st.spinner("Processing documents..."):
                     # Initialize category if not exists
                     if selected_category not in st.session_state.hcmpact_files:
@@ -417,10 +499,11 @@ with tab6:
                         st.session_state.hcmpact_files[selected_category].append(file_info)
                     
                     st.success(f"✅ Processed {len(uploaded_standards)} document(s) for {selected_category}")
+                    st.rerun()
         
         # Display existing HCMPACT files
         st.divider()
-        st.subheader("HCMPACT Knowledge Base")
+        st.subheader("📚 HCMPACT Knowledge Base")
         
         if st.session_state.hcmpact_files:
             total_files = sum(len(files) for files in st.session_state.hcmpact_files.values())
@@ -433,7 +516,7 @@ with tab6:
             
             for category, files in st.session_state.hcmpact_files.items():
                 if files:
-                    with st.expander(f"📁 {category} ({len(files)} documents)"):
+                    with st.expander(f"📁 {category} ({len(files)} documents)", expanded=False):
                         for idx, file_info in enumerate(files):
                             col1, col2, col3 = st.columns([3, 1, 1])
                             
@@ -450,7 +533,7 @@ with tab6:
                                 file_info['enabled'] = enabled
                             
                             with col3:
-                                if st.button("🗑️ Delete", key=f"delete_{category}_{idx}"):
+                                if st.button("🗑️", key=f"delete_{category}_{idx}"):
                                     st.session_state.hcmpact_files[category].pop(idx)
                                     st.rerun()
         else:
