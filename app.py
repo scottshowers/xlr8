@@ -15,6 +15,7 @@ from utils.secure_pdf_parser import (
     EnhancedPayrollParser,
     process_parsed_pdf_for_ukg
 )
+from utils.rag_handler import RAGHandler
 # Section-Based Template System imports
 try:
     from pdf2image import convert_from_bytes
@@ -48,6 +49,10 @@ if 'parsed_results' not in st.session_state:
     st.session_state.parsed_results = None
 if 'foundation_files' not in st.session_state:
     st.session_state.foundation_files = []
+
+# Initialize RAG Handler for HCMPACT Knowledge Base
+if 'rag_handler' not in st.session_state:
+    st.session_state.rag_handler = RAGHandler()
 
 # Hardcoded LLM Configuration - Always Connected
 if 'llm_endpoint' not in st.session_state:
@@ -2166,6 +2171,21 @@ End of Report
             </div>
             """, unsafe_allow_html=True)
             
+            # Show active HCMPACT standards
+            if st.session_state.get('foundation_enabled', True):
+                rag_stats = st.session_state.rag_handler.get_stats()
+                if rag_stats['unique_documents'] > 0:
+                    st.markdown(f"""
+                    <div class='success-box' style='font-size: 0.85rem;'>
+                        🧠 <strong>RAG Intelligence Active</strong> - {rag_stats['unique_documents']} documents indexed with {rag_stats['total_chunks']} searchable chunks<br>
+                        <small>Chat automatically finds relevant standards for each question</small>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.info("💡 Upload HCMPACT standards in Tab 6 → Seed HCMPACT LLM to enhance chat responses")
+            else:
+                st.info("💡 Upload HCMPACT standards in Tab 6 → Seed HCMPACT LLM to enhance chat responses")
+            
             # Security indicator
             if st.session_state.llm_provider == 'local':
                 st.success("🔐 Using Local LLM - Chat data stays in your infrastructure")
@@ -2190,6 +2210,14 @@ End of Report
                         <strong>AI:</strong><br>{message['content']}
                     </div>
                     """, unsafe_allow_html=True)
+                    
+                    # Show sources if available
+                    if message.get('sources'):
+                        with st.expander("📚 Sources Used", expanded=False):
+                            st.markdown("**HCMPACT Standards Referenced:**")
+                            for source in message['sources']:
+                                relevance_pct = int(source['relevance'] * 100)
+                                st.markdown(f"- **{source['name']}** ({source['category']}) - Relevance: {relevance_pct}%")
             
             # Chat input
             user_question = st.text_input(
@@ -2210,24 +2238,47 @@ End of Report
                 if st.session_state.get('ai_analysis_results'):
                     context = f"\n\nCONTEXT:\n{st.session_state.ai_analysis_results['analysis']}"
                 
-                # Add foundation context if enabled
+                # Use RAG semantic search for HCMPACT context
                 foundation_chat_context = ""
-                # Filter to only include dictionaries (not UploadedFile objects)
-                valid_foundation_files = [f for f in st.session_state.foundation_files if isinstance(f, dict)]
-                enabled_foundation_files = [f for f in valid_foundation_files if f.get('enabled', False)]
-                if enabled_foundation_files:
-                    foundation_chat_context = "\n\nFOUNDATION STANDARDS (Your Company's Approach):\n"
-                    for foundation_file in enabled_foundation_files:
-                        foundation_chat_context += f"\n{foundation_file['name']} ({foundation_file.get('category', 'General')}):\n"
-                        foundation_chat_context += foundation_file['content'][:500] + "...\n"  # Truncated for chat
+                retrieved_sources = []
                 
-                chat_prompt = f"""You are a UKG implementation expert for project: {st.session_state.current_project}.
+                if st.session_state.get('foundation_enabled', True):
+                    # Semantic search for relevant HCMPACT standards
+                    search_results = st.session_state.rag_handler.search(
+                        query=user_question,
+                        n_results=5  # Top 5 most relevant chunks
+                    )
+                    
+                    if search_results:
+                        foundation_chat_context = "\n\n=== RELEVANT HCMPACT STANDARDS ===\n"
+                        
+                        for idx, result in enumerate(search_results, 1):
+                            doc_name = result['metadata'].get('doc_name', 'Unknown')
+                            category = result['metadata'].get('category', 'General')
+                            content = result['content']
+                            
+                            foundation_chat_context += f"\n[Source {idx}: {doc_name} - {category}]\n{content}\n"
+                            
+                            # Track sources for display
+                            retrieved_sources.append({
+                                'name': doc_name,
+                                'category': category,
+                                'relevance': 1.0 - result.get('distance', 0)  # Convert distance to relevance score
+                            })
+                        
+                        foundation_chat_context += "\n=== END HCMPACT STANDARDS ===\n"
+                
+                chat_prompt = f"""You are a UKG implementation expert helping with: {st.session_state.current_project or 'a UKG implementation'}.
 {foundation_chat_context}
 {context}
 
-USER: {user_question}
+USER QUESTION: {user_question}
 
-Provide a helpful, specific answer based on the context and your UKG expertise."""
+INSTRUCTIONS:
+- Reference the HCMPACT Standards above when answering
+- Provide specific, actionable guidance based on HCMPACT's proven methodology
+- Cite which HCMPACT standard you're referencing when applicable
+- If the standards don't cover this topic, use your UKG expertise"""
                 
                 try:
                     import requests
@@ -2255,7 +2306,11 @@ Provide a helpful, specific answer based on the context and your UKG expertise."
                             
                             if response.status_code == 200:
                                 ai_response = response.json().get('response', 'No response')
-                                st.session_state.chat_history.append({'role': 'assistant', 'content': ai_response})
+                                st.session_state.chat_history.append({
+                                    'role': 'assistant', 
+                                    'content': ai_response,
+                                    'sources': retrieved_sources if retrieved_sources else None
+                                })
                                 st.rerun()
                         
                         else:
@@ -2346,6 +2401,25 @@ Provide a helpful, specific answer based on the context and your UKG expertise."
             
             st.markdown("---")
             
+            # RAG Vector Store Stats
+            rag_stats = st.session_state.rag_handler.get_stats()
+            
+            st.markdown("### 📊 Knowledge Base Statistics")
+            rag_col1, rag_col2, rag_col3 = st.columns(3)
+            with rag_col1:
+                st.metric("Documents Indexed", rag_stats['unique_documents'])
+            with rag_col2:
+                st.metric("Searchable Chunks", rag_stats['total_chunks'])
+            with rag_col3:
+                st.metric("Categories", len(rag_stats['categories']))
+            
+            if rag_stats['categories']:
+                with st.expander("📁 View by Category"):
+                    for category, count in sorted(rag_stats['categories'].items()):
+                        st.markdown(f"**{category}:** {count} chunks")
+            
+            st.markdown("---")
+            
             # Upload new HCMPACT standard file
             st.markdown("### ➕ Add HCMPACT Standard")
             
@@ -2371,34 +2445,45 @@ Provide a helpful, specific answer based on the context and your UKG expertise."
             
             if foundation_upload:
                 if st.button("📥 Add to HCMPACT Knowledge Base", type="primary", use_container_width=True):
-                    try:
-                        # Read file content
-                        if foundation_upload.name.endswith(('.txt', '.md')):
-                            content = foundation_upload.read().decode('utf-8')
-                        elif foundation_upload.name.endswith('.csv'):
-                            df = pd.read_csv(foundation_upload)
-                            content = f"CSV Data:\n{df.to_string()}"
-                        elif foundation_upload.name.endswith(('.xlsx', '.xls')):
-                            df = pd.read_excel(foundation_upload)
-                            content = f"Excel Data:\n{df.to_string()}"
-                        else:
-                            content = f"[Binary file: {foundation_upload.name}]"
+                    with st.spinner("📊 Processing and indexing document..."):
+                        try:
+                            # Read file content
+                            if foundation_upload.name.endswith(('.txt', '.md')):
+                                content = foundation_upload.read().decode('utf-8')
+                            elif foundation_upload.name.endswith('.csv'):
+                                df = pd.read_csv(foundation_upload)
+                                content = f"CSV Data:\n{df.to_string()}"
+                            elif foundation_upload.name.endswith(('.xlsx', '.xls')):
+                                df = pd.read_excel(foundation_upload)
+                                content = f"Excel Data:\n{df.to_string()}"
+                            else:
+                                content = f"[Binary file: {foundation_upload.name}]"
+                            
+                            # Add to foundation library
+                            new_foundation_file = {
+                                'name': foundation_upload.name,
+                                'content': content,
+                                'category': foundation_category,
+                                'enabled': True,
+                                'uploaded_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            }
+                            
+                            st.session_state.foundation_files.append(new_foundation_file)
+                            
+                            # Index into RAG vector store
+                            chunks_added = st.session_state.rag_handler.add_document(
+                                name=foundation_upload.name,
+                                content=content,
+                                category=foundation_category,
+                                metadata={'uploaded_at': new_foundation_file['uploaded_at']}
+                            )
+                            
+                            st.success(f"✅ Added '{foundation_upload.name}' to HCMPACT Knowledge Base!")
+                            st.info(f"🧠 Indexed {chunks_added} searchable chunks for semantic retrieval")
+                            st.rerun()
                         
-                        # Add to foundation library
-                        new_foundation_file = {
-                            'name': foundation_upload.name,
-                            'content': content,
-                            'category': foundation_category,
-                            'enabled': True,
-                            'uploaded_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        }
-                        
-                        st.session_state.foundation_files.append(new_foundation_file)
-                        st.success(f"✅ Added '{foundation_upload.name}' to HCMPACT Knowledge Base!")
-                        st.rerun()
-                    
-                    except Exception as e:
-                        st.error(f"❌ Error reading file: {str(e)}")
+                        except Exception as e:
+                            st.error(f"❌ Error reading file: {str(e)}")
             
             st.markdown("---")
             
