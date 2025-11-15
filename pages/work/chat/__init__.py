@@ -229,7 +229,7 @@ def _call_llm_streaming(prompt: str, placeholder) -> str:
     """Call LLM with streaming for perceived speed boost"""
     
     llm_endpoint = st.session_state.get('llm_endpoint', 'http://localhost:11435')
-    llm_model = st.session_state.get('llm_model', 'llama3.2:latest')
+    llm_model = st.session_state.get('llm_model', 'deepseek-r1:7b')  # ← CHANGED TO DEEPSEEK!
     llm_username = st.session_state.get('llm_username', 'xlr8')
     llm_password = st.session_state.get('llm_password', 'Argyle76226#')
     
