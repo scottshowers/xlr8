@@ -1,36 +1,22 @@
 """
 Document Parser Module
-Extracts text and data from uploaded documents
-
-Owner: Person B - Parser Team
-Dependencies: utils/parsers, PyPDF2, openpyxl
-Testing: Can run standalone with sample files
+Uses the ACTUAL working EnhancedPayrollParser from secure_pdf_parser.py
 """
 
 import streamlit as st
 from typing import Dict, Any, Optional
-from utils.parsers.pdf_parser import extract_pdf_text
-from utils.parsers.excel_parser import extract_excel_data
+from utils.secure_pdf_parser import EnhancedPayrollParser
 
 
 def parse_document(uploaded_file) -> Optional[Dict[str, Any]]:
     """
-    Parse uploaded document and extract content
+    Parse uploaded document using ACTUAL working parser
     
     Args:
         uploaded_file: Streamlit UploadedFile object
     
     Returns:
-        Dictionary with parsed data:
-        {
-            'text': str,
-            'tables': List[DataFrame],
-            'metadata': dict
-        }
-    
-    Example Usage:
-        parsed = parse_document(file)
-        text = parsed['text']
+        Dictionary with parsed data including tables and metadata
     """
     
     try:
@@ -52,56 +38,104 @@ def parse_document(uploaded_file) -> Optional[Dict[str, Any]]:
 
 
 def _parse_pdf(uploaded_file) -> Dict[str, Any]:
-    """Parse PDF document"""
-    text = extract_pdf_text(uploaded_file)
+    """Parse PDF using ACTUAL working EnhancedPayrollParser"""
     
-    return {
-        'text': text,
-        'tables': [],  # TODO: Implement table extraction
-        'metadata': {
-            'type': 'pdf',
-            'filename': uploaded_file.name
+    # Get parser from session state or create new one
+    if 'pdf_parser' not in st.session_state:
+        st.session_state.pdf_parser = EnhancedPayrollParser()
+    
+    parser = st.session_state.pdf_parser
+    
+    # Parse the PDF using the working parser
+    result = parser.parse_pdf(
+        pdf_content=uploaded_file.read(),
+        filename=uploaded_file.name,
+        pages='all'
+    )
+    
+    if result.get('success') and result.get('tables'):
+        # Convert to format expected by analysis module
+        text_content = ""
+        for table_info in result['tables']:
+            df = table_info['data']
+            text_content += f"\n\nTable {table_info['table_num']}:\n"
+            text_content += df.to_string()
+        
+        return {
+            'text': text_content,
+            'tables': result['tables'],
+            'metadata': {
+                'type': 'pdf',
+                'filename': uploaded_file.name,
+                'method': result.get('method', 'unknown'),
+                'processing_time': result.get('processing_time', 0),
+                'total_pages': result.get('metadata', {}).get('total_pages', 0)
+            },
+            'raw_result': result  # Keep full result for advanced processing
         }
-    }
+    else:
+        # Parser failed
+        error_msg = result.get('error', 'Failed to parse PDF')
+        st.error(f"PDF parsing failed: {error_msg}")
+        return None
 
 
 def _parse_excel(uploaded_file) -> Dict[str, Any]:
     """Parse Excel document"""
-    data = extract_excel_data(uploaded_file)
+    import pandas as pd
     
-    # Convert tables to text for AI analysis
-    text_content = f"Excel file: {uploaded_file.name}\n\n"
-    for table_name, df in data.items():
-        text_content += f"Sheet: {table_name}\n{df.to_string()}\n\n"
-    
-    return {
-        'text': text_content,
-        'tables': list(data.values()),
-        'metadata': {
-            'type': 'excel',
-            'filename': uploaded_file.name,
-            'sheets': list(data.keys())
+    try:
+        # Read all sheets
+        excel_file = pd.ExcelFile(uploaded_file)
+        sheets_data = {}
+        text_content = ""
+        
+        for sheet_name in excel_file.sheet_names:
+            df = pd.read_excel(excel_file, sheet_name=sheet_name)
+            sheets_data[sheet_name] = df
+            text_content += f"\n\nSheet: {sheet_name}\n{df.to_string()}\n"
+        
+        return {
+            'text': text_content,
+            'tables': [{'name': name, 'data': df} for name, df in sheets_data.items()],
+            'metadata': {
+                'type': 'excel',
+                'filename': uploaded_file.name,
+                'sheets': list(sheets_data.keys()),
+                'total_sheets': len(sheets_data)
+            }
         }
-    }
+    except Exception as e:
+        st.error(f"Error parsing Excel: {str(e)}")
+        return None
 
 
 def _parse_word(uploaded_file) -> Dict[str, Any]:
     """Parse Word document"""
-    # TODO: Implement Word parsing
-    return {
-        'text': f"[Word document: {uploaded_file.name}]",
-        'tables': [],
-        'metadata': {
-            'type': 'word',
-            'filename': uploaded_file.name
+    try:
+        from docx import Document
+        
+        doc = Document(uploaded_file)
+        text_content = "\n".join([para.text for para in doc.paragraphs])
+        
+        return {
+            'text': text_content,
+            'tables': [],
+            'metadata': {
+                'type': 'word',
+                'filename': uploaded_file.name,
+                'paragraphs': len(doc.paragraphs)
+            }
         }
-    }
+    except Exception as e:
+        st.error(f"Error parsing Word: {str(e)}")
+        return None
 
 
 # Standalone testing
 if __name__ == "__main__":
-    st.title("Parser Module - Standalone Test")
-    st.write("Upload a test file to verify parsing")
+    st.title("Parser Module - Using ACTUAL Working Parser")
+    st.write("Upload a test file to verify parsing with EnhancedPayrollParser")
     
     test_file = st.file_uploader("Test file", type=['pdf', 'xlsx', 'csv'])
     
@@ -112,4 +146,12 @@ if __name__ == "__main__":
         if result:
             st.success("✅ Parse successful!")
             st.json(result['metadata'])
-            st.text_area("Extracted Text Preview", result['text'][:500])
+            
+            if result.get('tables'):
+                st.write(f"Found {len(result['tables'])} tables")
+                for i, table in enumerate(result['tables'][:3]):  # Show first 3
+                    st.write(f"Table {i+1}:")
+                    st.dataframe(table.get('data'))
+            
+            with st.expander("View extracted text"):
+                st.text_area("Text Preview", result['text'][:1000], height=200)
