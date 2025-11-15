@@ -53,7 +53,7 @@ if 'foundation_files' not in st.session_state:
 if 'llm_endpoint' not in st.session_state:
     st.session_state.llm_endpoint = "http://178.156.190.64:11435"
 if 'llm_model' not in st.session_state:
-    st.session_state.llm_model = "mixtral:8x7b"
+    st.session_state.llm_model = "mistral:7b"  # Default to faster model
 if 'llm_username' not in st.session_state:
     st.session_state.llm_username = "xlr8"
 if 'llm_password' not in st.session_state:
@@ -255,6 +255,55 @@ with st.sidebar:
         • Pay code templates<br>
         • Accrual standards<br>
         • Industry regulations
+        </div>
+        """, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # AI Model Selector - User Friendly
+    st.markdown("### 🤖 AI Speed")
+    
+    model_choice = st.radio(
+        "Choose AI Speed",
+        ["⚡ Fast (Recommended for most tasks)", "🧠 Thorough (For complex analysis)"],
+        index=0,
+        key="model_selector_radio",
+        help="Fast: PDF parsing, categorization, summaries\nThorough: Strategic planning, complex reasoning"
+    )
+    
+    # Map friendly names to actual models
+    model_mapping = {
+        "⚡ Fast (Recommended for most tasks)": "mistral:7b",
+        "🧠 Thorough (For complex analysis)": "mixtral:8x7b"
+    }
+    
+    selected_model = model_mapping[model_choice]
+    
+    # Update session state when changed
+    if selected_model != st.session_state.llm_model:
+        st.session_state.llm_model = selected_model
+        st.rerun()
+    
+    # Show what this is good for
+    if selected_model == "mistral:7b":
+        st.markdown("""
+        <div class='success-box' style='font-size: 0.75rem; margin-top: 0.5rem; padding: 0.5rem;'>
+            ✅ <strong>Perfect for:</strong><br>
+            • Parsing PDFs<br>
+            • Categorizing data<br>
+            • Quick summaries<br>
+            • Field mapping
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div class='info-box' style='font-size: 0.75rem; margin-top: 0.5rem; padding: 0.5rem;'>
+            🧠 <strong>Best for:</strong><br>
+            • Strategic analysis<br>
+            • Complex reasoning<br>
+            • Detailed reports<br>
+            • Policy interpretation<br>
+            <em>Note: Takes longer to process</em>
         </div>
         """, unsafe_allow_html=True)
     
@@ -1325,14 +1374,6 @@ with tab6:
                 st.session_state.doc_contents = {}
             if 'llm_provider' not in st.session_state:
                 st.session_state.llm_provider = 'local'
-            if 'local_llm_endpoint' not in st.session_state:
-                st.session_state.local_llm_endpoint = 'http://178.156.190.64:11435'
-            if 'local_llm_model' not in st.session_state:
-                st.session_state.local_llm_model = 'mixtral:8x7b'
-            if 'local_llm_username' not in st.session_state:
-                st.session_state.local_llm_username = ''
-            if 'local_llm_password' not in st.session_state:
-                st.session_state.local_llm_password = ''
             
             # Add localStorage persistence via HTML/JavaScript
             st.markdown("""
@@ -1491,40 +1532,28 @@ with tab6:
                         # Local LLM settings
                         endpoint = st.text_input(
                             "Local LLM Endpoint",
-                            value=st.session_state.local_llm_endpoint,
+                            value=st.session_state.llm_endpoint,
                             help="With auth: http://178.156.190.64:11435 | Without auth: http://178.156.190.64:11434",
                             key="local_llm_endpoint_input"
                         )
-                        st.session_state.local_llm_endpoint = endpoint
+                        st.session_state.llm_endpoint = endpoint
                         
                         model = st.text_input(
                             "Model Name",
-                            value=st.session_state.local_llm_model,
+                            value=st.session_state.llm_model,
                             help="Examples: mixtral:8x7b (recommended for 32GB), llama3:70b (needs 64GB), mistral:7b (fast)",
                             key="local_llm_model_input"
                         )
-                        st.session_state.local_llm_model = model
+                        st.session_state.llm_model = model
                         
-                        # Authentication (optional)
-                        st.markdown("**Authentication (Optional)**")
-                        auth_col1, auth_col2 = st.columns(2)
-                        with auth_col1:
-                            llm_username = st.text_input(
-                                "Username",
-                                value=st.session_state.get('local_llm_username', ''),
-                                help="Leave empty if no authentication required",
-                                key="local_llm_username_input"
-                            )
-                            st.session_state.local_llm_username = llm_username
-                        with auth_col2:
-                            llm_password = st.text_input(
-                                "Password",
-                                value=st.session_state.get('local_llm_password', ''),
-                                type="password",
-                                help="Leave empty if no authentication required",
-                                key="local_llm_password_input"
-                            )
-                            st.session_state.local_llm_password = llm_password
+                        # Authentication - Pre-configured
+                        st.markdown("**Authentication**")
+                        st.markdown("""
+                        <div class='success-box' style='font-size: 0.85rem;'>
+                            🔒 Authentication is pre-configured and secured.<br>
+                            Your XLR8 instance automatically connects to your authenticated Ollama server.
+                        </div>
+                        """, unsafe_allow_html=True)
                         
                         # Show save indicator
                         st.markdown("""
@@ -1883,10 +1912,10 @@ Provide specific, actionable recommendations. Use headers and bullet points.
                             
                             if st.session_state.llm_provider == 'local':
                                 # Local LLM (Ollama)
-                                api_url = f"{st.session_state.local_llm_endpoint}/api/generate"
+                                api_url = f"{st.session_state.llm_endpoint}/api/generate"
                                 
                                 payload = {
-                                    "model": st.session_state.local_llm_model,
+                                    "model": st.session_state.llm_model,
                                     "prompt": analysis_prompt,
                                     "stream": False,
                                     "options": {
@@ -1898,12 +1927,12 @@ Provide specific, actionable recommendations. Use headers and bullet points.
                                 try:
                                     from requests.auth import HTTPBasicAuth
                                     
-                                    # Use auth if credentials are provided
+                                    # Use hardcoded auth credentials
                                     auth = None
-                                    if st.session_state.get('local_llm_username') and st.session_state.get('local_llm_password'):
+                                    if st.session_state.get('llm_username') and st.session_state.get('llm_password'):
                                         auth = HTTPBasicAuth(
-                                            st.session_state.local_llm_username,
-                                            st.session_state.local_llm_password
+                                            st.session_state.llm_username,
+                                            st.session_state.llm_password
                                         )
                                     
                                     response = requests.post(api_url, json=payload, timeout=300, auth=auth)
@@ -1918,7 +1947,7 @@ Provide specific, actionable recommendations. Use headers and bullet points.
                                             'analysis': analysis_text,
                                             'depth': analysis_depth,
                                             'provider': 'Local LLM (Secure)',
-                                            'model': st.session_state.local_llm_model,
+                                            'model': st.session_state.llm_model,
                                             'data_residency': 'On-Premises'
                                         }
                                         
@@ -1930,7 +1959,7 @@ Provide specific, actionable recommendations. Use headers and bullet points.
                                         progress_bar.empty()
                                         status_text.empty()
                                         st.error(f"❌ Local LLM Error: {response.status_code}")
-                                        st.info("💡 Check that Ollama is running and the model is pulled: `ollama pull " + st.session_state.local_llm_model + "`")
+                                        st.info("💡 Check that Ollama is running and the model is pulled: `ollama pull " + st.session_state.llm_model + "`")
                                 
                                 except requests.exceptions.Timeout:
                                     progress_bar.empty()
@@ -2203,23 +2232,23 @@ Provide a helpful, specific answer based on the context and your UKG expertise."
                     
                     with st.spinner("🤖 Thinking..."):
                         if st.session_state.llm_provider == 'local':
-                            api_url = f"{st.session_state.local_llm_endpoint}/api/generate"
+                            api_url = f"{st.session_state.llm_endpoint}/api/generate"
                             payload = {
-                                "model": st.session_state.local_llm_model,
+                                "model": st.session_state.llm_model,
                                 "prompt": chat_prompt,
                                 "stream": False,
                                 "options": {"num_predict": 500}
                             }
                             
-                            # Use auth if credentials are provided
+                            # Use hardcoded auth credentials
                             auth = None
-                            if st.session_state.get('local_llm_username') and st.session_state.get('local_llm_password'):
+                            if st.session_state.get('llm_username') and st.session_state.get('llm_password'):
                                 auth = HTTPBasicAuth(
-                                    st.session_state.local_llm_username,
-                                    st.session_state.local_llm_password
+                                    st.session_state.llm_username,
+                                    st.session_state.llm_password
                                 )
                             
-                            response = requests.post(api_url, json=payload, timeout=60, auth=auth)
+                            response = requests.post(api_url, json=payload, timeout=300, auth=auth)
                             
                             if response.status_code == 200:
                                 ai_response = response.json().get('response', 'No response')
