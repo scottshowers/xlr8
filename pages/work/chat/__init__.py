@@ -70,8 +70,9 @@ def render_chat_page():
                         st.markdown(f"**Source {i}:** {source['doc_name']}")
                         st.markdown(f"*Category:* {source['category']}")
                         st.markdown(f"*Relevance Score:* {source.get('score', 'N/A'):.3f}")
-                        with st.expander(f"View excerpt"):
-                            st.text(source['content'][:300] + "...")
+                        st.markdown("**Excerpt:**")
+                        st.text(source['content'][:300] + "...")
+                        st.markdown("---")
     
     # Chat input
     if prompt := st.chat_input("Ask about UKG implementation, best practices, or technical questions..."):
@@ -103,8 +104,9 @@ def render_chat_page():
                             st.markdown(f"**Source {i}:** {source['doc_name']}")
                             st.markdown(f"*Category:* {source['category']}")
                             st.markdown(f"*Relevance Score:* {source.get('score', 'N/A'):.3f}")
-                            with st.expander(f"View excerpt"):
-                                st.text(source['content'][:300] + "...")
+                            st.markdown("**Excerpt:**")
+                            st.text(source['content'][:300] + "...")
+                            st.markdown("---")
         
         # Add assistant message to history
         st.session_state.chat_history.append({
