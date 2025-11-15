@@ -1,21 +1,15 @@
 """
-Sidebar Component
-Always-visible sidebar with project info, AI status, and quick stats
-
-Owner: UI Team
-Dependencies: streamlit, config, session
+Sidebar Component - Fixed for Advanced RAG
 """
 
 import streamlit as st
-from config import AppConfig
-from utils.data.session import get_current_project, get_project_data
 
 
 def render_sidebar():
     """Render the main sidebar"""
     
     with st.sidebar:
-        # Logo and branding
+        # Logo
         st.markdown("""
         <div style='text-align: center; padding-bottom: 2rem; border-bottom: 2px solid #d1dce5; margin-bottom: 2rem;'>
             <div style='width: 80px; height: 80px; margin: 0 auto 1rem; background: white; border: 4px solid #6d8aa0; border-radius: 16px; display: flex; align-items: center; justify-content: center; color: #6d8aa0; font-size: 2rem; font-weight: 700; box-shadow: 0 6px 20px rgba(109, 138, 160, 0.25);'>⚡</div>
@@ -25,142 +19,126 @@ def render_sidebar():
         </div>
         """, unsafe_allow_html=True)
         
-        # Active Project Section
-        _render_project_section()
+        # Project selector
+        _render_project_selector()
         
         st.markdown("---")
         
-        # AI Model Selector
+        # AI/RAG status
         _render_ai_selector()
         
         st.markdown("---")
         
-        # Quick Stats
-        _render_quick_stats()
-        
-        st.markdown("---")
-        
-        # Quick Links
-        _render_quick_links()
+        # Status
+        _render_status()
 
 
-def _render_project_section():
-    """Render project selection and info"""
-    st.markdown("### 📁 Active Project")
-    
-    current_project = get_current_project()
+def _render_project_selector():
+    """Render project selector"""
+    st.markdown("### 📁 Project")
     
     if st.session_state.projects:
         project_names = list(st.session_state.projects.keys())
-        
-        # Current index
-        current_idx = 0
-        if current_project and current_project in project_names:
-            current_idx = project_names.index(current_project) + 1
+        current = st.session_state.current_project
         
         selected = st.selectbox(
             "Select Project",
-            ["None"] + project_names,
-            index=current_idx,
+            [""] + project_names,
+            index=project_names.index(current) + 1 if current in project_names else 0,
             key="sidebar_project_selector"
         )
         
-        if selected != "None":
+        if selected and selected != st.session_state.current_project:
             st.session_state.current_project = selected
-            project_data = get_project_data(selected)
-            
-            if project_data:
-                st.markdown(f"""
-                <div class='info-box' style='font-size: 0.85rem; margin-top: 0.5rem;'>
-                    <strong>📋 {selected}</strong><br>
-                    <small>Customer: {project_data.get('customer_id', 'N/A')}</small><br>
-                    <small>Type: {project_data.get('implementation_type', 'N/A')}</small><br>
-                    <small>Created: {project_data.get('created_date', 'N/A')}</small>
-                </div>
-                """, unsafe_allow_html=True)
-        else:
-            st.session_state.current_project = None
-            st.info("No project selected")
+            st.rerun()
+        
+        if current:
+            project_data = st.session_state.projects[current]
+            st.markdown(f"""
+            <div style='font-size: 0.85rem; color: #6c757d; margin-top: 0.5rem;'>
+                <strong>Type:</strong> {project_data.get('implementation_type', 'N/A')}<br>
+                <strong>Customer:</strong> {project_data.get('customer_id', 'N/A')}
+            </div>
+            """, unsafe_allow_html=True)
     else:
-        st.info("No projects created yet")
-        st.caption("Create one in Setup → Projects")
+        st.info("No projects yet")
 
 
 def _render_ai_selector():
-    """Render AI model selector"""
-    st.markdown("### 🤖 AI Model")
+    """Render AI/RAG status - FIXED for Advanced RAG"""
+    st.markdown("### 🧠 AI System")
     
-    # Model choice
-    model_options = list(AppConfig.LLM_MODELS.keys())
-    model_display = [AppConfig.LLM_MODELS[m]["name"] for m in model_options]
+    # Check RAG handler
+    rag_handler = st.session_state.get('rag_handler')
+    rag_type = st.session_state.get('rag_type', 'none')
     
-    current_model = st.session_state.llm_model
-    current_idx = model_options.index(current_model) if current_model in model_options else 0
+    if rag_handler:
+        try:
+            # Get stats - handle both basic and advanced formats
+            rag_stats = rag_handler.get_stats()
+            
+            # Check if advanced format (nested dict)
+            if isinstance(rag_stats, dict) and any(isinstance(v, dict) for v in rag_stats.values()):
+                # Advanced RAG format - aggregate across strategies
+                total_docs = sum(s.get('unique_documents', 0) for s in rag_stats.values() if isinstance(s, dict))
+                total_chunks = sum(s.get('total_chunks', 0) for s in rag_stats.values() if isinstance(s, dict))
+            else:
+                # Basic RAG format
+                total_docs = rag_stats.get('unique_documents', 0)
+                total_chunks = rag_stats.get('total_chunks', 0)
+            
+            if total_docs > 0:
+                st.success(f"✅ {total_docs} docs | {total_chunks} chunks")
+                
+                # Show RAG type
+                if rag_type == 'advanced':
+                    st.markdown("<small>🚀 Advanced RAG Active</small>", unsafe_allow_html=True)
+                else:
+                    st.markdown("<small>📚 RAG Active</small>", unsafe_allow_html=True)
+            else:
+                st.info("📋 No documents yet")
+                st.markdown("<small>Upload in Knowledge Base</small>", unsafe_allow_html=True)
+                
+        except Exception as e:
+            st.warning(f"⚠️ RAG status unavailable")
+            st.markdown(f"<small>{str(e)[:50]}</small>", unsafe_allow_html=True)
+    else:
+        st.warning("⚠️ RAG not initialized")
     
-    selected_display = st.radio(
-        "Choose Speed",
-        model_display,
-        index=current_idx,
-        key="sidebar_model_selector"
-    )
+    # LLM status
+    llm_endpoint = st.session_state.get('llm_endpoint', 'Not configured')
+    llm_model = st.session_state.get('llm_model', 'Not configured')
     
-    # Map back to actual model name
-    selected_model = model_options[model_display.index(selected_display)]
-    
-    if selected_model != st.session_state.llm_model:
-        st.session_state.llm_model = selected_model
-        st.rerun()
-    
-    # Show model info
-    model_info = AppConfig.LLM_MODELS[selected_model]
-    st.markdown(f"""
-    <div class='success-box' style='font-size: 0.75rem; margin-top: 0.5rem; padding: 0.5rem;'>
-        <strong>{model_info['description']}</strong><br>
-        <small>RAM: {model_info['ram']} • Speed: {model_info['speed']}</small>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # RAG status
-    rag_stats = st.session_state.rag_handler.get_stats()
-    if rag_stats['unique_documents'] > 0:
+    with st.expander("🤖 LLM Config"):
         st.markdown(f"""
-        <div style='background-color: rgba(76, 175, 80, 0.1); padding: 0.5rem; border-radius: 6px; margin-top: 0.5rem; font-size: 0.75rem;'>
-            🧠 <strong>RAG Active</strong><br>
-            <small>{rag_stats['unique_documents']} docs • {rag_stats['total_chunks']} chunks</small>
+        <div style='font-size: 0.8rem;'>
+            <strong>Endpoint:</strong> {llm_endpoint}<br>
+            <strong>Model:</strong> {llm_model}
         </div>
         """, unsafe_allow_html=True)
 
 
-def _render_quick_stats():
-    """Render quick statistics"""
-    st.markdown("### 📊 Quick Stats")
+def _render_status():
+    """Render system status"""
+    st.markdown("### ⚡ Status")
     
-    # Project count
-    project_count = len(st.session_state.projects)
-    st.metric("Projects", project_count)
+    # API status
+    pro_configured = bool(st.session_state.api_credentials.get('pro'))
+    wfm_configured = bool(st.session_state.api_credentials.get('wfm'))
     
-    # Document count
-    doc_count = len(st.session_state.get('doc_library', []))
-    st.metric("Documents", doc_count)
+    st.markdown(f"""
+    <div style='font-size: 0.85rem; line-height: 1.8;'>
+        <div>UKG Pro: {'✅' if pro_configured else '⚪'}</div>
+        <div>UKG WFM: {'✅' if wfm_configured else '⚪'}</div>
+    </div>
+    """, unsafe_allow_html=True)
     
-    # RAG documents
-    rag_stats = st.session_state.rag_handler.get_stats()
-    st.metric("HCMPACT Docs", rag_stats['unique_documents'])
-
-
-def _render_quick_links():
-    """Render quick action links"""
-    st.markdown("### 🔗 Quick Actions")
-    
-    if st.button("📤 Upload Document", use_container_width=True):
-        # Set flag to jump to upload (handled by main app)
-        st.session_state.quick_action = 'upload'
-        st.rerun()
-    
-    if st.button("🤖 Run Analysis", use_container_width=True):
-        st.session_state.quick_action = 'analyze'
-        st.rerun()
-    
-    if st.button("💬 Open Chat", use_container_width=True):
-        st.session_state.quick_action = 'chat'
-        st.rerun()
+    with st.expander("🔒 Security"):
+        st.markdown("""
+        <div style='font-size: 0.8rem; line-height: 1.6;'>
+        ✓ Local Processing<br>
+        ✓ Session-Only Storage<br>
+        ✓ No External APIs<br>
+        ✓ PII Protected
+        </div>
+        """, unsafe_allow_html=True)
