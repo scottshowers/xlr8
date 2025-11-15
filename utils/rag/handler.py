@@ -544,46 +544,56 @@ class AdvancedRAGHandler:
                                   doc_name: str, category: str, 
                                   chunks: List[str], 
                                   metadata: Dict[str, Any] = None) -> int:
-        """Helper to add chunks to specific collection"""
+        """Helper to add chunks to specific collection with automatic batching"""
         collection = self.collections[collection_name]
         
-        ids = []
-        embeddings = []
-        documents = []
-        metadatas = []
+        # ChromaDB batch size limit (use 5000 to be safe, actual limit is ~5461)
+        BATCH_SIZE = 5000
         
-        for i, chunk in enumerate(chunks):
-            chunk_id = f"{doc_id}_{collection_name}_{i}"
-            ids.append(chunk_id)
-            
-            # Generate embedding
-            embedding = self.generate_embedding(chunk)
-            embeddings.append(embedding)
-            documents.append(chunk)
-            
-            # Metadata
-            chunk_metadata = {
-                "doc_id": doc_id,
-                "doc_name": doc_name,
-                "category": category,
-                "chunk_index": i,
-                "total_chunks": len(chunks),
-                "chunking_strategy": collection_name
-            }
-            if metadata:
-                chunk_metadata.update(metadata)
-            
-            metadatas.append(chunk_metadata)
+        total_chunks = len(chunks)
         
-        # Add to collection
-        collection.add(
-            ids=ids,
-            embeddings=embeddings,
-            documents=documents,
-            metadatas=metadatas
-        )
+        # Process in batches to avoid "batch size too large" errors
+        for batch_start in range(0, total_chunks, BATCH_SIZE):
+            batch_end = min(batch_start + BATCH_SIZE, total_chunks)
+            batch_chunks = chunks[batch_start:batch_end]
+            
+            ids = []
+            embeddings = []
+            documents = []
+            metadatas = []
+            
+            for i, chunk in enumerate(batch_chunks, start=batch_start):
+                chunk_id = f"{doc_id}_{collection_name}_{i}"
+                ids.append(chunk_id)
+                
+                # Generate embedding
+                embedding = self.generate_embedding(chunk)
+                embeddings.append(embedding)
+                documents.append(chunk)
+                
+                # Metadata
+                chunk_metadata = {
+                    "doc_id": doc_id,
+                    "doc_name": doc_name,
+                    "category": category,
+                    "chunk_index": i,
+                    "total_chunks": total_chunks,
+                    "chunking_strategy": collection_name
+                }
+                if metadata:
+                    chunk_metadata.update(metadata)
+                
+                metadatas.append(chunk_metadata)
+            
+            # Add this batch to collection
+            collection.add(
+                ids=ids,
+                embeddings=embeddings,
+                documents=documents,
+                metadatas=metadatas
+            )
         
-        return len(chunks)
+        return total_chunks
     
     # ========================================================================
     # HELPER METHODS
