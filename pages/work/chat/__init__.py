@@ -13,13 +13,12 @@ from concurrent.futures import ThreadPoolExecutor
 import asyncio
 
 
-# Query cache (in-memory, session-based)
-if 'query_cache' not in st.session_state:
-    st.session_state.query_cache = {}
-
-
 def render_chat_page():
     """Render highly optimized chat interface"""
+    
+    # Initialize query cache FIRST
+    if 'query_cache' not in st.session_state:
+        st.session_state.query_cache = {}
     
     st.markdown("## 💬 AI Assistant")
     
@@ -123,6 +122,10 @@ def _generate_optimized_response(prompt: str,
     
     if not rag_handler:
         return "RAG system not initialized. Upload documents to Knowledge Base first.", []
+    
+    # Ensure cache exists
+    if 'query_cache' not in st.session_state:
+        st.session_state.query_cache = {}
     
     # Check cache (60 second TTL)
     cache_key = hashlib.md5(f"{prompt}_{retrieval_method}_{num_sources}".encode()).hexdigest()
