@@ -330,13 +330,14 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Tabs
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "🏠 Home & Projects",
-    "📄 Secure PDF Parser",
-    "📊 Data Analysis",
-    "📝 Templates",
-    "⚙️ Configuration",
-    "🛠️ Admin Panel"
+    "🛠️ Admin",
+    "🔗 Connectivity",
+    "🤖 AI PDF Parser",
+    "📝 Templated Parser",
+    "🧠 AI Analysis & Intelligence",
+    "🧪 Testing"
 ])
 
 with tab1:
@@ -497,8 +498,8 @@ with tab1:
                             st.session_state.current_project = None
                         st.rerun()
 
-with tab2:
-    st.markdown("## 📄 Secure Multi-Strategy PDF Parser")
+with tab4:
+    st.markdown("## 🤖 AI PDF Parser")
     
     if not st.session_state.current_project:
         st.warning("⚠️ Please create or select a project first (Home tab)")
@@ -1154,8 +1155,8 @@ Note: Keep column names in first row for re-import
 # TAB 3: SECURE DATA ANALYSIS WITH LOCAL LLM (HR/PAYROLL COMPLIANT)
 # This is the secure version that keeps data in your infrastructure
 
-with tab3:
-    st.markdown("## 📊 Data Analysis & AI Document Intelligence")
+with tab6:
+    st.markdown("## 🧠 AI Analysis & Intelligence")
     
     # Create sub-tabs for different analysis modes
     analysis_tab1, analysis_tab2, analysis_tab3, analysis_tab4 = st.tabs([
@@ -2432,8 +2433,8 @@ Provide a helpful, specific answer based on the context and your UKG expertise."
 
 # TAB 4: SECTION-BASED TEMPLATE SYSTEM
 
-with tab4:
-    st.markdown("## 🎯 Advanced Payroll Template System")
+with tab5:
+    st.markdown("## 📝 Templated Parser System")
     st.markdown("**Define sections + fields to capture all line items from variable-height employee blocks**")
     
     # Initialize state
@@ -2894,8 +2895,8 @@ with tab4:
 
 # TAB 5 - ENHANCED CONFIGURATION WITH API PLAYGROUND
 
-with tab5:
-    st.markdown("## ⚙️ Configuration & API Playground")
+with tab3:
+    st.markdown("## 🔗 Connectivity & API Playground")
     
     # Initialize API state
     if 'ukg_wfm_token' not in st.session_state:
@@ -3292,7 +3293,7 @@ with tab5:
             st.info("📋 No saved endpoints yet. Add one above!")
 
 
-with tab6:
+with tab2:
     st.markdown("## 🛠️ Admin Panel")
     st.markdown("""
     <div class='warning-box'>
@@ -3425,6 +3426,509 @@ with tab6:
         """
         
         st.markdown(system_info)
+
+# TAB 7: TESTING
+
+with tab7:
+    st.markdown("## 🧪 Testing")
+    
+    st.markdown("""
+    <div class='info-box'>
+        <h4>🧪 Test Management & Execution</h4>
+        <p>Manage your UKG implementation testing across all phases: System Integration Testing (SIT), 
+        User Acceptance Testing (UAT), and test scenario/script libraries.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Create sub-tabs for different testing phases
+    test_tab1, test_tab2, test_tab3 = st.tabs([
+        "🔧 SIT (System Integration Testing)",
+        "✅ UAT (User Acceptance Testing)",
+        "📋 Scenarios & Scripts"
+    ])
+    
+    # ============================================================================
+    # SIT TAB
+    # ============================================================================
+    with test_tab1:
+        st.markdown("### 🔧 System Integration Testing")
+        
+        st.markdown("""
+        <div class='warning-box'>
+            <strong>SIT Phase</strong><br>
+            Validate system configurations, integrations, and technical functionality before user testing.
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if not st.session_state.current_project:
+            st.warning("⚠️ Please create or select a project first (Home & Projects tab)")
+        else:
+            st.info(f"📁 **Active Project:** {st.session_state.current_project}")
+            
+            # SIT Test Categories
+            st.markdown("#### Test Categories")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                with st.expander("🔐 Security & Access", expanded=False):
+                    st.markdown("""
+                    - User authentication
+                    - Role-based access control
+                    - Data encryption
+                    - SSO integration
+                    - Password policies
+                    """)
+                
+                with st.expander("🔄 Integrations", expanded=False):
+                    st.markdown("""
+                    - Payroll integrations
+                    - Time & Attendance feeds
+                    - Benefits carrier connections
+                    - Third-party system APIs
+                    - File imports/exports
+                    """)
+                
+                with st.expander("📊 Data Migration", expanded=False):
+                    st.markdown("""
+                    - Employee data load
+                    - Historical data validation
+                    - Data mapping accuracy
+                    - Data transformation rules
+                    - Cleanup and deduplication
+                    """)
+            
+            with col2:
+                with st.expander("⚙️ Configuration", expanded=False):
+                    st.markdown("""
+                    - Pay codes setup
+                    - Deduction codes setup
+                    - Org hierarchy structure
+                    - Workflow configurations
+                    - Business rules engine
+                    """)
+                
+                with st.expander("📈 Reporting", expanded=False):
+                    st.markdown("""
+                    - Standard reports accuracy
+                    - Custom reports functionality
+                    - Dashboard data validation
+                    - Export functionality
+                    - Scheduling and distribution
+                    """)
+                
+                with st.expander("🔔 Notifications", expanded=False):
+                    st.markdown("""
+                    - Email notifications
+                    - System alerts
+                    - Workflow notifications
+                    - Reminder configurations
+                    - Escalation paths
+                    """)
+            
+            st.markdown("---")
+            st.markdown("#### SIT Test Tracker")
+            
+            # Simple test tracker
+            st.markdown("**Track SIT test execution and results:**")
+            
+            # Initialize SIT test state
+            if 'sit_tests' not in st.session_state:
+                st.session_state.sit_tests = []
+            
+            # Add test case
+            with st.expander("➕ Add SIT Test Case"):
+                test_name = st.text_input("Test Case Name", key="sit_test_name")
+                test_category = st.selectbox("Category", 
+                    ["Security & Access", "Integrations", "Data Migration", 
+                     "Configuration", "Reporting", "Notifications"],
+                    key="sit_category")
+                test_description = st.text_area("Description", key="sit_description")
+                test_status = st.selectbox("Status", 
+                    ["Not Started", "In Progress", "Passed", "Failed", "Blocked"],
+                    key="sit_status")
+                test_notes = st.text_area("Notes", key="sit_notes")
+                
+                if st.button("Add Test Case", key="add_sit"):
+                    if test_name:
+                        st.session_state.sit_tests.append({
+                            'name': test_name,
+                            'category': test_category,
+                            'description': test_description,
+                            'status': test_status,
+                            'notes': test_notes,
+                            'created': datetime.now().strftime("%Y-%m-%d %H:%M")
+                        })
+                        st.success(f"✅ Added test case: {test_name}")
+                        st.rerun()
+            
+            # Display test cases
+            if st.session_state.sit_tests:
+                st.markdown("---")
+                st.markdown("**Test Cases:**")
+                
+                # Summary metrics
+                total = len(st.session_state.sit_tests)
+                passed = len([t for t in st.session_state.sit_tests if t['status'] == 'Passed'])
+                failed = len([t for t in st.session_state.sit_tests if t['status'] == 'Failed'])
+                
+                met_col1, met_col2, met_col3, met_col4 = st.columns(4)
+                with met_col1:
+                    st.metric("Total Tests", total)
+                with met_col2:
+                    st.metric("Passed", passed)
+                with met_col3:
+                    st.metric("Failed", failed)
+                with met_col4:
+                    pass_rate = (passed / total * 100) if total > 0 else 0
+                    st.metric("Pass Rate", f"{pass_rate:.0f}%")
+                
+                # List tests
+                for idx, test in enumerate(st.session_state.sit_tests):
+                    status_color = {
+                        'Passed': '🟢',
+                        'Failed': '🔴',
+                        'In Progress': '🟡',
+                        'Not Started': '⚪',
+                        'Blocked': '🟠'
+                    }
+                    
+                    with st.expander(f"{status_color.get(test['status'], '⚪')} {test['name']} ({test['category']})"):
+                        st.markdown(f"**Status:** {test['status']}")
+                        st.markdown(f"**Description:** {test['description']}")
+                        if test['notes']:
+                            st.markdown(f"**Notes:** {test['notes']}")
+                        st.markdown(f"<small>Created: {test['created']}</small>", unsafe_allow_html=True)
+                        
+                        if st.button("🗑️ Delete", key=f"del_sit_{idx}"):
+                            st.session_state.sit_tests.pop(idx)
+                            st.rerun()
+            else:
+                st.info("📋 No SIT test cases yet. Add test cases above to track testing progress.")
+    
+    # ============================================================================
+    # UAT TAB
+    # ============================================================================
+    with test_tab2:
+        st.markdown("### ✅ User Acceptance Testing")
+        
+        st.markdown("""
+        <div class='success-box'>
+            <strong>UAT Phase</strong><br>
+            Validate end-user workflows, business processes, and real-world scenarios with stakeholders.
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if not st.session_state.current_project:
+            st.warning("⚠️ Please create or select a project first (Home & Projects tab)")
+        else:
+            st.info(f"📁 **Active Project:** {st.session_state.current_project}")
+            
+            # UAT Focus Areas
+            st.markdown("#### UAT Focus Areas")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                with st.expander("👥 Employee Self-Service", expanded=False):
+                    st.markdown("""
+                    - Personal information updates
+                    - Time off requests
+                    - Timecard entry and approval
+                    - Benefits enrollment
+                    - Paycheck and tax form access
+                    """)
+                
+                with st.expander("👔 Manager Self-Service", expanded=False):
+                    st.markdown("""
+                    - Approve time off requests
+                    - Approve timecards
+                    - Team scheduling
+                    - Performance reviews
+                    - Compensation planning
+                    """)
+                
+                with st.expander("💼 HR Processes", expanded=False):
+                    st.markdown("""
+                    - New hire onboarding
+                    - Termination processing
+                    - Organizational changes
+                    - Compensation adjustments
+                    - Benefits administration
+                    """)
+            
+            with col2:
+                with st.expander("💰 Payroll Processes", expanded=False):
+                    st.markdown("""
+                    - Regular payroll processing
+                    - Off-cycle payroll
+                    - Year-end processing
+                    - Tax filing preparation
+                    - Garnishment processing
+                    """)
+                
+                with st.expander("⏰ Time & Attendance", expanded=False):
+                    st.markdown("""
+                    - Clock in/out
+                    - Timecard editing
+                    - Schedule creation
+                    - Absence management
+                    - Overtime tracking
+                    """)
+                
+                with st.expander("🎯 Talent Management", expanded=False):
+                    st.markdown("""
+                    - Recruiting workflows
+                    - Onboarding checklists
+                    - Performance reviews
+                    - Goal management
+                    - Succession planning
+                    """)
+            
+            st.markdown("---")
+            st.markdown("#### UAT Test Tracker")
+            
+            # Initialize UAT test state
+            if 'uat_tests' not in st.session_state:
+                st.session_state.uat_tests = []
+            
+            # Add test scenario
+            with st.expander("➕ Add UAT Test Scenario"):
+                uat_name = st.text_input("Scenario Name", key="uat_test_name")
+                uat_category = st.selectbox("Focus Area", 
+                    ["Employee Self-Service", "Manager Self-Service", "HR Processes", 
+                     "Payroll Processes", "Time & Attendance", "Talent Management"],
+                    key="uat_category")
+                uat_description = st.text_area("Scenario Description", key="uat_description")
+                uat_tester = st.text_input("Assigned Tester", key="uat_tester")
+                uat_status = st.selectbox("Status", 
+                    ["Not Started", "In Progress", "Passed", "Failed", "Blocked"],
+                    key="uat_status")
+                uat_feedback = st.text_area("User Feedback", key="uat_feedback")
+                
+                if st.button("Add UAT Scenario", key="add_uat"):
+                    if uat_name:
+                        st.session_state.uat_tests.append({
+                            'name': uat_name,
+                            'category': uat_category,
+                            'description': uat_description,
+                            'tester': uat_tester,
+                            'status': uat_status,
+                            'feedback': uat_feedback,
+                            'created': datetime.now().strftime("%Y-%m-%d %H:%M")
+                        })
+                        st.success(f"✅ Added UAT scenario: {uat_name}")
+                        st.rerun()
+            
+            # Display UAT scenarios
+            if st.session_state.uat_tests:
+                st.markdown("---")
+                st.markdown("**UAT Scenarios:**")
+                
+                # Summary metrics
+                total = len(st.session_state.uat_tests)
+                passed = len([t for t in st.session_state.uat_tests if t['status'] == 'Passed'])
+                failed = len([t for t in st.session_state.uat_tests if t['status'] == 'Failed'])
+                
+                met_col1, met_col2, met_col3, met_col4 = st.columns(4)
+                with met_col1:
+                    st.metric("Total Scenarios", total)
+                with met_col2:
+                    st.metric("Passed", passed)
+                with met_col3:
+                    st.metric("Failed", failed)
+                with met_col4:
+                    pass_rate = (passed / total * 100) if total > 0 else 0
+                    st.metric("Pass Rate", f"{pass_rate:.0f}%")
+                
+                # List scenarios
+                for idx, test in enumerate(st.session_state.uat_tests):
+                    status_color = {
+                        'Passed': '🟢',
+                        'Failed': '🔴',
+                        'In Progress': '🟡',
+                        'Not Started': '⚪',
+                        'Blocked': '🟠'
+                    }
+                    
+                    with st.expander(f"{status_color.get(test['status'], '⚪')} {test['name']} ({test['category']})"):
+                        st.markdown(f"**Status:** {test['status']}")
+                        st.markdown(f"**Tester:** {test['tester']}")
+                        st.markdown(f"**Description:** {test['description']}")
+                        if test['feedback']:
+                            st.markdown(f"**User Feedback:** {test['feedback']}")
+                        st.markdown(f"<small>Created: {test['created']}</small>", unsafe_allow_html=True)
+                        
+                        if st.button("🗑️ Delete", key=f"del_uat_{idx}"):
+                            st.session_state.uat_tests.pop(idx)
+                            st.rerun()
+            else:
+                st.info("📋 No UAT scenarios yet. Add scenarios above to track user acceptance testing.")
+    
+    # ============================================================================
+    # SCENARIOS & SCRIPTS TAB
+    # ============================================================================
+    with test_tab3:
+        st.markdown("### 📋 Test Scenarios & Scripts Library")
+        
+        st.markdown("""
+        <div class='info-box'>
+            <strong>Test Scenario Library</strong><br>
+            Manage reusable test scenarios and scripts for common UKG workflows and processes.
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Initialize scenario library
+        if 'scenario_library' not in st.session_state:
+            st.session_state.scenario_library = []
+        
+        # Add scenario template
+        st.markdown("#### Add Test Scenario Template")
+        
+        with st.expander("➕ Create New Scenario Template"):
+            scenario_name = st.text_input("Scenario Name", key="scenario_name")
+            scenario_module = st.selectbox("UKG Module", 
+                ["PRO Core", "WFM", "Payroll", "Benefits", "Recruiting", 
+                 "Onboarding", "Performance", "Compensation", "Time & Attendance"],
+                key="scenario_module")
+            scenario_type = st.selectbox("Test Type", 
+                ["Functional", "Integration", "Regression", "Performance", "Security"],
+                key="scenario_type")
+            scenario_steps = st.text_area("Test Steps", 
+                placeholder="1. Navigate to...\n2. Click on...\n3. Enter data...\n4. Verify...",
+                key="scenario_steps", height=150)
+            scenario_data = st.text_area("Test Data Requirements", key="scenario_data")
+            scenario_expected = st.text_area("Expected Results", key="scenario_expected")
+            
+            if st.button("💾 Save Scenario Template", key="save_scenario"):
+                if scenario_name and scenario_steps:
+                    st.session_state.scenario_library.append({
+                        'name': scenario_name,
+                        'module': scenario_module,
+                        'type': scenario_type,
+                        'steps': scenario_steps,
+                        'data': scenario_data,
+                        'expected': scenario_expected,
+                        'created': datetime.now().strftime("%Y-%m-%d %H:%M")
+                    })
+                    st.success(f"✅ Saved scenario: {scenario_name}")
+                    st.rerun()
+                else:
+                    st.warning("Please provide scenario name and test steps")
+        
+        # Display scenario library
+        if st.session_state.scenario_library:
+            st.markdown("---")
+            st.markdown("#### Scenario Library")
+            
+            # Filter options
+            filter_col1, filter_col2 = st.columns(2)
+            with filter_col1:
+                filter_module = st.selectbox("Filter by Module", 
+                    ["All"] + ["PRO Core", "WFM", "Payroll", "Benefits", "Recruiting", 
+                               "Onboarding", "Performance", "Compensation", "Time & Attendance"],
+                    key="filter_module")
+            with filter_col2:
+                filter_type = st.selectbox("Filter by Type",
+                    ["All", "Functional", "Integration", "Regression", "Performance", "Security"],
+                    key="filter_type")
+            
+            # Filter scenarios
+            filtered_scenarios = st.session_state.scenario_library
+            if filter_module != "All":
+                filtered_scenarios = [s for s in filtered_scenarios if s['module'] == filter_module]
+            if filter_type != "All":
+                filtered_scenarios = [s for s in filtered_scenarios if s['type'] == filter_type]
+            
+            st.markdown(f"**Showing {len(filtered_scenarios)} of {len(st.session_state.scenario_library)} scenarios**")
+            
+            # Display scenarios
+            for idx, scenario in enumerate(st.session_state.scenario_library):
+                # Skip if filtered out
+                if scenario not in filtered_scenarios:
+                    continue
+                
+                with st.expander(f"📋 {scenario['name']} | {scenario['module']} | {scenario['type']}"):
+                    st.markdown(f"**Module:** {scenario['module']}")
+                    st.markdown(f"**Type:** {scenario['type']}")
+                    st.markdown("**Test Steps:**")
+                    st.code(scenario['steps'], language=None)
+                    if scenario['data']:
+                        st.markdown("**Test Data Requirements:**")
+                        st.code(scenario['data'], language=None)
+                    if scenario['expected']:
+                        st.markdown("**Expected Results:**")
+                        st.code(scenario['expected'], language=None)
+                    st.markdown(f"<small>Created: {scenario['created']}</small>", unsafe_allow_html=True)
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("📋 Copy to SIT", key=f"copy_sit_{idx}"):
+                            # Copy to SIT tracker
+                            if 'sit_tests' not in st.session_state:
+                                st.session_state.sit_tests = []
+                            st.session_state.sit_tests.append({
+                                'name': scenario['name'],
+                                'category': scenario['module'],
+                                'description': scenario['steps'],
+                                'status': 'Not Started',
+                                'notes': '',
+                                'created': datetime.now().strftime("%Y-%m-%d %H:%M")
+                            })
+                            st.success("✅ Copied to SIT tracker")
+                            st.rerun()
+                    with col2:
+                        if st.button("🗑️ Delete", key=f"del_scenario_{idx}"):
+                            st.session_state.scenario_library.pop(idx)
+                            st.rerun()
+        else:
+            st.info("📋 No scenario templates yet. Create reusable test scenarios above.")
+        
+        # Pre-built scenario templates
+        st.markdown("---")
+        st.markdown("#### 💡 Quick Start: Common Test Scenarios")
+        
+        with st.expander("📚 Load Common UKG Test Scenarios"):
+            st.markdown("""
+            Click below to load pre-built test scenarios for common UKG workflows:
+            """)
+            
+            if st.button("Load Sample Scenarios"):
+                sample_scenarios = [
+                    {
+                        'name': 'Employee New Hire Onboarding',
+                        'module': 'PRO Core',
+                        'type': 'Functional',
+                        'steps': '1. Navigate to Add New Employee\n2. Enter employee demographics\n3. Assign org placement\n4. Configure pay setup\n5. Set work schedule\n6. Save and verify employee record',
+                        'data': 'New employee: First Name, Last Name, SSN, DOB, Address, Hire Date',
+                        'expected': 'Employee created successfully, appears in employee list, can login to ESS',
+                        'created': datetime.now().strftime("%Y-%m-%d %H:%M")
+                    },
+                    {
+                        'name': 'Process Bi-Weekly Payroll',
+                        'module': 'Payroll',
+                        'type': 'Integration',
+                        'steps': '1. Import time data\n2. Review exceptions\n3. Calculate payroll\n4. Review pre-check report\n5. Approve and finalize\n6. Generate direct deposit file',
+                        'data': 'Time data for pay period, existing employee records',
+                        'expected': 'Payroll processes without errors, checks calculated correctly, DD file generated',
+                        'created': datetime.now().strftime("%Y-%m-%d %H:%M")
+                    },
+                    {
+                        'name': 'Manager Approve Time Off Request',
+                        'module': 'Time & Attendance',
+                        'type': 'Functional',
+                        'steps': '1. Login as manager\n2. Navigate to time off requests\n3. Review employee request\n4. Check available balance\n5. Approve or deny\n6. Add comments if needed',
+                        'data': 'Employee time off request, manager credentials',
+                        'expected': 'Request approved/denied, employee notified, balance updated',
+                        'created': datetime.now().strftime("%Y-%m-%d %H:%M")
+                    }
+                ]
+                
+                for scenario in sample_scenarios:
+                    st.session_state.scenario_library.append(scenario)
+                
+                st.success(f"✅ Loaded {len(sample_scenarios)} sample scenarios")
+                st.rerun()
 
 # Footer
 st.markdown("---")
