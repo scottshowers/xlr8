@@ -28,13 +28,11 @@ def render_analysis_page():
     </div>
     """, unsafe_allow_html=True)
     
-    # Check for active project
-        if st.session_state.current_project:
-            st.success(f"📁 Active Project: {st.session_state.current_project}")
-        else:
-            st.info("💡 No project selected - analyzing in standalone mode")
-    
-    st.success(f"📁 Active Project: {st.session_state.current_project}")
+    # Check for active project (FIXED - proper indentation)
+    if st.session_state.current_project:
+        st.success(f"📁 Active Project: {st.session_state.current_project}")
+    else:
+        st.info("💡 No project selected - analyzing in standalone mode")
     
     st.markdown("---")
     
