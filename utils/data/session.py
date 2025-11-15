@@ -1,15 +1,10 @@
 """
 Session State Manager
-Centralized session state initialization and management
-
-Owner: Core Team
-Dependencies: streamlit, config
+Initializes advanced RAG handler and all session variables
 """
 
 import streamlit as st
 from config import AppConfig
-from utils.rag.handler import RAGHandler
-from utils.parsers.pdf_parser import EnhancedPayrollParser
 
 
 def initialize_session_state():
@@ -29,25 +24,34 @@ def initialize_session_state():
     if 'api_credentials' not in st.session_state:
         st.session_state.api_credentials = {'pro': {}, 'wfm': {}}
     
-    # PDF Parser
+    # PDF Parser - use EnhancedPayrollParser from secure_pdf_parser
     if 'pdf_parser' not in st.session_state:
+        from utils.secure_pdf_parser import EnhancedPayrollParser
         st.session_state.pdf_parser = EnhancedPayrollParser()
     
     if 'parsed_results' not in st.session_state:
         st.session_state.parsed_results = None
     
-    # HCMPACT Foundation Files (legacy - keeping for backwards compatibility)
-    if 'foundation_files' not in st.session_state:
-        st.session_state.foundation_files = []
-    
-    if 'foundation_enabled' not in st.session_state:
-        st.session_state.foundation_enabled = True
-    
-    # RAG Handler
+    # RAG Handler - use Advanced version if available
     if 'rag_handler' not in st.session_state:
-        st.session_state.rag_handler = RAGHandler(
-            persist_directory=AppConfig.RAG_PERSIST_DIR
-        )
+        try:
+            # Try to import advanced RAG handler
+            from utils.rag.handler import AdvancedRAGHandler
+            st.session_state.rag_handler = AdvancedRAGHandler(
+                persist_directory=AppConfig.RAG_PERSIST_DIR
+            )
+            st.session_state.rag_type = 'advanced'
+        except ImportError:
+            # Fallback to basic RAG handler
+            try:
+                from utils.rag.handler import RAGHandler
+                st.session_state.rag_handler = RAGHandler(
+                    persist_directory=AppConfig.RAG_PERSIST_DIR
+                )
+                st.session_state.rag_type = 'basic'
+            except:
+                st.session_state.rag_handler = None
+                st.session_state.rag_type = None
     
     # LLM Configuration (from config)
     if 'llm_endpoint' not in st.session_state:
@@ -72,6 +76,12 @@ def initialize_session_state():
     # AI Analysis Results
     if 'ai_analysis_results' not in st.session_state:
         st.session_state.ai_analysis_results = None
+    
+    if 'current_analysis' not in st.session_state:
+        st.session_state.current_analysis = None
+    
+    if 'current_templates' not in st.session_state:
+        st.session_state.current_templates = None
     
     # Document Library
     if 'doc_library' not in st.session_state:
@@ -179,3 +189,8 @@ def add_chat_message(role, content, sources=None):
         message['sources'] = sources
     
     st.session_state.chat_history.append(message)
+
+
+def get_rag_handler():
+    """Get RAG handler with type info"""
+    return st.session_state.get('rag_handler'), st.session_state.get('rag_type')
