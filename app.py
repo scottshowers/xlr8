@@ -1571,10 +1571,13 @@ with tab6:
                                     
                                     test_url = f"{endpoint}/api/tags"
                                     
-                                    # Use auth if provided
+                                    # Use hardcoded auth credentials from session state
                                     auth = None
-                                    if llm_username and llm_password:
-                                        auth = HTTPBasicAuth(llm_username, llm_password)
+                                    if st.session_state.get('llm_username') and st.session_state.get('llm_password'):
+                                        auth = HTTPBasicAuth(
+                                            st.session_state.llm_username,
+                                            st.session_state.llm_password
+                                        )
                                     
                                     response = requests.get(test_url, timeout=5, auth=auth)
                                     if response.status_code == 200:
