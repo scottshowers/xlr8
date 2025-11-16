@@ -1,13 +1,12 @@
 """
-Chat Interface Page - WITH EMPTY STATE ✨
+Chat Interface Page - FIXED + WITH EMPTY STATE ✨
 RAG-powered chat with UKG knowledge base
 Quick Win #4: Added empty state when no chat history
 """
 
 import streamlit as st
-from utils.rag.query_handler import query_knowledge_base
-from utils.error_handler import handle_error
-from utils.toast import show_toast
+import requests
+from requests.auth import HTTPBasicAuth
 
 
 def render_chat_page():
@@ -28,9 +27,24 @@ def render_chat_page():
     if 'query_cache' not in st.session_state:
         st.session_state.query_cache = {}
     
+    # Get RAG handler
+    rag_handler = st.session_state.get('rag_handler')
+    
     # Stats
     total_messages = len(st.session_state.get('chat_history', []))
-    knowledge_items = len(st.session_state.get('knowledge_base', []))
+    
+    # Count knowledge items from RAG if available
+    knowledge_items = 0
+    if rag_handler:
+        try:
+            stats = rag_handler.get_stats()
+            if isinstance(stats, dict):
+                # Count across all strategies
+                knowledge_items = sum(s.get('unique_documents', 0) for s in stats.values() if isinstance(s, dict))
+                if knowledge_items == 0:
+                    knowledge_items = stats.get('unique_documents', 0)
+        except:
+            knowledge_items = 0
     
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -97,7 +111,7 @@ def render_chat_page():
             if sources:
                 with st.expander(f"📚 View {len(sources)} Sources"):
                     for idx, source in enumerate(sources, 1):
-                        st.markdown(f"**Source {idx}:** {source.get('title', 'Unknown')}")
+                        st.markdown(f"**Source {idx}:** {source.get('doc_name', 'Unknown')}")
                         st.markdown(f"_{source.get('content', '')[:200]}..._")
                         st.markdown("---")
     
@@ -117,9 +131,14 @@ def render_chat_page():
             submit_button = st.form_submit_button("Send 💬", use_container_width=True)
     
     if submit_button and user_question:
-        # Check if knowledge base exists
-        if not st.session_state.get('knowledge_base'):
-            show_toast("⚠️ No Knowledge Base", "Please add documents to the knowledge base first", "warning")
+        # Check if RAG handler exists
+        if not rag_handler:
+            st.error("⚠️ Knowledge base not initialized. Please check system configuration.")
+            return
+        
+        # Check if knowledge base has documents
+        if knowledge_items == 0:
+            st.warning("⚠️ No documents in knowledge base. Please add documents in the Knowledge Base tab first.")
             return
         
         try:
@@ -130,15 +149,15 @@ def render_chat_page():
             })
             
             # Show loading state
-            with st.spinner("🔍 Searching knowledge base..."):
+            with st.spinner("🔍 Searching knowledge base and generating response..."):
                 # Check cache first
                 cache_key = user_question.lower().strip()
                 if cache_key in st.session_state.get('query_cache', {}):
                     result = st.session_state.query_cache[cache_key]
-                    show_toast("⚡ Cached Response", "Retrieved from cache", "info")
+                    st.info("⚡ Retrieved from cache")
                 else:
                     # Query RAG system
-                    result = query_knowledge_base(user_question)
+                    result = _query_knowledge_base(user_question, rag_handler)
                     
                     # Cache the result
                     if 'query_cache' not in st.session_state:
@@ -152,17 +171,145 @@ def render_chat_page():
                 'sources': result.get('sources', [])
             })
             
-            show_toast("✅ Response Generated", "Answer added to chat", "success")
+            st.success("✅ Response generated!")
             st.rerun()
             
         except Exception as e:
-            error_msg = handle_error(
-                e,
-                context="Chat Query",
-                user_message="Failed to process your question. Please try again.",
-                show_toast_notification=True
-            )
-            st.error(error_msg)
+            st.error(f"❌ Error: {str(e)}")
+            st.markdown("""
+            <div style='background: #fff3cd; padding: 1rem; border-radius: 8px; border-left: 4px solid #ffc107; margin-top: 1rem;'>
+                <strong style='color: #856404;'>💡 Troubleshooting Tips:</strong><br>
+                <span style='color: #856404; font-size: 0.9rem;'>
+                • Check if LLM service is running<br>
+                • Verify knowledge base has documents<br>
+                • Try a simpler question<br>
+                • Check Railway logs for detailed errors
+                </span>
+            </div>
+            """, unsafe_allow_html=True)
+
+
+def _query_knowledge_base(query: str, rag_handler) -> dict:
+    """
+    Query the knowledge base and generate an answer using LLM
+    
+    Args:
+        query: User's question
+        rag_handler: RAG handler instance
+        
+    Returns:
+        Dictionary with answer and sources
+    """
+    
+    # Get LLM config
+    llm_endpoint = st.session_state.get('llm_endpoint', 'http://localhost:11435')
+    llm_model = st.session_state.get('llm_model', 'llama3.2:latest')
+    llm_username = st.session_state.get('llm_username', 'xlr8')
+    llm_password = st.session_state.get('llm_password', 'Argyle76226#')
+    
+    # Check for Claude API preference
+    llm_provider = st.session_state.get('llm_provider', 'local')
+    
+    try:
+        # Search knowledge base
+        search_results = rag_handler.search(query, n_results=5)
+        
+        if not search_results:
+            return {
+                'answer': "I couldn't find relevant information in the knowledge base. Please try rephrasing your question or add more documents to the knowledge base.",
+                'sources': []
+            }
+        
+        # Build context from search results
+        context = "\n\n".join([
+            f"[{r['metadata'].get('doc_name', 'Unknown')}]: {r['content']}"
+            for r in search_results
+        ])
+        
+        # Build prompt
+        prompt = f"""You are an expert UKG implementation consultant. Answer the user's question using ONLY the provided context from HCMPACT standards and documentation.
+
+CONTEXT FROM KNOWLEDGE BASE:
+{context}
+
+USER QUESTION:
+{query}
+
+INSTRUCTIONS:
+- Answer based ONLY on the context provided above
+- Be specific and reference the source documents when possible
+- If the context doesn't contain enough information, say so
+- Provide actionable guidance where applicable
+- Keep the answer concise but complete
+
+ANSWER:"""
+        
+        # Generate answer using LLM
+        if llm_provider == 'claude' and st.session_state.get('claude_api_key'):
+            # Use Claude API
+            answer = _call_claude_api(prompt, st.session_state.get('claude_api_key'))
+        else:
+            # Use local LLM (Ollama)
+            answer = _call_local_llm(prompt, llm_endpoint, llm_model, llm_username, llm_password)
+        
+        return {
+            'answer': answer,
+            'sources': search_results
+        }
+        
+    except Exception as e:
+        raise Exception(f"Knowledge base query failed: {str(e)}")
+
+
+def _call_local_llm(prompt: str, endpoint: str, model: str, username: str, password: str) -> str:
+    """Call local Ollama LLM"""
+    
+    try:
+        url = f"{endpoint}/api/generate"
+        
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "stream": False
+        }
+        
+        auth = HTTPBasicAuth(username, password)
+        response = requests.post(url, json=payload, auth=auth, timeout=120)
+        response.raise_for_status()
+        
+        result = response.json()
+        return result.get('response', 'No response from LLM')
+        
+    except Exception as e:
+        raise Exception(f"Local LLM error: {str(e)}")
+
+
+def _call_claude_api(prompt: str, api_key: str) -> str:
+    """Call Claude API"""
+    
+    try:
+        import anthropic
+        
+        client = anthropic.Anthropic(api_key=api_key)
+        
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1000,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        return message.content[0].text
+        
+    except Exception as e:
+        # Fall back to local LLM if Claude API fails
+        st.warning(f"Claude API failed ({str(e)}), falling back to local LLM...")
+        llm_endpoint = st.session_state.get('llm_endpoint', 'http://localhost:11435')
+        llm_model = st.session_state.get('llm_model', 'llama3.2:latest')
+        llm_username = st.session_state.get('llm_username', 'xlr8')
+        llm_password = st.session_state.get('llm_password', 'Argyle76226#')
+        return _call_local_llm(prompt, llm_endpoint, llm_model, llm_username, llm_password)
 
 
 if __name__ == "__main__":
