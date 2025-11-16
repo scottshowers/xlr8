@@ -1,7 +1,7 @@
 """
-HCMPACT Knowledge Base Management - 🎸 CRANKED TO 11! 🎸
+HCMPACT LLM Management - Professional & Polished
 Beautiful document management with enhanced visuals
-Version: 11/10 - "These docs go to 11!"
+Version: 3.0
 """
 
 import streamlit as st
@@ -12,16 +12,16 @@ import pandas as pd
 
 
 def render_knowledge_page():
-    """Render knowledge base management page with empty state"""
+    """Render HCMPACT LLM management page with empty state"""
     
-    st.markdown("## 🧠 HCMPACT Local LLM Seeding")
+    st.markdown("## 🧠 HCMPACT LLM Seeding")
     
     st.markdown("""
-    <div style='background: linear-gradient(135deg, #f5f7f9 0%, #e8eef3 100%); padding: 1.25rem; border-radius: 12px; border-left: 4px solid #667eea; margin-bottom: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.05);'>
+    <div style='background: linear-gradient(135deg, #f5f7f9 0%, #e8eef3 100%); padding: 1rem; border-radius: 12px; border-left: 4px solid #8ca6be; margin-bottom: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.05);'>
         <div style='display: flex; align-items: center; gap: 0.75rem;'>
-            <div style='font-size: 1.5rem;'>📚</div>
+            <div style='font-size: 1.3rem;'>📚</div>
             <div>
-                <strong style='color: #6d8aa0; font-size: 1.05rem;'>Knowledge Base Management</strong><br>
+                <strong style='color: #6d8aa0; font-size: 1rem;'>HCMPACT LLM Management</strong><br>
                 <span style='color: #7d96a8; font-size: 0.9rem;'>Upload HCMPACT standards, best practices, and technical documentation. These documents power the AI Assistant's responses.</span>
             </div>
         </div>
@@ -58,18 +58,18 @@ def render_knowledge_page():
     
     st.markdown("---")
     
-    # EMPTY STATE CHECK ✨
+    # EMPTY STATE CHECK - COMPACT
     if total_docs == 0:
         st.markdown("""
-        <div style='text-align: center; padding: 4rem 1rem; background: linear-gradient(135deg, #f5f7f9 0%, #e8eef3 100%); border-radius: 16px; border: 2px dashed #8ca6be; margin: 2rem 0;'>
-            <div style='font-size: 4rem; margin-bottom: 1rem; opacity: 0.9;'>📚</div>
-            <h2 style='color: #6d8aa0; margin-bottom: 1rem; font-size: 1.8rem;'>Knowledge Base is Empty</h2>
-            <p style='color: #7d96a8; font-size: 1.1rem; margin-bottom: 2rem; max-width: 600px; margin-left: auto; margin-right: auto;'>
+        <div style='text-align: center; padding: 2.5rem 1rem; background: linear-gradient(135deg, #f5f7f9 0%, #e8eef3 100%); border-radius: 12px; border: 2px solid rgba(140, 166, 190, 0.3); margin: 1.5rem 0;'>
+            <div style='font-size: 3rem; margin-bottom: 0.75rem; opacity: 0.9;'>📚</div>
+            <h2 style='color: #6d8aa0; margin-bottom: 0.75rem; font-size: 1.3rem; font-weight: 600;'>HCMPACT LLM is Empty</h2>
+            <p style='color: #7d96a8; font-size: 1rem; margin-bottom: 1.5rem; max-width: 550px; margin-left: auto; margin-right: auto;'>
                 Upload HCMPACT standards, UKG documentation, and best practices to power your AI Assistant
             </p>
-            <div style='background: white; padding: 2rem; border-radius: 12px; max-width: 500px; margin: 0 auto; box-shadow: 0 4px 12px rgba(0,0,0,0.08);'>
-                <h3 style='color: #6d8aa0; margin-bottom: 1rem; font-size: 1.2rem;'>📤 What to Upload First</h3>
-                <div style='text-align: left; color: #6c757d; line-height: 2;'>
+            <div style='background: white; padding: 1.5rem; border-radius: 12px; max-width: 480px; margin: 0 auto; box-shadow: 0 4px 12px rgba(0,0,0,0.08);'>
+                <h3 style='color: #6d8aa0; margin-bottom: 0.75rem; font-size: 1.1rem;'>📤 What to Upload First</h3>
+                <div style='text-align: left; color: #6c757d; line-height: 1.9;'>
                     • UKG Pro configuration guides<br>
                     • UKG WFM documentation<br>
                     • Implementation best practices<br>
@@ -82,16 +82,16 @@ def render_knowledge_page():
         """, unsafe_allow_html=True)
         
         # Show example with more detail
-        with st.expander("💡 Why Upload Documents to Knowledge Base?", expanded=True):
+        with st.expander("💡 Why Upload Documents to HCMPACT LLM?", expanded=True):
             st.markdown("""
             **Your AI Assistant becomes smarter with each document you upload:**
             
-            **Without Knowledge Base:**
+            **Without HCMPACT LLM:**
             - Generic responses based only on general AI training
             - No company-specific context
             - Limited to basic UKG information
             
-            **With Knowledge Base:**
+            **With HCMPACT LLM:**
             - Responds with your company's best practices
             - References specific HCMPACT standards
             - Pulls from actual UKG documentation
@@ -142,7 +142,7 @@ def render_knowledge_page():
         )
     
     if uploaded_files:
-        if st.button("🚀 Process and Add to Knowledge Base", type="primary", use_container_width=True):
+        if st.button("🚀 Process and Add to HCMPACT LLM", type="primary", use_container_width=True):
             progress_bar = st.progress(0)
             status_text = st.empty()
             
@@ -153,7 +153,7 @@ def render_knowledge_page():
                 content = _extract_text(uploaded_file)
                 
                 if content:
-                    # Add to knowledge base
+                    # Add to HCMPACT LLM
                     counts = rag_handler.add_document(
                         name=uploaded_file.name,
                         content=content,
@@ -177,7 +177,7 @@ def render_knowledge_page():
     # Display statistics by strategy (only if documents exist)
     if total_chunks > 0:
         st.markdown("---")
-        st.markdown("### 📊 Knowledge Base Statistics")
+        st.markdown("### 📊 HCMPACT LLM Statistics")
         
         # Strategy breakdown
         strategy_tab, category_tab = st.tabs(["By Strategy", "By Category"])
@@ -209,12 +209,12 @@ def render_knowledge_page():
                 ]
                 st.dataframe(pd.DataFrame(category_data), use_container_width=True, hide_index=True)
         
-        # Clear knowledge base option
+        # Clear HCMPACT LLM option
         st.markdown("---")
-        st.markdown("### 🗑️ Manage Knowledge Base")
+        st.markdown("### 🗑️ Manage HCMPACT LLM")
         
-        if st.button("⚠️ Clear All Documents", help="Removes all documents from knowledge base"):
-            if st.checkbox("I understand this will delete all knowledge base documents"):
+        if st.button("⚠️ Clear All Documents", help="Removes all documents from HCMPACT LLM"):
+            if st.checkbox("I understand this will delete all HCMPACT LLM documents"):
                 for collection in rag_handler.collections.values():
                     try:
                         # Clear collection
@@ -223,7 +223,7 @@ def render_knowledge_page():
                             collection.delete(ids=all_ids)
                     except:
                         pass
-                st.success("✅ Knowledge base cleared")
+                st.success("✅ HCMPACT LLM cleared")
                 st.rerun()
 
 
@@ -261,5 +261,5 @@ def _extract_text(uploaded_file) -> str:
 
 
 if __name__ == "__main__":
-    st.title("Knowledge Base - Test")
+    st.title("HCMPACT LLM - Test")
     render_knowledge_page()
