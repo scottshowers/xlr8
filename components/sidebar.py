@@ -65,9 +65,65 @@ def _render_project_selector():
 
 
 def _render_ai_selector():
-    """Render AI/RAG status - FIXED for Advanced RAG"""
+    """Render AI/RAG status and LLM provider selector"""
     st.markdown("### 🧠 AI System")
     
+    # LLM Provider Selection
+    llm_provider = st.selectbox(
+        "🤖 AI Provider",
+        ["Local LLM", "Claude API"],
+        index=0 if st.session_state.get('llm_provider', 'local') == 'local' else 1,
+        help="Choose between local DeepSeek or Claude API"
+    )
+    
+    # Update session state
+    new_provider = 'local' if llm_provider == "Local LLM" else 'claude'
+    if st.session_state.get('llm_provider') != new_provider:
+        st.session_state.llm_provider = new_provider
+    
+    # Show provider-specific config
+    if llm_provider == "Local LLM":
+        st.markdown("""
+        <div style='font-size: 0.8rem; color: #28a745; padding: 0.5rem; background: rgba(40, 167, 69, 0.1); border-radius: 4px; margin-bottom: 0.5rem;'>
+            ⚡ <strong>Local DeepSeek</strong><br>
+            • Free, Private<br>
+            • Good for detailed docs<br>
+            • Model: deepseek-r1:7b
+        </div>
+        """, unsafe_allow_html=True)
+    else:  # Claude API
+        # API Key input
+        api_key = st.text_input(
+            "Claude API Key",
+            type="password",
+            value=st.session_state.get('claude_api_key', ''),
+            help="Get your key at console.anthropic.com",
+            key="claude_api_key_input"
+        )
+        
+        # Save button
+        if st.button("💾 Save API Key", type="primary"):
+            st.session_state.claude_api_key = api_key
+            st.success("API Key saved!")
+            st.rerun()
+        
+        # Show status
+        if st.session_state.get('claude_api_key'):
+            st.markdown("""
+            <div style='font-size: 0.8rem; color: #007bff; padding: 0.5rem; background: rgba(0, 123, 255, 0.1); border-radius: 4px; margin-top: 0.5rem;'>
+                🧠 <strong>Claude API</strong><br>
+                • Excellent quality<br>
+                • ~$0.015 per response<br>
+                • Model: Claude Sonnet 4
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.warning("⚠️ API key required")
+            st.markdown("[Get API key →](https://console.anthropic.com/)", unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # RAG Status (existing code)
     # Check RAG handler
     rag_handler = st.session_state.get('rag_handler')
     rag_type = st.session_state.get('rag_type', 'none')
