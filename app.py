@@ -52,12 +52,12 @@ st.markdown(AppConfig.CUSTOM_CSS, unsafe_allow_html=True)
 # Render sidebar (always visible)
 render_sidebar()
 
-# WELCOME DASHBOARD - AMPLIFIED TO 11! 🎸
+# WELCOME DASHBOARD - COMPACT & PROFESSIONAL
 st.markdown("""
-<div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 2rem; border-radius: 16px; margin-bottom: 2rem; box-shadow: 0 8px 24px rgba(102, 126, 234, 0.3);'>
+<div style='background: linear-gradient(135deg, #8ca6be 0%, #6d8aa0 100%); padding: 0.75rem; border-radius: 12px; margin-bottom: 1.5rem; box-shadow: 0 4px 16px rgba(140, 166, 190, 0.25);'>
     <div style='text-align: center;'>
-        <h1 style='color: white; margin: 0 0 0.5rem 0; font-size: 2.5rem; font-weight: 800;'>⚡ XLR8 by HCMPACT</h1>
-        <p style='color: rgba(255,255,255,0.9); font-size: 1.2rem; margin: 0;'>UKG Implementation Accelerator</p>
+        <h1 style='color: white; margin: 0 0 0.25rem 0; font-size: 1.8rem; font-weight: 700;'>⚡ XLR8 by HCMPACT</h1>
+        <p style='color: rgba(255,255,255,0.95); font-size: 1rem; margin: 0;'>UKG Implementation Accelerator</p>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -82,7 +82,7 @@ if st.session_state.get('projects') or st.session_state.get('knowledge_base'):
         <div style='background: white; padding: 1.5rem; border-radius: 12px; border: 2px solid #e3f2fd; box-shadow: 0 4px 12px rgba(0,0,0,0.08); text-align: center;'>
             <div style='font-size: 2.5rem; margin-bottom: 0.5rem;'>📚</div>
             <div style='font-size: 2rem; font-weight: 700; color: #2196F3;'>{kb_count}</div>
-            <div style='color: #7d96a8; font-size: 0.9rem; font-weight: 500;'>KB Documents</div>
+            <div style='color: #7d96a8; font-size: 0.9rem; font-weight: 500;'>LLM Documents</div>
         </div>
         """, unsafe_allow_html=True)
     
@@ -102,7 +102,7 @@ if st.session_state.get('projects') or st.session_state.get('knowledge_base'):
         st.markdown(f"""
         <div style='background: white; padding: 1.5rem; border-radius: 12px; border: 2px solid #f3e5f5; box-shadow: 0 4px 12px rgba(0,0,0,0.08); text-align: center;'>
             <div style='font-size: 2.5rem; margin-bottom: 0.5rem;'>🤖</div>
-            <div style='font-size: 1.2rem; font-weight: 600; color: #667eea;'>{provider_name.split()[0]}</div>
+            <div style='font-size: 1.2rem; font-weight: 600; color: #8ca6be;'>{provider_name.split()[0]}</div>
             <div style='color: #7d96a8; font-size: 0.9rem; font-weight: 500;'>AI Provider</div>
         </div>
         """, unsafe_allow_html=True)
@@ -185,17 +185,14 @@ with tab4:
     with admin_subtab3:
         render_settings_page()
 
-# Footer - AMPLIFIED! 🎸
+# Footer - PROFESSIONAL & COMPACT
 st.markdown("---")
 st.markdown(f"""
-<div style='background: linear-gradient(135deg, #f5f7f9 0%, #e8eef3 100%); padding: 1.5rem; border-radius: 12px; text-align: center; margin-top: 2rem; border: 2px solid rgba(109, 138, 160, 0.15);'>
+<div style='background: linear-gradient(135deg, #f5f7f9 0%, #e8eef3 100%); padding: 1rem; border-radius: 12px; text-align: center; margin-top: 1.5rem; border: 2px solid rgba(109, 138, 160, 0.15);'>
     <div style='display: flex; align-items: center; justify-content: center; gap: 1rem; flex-wrap: wrap;'>
-        <div style='color: #6d8aa0; font-weight: 700; font-size: 1.1rem;'>⚡ {AppConfig.APP_NAME} v{AppConfig.VERSION}</div>
+        <div style='color: #6d8aa0; font-weight: 700; font-size: 1rem;'>⚡ {AppConfig.APP_NAME} v{AppConfig.VERSION}</div>
         <div style='color: #7d96a8;'>|</div>
         <div style='color: #7d96a8; font-weight: 500;'>{AppConfig.TAGLINE}</div>
-    </div>
-    <div style='color: #7d96a8; font-size: 0.85rem; margin-top: 0.5rem;'>
-        🎸 <strong>Cranked to 11</strong> - The loudest UKG implementation tool in the world!
     </div>
 </div>
 """, unsafe_allow_html=True)
