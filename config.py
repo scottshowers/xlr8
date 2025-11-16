@@ -23,7 +23,7 @@ class AppConfig:
     
     # RAG Configuration - PERSISTENT STORAGE
     # Use Railway volume if available, otherwise fall back to local
-    RAG_PERSIST_DIR = os.getenv("CHROMADB_PATH", "/data/chromadb")
+    RAG_PERSIST_DIR = os.getenv("CHROMADB_PATH", "/root/.xlr8_chroma")
     
     # Embedding Configuration
     EMBED_ENDPOINT = os.getenv("EMBED_ENDPOINT", "http://178.156.190.64:11435")
