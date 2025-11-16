@@ -69,6 +69,10 @@ def initialize_session_state():
     if 'llm_provider' not in st.session_state:
         st.session_state.llm_provider = 'local'
     
+    # Claude API Key (secure, session-only storage)
+    if 'claude_api_key' not in st.session_state:
+        st.session_state.claude_api_key = ''
+    
     # Chat History
     if 'chat_history' not in st.session_state:
         st.session_state.chat_history = []
