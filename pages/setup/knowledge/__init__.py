@@ -1,7 +1,7 @@
-
 """
-HCMPACT Knowledge Base Management
+HCMPACT Knowledge Base Management - WITH EMPTY STATE ✨
 Upload and manage documents for RAG system
+Quick Win #4: Added empty state when no documents
 """
 
 import streamlit as st
@@ -12,7 +12,7 @@ import pandas as pd
 
 
 def render_knowledge_page():
-    """Render knowledge base management page"""
+    """Render knowledge base management page with empty state"""
     
     st.markdown("## 🧠 HCMPACT Local LLM Seeding")
     
@@ -52,6 +52,62 @@ def render_knowledge_page():
         st.metric("📁 Categories", len(all_categories))
     
     st.markdown("---")
+    
+    # EMPTY STATE CHECK ✨
+    if total_docs == 0:
+        st.markdown("""
+        <div style='text-align: center; padding: 4rem 1rem; background: linear-gradient(135deg, #f5f7f9 0%, #e8eef3 100%); border-radius: 16px; border: 2px dashed #8ca6be; margin: 2rem 0;'>
+            <div style='font-size: 4rem; margin-bottom: 1rem; opacity: 0.9;'>📚</div>
+            <h2 style='color: #6d8aa0; margin-bottom: 1rem; font-size: 1.8rem;'>Knowledge Base is Empty</h2>
+            <p style='color: #7d96a8; font-size: 1.1rem; margin-bottom: 2rem; max-width: 600px; margin-left: auto; margin-right: auto;'>
+                Upload HCMPACT standards, UKG documentation, and best practices to power your AI Assistant
+            </p>
+            <div style='background: white; padding: 2rem; border-radius: 12px; max-width: 500px; margin: 0 auto; box-shadow: 0 4px 12px rgba(0,0,0,0.08);'>
+                <h3 style='color: #6d8aa0; margin-bottom: 1rem; font-size: 1.2rem;'>📤 What to Upload First</h3>
+                <div style='text-align: left; color: #6c757d; line-height: 2;'>
+                    • UKG Pro configuration guides<br>
+                    • UKG WFM documentation<br>
+                    • Implementation best practices<br>
+                    • Standard templates & checklists<br>
+                    • Industry compliance guides<br>
+                    • Troubleshooting documentation
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Show example with more detail
+        with st.expander("💡 Why Upload Documents to Knowledge Base?", expanded=True):
+            st.markdown("""
+            **Your AI Assistant becomes smarter with each document you upload:**
+            
+            **Without Knowledge Base:**
+            - Generic responses based only on general AI training
+            - No company-specific context
+            - Limited to basic UKG information
+            
+            **With Knowledge Base:**
+            - Responds with your company's best practices
+            - References specific HCMPACT standards
+            - Pulls from actual UKG documentation
+            - Provides accurate, context-aware guidance
+            
+            **Example:**
+            
+            *Question:* "How should we configure multi-tier approvals?"
+            
+            *Without docs:* Generic explanation
+            
+            *With docs:* Specific steps from your standards, references to exact UKG screens, 
+            best practices from your implementation guides
+            
+            **🎯 Recommended Starter Pack (5-10 documents):**
+            1. UKG Pro Administration Guide
+            2. Your implementation methodology
+            3. Standard pay code template
+            4. Time & attendance best practices
+            5. Benefits configuration checklist
+            """)
     
     # Upload section
     st.markdown("### 📤 Upload Documents")
@@ -113,7 +169,7 @@ def render_knowledge_page():
             st.success(f"✅ Processed {len(uploaded_files)} document(s)")
             st.rerun()
     
-    # Display statistics by strategy
+    # Display statistics by strategy (only if documents exist)
     if total_chunks > 0:
         st.markdown("---")
         st.markdown("### 📊 Knowledge Base Statistics")
