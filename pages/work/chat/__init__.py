@@ -12,157 +12,236 @@ import hashlib
 from concurrent.futures import ThreadPoolExecutor
 
 
-# Custom CSS to match Claude.ai style - FIXED FOR SIDEBAR
+# Custom CSS - Clean design matching XLR8 app style
 CLAUDE_STYLE_CSS = """
 <style>
-/* Main chat container - NO centering, respect sidebar */
+/* ========================================
+   MAIN CONTAINER - Standard Layout
+   ======================================== */
 .main .block-container {
     padding-top: 2rem;
-    padding-bottom: 6rem;
-    max-width: 100%;
-    padding-left: 2rem;
-    padding-right: 2rem;
+    padding-bottom: 2rem;
+    max-width: 1200px;
 }
 
-/* Chat messages */
+/* ========================================
+   CHAT MESSAGES - Clean & Readable
+   ======================================== */
 .stChatMessage {
-    padding: 1.5rem 1rem;
-    margin-bottom: 0;
-    border-bottom: 1px solid #e5e7eb;
-    max-width: 48rem;
+    padding: 1.25rem;
+    margin-bottom: 1rem;
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+    background-color: #ffffff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
-.stChatMessage:last-child {
-    border-bottom: none;
-}
-
-/* Message content */
-.stChatMessage [data-testid="stMarkdownContainer"] {
-    font-size: 0.95rem;
-    line-height: 1.6;
-    color: #1f2937;
-}
-
-/* User messages - slightly different background */
+/* User messages - Light blue background */
 .stChatMessage[data-testid="user"] {
-    background-color: #f9fafb;
+    background-color: #f0f7ff;
+    border-color: #bfdbfe;
 }
 
-/* Assistant messages */
+/* Assistant messages - White background */
 .stChatMessage[data-testid="assistant"] {
     background-color: #ffffff;
+    border-color: #e5e7eb;
 }
 
-/* Chat input container - FIXED to respect sidebar */
+/* Message text - Standard app font */
+.stChatMessage [data-testid="stMarkdownContainer"] {
+    font-size: 1rem;
+    line-height: 1.6;
+    color: #1f2937;
+    font-family: "Source Sans Pro", sans-serif;
+}
+
+/* ========================================
+   CHAT INPUT - Standard Position (No Fixed!)
+   ======================================== */
 .stChatInput {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    padding: 1rem 2rem;
-    background: linear-gradient(to top, white 80%, transparent);
-    border-top: 1px solid #e5e7eb;
-    z-index: 100;
-}
-
-/* Adjust for sidebar when open */
-@media (min-width: 768px) {
-    .stChatInput {
-        left: auto;
-        /* Streamlit sidebar is ~21rem wide */
-        margin-left: 21rem;
-    }
-}
-
-.stChatInput > div {
-    max-width: 48rem;
+    margin-top: 2rem;
+    margin-bottom: 1rem;
 }
 
 .stChatInput textarea {
-    border-radius: 24px !important;
-    border: 1px solid #d1d5db !important;
-    padding: 12px 48px 12px 16px !important;
-    font-size: 0.95rem !important;
-    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05) !important;
-    resize: none !important;
+    border-radius: 8px !important;
+    border: 2px solid #d1d5db !important;
+    padding: 12px 16px !important;
+    font-size: 1rem !important;
+    font-family: "Source Sans Pro", sans-serif !important;
+    transition: border-color 0.2s !important;
 }
 
 .stChatInput textarea:focus {
-    border-color: #6366f1 !important;
-    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1) !important;
+    border-color: #3b82f6 !important;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
+    outline: none !important;
 }
 
-/* Send button styling */
+/* Send button */
 .stChatInput button {
-    background-color: #6366f1 !important;
-    border-radius: 50% !important;
-    padding: 8px !important;
-    right: 20px !important;
+    background-color: #3b82f6 !important;
+    border-radius: 8px !important;
+    transition: background-color 0.2s !important;
 }
 
 .stChatInput button:hover {
-    background-color: #4f46e5 !important;
+    background-color: #2563eb !important;
 }
 
-/* Expander for sources */
+/* ========================================
+   SOURCES EXPANDER - Clean Style
+   ======================================== */
 .streamlit-expanderHeader {
     font-size: 0.875rem;
     color: #6b7280;
-    font-weight: 500;
+    font-weight: 600;
+    padding: 0.5rem 0;
+    font-family: "Source Sans Pro", sans-serif;
 }
 
 .streamlit-expanderHeader:hover {
-    color: #4b5563;
+    color: #3b82f6;
+}
+
+.streamlit-expanderContent {
+    padding: 1rem;
+    background-color: #f9fafb;
+    border-radius: 6px;
+    margin-top: 0.5rem;
 }
 
 /* Source citations */
 .source-citation {
-    font-size: 0.813rem;
-    color: #6b7280;
-    padding: 0.5rem;
-    background-color: #f9fafb;
-    border-radius: 6px;
-    margin-bottom: 0.5rem;
-}
-
-/* Sidebar styling */
-section[data-testid="stSidebar"] {
-    background-color: #f9fafb;
-}
-
-section[data-testid="stSidebar"] > div {
-    padding-top: 2rem;
-}
-
-/* Compact sidebar headers */
-section[data-testid="stSidebar"] h3 {
     font-size: 0.875rem;
-    font-weight: 600;
     color: #374151;
-    margin-top: 1.5rem;
+    padding: 0.75rem;
+    background-color: #ffffff;
+    border-left: 3px solid #3b82f6;
+    border-radius: 4px;
     margin-bottom: 0.5rem;
+    font-family: "Source Sans Pro", sans-serif;
 }
 
-/* Sidebar widgets */
-section[data-testid="stSidebar"] .stSelectbox,
-section[data-testid="stSidebar"] .stSlider,
-section[data-testid="stSidebar"] .stCheckbox {
+.source-citation strong {
+    color: #1f2937;
+}
+
+.source-citation .category {
+    color: #6b7280;
+    font-size: 0.813rem;
+}
+
+.source-citation .score {
+    color: #9ca3af;
+    font-size: 0.813rem;
+    float: right;
+}
+
+/* ========================================
+   SIDEBAR - Compact & Clean
+   ======================================== */
+section[data-testid="stSidebar"] h3 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #1f2937;
+    margin-top: 1.5rem;
+    margin-bottom: 0.75rem;
+    font-family: "Source Sans Pro", sans-serif;
+}
+
+section[data-testid="stSidebar"] .stSelectbox label,
+section[data-testid="stSidebar"] .stSlider label,
+section[data-testid="stSidebar"] .stCheckbox label {
     font-size: 0.875rem;
+    font-family: "Source Sans Pro", sans-serif;
 }
 
-/* Hide Streamlit branding */
+section[data-testid="stSidebar"] button {
+    font-size: 0.875rem;
+    font-family: "Source Sans Pro", sans-serif;
+}
+
+/* ========================================
+   CLEAR BUTTON - Danger Style
+   ======================================== */
+section[data-testid="stSidebar"] button[kind="secondary"] {
+    background-color: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #fca5a5;
+}
+
+section[data-testid="stSidebar"] button[kind="secondary"]:hover {
+    background-color: #fecaca;
+    border-color: #f87171;
+}
+
+/* ========================================
+   PAGE HEADER
+   ======================================== */
+h1 {
+    color: #1976D2;
+    font-family: "Source Sans Pro", sans-serif;
+    font-weight: 600;
+    margin-bottom: 1.5rem;
+}
+
+/* ========================================
+   SCROLLBAR - Clean Style
+   ======================================== */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
+/* ========================================
+   REMOVE STREAMLIT BRANDING
+   ======================================== */
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
 header {visibility: hidden;}
+
+/* ========================================
+   RESPONSIVE ADJUSTMENTS
+   ======================================== */
+@media (max-width: 768px) {
+    .main .block-container {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+    
+    .stChatMessage {
+        padding: 1rem;
+    }
+}
 </style>
 """
 
 
 def render_chat_page():
-    """Render Claude.ai style chat interface"""
+    """Render clean chat interface matching XLR8 app style"""
     
     # Apply custom CSS
     st.markdown(CLAUDE_STYLE_CSS, unsafe_allow_html=True)
+    
+    # Page header
+    st.title("💬 AI Assistant")
+    st.markdown("Ask questions about UKG implementation, get answers from documents and AI knowledge.")
+    st.markdown("---")
     
     # Initialize query cache
     if 'query_cache' not in st.session_state:
@@ -174,37 +253,44 @@ def render_chat_page():
     
     # Compact settings in sidebar
     with st.sidebar:
-        st.markdown("### ⚙️ Settings")
+        st.markdown("### ⚙️ Chat Settings")
         
         retrieval_method = st.selectbox(
             "Search Method",
             ["Hybrid", "Semantic", "MMR"],
-            help="How to search documents"
+            help="How to search your knowledge base"
         )
         
         num_sources = st.slider(
-            "Number of Sources", 
+            "Sources to Use", 
             min_value=1, 
             max_value=10, 
             value=5,
-            help="Sources to retrieve per query"
+            help="Number of document sources per query"
         )
         
         show_sources = st.checkbox(
             "Show Sources", 
             value=True,
-            help="Display source documents"
+            help="Display which documents were used"
         )
         
         use_compression = st.checkbox(
             "Compress Context",
             value=False,
-            help="Reduce context size (experimental)"
+            help="Reduce context size for faster responses"
         )
         
         st.markdown("---")
+        st.markdown("### 🗄️ Chat History")
         
-        if st.button("🗑️ Clear Chat History", use_container_width=True):
+        # Chat stats
+        if st.session_state.chat_history:
+            total_messages = len(st.session_state.chat_history)
+            user_messages = len([m for m in st.session_state.chat_history if m['role'] == 'user'])
+            st.info(f"**Messages:** {total_messages}\n\n**Questions Asked:** {user_messages}")
+        
+        if st.button("🗑️ Clear History", use_container_width=True, type="secondary"):
             st.session_state.chat_history = []
             st.session_state.query_cache = {}
             st.rerun()
@@ -216,21 +302,23 @@ def render_chat_page():
             
             # Show sources if available
             if show_sources and message.get('sources'):
-                with st.expander(f"📚 {len(message['sources'])} sources used", expanded=False):
+                with st.expander(f"📚 {len(message['sources'])} sources", expanded=False):
                     for i, source in enumerate(message['sources'], 1):
                         score = source.get('score', 0)
+                        doc_name = source.get('doc_name', 'Unknown')
+                        category = source.get('category', 'Unknown')
                         st.markdown(
                             f"""<div class='source-citation'>
-                            <strong>{i}.</strong> {source['doc_name']} 
-                            <span style='color: #9ca3af;'>({source['category']})</span>
-                            <span style='color: #9ca3af; float: right;'>Score: {score:.2f}</span>
+                            <strong>{i}. {doc_name}</strong>
+                            <span class='category'>({category})</span>
+                            <span class='score'>Relevance: {score:.1%}</span>
                             </div>""",
                             unsafe_allow_html=True
                         )
     
-    # Chat input - using Streamlit's built-in chat input (Claude-style)
+    # Chat input - clean and simple
     prompt = st.chat_input(
-        placeholder="Ask about UKG implementation...",
+        placeholder="Ask me anything about UKG, payroll, implementations...",
         key="chat_input"
     )
     
@@ -251,28 +339,33 @@ def render_chat_page():
             response_placeholder = st.empty()
             sources_placeholder = st.empty()
             
-            # Generate response with streaming
-            response, sources = _generate_optimized_response(
-                prompt=prompt,
-                retrieval_method=retrieval_method,
-                num_sources=num_sources,
-                use_compression=use_compression,
-                response_placeholder=response_placeholder
-            )
+            # Show thinking indicator
+            with response_placeholder.container():
+                with st.spinner("🤔 Thinking..."):
+                    # Generate response with streaming
+                    response, sources = _generate_optimized_response(
+                        prompt=prompt,
+                        retrieval_method=retrieval_method,
+                        num_sources=num_sources,
+                        use_compression=use_compression,
+                        response_placeholder=response_placeholder
+                    )
             
             # Display final response
             response_placeholder.markdown(response)
             
             # Show sources
             if show_sources and sources:
-                with sources_placeholder.expander(f"📚 {len(sources)} sources used", expanded=False):
+                with sources_placeholder.expander(f"📚 {len(sources)} sources", expanded=False):
                     for i, source in enumerate(sources, 1):
                         score = source.get('score', 0)
+                        doc_name = source.get('doc_name', 'Unknown')
+                        category = source.get('category', 'Unknown')
                         st.markdown(
                             f"""<div class='source-citation'>
-                            <strong>{i}.</strong> {source['doc_name']} 
-                            <span style='color: #9ca3af;'>({source['category']})</span>
-                            <span style='color: #9ca3af; float: right;'>Score: {score:.2f}</span>
+                            <strong>{i}. {doc_name}</strong>
+                            <span class='category'>({category})</span>
+                            <span class='score'>Relevance: {score:.1%}</span>
                             </div>""",
                             unsafe_allow_html=True
                         )
@@ -330,6 +423,10 @@ def _generate_optimized_response(
     # Get LLM provider early (needed for fallback if no docs)
     provider = st.session_state.get('llm_provider', 'local')
     
+    # Show search status
+    search_status = response_placeholder.empty()
+    search_status.info("🔍 Searching knowledge base...")
+    
     # Parallel RAG search in background
     with ThreadPoolExecutor(max_workers=1) as executor:
         # Try to call search with method parameter (for advanced handlers)
@@ -359,9 +456,16 @@ def _generate_optimized_response(
         try:
             sources = search_future.result(timeout=10)
         except Exception as e:
+            search_status.empty()
             return f"⚠️ Search error: {str(e)}", []
     
+    # Clear search status
+    search_status.empty()
+    
     if not sources:
+        # Show generating status for no-docs mode
+        response_placeholder.info("💭 Generating answer from AI knowledge...")
+        
         # No documents found - use LLM's general knowledge instead
         # Build a prompt without RAG context
         if provider == 'claude':
@@ -402,6 +506,9 @@ Provide a detailed answer:"""
     # Optional context compression
     if use_compression and len(context) > 2000:
         context = context[:2000] + "...[truncated]"
+    
+    # Show generating status
+    response_placeholder.info(f"📚 Generating answer from {len(sources)} documents...")
     
     # Build prompt based on provider
     if provider == 'claude':
@@ -456,7 +563,7 @@ Provide a thorough, detailed answer based on the documents:"""
 
 
 def _call_local_llm(prompt: str, placeholder) -> str:
-    """Call local LLM with streaming - OPTIMIZED"""
+    """Call local LLM with streaming - OPTIMIZED & FIXED"""
     from config import AppConfig
     
     # Calculate appropriate context size based on prompt length
@@ -499,6 +606,7 @@ def _call_local_llm(prompt: str, placeholder) -> str:
         # Stream the response with faster updates
         full_response = ""
         chunk_counter = 0
+        
         for line in response.iter_lines():
             if line:
                 import json
@@ -515,8 +623,19 @@ def _call_local_llm(prompt: str, placeholder) -> str:
                 except json.JSONDecodeError:
                     continue
         
+        # CRITICAL: Always show final response (even if no updates happened)
+        if full_response:
+            placeholder.markdown(full_response)
+        else:
+            # If we got no response, return error
+            return "⚠️ No response received from LLM. Please try again."
+        
         return full_response
         
+    except requests.exceptions.Timeout:
+        return "⚠️ Request timed out. The model might be busy. Please try again."
+    except requests.exceptions.ConnectionError:
+        return f"⚠️ Cannot connect to LLM server at {AppConfig.LLM_ENDPOINT}. Please check if the server is running."
     except Exception as e:
         return f"⚠️ Error calling local LLM: {str(e)}"
 
