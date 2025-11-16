@@ -1,6 +1,6 @@
 """
 Projects & Clients Management Page
-Complete project lifecycle management
+Complete project lifecycle management with Supabase persistence
 """
 
 import streamlit as st
@@ -8,7 +8,7 @@ from datetime import datetime
 
 
 def render_projects_page():
-    """Render projects management page with full functionality"""
+    """Render projects management page with Supabase persistence"""
     
     st.markdown("## 📁 Projects & Client Management")
     
@@ -18,6 +18,32 @@ def render_projects_page():
         track client information, and organize your work by customer.
     </div>
     """, unsafe_allow_html=True)
+    
+    # Initialize Supabase if enabled
+    supabase_handler = None
+    try:
+        from config import AppConfig
+        if AppConfig.USE_SUPABASE_PERSISTENCE:
+            supabase_handler = AppConfig.get_supabase_handler()
+            
+            # Load projects from Supabase on first load
+            if 'projects_loaded_from_db' not in st.session_state:
+                try:
+                    db_projects = supabase_handler.get_all_projects()
+                    if db_projects:
+                        # Convert list to dict format expected by UI
+                        st.session_state.projects = {
+                            p['name']: p for p in db_projects
+                        }
+                    st.session_state.projects_loaded_from_db = True
+                except Exception as e:
+                    st.warning(f"⚠️ Could not load projects from database: {str(e)}")
+    except Exception as e:
+        st.warning(f"⚠️ Supabase not configured: {str(e)}")
+    
+    # Ensure projects dict exists
+    if 'projects' not in st.session_state:
+        st.session_state.projects = {}
     
     # Quick stats if projects exist
     if st.session_state.get('projects'):
@@ -93,12 +119,9 @@ def render_projects_page():
                 elif project_name in st.session_state.get('projects', {}):
                     st.error(f"❌ Project '{project_name}' already exists!")
                 else:
-                    # Ensure projects dict exists
-                    if 'projects' not in st.session_state:
-                        st.session_state.projects = {}
-                    
-                    # Create project
-                    st.session_state.projects[project_name] = {
+                    # Create project data
+                    project_data = {
+                        'name': project_name,
                         'customer_id': customer_id,
                         'implementation_type': implementation_type,
                         'description': project_description,
@@ -109,8 +132,24 @@ def render_projects_page():
                         'data_sources': [],
                         'notes': []
                     }
+                    
+                    # Save to Supabase if enabled
+                    if supabase_handler:
+                        try:
+                            saved_project = supabase_handler.create_project(project_data)
+                            # Use returned data with ID
+                            st.session_state.projects[project_name] = saved_project
+                            st.success(f"✅ Project '{project_name}' created and saved to database!")
+                        except Exception as e:
+                            st.error(f"⚠️ Created locally but failed to save to database: {str(e)}")
+                            # Fall back to session state only
+                            st.session_state.projects[project_name] = project_data
+                    else:
+                        # No Supabase, just session state
+                        st.session_state.projects[project_name] = project_data
+                        st.warning("⚠️ Project created in session only (not persisted). Enable Supabase for persistence.")
+                    
                     st.session_state.current_project = project_name
-                    st.success(f"✅ Project '{project_name}' created successfully!")
                     st.rerun()
     
     with col_right:
@@ -138,6 +177,7 @@ def render_projects_page():
                 <li>✓ Implementation timeline</li>
                 <li>✓ Consultant assignment</li>
                 <li>✓ Project notes & history</li>
+                <li>✓ <strong>Persistent storage</strong> (Supabase)</li>
             </ul>
         </div>
         """, unsafe_allow_html=True)
@@ -155,9 +195,9 @@ def render_projects_page():
                 
                 with col1:
                     st.markdown(f"""
-                    **Customer ID:** {proj_data['customer_id']}  
-                    **Type:** {proj_data['implementation_type']}  
-                    **Created:** {proj_data['created_date']}  
+                    **Customer ID:** {proj_data.get('customer_id', 'N/A')}  
+                    **Type:** {proj_data.get('implementation_type', 'N/A')}  
+                    **Created:** {proj_data.get('created_date', 'N/A')}  
                     **Consultant:** {proj_data.get('consultant', 'Not specified')}
                     """)
                     
@@ -166,6 +206,12 @@ def render_projects_page():
                     
                     if proj_data.get('go_live_date'):
                         st.markdown(f"**Target Go-Live:** {proj_data['go_live_date']}")
+                    
+                    # Show if persisted
+                    if 'id' in proj_data:
+                        st.caption("💾 Saved to database")
+                    else:
+                        st.caption("⚠️ Session only (not persisted)")
                     
                     # Project notes
                     if proj_data.get('notes'):
@@ -181,6 +227,15 @@ def render_projects_page():
                     
                     if st.button(f"Delete", key=f"delete_{proj_name}", use_container_width=True):
                         if st.checkbox(f"Confirm delete {proj_name}?", key=f"confirm_del_{proj_name}"):
+                            # Delete from Supabase if enabled
+                            if supabase_handler and 'id' in proj_data:
+                                try:
+                                    supabase_handler.delete_project(proj_data['id'])
+                                    st.success("✅ Deleted from database")
+                                except Exception as e:
+                                    st.error(f"⚠️ Failed to delete from database: {str(e)}")
+                            
+                            # Delete from session state
                             if 'projects' in st.session_state:
                                 del st.session_state.projects[proj_name]
                             if st.session_state.get('current_project') == proj_name:
@@ -200,11 +255,22 @@ def render_projects_page():
                     if new_note:
                         if 'notes' not in proj_data:
                             proj_data['notes'] = []
-                        proj_data['notes'].append({
+                        note_data = {
                             'text': new_note,
                             'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        })
-                        st.success("✅ Note added")
+                        }
+                        proj_data['notes'].append(note_data)
+                        
+                        # Update in Supabase if enabled
+                        if supabase_handler and 'id' in proj_data:
+                            try:
+                                supabase_handler.update_project(proj_data['id'], {'notes': proj_data['notes']})
+                                st.success("✅ Note added and saved")
+                            except Exception as e:
+                                st.warning(f"⚠️ Note added locally but not saved to database: {str(e)}")
+                        else:
+                            st.success("✅ Note added")
+                        
                         st.rerun()
                 
                 # Display existing notes
