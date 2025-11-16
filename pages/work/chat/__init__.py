@@ -302,11 +302,23 @@ def _generate_optimized_response(
     
     start_time = time.time()
     
-    # Get RAG handler
-    rag_handler = st.session_state.get('rag_handler')
-    
-    if not rag_handler:
-        return "⚠️ Please upload documents to the Knowledge Base first.", []
+    # Get RAG handler using AppConfig (respects feature flags!)
+    try:
+        from config import AppConfig
+        rag_handler = st.session_state.get('rag_handler')
+        
+        if not rag_handler:
+            # Try to initialize from AppConfig
+            try:
+                rag_handler = AppConfig.get_rag_handler()
+                st.session_state.rag_handler = rag_handler
+            except Exception:
+                pass
+        
+        if not rag_handler:
+            return "⚠️ Please upload documents to the Knowledge Base first.", []
+    except Exception as e:
+        return f"⚠️ Configuration error: {str(e)}", []
     
     # Check query cache (60 second TTL)
     cache_key = hashlib.md5(f"{prompt}_{retrieval_method}_{num_sources}".encode()).hexdigest()
@@ -317,12 +329,28 @@ def _generate_optimized_response(
     
     # Parallel RAG search in background
     with ThreadPoolExecutor(max_workers=1) as executor:
-        search_future = executor.submit(
-            rag_handler.search,
-            prompt,
-            method=retrieval_method.lower(),
-            n_results=num_sources
-        )
+        # Try to call search with method parameter (for advanced handlers)
+        # Fall back to basic search if method parameter not supported
+        def safe_search():
+            try:
+                # Try advanced search with method parameter
+                return rag_handler.search(
+                    prompt,
+                    method=retrieval_method.lower(),
+                    n_results=num_sources
+                )
+            except TypeError:
+                # Handler doesn't support 'method' parameter, use basic search
+                try:
+                    return rag_handler.search(
+                        prompt,
+                        n_results=num_sources
+                    )
+                except Exception:
+                    # Last resort: just query with no params
+                    return rag_handler.search(prompt)
+        
+        search_future = executor.submit(safe_search)
         
         # Get search results
         try:
