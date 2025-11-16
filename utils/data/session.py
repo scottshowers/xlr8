@@ -86,7 +86,16 @@ def initialize_session_state():
         st.session_state.llm_endpoint = AppConfig.LLM_ENDPOINT
     
     if 'llm_model' not in st.session_state:
-        st.session_state.llm_model = AppConfig.DEFAULT_LLM_MODEL
+        st.session_state.llm_model = AppConfig.LLM_DEFAULT_MODEL
+    
+    if 'llm_username' not in st.session_state:
+        st.session_state.llm_username = AppConfig.LLM_USERNAME
+    
+    if 'llm_password' not in st.session_state:
+        st.session_state.llm_password = AppConfig.LLM_PASSWORD
+    
+    if 'llm_provider' not in st.session_state:
+        st.session_state.llm_provider = 'local'
     
     # Chat History
     if 'chat_history' not in st.session_state:
