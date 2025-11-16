@@ -456,8 +456,22 @@ Provide a thorough, detailed answer based on the documents:"""
 
 
 def _call_local_llm(prompt: str, placeholder) -> str:
-    """Call local LLM with streaming"""
+    """Call local LLM with streaming - OPTIMIZED"""
     from config import AppConfig
+    
+    # Calculate appropriate context size based on prompt length
+    prompt_length = len(prompt.split())
+    
+    # Smart context sizing:
+    # - Short prompts (< 100 words): 2048 tokens
+    # - Medium prompts (100-500 words): 4096 tokens  
+    # - Long prompts (> 500 words): 8192 tokens
+    if prompt_length < 100:
+        num_ctx = 2048  # Fast for simple questions
+    elif prompt_length < 500:
+        num_ctx = 4096  # Balanced
+    else:
+        num_ctx = 8192  # Full context for complex queries
     
     try:
         response = requests.post(
@@ -468,18 +482,23 @@ def _call_local_llm(prompt: str, placeholder) -> str:
                 "stream": True,
                 "options": {
                     "temperature": 0.7,
-                    "num_ctx": 8192  # Large context window
+                    "num_ctx": num_ctx,  # Dynamic context size
+                    "num_predict": 512,  # Limit response length (faster!)
+                    "top_k": 40,
+                    "top_p": 0.9,
+                    "repeat_penalty": 1.1
                 }
             },
             auth=HTTPBasicAuth(AppConfig.LLM_USERNAME, AppConfig.LLM_PASSWORD),
             stream=True,
-            timeout=120
+            timeout=60  # Reduced from 120
         )
         
         response.raise_for_status()
         
-        # Stream the response
+        # Stream the response with faster updates
         full_response = ""
+        chunk_counter = 0
         for line in response.iter_lines():
             if line:
                 import json
@@ -488,7 +507,11 @@ def _call_local_llm(prompt: str, placeholder) -> str:
                     if 'response' in chunk:
                         token = chunk['response']
                         full_response += token
-                        placeholder.markdown(full_response + "▌")
+                        
+                        # Update display every 3 tokens (faster visual feedback)
+                        chunk_counter += 1
+                        if chunk_counter % 3 == 0:
+                            placeholder.markdown(full_response + "▌")
                 except json.JSONDecodeError:
                     continue
         
