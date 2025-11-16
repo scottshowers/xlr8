@@ -28,7 +28,7 @@ def render_analysis_page():
     """, unsafe_allow_html=True)
     
     # Check for active project
-    if st.session_state.current_project:
+    if st.session_state.get('current_project'):
         st.success(f"📁 Active Project: {st.session_state.current_project}")
     else:
         st.info("💡 No project selected - analyzing in standalone mode")
