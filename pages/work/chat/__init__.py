@@ -327,6 +327,9 @@ def _generate_optimized_response(
     if cached and (time.time() - cached['timestamp'] < 60):
         return cached['response'], cached['sources']
     
+    # Get LLM provider early (needed for fallback if no docs)
+    provider = st.session_state.get('llm_provider', 'local')
+    
     # Parallel RAG search in background
     with ThreadPoolExecutor(max_workers=1) as executor:
         # Try to call search with method parameter (for advanced handlers)
@@ -359,7 +362,28 @@ def _generate_optimized_response(
             return f"⚠️ Search error: {str(e)}", []
     
     if not sources:
-        return "⚠️ No relevant documents found. Please upload more content.", []
+        # No documents found - use LLM's general knowledge instead
+        # Build a prompt without RAG context
+        if provider == 'claude':
+            prompt_without_docs = f"""You are an expert UKG implementation consultant. 
+
+QUESTION: {prompt}
+
+Provide a comprehensive answer using your general knowledge:"""
+        else:
+            prompt_without_docs = f"""You are an expert UKG implementation consultant. Answer the following question using your knowledge.
+
+QUESTION: {prompt}
+
+Provide a detailed answer:"""
+        
+        # Call LLM without documents
+        if provider == 'claude':
+            response = _call_claude_api(prompt_without_docs, response_placeholder)
+        else:
+            response = _call_local_llm(prompt_without_docs, response_placeholder)
+        
+        return response, []  # Return response with no sources
     
     # Build context from sources
     context_parts = []
@@ -378,9 +402,6 @@ def _generate_optimized_response(
     # Optional context compression
     if use_compression and len(context) > 2000:
         context = context[:2000] + "...[truncated]"
-    
-    # Get LLM provider and model
-    provider = st.session_state.get('llm_provider', 'local')
     
     # Build prompt based on provider
     if provider == 'claude':
