@@ -235,6 +235,8 @@ header {visibility: hidden;}
 def render_chat_page():
     """Render clean chat interface matching XLR8 app style"""
     
+    import time  # Import here for timer functionality
+    
     # Apply custom CSS
     st.markdown(CLAUDE_STYLE_CSS, unsafe_allow_html=True)
     
@@ -448,7 +450,9 @@ def _generate_optimized_response(
     Optimized with caching and parallel processing
     """
     
-    start_time = time.time()
+    import time  # Import at function level
+    
+    start_time_local = time.time()
     
     # Get RAG handler using AppConfig (respects feature flags!)
     try:
@@ -480,7 +484,6 @@ def _generate_optimized_response(
     
     # Update timer - searching phase
     if timer_placeholder and start_time:
-        import time
         elapsed = time.time() - start_time
         timer_placeholder.info(f"🔍 Searching documents... ({elapsed:.1f}s)")
     
@@ -518,7 +521,6 @@ def _generate_optimized_response(
     if not sources:
         # Update timer - generating without docs
         if timer_placeholder and start_time:
-            import time
             elapsed = time.time() - start_time
             timer_placeholder.info(f"💭 Generating from AI knowledge... ({elapsed:.1f}s)")
         
@@ -565,7 +567,6 @@ Provide a detailed answer:"""
     
     # Update timer - generating with docs
     if timer_placeholder and start_time:
-        import time
         elapsed = time.time() - start_time
         timer_placeholder.info(f"📚 Generating from {len(sources)} documents... ({elapsed:.1f}s)")
     
@@ -624,6 +625,7 @@ Provide a thorough, detailed answer based on the documents:"""
 def _call_local_llm(prompt: str, placeholder) -> str:
     """Call local LLM with streaming - OPTIMIZED & FIXED"""
     from config import AppConfig
+    import time  # For potential timing needs
     
     # Calculate appropriate context size based on prompt length
     prompt_length = len(prompt.split())
