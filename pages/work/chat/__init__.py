@@ -1,6 +1,7 @@
 """
 AI Assistant Chat Page - HIGHLY OPTIMIZED
 Streaming responses, query caching, parallel processing
+Supports both Local LLM and Claude API
 """
 
 import streamlit as st
@@ -236,10 +237,21 @@ def _build_compact_context(sources: List[Dict]) -> str:
 
 
 def _call_llm_streaming(prompt: str, placeholder) -> str:
-    """Call LLM with streaming for perceived speed boost"""
+    """Route to appropriate LLM provider with streaming"""
+    
+    provider = st.session_state.get('llm_provider', 'local')
+    
+    if provider == 'claude':
+        return _call_claude_api(prompt, placeholder)
+    else:
+        return _call_local_llm(prompt, placeholder)
+
+
+def _call_local_llm(prompt: str, placeholder) -> str:
+    """Call local Ollama LLM with streaming"""
     
     llm_endpoint = st.session_state.get('llm_endpoint', 'http://localhost:11435')
-    llm_model = st.session_state.get('llm_model', 'deepseek-r1:7b')  # ← CHANGED TO DEEPSEEK!
+    llm_model = st.session_state.get('llm_model', 'deepseek-r1:7b')
     llm_username = st.session_state.get('llm_username', 'xlr8')
     llm_password = st.session_state.get('llm_password', 'Argyle76226#')
     
@@ -249,11 +261,11 @@ def _call_llm_streaming(prompt: str, placeholder) -> str:
         payload = {
             "model": llm_model,
             "prompt": prompt,
-            "stream": True,  # Enable streaming
+            "stream": True,
             "options": {
                 "temperature": 0.7,
-                "num_predict": 1000,  # Allow longer, more detailed responses
-                "num_ctx": 8192,      # MUCH larger context window for detailed docs
+                "num_predict": 1000,
+                "num_ctx": 8192,
                 "top_p": 0.9,
                 "top_k": 40
             }
@@ -272,14 +284,51 @@ def _call_llm_streaming(prompt: str, placeholder) -> str:
                 chunk = json.loads(line)
                 token = chunk.get('response', '')
                 full_response += token
-                
-                # Update placeholder with growing response
                 placeholder.markdown(full_response + "▌")
         
         return full_response
         
     except Exception as e:
-        return f"Error: {str(e)}"
+        return f"Error calling local LLM: {str(e)}"
+
+
+def _call_claude_api(prompt: str, placeholder) -> str:
+    """Call Claude API with streaming"""
+    
+    api_key = st.session_state.get('claude_api_key', '')
+    
+    if not api_key:
+        return "❌ Claude API key not configured. Please add your API key in the sidebar."
+    
+    try:
+        import anthropic
+        
+        client = anthropic.Anthropic(api_key=api_key)
+        
+        # Call Claude API with streaming
+        full_response = ""
+        
+        with client.messages.stream(
+            model="claude-sonnet-4-20250514",
+            max_tokens=2000,
+            temperature=0.7,
+            messages=[{
+                "role": "user",
+                "content": prompt
+            }]
+        ) as stream:
+            for text in stream.text_stream:
+                full_response += text
+                placeholder.markdown(full_response + "▌")
+        
+        return full_response
+        
+    except ImportError:
+        return "❌ Anthropic library not installed. Add 'anthropic' to requirements.txt"
+    except anthropic.AuthenticationError:
+        return "❌ Invalid Claude API key. Please check your key in the sidebar."
+    except Exception as e:
+        return f"Error calling Claude API: {str(e)}"
 
 
 if __name__ == "__main__":
