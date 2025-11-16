@@ -1,7 +1,7 @@
 """
-Chat Interface Page - FIXED + WITH EMPTY STATE ✨
-RAG-powered chat with UKG knowledge base
-Quick Win #4: Added empty state when no chat history
+Chat Interface Page - Professional & Polished
+RAG-powered chat with HCMPACT LLM
+Version: 3.0 - Fixed LLM endpoint and updated terminology
 """
 
 import streamlit as st
@@ -10,14 +10,14 @@ from requests.auth import HTTPBasicAuth
 
 
 def render_chat_page():
-    """Render chat interface page with RAG and empty state"""
+    """Render chat interface page with RAG and clean empty state"""
     
-    st.markdown("## 💬 Chat with Knowledge Base")
+    st.markdown("## 💬 Chat with HCMPACT LLM")
     
     st.markdown("""
     <div class='info-box'>
         <strong>AI-Powered Chat:</strong> Ask questions about UKG implementation and get answers
-        from your knowledge base using advanced RAG (Retrieval-Augmented Generation).
+        from your HCMPACT LLM using advanced RAG (Retrieval-Augmented Generation).
     </div>
     """, unsafe_allow_html=True)
     
@@ -50,7 +50,7 @@ def render_chat_page():
     with col1:
         st.metric("💬 Messages", total_messages)
     with col2:
-        st.metric("📚 Knowledge Items", knowledge_items)
+        st.metric("📚 HCMPACT LLM Items", knowledge_items)
     with col3:
         cached_queries = len(st.session_state.get('query_cache', {}))
         st.metric("⚡ Cached Queries", cached_queries)
@@ -65,18 +65,18 @@ def render_chat_page():
             st.session_state.query_cache = {}
             st.rerun()
     
-    # EMPTY STATE ✨
+    # EMPTY STATE - CLEAN & COMPACT
     if not st.session_state.get('chat_history'):
         st.markdown("""
-        <div style='text-align: center; padding: 3rem 1rem; background: linear-gradient(135deg, #f5f7f9 0%, #e8eef3 100%); border-radius: 16px; border: 2px dashed #8ca6be; margin: 2rem 0;'>
-            <div style='font-size: 4rem; margin-bottom: 1rem;'>💬</div>
-            <h2 style='color: #6d8aa0; margin-bottom: 1rem;'>Start a Conversation</h2>
-            <p style='color: #7d96a8; font-size: 1.1rem; max-width: 500px; margin: 0 auto 2rem;'>
-                Ask questions about UKG implementation and I'll search the knowledge base for relevant information
+        <div style='text-align: center; padding: 2.5rem 1rem; background: linear-gradient(135deg, #f5f7f9 0%, #e8eef3 100%); border-radius: 12px; border: 2px solid rgba(140, 166, 190, 0.3); margin: 1.5rem 0;'>
+            <div style='font-size: 3rem; margin-bottom: 0.75rem;'>💬</div>
+            <h2 style='color: #6d8aa0; margin-bottom: 0.75rem; font-size: 1.3rem; font-weight: 600;'>Start a Conversation</h2>
+            <p style='color: #7d96a8; font-size: 1rem; max-width: 480px; margin: 0 auto 1.5rem;'>
+                Ask questions about UKG implementation and I'll search the HCMPACT LLM for relevant information
             </p>
-            <div style='background: white; padding: 1.5rem; border-radius: 12px; max-width: 450px; margin: 0 auto; box-shadow: 0 4px 12px rgba(0,0,0,0.08);'>
-                <h3 style='color: #6d8aa0; margin-bottom: 1rem; font-size: 1.1rem;'>💡 Example Questions</h3>
-                <div style='text-align: left; color: #6c757d; line-height: 2;'>
+            <div style='background: white; padding: 1.5rem; border-radius: 12px; max-width: 420px; margin: 0 auto; box-shadow: 0 4px 12px rgba(0,0,0,0.08);'>
+                <h3 style='color: #6d8aa0; margin-bottom: 0.75rem; font-size: 1.1rem;'>💡 Example Questions</h3>
+                <div style='text-align: left; color: #6c757d; line-height: 1.9;'>
                     • "How do I configure pay codes?"<br>
                     • "What are best practices for time entry?"<br>
                     • "How should I set up accruals?"<br>
@@ -133,12 +133,12 @@ def render_chat_page():
     if submit_button and user_question:
         # Check if RAG handler exists
         if not rag_handler:
-            st.error("⚠️ Knowledge base not initialized. Please check system configuration.")
+            st.error("⚠️ HCMPACT LLM not initialized. Please check system configuration.")
             return
         
-        # Check if knowledge base has documents
+        # Check if HCMPACT LLM has documents
         if knowledge_items == 0:
-            st.warning("⚠️ No documents in knowledge base. Please add documents in the Knowledge Base tab first.")
+            st.warning("⚠️ No documents in HCMPACT LLM. Please add documents in the HCMPACT LLM tab first.")
             return
         
         try:
@@ -149,7 +149,7 @@ def render_chat_page():
             })
             
             # Show loading state
-            with st.spinner("🔍 Searching knowledge base and generating response..."):
+            with st.spinner("🔍 Searching HCMPACT LLM and generating response..."):
                 # Check cache first
                 cache_key = user_question.lower().strip()
                 if cache_key in st.session_state.get('query_cache', {}):
@@ -157,7 +157,7 @@ def render_chat_page():
                     st.info("⚡ Retrieved from cache")
                 else:
                     # Query RAG system
-                    result = _query_knowledge_base(user_question, rag_handler)
+                    result = _query_hcmpact_llm(user_question, rag_handler)
                     
                     # Cache the result
                     if 'query_cache' not in st.session_state:
@@ -181,7 +181,7 @@ def render_chat_page():
                 <strong style='color: #856404;'>💡 Troubleshooting Tips:</strong><br>
                 <span style='color: #856404; font-size: 0.9rem;'>
                 • Check if LLM service is running<br>
-                • Verify knowledge base has documents<br>
+                • Verify HCMPACT LLM has documents<br>
                 • Try a simpler question<br>
                 • Check Railway logs for detailed errors
                 </span>
@@ -189,9 +189,9 @@ def render_chat_page():
             """, unsafe_allow_html=True)
 
 
-def _query_knowledge_base(query: str, rag_handler) -> dict:
+def _query_hcmpact_llm(query: str, rag_handler) -> dict:
     """
-    Query the knowledge base and generate an answer using LLM
+    Query the HCMPACT LLM and generate an answer using LLM
     
     Args:
         query: User's question
@@ -201,8 +201,13 @@ def _query_knowledge_base(query: str, rag_handler) -> dict:
         Dictionary with answer and sources
     """
     
-    # Get LLM config
+    # Get LLM config - ENSURE HTTP:// PREFIX
     llm_endpoint = st.session_state.get('llm_endpoint', 'http://localhost:11435')
+    
+    # FIX: Ensure http:// prefix exists
+    if llm_endpoint and not llm_endpoint.startswith(('http://', 'https://')):
+        llm_endpoint = f'http://{llm_endpoint}'
+    
     llm_model = st.session_state.get('llm_model', 'llama3.2:latest')
     llm_username = st.session_state.get('llm_username', 'xlr8')
     llm_password = st.session_state.get('llm_password', 'Argyle76226#')
@@ -211,12 +216,12 @@ def _query_knowledge_base(query: str, rag_handler) -> dict:
     llm_provider = st.session_state.get('llm_provider', 'local')
     
     try:
-        # Search knowledge base
+        # Search HCMPACT LLM
         search_results = rag_handler.search(query, n_results=5)
         
         if not search_results:
             return {
-                'answer': "I couldn't find relevant information in the knowledge base. Please try rephrasing your question or add more documents to the knowledge base.",
+                'answer': "I couldn't find relevant information in the HCMPACT LLM. Please try rephrasing your question or add more documents to the HCMPACT LLM.",
                 'sources': []
             }
         
@@ -229,7 +234,7 @@ def _query_knowledge_base(query: str, rag_handler) -> dict:
         # Build prompt
         prompt = f"""You are an expert UKG implementation consultant. Answer the user's question using ONLY the provided context from HCMPACT standards and documentation.
 
-CONTEXT FROM KNOWLEDGE BASE:
+CONTEXT FROM HCMPACT LLM:
 {context}
 
 USER QUESTION:
@@ -258,7 +263,7 @@ ANSWER:"""
         }
         
     except Exception as e:
-        raise Exception(f"Knowledge base query failed: {str(e)}")
+        raise Exception(f"HCMPACT LLM query failed: {str(e)}")
 
 
 def _call_local_llm(prompt: str, endpoint: str, model: str, username: str, password: str) -> str:
@@ -306,6 +311,11 @@ def _call_claude_api(prompt: str, api_key: str) -> str:
         # Fall back to local LLM if Claude API fails
         st.warning(f"Claude API failed ({str(e)}), falling back to local LLM...")
         llm_endpoint = st.session_state.get('llm_endpoint', 'http://localhost:11435')
+        
+        # Ensure http:// prefix
+        if llm_endpoint and not llm_endpoint.startswith(('http://', 'https://')):
+            llm_endpoint = f'http://{llm_endpoint}'
+        
         llm_model = st.session_state.get('llm_model', 'llama3.2:latest')
         llm_username = st.session_state.get('llm_username', 'xlr8')
         llm_password = st.session_state.get('llm_password', 'Argyle76226#')
