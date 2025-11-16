@@ -23,17 +23,17 @@ def render_projects_page():
     if st.session_state.get('projects'):
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("📁 Total Projects", len(st.session_state.projects))
+            st.metric("📁 Total Projects", len(st.session_state.get('projects', {})))
         with col2:
-            active_project = st.session_state.current_project or "None"
+            active_project = st.session_state.get('current_project') or "None"
             display_name = active_project if len(active_project) < 15 else active_project[:12] + "..."
             st.metric("📌 Active Project", display_name)
         with col3:
-            pro_count = sum(1 for p in st.session_state.projects.values() 
+            pro_count = sum(1 for p in st.session_state.get('projects', {}).values() 
                           if 'Pro' in p.get('implementation_type', ''))
             st.metric("🔵 UKG Pro", pro_count)
         with col4:
-            wfm_count = sum(1 for p in st.session_state.projects.values() 
+            wfm_count = sum(1 for p in st.session_state.get('projects', {}).values() 
                           if 'WFM' in p.get('implementation_type', ''))
             st.metric("🟢 UKG WFM", wfm_count)
         
@@ -90,9 +90,13 @@ def render_projects_page():
             if submitted:
                 if not project_name or not customer_id:
                     st.error("❌ Project Name and Customer ID are required!")
-                elif project_name in st.session_state.projects:
+                elif project_name in st.session_state.get('projects', {}):
                     st.error(f"❌ Project '{project_name}' already exists!")
                 else:
+                    # Ensure projects dict exists
+                    if 'projects' not in st.session_state:
+                        st.session_state.projects = {}
+                    
                     # Create project
                     st.session_state.projects[project_name] = {
                         'customer_id': customer_id,
@@ -143,8 +147,8 @@ def render_projects_page():
         st.markdown("---")
         st.markdown("### 📂 Your Projects")
         
-        for proj_name, proj_data in st.session_state.projects.items():
-            is_active = proj_name == st.session_state.current_project
+        for proj_name, proj_data in st.session_state.get('projects', {}).items():
+            is_active = proj_name == st.session_state.get('current_project')
             
             with st.expander(f"{'📌 ' if is_active else '📁 '}{proj_name}", expanded=is_active):
                 col1, col2 = st.columns([3, 1])
@@ -177,8 +181,9 @@ def render_projects_page():
                     
                     if st.button(f"Delete", key=f"delete_{proj_name}", use_container_width=True):
                         if st.checkbox(f"Confirm delete {proj_name}?", key=f"confirm_del_{proj_name}"):
-                            del st.session_state.projects[proj_name]
-                            if st.session_state.current_project == proj_name:
+                            if 'projects' in st.session_state:
+                                del st.session_state.projects[proj_name]
+                            if st.session_state.get('current_project') == proj_name:
                                 st.session_state.current_project = None
                             st.rerun()
                 
