@@ -43,7 +43,7 @@ def render_chat_page():
             help="Search method"
         )
         
-        num_sources = st.slider("Sources", 1, 10, 3)
+        num_sources = st.slider("Sources", 1, 10, 5)  # Default to 5 sources
         
         use_compression = st.checkbox("Compression", value=False)
         show_sources = st.checkbox("Show Sources", value=True)
@@ -210,17 +210,27 @@ def _get_rag_sources(rag_handler, prompt: str, method: str, n: int, compress: bo
 
 
 def _build_optimized_prompt() -> str:
-    """Compact system prompt (fewer tokens = faster)"""
-    return """You're a UKG expert. Use the context to answer. Be concise. Cite sources."""
+    """System prompt emphasizing thoroughness and accuracy"""
+    return """You are a UKG technical expert providing detailed, accurate guidance.
+
+CRITICAL INSTRUCTIONS:
+1. Base your answer ENTIRELY on the provided context sources
+2. Provide COMPLETE, step-by-step instructions with ALL details
+3. Include specific field names, values, and navigation paths from the documentation
+4. If the documentation provides numbered steps, include ALL steps in order
+5. Do NOT summarize or shorten technical procedures - give the full process
+6. Cite which source(s) you used for each major point
+
+If the context doesn't contain enough information, say so explicitly."""
 
 
 def _build_compact_context(sources: List[Dict]) -> str:
-    """Build minimal context (reduce tokens)"""
-    # Limit each source to 200 chars max
+    """Build context with full details (not truncated)"""
+    # Allow up to 1000 chars per source for detailed technical docs
     context_parts = []
     for i, source in enumerate(sources, 1):
-        content = source['content'][:200] + "..." if len(source['content']) > 200 else source['content']
-        context_parts.append(f"[{i}] {content}")
+        content = source['content'][:1000] + "..." if len(source['content']) > 1000 else source['content']
+        context_parts.append(f"[Source {i}] {content}")
     
     return "\n\n".join(context_parts)
 
@@ -242,8 +252,8 @@ def _call_llm_streaming(prompt: str, placeholder) -> str:
             "stream": True,  # Enable streaming
             "options": {
                 "temperature": 0.7,
-                "num_predict": 500,  # Limit response length for speed
-                "num_ctx": 2048,     # Smaller context window
+                "num_predict": 1000,  # Allow longer, more detailed responses
+                "num_ctx": 8192,      # MUCH larger context window for detailed docs
                 "top_p": 0.9,
                 "top_k": 40
             }
