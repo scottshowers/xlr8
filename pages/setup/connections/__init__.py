@@ -23,8 +23,8 @@ def render_connections_page():
         st.session_state.api_credentials = {'pro': {}, 'wfm': {}}
     
     # Connection status
-    pro_configured = bool(st.session_state.api_credentials['pro'])
-    wfm_configured = bool(st.session_state.api_credentials['wfm'])
+    pro_configured = bool(st.session_state.get('api_credentials', {}).get('pro'))
+    wfm_configured = bool(st.session_state.get('api_credentials', {}).get('wfm'))
     
     col1, col2 = st.columns(2)
     
@@ -45,7 +45,7 @@ def render_connections_page():
         with st.form("pro_api_form"):
             pro_tenant_url = st.text_input(
                 "Tenant URL *",
-                value=st.session_state.api_credentials['pro'].get('tenant_url', ''),
+                value=st.session_state.get('api_credentials', {}).get('pro', {}).get('tenant_url', ''),
                 placeholder="https://service.ultipro.com",
                 help="Your UKG Pro tenant URL"
             )
@@ -54,14 +54,14 @@ def render_connections_page():
             with col1:
                 pro_username = st.text_input(
                     "API Username *",
-                    value=st.session_state.api_credentials['pro'].get('username', ''),
+                    value=st.session_state.get('api_credentials', {}).get('pro', {}).get('username', ''),
                     help="API service account username"
                 )
             with col2:
                 pro_password = st.text_input(
                     "API Password *",
                     type="password",
-                    value=st.session_state.api_credentials['pro'].get('password', ''),
+                    value=st.session_state.get('api_credentials', {}).get('pro', {}).get('password', ''),
                     help="API service account password"
                 )
             
@@ -69,14 +69,14 @@ def render_connections_page():
             with col1:
                 pro_app_key = st.text_input(
                     "Application Key *",
-                    value=st.session_state.api_credentials['pro'].get('app_key', ''),
+                    value=st.session_state.get('api_credentials', {}).get('pro', {}).get('app_key', ''),
                     type="password",
                     help="API application key"
                 )
             with col2:
                 pro_customer_key = st.text_input(
                     "Customer API Key *",
-                    value=st.session_state.api_credentials['pro'].get('customer_key', ''),
+                    value=st.session_state.get('api_credentials', {}).get('pro', {}).get('customer_key', ''),
                     type="password",
                     help="Customer-specific API key"
                 )
@@ -85,6 +85,8 @@ def render_connections_page():
             
             if submitted_pro:
                 if all([pro_tenant_url, pro_username, pro_password, pro_app_key, pro_customer_key]):
+                    if 'api_credentials' not in st.session_state:
+                        st.session_state.api_credentials = {'pro': {}, 'wfm': {}}
                     st.session_state.api_credentials['pro'] = {
                         'tenant_url': pro_tenant_url,
                         'username': pro_username,
@@ -104,7 +106,7 @@ def render_connections_page():
         with st.form("wfm_api_form"):
             wfm_base_url = st.text_input(
                 "Base URL *",
-                value=st.session_state.api_credentials['wfm'].get('base_url', ''),
+                value=st.session_state.get('api_credentials', {}).get('wfm', {}).get('base_url', ''),
                 placeholder="https://wfm.ultipro.com",
                 help="Your UKG WFM instance URL"
             )
@@ -113,20 +115,20 @@ def render_connections_page():
             with col1:
                 wfm_username = st.text_input(
                     "API Username *",
-                    value=st.session_state.api_credentials['wfm'].get('username', ''),
+                    value=st.session_state.get('api_credentials', {}).get('wfm', {}).get('username', ''),
                     help="WFM API username"
                 )
             with col2:
                 wfm_password = st.text_input(
                     "API Password *",
                     type="password",
-                    value=st.session_state.api_credentials['wfm'].get('password', ''),
+                    value=st.session_state.get('api_credentials', {}).get('wfm', {}).get('password', ''),
                     help="WFM API password"
                 )
             
             wfm_app_key = st.text_input(
                 "Application Key *",
-                value=st.session_state.api_credentials['wfm'].get('app_key', ''),
+                value=st.session_state.get('api_credentials', {}).get('wfm', {}).get('app_key', ''),
                 type="password",
                 help="WFM application key"
             )
@@ -135,6 +137,8 @@ def render_connections_page():
             
             if submitted_wfm:
                 if all([wfm_base_url, wfm_username, wfm_password, wfm_app_key]):
+                    if 'api_credentials' not in st.session_state:
+                        st.session_state.api_credentials = {'pro': {}, 'wfm': {}}
                     st.session_state.api_credentials['wfm'] = {
                         'base_url': wfm_base_url,
                         'username': wfm_username,
@@ -154,13 +158,15 @@ def render_connections_page():
     
     with col1:
         if pro_configured and st.button("Clear UKG Pro Credentials"):
-            st.session_state.api_credentials['pro'] = {}
+            if 'api_credentials' in st.session_state:
+                st.session_state.api_credentials['pro'] = {}
             st.success("✅ UKG Pro credentials cleared")
             st.rerun()
     
     with col2:
         if wfm_configured and st.button("Clear UKG WFM Credentials"):
-            st.session_state.api_credentials['wfm'] = {}
+            if 'api_credentials' in st.session_state:
+                st.session_state.api_credentials['wfm'] = {}
             st.success("✅ UKG WFM credentials cleared")
             st.rerun()
     
