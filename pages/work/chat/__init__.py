@@ -64,8 +64,24 @@ def render_chat_page():
                     for i, source in enumerate(message['sources'], 1):
                         st.caption(f"**{i}. {source['doc_name']}** ({source['category']}) - {source.get('score', 0):.2f}")
     
-    # Chat input
-    if prompt := st.chat_input("Ask about UKG..."):
+    # Chat input - LARGER like Claude's interface
+    st.markdown("---")
+    prompt = st.text_area(
+        "💬 Ask about UKG...",
+        height=120,
+        placeholder="Type your question here... (Shift+Enter for new line, Enter to send)",
+        key="chat_input_area"
+    )
+    
+    col1, col2, col3 = st.columns([6, 1, 1])
+    with col2:
+        send_button = st.button("📤 Send", type="primary", use_container_width=True)
+    with col3:
+        if st.button("🗑️", use_container_width=True, help="Clear input"):
+            st.session_state.chat_input_area = ""
+            st.rerun()
+    
+    if send_button and prompt.strip():
         # Add user message
         st.session_state.chat_history.append({'role': 'user', 'content': prompt})
         
