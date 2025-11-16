@@ -206,6 +206,10 @@ Project was created in session only (will be lost on refresh).
         st.markdown("### 📂 Your Projects")
         
         for proj_name, proj_data in st.session_state.get('projects', {}).items():
+            # Safety check - ensure proj_data is a dict
+            if not isinstance(proj_data, dict):
+                continue
+                
             is_active = proj_name == st.session_state.get('current_project')
             
             with st.expander(f"{'📌 ' if is_active else '📁 '}{proj_name}", expanded=is_active):
@@ -232,8 +236,12 @@ Project was created in session only (will be lost on refresh).
                         st.caption("⚠️ Session only (not persisted)")
                     
                     # Project notes
-                    if proj_data.get('notes'):
-                        st.markdown(f"**Notes:** {len(proj_data['notes'])} note(s)")
+                    notes = proj_data.get('notes', [])
+                    # Ensure notes is a list
+                    if isinstance(notes, str):
+                        notes = []
+                    if notes and len(notes) > 0:
+                        st.markdown(f"**Notes:** {len(notes)} note(s)")
                 
                 with col2:
                     if not is_active:
@@ -271,8 +279,10 @@ Project was created in session only (will be lost on refresh).
                 
                 if st.button("Add Note", key=f"add_note_{proj_name}"):
                     if new_note:
-                        if 'notes' not in proj_data:
+                        # Ensure notes field exists and is a list
+                        if 'notes' not in proj_data or not isinstance(proj_data.get('notes'), list):
                             proj_data['notes'] = []
+                        
                         note_data = {
                             'text': new_note,
                             'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -292,10 +302,23 @@ Project was created in session only (will be lost on refresh).
                         st.rerun()
                 
                 # Display existing notes
-                if proj_data.get('notes'):
-                    for note in proj_data['notes'][-3:]:  # Show last 3
-                        st.markdown(f"<small>**{note['timestamp']}:** {note['text']}</small>", 
-                                  unsafe_allow_html=True)
+                notes = proj_data.get('notes', [])
+                # Ensure notes is a list
+                if isinstance(notes, str):
+                    notes = []
+                    
+                if notes and len(notes) > 0:
+                    for note in notes[-3:]:  # Show last 3
+                        # Handle both dict and string formats
+                        if isinstance(note, dict):
+                            timestamp = note.get('timestamp', 'Unknown')
+                            text = note.get('text', '')
+                            st.markdown(f"<small>**{timestamp}:** {text}</small>", 
+                                      unsafe_allow_html=True)
+                        else:
+                            # Legacy string format
+                            st.markdown(f"<small>{note}</small>", 
+                                      unsafe_allow_html=True)
     else:
         st.info("📋 No projects yet. Create your first project above to get started!")
 
