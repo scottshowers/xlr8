@@ -52,6 +52,63 @@ st.markdown(AppConfig.CUSTOM_CSS, unsafe_allow_html=True)
 # Render sidebar (always visible)
 render_sidebar()
 
+# WELCOME DASHBOARD - AMPLIFIED TO 11! 🎸
+st.markdown("""
+<div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 2rem; border-radius: 16px; margin-bottom: 2rem; box-shadow: 0 8px 24px rgba(102, 126, 234, 0.3);'>
+    <div style='text-align: center;'>
+        <h1 style='color: white; margin: 0 0 0.5rem 0; font-size: 2.5rem; font-weight: 800;'>⚡ XLR8 by HCMPACT</h1>
+        <p style='color: rgba(255,255,255,0.9); font-size: 1.2rem; margin: 0;'>UKG Implementation Accelerator</p>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+# Quick Stats Dashboard
+if st.session_state.get('projects') or st.session_state.get('knowledge_base'):
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        project_count = len(st.session_state.get('projects', {}))
+        st.markdown(f"""
+        <div style='background: white; padding: 1.5rem; border-radius: 12px; border: 2px solid #e8eef3; box-shadow: 0 4px 12px rgba(0,0,0,0.08); text-align: center;'>
+            <div style='font-size: 2.5rem; margin-bottom: 0.5rem;'>📁</div>
+            <div style='font-size: 2rem; font-weight: 700; color: #6d8aa0;'>{project_count}</div>
+            <div style='color: #7d96a8; font-size: 0.9rem; font-weight: 500;'>Projects</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        kb_count = len(st.session_state.get('knowledge_base', []))
+        st.markdown(f"""
+        <div style='background: white; padding: 1.5rem; border-radius: 12px; border: 2px solid #e3f2fd; box-shadow: 0 4px 12px rgba(0,0,0,0.08); text-align: center;'>
+            <div style='font-size: 2.5rem; margin-bottom: 0.5rem;'>📚</div>
+            <div style='font-size: 2rem; font-weight: 700; color: #2196F3;'>{kb_count}</div>
+            <div style='color: #7d96a8; font-size: 0.9rem; font-weight: 500;'>KB Documents</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        active_project = st.session_state.get('current_project')
+        st.markdown(f"""
+        <div style='background: white; padding: 1.5rem; border-radius: 12px; border: 2px solid #e8f5e9; box-shadow: 0 4px 12px rgba(0,0,0,0.08); text-align: center;'>
+            <div style='font-size: 2.5rem; margin-bottom: 0.5rem;'>{'📌' if active_project else '⚪'}</div>
+            <div style='font-size: 1.2rem; font-weight: 600; color: {'#28a745' if active_project else '#6c757d'};'>{'Active' if active_project else 'None'}</div>
+            <div style='color: #7d96a8; font-size: 0.9rem; font-weight: 500;'>Active Project</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col4:
+        llm_provider = st.session_state.get('llm_provider', 'local')
+        provider_name = 'Local LLM' if llm_provider == 'local' else 'Claude API'
+        st.markdown(f"""
+        <div style='background: white; padding: 1.5rem; border-radius: 12px; border: 2px solid #f3e5f5; box-shadow: 0 4px 12px rgba(0,0,0,0.08); text-align: center;'>
+            <div style='font-size: 2.5rem; margin-bottom: 0.5rem;'>🤖</div>
+            <div style='font-size: 1.2rem; font-weight: 600; color: #667eea;'>{provider_name.split()[0]}</div>
+            <div style='color: #7d96a8; font-size: 0.9rem; font-weight: 500;'>AI Provider</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    st.markdown("<div style='margin-bottom: 2rem;'></div>", unsafe_allow_html=True)
+
 # Main content area with tabs
 tab1, tab2, tab3, tab4 = st.tabs([
     "🚀 WORK",
@@ -128,10 +185,17 @@ with tab4:
     with admin_subtab3:
         render_settings_page()
 
-# Footer
+# Footer - AMPLIFIED! 🎸
 st.markdown("---")
 st.markdown(f"""
-<div style="text-align: center; color: #6c757d; padding: 1rem;">
-    <small>{AppConfig.APP_NAME} v{AppConfig.VERSION} | {AppConfig.TAGLINE}</small>
+<div style='background: linear-gradient(135deg, #f5f7f9 0%, #e8eef3 100%); padding: 1.5rem; border-radius: 12px; text-align: center; margin-top: 2rem; border: 2px solid rgba(109, 138, 160, 0.15);'>
+    <div style='display: flex; align-items: center; justify-content: center; gap: 1rem; flex-wrap: wrap;'>
+        <div style='color: #6d8aa0; font-weight: 700; font-size: 1.1rem;'>⚡ {AppConfig.APP_NAME} v{AppConfig.VERSION}</div>
+        <div style='color: #7d96a8;'>|</div>
+        <div style='color: #7d96a8; font-weight: 500;'>{AppConfig.TAGLINE}</div>
+    </div>
+    <div style='color: #7d96a8; font-size: 0.85rem; margin-top: 0.5rem;'>
+        🎸 <strong>Cranked to 11</strong> - The loudest UKG implementation tool in the world!
+    </div>
 </div>
 """, unsafe_allow_html=True)
