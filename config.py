@@ -201,6 +201,47 @@ class FeatureFlags:
     Rollback: Set to False
     """
     
+    # ========================================
+    # SUPABASE/PERSISTENCE FLAGS
+    # ========================================
+    
+    USE_SUPABASE_PERSISTENCE = False
+    """
+    Enable persistent storage with Supabase (FREE tier!).
+    Replaces ephemeral session state with database storage.
+    Owner: Core Team
+    Status: Ready to Deploy (Phase 3)
+    Requires: SUPABASE_URL and SUPABASE_KEY in Railway
+    Rollback: Set to False (instant rollback to session state)
+    """
+    
+    SUPABASE_SYNC_CHAT_HISTORY = True
+    """
+    Automatically sync chat history to Supabase.
+    Only applies when USE_SUPABASE_PERSISTENCE = True
+    Owner: Core Team
+    Status: Production Ready
+    Rollback: Set to False if causing performance issues
+    """
+    
+    SUPABASE_AUTO_MIGRATE = False
+    """
+    Auto-migrate existing session data to Supabase on first enable.
+    Owner: Core Team
+    Status: Experimental
+    Warning: One-time migration, test carefully
+    Rollback: Set to False
+    """
+    
+    SHOW_SUPABASE_STATUS = True
+    """
+    Show Supabase connection status in sidebar.
+    Useful for debugging and monitoring.
+    Owner: Core Team
+    Status: Production
+    Rollback: Set to False to hide status
+    """
+    
     @classmethod
     def get_all_flags(cls) -> Dict[str, bool]:
         """Get all feature flags and their status."""
@@ -394,3 +435,65 @@ def has_experimental_features() -> bool:
 def is_development_mode() -> bool:
     """Check if running in development mode."""
     return FeatureFlags.SHOW_DEBUG_INFO or os.getenv("ENVIRONMENT") == "development"
+
+
+# ========================================
+# SUPABASE CONFIGURATION HELPERS
+# ========================================
+
+def get_supabase_config() -> Dict[str, Any]:
+    """
+    Get Supabase configuration status.
+    
+    Returns:
+        dict: Configuration including enabled status, credentials, and settings
+    
+    Example:
+        config = get_supabase_config()
+        if config['enabled'] and config['configured']:
+            # Use Supabase
+        else:
+            # Use session state
+    """
+    return {
+        'enabled': FeatureFlags.USE_SUPABASE_PERSISTENCE,
+        'configured': bool(os.getenv('SUPABASE_URL') and os.getenv('SUPABASE_KEY')),
+        'url': os.getenv('SUPABASE_URL'),
+        'has_url': bool(os.getenv('SUPABASE_URL')),
+        'has_key': bool(os.getenv('SUPABASE_KEY')),
+        'sync_chat': FeatureFlags.SUPABASE_SYNC_CHAT_HISTORY,
+        'auto_migrate': FeatureFlags.SUPABASE_AUTO_MIGRATE,
+        'show_status': FeatureFlags.SHOW_SUPABASE_STATUS
+    }
+
+
+def is_supabase_enabled() -> bool:
+    """
+    Check if Supabase is both enabled AND properly configured.
+    
+    Returns:
+        bool: True if ready to use Supabase, False otherwise
+    
+    Example:
+        if is_supabase_enabled():
+            # Save to database
+        else:
+            # Save to session state
+    """
+    return (FeatureFlags.USE_SUPABASE_PERSISTENCE and 
+            bool(os.getenv('SUPABASE_URL')) and 
+            bool(os.getenv('SUPABASE_KEY')))
+
+
+def get_storage_mode() -> str:
+    """
+    Get current storage mode.
+    
+    Returns:
+        str: 'supabase' if Supabase enabled, 'session' otherwise
+    
+    Example:
+        mode = get_storage_mode()
+        print(f"Currently using: {mode}")
+    """
+    return 'supabase' if is_supabase_enabled() else 'session'
