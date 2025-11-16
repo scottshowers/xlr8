@@ -12,6 +12,72 @@ import hashlib
 from concurrent.futures import ThreadPoolExecutor
 
 
+def classify_question_complexity(question: str, num_sources: int = 0) -> dict:
+    """
+    Classify question complexity and select appropriate model
+    
+    Returns dict with:
+    - complexity: 'simple', 'medium', or 'complex'
+    - model: which model to use
+    - reason: why this model was chosen
+    - expected_time: estimated response time
+    """
+    
+    word_count = len(question.split())
+    question_lower = question.lower().strip()
+    
+    # Level 1: Conversational (ultra-simple)
+    conversational = ['hello', 'hi', 'hey', 'thanks', 'thank you', 'ok', 'okay', 
+                     'got it', 'bye', 'goodbye', 'yes', 'no', 'sure']
+    if question_lower in conversational or word_count <= 2:
+        return {
+            'complexity': 'simple',
+            'model': 'mistral:7b',
+            'reason': 'Conversational',
+            'expected_time': '3-5 seconds'
+        }
+    
+    # Level 2: Simple factual questions
+    simple_patterns = ['what is', 'define', 'who is', 'when was', 'where is',
+                      'list', 'name', 'tell me about']
+    if any(pattern in question_lower for pattern in simple_patterns) and word_count < 15:
+        return {
+            'complexity': 'simple',
+            'model': 'mistral:7b',
+            'reason': 'Simple factual',
+            'expected_time': '5-10 seconds'
+        }
+    
+    # Level 3: Complex analytical questions
+    complex_patterns = ['compare', 'analyze', 'why does', 'why did', 'how should',
+                       'what are the trade-offs', 'recommend', 'evaluate', 'assess',
+                       'synthesize', 'review', 'explain why', 'explain how']
+    if any(pattern in question_lower for pattern in complex_patterns):
+        return {
+            'complexity': 'complex',
+            'model': 'deepseek-r1:7b',
+            'reason': 'Requires reasoning',
+            'expected_time': '25-35 seconds'
+        }
+    
+    # Level 4: Multi-document synthesis
+    if num_sources > 5 or word_count > 30:
+        return {
+            'complexity': 'complex',
+            'model': 'deepseek-r1:7b',
+            'reason': 'Multi-document analysis',
+            'expected_time': '30-40 seconds'
+        }
+    
+    # Default: Medium complexity - use fast model
+    return {
+        'complexity': 'medium',
+        'model': 'mistral:7b',
+        'reason': 'General question',
+        'expected_time': '8-15 seconds'
+    }
+
+
 # Custom CSS - Clean design matching XLR8 app style
 CLAUDE_STYLE_CSS = """
 <style>
@@ -284,6 +350,16 @@ def render_chat_page():
         )
         
         st.markdown("---")
+        
+        # Model selection mode
+        st.markdown("### 🤖 AI Model")
+        model_mode = st.radio(
+            "Selection Mode",
+            ["Auto (Smart Routing)", "Always Fast (Mistral)", "Always Smart (DeepSeek)"],
+            help="Auto selects the best model for each question"
+        )
+        
+        st.markdown("---")
         st.markdown("### 🗄️ Chat History")
         
         # Chat stats
@@ -401,7 +477,8 @@ RAG Handler: {type(st.session_state.get('rag_handler')).__name__ if st.session_s
                     use_compression=use_compression,
                     response_placeholder=response_placeholder,
                     timer_placeholder=timer_placeholder,
-                    start_time=start_time
+                    start_time=start_time,
+                    model_mode=model_mode
                 )
                 
                 # Clear timer
@@ -465,11 +542,12 @@ def _generate_optimized_response(
     use_compression: bool,
     response_placeholder,
     timer_placeholder=None,
-    start_time=None
+    start_time=None,
+    model_mode: str = "Auto (Smart Routing)"
 ) -> tuple[str, List[Dict[str, Any]]]:
     """
     Generate response with RAG context
-    Optimized with caching and parallel processing
+    Optimized with caching, parallel processing, and intelligent model routing
     """
     
     import time  # Import at function level
@@ -539,6 +617,28 @@ def _generate_optimized_response(
             sources = search_future.result(timeout=10)
         except Exception as e:
             return f"⚠️ Search error: {str(e)}", []
+    
+    # INTELLIGENT MODEL SELECTION
+    # Determine which model to use based on complexity and user preference
+    if model_mode == "Always Fast (Mistral)":
+        selected_model = "mistral:7b"
+        model_reason = "User preference: Always Fast"
+    elif model_mode == "Always Smart (DeepSeek)":
+        selected_model = "deepseek-r1:7b"
+        model_reason = "User preference: Always Smart"
+    else:  # Auto (Smart Routing)
+        complexity_info = classify_question_complexity(prompt, len(sources))
+        selected_model = complexity_info['model']
+        model_reason = f"{complexity_info['complexity'].title()} question - {complexity_info['reason']}"
+    
+    # Store selected model in session state for LLM to use
+    st.session_state.selected_model = selected_model
+    
+    # Show user which model is being used
+    if timer_placeholder and start_time:
+        elapsed = time.time() - start_time
+        model_emoji = "⚡" if "mistral" in selected_model else "🧠"
+        timer_placeholder.info(f"{model_emoji} Using {selected_model} ({model_reason}) - {elapsed:.1f}s")
     
     if not sources:
         # Update timer - generating without docs
@@ -645,9 +745,12 @@ Provide a thorough, detailed answer based on the documents:"""
 
 
 def _call_local_llm(prompt: str, placeholder, timer_placeholder=None, start_time=None) -> str:
-    """Call local LLM with streaming - OPTIMIZED & FIXED"""
+    """Call local LLM with streaming - OPTIMIZED & FIXED with intelligent model routing"""
     from config import AppConfig
     import time  # For potential timing needs
+    
+    # Get the selected model (from intelligent routing or default)
+    model_to_use = st.session_state.get('selected_model', AppConfig.LLM_DEFAULT_MODEL)
     
     # Test connection FIRST
     try:
@@ -664,24 +767,31 @@ def _call_local_llm(prompt: str, placeholder, timer_placeholder=None, start_time
     except Exception as e:
         return f"⚠️ Connection test failed: {str(e)}"
     
-    # Calculate appropriate context size based on prompt length
+    # Calculate appropriate context size based on prompt length AND model
     prompt_length = len(prompt.split())
     
-    # Smart context sizing for DeepSeek R1 (reasoning model needs more space):
-    # - Short prompts: 4096 tokens (R1 needs room to reason!)
-    # - Medium prompts: 6144 tokens
-    # - Long prompts: 8192 tokens
-    if prompt_length < 100:
-        num_ctx = 4096  # Increased for R1's reasoning process
-    elif prompt_length < 500:
-        num_ctx = 6144  # Balanced for reasoning + response
+    # Adjust context based on model type
+    if 'deepseek' in model_to_use.lower():
+        # DeepSeek R1 (reasoning model needs more space)
+        if prompt_length < 100:
+            num_ctx = 4096  # Increased for R1's reasoning process
+        elif prompt_length < 500:
+            num_ctx = 6144  # Balanced for reasoning + response
+        else:
+            num_ctx = 8192  # Full context for complex queries
     else:
-        num_ctx = 8192  # Full context for complex queries
+        # Mistral (faster model, needs less context)
+        if prompt_length < 100:
+            num_ctx = 2048  # Small context for speed
+        elif prompt_length < 500:
+            num_ctx = 4096  # Medium context
+        else:
+            num_ctx = 6144  # Larger context for complex
     
     try:
         # Log the request for debugging
         request_payload = {
-            "model": AppConfig.LLM_DEFAULT_MODEL,
+            "model": model_to_use,  # Use intelligently selected model
             "prompt": prompt[:100] + "..." if len(prompt) > 100 else prompt,
             "stream": True,
             "options": {
@@ -694,7 +804,7 @@ def _call_local_llm(prompt: str, placeholder, timer_placeholder=None, start_time
         }
         
         placeholder.markdown(f"🔄 Sending request to {AppConfig.LLM_ENDPOINT}...")
-        placeholder.markdown(f"📊 Context: {num_ctx} tokens | Model: {AppConfig.LLM_DEFAULT_MODEL}")
+        placeholder.markdown(f"📊 Context: {num_ctx} tokens | Model: {model_to_use}")
         
         response = requests.post(
             f"{AppConfig.LLM_ENDPOINT}/api/generate",
@@ -722,7 +832,9 @@ def _call_local_llm(prompt: str, placeholder, timer_placeholder=None, start_time
         # Update initial timer
         if timer_placeholder and start_time:
             elapsed = time.time() - start_time
-            timer_placeholder.info(f"⚡ DeepSeek reasoning... ({elapsed:.1f}s)")
+            model_emoji = "⚡" if "mistral" in model_to_use.lower() else "🧠"
+            model_name = "Mistral" if "mistral" in model_to_use.lower() else "DeepSeek"
+            timer_placeholder.info(f"{model_emoji} {model_name} generating... ({elapsed:.1f}s)")
         
         for line in response.iter_lines():
             if line:
@@ -744,7 +856,9 @@ def _call_local_llm(prompt: str, placeholder, timer_placeholder=None, start_time
                                 current_time = time.time()
                                 if current_time - last_timer_update >= 2:
                                     elapsed = current_time - start_time
-                                    timer_placeholder.info(f"⚡ DeepSeek reasoning... ({elapsed:.1f}s)")
+                                    model_emoji = "⚡" if "mistral" in model_to_use.lower() else "🧠"
+                                    model_name = "Mistral" if "mistral" in model_to_use.lower() else "DeepSeek"
+                                    timer_placeholder.info(f"{model_emoji} {model_name} generating... ({elapsed:.1f}s)")
                                     last_timer_update = current_time
                     
                     # Check for error in chunk
