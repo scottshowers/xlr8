@@ -136,22 +136,38 @@ def _generate_optimized_response(prompt: str,
         # Cache hit!
         return cache_entry['response'], cache_entry['sources']
     
-    # Parallel operations: Get sources while preparing prompt
+    # Parallel operations: Get sources
     with ThreadPoolExecutor(max_workers=2) as executor:
         # Start RAG search in background
         rag_future = executor.submit(_get_rag_sources, rag_handler, prompt, retrieval_method, num_sources, use_compression)
-        
-        # Prepare prompt template (happens in parallel)
-        system_prompt = _build_optimized_prompt()
         
         # Wait for RAG results
         sources = rag_future.result()
     
     if not sources:
-        return "No relevant information found. Upload more documents to the Knowledge Base.", []
+        # No RAG sources found
+        provider = st.session_state.get('llm_provider', 'local')
+        
+        if provider == 'claude':
+            # Claude can answer from its training even without RAG
+            fallback_prompt = f"""You are a UKG technical expert. The user asked: "{prompt}"
+
+No specific documentation was found in their knowledge base for this query. 
+Please answer using your general knowledge of UKG systems. Be clear that you're answering 
+from general knowledge, not from their specific documentation."""
+            
+            response = _call_llm_streaming(fallback_prompt, response_placeholder)
+            return response, []
+        else:
+            # Local LLM needs RAG
+            return "No relevant information found. Upload more documents to the Knowledge Base.", []
     
     # Build compact context
     context = _build_compact_context(sources)
+    
+    # Get provider-specific prompt
+    provider = st.session_state.get('llm_provider', 'local')
+    system_prompt = _build_optimized_prompt(provider)
     
     # Build final prompt
     full_prompt = f"{system_prompt}\n\nCONTEXT:\n{context}\n\nQUESTION: {prompt}\n\nANSWER:"
@@ -210,9 +226,28 @@ def _get_rag_sources(rag_handler, prompt: str, method: str, n: int, compress: bo
         return []
 
 
-def _build_optimized_prompt() -> str:
-    """System prompt emphasizing thoroughness and accuracy"""
-    return """You are a UKG technical expert providing detailed, accurate guidance.
+def _build_optimized_prompt(provider: str = 'local') -> str:
+    """System prompt - provider-specific for optimal results"""
+    
+    if provider == 'claude':
+        # HYBRID MODE: Claude can use both RAG context AND its training
+        return """You are a UKG technical expert with access to specific documentation.
+
+INSTRUCTIONS:
+1. First, review the provided CONTEXT from the user's documentation
+2. Use the context as your PRIMARY source for specific details, field names, and procedures
+3. You may ALSO use your training knowledge of UKG to provide additional helpful context
+4. Provide COMPLETE, step-by-step instructions with ALL details
+5. Include specific field names, values, and navigation paths from the documentation
+6. If the documentation provides numbered steps, include ALL steps in order
+7. If you're adding information from your training that's not in the docs, say so
+8. Cite which source(s) you used for each major point
+
+Combine the documentation with your UKG expertise to give the most helpful, accurate answer."""
+    
+    else:
+        # STRICT MODE: Local LLM must use ONLY the RAG context
+        return """You are a UKG technical expert providing detailed, accurate guidance.
 
 CRITICAL INSTRUCTIONS:
 1. Base your answer ENTIRELY on the provided context sources
@@ -293,7 +328,7 @@ def _call_local_llm(prompt: str, placeholder) -> str:
 
 
 def _call_claude_api(prompt: str, placeholder) -> str:
-    """Call Claude API with streaming"""
+    """Call Claude API with streaming - can work with or without RAG"""
     
     api_key = st.session_state.get('claude_api_key', '')
     
@@ -327,6 +362,8 @@ def _call_claude_api(prompt: str, placeholder) -> str:
         return "❌ Anthropic library not installed. Add 'anthropic' to requirements.txt"
     except anthropic.AuthenticationError:
         return "❌ Invalid Claude API key. Please check your key in the sidebar."
+    except anthropic.RateLimitError:
+        return "⏸️ Claude API rate limit reached. Please wait a moment and try again."
     except Exception as e:
         return f"Error calling Claude API: {str(e)}"
 
