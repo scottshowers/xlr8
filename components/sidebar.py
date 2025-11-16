@@ -1,42 +1,42 @@
 """
-Sidebar Component - 🎸 CRANKED TO 11! 🎸
+Sidebar Component - Professional & Polished
 Beautiful visual hierarchy, polished displays, professional typography
-Version: 11/10 - "These knobs go to 11!"
+Version: 3.0
 """
 
 import streamlit as st
 
 
 def render_sidebar():
-    """Render the main sidebar with 11/10 polish"""
+    """Render the main sidebar with professional polish"""
     
     with st.sidebar:
-        # Logo - AMPLIFIED! 🎸
+        # Logo - PROFESSIONAL & CLEAN
         st.markdown("""
         <div style='text-align: center; padding-bottom: 2rem; border-bottom: 3px solid #d1dce5; margin-bottom: 2rem;'>
-            <div style='width: 90px; height: 90px; margin: 0 auto 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: 4px solid white; border-radius: 20px; display: flex; align-items: center; justify-content: center; color: white; font-size: 2.5rem; font-weight: 700; box-shadow: 0 8px 24px rgba(102, 126, 234, 0.35);'>⚡</div>
-            <div style='font-size: 1.8rem; font-weight: 800; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 0.25rem; letter-spacing: 1px;'>XLR8</div>
+            <div style='width: 90px; height: 90px; margin: 0 auto 1rem; background: linear-gradient(135deg, #8ca6be 0%, #6d8aa0 100%); border: 4px solid white; border-radius: 20px; display: flex; align-items: center; justify-content: center; color: white; font-size: 2.5rem; font-weight: 700; box-shadow: 0 8px 24px rgba(140, 166, 190, 0.3);'>⚡</div>
+            <div style='font-size: 1.8rem; font-weight: 800; background: linear-gradient(135deg, #8ca6be 0%, #6d8aa0 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 0.25rem; letter-spacing: 1px;'>XLR8</div>
             <div style='font-size: 0.9rem; color: #7d96a8; font-weight: 600; letter-spacing: 0.5px;'>by HCMPACT</div>
-            <div style='display: inline-block; background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%); color: #6d8aa0; padding: 0.3rem 0.9rem; border-radius: 14px; font-size: 0.75rem; font-weight: 700; margin-top: 0.75rem; border: 2px solid rgba(109, 138, 160, 0.2);'>v3.0</div>
+            <div style='display: inline-block; background: linear-gradient(135deg, rgba(140, 166, 190, 0.15) 0%, rgba(109, 138, 160, 0.15) 100%); color: #6d8aa0; padding: 0.3rem 0.9rem; border-radius: 14px; font-size: 0.75rem; font-weight: 700; margin-top: 0.75rem; border: 2px solid rgba(109, 138, 160, 0.2);'>v3.0</div>
         </div>
         """, unsafe_allow_html=True)
         
-        # Project selector - AMPLIFIED! 🎸
+        # Project selector
         _render_project_selector_11()
         
         st.markdown("<div style='border-top: 2px solid #e8eef3; margin: 1.5rem 0;'></div>", unsafe_allow_html=True)
         
-        # AI/RAG status - AMPLIFIED! 🎸
+        # AI/RAG status
         _render_ai_selector_11()
         
         st.markdown("<div style='border-top: 2px solid #e8eef3; margin: 1.5rem 0;'></div>", unsafe_allow_html=True)
         
-        # Status - AMPLIFIED! 🎸
+        # Status
         _render_status_11()
 
 
 def _render_project_selector_11():
-    """Render project selector with 11/10 polish"""
+    """Render project selector with professional polish"""
     st.markdown("""
     <h3 style='color: #6d8aa0; font-size: 1.1rem; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; font-weight: 700;'>
         📁 Active Project
@@ -108,7 +108,7 @@ def _render_project_selector_11():
 
 
 def _render_ai_selector_11():
-    """Render AI/RAG status and LLM provider selector with 11/10 polish"""
+    """Render AI/RAG status and LLM provider selector with professional polish"""
     st.markdown("""
     <h3 style='color: #6d8aa0; font-size: 1.1rem; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; font-weight: 700;'>
         🧠 AI System
@@ -128,7 +128,7 @@ def _render_ai_selector_11():
     if st.session_state.get('llm_provider') != new_provider:
         st.session_state.llm_provider = new_provider
     
-    # Show provider-specific config - AMPLIFIED! 🎸
+    # Show provider-specific config
     if llm_provider == "Local LLM":
         st.markdown("""
         <div style='background: linear-gradient(135deg, #e8f5e9 0%, #f1f8f4 100%); padding: 1rem; border-radius: 10px; border: 2px solid #28a745; margin-top: 0.75rem; box-shadow: 0 2px 8px rgba(40, 167, 69, 0.1);'>
@@ -181,7 +181,7 @@ def _render_ai_selector_11():
     
     st.markdown("<div style='height: 1rem;'></div>", unsafe_allow_html=True)
     
-    # RAG Status - AMPLIFIED! 🎸
+    # RAG Status
     rag_handler = st.session_state.get('rag_handler')
     rag_type = st.session_state.get('rag_type', 'none')
     
@@ -223,7 +223,7 @@ def _render_ai_selector_11():
                 <div style='background: linear-gradient(135deg, #fff3cd 0%, #fffef0 100%); padding: 1rem; border-radius: 10px; border: 2px solid #ffc107; text-align: center;'>
                     <div style='font-size: 1.2rem; margin-bottom: 0.25rem;'>📋</div>
                     <div style='color: #856404; font-size: 0.85rem; font-weight: 600;'>No documents yet</div>
-                    <div style='color: #856404; font-size: 0.75rem; margin-top: 0.25rem;'>Upload in Knowledge Base</div>
+                    <div style='color: #856404; font-size: 0.75rem; margin-top: 0.25rem;'>Upload in HCMPACT LLM</div>
                 </div>
                 """, unsafe_allow_html=True)
                 
@@ -256,7 +256,7 @@ def _render_ai_selector_11():
 
 
 def _render_status_11():
-    """Render system status with 11/10 polish"""
+    """Render system status with professional polish"""
     st.markdown("""
     <h3 style='color: #6d8aa0; font-size: 1.1rem; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; font-weight: 700;'>
         ⚡ System Status
