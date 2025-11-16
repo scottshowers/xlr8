@@ -1,7 +1,7 @@
 """
-Document Library Page - WITH EMPTY STATE ✨
+Document Library Page - Professional & Polished
 Manage all uploaded and generated documents
-Quick Win #4: Added empty state when no documents
+Version: 3.0
 """
 
 import streamlit as st
@@ -10,7 +10,7 @@ import pandas as pd
 
 
 def render_library_page():
-    """Render document library page with empty state"""
+    """Render document library page with clean empty state"""
     
     st.markdown("## 📁 Document Library")
     
@@ -123,23 +123,23 @@ def render_library_page():
                         st.rerun()
     
     else:
-        # EMPTY STATE ✨
+        # EMPTY STATE - CLEAN & COMPACT
         st.markdown("""
-        <div style='text-align: center; padding: 4rem 1rem; background: linear-gradient(135deg, #f5f7f9 0%, #e8eef3 100%); border-radius: 16px; border: 2px dashed #8ca6be; margin: 2rem 0;'>
-            <div style='font-size: 4rem; margin-bottom: 1rem; opacity: 0.9;'>📁</div>
-            <h2 style='color: #6d8aa0; margin-bottom: 1rem; font-size: 1.8rem;'>Document Library is Empty</h2>
-            <p style='color: #7d96a8; font-size: 1.1rem; margin-bottom: 2rem; max-width: 500px; margin-left: auto; margin-right: auto;'>
+        <div style='text-align: center; padding: 2.5rem 1rem; background: linear-gradient(135deg, #f5f7f9 0%, #e8eef3 100%); border-radius: 12px; border: 2px solid rgba(140, 166, 190, 0.3); margin: 1.5rem 0;'>
+            <div style='font-size: 3rem; margin-bottom: 0.75rem; opacity: 0.9;'>📁</div>
+            <h2 style='color: #6d8aa0; margin-bottom: 0.75rem; font-size: 1.3rem; font-weight: 600;'>Document Library is Empty</h2>
+            <p style='color: #7d96a8; font-size: 1rem; margin-bottom: 1.5rem; max-width: 480px; margin-left: auto; margin-right: auto;'>
                 Your document library automatically tracks all files as you work with XLR8
             </p>
-            <div style='background: white; padding: 2rem; border-radius: 12px; max-width: 500px; margin: 0 auto; box-shadow: 0 4px 12px rgba(0,0,0,0.08);'>
-                <h3 style='color: #6d8aa0; margin-bottom: 1rem; font-size: 1.2rem;'>📤 Documents Auto-Added From:</h3>
-                <div style='text-align: left; color: #6c757d; line-height: 2.2;'>
+            <div style='background: white; padding: 1.5rem; border-radius: 12px; max-width: 480px; margin: 0 auto; box-shadow: 0 4px 12px rgba(0,0,0,0.08);'>
+                <h3 style='color: #6d8aa0; margin-bottom: 0.75rem; font-size: 1.1rem;'>📤 Documents Auto-Added From:</h3>
+                <div style='text-align: left; color: #6c757d; line-height: 2;'>
                     • <strong style='color: #8ca6be;'>Analysis:</strong> Customer documents you upload<br>
                     • <strong style='color: #8ca6be;'>Templates:</strong> Generated UKG templates<br>
-                    • <strong style='color: #8ca6be;'>Knowledge Base:</strong> Standards & guides<br>
+                    • <strong style='color: #8ca6be;'>HCMPACT LLM:</strong> Standards & guides<br>
                     • <strong style='color: #8ca6be;'>Parsed Results:</strong> Extracted data files
                 </div>
-                <div style='margin-top: 1.5rem; padding: 1rem; background: linear-gradient(135deg, #f0f7ff 0%, #e8f4fd 100%); border-radius: 8px; border-left: 4px solid #8ca6be;'>
+                <div style='margin-top: 1.25rem; padding: 1rem; background: linear-gradient(135deg, #f0f7ff 0%, #e8f4fd 100%); border-radius: 8px; border-left: 4px solid #8ca6be;'>
                     <strong style='color: #6d8aa0;'>🎯 Get Started:</strong><br>
                     <span style='color: #7d96a8; font-size: 0.95rem;'>
                     Go to <strong>Analysis & Templates</strong> and upload a customer document to see it appear here!
