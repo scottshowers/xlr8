@@ -1,6 +1,6 @@
 """
 Projects & Clients Management Page
-Complete project lifecycle management with Supabase persistence
+Complete project lifecycle management
 """
 
 import streamlit as st
@@ -8,7 +8,11 @@ from datetime import datetime
 
 
 def render_projects_page():
-    """Render projects management page with Supabase persistence"""
+    """Render projects management page with full functionality"""
+    
+    # Initialize delete confirmation tracking
+    if 'delete_confirmations' not in st.session_state:
+        st.session_state.delete_confirmations = {}
     
     st.markdown("## 📁 Projects & Client Management")
     
@@ -18,32 +22,6 @@ def render_projects_page():
         track client information, and organize your work by customer.
     </div>
     """, unsafe_allow_html=True)
-    
-    # Initialize Supabase if enabled
-    supabase_handler = None
-    try:
-        from config import AppConfig
-        if AppConfig.USE_SUPABASE_PERSISTENCE:
-            supabase_handler = AppConfig.get_supabase_handler()
-            
-            # Load projects from Supabase on first load
-            if 'projects_loaded_from_db' not in st.session_state:
-                try:
-                    db_projects = supabase_handler.get_all_projects()
-                    if db_projects:
-                        # Convert list to dict format expected by UI
-                        st.session_state.projects = {
-                            p['name']: p for p in db_projects
-                        }
-                    st.session_state.projects_loaded_from_db = True
-                except Exception as e:
-                    st.warning(f"⚠️ Could not load projects from database: {str(e)}")
-    except Exception as e:
-        st.warning(f"⚠️ Supabase not configured: {str(e)}")
-    
-    # Ensure projects dict exists
-    if 'projects' not in st.session_state:
-        st.session_state.projects = {}
     
     # Quick stats if projects exist
     if st.session_state.get('projects'):
@@ -71,12 +49,6 @@ def render_projects_page():
     with col_left:
         # Create New Project Section
         st.markdown("### 📋 Create New Project")
-        
-        # DEBUG INFO - Show Supabase status
-        if supabase_handler:
-            st.info("💾 Supabase persistence: ENABLED")
-        else:
-            st.warning("⚠️ Supabase persistence: DISABLED (session only)")
         
         with st.form("new_project_form"):
             project_name = st.text_input(
@@ -125,7 +97,11 @@ def render_projects_page():
                 elif project_name in st.session_state.get('projects', {}):
                     st.error(f"❌ Project '{project_name}' already exists!")
                 else:
-                    # Create project data
+                    # Ensure projects dict exists
+                    if 'projects' not in st.session_state:
+                        st.session_state.projects = {}
+                    
+                    # Create project
                     project_data = {
                         'name': project_name,
                         'customer_id': customer_id,
@@ -139,36 +115,20 @@ def render_projects_page():
                         'notes': []
                     }
                     
+                    st.session_state.projects[project_name] = project_data
+                    st.session_state.current_project = project_name
+                    
                     # Save to Supabase if enabled
-                    if supabase_handler:
-                        try:
-                            saved_project = supabase_handler.create_project(project_data)
-                            # Use returned data with ID
-                            st.session_state.projects[project_name] = saved_project
-                            st.success(f"✅ Project '{project_name}' created and saved to database!")
-                            st.session_state.current_project = project_name
-                            st.rerun()  # Only rerun on SUCCESS
-                        except Exception as e:
-                            # Show detailed error that stays visible
-                            st.error(f"⚠️ Failed to save to database")
-                            with st.expander("🔍 Error Details (click to expand)", expanded=True):
-                                st.code(f"""
-Error Type: {type(e).__name__}
-
-Error Message: {str(e)}
-
-This error prevented saving to Supabase.
-Project was created in session only (will be lost on refresh).
-                                """)
-                            # Fall back to session state only
-                            st.session_state.projects[project_name] = project_data
-                            # DON'T RERUN - let error stay visible!
-                    else:
-                        # No Supabase, just session state
-                        st.session_state.projects[project_name] = project_data
-                        st.warning("⚠️ Project created in session only (not persisted). Enable Supabase for persistence.")
-                        st.session_state.current_project = project_name
-                        st.rerun()
+                    try:
+                        from utils.data.supabase_handler import save_project
+                        from config import AppConfig
+                        if AppConfig.USE_SUPABASE_PERSISTENCE:
+                            save_project(project_data)
+                    except Exception as e:
+                        print(f"Error saving to Supabase: {e}")
+                    
+                    st.success(f"✅ Project '{project_name}' created successfully!")
+                    st.rerun()
     
     with col_right:
         st.markdown("### 🚀 Quick Start Guide")
@@ -195,7 +155,6 @@ Project was created in session only (will be lost on refresh).
                 <li>✓ Implementation timeline</li>
                 <li>✓ Consultant assignment</li>
                 <li>✓ Project notes & history</li>
-                <li>✓ <strong>Persistent storage</strong> (Supabase)</li>
             </ul>
         </div>
         """, unsafe_allow_html=True)
@@ -206,10 +165,6 @@ Project was created in session only (will be lost on refresh).
         st.markdown("### 📂 Your Projects")
         
         for proj_name, proj_data in st.session_state.get('projects', {}).items():
-            # Safety check - ensure proj_data is a dict
-            if not isinstance(proj_data, dict):
-                continue
-                
             is_active = proj_name == st.session_state.get('current_project')
             
             with st.expander(f"{'📌 ' if is_active else '📁 '}{proj_name}", expanded=is_active):
@@ -229,19 +184,9 @@ Project was created in session only (will be lost on refresh).
                     if proj_data.get('go_live_date'):
                         st.markdown(f"**Target Go-Live:** {proj_data['go_live_date']}")
                     
-                    # Show if persisted
-                    if 'id' in proj_data:
-                        st.caption("💾 Saved to database")
-                    else:
-                        st.caption("⚠️ Session only (not persisted)")
-                    
                     # Project notes
-                    notes = proj_data.get('notes', [])
-                    # Ensure notes is a list
-                    if isinstance(notes, str):
-                        notes = []
-                    if notes and len(notes) > 0:
-                        st.markdown(f"**Notes:** {len(notes)} note(s)")
+                    if proj_data.get('notes'):
+                        st.markdown(f"**Notes:** {len(proj_data['notes'])} note(s)")
                 
                 with col2:
                     if not is_active:
@@ -251,21 +196,44 @@ Project was created in session only (will be lost on refresh).
                     else:
                         st.success("✓ Active")
                     
-                    if st.button(f"Delete", key=f"delete_{proj_name}", use_container_width=True):
-                        if st.checkbox(f"Confirm delete {proj_name}?", key=f"confirm_del_{proj_name}"):
-                            # Delete from Supabase if enabled
-                            if supabase_handler and 'id' in proj_data:
-                                try:
-                                    supabase_handler.delete_project(proj_data['id'])
-                                    st.success("✅ Deleted from database")
-                                except Exception as e:
-                                    st.error(f"⚠️ Failed to delete from database: {str(e)}")
-                            
-                            # Delete from session state
-                            if 'projects' in st.session_state:
+                    # FIXED DELETE LOGIC - Two-step confirmation pattern
+                    if st.button(f"Delete", key=f"delete_{proj_name}", use_container_width=True, type="secondary"):
+                        # Set confirmation state when delete is clicked
+                        st.session_state.delete_confirmations[proj_name] = True
+                        st.rerun()
+                
+                # Show confirmation UI if delete was clicked
+                if st.session_state.delete_confirmations.get(proj_name, False):
+                    st.warning(f"⚠️ Delete '{proj_name}'?")
+                    col_confirm, col_cancel = st.columns(2)
+                    
+                    with col_confirm:
+                        if st.button("✓ Confirm Delete", key=f"confirm_del_{proj_name}", type="primary", use_container_width=True):
+                            # Actually delete the project
+                            if 'projects' in st.session_state and proj_name in st.session_state.projects:
                                 del st.session_state.projects[proj_name]
+                            
                             if st.session_state.get('current_project') == proj_name:
                                 st.session_state.current_project = None
+                            
+                            # Clear confirmation state
+                            st.session_state.delete_confirmations[proj_name] = False
+                            
+                            # Delete from Supabase too
+                            try:
+                                from utils.data.supabase_handler import delete_project
+                                from config import AppConfig
+                                if AppConfig.USE_SUPABASE_PERSISTENCE:
+                                    delete_project(proj_name)
+                            except Exception as e:
+                                print(f"Error deleting from Supabase: {e}")
+                            
+                            st.success(f"✅ Deleted '{proj_name}'")
+                            st.rerun()
+                    
+                    with col_cancel:
+                        if st.button("✗ Cancel", key=f"cancel_del_{proj_name}", use_container_width=True):
+                            st.session_state.delete_confirmations[proj_name] = False
                             st.rerun()
                 
                 # Add note functionality
@@ -279,46 +247,20 @@ Project was created in session only (will be lost on refresh).
                 
                 if st.button("Add Note", key=f"add_note_{proj_name}"):
                     if new_note:
-                        # Ensure notes field exists and is a list
-                        if 'notes' not in proj_data or not isinstance(proj_data.get('notes'), list):
+                        if 'notes' not in proj_data:
                             proj_data['notes'] = []
-                        
-                        note_data = {
+                        proj_data['notes'].append({
                             'text': new_note,
                             'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        }
-                        proj_data['notes'].append(note_data)
-                        
-                        # Update in Supabase if enabled
-                        if supabase_handler and 'id' in proj_data:
-                            try:
-                                supabase_handler.update_project(proj_data['id'], {'notes': proj_data['notes']})
-                                st.success("✅ Note added and saved")
-                            except Exception as e:
-                                st.warning(f"⚠️ Note added locally but not saved to database: {str(e)}")
-                        else:
-                            st.success("✅ Note added")
-                        
+                        })
+                        st.success("✅ Note added")
                         st.rerun()
                 
                 # Display existing notes
-                notes = proj_data.get('notes', [])
-                # Ensure notes is a list
-                if isinstance(notes, str):
-                    notes = []
-                    
-                if notes and len(notes) > 0:
-                    for note in notes[-3:]:  # Show last 3
-                        # Handle both dict and string formats
-                        if isinstance(note, dict):
-                            timestamp = note.get('timestamp', 'Unknown')
-                            text = note.get('text', '')
-                            st.markdown(f"<small>**{timestamp}:** {text}</small>", 
-                                      unsafe_allow_html=True)
-                        else:
-                            # Legacy string format
-                            st.markdown(f"<small>{note}</small>", 
-                                      unsafe_allow_html=True)
+                if proj_data.get('notes'):
+                    for note in proj_data['notes'][-3:]:  # Show last 3
+                        st.markdown(f"<small>**{note['timestamp']}:** {note['text']}</small>", 
+                                  unsafe_allow_html=True)
     else:
         st.info("📋 No projects yet. Create your first project above to get started!")
 
