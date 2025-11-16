@@ -37,9 +37,10 @@ def _render_project_selector():
     """Render project selector"""
     st.markdown("### 📁 Project")
     
-    if st.session_state.projects:
+    # Safe check for projects
+    if st.session_state.get('projects'):
         project_names = list(st.session_state.projects.keys())
-        current = st.session_state.current_project
+        current = st.session_state.get('current_project')
         
         selected = st.selectbox(
             "Select Project",
@@ -48,12 +49,12 @@ def _render_project_selector():
             key="sidebar_project_selector"
         )
         
-        if selected and selected != st.session_state.current_project:
+        if selected and selected != st.session_state.get('current_project'):
             st.session_state.current_project = selected
             st.rerun()
         
         if current:
-            project_data = st.session_state.projects[current]
+            project_data = st.session_state.projects.get(current, {})
             st.markdown(f"""
             <div style='font-size: 0.85rem; color: #6c757d; margin-top: 0.5rem;'>
                 <strong>Type:</strong> {project_data.get('implementation_type', 'N/A')}<br>
@@ -178,9 +179,10 @@ def _render_status():
     """Render system status"""
     st.markdown("### ⚡ Status")
     
-    # API status
-    pro_configured = bool(st.session_state.api_credentials.get('pro'))
-    wfm_configured = bool(st.session_state.api_credentials.get('wfm'))
+    # API status - safe checks
+    api_credentials = st.session_state.get('api_credentials', {'pro': {}, 'wfm': {}})
+    pro_configured = bool(api_credentials.get('pro'))
+    wfm_configured = bool(api_credentials.get('wfm'))
     
     st.markdown(f"""
     <div style='font-size: 0.85rem; line-height: 1.8;'>
