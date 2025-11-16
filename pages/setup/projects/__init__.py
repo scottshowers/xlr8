@@ -139,7 +139,7 @@ def render_projects_page():
         """, unsafe_allow_html=True)
     
     # Existing Projects List
-    if st.session_state.projects:
+    if st.session_state.get('projects'):
         st.markdown("---")
         st.markdown("### 📂 Your Projects")
         
