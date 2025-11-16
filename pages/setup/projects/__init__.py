@@ -72,6 +72,12 @@ def render_projects_page():
         # Create New Project Section
         st.markdown("### 📋 Create New Project")
         
+        # DEBUG INFO - Show Supabase status
+        if supabase_handler:
+            st.info("💾 Supabase persistence: ENABLED")
+        else:
+            st.warning("⚠️ Supabase persistence: DISABLED (session only)")
+        
         with st.form("new_project_form"):
             project_name = st.text_input(
                 "Project Name *",
@@ -141,7 +147,17 @@ def render_projects_page():
                             st.session_state.projects[project_name] = saved_project
                             st.success(f"✅ Project '{project_name}' created and saved to database!")
                         except Exception as e:
-                            st.error(f"⚠️ Created locally but failed to save to database: {str(e)}")
+                            # Show detailed error that stays visible
+                            st.error(f"⚠️ Failed to save to database")
+                            with st.expander("🔍 Error Details (click to expand)", expanded=True):
+                                st.code(f"""
+Error Type: {type(e).__name__}
+
+Error Message: {str(e)}
+
+This error prevented saving to Supabase.
+Project was created in session only (will be lost on refresh).
+                                """)
                             # Fall back to session state only
                             st.session_state.projects[project_name] = project_data
                     else:
