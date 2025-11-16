@@ -1,5 +1,5 @@
 """
-AI Assistant Chat Page - Claude.ai Style Interface
+AI Assistant Chat Page - Claude.ai Style Interface (SIDEBAR FIXED)
 Clean, modern chat interface with auto-expanding input
 """
 
@@ -12,15 +12,16 @@ import hashlib
 from concurrent.futures import ThreadPoolExecutor
 
 
-# Custom CSS to match Claude.ai style
+# Custom CSS to match Claude.ai style - FIXED FOR SIDEBAR
 CLAUDE_STYLE_CSS = """
 <style>
-/* Main chat container */
+/* Main chat container - NO centering, respect sidebar */
 .main .block-container {
     padding-top: 2rem;
-    padding-bottom: 1rem;
-    max-width: 48rem;
-    margin: 0 auto;
+    padding-bottom: 6rem;
+    max-width: 100%;
+    padding-left: 2rem;
+    padding-right: 2rem;
 }
 
 /* Chat messages */
@@ -28,6 +29,7 @@ CLAUDE_STYLE_CSS = """
     padding: 1.5rem 1rem;
     margin-bottom: 0;
     border-bottom: 1px solid #e5e7eb;
+    max-width: 48rem;
 }
 
 .stChatMessage:last-child {
@@ -51,15 +53,29 @@ CLAUDE_STYLE_CSS = """
     background-color: #ffffff;
 }
 
-/* Chat input styling */
+/* Chat input container - FIXED to respect sidebar */
 .stChatInput {
     position: fixed;
     bottom: 0;
     left: 0;
     right: 0;
-    padding: 1rem;
+    padding: 1rem 2rem;
     background: linear-gradient(to top, white 80%, transparent);
     border-top: 1px solid #e5e7eb;
+    z-index: 100;
+}
+
+/* Adjust for sidebar when open */
+@media (min-width: 768px) {
+    .stChatInput {
+        left: auto;
+        /* Streamlit sidebar is ~21rem wide */
+        margin-left: 21rem;
+    }
+}
+
+.stChatInput > div {
+    max-width: 48rem;
 }
 
 .stChatInput textarea {
@@ -76,7 +92,7 @@ CLAUDE_STYLE_CSS = """
     box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1) !important;
 }
 
-/* Send button styling (Streamlit's built-in) */
+/* Send button styling */
 .stChatInput button {
     background-color: #6366f1 !important;
     border-radius: 50% !important;
@@ -109,12 +125,11 @@ CLAUDE_STYLE_CSS = """
     margin-bottom: 0.5rem;
 }
 
-/* Settings sidebar */
-.css-1d391kg {
-    padding-top: 2rem;
+/* Sidebar styling */
+section[data-testid="stSidebar"] {
+    background-color: #f9fafb;
 }
 
-/* Remove top padding from sidebar */
 section[data-testid="stSidebar"] > div {
     padding-top: 2rem;
 }
@@ -138,11 +153,7 @@ section[data-testid="stSidebar"] .stCheckbox {
 /* Hide Streamlit branding */
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
-
-/* Adjust spacing for fixed input */
-.main .block-container {
-    padding-bottom: 6rem;
-}
+header {visibility: hidden;}
 </style>
 """
 
