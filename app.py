@@ -81,7 +81,7 @@ with tab1:
 with tab2:
     setup_subtab1, setup_subtab2, setup_subtab3 = st.tabs([
         "📁 Projects & Clients",
-        "🧠 HCMPACT Knowledge Base",
+        "🧠 HCMPACT LLM Seeding",
         "🔌 Connections"
     ])
     
