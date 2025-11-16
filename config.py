@@ -205,7 +205,7 @@ class FeatureFlags:
     # SUPABASE/PERSISTENCE FLAGS
     # ========================================
     
-    USE_SUPABASE_PERSISTENCE = False
+    USE_SUPABASE_PERSISTENCE = True
     """
     Enable persistent storage with Supabase (FREE tier!).
     Replaces ephemeral session state with database storage.
