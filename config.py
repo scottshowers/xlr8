@@ -25,6 +25,9 @@ class AppConfig:
     # Using ephemeral storage (will reset on rebuilds)
     RAG_PERSIST_DIR = os.getenv("CHROMADB_PATH", "/root/.xlr8_chroma")
     
+    # File Upload Limits
+    MAX_FILE_SIZE_MB = 200  # Maximum file upload size in MB
+    
     # Embedding Configuration
     EMBED_ENDPOINT = os.getenv("EMBED_ENDPOINT", "http://178.156.190.64:11435")
     EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
