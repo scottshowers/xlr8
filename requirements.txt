@@ -15,4 +15,4 @@ tabula-py>=2.9.0
 pdfplumber>=0.10.0
 PyMuPDF>=1.23.0
 anthropic>=0.40.0
-supabase==2.7.0
+supabase>=2.0.0
