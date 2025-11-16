@@ -1,7 +1,7 @@
 """
-HCMPACT Knowledge Base Management - WITH EMPTY STATE ✨
-Upload and manage documents for RAG system
-Quick Win #4: Added empty state when no documents
+HCMPACT Knowledge Base Management - 🎸 CRANKED TO 11! 🎸
+Beautiful document management with enhanced visuals
+Version: 11/10 - "These docs go to 11!"
 """
 
 import streamlit as st
@@ -17,9 +17,14 @@ def render_knowledge_page():
     st.markdown("## 🧠 HCMPACT Local LLM Seeding")
     
     st.markdown("""
-    <div class='info-box'>
-        <strong>Knowledge Base:</strong> Upload HCMPACT standards, best practices,
-        and technical documentation. These documents power the AI Assistant's responses.
+    <div style='background: linear-gradient(135deg, #f5f7f9 0%, #e8eef3 100%); padding: 1.25rem; border-radius: 12px; border-left: 4px solid #667eea; margin-bottom: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.05);'>
+        <div style='display: flex; align-items: center; gap: 0.75rem;'>
+            <div style='font-size: 1.5rem;'>📚</div>
+            <div>
+                <strong style='color: #6d8aa0; font-size: 1.05rem;'>Knowledge Base Management</strong><br>
+                <span style='color: #7d96a8; font-size: 0.9rem;'>Upload HCMPACT standards, best practices, and technical documentation. These documents power the AI Assistant's responses.</span>
+            </div>
+        </div>
     </div>
     """, unsafe_allow_html=True)
     
