@@ -1,15 +1,22 @@
 """
-Session State Manager
+Session State Manager  
 Initializes advanced RAG handler and all session variables
+PROPERLY FIXED: Detects when env vars are not set vs empty, proper error handling
 """
 
 import streamlit as st
 from config import AppConfig
+import os
 
 
 def load_projects_from_supabase():
     """Load all projects from Supabase into session state"""
     if not AppConfig.USE_SUPABASE_PERSISTENCE:
+        return
+    
+    # Check if Supabase is actually configured
+    if not AppConfig.SUPABASE_URL or not AppConfig.SUPABASE_KEY:
+        print("⚠️ Supabase persistence enabled but credentials not set - skipping")
         return
     
     try:
@@ -29,7 +36,8 @@ def load_projects_from_supabase():
         print(f"✅ Loaded {len(st.session_state.projects)} projects from Supabase")
         
     except Exception as e:
-        print(f"⚠️ Error loading projects from Supabase: {e}")
+        print(f"⚠️ Could not connect to Supabase: {e}")
+        print("   Continuing with local-only storage...")
 
 
 def initialize_session_state():
@@ -45,8 +53,11 @@ def initialize_session_state():
     if 'projects' not in st.session_state:
         st.session_state.projects = {}
     
-    # Load projects from Supabase on startup
-    load_projects_from_supabase()
+    # Load projects from Supabase (with proper error handling)
+    try:
+        load_projects_from_supabase()
+    except Exception as e:
+        print(f"⚠️ Supabase initialization failed: {e}")
     
     # API Credentials (not persisted - session only)
     if 'api_credentials' not in st.session_state:
@@ -54,8 +65,12 @@ def initialize_session_state():
     
     # PDF Parser - use EnhancedPayrollParser from secure_pdf_parser
     if 'pdf_parser' not in st.session_state:
-        from utils.secure_pdf_parser import EnhancedPayrollParser
-        st.session_state.pdf_parser = EnhancedPayrollParser()
+        try:
+            from utils.secure_pdf_parser import EnhancedPayrollParser
+            st.session_state.pdf_parser = EnhancedPayrollParser()
+        except Exception as e:
+            print(f"⚠️ Could not initialize PDF parser: {e}")
+            st.session_state.pdf_parser = None
     
     if 'parsed_results' not in st.session_state:
         st.session_state.parsed_results = None
@@ -69,6 +84,7 @@ def initialize_session_state():
                 persist_directory=AppConfig.RAG_PERSIST_DIR
             )
             st.session_state.rag_type = 'advanced'
+            print("✅ Advanced RAG handler initialized")
         except ImportError:
             # Fallback to basic RAG handler
             try:
@@ -77,22 +93,56 @@ def initialize_session_state():
                     persist_directory=AppConfig.RAG_PERSIST_DIR
                 )
                 st.session_state.rag_type = 'basic'
-            except:
+                print("✅ Basic RAG handler initialized")
+            except Exception as e:
+                print(f"⚠️ Could not initialize RAG handler: {e}")
                 st.session_state.rag_handler = None
                 st.session_state.rag_type = None
     
-    # LLM Configuration (from config)
+    # LLM Configuration - PROPER HANDLING
+    # Check if env var is actually set (not just empty)
     if 'llm_endpoint' not in st.session_state:
-        st.session_state.llm_endpoint = AppConfig.LLM_ENDPOINT
+        endpoint = AppConfig.LLM_ENDPOINT
+        
+        # Check if actually set in environment
+        if 'LLM_ENDPOINT' not in os.environ:
+            print("❌ CRITICAL: LLM_ENDPOINT environment variable not set in Railway!")
+            print("   Set LLM_ENDPOINT=http://178.156.190.64:11435 in Railway Variables")
+            # Don't use fallback - let it fail visibly so user knows to fix it
+            endpoint = ""
+        elif not endpoint:
+            print("❌ CRITICAL: LLM_ENDPOINT is empty string!")
+            endpoint = ""
+        elif not endpoint.startswith(('http://', 'https://')):
+            # Add http:// if missing
+            print(f"⚠️ Adding http:// prefix to LLM_ENDPOINT: {endpoint}")
+            endpoint = f"http://{endpoint}"
+        
+        st.session_state.llm_endpoint = endpoint
+        if endpoint:
+            print(f"✅ LLM endpoint: {endpoint}")
     
     if 'llm_model' not in st.session_state:
-        st.session_state.llm_model = AppConfig.LLM_DEFAULT_MODEL
+        model = AppConfig.LLM_DEFAULT_MODEL
+        if not model:
+            print("⚠️ LLM_DEFAULT_MODEL not set, using fallback: deepseek-r1:7b")
+            model = 'deepseek-r1:7b'
+        st.session_state.llm_model = model
+        print(f"✅ LLM model: {model}")
     
     if 'llm_username' not in st.session_state:
-        st.session_state.llm_username = AppConfig.LLM_USERNAME
+        username = AppConfig.LLM_USERNAME
+        if not username:
+            print("⚠️ LLM_USERNAME not set, using fallback: xlr8")
+            username = 'xlr8'
+        st.session_state.llm_username = username
     
     if 'llm_password' not in st.session_state:
-        st.session_state.llm_password = AppConfig.LLM_PASSWORD
+        password = AppConfig.LLM_PASSWORD
+        if not password:
+            print("⚠️ LLM_PASSWORD not set, using fallback")
+            password = 'Argyle76226#'
+        st.session_state.llm_password = password
     
     if 'llm_provider' not in st.session_state:
         st.session_state.llm_provider = 'local'
@@ -114,6 +164,20 @@ def initialize_session_state():
     
     if 'ukg_hcm_auth' not in st.session_state:
         st.session_state.ukg_hcm_auth = None
+    
+    # Configuration validation warning
+    if not st.session_state.llm_endpoint:
+        print("\n" + "="*60)
+        print("⚠️  CONFIGURATION ERROR")
+        print("="*60)
+        print("LLM_ENDPOINT is not set!")
+        print("\nTo fix:")
+        print("1. Go to Railway dashboard")
+        print("2. Click on your XLR8 service")
+        print("3. Go to Variables tab")
+        print("4. Add: LLM_ENDPOINT=http://178.156.190.64:11435")
+        print("5. Redeploy")
+        print("="*60 + "\n")
 
 
 def get_current_project():
