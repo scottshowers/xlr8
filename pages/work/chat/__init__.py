@@ -565,7 +565,7 @@ Provide a detailed answer:"""
         if provider == 'claude':
             response = _call_claude_api(prompt_without_docs, response_placeholder)
         else:
-            response = _call_local_llm(prompt_without_docs, response_placeholder)
+            response = _call_local_llm(prompt_without_docs, response_placeholder, timer_placeholder, start_time)
         
         return response, []  # Return response with no sources
     
@@ -624,7 +624,7 @@ Provide a thorough, detailed answer based on the documents:"""
     if provider == 'claude':
         response = _call_claude_api(full_prompt, response_placeholder)
     else:
-        response = _call_local_llm(full_prompt, response_placeholder)
+        response = _call_local_llm(full_prompt, response_placeholder, timer_placeholder, start_time)
     
     # Cache the result
     st.session_state.query_cache[cache_key] = {
@@ -644,7 +644,7 @@ Provide a thorough, detailed answer based on the documents:"""
     return response, sources
 
 
-def _call_local_llm(prompt: str, placeholder) -> str:
+def _call_local_llm(prompt: str, placeholder, timer_placeholder=None, start_time=None) -> str:
     """Call local LLM with streaming - OPTIMIZED & FIXED"""
     from config import AppConfig
     import time  # For potential timing needs
@@ -694,6 +694,7 @@ def _call_local_llm(prompt: str, placeholder) -> str:
         }
         
         placeholder.markdown(f"🔄 Sending request to {AppConfig.LLM_ENDPOINT}...")
+        placeholder.markdown(f"📊 Context: {num_ctx} tokens | Model: {AppConfig.LLM_DEFAULT_MODEL}")
         
         response = requests.post(
             f"{AppConfig.LLM_ENDPOINT}/api/generate",
@@ -716,6 +717,12 @@ def _call_local_llm(prompt: str, placeholder) -> str:
         full_response = ""
         chunk_counter = 0
         chunks_received = 0  # Track if we're getting ANY data
+        last_timer_update = time.time()
+        
+        # Update initial timer
+        if timer_placeholder and start_time:
+            elapsed = time.time() - start_time
+            timer_placeholder.info(f"⚡ DeepSeek reasoning... ({elapsed:.1f}s)")
         
         for line in response.iter_lines():
             if line:
@@ -731,13 +738,33 @@ def _call_local_llm(prompt: str, placeholder) -> str:
                         chunk_counter += 1
                         if chunk_counter % 3 == 0:
                             placeholder.markdown(full_response + "▌")
+                            
+                            # Update timer every 2 seconds
+                            if timer_placeholder and start_time:
+                                current_time = time.time()
+                                if current_time - last_timer_update >= 2:
+                                    elapsed = current_time - start_time
+                                    timer_placeholder.info(f"⚡ DeepSeek reasoning... ({elapsed:.1f}s)")
+                                    last_timer_update = current_time
                     
                     # Check for error in chunk
                     if 'error' in chunk:
+                        if timer_placeholder:
+                            timer_placeholder.empty()
                         return f"⚠️ LLM Error: {chunk['error']}"
+                        
+                    # Check if done
+                    if chunk.get('done', False):
+                        if timer_placeholder:
+                            timer_placeholder.empty()
+                        break
                         
                 except json.JSONDecodeError:
                     continue
+        
+        # Clear timer when done
+        if timer_placeholder:
+            timer_placeholder.empty()
         
         # Debug: Show if we got data but no response
         if chunks_received > 0 and not full_response:
