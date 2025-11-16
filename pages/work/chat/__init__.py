@@ -336,22 +336,21 @@ def render_chat_page():
         
         # Generate response
         with st.chat_message("assistant"):
-            response_placeholder = st.empty()
-            sources_placeholder = st.empty()
-            
             # Show thinking indicator
-            with response_placeholder.container():
-                with st.spinner("🤔 Thinking..."):
-                    # Generate response with streaming
-                    response, sources = _generate_optimized_response(
-                        prompt=prompt,
-                        retrieval_method=retrieval_method,
-                        num_sources=num_sources,
-                        use_compression=use_compression,
-                        response_placeholder=response_placeholder
-                    )
+            with st.spinner("🤔 Thinking..."):
+                response_placeholder = st.empty()
+                sources_placeholder = st.empty()
+                
+                # Generate response with streaming
+                response, sources = _generate_optimized_response(
+                    prompt=prompt,
+                    retrieval_method=retrieval_method,
+                    num_sources=num_sources,
+                    use_compression=use_compression,
+                    response_placeholder=response_placeholder
+                )
             
-            # Display final response
+            # Display final response (after spinner clears)
             response_placeholder.markdown(response)
             
             # Show sources
@@ -423,10 +422,6 @@ def _generate_optimized_response(
     # Get LLM provider early (needed for fallback if no docs)
     provider = st.session_state.get('llm_provider', 'local')
     
-    # Show search status
-    search_status = response_placeholder.empty()
-    search_status.info("🔍 Searching knowledge base...")
-    
     # Parallel RAG search in background
     with ThreadPoolExecutor(max_workers=1) as executor:
         # Try to call search with method parameter (for advanced handlers)
@@ -456,16 +451,9 @@ def _generate_optimized_response(
         try:
             sources = search_future.result(timeout=10)
         except Exception as e:
-            search_status.empty()
             return f"⚠️ Search error: {str(e)}", []
     
-    # Clear search status
-    search_status.empty()
-    
     if not sources:
-        # Show generating status for no-docs mode
-        response_placeholder.info("💭 Generating answer from AI knowledge...")
-        
         # No documents found - use LLM's general knowledge instead
         # Build a prompt without RAG context
         if provider == 'claude':
@@ -506,9 +494,6 @@ Provide a detailed answer:"""
     # Optional context compression
     if use_compression and len(context) > 2000:
         context = context[:2000] + "...[truncated]"
-    
-    # Show generating status
-    response_placeholder.info(f"📚 Generating answer from {len(sources)} documents...")
     
     # Build prompt based on provider
     if provider == 'claude':
