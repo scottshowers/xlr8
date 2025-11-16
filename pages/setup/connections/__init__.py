@@ -5,7 +5,7 @@ Quick Win #4: Added empty state when no APIs configured
 """
 
 import streamlit as st
-from utils.toast import show_toast
+from utils.toast import ToastManager
 
 
 def render_connections_page():
@@ -109,19 +109,19 @@ def render_connections_page():
                     st.session_state.ukg_pro_key = pro_key
                     if pro_username:
                         st.session_state.ukg_pro_username = pro_username
-                    show_toast("✅ Saved", "UKG Pro configuration saved", "success")
+                    ToastManager.success("UKG Pro configuration saved")
                     st.rerun()
                 else:
-                    show_toast("⚠️ Required Fields", "Please fill in URL and API Key", "warning")
+                    ToastManager.warning("Please fill in URL and API Key")
         
         with col2:
             if st.button("🧪 Test", use_container_width=True):
                 if pro_url and pro_key:
                     with st.spinner("Testing connection..."):
                         # TODO: Add actual API test
-                        show_toast("✅ Connection OK", "UKG Pro API is reachable", "success")
+                        ToastManager.success("UKG Pro API is reachable")
                 else:
-                    show_toast("⚠️ No Configuration", "Save configuration first", "warning")
+                    ToastManager.warning("Save configuration first")
         
         if pro_configured:
             st.markdown("---")
@@ -129,7 +129,7 @@ def render_connections_page():
                 st.session_state.ukg_pro_url = None
                 st.session_state.ukg_pro_key = None
                 st.session_state.ukg_pro_username = None
-                show_toast("🗑️ Cleared", "UKG Pro configuration removed", "info")
+                ToastManager.info("UKG Pro configuration removed")
                 st.rerun()
     
     st.markdown("---")
@@ -169,19 +169,19 @@ def render_connections_page():
                     st.session_state.ukg_wfm_key = wfm_key
                     if wfm_tenant:
                         st.session_state.ukg_wfm_tenant = wfm_tenant
-                    show_toast("✅ Saved", "UKG WFM configuration saved", "success")
+                    ToastManager.success("UKG WFM configuration saved")
                     st.rerun()
                 else:
-                    show_toast("⚠️ Required Fields", "Please fill in URL and API Key", "warning")
+                    ToastManager.warning("Please fill in URL and API Key")
         
         with col2:
             if st.button("🧪 Test", use_container_width=True, key="test_wfm"):
                 if wfm_url and wfm_key:
                     with st.spinner("Testing connection..."):
                         # TODO: Add actual API test
-                        show_toast("✅ Connection OK", "UKG WFM API is reachable", "success")
+                        ToastManager.success("UKG WFM API is reachable")
                 else:
-                    show_toast("⚠️ No Configuration", "Save configuration first", "warning")
+                    ToastManager.warning("Save configuration first")
         
         if wfm_configured:
             st.markdown("---")
@@ -189,7 +189,7 @@ def render_connections_page():
                 st.session_state.ukg_wfm_url = None
                 st.session_state.ukg_wfm_key = None
                 st.session_state.ukg_wfm_tenant = None
-                show_toast("🗑️ Cleared", "UKG WFM configuration removed", "info")
+                ToastManager.info("UKG WFM configuration removed")
                 st.rerun()
     
     # Security note
