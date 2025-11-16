@@ -305,6 +305,28 @@ Model: {AppConfig.LLM_DEFAULT_MODEL}
 Provider: {st.session_state.get('llm_provider', 'local')}
 RAG Handler: {type(st.session_state.get('rag_handler')).__name__ if st.session_state.get('rag_handler') else 'None'}
             """)
+            
+            # Add connection test button
+            if st.button("🔌 Test LLM Connection", use_container_width=True):
+                with st.spinner("Testing connection..."):
+                    try:
+                        response = requests.get(
+                            f"{AppConfig.LLM_ENDPOINT}/api/tags",
+                            auth=HTTPBasicAuth(AppConfig.LLM_USERNAME, AppConfig.LLM_PASSWORD),
+                            timeout=5
+                        )
+                        if response.status_code == 200:
+                            data = response.json()
+                            st.success("✅ Connected to Ollama!")
+                            st.json(data)
+                        else:
+                            st.error(f"❌ Error {response.status_code}: {response.text}")
+                    except requests.exceptions.Timeout:
+                        st.error(f"❌ Connection timeout to {AppConfig.LLM_ENDPOINT}")
+                    except requests.exceptions.ConnectionError:
+                        st.error(f"❌ Cannot connect to {AppConfig.LLM_ENDPOINT}")
+                    except Exception as e:
+                        st.error(f"❌ Error: {str(e)}")
         
         if st.button("🗑️ Clear History", use_container_width=True, type="secondary"):
             st.session_state.chat_history = []
@@ -627,6 +649,21 @@ def _call_local_llm(prompt: str, placeholder) -> str:
     from config import AppConfig
     import time  # For potential timing needs
     
+    # Test connection FIRST
+    try:
+        test_response = requests.get(
+            f"{AppConfig.LLM_ENDPOINT}/api/tags",
+            auth=HTTPBasicAuth(AppConfig.LLM_USERNAME, AppConfig.LLM_PASSWORD),
+            timeout=5
+        )
+        test_response.raise_for_status()
+    except requests.exceptions.Timeout:
+        return f"⚠️ Cannot connect to LLM server (timeout). Check if Ollama is running at {AppConfig.LLM_ENDPOINT}"
+    except requests.exceptions.ConnectionError:
+        return f"⚠️ Connection refused to {AppConfig.LLM_ENDPOINT}. Is the server accessible?"
+    except Exception as e:
+        return f"⚠️ Connection test failed: {str(e)}"
+    
     # Calculate appropriate context size based on prompt length
     prompt_length = len(prompt.split())
     
@@ -642,25 +679,33 @@ def _call_local_llm(prompt: str, placeholder) -> str:
         num_ctx = 8192  # Full context for complex queries
     
     try:
+        # Log the request for debugging
+        request_payload = {
+            "model": AppConfig.LLM_DEFAULT_MODEL,
+            "prompt": prompt[:100] + "..." if len(prompt) > 100 else prompt,
+            "stream": True,
+            "options": {
+                "temperature": 0.7,
+                "num_ctx": num_ctx,
+                "top_k": 40,
+                "top_p": 0.9,
+                "repeat_penalty": 1.1
+            }
+        }
+        
+        placeholder.markdown(f"🔄 Sending request to {AppConfig.LLM_ENDPOINT}...")
+        
         response = requests.post(
             f"{AppConfig.LLM_ENDPOINT}/api/generate",
-            json={
-                "model": AppConfig.LLM_DEFAULT_MODEL,
-                "prompt": prompt,
-                "stream": True,
-                "options": {
-                    "temperature": 0.7,
-                    "num_ctx": num_ctx,  # Dynamic context size
-                    # Removed num_predict limit - R1 needs freedom to reason!
-                    "top_k": 40,
-                    "top_p": 0.9,
-                    "repeat_penalty": 1.1
-                }
-            },
+            json=request_payload,
             auth=HTTPBasicAuth(AppConfig.LLM_USERNAME, AppConfig.LLM_PASSWORD),
             stream=True,
-            timeout=120  # Increased to 120 seconds for DeepSeek R1
+            timeout=120
         )
+        
+        # Check response status
+        if response.status_code != 200:
+            return f"⚠️ Server returned error {response.status_code}: {response.text[:200]}"
         
         response.raise_for_status()
         
