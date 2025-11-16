@@ -290,6 +290,20 @@ def render_chat_page():
             user_messages = len([m for m in st.session_state.chat_history if m['role'] == 'user'])
             st.info(f"**Messages:** {total_messages}\n\n**Questions Asked:** {user_messages}")
         
+        # Debug mode
+        st.markdown("---")
+        debug_mode = st.checkbox("🔧 Debug Mode", value=False)
+        
+        if debug_mode:
+            from config import AppConfig
+            st.markdown("### 🐛 Debug Info")
+            st.code(f"""
+LLM Endpoint: {AppConfig.LLM_ENDPOINT}
+Model: {AppConfig.LLM_DEFAULT_MODEL}
+Provider: {st.session_state.get('llm_provider', 'local')}
+RAG Handler: {type(st.session_state.get('rag_handler')).__name__ if st.session_state.get('rag_handler') else 'None'}
+            """)
+        
         if st.button("🗑️ Clear History", use_container_width=True, type="secondary"):
             st.session_state.chat_history = []
             st.session_state.query_cache = {}
@@ -341,14 +355,25 @@ def render_chat_page():
                 response_placeholder = st.empty()
                 sources_placeholder = st.empty()
                 
-                # Generate response with streaming
-                response, sources = _generate_optimized_response(
-                    prompt=prompt,
-                    retrieval_method=retrieval_method,
-                    num_sources=num_sources,
-                    use_compression=use_compression,
-                    response_placeholder=response_placeholder
-                )
+                try:
+                    # Generate response with streaming
+                    response, sources = _generate_optimized_response(
+                        prompt=prompt,
+                        retrieval_method=retrieval_method,
+                        num_sources=num_sources,
+                        use_compression=use_compression,
+                        response_placeholder=response_placeholder
+                    )
+                except Exception as e:
+                    # If generation fails, show error and don't rerun
+                    response = f"⚠️ Error generating response: {str(e)}"
+                    sources = []
+                    response_placeholder.error(response)
+                    st.stop()  # Stop execution, don't rerun
+            
+            # Validate response before displaying
+            if not response or response.strip() == "":
+                response = "⚠️ No response generated. Please try again."
             
             # Display final response (after spinner clears)
             response_placeholder.markdown(response)
@@ -583,10 +608,13 @@ def _call_local_llm(prompt: str, placeholder) -> str:
             },
             auth=HTTPBasicAuth(AppConfig.LLM_USERNAME, AppConfig.LLM_PASSWORD),
             stream=True,
-            timeout=60  # Reduced from 120
+            timeout=120  # Increased to 120 seconds for DeepSeek R1
         )
         
         response.raise_for_status()
+        
+        # Show initial status
+        placeholder.markdown("🔄 Generating response...")
         
         # Stream the response with faster updates
         full_response = ""
