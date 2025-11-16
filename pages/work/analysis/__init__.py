@@ -1,6 +1,7 @@
 """
-Analysis & Templates Page - WITH 10/10 POLISH ✨
-Enhanced with loading states, progress tracking, and empty states
+Analysis & Templates Page - 🎸 CRANKED TO 11! 🎸
+Beautiful cards, enhanced visuals, professional polish
+Version: 11/10 - "This one goes to 11!"
 """
 
 import streamlit as st
@@ -20,17 +21,40 @@ def render_analysis_page():
     st.markdown("## 📊 Document Analysis & Template Generation")
     
     st.markdown("""
-    <div class='info-box'>
-        <strong>Workflow:</strong> Upload customer document → AI analyzes against HCMPACT standards → 
-        Generate UKG-ready templates (pay codes, deductions, org structure)
+    <div style='background: linear-gradient(135deg, #f5f7f9 0%, #e8eef3 100%); padding: 1.25rem; border-radius: 12px; border-left: 4px solid #667eea; margin-bottom: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.05);'>
+        <div style='display: flex; align-items: center; gap: 0.75rem;'>
+            <div style='font-size: 1.5rem;'>🚀</div>
+            <div>
+                <strong style='color: #6d8aa0; font-size: 1.05rem;'>AI-Powered Workflow</strong><br>
+                <span style='color: #7d96a8; font-size: 0.9rem;'>Upload customer document → AI analyzes against HCMPACT standards → Generate UKG-ready templates (pay codes, deductions, org structure)</span>
+            </div>
+        </div>
     </div>
     """, unsafe_allow_html=True)
     
-    # Check for active project
+    # Check for active project - AMPLIFIED! 🎸
     if st.session_state.get('current_project'):
-        st.success(f"📁 Active Project: {st.session_state.current_project}")
+        project_name = st.session_state.current_project
+        st.markdown(f"""
+        <div style='background: linear-gradient(135deg, #e8f5e9 0%, #f1f8f4 100%); padding: 1rem; border-radius: 10px; border: 2px solid #28a745; margin-bottom: 1rem; box-shadow: 0 2px 8px rgba(40, 167, 69, 0.1);'>
+            <div style='display: flex; align-items: center; gap: 0.5rem;'>
+                <span style='font-size: 1.2rem;'>📁</span>
+                <div>
+                    <strong style='color: #28a745;'>Active Project:</strong>
+                    <span style='color: #155724; margin-left: 0.5rem; font-weight: 600;'>{project_name}</span>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     else:
-        st.info("💡 No project selected - analyzing in standalone mode")
+        st.markdown("""
+        <div style='background: linear-gradient(135deg, #fff3cd 0%, #fffef0 100%); padding: 1rem; border-radius: 10px; border: 2px solid #ffc107; margin-bottom: 1rem;'>
+            <div style='display: flex; align-items: center; gap: 0.5rem;'>
+                <span style='font-size: 1.2rem;'>💡</span>
+                <span style='color: #856404; font-weight: 600;'>No project selected - analyzing in standalone mode</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     
     st.markdown("---")
     
