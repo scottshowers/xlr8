@@ -25,7 +25,7 @@ def render_library_page():
         st.session_state.doc_library = []
     
     # Stats
-    total_docs = len(st.session_state.doc_library)
+    total_docs = len(st.session_state.get('doc_library', []))
     
     if total_docs > 0:
         # Document type breakdown
