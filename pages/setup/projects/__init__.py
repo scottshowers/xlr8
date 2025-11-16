@@ -146,6 +146,8 @@ def render_projects_page():
                             # Use returned data with ID
                             st.session_state.projects[project_name] = saved_project
                             st.success(f"✅ Project '{project_name}' created and saved to database!")
+                            st.session_state.current_project = project_name
+                            st.rerun()  # Only rerun on SUCCESS
                         except Exception as e:
                             # Show detailed error that stays visible
                             st.error(f"⚠️ Failed to save to database")
@@ -160,13 +162,13 @@ Project was created in session only (will be lost on refresh).
                                 """)
                             # Fall back to session state only
                             st.session_state.projects[project_name] = project_data
+                            # DON'T RERUN - let error stay visible!
                     else:
                         # No Supabase, just session state
                         st.session_state.projects[project_name] = project_data
                         st.warning("⚠️ Project created in session only (not persisted). Enable Supabase for persistence.")
-                    
-                    st.session_state.current_project = project_name
-                    st.rerun()
+                        st.session_state.current_project = project_name
+                        st.rerun()
     
     with col_right:
         st.markdown("### 🚀 Quick Start Guide")
