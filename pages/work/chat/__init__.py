@@ -55,7 +55,7 @@ def render_chat_page():
             st.rerun()
     
     # Display chat history (compact)
-    for message in st.session_state.chat_history:
+    for message in st.session_state.get('chat_history', []):
         with st.chat_message(message['role']):
             st.markdown(message['content'])
             
