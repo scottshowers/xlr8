@@ -20,7 +20,7 @@ def render_projects_page():
     """, unsafe_allow_html=True)
     
     # Quick stats if projects exist
-    if st.session_state.projects:
+    if st.session_state.get('projects'):
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("📁 Total Projects", len(st.session_state.projects))
