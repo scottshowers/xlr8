@@ -1,10 +1,42 @@
 """
-XLR8 Configuration
+XLR8 Configuration - SECURE VERSION
 Central configuration for all app settings
 """
 
 import os
 from typing import Optional
+from dotenv import load_dotenv
+
+# Load environment variables from .env file (for local development)
+load_dotenv()
+
+
+class Colors:
+    """Standardized color palette - Muted Blue Theme"""
+    # Primary palette
+    PRIMARY = "#8ca6be"      # Main brand color (muted blue)
+    SECONDARY = "#98afc5"    # Secondary actions
+    ACCENT = "#6d8aa0"       # Highlights/active states
+    
+    # Backgrounds
+    BG_PAGE = "#f5f7f9"      # Page background
+    BG_CARD = "#ffffff"      # Card background
+    BG_SIDEBAR = "#f8f9fa"   # Sidebar background
+    
+    # Text
+    TEXT_PRIMARY = "#2c3e50"     # Main text
+    TEXT_SECONDARY = "#6c757d"   # Secondary text
+    TEXT_MUTED = "#7d96a8"       # Muted text
+    
+    # Status
+    SUCCESS = "#28a745"      # Success states
+    WARNING = "#ffc107"      # Warning states
+    ERROR = "#dc3545"        # Error states
+    INFO = "#17a2b8"         # Info states
+    
+    # Borders
+    BORDER_LIGHT = "#e1e8ed"
+    BORDER_DARK = "#d1dce5"
 
 
 class AppConfig:
@@ -33,7 +65,7 @@ class AppConfig:
     ENABLE_DEBUG_MODE = False        # Show debug information
     
     # ============================================================================
-    # SUPABASE CONFIGURATION
+    # SUPABASE CONFIGURATION (SECURE - from environment)
     # ============================================================================
     SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
     SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
@@ -56,13 +88,13 @@ class AppConfig:
         return SupabaseHandler(cls.SUPABASE_URL, cls.SUPABASE_KEY)
     
     # ============================================================================
-    # LLM CONFIGURATION (Local LLM on Hetzner)
+    # LLM CONFIGURATION (SECURE - from environment)
     # ============================================================================
-    LLM_ENDPOINT = "http://178.156.190.64:11435"
-    LLM_USERNAME = "xlr8"
-    LLM_PASSWORD = "Argyle76226#"
-    LLM_DEFAULT_MODEL = "deepseek-r1:7b"  # Default model
-    LLM_FAST_MODEL = "mistral:7b"         # Fast alternative
+    LLM_ENDPOINT = os.environ.get('LLM_ENDPOINT', '')
+    LLM_USERNAME = os.environ.get('LLM_USERNAME', '')
+    LLM_PASSWORD = os.environ.get('LLM_PASSWORD', '')
+    LLM_DEFAULT_MODEL = os.environ.get('LLM_DEFAULT_MODEL', 'deepseek-r1:7b')
+    LLM_FAST_MODEL = "mistral:7b"  # Fast alternative
     
     # Model selection based on task
     LLM_MODELS = {
@@ -81,7 +113,7 @@ class AppConfig:
     RAG_SIMILARITY_THRESHOLD = 0.7
     
     # Embedding Configuration
-    EMBED_ENDPOINT = os.environ.get('EMBED_ENDPOINT', 'http://178.156.190.64:11435')
+    EMBED_ENDPOINT = os.environ.get('EMBED_ENDPOINT', os.environ.get('LLM_ENDPOINT', ''))
     EMBED_MODEL = os.environ.get('EMBED_MODEL', 'nomic-embed-text')
     
     @classmethod
@@ -110,129 +142,174 @@ class AppConfig:
             )
     
     # ============================================================================
-    # UI CONFIGURATION
+    # CUSTOM CSS (STANDARDIZED COLORS)
     # ============================================================================
-    THEME_COLOR = "#1976D2"
-    BACKGROUND_COLOR = "#f5f7f9"
-    CARD_BACKGROUND = "#ffffff"
-    TEXT_COLOR = "#2c3e50"
-    
-    # ============================================================================
-    # CUSTOM CSS
-    # ============================================================================
-    CUSTOM_CSS = """
+    CUSTOM_CSS = f"""
     <style>
-    /* XLR8 Custom Styling */
+    /* XLR8 Custom Styling - STANDARDIZED */
     
     /* Main container */
-    .main .block-container {
+    .main .block-container {{
         padding-top: 2rem;
         padding-bottom: 2rem;
         max-width: 1400px;
-    }
+    }}
     
-    /* Headers */
-    h1, h2, h3 {
-        color: #1976D2;
+    /* Headers - Use primary color */
+    h1, h2, h3 {{
+        color: {Colors.PRIMARY};
         font-family: "Source Sans Pro", sans-serif;
-    }
+    }}
     
-    /* Info boxes */
-    .info-box {
+    /* Info boxes - Consistent colors */
+    .info-box {{
         padding: 1rem;
-        background-color: #e3f2fd;
-        border-left: 4px solid #1976D2;
+        background-color: {Colors.PRIMARY}15;
+        border-left: 4px solid {Colors.PRIMARY};
         border-radius: 4px;
         margin-bottom: 1rem;
-    }
+    }}
     
-    .success-box {
+    .success-box {{
         padding: 1rem;
-        background-color: #e8f5e9;
-        border-left: 4px solid #4caf50;
+        background-color: {Colors.SUCCESS}15;
+        border-left: 4px solid {Colors.SUCCESS};
         border-radius: 4px;
         margin-bottom: 1rem;
-    }
+    }}
     
-    .warning-box {
+    .warning-box {{
         padding: 1rem;
-        background-color: #fff3e0;
-        border-left: 4px solid #ff9800;
+        background-color: {Colors.WARNING}15;
+        border-left: 4px solid {Colors.WARNING};
         border-radius: 4px;
         margin-bottom: 1rem;
-    }
+    }}
     
-    .error-box {
+    .error-box {{
         padding: 1rem;
-        background-color: #ffebee;
-        border-left: 4px solid #f44336;
+        background-color: {Colors.ERROR}15;
+        border-left: 4px solid {Colors.ERROR};
         border-radius: 4px;
         margin-bottom: 1rem;
-    }
+    }}
     
-    /* Buttons */
-    .stButton > button {
+    /* Buttons - Primary color with hover */
+    .stButton > button {{
+        background-color: {Colors.PRIMARY};
+        color: white;
+        border: none;
         border-radius: 4px;
         font-weight: 600;
         transition: all 0.3s;
-    }
+    }}
     
-    .stButton > button:hover {
+    .stButton > button:hover {{
+        background-color: {Colors.ACCENT};
         transform: translateY(-2px);
-        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-    }
+        box-shadow: 0 4px 8px rgba(140, 166, 190, 0.3);
+    }}
+    
+    /* Secondary buttons */
+    .stButton > button[kind="secondary"] {{
+        background-color: white;
+        color: {Colors.PRIMARY};
+        border: 2px solid {Colors.PRIMARY};
+    }}
+    
+    .stButton > button[kind="secondary"]:hover {{
+        background-color: {Colors.PRIMARY};
+        color: white;
+    }}
     
     /* Cards */
-    .metric-card {
-        background: white;
+    .metric-card {{
+        background: {Colors.BG_CARD};
         padding: 1.5rem;
         border-radius: 8px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         margin-bottom: 1rem;
-    }
+        border: 1px solid {Colors.BORDER_LIGHT};
+    }}
     
     /* Sidebar */
-    section[data-testid="stSidebar"] {
-        background-color: #f8f9fa;
-    }
+    section[data-testid="stSidebar"] {{
+        background-color: {Colors.BG_SIDEBAR};
+    }}
     
     section[data-testid="stSidebar"] h1,
     section[data-testid="stSidebar"] h2,
-    section[data-testid="stSidebar"] h3 {
-        color: #1976D2;
-    }
+    section[data-testid="stSidebar"] h3 {{
+        color: {Colors.PRIMARY};
+    }}
     
     /* Chat messages */
-    .stChatMessage {
+    .stChatMessage {{
         padding: 1rem;
         margin-bottom: 1rem;
         border-radius: 8px;
-        border: 1px solid #e5e7eb;
-    }
+        border: 1px solid {Colors.BORDER_LIGHT};
+        background: {Colors.BG_CARD};
+    }}
     
     /* File uploader */
-    .uploadedFile {
-        background-color: #f0f7ff;
-        border: 1px solid #1976D2;
+    .uploadedFile {{
+        background-color: {Colors.PRIMARY}10;
+        border: 1px solid {Colors.PRIMARY};
         border-radius: 4px;
         padding: 0.5rem;
-    }
+    }}
     
     /* Expanders */
-    .streamlit-expanderHeader {
-        background-color: #f5f7f9;
+    .streamlit-expanderHeader {{
+        background-color: {Colors.BG_PAGE};
         border-radius: 4px;
         font-weight: 600;
-    }
+        color: {Colors.TEXT_PRIMARY};
+    }}
+    
+    /* Links */
+    a {{
+        color: {Colors.PRIMARY};
+        text-decoration: none;
+    }}
+    
+    a:hover {{
+        color: {Colors.ACCENT};
+        text-decoration: underline;
+    }}
+    
+    /* Metrics */
+    .stMetric {{
+        background: {Colors.BG_CARD};
+        padding: 1rem;
+        border-radius: 8px;
+        border: 1px solid {Colors.BORDER_LIGHT};
+    }}
+    
+    .stMetric label {{
+        color: {Colors.TEXT_SECONDARY};
+    }}
+    
+    .stMetric [data-testid="stMetricValue"] {{
+        color: {Colors.PRIMARY};
+    }}
     
     /* Hide Streamlit branding */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
+    #MainMenu {{visibility: hidden;}}
+    footer {{visibility: hidden;}}
     
     /* Smooth transitions */
-    * {
-        transition: background-color 0.3s ease;
-    }
+    * {{
+        transition: background-color 0.3s ease, color 0.3s ease;
+    }}
+    
+    /* Responsive spacing */
+    @media (max-width: 768px) {{
+        .main .block-container {{
+            padding: 1rem !important;
+        }}
+    }}
     </style>
     """
     
@@ -248,17 +325,28 @@ class AppConfig:
             Tuple of (is_valid, list_of_errors)
         """
         errors = []
+        warnings = []
         
         # Check LLM configuration
         if not cls.LLM_ENDPOINT:
-            errors.append("LLM_ENDPOINT not configured")
+            errors.append("LLM_ENDPOINT not configured in environment variables")
+        if not cls.LLM_USERNAME:
+            errors.append("LLM_USERNAME not configured in environment variables")
+        if not cls.LLM_PASSWORD:
+            errors.append("LLM_PASSWORD not configured in environment variables")
         
         # Check Supabase if enabled
         if cls.USE_SUPABASE_PERSISTENCE:
             if not cls.SUPABASE_URL:
-                errors.append("SUPABASE_URL not set (required when USE_SUPABASE_PERSISTENCE=True)")
+                warnings.append("SUPABASE_URL not set (required when USE_SUPABASE_PERSISTENCE=True)")
             if not cls.SUPABASE_KEY:
-                errors.append("SUPABASE_KEY not set (required when USE_SUPABASE_PERSISTENCE=True)")
+                warnings.append("SUPABASE_KEY not set (required when USE_SUPABASE_PERSISTENCE=True)")
+        
+        # Print warnings
+        if warnings and cls.ENABLE_DEBUG_MODE:
+            print("⚠️ Configuration warnings:")
+            for warning in warnings:
+                print(f"  - {warning}")
         
         return (len(errors) == 0, errors)
     
@@ -270,7 +358,8 @@ class AppConfig:
             'version': cls.APP_VERSION,
             'supabase_enabled': cls.USE_SUPABASE_PERSISTENCE,
             'supabase_configured': bool(cls.SUPABASE_URL and cls.SUPABASE_KEY),
-            'llm_endpoint': cls.LLM_ENDPOINT,
+            'llm_configured': bool(cls.LLM_ENDPOINT and cls.LLM_USERNAME and cls.LLM_PASSWORD),
+            'llm_endpoint': cls.LLM_ENDPOINT[:50] + '...' if cls.LLM_ENDPOINT else 'Not configured',
             'llm_model': cls.LLM_DEFAULT_MODEL,
             'advanced_rag': cls.USE_ADVANCED_RAG,
             'debug_mode': cls.ENABLE_DEBUG_MODE
@@ -311,7 +400,8 @@ def is_supabase_enabled() -> bool:
 
 # Validate configuration on import
 is_valid, errors = AppConfig.validate_config()
-if not is_valid and AppConfig.ENABLE_DEBUG_MODE:
-    print("⚠️ Configuration warnings:")
+if not is_valid:
+    print("❌ Configuration errors:")
     for error in errors:
         print(f"  - {error}")
+    print("\n💡 Set these environment variables in Railway or .env file")
