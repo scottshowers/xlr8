@@ -350,26 +350,51 @@ RAG Handler: {type(st.session_state.get('rag_handler')).__name__ if st.session_s
         
         # Generate response
         with st.chat_message("assistant"):
-            # Show thinking indicator
-            with st.spinner("🤔 Thinking..."):
-                response_placeholder = st.empty()
-                sources_placeholder = st.empty()
+            response_placeholder = st.empty()
+            sources_placeholder = st.empty()
+            
+            # Track response time
+            import time
+            start_time = time.time()
+            
+            # Show thinking indicator with timer
+            timer_placeholder = st.empty()
+            
+            def update_timer():
+                """Update elapsed time display"""
+                elapsed = time.time() - start_time
+                return f"🤔 Thinking... ({elapsed:.1f}s)"
+            
+            try:
+                # Show initial spinner message
+                timer_placeholder.info(update_timer())
                 
-                try:
-                    # Generate response with streaming
-                    response, sources = _generate_optimized_response(
-                        prompt=prompt,
-                        retrieval_method=retrieval_method,
-                        num_sources=num_sources,
-                        use_compression=use_compression,
-                        response_placeholder=response_placeholder
-                    )
-                except Exception as e:
-                    # If generation fails, show error and don't rerun
-                    response = f"⚠️ Error generating response: {str(e)}"
-                    sources = []
-                    response_placeholder.error(response)
-                    st.stop()  # Stop execution, don't rerun
+                # Generate response with streaming
+                response, sources = _generate_optimized_response(
+                    prompt=prompt,
+                    retrieval_method=retrieval_method,
+                    num_sources=num_sources,
+                    use_compression=use_compression,
+                    response_placeholder=response_placeholder,
+                    timer_placeholder=timer_placeholder,
+                    start_time=start_time
+                )
+                
+                # Clear timer
+                timer_placeholder.empty()
+                
+                # Show final elapsed time
+                elapsed_time = time.time() - start_time
+                
+            except Exception as e:
+                # If generation fails, show error and don't rerun
+                elapsed_time = time.time() - start_time
+                timer_placeholder.empty()
+                response = f"⚠️ Error generating response: {str(e)}"
+                sources = []
+                response_placeholder.error(response)
+                st.caption(f"⏱️ Failed after {elapsed_time:.1f} seconds")
+                st.stop()  # Stop execution, don't rerun
             
             # Validate response before displaying
             if not response or response.strip() == "":
@@ -377,6 +402,10 @@ RAG Handler: {type(st.session_state.get('rag_handler')).__name__ if st.session_s
             
             # Display final response (after spinner clears)
             response_placeholder.markdown(response)
+            
+            # Show elapsed time
+            if elapsed_time:
+                st.caption(f"⏱️ Response generated in {elapsed_time:.1f} seconds")
             
             # Show sources
             if show_sources and sources:
@@ -410,7 +439,9 @@ def _generate_optimized_response(
     retrieval_method: str,
     num_sources: int,
     use_compression: bool,
-    response_placeholder
+    response_placeholder,
+    timer_placeholder=None,
+    start_time=None
 ) -> tuple[str, List[Dict[str, Any]]]:
     """
     Generate response with RAG context
@@ -447,6 +478,12 @@ def _generate_optimized_response(
     # Get LLM provider early (needed for fallback if no docs)
     provider = st.session_state.get('llm_provider', 'local')
     
+    # Update timer - searching phase
+    if timer_placeholder and start_time:
+        import time
+        elapsed = time.time() - start_time
+        timer_placeholder.info(f"🔍 Searching documents... ({elapsed:.1f}s)")
+    
     # Parallel RAG search in background
     with ThreadPoolExecutor(max_workers=1) as executor:
         # Try to call search with method parameter (for advanced handlers)
@@ -479,6 +516,12 @@ def _generate_optimized_response(
             return f"⚠️ Search error: {str(e)}", []
     
     if not sources:
+        # Update timer - generating without docs
+        if timer_placeholder and start_time:
+            import time
+            elapsed = time.time() - start_time
+            timer_placeholder.info(f"💭 Generating from AI knowledge... ({elapsed:.1f}s)")
+        
         # No documents found - use LLM's general knowledge instead
         # Build a prompt without RAG context
         if provider == 'claude':
@@ -519,6 +562,12 @@ Provide a detailed answer:"""
     # Optional context compression
     if use_compression and len(context) > 2000:
         context = context[:2000] + "...[truncated]"
+    
+    # Update timer - generating with docs
+    if timer_placeholder and start_time:
+        import time
+        elapsed = time.time() - start_time
+        timer_placeholder.info(f"📚 Generating from {len(sources)} documents... ({elapsed:.1f}s)")
     
     # Build prompt based on provider
     if provider == 'claude':
@@ -579,14 +628,14 @@ def _call_local_llm(prompt: str, placeholder) -> str:
     # Calculate appropriate context size based on prompt length
     prompt_length = len(prompt.split())
     
-    # Smart context sizing:
-    # - Short prompts (< 100 words): 2048 tokens
-    # - Medium prompts (100-500 words): 4096 tokens  
-    # - Long prompts (> 500 words): 8192 tokens
+    # Smart context sizing for DeepSeek R1 (reasoning model needs more space):
+    # - Short prompts: 4096 tokens (R1 needs room to reason!)
+    # - Medium prompts: 6144 tokens
+    # - Long prompts: 8192 tokens
     if prompt_length < 100:
-        num_ctx = 2048  # Fast for simple questions
+        num_ctx = 4096  # Increased for R1's reasoning process
     elif prompt_length < 500:
-        num_ctx = 4096  # Balanced
+        num_ctx = 6144  # Balanced for reasoning + response
     else:
         num_ctx = 8192  # Full context for complex queries
     
@@ -600,7 +649,7 @@ def _call_local_llm(prompt: str, placeholder) -> str:
                 "options": {
                     "temperature": 0.7,
                     "num_ctx": num_ctx,  # Dynamic context size
-                    "num_predict": 512,  # Limit response length (faster!)
+                    # Removed num_predict limit - R1 needs freedom to reason!
                     "top_k": 40,
                     "top_p": 0.9,
                     "repeat_penalty": 1.1
@@ -619,9 +668,11 @@ def _call_local_llm(prompt: str, placeholder) -> str:
         # Stream the response with faster updates
         full_response = ""
         chunk_counter = 0
+        chunks_received = 0  # Track if we're getting ANY data
         
         for line in response.iter_lines():
             if line:
+                chunks_received += 1
                 import json
                 try:
                     chunk = json.loads(line)
@@ -633,15 +684,24 @@ def _call_local_llm(prompt: str, placeholder) -> str:
                         chunk_counter += 1
                         if chunk_counter % 3 == 0:
                             placeholder.markdown(full_response + "▌")
+                    
+                    # Check for error in chunk
+                    if 'error' in chunk:
+                        return f"⚠️ LLM Error: {chunk['error']}"
+                        
                 except json.JSONDecodeError:
                     continue
+        
+        # Debug: Show if we got data but no response
+        if chunks_received > 0 and not full_response:
+            return f"⚠️ Received {chunks_received} chunks but no text content. Model may have failed to generate."
         
         # CRITICAL: Always show final response (even if no updates happened)
         if full_response:
             placeholder.markdown(full_response)
         else:
             # If we got no response, return error
-            return "⚠️ No response received from LLM. Please try again."
+            return "⚠️ No response received from LLM. The model may need more context or the prompt may be too restrictive."
         
         return full_response
         
