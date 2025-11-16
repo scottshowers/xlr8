@@ -7,6 +7,31 @@ import streamlit as st
 from config import AppConfig
 
 
+def load_projects_from_supabase():
+    """Load all projects from Supabase into session state"""
+    if not AppConfig.USE_SUPABASE_PERSISTENCE:
+        return
+    
+    try:
+        from utils.data.supabase_handler import get_all_projects
+        
+        # Load projects from Supabase
+        projects_list = get_all_projects()
+        
+        # Convert to dict format for session state
+        if projects_list:
+            st.session_state.projects = {}
+            for project in projects_list:
+                project_name = project.get('name')
+                if project_name:
+                    st.session_state.projects[project_name] = project
+        
+        print(f"✅ Loaded {len(st.session_state.projects)} projects from Supabase")
+        
+    except Exception as e:
+        print(f"⚠️ Error loading projects from Supabase: {e}")
+
+
 def initialize_session_state():
     """
     Initialize all session state variables
@@ -19,6 +44,9 @@ def initialize_session_state():
     
     if 'projects' not in st.session_state:
         st.session_state.projects = {}
+    
+    # Load projects from Supabase on startup
+    load_projects_from_supabase()
     
     # API Credentials (not persisted - session only)
     if 'api_credentials' not in st.session_state:
@@ -58,58 +86,22 @@ def initialize_session_state():
         st.session_state.llm_endpoint = AppConfig.LLM_ENDPOINT
     
     if 'llm_model' not in st.session_state:
-        st.session_state.llm_model = AppConfig.LLM_DEFAULT_MODEL
-    
-    if 'llm_username' not in st.session_state:
-        st.session_state.llm_username = AppConfig.LLM_USERNAME
-    
-    if 'llm_password' not in st.session_state:
-        st.session_state.llm_password = AppConfig.LLM_PASSWORD
-    
-    if 'llm_provider' not in st.session_state:
-        st.session_state.llm_provider = 'local'
-    
-    # Claude API Key (secure, session-only storage)
-    if 'claude_api_key' not in st.session_state:
-        st.session_state.claude_api_key = ''
+        st.session_state.llm_model = AppConfig.DEFAULT_LLM_MODEL
     
     # Chat History
     if 'chat_history' not in st.session_state:
         st.session_state.chat_history = []
     
-    # AI Analysis Results
-    if 'ai_analysis_results' not in st.session_state:
-        st.session_state.ai_analysis_results = None
-    
-    if 'current_analysis' not in st.session_state:
-        st.session_state.current_analysis = None
-    
-    if 'current_templates' not in st.session_state:
-        st.session_state.current_templates = None
-    
     # Document Library
     if 'doc_library' not in st.session_state:
         st.session_state.doc_library = []
     
-    # Testing Module
-    if 'sit_tests' not in st.session_state:
-        st.session_state.sit_tests = []
+    # UKG API Credentials
+    if 'ukg_pro_auth' not in st.session_state:
+        st.session_state.ukg_pro_auth = None
     
-    if 'uat_tests' not in st.session_state:
-        st.session_state.uat_tests = []
-    
-    if 'scenario_library' not in st.session_state:
-        st.session_state.scenario_library = []
-    
-    # UKG API tokens (session-based)
-    if 'ukg_wfm_token' not in st.session_state:
-        st.session_state.ukg_wfm_token = None
-    
-    if 'ukg_wfm_token_expiry' not in st.session_state:
-        st.session_state.ukg_wfm_token_expiry = None
-    
-    if 'ukg_wfm_refresh_token' not in st.session_state:
-        st.session_state.ukg_wfm_refresh_token = None
+    if 'ukg_wfm_auth' not in st.session_state:
+        st.session_state.ukg_wfm_auth = None
     
     if 'ukg_hcm_auth' not in st.session_state:
         st.session_state.ukg_hcm_auth = None
