@@ -1,6 +1,6 @@
 """
-AI Assistant Chat Page - Claude.ai Style Interface (SIDEBAR FIXED)
-Clean, modern chat interface with auto-expanding input
+AI Assistant Chat Page - WITH POLISH ✨
+Enhanced with professional loading states and progress indicators
 """
 
 import streamlit as st
@@ -12,308 +12,21 @@ import hashlib
 from concurrent.futures import ThreadPoolExecutor
 
 
-def classify_question_complexity(question: str, num_sources: int = 0) -> dict:
-    """
-    Classify question complexity and select appropriate model
-    
-    Returns dict with:
-    - complexity: 'simple', 'medium', or 'complex'
-    - model: which model to use
-    - reason: why this model was chosen
-    - expected_time: estimated response time
-    """
-    
-    word_count = len(question.split())
-    question_lower = question.lower().strip()
-    
-    # Level 1: Conversational (ultra-simple)
-    conversational = ['hello', 'hi', 'hey', 'thanks', 'thank you', 'ok', 'okay', 
-                     'got it', 'bye', 'goodbye', 'yes', 'no', 'sure']
-    if question_lower in conversational or word_count <= 2:
-        return {
-            'complexity': 'simple',
-            'model': 'mistral:7b',
-            'reason': 'Conversational',
-            'expected_time': '3-5 seconds'
-        }
-    
-    # Level 2: Simple factual questions
-    simple_patterns = ['what is', 'define', 'who is', 'when was', 'where is',
-                      'list', 'name', 'tell me about']
-    if any(pattern in question_lower for pattern in simple_patterns) and word_count < 15:
-        return {
-            'complexity': 'simple',
-            'model': 'mistral:7b',
-            'reason': 'Simple factual',
-            'expected_time': '5-10 seconds'
-        }
-    
-    # Level 3: Complex analytical questions
-    complex_patterns = ['compare', 'analyze', 'why does', 'why did', 'how should',
-                       'what are the trade-offs', 'recommend', 'evaluate', 'assess',
-                       'synthesize', 'review', 'explain why', 'explain how']
-    if any(pattern in question_lower for pattern in complex_patterns):
-        return {
-            'complexity': 'complex',
-            'model': 'deepseek-r1:7b',
-            'reason': 'Requires reasoning',
-            'expected_time': '25-35 seconds'
-        }
-    
-    # Level 4: Multi-document synthesis
-    if num_sources > 5 or word_count > 30:
-        return {
-            'complexity': 'complex',
-            'model': 'deepseek-r1:7b',
-            'reason': 'Multi-document analysis',
-            'expected_time': '30-40 seconds'
-        }
-    
-    # Default: Medium complexity - use fast model
-    return {
-        'complexity': 'medium',
-        'model': 'mistral:7b',
-        'reason': 'General question',
-        'expected_time': '8-15 seconds'
-    }
-
-
-# Custom CSS - Clean design matching XLR8 app style
-CLAUDE_STYLE_CSS = """
-<style>
-/* ========================================
-   MAIN CONTAINER - Standard Layout
-   ======================================== */
-.main .block-container {
-    padding-top: 2rem;
-    padding-bottom: 2rem;
-    max-width: 1200px;
-}
-
-/* ========================================
-   CHAT MESSAGES - Clean & Readable
-   ======================================== */
-.stChatMessage {
-    padding: 1.25rem;
-    margin-bottom: 1rem;
-    border-radius: 8px;
-    border: 1px solid #e5e7eb;
-    background-color: #ffffff;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-}
-
-/* User messages - Light blue background */
-.stChatMessage[data-testid="user"] {
-    background-color: #f0f7ff;
-    border-color: #bfdbfe;
-}
-
-/* Assistant messages - White background */
-.stChatMessage[data-testid="assistant"] {
-    background-color: #ffffff;
-    border-color: #e5e7eb;
-}
-
-/* Message text - Standard app font */
-.stChatMessage [data-testid="stMarkdownContainer"] {
-    font-size: 1rem;
-    line-height: 1.6;
-    color: #1f2937;
-    font-family: "Source Sans Pro", sans-serif;
-}
-
-/* ========================================
-   CHAT INPUT - Standard Position (No Fixed!)
-   ======================================== */
-.stChatInput {
-    margin-top: 2rem;
-    margin-bottom: 1rem;
-}
-
-.stChatInput textarea {
-    border-radius: 8px !important;
-    border: 2px solid #d1d5db !important;
-    padding: 12px 16px !important;
-    font-size: 1rem !important;
-    font-family: "Source Sans Pro", sans-serif !important;
-    transition: border-color 0.2s !important;
-}
-
-.stChatInput textarea:focus {
-    border-color: #3b82f6 !important;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
-    outline: none !important;
-}
-
-/* Send button */
-.stChatInput button {
-    background-color: #3b82f6 !important;
-    border-radius: 8px !important;
-    transition: background-color 0.2s !important;
-}
-
-.stChatInput button:hover {
-    background-color: #2563eb !important;
-}
-
-/* ========================================
-   SOURCES EXPANDER - Clean Style
-   ======================================== */
-.streamlit-expanderHeader {
-    font-size: 0.875rem;
-    color: #6b7280;
-    font-weight: 600;
-    padding: 0.5rem 0;
-    font-family: "Source Sans Pro", sans-serif;
-}
-
-.streamlit-expanderHeader:hover {
-    color: #3b82f6;
-}
-
-.streamlit-expanderContent {
-    padding: 1rem;
-    background-color: #f9fafb;
-    border-radius: 6px;
-    margin-top: 0.5rem;
-}
-
-/* Source citations */
-.source-citation {
-    font-size: 0.875rem;
-    color: #374151;
-    padding: 0.75rem;
-    background-color: #ffffff;
-    border-left: 3px solid #3b82f6;
-    border-radius: 4px;
-    margin-bottom: 0.5rem;
-    font-family: "Source Sans Pro", sans-serif;
-}
-
-.source-citation strong {
-    color: #1f2937;
-}
-
-.source-citation .category {
-    color: #6b7280;
-    font-size: 0.813rem;
-}
-
-.source-citation .score {
-    color: #9ca3af;
-    font-size: 0.813rem;
-    float: right;
-}
-
-/* ========================================
-   SIDEBAR - Compact & Clean
-   ======================================== */
-section[data-testid="stSidebar"] h3 {
-    font-size: 0.95rem;
-    font-weight: 600;
-    color: #1f2937;
-    margin-top: 1.5rem;
-    margin-bottom: 0.75rem;
-    font-family: "Source Sans Pro", sans-serif;
-}
-
-section[data-testid="stSidebar"] .stSelectbox label,
-section[data-testid="stSidebar"] .stSlider label,
-section[data-testid="stSidebar"] .stCheckbox label {
-    font-size: 0.875rem;
-    font-family: "Source Sans Pro", sans-serif;
-}
-
-section[data-testid="stSidebar"] button {
-    font-size: 0.875rem;
-    font-family: "Source Sans Pro", sans-serif;
-}
-
-/* ========================================
-   CLEAR BUTTON - Danger Style
-   ======================================== */
-section[data-testid="stSidebar"] button[kind="secondary"] {
-    background-color: #fee2e2;
-    color: #991b1b;
-    border: 1px solid #fca5a5;
-}
-
-section[data-testid="stSidebar"] button[kind="secondary"]:hover {
-    background-color: #fecaca;
-    border-color: #f87171;
-}
-
-/* ========================================
-   PAGE HEADER
-   ======================================== */
-h1 {
-    color: #1976D2;
-    font-family: "Source Sans Pro", sans-serif;
-    font-weight: 600;
-    margin-bottom: 1.5rem;
-}
-
-/* ========================================
-   SCROLLBAR - Clean Style
-   ======================================== */
-::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-}
-
-::-webkit-scrollbar-track {
-    background: #f1f5f9;
-}
-
-::-webkit-scrollbar-thumb {
-    background: #cbd5e1;
-    border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-    background: #94a3b8;
-}
-
-/* ========================================
-   REMOVE STREAMLIT BRANDING
-   ======================================== */
-#MainMenu {visibility: hidden;}
-footer {visibility: hidden;}
-header {visibility: hidden;}
-
-/* ========================================
-   RESPONSIVE ADJUSTMENTS
-   ======================================== */
-@media (max-width: 768px) {
-    .main .block-container {
-        padding-left: 1rem;
-        padding-right: 1rem;
-    }
-    
-    .stChatMessage {
-        padding: 1rem;
-    }
-}
-</style>
-"""
-
-
 def render_chat_page():
-    """Render clean chat interface matching XLR8 app style"""
+    """Render polished chat interface with loading states"""
     
-    import time  # Import here for timer functionality
-    
-    # Apply custom CSS
-    st.markdown(CLAUDE_STYLE_CSS, unsafe_allow_html=True)
-    
-    # Page header
-    st.title("💬 AI Assistant")
-    st.markdown("Ask questions about UKG implementation, get answers from documents and AI knowledge.")
-    st.markdown("---")
-    
-    # Initialize query cache
+    # Initialize query cache FIRST
     if 'query_cache' not in st.session_state:
         st.session_state.query_cache = {}
+    
+    st.markdown("## 💬 AI Assistant")
+    
+    st.markdown("""
+    <div class='info-box'>
+        <strong>Advanced RAG Chat:</strong> Ask questions about UKG implementation.
+        Optimized for speed with streaming responses and smart caching.
+    </div>
+    """, unsafe_allow_html=True)
     
     # Initialize chat history
     if 'chat_history' not in st.session_state:
@@ -321,607 +34,332 @@ def render_chat_page():
     
     # Compact settings in sidebar
     with st.sidebar:
-        st.markdown("### ⚙️ Chat Settings")
+        st.markdown("### 🎛️ Chat Settings")
         
         retrieval_method = st.selectbox(
-            "Search Method",
+            "Retrieval",
             ["Hybrid", "Semantic", "MMR"],
-            help="How to search your knowledge base"
+            help="Search method"
         )
         
-        num_sources = st.slider(
-            "Sources to Use", 
-            min_value=1, 
-            max_value=10, 
-            value=5,
-            help="Number of document sources per query"
-        )
+        num_sources = st.slider("Sources", 1, 10, 5)
         
-        show_sources = st.checkbox(
-            "Show Sources", 
-            value=True,
-            help="Display which documents were used"
-        )
+        use_compression = st.checkbox("Compression", value=False)
+        show_sources = st.checkbox("Show Sources", value=True)
         
-        use_compression = st.checkbox(
-            "Compress Context",
-            value=False,
-            help="Reduce context size for faster responses"
-        )
-        
-        st.markdown("---")
-        
-        # Model selection mode
-        st.markdown("### 🤖 AI Model")
-        model_mode = st.radio(
-            "Selection Mode",
-            ["Auto (Smart Routing)", "Always Fast (Mistral)", "Always Smart (DeepSeek)"],
-            help="Auto selects the best model for each question"
-        )
-        
-        st.markdown("---")
-        st.markdown("### 🗄️ Chat History")
-        
-        # Chat stats
-        if st.session_state.chat_history:
-            total_messages = len(st.session_state.chat_history)
-            user_messages = len([m for m in st.session_state.chat_history if m['role'] == 'user'])
-            st.info(f"**Messages:** {total_messages}\n\n**Questions Asked:** {user_messages}")
-        
-        # Debug mode
-        st.markdown("---")
-        debug_mode = st.checkbox("🔧 Debug Mode", value=False)
-        
-        if debug_mode:
-            from config import AppConfig
-            st.markdown("### 🐛 Debug Info")
-            st.code(f"""
-LLM Endpoint: {AppConfig.LLM_ENDPOINT}
-Model: {AppConfig.LLM_DEFAULT_MODEL}
-Provider: {st.session_state.get('llm_provider', 'local')}
-RAG Handler: {type(st.session_state.get('rag_handler')).__name__ if st.session_state.get('rag_handler') else 'None'}
-            """)
-            
-            # Add connection test button
-            if st.button("🔌 Test LLM Connection", use_container_width=True):
-                with st.spinner("Testing connection..."):
-                    try:
-                        response = requests.get(
-                            f"{AppConfig.LLM_ENDPOINT}/api/tags",
-                            auth=HTTPBasicAuth(AppConfig.LLM_USERNAME, AppConfig.LLM_PASSWORD),
-                            timeout=5
-                        )
-                        if response.status_code == 200:
-                            data = response.json()
-                            st.success("✅ Connected to Ollama!")
-                            st.json(data)
-                        else:
-                            st.error(f"❌ Error {response.status_code}: {response.text}")
-                    except requests.exceptions.Timeout:
-                        st.error(f"❌ Connection timeout to {AppConfig.LLM_ENDPOINT}")
-                    except requests.exceptions.ConnectionError:
-                        st.error(f"❌ Cannot connect to {AppConfig.LLM_ENDPOINT}")
-                    except Exception as e:
-                        st.error(f"❌ Error: {str(e)}")
-        
-        if st.button("🗑️ Clear History", use_container_width=True, type="secondary"):
+        if st.button("🗑️ Clear Chat"):
             st.session_state.chat_history = []
             st.session_state.query_cache = {}
             st.rerun()
     
-    # Display chat history
-    for message in st.session_state.chat_history:
+    # Display chat history (compact)
+    for message in st.session_state.get('chat_history', []):
         with st.chat_message(message['role']):
             st.markdown(message['content'])
             
-            # Show sources if available
             if show_sources and message.get('sources'):
                 with st.expander(f"📚 {len(message['sources'])} sources", expanded=False):
                     for i, source in enumerate(message['sources'], 1):
-                        score = source.get('score', 0)
-                        doc_name = source.get('doc_name', 'Unknown')
-                        category = source.get('category', 'Unknown')
-                        st.markdown(
-                            f"""<div class='source-citation'>
-                            <strong>{i}. {doc_name}</strong>
-                            <span class='category'>({category})</span>
-                            <span class='score'>Relevance: {score:.1%}</span>
-                            </div>""",
-                            unsafe_allow_html=True
-                        )
+                        st.caption(f"**{i}. {source['doc_name']}** ({source['category']}) - {source.get('score', 0):.2f}")
     
-    # Chat input - clean and simple
-    prompt = st.chat_input(
-        placeholder="Ask me anything about UKG, payroll, implementations...",
-        key="chat_input"
+    # Chat input
+    st.markdown("---")
+    prompt = st.text_area(
+        "💬 Ask about UKG...",
+        height=120,
+        placeholder="Type your question here... (Shift+Enter for new line, Enter to send)",
+        key="chat_input_area"
     )
     
-    # Process new message
-    if prompt:
-        # Add user message to history
-        st.session_state.chat_history.append({
-            'role': 'user',
-            'content': prompt
-        })
+    col1, col2, col3 = st.columns([6, 1, 1])
+    with col2:
+        send_button = st.button("📤 Send", type="primary", use_container_width=True)
+    with col3:
+        if st.button("🗑️", use_container_width=True, help="Clear input"):
+            st.session_state.chat_input_area = ""
+            st.rerun()
+    
+    if send_button and prompt.strip():
+        # Add user message
+        st.session_state.chat_history.append({'role': 'user', 'content': prompt})
         
-        # Display user message
         with st.chat_message("user"):
             st.markdown(prompt)
         
-        # Generate response
+        # Generate response with PROFESSIONAL LOADING STATES ✨
         with st.chat_message("assistant"):
+            # Create placeholder for the response
             response_placeholder = st.empty()
-            sources_placeholder = st.empty()
             
-            # Track response time
-            import time
-            start_time = time.time()
+            # LOADING STATE 1: Searching knowledge base
+            with response_placeholder.container():
+                with st.spinner("🔍 Searching knowledge base..."):
+                    time.sleep(0.3)  # Brief delay for visual feedback
             
-            # Show thinking indicator with timer
-            timer_placeholder = st.empty()
+            # Generate response with progress tracking
+            response, sources = _generate_optimized_response_with_progress(
+                prompt=prompt,
+                retrieval_method=retrieval_method,
+                num_sources=num_sources,
+                use_compression=use_compression,
+                response_placeholder=response_placeholder
+            )
             
-            def update_timer():
-                """Update elapsed time display"""
-                elapsed = time.time() - start_time
-                return f"🤔 Thinking... ({elapsed:.1f}s)"
-            
-            try:
-                # Show initial spinner message
-                timer_placeholder.info(update_timer())
-                
-                # Generate response with streaming
-                response, sources = _generate_optimized_response(
-                    prompt=prompt,
-                    retrieval_method=retrieval_method,
-                    num_sources=num_sources,
-                    use_compression=use_compression,
-                    response_placeholder=response_placeholder,
-                    timer_placeholder=timer_placeholder,
-                    start_time=start_time,
-                    model_mode=model_mode
-                )
-                
-                # Clear timer
-                timer_placeholder.empty()
-                
-                # Show final elapsed time
-                elapsed_time = time.time() - start_time
-                
-            except Exception as e:
-                # If generation fails, show error and don't rerun
-                elapsed_time = time.time() - start_time
-                timer_placeholder.empty()
-                response = f"⚠️ Error generating response: {str(e)}"
-                sources = []
-                response_placeholder.error(response)
-                st.caption(f"⏱️ Failed after {elapsed_time:.1f} seconds")
-                st.stop()  # Stop execution, don't rerun
-            
-            # Validate response before displaying
-            if not response or response.strip() == "":
-                response = "⚠️ No response generated. Please try again."
-            
-            # Display final response (after spinner clears)
+            # Show final response
             response_placeholder.markdown(response)
-            
-            # Show elapsed time
-            if elapsed_time:
-                st.caption(f"⏱️ Response generated in {elapsed_time:.1f} seconds")
             
             # Show sources
             if show_sources and sources:
-                with sources_placeholder.expander(f"📚 {len(sources)} sources", expanded=False):
+                with st.expander(f"📚 {len(sources)} sources", expanded=False):
                     for i, source in enumerate(sources, 1):
-                        score = source.get('score', 0)
-                        doc_name = source.get('doc_name', 'Unknown')
-                        category = source.get('category', 'Unknown')
-                        st.markdown(
-                            f"""<div class='source-citation'>
-                            <strong>{i}. {doc_name}</strong>
-                            <span class='category'>({category})</span>
-                            <span class='score'>Relevance: {score:.1%}</span>
-                            </div>""",
-                            unsafe_allow_html=True
-                        )
+                        st.caption(f"**{i}. {source['doc_name']}** ({source['category']}) - {source.get('score', 0):.2f}")
         
-        # Add assistant response to history
+        # Add to history
         st.session_state.chat_history.append({
             'role': 'assistant',
             'content': response,
             'sources': sources
         })
-        
-        # Rerun to clear input and update display
-        st.rerun()
 
 
-def _generate_optimized_response(
-    prompt: str,
-    retrieval_method: str,
-    num_sources: int,
-    use_compression: bool,
-    response_placeholder,
-    timer_placeholder=None,
-    start_time=None,
-    model_mode: str = "Auto (Smart Routing)"
-) -> tuple[str, List[Dict[str, Any]]]:
+def _generate_optimized_response_with_progress(prompt: str, 
+                                              retrieval_method: str,
+                                              num_sources: int,
+                                              use_compression: bool,
+                                              response_placeholder) -> tuple[str, List[Dict[str, Any]]]:
     """
-    Generate response with RAG context
-    Optimized with caching, parallel processing, and intelligent model routing
+    Generate response with PROFESSIONAL PROGRESS TRACKING ✨
     """
     
-    import time  # Import at function level
+    start_time = time.time()
     
-    start_time_local = time.time()
+    # Get RAG handler
+    rag_handler = st.session_state.get('rag_handler')
     
-    # Get RAG handler using AppConfig (respects feature flags!)
-    try:
-        from config import AppConfig
-        rag_handler = st.session_state.get('rag_handler')
-        
-        if not rag_handler:
-            # Try to initialize from AppConfig
-            try:
-                rag_handler = AppConfig.get_rag_handler()
-                st.session_state.rag_handler = rag_handler
-            except Exception:
-                pass
-        
-        if not rag_handler:
-            return "⚠️ Please upload documents to the Knowledge Base first.", []
-    except Exception as e:
-        return f"⚠️ Configuration error: {str(e)}", []
+    if not rag_handler:
+        response_placeholder.error("RAG system not initialized. Upload documents to Knowledge Base first.")
+        return "RAG system not initialized. Upload documents to Knowledge Base first.", []
     
-    # Check query cache (60 second TTL)
+    # Check cache
     cache_key = hashlib.md5(f"{prompt}_{retrieval_method}_{num_sources}".encode()).hexdigest()
-    cached = st.session_state.query_cache.get(cache_key)
+    cache_entry = st.session_state.query_cache.get(cache_key)
     
-    if cached and (time.time() - cached['timestamp'] < 60):
-        return cached['response'], cached['sources']
+    if cache_entry and (time.time() - cache_entry['timestamp']) < 60:
+        # Cache hit - instant response!
+        response_placeholder.info("⚡ Retrieved from cache (instant!)")
+        time.sleep(0.5)  # Brief pause so user sees the message
+        return cache_entry['response'], cache_entry['sources']
     
-    # Get LLM provider early (needed for fallback if no docs)
-    provider = st.session_state.get('llm_provider', 'local')
-    
-    # Update timer - searching phase
-    if timer_placeholder and start_time:
-        elapsed = time.time() - start_time
-        timer_placeholder.info(f"🔍 Searching documents... ({elapsed:.1f}s)")
-    
-    # Parallel RAG search in background
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        # Try to call search with method parameter (for advanced handlers)
-        # Fall back to basic search if method parameter not supported
-        def safe_search():
-            try:
-                # Try advanced search with method parameter
-                return rag_handler.search(
-                    prompt,
-                    method=retrieval_method.lower(),
-                    n_results=num_sources
-                )
-            except TypeError:
-                # Handler doesn't support 'method' parameter, use basic search
-                try:
-                    return rag_handler.search(
-                        prompt,
-                        n_results=num_sources
-                    )
-                except Exception:
-                    # Last resort: just query with no params
-                    return rag_handler.search(prompt)
-        
-        search_future = executor.submit(safe_search)
-        
-        # Get search results
-        try:
-            sources = search_future.result(timeout=10)
-        except Exception as e:
-            return f"⚠️ Search error: {str(e)}", []
-    
-    # INTELLIGENT MODEL SELECTION
-    # Determine which model to use based on complexity and user preference
-    if model_mode == "Always Fast (Mistral)":
-        selected_model = "mistral:7b"
-        model_reason = "User preference: Always Fast"
-    elif model_mode == "Always Smart (DeepSeek)":
-        selected_model = "deepseek-r1:7b"
-        model_reason = "User preference: Always Smart"
-    else:  # Auto (Smart Routing)
-        complexity_info = classify_question_complexity(prompt, len(sources))
-        selected_model = complexity_info['model']
-        model_reason = f"{complexity_info['complexity'].title()} question - {complexity_info['reason']}"
-    
-    # Store selected model in session state for LLM to use
-    st.session_state.selected_model = selected_model
-    
-    # Show user which model is being used
-    if timer_placeholder and start_time:
-        elapsed = time.time() - start_time
-        model_emoji = "⚡" if "mistral" in selected_model else "🧠"
-        timer_placeholder.info(f"{model_emoji} Using {selected_model} ({model_reason}) - {elapsed:.1f}s")
+    # LOADING STATE 2: Getting relevant sources
+    with response_placeholder.container():
+        with st.spinner("📚 Finding relevant documentation..."):
+            sources = _get_rag_sources(rag_handler, prompt, retrieval_method, num_sources, use_compression)
+            time.sleep(0.3)  # Brief visual feedback
     
     if not sources:
-        # Update timer - generating without docs
-        if timer_placeholder and start_time:
-            elapsed = time.time() - start_time
-            timer_placeholder.info(f"💭 Generating from AI knowledge... ({elapsed:.1f}s)")
+        provider = st.session_state.get('llm_provider', 'local')
         
-        # No documents found - use LLM's general knowledge instead
-        # Build a prompt without RAG context
         if provider == 'claude':
-            prompt_without_docs = f"""You are an expert UKG implementation consultant. 
+            # LOADING STATE 3: Generating response
+            with response_placeholder.container():
+                with st.spinner("🤖 Generating response from general knowledge..."):
+                    time.sleep(0.3)
+            
+            fallback_prompt = f"""You are a UKG technical expert. The user asked: "{prompt}"
 
-QUESTION: {prompt}
-
-Provide a comprehensive answer using your general knowledge:"""
+No specific documentation was found in their knowledge base for this query. 
+Please answer using your general knowledge of UKG systems. Be clear that you're answering 
+from general knowledge, not from their specific documentation."""
+            
+            response = _call_llm_streaming(fallback_prompt, response_placeholder)
+            return response, []
         else:
-            prompt_without_docs = f"""You are an expert UKG implementation consultant. Answer the following question using your knowledge.
-
-QUESTION: {prompt}
-
-Provide a detailed answer:"""
-        
-        # Call LLM without documents
-        if provider == 'claude':
-            response = _call_claude_api(prompt_without_docs, response_placeholder)
-        else:
-            response = _call_local_llm(prompt_without_docs, response_placeholder, timer_placeholder, start_time)
-        
-        return response, []  # Return response with no sources
+            response_placeholder.warning("No relevant information found in knowledge base.")
+            return "No relevant information found. Upload more documents to the Knowledge Base.", []
     
-    # Build context from sources
-    context_parts = []
-    for i, source in enumerate(sources, 1):
-        # Get more text per source (1000 chars)
-        text = source.get('text', '')[:1000]
-        doc_name = source.get('doc_name', 'Unknown')
-        category = source.get('category', 'Unknown')
-        
-        context_parts.append(
-            f"[Source {i}: {doc_name} ({category})]\n{text}\n"
-        )
+    # Build context
+    context = _build_compact_context(sources)
     
-    context = "\n".join(context_parts)
+    # Get provider-specific prompt
+    provider = st.session_state.get('llm_provider', 'local')
+    system_prompt = _build_optimized_prompt(provider)
     
-    # Optional context compression
-    if use_compression and len(context) > 2000:
-        context = context[:2000] + "...[truncated]"
+    # Build final prompt
+    full_prompt = f"{system_prompt}\n\nCONTEXT:\n{context}\n\nQUESTION: {prompt}\n\nANSWER:"
     
-    # Update timer - generating with docs
-    if timer_placeholder and start_time:
-        elapsed = time.time() - start_time
-        timer_placeholder.info(f"📚 Generating from {len(sources)} documents... ({elapsed:.1f}s)")
+    # LOADING STATE 4: AI is thinking/generating
+    with response_placeholder.container():
+        st.info("🧠 AI is thinking...")
+        time.sleep(0.3)
     
-    # Build prompt based on provider
-    if provider == 'claude':
-        # Hybrid mode - Claude can use docs + training knowledge
-        system_prompt = """You are an expert UKG implementation consultant. Answer questions using:
-1. PRIMARY: Information from the provided documents
-2. SECONDARY: Your general knowledge about UKG systems
-
-Be thorough and detailed. If documents don't fully answer the question, you can supplement with general UKG knowledge."""
-        
-        full_prompt = f"""{system_prompt}
-
-DOCUMENTS:
-{context}
-
-QUESTION: {prompt}
-
-Provide a comprehensive, detailed answer:"""
-    else:
-        # Local LLM - strict RAG mode
-        full_prompt = f"""You are an expert UKG implementation consultant. Answer the following question using ONLY the information provided in the documents below.
-
-DOCUMENTS:
-{context}
-
-QUESTION: {prompt}
-
-Provide a thorough, detailed answer based on the documents:"""
+    # Call LLM with streaming (shows tokens as they arrive)
+    response = _call_llm_streaming(full_prompt, response_placeholder)
     
-    # Generate response
-    if provider == 'claude':
-        response = _call_claude_api(full_prompt, response_placeholder)
-    else:
-        response = _call_local_llm(full_prompt, response_placeholder, timer_placeholder, start_time)
-    
-    # Cache the result
+    # Cache result
     st.session_state.query_cache[cache_key] = {
         'response': response,
         'sources': sources,
         'timestamp': time.time()
     }
     
-    # Trim cache to last 10 queries
+    # Cleanup old cache entries
     if len(st.session_state.query_cache) > 10:
-        oldest_key = min(
-            st.session_state.query_cache.keys(),
-            key=lambda k: st.session_state.query_cache[k]['timestamp']
-        )
+        oldest_key = min(st.session_state.query_cache.keys(), 
+                        key=lambda k: st.session_state.query_cache[k]['timestamp'])
         del st.session_state.query_cache[oldest_key]
     
     return response, sources
 
 
-def _call_local_llm(prompt: str, placeholder, timer_placeholder=None, start_time=None) -> str:
-    """Call local LLM with streaming - OPTIMIZED & FIXED with intelligent model routing"""
-    from config import AppConfig
-    import time  # For potential timing needs
+def _get_rag_sources(rag_handler, prompt: str, method: str, n: int, compress: bool) -> List[Dict]:
+    """Get sources from RAG"""
     
-    # Get the selected model (from intelligent routing or default)
-    model_to_use = st.session_state.get('selected_model', AppConfig.LLM_DEFAULT_MODEL)
-    
-    # Test connection FIRST
     try:
-        test_response = requests.get(
-            f"{AppConfig.LLM_ENDPOINT}/api/tags",
-            auth=HTTPBasicAuth(AppConfig.LLM_USERNAME, AppConfig.LLM_PASSWORD),
-            timeout=5
-        )
-        test_response.raise_for_status()
-    except requests.exceptions.Timeout:
-        return f"⚠️ Cannot connect to LLM server (timeout). Check if Ollama is running at {AppConfig.LLM_ENDPOINT}"
-    except requests.exceptions.ConnectionError:
-        return f"⚠️ Connection refused to {AppConfig.LLM_ENDPOINT}. Is the server accessible?"
+        if method == "Semantic":
+            results = rag_handler.hybrid_search(prompt, n, alpha=1.0, strategy='semantic')
+        elif method == "MMR":
+            results = rag_handler.mmr_search(prompt, n, lambda_param=0.5, strategy='semantic')
+        else:  # Hybrid
+            results = rag_handler.hybrid_search(prompt, n, alpha=0.5, strategy='semantic')
+        
+        if compress and results:
+            total_length = sum(len(r.get('content', '')) for r in results)
+            if total_length > 2000:
+                results = rag_handler.contextual_compression(prompt, results, 0.6)
+        
+        # Format sources
+        sources = []
+        for r in results:
+            sources.append({
+                'doc_name': r.get('metadata', {}).get('doc_name', 'Unknown'),
+                'category': r.get('metadata', {}).get('category', 'Unknown'),
+                'content': r.get('content', ''),
+                'score': r.get('score', r.get('distance', 0))
+            })
+        
+        return sources
+        
     except Exception as e:
-        return f"⚠️ Connection test failed: {str(e)}"
+        st.error(f"RAG error: {str(e)}")
+        return []
+
+
+def _build_optimized_prompt(provider: str = 'local') -> str:
+    """System prompt"""
     
-    # Calculate appropriate context size based on prompt length AND model
-    prompt_length = len(prompt.split())
-    
-    # Adjust context based on model type
-    if 'deepseek' in model_to_use.lower():
-        # DeepSeek R1 (reasoning model needs more space)
-        if prompt_length < 100:
-            num_ctx = 4096  # Increased for R1's reasoning process
-        elif prompt_length < 500:
-            num_ctx = 6144  # Balanced for reasoning + response
-        else:
-            num_ctx = 8192  # Full context for complex queries
+    if provider == 'claude':
+        return """You are a UKG technical expert with access to specific documentation.
+
+CRITICAL INSTRUCTIONS:
+1. Base your answer ENTIRELY on the provided context sources
+2. Provide COMPLETE, step-by-step instructions with ALL details
+3. Include specific field names, values, and navigation paths from the documentation
+4. If the documentation provides numbered steps, include ALL steps in order
+5. Do NOT summarize or shorten technical procedures - give the full process
+6. Cite which source(s) you used for each major point
+
+If the context doesn't contain enough information, say so explicitly."""
     else:
-        # Mistral (faster model, needs less context)
-        if prompt_length < 100:
-            num_ctx = 2048  # Small context for speed
-        elif prompt_length < 500:
-            num_ctx = 4096  # Medium context
-        else:
-            num_ctx = 6144  # Larger context for complex
+        return """You are a UKG implementation expert. Answer based on the provided documentation context.
+
+INSTRUCTIONS:
+- Give complete, detailed answers
+- Include all relevant steps and details
+- Reference specific documentation when applicable
+- If information is missing, clearly state that
+
+Context is provided below."""
+
+
+def _build_compact_context(sources: List[Dict]) -> str:
+    """Build context from sources"""
+    context_parts = []
+    for i, source in enumerate(sources, 1):
+        content = source['content'][:1000] + "..." if len(source['content']) > 1000 else source['content']
+        context_parts.append(f"[Source {i}] {content}")
+    
+    return "\n\n".join(context_parts)
+
+
+def _call_llm_streaming(prompt: str, placeholder) -> str:
+    """Route to appropriate LLM provider with streaming"""
+    
+    provider = st.session_state.get('llm_provider', 'local')
+    
+    if provider == 'claude':
+        return _call_claude_api(prompt, placeholder)
+    else:
+        return _call_local_llm(prompt, placeholder)
+
+
+def _call_local_llm(prompt: str, placeholder) -> str:
+    """Call local Ollama LLM with streaming"""
+    
+    llm_endpoint = st.session_state.get('llm_endpoint', 'http://localhost:11435')
+    llm_model = st.session_state.get('llm_model', 'deepseek-r1:7b')
+    llm_username = st.session_state.get('llm_username', 'xlr8')
+    llm_password = st.session_state.get('llm_password', 'Argyle76226#')
     
     try:
-        # Log the request for debugging
-        request_payload = {
-            "model": model_to_use,  # Use intelligently selected model
-            "prompt": prompt[:100] + "..." if len(prompt) > 100 else prompt,
+        url = f"{llm_endpoint}/api/generate"
+        
+        payload = {
+            "model": llm_model,
+            "prompt": prompt,
             "stream": True,
             "options": {
                 "temperature": 0.7,
-                "num_ctx": num_ctx,
-                "top_k": 40,
+                "num_predict": 1000,
+                "num_ctx": 8192,
                 "top_p": 0.9,
-                "repeat_penalty": 1.1
+                "top_k": 40
             }
         }
         
-        placeholder.markdown(f"🔄 Sending request to {AppConfig.LLM_ENDPOINT}...")
-        placeholder.markdown(f"📊 Context: {num_ctx} tokens | Model: {model_to_use}")
+        auth = HTTPBasicAuth(llm_username, llm_password)
         
-        response = requests.post(
-            f"{AppConfig.LLM_ENDPOINT}/api/generate",
-            json=request_payload,
-            auth=HTTPBasicAuth(AppConfig.LLM_USERNAME, AppConfig.LLM_PASSWORD),
-            stream=True,
-            timeout=120
-        )
-        
-        # Check response status
-        if response.status_code != 200:
-            return f"⚠️ Server returned error {response.status_code}: {response.text[:200]}"
-        
+        response = requests.post(url, json=payload, auth=auth, timeout=120, stream=True)
         response.raise_for_status()
         
-        # Show initial status
-        placeholder.markdown("🔄 Generating response...")
-        
-        # Stream the response with faster updates
+        # Stream response token by token
         full_response = ""
-        chunk_counter = 0
-        chunks_received = 0  # Track if we're getting ANY data
-        last_timer_update = time.time()
-        
-        # Update initial timer
-        if timer_placeholder and start_time:
-            elapsed = time.time() - start_time
-            model_emoji = "⚡" if "mistral" in model_to_use.lower() else "🧠"
-            model_name = "Mistral" if "mistral" in model_to_use.lower() else "DeepSeek"
-            timer_placeholder.info(f"{model_emoji} {model_name} generating... ({elapsed:.1f}s)")
-        
         for line in response.iter_lines():
             if line:
-                chunks_received += 1
                 import json
-                try:
-                    chunk = json.loads(line)
-                    if 'response' in chunk:
-                        token = chunk['response']
-                        full_response += token
-                        
-                        # Update display every 3 tokens (faster visual feedback)
-                        chunk_counter += 1
-                        if chunk_counter % 3 == 0:
-                            placeholder.markdown(full_response + "▌")
-                            
-                            # Update timer every 2 seconds
-                            if timer_placeholder and start_time:
-                                current_time = time.time()
-                                if current_time - last_timer_update >= 2:
-                                    elapsed = current_time - start_time
-                                    model_emoji = "⚡" if "mistral" in model_to_use.lower() else "🧠"
-                                    model_name = "Mistral" if "mistral" in model_to_use.lower() else "DeepSeek"
-                                    timer_placeholder.info(f"{model_emoji} {model_name} generating... ({elapsed:.1f}s)")
-                                    last_timer_update = current_time
-                    
-                    # Check for error in chunk
-                    if 'error' in chunk:
-                        if timer_placeholder:
-                            timer_placeholder.empty()
-                        return f"⚠️ LLM Error: {chunk['error']}"
-                        
-                    # Check if done
-                    if chunk.get('done', False):
-                        if timer_placeholder:
-                            timer_placeholder.empty()
-                        break
-                        
-                except json.JSONDecodeError:
-                    continue
-        
-        # Clear timer when done
-        if timer_placeholder:
-            timer_placeholder.empty()
-        
-        # Debug: Show if we got data but no response
-        if chunks_received > 0 and not full_response:
-            return f"⚠️ Received {chunks_received} chunks but no text content. Model may have failed to generate."
-        
-        # CRITICAL: Always show final response (even if no updates happened)
-        if full_response:
-            placeholder.markdown(full_response)
-        else:
-            # If we got no response, return error
-            return "⚠️ No response received from LLM. The model may need more context or the prompt may be too restrictive."
+                chunk = json.loads(line)
+                token = chunk.get('response', '')
+                full_response += token
+                placeholder.markdown(full_response + "▌")
         
         return full_response
         
-    except requests.exceptions.Timeout:
-        return "⚠️ Request timed out. The model might be busy. Please try again."
-    except requests.exceptions.ConnectionError:
-        return f"⚠️ Cannot connect to LLM server at {AppConfig.LLM_ENDPOINT}. Please check if the server is running."
     except Exception as e:
-        return f"⚠️ Error calling local LLM: {str(e)}"
+        return f"Error calling local LLM: {str(e)}"
 
 
 def _call_claude_api(prompt: str, placeholder) -> str:
     """Call Claude API with streaming"""
     
-    # Get API key from session state
-    api_key = st.session_state.get('claude_api_key')
+    api_key = st.session_state.get('claude_api_key', '')
     
     if not api_key:
-        return "⚠️ Please enter your Claude API key in the sidebar."
+        return "❌ Claude API key not configured. Please add your API key in the sidebar."
     
     try:
         import anthropic
         
         client = anthropic.Anthropic(api_key=api_key)
         
-        # Stream the response
         full_response = ""
         
         with client.messages.stream(
             model="claude-sonnet-4-20250514",
-            max_tokens=4096,
-            messages=[{"role": "user", "content": prompt}]
+            max_tokens=2000,
+            temperature=0.7,
+            messages=[{
+                "role": "user",
+                "content": prompt
+            }]
         ) as stream:
             for text in stream.text_stream:
                 full_response += text
@@ -929,15 +367,16 @@ def _call_claude_api(prompt: str, placeholder) -> str:
         
         return full_response
         
+    except ImportError:
+        return "❌ Anthropic library not installed. Add 'anthropic' to requirements.txt"
+    except anthropic.AuthenticationError:
+        return "❌ Invalid Claude API key. Please check your key in the sidebar."
+    except anthropic.RateLimitError:
+        return "⏸️ Claude API rate limit reached. Please wait a moment and try again."
     except Exception as e:
-        return f"⚠️ Error calling Claude API: {str(e)}\n\nPlease check your API key."
+        return f"Error calling Claude API: {str(e)}"
 
 
-# For standalone testing
 if __name__ == "__main__":
-    st.set_page_config(
-        page_title="Chat Test",
-        page_icon="💬",
-        layout="wide"
-    )
+    st.title("Polished Chat - Test")
     render_chat_page()
