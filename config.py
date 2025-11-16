@@ -21,8 +21,8 @@ class AppConfig:
     LLM_USERNAME = os.getenv("LLM_USERNAME", "xlr8")
     LLM_PASSWORD = os.getenv("LLM_PASSWORD", "Argyle76226#")
     
-    # RAG Configuration - PERSISTENT STORAGE
-    # Use Railway volume if available, otherwise fall back to local
+    # RAG Configuration
+    # Using ephemeral storage (will reset on rebuilds)
     RAG_PERSIST_DIR = os.getenv("CHROMADB_PATH", "/root/.xlr8_chroma")
     
     # Embedding Configuration
