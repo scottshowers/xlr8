@@ -15,7 +15,14 @@ class AppConfig:
     # ============================================================================
     APP_NAME = "XLR8 by HCMPACT"
     APP_VERSION = "3.0"
+    VERSION = "3.0"  # Alias for compatibility
     APP_ICON = "⚡"
+    TAGLINE = "UKG Implementation Accelerator by HCMPACT"
+    
+    # ============================================================================
+    # FILE UPLOAD CONFIGURATION
+    # ============================================================================
+    MAX_FILE_SIZE_MB = 200  # Maximum file upload size
     
     # ============================================================================
     # FEATURE FLAGS
@@ -67,10 +74,15 @@ class AppConfig:
     # ============================================================================
     # RAG CONFIGURATION
     # ============================================================================
+    RAG_PERSIST_DIR = "/tmp/xlr8_chroma"  # ChromaDB persistence directory
     RAG_CHUNK_SIZE = 500
     RAG_CHUNK_OVERLAP = 50
     RAG_TOP_K = 5
     RAG_SIMILARITY_THRESHOLD = 0.7
+    
+    # Embedding Configuration
+    EMBED_ENDPOINT = os.environ.get('EMBED_ENDPOINT', 'http://178.156.190.64:11435')
+    EMBED_MODEL = os.environ.get('EMBED_MODEL', 'nomic-embed-text')
     
     @classmethod
     def get_rag_handler(cls):
