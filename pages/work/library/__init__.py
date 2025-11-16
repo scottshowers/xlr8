@@ -30,7 +30,7 @@ def render_library_page():
     if total_docs > 0:
         # Document type breakdown
         doc_types = {}
-        for doc in st.session_state.doc_library:
+        for doc in st.session_state.get('doc_library', []):
             doc_type = doc.get('type', 'Unknown')
             doc_types[doc_type] = doc_types.get(doc_type, 0) + 1
         
@@ -61,7 +61,7 @@ def render_library_page():
         with col2:
             filter_project = st.selectbox(
                 "Filter by Project",
-                ["All"] + list(st.session_state.projects.keys()) if st.session_state.projects else ["All"]
+                ["All"] + list(st.session_state.get('projects', {}).keys()) if st.session_state.get('projects') else ["All"]
             )
         
         with col3:
@@ -71,7 +71,7 @@ def render_library_page():
             )
         
         # Apply filters
-        filtered_docs = st.session_state.doc_library
+        filtered_docs = st.session_state.get('doc_library', [])
         
         if filter_type != "All":
             filtered_docs = [d for d in filtered_docs if d.get('type') == filter_type]
@@ -117,7 +117,8 @@ def render_library_page():
                         )
                     
                     if st.button("🗑️ Delete", key=f"delete_doc_{idx}"):
-                        st.session_state.doc_library.pop(idx)
+                        if 'doc_library' in st.session_state:
+                            st.session_state.doc_library.pop(idx)
                         st.rerun()
     
     else:
