@@ -1,21 +1,23 @@
 """
-Projects & Clients Management Page - WITH PROFESSIONAL ERROR HANDLING ✨
-Version: Quick Win #2
-Includes: Delete fix + Error handling + Supabase error recovery
+Projects Page - WITH TOAST NOTIFICATIONS ✨
+Version: Quick Win #3
+Includes: Loading states + Error handling + Toast notifications
 """
 
 import streamlit as st
 from datetime import datetime
 import sys
 from pathlib import Path
+import time
 
-# Import error handler
+# Import utilities
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 from utils.error_handler import ErrorHandler
+from utils.toast import ToastManager, ProjectToasts
 
 
 def render_projects_page():
-    """Render projects management page with full error handling"""
+    """Render projects management page with toast notifications"""
     
     # Initialize delete confirmation tracking
     if 'delete_confirmations' not in st.session_state:
@@ -99,7 +101,7 @@ def render_projects_page():
             submitted = st.form_submit_button("✨ Create Project", use_container_width=True)
             
             if submitted:
-                # VALIDATION with helpful errors ✨
+                # Validation
                 if not project_name or not customer_id:
                     st.error("❌ Required Fields Missing")
                     st.info("💡 Please fill in both **Project Name** and **Customer ID** to create a project.")
@@ -109,8 +111,11 @@ def render_projects_page():
                     st.info("💡 Try a different name or edit the existing project instead.")
                     
                 else:
-                    # CREATE PROJECT with error handling ✨
+                    # CREATE PROJECT with toasts! ✨
                     try:
+                        # Show creating toast
+                        ToastManager.info("Creating project...", "⏳")
+                        
                         # Ensure projects dict exists
                         if 'projects' not in st.session_state:
                             st.session_state.projects = {}
@@ -133,27 +138,28 @@ def render_projects_page():
                         st.session_state.projects[project_name] = project_data
                         st.session_state.current_project = project_name
                         
-                        # TRY to save to Supabase (with graceful failure) ✨
+                        # Try to save to Supabase
                         try:
                             from utils.data.supabase_handler import save_project
                             from config import AppConfig
                             if AppConfig.USE_SUPABASE_PERSISTENCE:
                                 save_project(project_data)
-                                ErrorHandler.show_success(
-                                    f"Project '{project_name}' created!",
-                                    "Saved to both browser and database."
-                                )
+                                # Success toast! ✨
+                                ProjectToasts.created(project_name)
+                                ToastManager.success("Saved to database too!", "💾")
                         except Exception as e:
-                            # Supabase failed but session state worked!
+                            # Supabase failed but session state worked
                             ErrorHandler.handle_supabase_error(e, operation="save project")
-                            st.info("✅ Project created successfully in your browser session!")
+                            # Still show success for session state
+                            ProjectToasts.created(project_name)
+                            ToastManager.info("Saved locally (not in database)", "💾")
                         
-                        time.sleep(0.5)
+                        time.sleep(0.3)
                         st.rerun()
                         
                     except Exception as e:
-                        # Unexpected error creating project
                         ErrorHandler.handle_generic_error(e, context="creating project")
+                        ToastManager.error("Failed to create project", "❌")
     
     with col_right:
         st.markdown("### 🚀 Quick Start Guide")
@@ -216,11 +222,13 @@ def render_projects_page():
                     if not is_active:
                         if st.button(f"Activate", key=f"activate_{proj_name}", use_container_width=True):
                             st.session_state.current_project = proj_name
+                            # Toast for activation! ✨
+                            ProjectToasts.activated(proj_name)
                             st.rerun()
                     else:
                         st.success("✓ Active")
                     
-                    # Delete with error handling ✨
+                    # Delete with toasts! ✨
                     if st.button(f"Delete", key=f"delete_{proj_name}", use_container_width=True, type="secondary"):
                         st.session_state.delete_confirmations[proj_name] = True
                         st.rerun()
@@ -233,6 +241,9 @@ def render_projects_page():
                     with col_confirm:
                         if st.button("✓ Confirm Delete", key=f"confirm_del_{proj_name}", type="primary", use_container_width=True):
                             try:
+                                # Show deleting toast
+                                ToastManager.info(f"Deleting '{proj_name}'...", "🗑️")
+                                
                                 # Delete from session state
                                 if 'projects' in st.session_state and proj_name in st.session_state.projects:
                                     del st.session_state.projects[proj_name]
@@ -243,30 +254,33 @@ def render_projects_page():
                                 # Clear confirmation
                                 st.session_state.delete_confirmations[proj_name] = False
                                 
-                                # TRY to delete from Supabase ✨
+                                # Try to delete from Supabase
                                 try:
                                     from utils.data.supabase_handler import delete_project
                                     from config import AppConfig
                                     if AppConfig.USE_SUPABASE_PERSISTENCE:
                                         delete_project(proj_name)
-                                        ErrorHandler.show_success(f"Deleted '{proj_name}'", "Removed from both browser and database.")
+                                        # Success toast! ✨
+                                        ProjectToasts.deleted(proj_name)
                                 except Exception as e:
-                                    # Supabase delete failed
                                     ErrorHandler.handle_supabase_error(e, operation="delete project")
-                                    st.info(f"✅ '{proj_name}' deleted from your browser session!")
+                                    # Still show success for local delete
+                                    ProjectToasts.deleted(proj_name)
                                 
-                                time.sleep(0.5)
+                                time.sleep(0.3)
                                 st.rerun()
                                 
                             except Exception as e:
                                 ErrorHandler.handle_generic_error(e, context="deleting project")
+                                ToastManager.error("Failed to delete", "❌")
                     
                     with col_cancel:
                         if st.button("✗ Cancel", key=f"cancel_del_{proj_name}", use_container_width=True):
                             st.session_state.delete_confirmations[proj_name] = False
+                            ToastManager.info("Delete cancelled", "↩️")
                             st.rerun()
                 
-                # Add note with error handling ✨
+                # Add note with toast! ✨
                 st.markdown("##### 📝 Project Notes")
                 new_note = st.text_area(
                     "Add a note",
@@ -284,13 +298,15 @@ def render_projects_page():
                                 'text': new_note,
                                 'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             })
-                            ErrorHandler.show_success("Note added!")
-                            time.sleep(0.3)
+                            # Toast for note added! ✨
+                            ProjectToasts.note_added()
+                            time.sleep(0.2)
                             st.rerun()
                         except Exception as e:
                             ErrorHandler.handle_generic_error(e, context="adding note")
+                            ToastManager.error("Failed to add note", "❌")
                 
-                # Display existing notes (with backward compatibility)
+                # Display existing notes
                 if proj_data.get('notes'):
                     for note in proj_data['notes'][-3:]:
                         if isinstance(note, dict):
@@ -306,5 +322,5 @@ def render_projects_page():
 
 
 if __name__ == "__main__":
-    st.title("Projects Page - With Error Handling")
+    st.title("Projects Page - With Toasts")
     render_projects_page()
