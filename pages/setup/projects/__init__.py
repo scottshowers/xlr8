@@ -1,14 +1,21 @@
 """
-Projects & Clients Management Page
-Complete project lifecycle management
+Projects & Clients Management Page - WITH PROFESSIONAL ERROR HANDLING ✨
+Version: Quick Win #2
+Includes: Delete fix + Error handling + Supabase error recovery
 """
 
 import streamlit as st
 from datetime import datetime
+import sys
+from pathlib import Path
+
+# Import error handler
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+from utils.error_handler import ErrorHandler
 
 
 def render_projects_page():
-    """Render projects management page with full functionality"""
+    """Render projects management page with full error handling"""
     
     # Initialize delete confirmation tracking
     if 'delete_confirmations' not in st.session_state:
@@ -23,7 +30,7 @@ def render_projects_page():
     </div>
     """, unsafe_allow_html=True)
     
-    # Quick stats if projects exist
+    # Quick stats
     if st.session_state.get('projects'):
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -92,43 +99,61 @@ def render_projects_page():
             submitted = st.form_submit_button("✨ Create Project", use_container_width=True)
             
             if submitted:
+                # VALIDATION with helpful errors ✨
                 if not project_name or not customer_id:
-                    st.error("❌ Project Name and Customer ID are required!")
+                    st.error("❌ Required Fields Missing")
+                    st.info("💡 Please fill in both **Project Name** and **Customer ID** to create a project.")
+                    
                 elif project_name in st.session_state.get('projects', {}):
-                    st.error(f"❌ Project '{project_name}' already exists!")
+                    st.error(f"❌ Project '{project_name}' Already Exists")
+                    st.info("💡 Try a different name or edit the existing project instead.")
+                    
                 else:
-                    # Ensure projects dict exists
-                    if 'projects' not in st.session_state:
-                        st.session_state.projects = {}
-                    
-                    # Create project
-                    project_data = {
-                        'name': project_name,
-                        'customer_id': customer_id,
-                        'implementation_type': implementation_type,
-                        'description': project_description,
-                        'go_live_date': str(go_live_date) if go_live_date else None,
-                        'consultant': consultant_name,
-                        'created_date': datetime.now().strftime("%Y-%m-%d"),
-                        'created_time': datetime.now().strftime("%H:%M:%S"),
-                        'data_sources': [],
-                        'notes': []
-                    }
-                    
-                    st.session_state.projects[project_name] = project_data
-                    st.session_state.current_project = project_name
-                    
-                    # Save to Supabase if enabled
+                    # CREATE PROJECT with error handling ✨
                     try:
-                        from utils.data.supabase_handler import save_project
-                        from config import AppConfig
-                        if AppConfig.USE_SUPABASE_PERSISTENCE:
-                            save_project(project_data)
+                        # Ensure projects dict exists
+                        if 'projects' not in st.session_state:
+                            st.session_state.projects = {}
+                        
+                        # Create project data
+                        project_data = {
+                            'name': project_name,
+                            'customer_id': customer_id,
+                            'implementation_type': implementation_type,
+                            'description': project_description,
+                            'go_live_date': str(go_live_date) if go_live_date else None,
+                            'consultant': consultant_name,
+                            'created_date': datetime.now().strftime("%Y-%m-%d"),
+                            'created_time': datetime.now().strftime("%H:%M:%S"),
+                            'data_sources': [],
+                            'notes': []
+                        }
+                        
+                        # Save to session state
+                        st.session_state.projects[project_name] = project_data
+                        st.session_state.current_project = project_name
+                        
+                        # TRY to save to Supabase (with graceful failure) ✨
+                        try:
+                            from utils.data.supabase_handler import save_project
+                            from config import AppConfig
+                            if AppConfig.USE_SUPABASE_PERSISTENCE:
+                                save_project(project_data)
+                                ErrorHandler.show_success(
+                                    f"Project '{project_name}' created!",
+                                    "Saved to both browser and database."
+                                )
+                        except Exception as e:
+                            # Supabase failed but session state worked!
+                            ErrorHandler.handle_supabase_error(e, operation="save project")
+                            st.info("✅ Project created successfully in your browser session!")
+                        
+                        time.sleep(0.5)
+                        st.rerun()
+                        
                     except Exception as e:
-                        print(f"Error saving to Supabase: {e}")
-                    
-                    st.success(f"✅ Project '{project_name}' created successfully!")
-                    st.rerun()
+                        # Unexpected error creating project
+                        ErrorHandler.handle_generic_error(e, context="creating project")
     
     with col_right:
         st.markdown("### 🚀 Quick Start Guide")
@@ -184,7 +209,6 @@ def render_projects_page():
                     if proj_data.get('go_live_date'):
                         st.markdown(f"**Target Go-Live:** {proj_data['go_live_date']}")
                     
-                    # Project notes
                     if proj_data.get('notes'):
                         st.markdown(f"**Notes:** {len(proj_data['notes'])} note(s)")
                 
@@ -196,47 +220,53 @@ def render_projects_page():
                     else:
                         st.success("✓ Active")
                     
-                    # FIXED DELETE LOGIC - Two-step confirmation pattern
+                    # Delete with error handling ✨
                     if st.button(f"Delete", key=f"delete_{proj_name}", use_container_width=True, type="secondary"):
-                        # Set confirmation state when delete is clicked
                         st.session_state.delete_confirmations[proj_name] = True
                         st.rerun()
                 
-                # Show confirmation UI if delete was clicked
+                # Show confirmation UI
                 if st.session_state.delete_confirmations.get(proj_name, False):
                     st.warning(f"⚠️ Delete '{proj_name}'?")
                     col_confirm, col_cancel = st.columns(2)
                     
                     with col_confirm:
                         if st.button("✓ Confirm Delete", key=f"confirm_del_{proj_name}", type="primary", use_container_width=True):
-                            # Actually delete the project
-                            if 'projects' in st.session_state and proj_name in st.session_state.projects:
-                                del st.session_state.projects[proj_name]
-                            
-                            if st.session_state.get('current_project') == proj_name:
-                                st.session_state.current_project = None
-                            
-                            # Clear confirmation state
-                            st.session_state.delete_confirmations[proj_name] = False
-                            
-                            # Delete from Supabase too
                             try:
-                                from utils.data.supabase_handler import delete_project
-                                from config import AppConfig
-                                if AppConfig.USE_SUPABASE_PERSISTENCE:
-                                    delete_project(proj_name)
+                                # Delete from session state
+                                if 'projects' in st.session_state and proj_name in st.session_state.projects:
+                                    del st.session_state.projects[proj_name]
+                                
+                                if st.session_state.get('current_project') == proj_name:
+                                    st.session_state.current_project = None
+                                
+                                # Clear confirmation
+                                st.session_state.delete_confirmations[proj_name] = False
+                                
+                                # TRY to delete from Supabase ✨
+                                try:
+                                    from utils.data.supabase_handler import delete_project
+                                    from config import AppConfig
+                                    if AppConfig.USE_SUPABASE_PERSISTENCE:
+                                        delete_project(proj_name)
+                                        ErrorHandler.show_success(f"Deleted '{proj_name}'", "Removed from both browser and database.")
+                                except Exception as e:
+                                    # Supabase delete failed
+                                    ErrorHandler.handle_supabase_error(e, operation="delete project")
+                                    st.info(f"✅ '{proj_name}' deleted from your browser session!")
+                                
+                                time.sleep(0.5)
+                                st.rerun()
+                                
                             except Exception as e:
-                                print(f"Error deleting from Supabase: {e}")
-                            
-                            st.success(f"✅ Deleted '{proj_name}'")
-                            st.rerun()
+                                ErrorHandler.handle_generic_error(e, context="deleting project")
                     
                     with col_cancel:
                         if st.button("✗ Cancel", key=f"cancel_del_{proj_name}", use_container_width=True):
                             st.session_state.delete_confirmations[proj_name] = False
                             st.rerun()
                 
-                # Add note functionality
+                # Add note with error handling ✨
                 st.markdown("##### 📝 Project Notes")
                 new_note = st.text_area(
                     "Add a note",
@@ -247,26 +277,28 @@ def render_projects_page():
                 
                 if st.button("Add Note", key=f"add_note_{proj_name}"):
                     if new_note:
-                        if 'notes' not in proj_data:
-                            proj_data['notes'] = []
-                        proj_data['notes'].append({
-                            'text': new_note,
-                            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        })
-                        st.success("✅ Note added")
-                        st.rerun()
+                        try:
+                            if 'notes' not in proj_data:
+                                proj_data['notes'] = []
+                            proj_data['notes'].append({
+                                'text': new_note,
+                                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            })
+                            ErrorHandler.show_success("Note added!")
+                            time.sleep(0.3)
+                            st.rerun()
+                        except Exception as e:
+                            ErrorHandler.handle_generic_error(e, context="adding note")
                 
-                # Display existing notes
+                # Display existing notes (with backward compatibility)
                 if proj_data.get('notes'):
-                    for note in proj_data['notes'][-3:]:  # Show last 3
-                        # Handle both old format (string) and new format (dict)
+                    for note in proj_data['notes'][-3:]:
                         if isinstance(note, dict):
                             timestamp = note.get('timestamp', 'Unknown')
                             text = note.get('text', '')
                             st.markdown(f"<small>**{timestamp}:** {text}</small>", 
                                       unsafe_allow_html=True)
                         else:
-                            # Old format - just a string
                             st.markdown(f"<small>{note}</small>", 
                                       unsafe_allow_html=True)
     else:
@@ -274,5 +306,5 @@ def render_projects_page():
 
 
 if __name__ == "__main__":
-    st.title("Projects Page - Test")
+    st.title("Projects Page - With Error Handling")
     render_projects_page()
