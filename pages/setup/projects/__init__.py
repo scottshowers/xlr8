@@ -259,8 +259,16 @@ def render_projects_page():
                 # Display existing notes
                 if proj_data.get('notes'):
                     for note in proj_data['notes'][-3:]:  # Show last 3
-                        st.markdown(f"<small>**{note['timestamp']}:** {note['text']}</small>", 
-                                  unsafe_allow_html=True)
+                        # Handle both old format (string) and new format (dict)
+                        if isinstance(note, dict):
+                            timestamp = note.get('timestamp', 'Unknown')
+                            text = note.get('text', '')
+                            st.markdown(f"<small>**{timestamp}:** {text}</small>", 
+                                      unsafe_allow_html=True)
+                        else:
+                            # Old format - just a string
+                            st.markdown(f"<small>{note}</small>", 
+                                      unsafe_allow_html=True)
     else:
         st.info("📋 No projects yet. Create your first project above to get started!")
 
