@@ -14,7 +14,7 @@ import pandas as pd
 def render_knowledge_page():
     """Render knowledge base management page"""
     
-    st.markdown("## 🧠 HCMPACT Knowledge Base")
+    st.markdown("## 🧠 HCMPACT Local LLM Seeding")
     
     st.markdown("""
     <div class='info-box'>
