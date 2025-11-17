@@ -1,6 +1,7 @@
 """
-XLR8 Session Management - COMPLETE FIX
+XLR8 Session Management - FIXED VERSION
 Properly initializes AdvancedRAGHandler with endpoints from environment/session
+NO AUTO-INITIALIZATION - let app.py control when initialization happens
 """
 
 import streamlit as st
@@ -13,12 +14,14 @@ try:
     from utils.rag_handler import AdvancedRAGHandler
     RAG_AVAILABLE = True
     RAG_TYPE = 'advanced'
-except ImportError:
+except ImportError as e:
+    print(f"âš ï¸ Warning: Could not import AdvancedRAGHandler: {e}")
     try:
         from utils.rag_handler import RAGHandler as AdvancedRAGHandler
         RAG_AVAILABLE = True
         RAG_TYPE = 'basic'
-    except ImportError:
+    except ImportError as e2:
+        print(f"âŒ Error: Could not import any RAG handler: {e2}")
         RAG_AVAILABLE = False
         RAG_TYPE = None
         AdvancedRAGHandler = None
@@ -42,7 +45,7 @@ def initialize_session():
     if 'llm_provider' not in st.session_state:
         st.session_state.llm_provider = 'local'  # 'local' or 'claude'
     
-    # LLM settings - GET FROM ENVIRONMENT
+    # LLM settings - GET FROM ENVIRONMENT FIRST
     if 'llm_endpoint' not in st.session_state:
         st.session_state.llm_endpoint = os.environ.get('LLM_ENDPOINT', 'http://178.156.190.64:11435')
     
@@ -78,10 +81,12 @@ def initialize_session():
             # Determine persist directory
             persist_dir = os.path.expanduser("~/.xlr8_chroma")
             
-            # Get endpoints from session state
-            embed_endpoint = st.session_state.get('llm_endpoint', 'http://178.156.190.64:11435')
-            embed_username = st.session_state.get('llm_username', 'xlr8')
-            embed_password = st.session_state.get('llm_password', 'Argyle76226#')
+            # Get endpoints from session state (already initialized above)
+            embed_endpoint = st.session_state.llm_endpoint
+            embed_username = st.session_state.llm_username
+            embed_password = st.session_state.llm_password
+            
+            print(f"ðŸ"§ Initializing RAG handler with endpoint: {embed_endpoint}")
             
             # Initialize AdvancedRAGHandler WITH ENDPOINTS
             st.session_state.rag_handler = AdvancedRAGHandler(
@@ -95,17 +100,23 @@ def initialize_session():
             if hasattr(st.session_state.rag_handler, 'chunking_strategies'):
                 st.session_state.rag_type = 'advanced'
                 st.session_state.rag_enabled = True
-                print(f"✅ Advanced RAG initialized with endpoint: {embed_endpoint}")
+                print(f"âœ… Advanced RAG initialized successfully with endpoint: {embed_endpoint}")
             else:
                 st.session_state.rag_type = 'basic'
                 st.session_state.rag_enabled = True
-                print("⚠️ Basic RAG initialized (no chunking strategies)")
+                print("âš ï¸ Basic RAG initialized (no chunking strategies)")
                 
         except Exception as e:
             st.session_state.rag_enabled = False
             st.session_state.rag_handler = None
             st.session_state.rag_type = None
-            print(f"❌ Failed to initialize RAG handler: {e}")
+            print(f"âŒ Failed to initialize RAG handler: {e}")
+            import traceback
+            traceback.print_exc()
+    elif not RAG_AVAILABLE:
+        print(f"âš ï¸ RAG not available - RAG_AVAILABLE={RAG_AVAILABLE}, RAG_TYPE={RAG_TYPE}")
+    elif 'rag_handler' in st.session_state:
+        print(f"âœ… RAG handler already initialized")
     
     # Project management
     if 'current_project' not in st.session_state:
@@ -254,5 +265,6 @@ def verify_advanced_rag():
 # Alias for backward compatibility
 initialize_session_state = initialize_session
 
-# Auto-initialize on import
-initialize_session()
+# DO NOT AUTO-INITIALIZE ON IMPORT
+# Let app.py control when initialization happens
+# This ensures Streamlit is fully ready before we try to access session_state
