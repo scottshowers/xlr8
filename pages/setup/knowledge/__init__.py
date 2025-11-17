@@ -96,66 +96,104 @@ def render_knowledge_page():
         st.error("NUCLEAR OPTION: This physically deletes the ChromaDB directory and restarts from scratch.")
         
         # Show actual persist directory
-        persist_dir = getattr(rag_handler, 'persist_directory', '/root/.xlr8_chroma')
-        st.info(f"Persist directory: {persist_dir}")
-        
-        # Check if directory exists
         import os
-        if os.path.exists(persist_dir):
-            st.success(f"[OK] Directory exists")
+        persist_dir = getattr(rag_handler, 'persist_directory', '/root/.xlr8_chroma')
+        st.info(f"Configured persist directory: {persist_dir}")
+        st.info(f"Expanded persist directory: {os.path.expanduser(persist_dir)}")
+        st.info(f"Home directory: {os.path.expanduser('~')}")
+        
+        # Check ChromaDB client type
+        client = getattr(rag_handler, 'client', None)
+        if client:
+            st.info(f"ChromaDB client type: {type(client).__name__}")
+            # Try to get settings
             try:
-                # Show size
-                import subprocess
-                result = subprocess.run(['du', '-sh', persist_dir], capture_output=True, text=True, timeout=5)
-                if result.returncode == 0:
-                    st.write(f"Size: {result.stdout.strip()}")
+                if hasattr(client, '_settings'):
+                    settings = client._settings
+                    st.info(f"Settings persist_directory: {getattr(settings, 'persist_directory', 'Not set')}")
             except:
                 pass
-        else:
-            st.warning(f"[!] Directory doesn't exist at {persist_dir}")
-            st.info("Checking alternate locations...")
-            
-            # Check common locations
-            possible_paths = [
-                '/root/.xlr8_chroma',
-                '/tmp/xlr8_chroma',
-                '/home/claude/.xlr8_chroma',
-                os.path.expanduser('~/.xlr8_chroma'),
-                './chroma_db',
-                './.xlr8_chroma'
-            ]
-            
-            for path in possible_paths:
-                if os.path.exists(path):
-                    st.success(f"[OK] Found at: {path}")
-                    persist_dir = path
-                    break
         
+        # Check collections
+        st.markdown("**Current Collections:**")
+        if hasattr(rag_handler, 'collections'):
+            for strategy, collection in rag_handler.collections.items():
+                count = collection.count()
+                st.write(f"- {strategy}: {count} chunks")
+        
+        # List all possible paths
+        st.markdown("**Checking file system:**")
+        possible_paths = [
+            '/root/.xlr8_chroma',
+            '/tmp/xlr8_chroma',
+            '/home/claude/.xlr8_chroma',
+            os.path.expanduser('~/.xlr8_chroma'),
+            './chroma_db',
+            './.xlr8_chroma',
+            '/app/.xlr8_chroma'
+        ]
+        
+        found_path = None
+        for path in possible_paths:
+            if os.path.exists(path):
+                st.success(f"✓ Found: {path}")
+                found_path = path
+                try:
+                    import subprocess
+                    result = subprocess.run(['du', '-sh', path], capture_output=True, text=True, timeout=5)
+                    if result.returncode == 0:
+                        st.write(f"  Size: {result.stdout.strip()}")
+                except:
+                    pass
+            else:
+                st.text(f"✗ Not found: {path}")
+        
+        if not found_path:
+            st.warning("No persist directory found - ChromaDB may be in-memory only!")
+            st.info("Collections exist in memory but aren't saved to disk.")
+        
+        st.markdown("---")
         st.warning("Use this if:")
         st.markdown("- Search distance >100 after re-upload")
-        st.markdown("- Regular clear didn't work")
-        st.markdown("- Embeddings are corrupted beyond repair")
+        st.markdown("- Need to clear in-memory collections")
         
-        confirm = st.checkbox("I understand this will delete everything and require restart")
+        if st.button("[X] CLEAR COLLECTIONS (Memory)", type="primary"):
+            try:
+                deleted_count = 0
+                
+                if hasattr(rag_handler, 'collections'):
+                    for strategy, collection in rag_handler.collections.items():
+                        count = collection.count()
+                        if count > 0:
+                            # Get all IDs and delete them
+                            all_data = collection.get()
+                            if all_data and 'ids' in all_data and all_data['ids']:
+                                collection.delete(ids=all_data['ids'])
+                                st.success(f"Cleared {strategy}: {count} chunks")
+                                deleted_count += count
+                
+                if deleted_count > 0:
+                    st.success(f"[OK] Deleted {deleted_count} total chunks from memory")
+                    st.warning("Refresh page to reinitialize")
+                    st.info("Now re-upload your documents")
+                else:
+                    st.info("No data to clear")
+                    
+            except Exception as e:
+                st.error(f"Error: {e}")
+                st.code(str(e))
         
-        if confirm:
-            if st.button("[X] NUCLEAR DELETE", type="primary"):
+        if found_path:
+            st.markdown("---")
+            confirm = st.checkbox("Delete physical directory (if found)")
+            if confirm and st.button("[X] DELETE DIRECTORY", type="secondary"):
                 try:
                     import shutil
-                    
-                    if os.path.exists(persist_dir):
-                        # Delete the entire directory
-                        shutil.rmtree(persist_dir)
-                        st.success(f"[OK] Deleted: {persist_dir}")
-                        st.warning("RESTART REQUIRED: Refresh the page or restart Railway service")
-                        st.info("After restart, re-upload your documents")
-                    else:
-                        st.error(f"Directory doesn't exist: {persist_dir}")
-                        st.info("Check Railway environment or use Railway shell")
-                        
+                    shutil.rmtree(found_path)
+                    st.success(f"[OK] Deleted: {found_path}")
+                    st.warning("Restart required")
                 except Exception as e:
                     st.error(f"Error: {e}")
-                    st.code(str(e))
     
     st.markdown("---")
     
