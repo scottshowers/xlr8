@@ -245,7 +245,7 @@ class IntelligentRouter:
         try:
             # Use the handler's search method
             results = self.chromadb_handler.search(
-                query_text=query,
+                query=query,
                 n_results=num_sources
             )
             
