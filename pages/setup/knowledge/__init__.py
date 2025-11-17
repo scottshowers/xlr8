@@ -22,7 +22,7 @@ def render_knowledge_page():
     </div>
     """, unsafe_allow_html=True)
     
-    # Get RAG handler
+    # Get RAG handler and type
     rag_handler = st.session_state.get('rag_handler')
     rag_type = st.session_state.get('rag_type', 'basic')
     
@@ -30,14 +30,16 @@ def render_knowledge_page():
         st.error("❌ RAG system not initialized")
         return
     
+    # Determine which handler we actually have
+    is_advanced = (rag_type == 'advanced')
+    
     # Stats - handle both formats
     try:
         stats = rag_handler.get_stats()
         
-        # Determine format and calculate totals
+        # Calculate totals based on stats structure
         if isinstance(stats, dict) and any(isinstance(v, dict) for v in stats.values()):
-            # Advanced RAG format
-            is_advanced = True
+            # Advanced RAG stats format (nested dicts)
             total_docs = sum(s.get('unique_documents', 0) for s in stats.values() if isinstance(s, dict))
             total_chunks = sum(s.get('total_chunks', 0) for s in stats.values() if isinstance(s, dict))
             strategies_used = len([s for s in stats.values() if isinstance(s, dict) and s.get('total_chunks', 0) > 0])
@@ -48,8 +50,7 @@ def render_knowledge_page():
                     all_categories.update(s.get('categories', {}).keys())
             category_count = len(all_categories)
         else:
-            # Basic RAG format
-            is_advanced = False
+            # Basic RAG stats format (flat dict)
             total_docs = stats.get('unique_documents', 0)
             total_chunks = stats.get('total_chunks', 0)
             strategies_used = 1 if total_chunks > 0 else 0
@@ -60,7 +61,6 @@ def render_knowledge_page():
         total_chunks = 0
         strategies_used = 0
         category_count = 0
-        is_advanced = False
     
     # Display stats
     col1, col2, col3, col4 = st.columns(4)
@@ -97,12 +97,13 @@ def render_knowledge_page():
             help="Categorize your document"
         )
         
-        # Only show chunking strategy for advanced RAG
-        if is_advanced or rag_type == 'advanced':
+        # CRITICAL: Only show chunking strategy if we have ADVANCED handler
+        if is_advanced:
             chunking_strategy = st.selectbox(
                 "Chunking Strategy",
                 ["adaptive", "semantic", "recursive", "sliding", "paragraph", "all"],
-                help="How to split the document. 'adaptive' automatically chooses best method."
+                help="How to split the document. 'adaptive' automatically chooses best method.",
+                index=0  # Default to 'adaptive'
             )
         else:
             chunking_strategy = None
@@ -120,7 +121,7 @@ def render_knowledge_page():
                 
                 if content:
                     try:
-                        # Build kwargs
+                        # Build kwargs - ONLY include chunking_strategy if advanced handler
                         kwargs = {
                             'name': uploaded_file.name,
                             'content': content,
@@ -131,8 +132,8 @@ def render_knowledge_page():
                             }
                         }
                         
-                        # Add chunking_strategy ONLY if advanced RAG
-                        if chunking_strategy and (is_advanced or rag_type == 'advanced'):
+                        # Add chunking_strategy ONLY for advanced RAG
+                        if is_advanced and chunking_strategy:
                             kwargs['chunking_strategy'] = chunking_strategy
                         
                         # Call add_document
@@ -148,20 +149,13 @@ def render_knowledge_page():
                     
                     except Exception as e:
                         status_text.error(f"❌ Error: {str(e)}")
+                        st.error(f"Debug - RAG Type: {rag_type}, Is Advanced: {is_advanced}")
                 else:
                     status_text.error(f"❌ Failed to extract text from {uploaded_file.name}")
                 
                 progress_bar.progress((idx + 1) / len(uploaded_files))
             
             st.success(f"✅ Processed {len(uploaded_files)} document(s)")
-            
-            # Force refresh stats
-            try:
-                stats = rag_handler.get_stats()
-            except:
-                pass
-            
-            # Rerun to show updated counts
             st.rerun()
     
     # Display statistics
@@ -170,8 +164,12 @@ def render_knowledge_page():
         st.markdown("### 📊 LLM Seeding Statistics")
         
         try:
-            if is_advanced:
-                # Advanced RAG - show strategy breakdown
+            # Refresh stats
+            stats = rag_handler.get_stats()
+            
+            # Show detailed stats based on format
+            if isinstance(stats, dict) and any(isinstance(v, dict) for v in stats.values()):
+                # Advanced format - show strategy breakdown
                 strategy_tab, category_tab = st.tabs(["By Strategy", "By Category"])
                 
                 with strategy_tab:
@@ -202,7 +200,7 @@ def render_knowledge_page():
                         ]
                         st.dataframe(pd.DataFrame(category_data), use_container_width=True, hide_index=True)
             else:
-                # Basic RAG - just categories
+                # Basic format - just categories
                 categories = stats.get('categories', {})
                 if categories:
                     category_data = [
