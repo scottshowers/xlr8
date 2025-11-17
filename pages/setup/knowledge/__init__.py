@@ -34,21 +34,38 @@ def render_knowledge_page():
     
     col1, col2, col3, col4 = st.columns(4)
     
-    total_docs = sum(s['unique_documents'] for s in stats.values())
-    total_chunks = sum(s['total_chunks'] for s in stats.values())
+    # Handle both basic and advanced RAG formats
+    if isinstance(stats, dict) and any(isinstance(v, dict) for v in stats.values()):
+        # Advanced RAG format - aggregate across strategies
+        total_docs = sum(s.get('unique_documents', 0) for s in stats.values() if isinstance(s, dict))
+        total_chunks = sum(s.get('total_chunks', 0) for s in stats.values() if isinstance(s, dict))
+    else:
+        # Basic RAG format (single collection)
+        total_docs = stats.get('unique_documents', 0)
+        total_chunks = stats.get('total_chunks', 0)
     
     with col1:
         st.metric("📚 LLM Documents", total_docs)
     with col2:
         st.metric("📝 Total Chunks", total_chunks)
     with col3:
-        strategies_used = len([s for s in stats.values() if s['total_chunks'] > 0])
+        # Count strategies/collections
+        if isinstance(stats, dict) and any(isinstance(v, dict) for v in stats.values()):
+            strategies_used = len([s for s in stats.values() if isinstance(s, dict) and s.get('total_chunks', 0) > 0])
+        else:
+            strategies_used = 1 if total_chunks > 0 else 0
         st.metric("🔧 Strategies", strategies_used)
     with col4:
-        all_categories = set()
-        for s in stats.values():
-            all_categories.update(s['categories'].keys())
-        st.metric("📁 Categories", len(all_categories))
+        # Count categories
+        if isinstance(stats, dict) and any(isinstance(v, dict) for v in stats.values()):
+            all_categories = set()
+            for s in stats.values():
+                if isinstance(s, dict):
+                    all_categories.update(s.get('categories', {}).keys())
+            category_count = len(all_categories)
+        else:
+            category_count = len(stats.get('categories', {}))
+        st.metric("📁 Categories", category_count)
     
     st.markdown("---")
     
@@ -92,7 +109,7 @@ def render_knowledge_page():
                 
                 if content:
                     # Add to LLM seeding
-                    counts = rag_handler.add_document(
+                    result = rag_handler.add_document(
                         name=uploaded_file.name,
                         content=content,
                         category=category,
@@ -103,7 +120,13 @@ def render_knowledge_page():
                         chunking_strategy=chunking_strategy
                     )
                     
-                    status_text.success(f"✅ Added {uploaded_file.name} - {sum(counts.values())} chunks")
+                    # Handle both int (basic RAG) and dict (advanced RAG) return values
+                    if isinstance(result, dict):
+                        chunk_count = sum(result.values())
+                    else:
+                        chunk_count = result
+                    
+                    status_text.success(f"✅ Added {uploaded_file.name} - {chunk_count} chunks")
                 else:
                     status_text.error(f"❌ Failed to extract text from {uploaded_file.name}")
                 
@@ -112,38 +135,50 @@ def render_knowledge_page():
             st.success(f"✅ Processed {len(uploaded_files)} document(s)")
             st.rerun()
     
-    # Display statistics by strategy
+    # Display statistics
     if total_chunks > 0:
         st.markdown("---")
         st.markdown("### 📊 LLM Seeding Statistics")
         
-        # Strategy breakdown
-        strategy_tab, category_tab = st.tabs(["By Strategy", "By Category"])
-        
-        with strategy_tab:
-            strategy_data = []
-            for strategy_name, strategy_stats in stats.items():
-                if strategy_stats['total_chunks'] > 0:
-                    strategy_data.append({
-                        'Strategy': strategy_name.title(),
-                        'Documents': strategy_stats['unique_documents'],
-                        'Chunks': strategy_stats['total_chunks']
-                    })
+        # Only show strategy breakdown if advanced RAG (multiple strategies)
+        if isinstance(stats, dict) and any(isinstance(v, dict) for v in stats.values()):
+            # Advanced RAG with multiple strategies
+            strategy_tab, category_tab = st.tabs(["By Strategy", "By Category"])
             
-            if strategy_data:
-                st.dataframe(pd.DataFrame(strategy_data), use_container_width=True, hide_index=True)
-        
-        with category_tab:
-            # Aggregate categories across all strategies
-            all_categories = {}
-            for strategy_stats in stats.values():
-                for cat, count in strategy_stats['categories'].items():
-                    all_categories[cat] = all_categories.get(cat, 0) + count
+            with strategy_tab:
+                strategy_data = []
+                for strategy_name, strategy_stats in stats.items():
+                    if isinstance(strategy_stats, dict) and strategy_stats.get('total_chunks', 0) > 0:
+                        strategy_data.append({
+                            'Strategy': strategy_name.title(),
+                            'Documents': strategy_stats.get('unique_documents', 0),
+                            'Chunks': strategy_stats.get('total_chunks', 0)
+                        })
+                
+                if strategy_data:
+                    st.dataframe(pd.DataFrame(strategy_data), use_container_width=True, hide_index=True)
             
-            if all_categories:
+            with category_tab:
+                # Aggregate categories across all strategies
+                all_categories = {}
+                for strategy_stats in stats.values():
+                    if isinstance(strategy_stats, dict):
+                        for cat, count in strategy_stats.get('categories', {}).items():
+                            all_categories[cat] = all_categories.get(cat, 0) + count
+                
+                if all_categories:
+                    category_data = [
+                        {'Category': cat, 'Chunks': count}
+                        for cat, count in sorted(all_categories.items(), key=lambda x: x[1], reverse=True)
+                    ]
+                    st.dataframe(pd.DataFrame(category_data), use_container_width=True, hide_index=True)
+        else:
+            # Basic RAG - just show categories
+            categories = stats.get('categories', {})
+            if categories:
                 category_data = [
                     {'Category': cat, 'Chunks': count}
-                    for cat, count in sorted(all_categories.items(), key=lambda x: x[1], reverse=True)
+                    for cat, count in sorted(categories.items(), key=lambda x: x[1], reverse=True)
                 ]
                 st.dataframe(pd.DataFrame(category_data), use_container_width=True, hide_index=True)
         
@@ -153,16 +188,22 @@ def render_knowledge_page():
         
         if st.button("⚠️ Clear All Documents", help="Removes all documents from LLM seeding"):
             if st.checkbox("I understand this will delete all LLM documents"):
-                for collection in rag_handler.collections.values():
+                try:
+                    # Use clear_all method if available
+                    rag_handler.clear_all()
+                    st.success("✅ LLM documents cleared")
+                    st.rerun()
+                except AttributeError:
+                    # Fallback for basic RAG without clear_all method
                     try:
-                        # Clear collection
-                        all_ids = collection.get()['ids']
-                        if all_ids:
-                            collection.delete(ids=all_ids)
-                    except:
-                        pass
-                st.success("✅ LLM documents cleared")
-                st.rerun()
+                        if hasattr(rag_handler, 'collection'):
+                            all_ids = rag_handler.collection.get()['ids']
+                            if all_ids:
+                                rag_handler.collection.delete(ids=all_ids)
+                        st.success("✅ LLM documents cleared")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to clear documents: {str(e)}")
 
 
 def _extract_text(uploaded_file) -> str:
