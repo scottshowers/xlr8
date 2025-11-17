@@ -27,7 +27,7 @@ from utils.ai.pii_handler import PIIHandler
 logger = logging.getLogger(__name__)
 
 
-def show():
+def render_chat_page():
     """Main chat page function"""
     
     st.title("💬 Intelligent Chat Assistant")
@@ -358,4 +358,4 @@ def _generate_and_display_response(user_query: str):
 
 # Entry point
 if __name__ == "__main__":
-    show()
+    render_chat_page()
