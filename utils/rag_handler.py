@@ -12,6 +12,7 @@ import requests
 from requests.auth import HTTPBasicAuth
 import nltk
 from collections import defaultdict
+import os
 
 
 class AdvancedRAGHandler:
@@ -20,12 +21,16 @@ class AdvancedRAGHandler:
     Supports: semantic, recursive, sliding window, paragraph-based, adaptive, and all strategies.
     """
     
-    def __init__(self, persist_directory: str = "/root/.xlr8_chroma"):
+    def __init__(self, persist_directory: str = "/root/.xlr8_chroma", 
+                 embed_endpoint: str = None, embed_username: str = None, embed_password: str = None):
         """
         Initialize ChromaDB client with advanced chunking capabilities
         
         Args:
             persist_directory: Where to store the vector database
+            embed_endpoint: Ollama endpoint URL (defaults to env var or localhost)
+            embed_username: Username for Ollama auth
+            embed_password: Password for Ollama auth
         """
         self.persist_directory = persist_directory
         
@@ -59,11 +64,11 @@ class AdvancedRAGHandler:
                 metadata={"description": f"HCMPACT knowledge with {strategy} chunking"}
             )
         
-        # Ollama embedding endpoint
-        self.embed_endpoint = "http://localhost:11435"
+        # Ollama embedding endpoint - GET FROM ENVIRONMENT OR PARAMETER
+        self.embed_endpoint = embed_endpoint or os.environ.get('LLM_ENDPOINT', 'http://178.156.190.64:11435')
         self.embed_model = "nomic-embed-text"
-        self.embed_username = "xlr8"
-        self.embed_password = "Argyle76226#"
+        self.embed_username = embed_username or os.environ.get('LLM_USERNAME', 'xlr8')
+        self.embed_password = embed_password or os.environ.get('LLM_PASSWORD', 'Argyle76226#')
     
     def _clean_text(self, text: str) -> str:
         """Clean and normalize text"""
