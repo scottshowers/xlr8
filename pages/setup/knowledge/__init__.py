@@ -1,5 +1,5 @@
 """
-HCMPACT LLM Seeding - With visible error tracking
+HCMPACT LLM Seeding - FASTER version (defaults to adaptive only)
 """
 
 import streamlit as st
@@ -88,10 +88,15 @@ def render_knowledge_page():
         if is_advanced:
             chunking_strategy = st.selectbox(
                 "Chunking Strategy",
-                ["adaptive", "semantic", "recursive", "sliding", "paragraph", "all"]
+                ["adaptive", "semantic", "recursive", "sliding", "paragraph"],  # REMOVED "all"
+                help="Adaptive automatically chooses best method. AVOID 'all' - it's 5x slower!"
             )
         else:
             chunking_strategy = None
+    
+    # WARNING if slow
+    if is_advanced:
+        st.info("[i] TIP: 'adaptive' is fastest (~30 sec/doc). Other strategies take longer.")
     
     if uploaded_files:
         if st.button("[>>] Process and Seed LLM", type="primary", use_container_width=True):
@@ -117,7 +122,7 @@ def render_knowledge_page():
                     
                     # STEP 1: Extract text
                     with status_area.container():
-                        st.info(f"[{idx+1}/{total_files}] Extracting text from {uploaded_file.name}...")
+                        st.info(f"[{idx+1}/{total_files}] Extracting text...")
                     
                     extract_start = time.time()
                     content = _extract_text(uploaded_file)
@@ -129,11 +134,11 @@ def render_knowledge_page():
                         continue
                     
                     with status_area.container():
-                        st.info(f"[{idx+1}/{total_files}] Extracted {len(content)} characters in {extract_time:.1f}s")
+                        st.info(f"[{idx+1}/{total_files}] Extracted {len(content)} chars in {extract_time:.1f}s")
                     
                     # STEP 2: Chunk and embed
                     with status_area.container():
-                        st.info(f"[{idx+1}/{total_files}] Chunking and embedding {uploaded_file.name}... (this may take 30-60 seconds)")
+                        st.warning(f"[{idx+1}/{total_files}] Chunking & embedding {uploaded_file.name}... PLEASE WAIT 30-90 seconds...")
                     
                     chunk_start = time.time()
                     
@@ -151,14 +156,14 @@ def render_knowledge_page():
                     if is_advanced and chunking_strategy:
                         kwargs['chunking_strategy'] = chunking_strategy
                     
-                    # THE CRITICAL CALL - wrap in try/catch
+                    # THE CRITICAL CALL
                     try:
                         result = rag_handler.add_document(**kwargs)
                     except Exception as chunk_error:
                         with error_area.container():
-                            st.error(f"[X] CHUNKING ERROR for {uploaded_file.name}")
+                            st.error(f"[X] EMBEDDING ERROR for {uploaded_file.name}")
                             st.error(f"Error: {str(chunk_error)}")
-                            with st.expander("Full Error Details"):
+                            with st.expander("Full Error"):
                                 st.code(traceback.format_exc())
                         continue
                     
@@ -168,55 +173,48 @@ def render_knowledge_page():
                     with status_area.container():
                         if isinstance(result, dict):
                             total_chunk_count = sum(result.values())
-                            strategy_info = ", ".join([f"{k}: {v}" for k, v in result.items()])
-                            st.success(f"[OK] {uploaded_file.name}: {total_chunk_count} chunks ({strategy_info}) - took {chunk_time:.1f}s")
+                            st.success(f"[OK] {uploaded_file.name}: {total_chunk_count} chunks - took {chunk_time:.1f}s")
                         else:
                             st.success(f"[OK] {uploaded_file.name}: {result} chunks - took {chunk_time:.1f}s")
                 
                 except Exception as file_error:
                     with error_area.container():
-                        st.error(f"[X] UNEXPECTED ERROR processing {uploaded_file.name}")
-                        st.error(f"Error: {str(file_error)}")
-                        with st.expander("Full Error Details"):
-                            st.code(traceback.format_exc())
+                        st.error(f"[X] ERROR: {uploaded_file.name}")
+                        st.error(str(file_error))
                 
                 with progress_area.container():
                     st.progress((idx + 1) / total_files)
             
             # Final success
             with status_area.container():
-                st.success(f"[OK] Completed processing {total_files} document(s)")
+                st.success(f"[OK] Completed {total_files} document(s)")
             
             st.balloons()
             time.sleep(2)
             st.rerun()
     
-    # Statistics section (collapsed for space)
+    # Statistics section
     if total_chunks > 0:
-        with st.expander("View LLM Base Statistics"):
+        with st.expander("View Statistics"):
             try:
                 if is_advanced:
                     strategy_tab, category_tab = st.tabs(["By Strategy", "By Category"])
                     
                     with strategy_tab:
-                        st.markdown("#### Chunks by Strategy")
                         strategy_data = []
-                        
                         for strategy_name, strategy_stats in stats.items():
                             if isinstance(strategy_stats, dict) and strategy_stats.get('total_chunks', 0) > 0:
                                 strategy_data.append({
                                     'Strategy': strategy_name.title(),
-                                    'Documents': strategy_stats.get('unique_documents', 0),
+                                    'Docs': strategy_stats.get('unique_documents', 0),
                                     'Chunks': strategy_stats.get('total_chunks', 0)
                                 })
                         
                         if strategy_data:
                             df = pd.DataFrame(strategy_data)
                             st.dataframe(df, use_container_width=True, hide_index=True)
-                            st.bar_chart(df.set_index('Strategy')['Chunks'])
                     
                     with category_tab:
-                        st.markdown("#### Chunks by Category")
                         all_categories = {}
                         for strategy_stats in stats.values():
                             if isinstance(strategy_stats, dict):
@@ -230,9 +228,8 @@ def render_knowledge_page():
                             ]
                             df = pd.DataFrame(category_data)
                             st.dataframe(df, use_container_width=True, hide_index=True)
-                            st.bar_chart(df.set_index('Category')['Chunks'])
             except Exception as e:
-                st.warning(f"Could not display statistics: {str(e)}")
+                st.warning(f"Stats error: {str(e)}")
 
 
 def _extract_text(uploaded_file) -> str:
@@ -263,5 +260,5 @@ def _extract_text(uploaded_file) -> str:
             return None
             
     except Exception as e:
-        st.error(f"[X] Text extraction error: {str(e)}")
+        st.error(f"[X] Extract error: {str(e)}")
         return None
