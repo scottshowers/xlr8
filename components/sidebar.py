@@ -191,6 +191,71 @@ def _render_ai_selector():
             <strong>Model:</strong> {llm_model}
         </div>
         """, unsafe_allow_html=True)
+    
+    # ChromaDB Diagnostic expander
+    with st.expander("[?] ChromaDB Diagnostic"):
+        _render_chromadb_diagnostic()
+
+
+def _render_chromadb_diagnostic():
+    """Diagnostic tool for ChromaDB issues"""
+    
+    rag_handler = st.session_state.get('rag_handler')
+    
+    if not rag_handler:
+        st.error("[X] RAG Handler not initialized")
+        st.info("Go to Knowledge tab to upload documents")
+        return
+    
+    st.success("[OK] RAG Handler initialized")
+    
+    # Check collections
+    st.markdown("**Collections Status:**")
+    try:
+        if hasattr(rag_handler, 'collections'):
+            for strategy, collection in rag_handler.collections.items():
+                count = collection.count()
+                st.text(f"{strategy}: {count} chunks")
+        else:
+            st.text("Basic RAG (no multi-strategy)")
+            if hasattr(rag_handler, 'collection'):
+                count = rag_handler.collection.count()
+                st.text(f"Total: {count} chunks")
+    except Exception as e:
+        st.error(f"Error: {e}")
+    
+    # Test search
+    st.markdown("**Search Test:**")
+    test_query = st.text_input("Query:", "UKG", key="diag_search")
+    
+    if st.button("Run Test", key="diag_test_btn"):
+        try:
+            results = rag_handler.search(query=test_query, n_results=3)
+            st.text(f"Found: {len(results)} results")
+            
+            if results:
+                for i, result in enumerate(results, 1):
+                    st.markdown(f"**{i}.** Dist: {result.get('distance', 'N/A'):.3f}")
+                    st.text(result.get('content', '')[:100] + "...")
+                    st.caption(f"Doc: {result.get('metadata', {}).get('document', 'Unknown')}")
+            else:
+                st.warning("No results - collection empty?")
+                
+        except Exception as e:
+            st.error(f"Search failed: {e}")
+    
+    # Check embedding
+    st.markdown("**Embedding Test:**")
+    if st.button("Test Embedding", key="diag_embed_btn"):
+        try:
+            test_emb = rag_handler.generate_embedding("test")
+            if test_emb:
+                st.success(f"[OK] {len(test_emb)} dimensions")
+            else:
+                st.error("[X] Empty embedding")
+        except Exception as e:
+            st.error(f"Failed: {e}")
+
 
 
 def _render_status():
