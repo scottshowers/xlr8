@@ -1,6 +1,6 @@
 """
-XLR8 Session Management - FIXED VERSION
-Properly initializes AdvancedRAGHandler with all chunking strategies
+XLR8 Session Management - COMPLETE FIX
+Properly initializes AdvancedRAGHandler with endpoints from environment/session
 """
 
 import streamlit as st
@@ -8,7 +8,7 @@ from datetime import datetime
 import os
 from pathlib import Path
 
-# CRITICAL: Import AdvancedRAGHandler (not basic RAGHandler)
+# CRITICAL: Import AdvancedRAGHandler
 try:
     from utils.rag_handler import AdvancedRAGHandler
     RAG_AVAILABLE = True
@@ -38,21 +38,22 @@ def initialize_session():
     if 'theme' not in st.session_state:
         st.session_state.theme = 'light'
     
-    if 'llm_enabled' not in st.session_state:
-        st.session_state.llm_enabled = False
+    # LLM Provider Selection
+    if 'llm_provider' not in st.session_state:
+        st.session_state.llm_provider = 'local'  # 'local' or 'claude'
     
-    # LLM settings
-    if 'ollama_base_url' not in st.session_state:
-        st.session_state.ollama_base_url = "http://localhost:11435"
+    # LLM settings - GET FROM ENVIRONMENT
+    if 'llm_endpoint' not in st.session_state:
+        st.session_state.llm_endpoint = os.environ.get('LLM_ENDPOINT', 'http://178.156.190.64:11435')
     
-    if 'ollama_username' not in st.session_state:
-        st.session_state.ollama_username = "xlr8"
+    if 'llm_username' not in st.session_state:
+        st.session_state.llm_username = os.environ.get('LLM_USERNAME', 'xlr8')
     
-    if 'ollama_password' not in st.session_state:
-        st.session_state.ollama_password = "Argyle76226#"
+    if 'llm_password' not in st.session_state:
+        st.session_state.llm_password = os.environ.get('LLM_PASSWORD', 'Argyle76226#')
     
     if 'llm_model' not in st.session_state:
-        st.session_state.llm_model = "llama3.2"
+        st.session_state.llm_model = "deepseek-r1:7b"
     
     if 'llm_temperature' not in st.session_state:
         st.session_state.llm_temperature = 0.7
@@ -60,44 +61,58 @@ def initialize_session():
     if 'llm_max_tokens' not in st.session_state:
         st.session_state.llm_max_tokens = 2048
     
-    # RAG settings - CRITICAL: Set rag_type to 'advanced'
+    # Claude API Key - PERSISTENT
+    if 'claude_api_key' not in st.session_state:
+        st.session_state.claude_api_key = os.environ.get('CLAUDE_API_KEY', '')
+    
+    # RAG settings
     if 'rag_type' not in st.session_state:
         st.session_state.rag_type = RAG_TYPE
     
     if 'rag_enabled' not in st.session_state:
         st.session_state.rag_enabled = RAG_AVAILABLE
     
-    # Initialize AdvancedRAGHandler if available
+    # Initialize AdvancedRAGHandler if available - PASS ENDPOINTS
     if RAG_AVAILABLE and 'rag_handler' not in st.session_state:
         try:
             # Determine persist directory
             persist_dir = os.path.expanduser("~/.xlr8_chroma")
             
-            # Initialize AdvancedRAGHandler
+            # Get endpoints from session state
+            embed_endpoint = st.session_state.get('llm_endpoint', 'http://178.156.190.64:11435')
+            embed_username = st.session_state.get('llm_username', 'xlr8')
+            embed_password = st.session_state.get('llm_password', 'Argyle76226#')
+            
+            # Initialize AdvancedRAGHandler WITH ENDPOINTS
             st.session_state.rag_handler = AdvancedRAGHandler(
-                persist_directory=persist_dir
+                persist_directory=persist_dir,
+                embed_endpoint=embed_endpoint,
+                embed_username=embed_username,
+                embed_password=embed_password
             )
             
-            # Verify it's actually the advanced handler
+            # Verify it's the advanced handler
             if hasattr(st.session_state.rag_handler, 'chunking_strategies'):
                 st.session_state.rag_type = 'advanced'
                 st.session_state.rag_enabled = True
+                print(f"✅ Advanced RAG initialized with endpoint: {embed_endpoint}")
             else:
                 st.session_state.rag_type = 'basic'
                 st.session_state.rag_enabled = True
+                print("⚠️ Basic RAG initialized (no chunking strategies)")
                 
         except Exception as e:
             st.session_state.rag_enabled = False
             st.session_state.rag_handler = None
             st.session_state.rag_type = None
-            print(f"Failed to initialize RAG handler: {e}")
+            print(f"❌ Failed to initialize RAG handler: {e}")
     
     # Project management
     if 'current_project' not in st.session_state:
         st.session_state.current_project = None
     
     if 'projects' not in st.session_state:
-        st.session_state.projects = []
+        st.session_state.projects = {}
     
     # Navigation
     if 'current_page' not in st.session_state:
@@ -149,6 +164,10 @@ def initialize_session():
     if 'auto_save' not in st.session_state:
         st.session_state.auto_save = True
     
+    # Knowledge base (for backward compatibility)
+    if 'knowledge_base' not in st.session_state:
+        st.session_state.knowledge_base = []
+    
     # Mark as initialized
     st.session_state.initialized = True
 
@@ -166,7 +185,7 @@ def get_session_info():
         'session_id': st.session_state.get('session_id', 'unknown'),
         'initialized': st.session_state.get('initialized', False),
         'current_project': st.session_state.get('current_project'),
-        'llm_enabled': st.session_state.get('llm_enabled', False),
+        'llm_provider': st.session_state.get('llm_provider', 'local'),
         'rag_enabled': st.session_state.get('rag_enabled', False),
         'rag_type': st.session_state.get('rag_type', 'unknown'),
         'ukg_connected': st.session_state.get('ukg_connected', False),
@@ -199,12 +218,14 @@ def get_rag_status():
         'type': st.session_state.get('rag_type', 'unknown'),
         'handler_initialized': handler is not None,
         'has_chunking_strategies': False,
-        'strategies': []
+        'strategies': [],
+        'endpoint': st.session_state.get('llm_endpoint', 'Not configured')
     }
     
     if handler and hasattr(handler, 'chunking_strategies'):
         status['has_chunking_strategies'] = True
         status['strategies'] = list(handler.chunking_strategies.keys())
+        status['endpoint'] = handler.embed_endpoint
     
     return status
 
