@@ -42,10 +42,10 @@ class IntelligentRouter:
     Orchestrates query routing through the intelligent chat system.
     
     Decision Flow:
-    1. Check for PII â†’ If found, anonymize and force local LLM
-    2. Check complexity â†’ Simple: Mistral, Complex: DeepSeek
-    3. Check ChromaDB â†’ If HCMPACT docs exist, enhance with context
-    4. If no PII and no ChromaDB â†’ Route to Claude API for general knowledge
+    1. Check for PII → If found, anonymize and force local LLM
+    2. Check complexity → Simple: Mistral, Complex: DeepSeek
+    3. Check ChromaDB → If HCMPACT docs exist, enhance with context
+    4. If no PII and no ChromaDB → Route to Claude API for general knowledge
     """
     
     def __init__(self, 
@@ -121,7 +121,7 @@ class IntelligentRouter:
                 pii_map=pii_map
             )
         
-        # STEP 2: Check ChromaDB for HCMPACT context
+        # STEP 2: Check ChromaDB for HCMPACT context - SEARCH ALL STRATEGIES
         logger.debug("Step 2: Checking ChromaDB for context")
         chromadb_context = self._get_chromadb_context(query, num_chromadb_sources)
         
@@ -162,7 +162,7 @@ class IntelligentRouter:
                 complexity=complexity_result['complexity']
             )
         else:
-            # Simple/medium questions without HCMPACT context â†’ Claude API
+            # Simple/medium questions without HCMPACT context → Claude API
             if self.claude_api_key:
                 logger.info(f"{complexity_result['complexity'].capitalize()} query - routing to Claude API")
                 return RouterDecision(
@@ -216,10 +216,11 @@ class IntelligentRouter:
     def _get_chromadb_context(self, query: str, num_sources: int) -> Optional[List[Dict]]:
         """
         Retrieve relevant context from ChromaDB if available.
+        SEARCHES ALL STRATEGIES and merges results.
         
         Args:
             query: User's query
-            num_sources: Number of sources to retrieve
+            num_sources: Number of sources to retrieve per strategy
             
         Returns:
             List of context documents or None
@@ -228,19 +229,47 @@ class IntelligentRouter:
             return None
         
         try:
-            # Use the handler's search method
-            results = self.chromadb_handler.search(
-                query=query,
-                n_results=num_sources
-            )
-            
-            if results and len(results) > 0:
-                return results
-            
-            return None
+            # Check if handler has multi_strategy_search method
+            if hasattr(self.chromadb_handler, 'multi_strategy_search'):
+                # Search across all strategies
+                results_by_strategy = self.chromadb_handler.multi_strategy_search(
+                    query=query,
+                    n_results_per_strategy=num_sources
+                )
+                
+                # Merge and deduplicate results
+                all_results = []
+                seen_content = set()
+                
+                for strategy, results in results_by_strategy.items():
+                    for result in results:
+                        content = result.get('content', '')
+                        if content and content not in seen_content:
+                            seen_content.add(content)
+                            all_results.append(result)
+                
+                # Sort by distance/score if available
+                if all_results and 'distance' in all_results[0]:
+                    all_results.sort(key=lambda x: x.get('distance', 1.0))
+                
+                # Return top N results
+                return all_results[:num_sources] if all_results else None
+            else:
+                # Fallback to single strategy search
+                results = self.chromadb_handler.search(
+                    query=query,
+                    n_results=num_sources
+                )
+                
+                if results and len(results) > 0:
+                    return results
+                
+                return None
             
         except Exception as e:
             logger.warning(f"ChromaDB context retrieval failed: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def get_decision_explanation(self, decision: RouterDecision) -> str:
@@ -257,27 +286,27 @@ class IntelligentRouter:
         
         # PII status
         if decision.has_pii:
-            parts.append("ðŸ”’ PII detected - using secure local processing")
+            parts.append("PII detected - using secure local processing")
         
         # Model selection
         if decision.use_local_llm:
             model_display = decision.model_name.replace(":7b", "").replace(":latest", "")
-            parts.append(f"ðŸ¤– Using {model_display}")
+            parts.append(f"Using {model_display}")
         else:
-            parts.append("ðŸŒ Using Claude API")
+            parts.append("Using Claude API")
         
         # Complexity
         complexity_emoji = {
-            'simple': 'âš¡',
-            'medium': 'ðŸ”„',
-            'complex': 'ðŸ§ '
+            'simple': 'Fast',
+            'medium': 'Standard',
+            'complex': 'Deep'
         }
-        emoji = complexity_emoji.get(decision.complexity, 'â“')
-        parts.append(f"{emoji} {decision.complexity.capitalize()} query")
+        emoji = complexity_emoji.get(decision.complexity, '?')
+        parts.append(f"{emoji} query")
         
         # Context
         if decision.chromadb_context:
-            parts.append(f"ðŸ“š Enhanced with {len(decision.chromadb_context)} HCMPACT sources")
+            parts.append(f"Enhanced with {len(decision.chromadb_context)} HCMPACT sources")
         
         return " | ".join(parts)
     
