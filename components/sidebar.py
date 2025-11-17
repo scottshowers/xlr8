@@ -1,48 +1,46 @@
 """
-Sidebar Component - Professional & Polished
-Beautiful visual hierarchy, polished displays, professional typography
-Version: 3.0
+Sidebar Component - COMPLETE FIXED VERSION
+Fixes: ChromaDB status display, LLM connection test button
 """
 
 import streamlit as st
+import requests
+from requests.auth import HTTPBasicAuth
 
 
 def render_sidebar():
-    """Render the main sidebar with professional polish"""
+    """Render the main sidebar"""
     
     with st.sidebar:
-        # Logo - PROFESSIONAL & CLEAN
+        # Logo
         st.markdown("""
-        <div style='text-align: center; padding-bottom: 2rem; border-bottom: 3px solid #d1dce5; margin-bottom: 2rem;'>
-            <div style='width: 90px; height: 90px; margin: 0 auto 1rem; background: linear-gradient(135deg, #8ca6be 0%, #6d8aa0 100%); border: 4px solid white; border-radius: 20px; display: flex; align-items: center; justify-content: center; color: white; font-size: 2.5rem; font-weight: 700; box-shadow: 0 8px 24px rgba(140, 166, 190, 0.3);'>⚡</div>
-            <div style='font-size: 1.8rem; font-weight: 800; background: linear-gradient(135deg, #8ca6be 0%, #6d8aa0 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 0.25rem; letter-spacing: 1px;'>XLR8</div>
-            <div style='font-size: 0.9rem; color: #7d96a8; font-weight: 600; letter-spacing: 0.5px;'>by HCMPACT</div>
-            <div style='display: inline-block; background: linear-gradient(135deg, rgba(140, 166, 190, 0.15) 0%, rgba(109, 138, 160, 0.15) 100%); color: #6d8aa0; padding: 0.3rem 0.9rem; border-radius: 14px; font-size: 0.75rem; font-weight: 700; margin-top: 0.75rem; border: 2px solid rgba(109, 138, 160, 0.2);'>v3.0</div>
+        <div style='text-align: center; padding-bottom: 2rem; border-bottom: 2px solid #d1dce5; margin-bottom: 2rem;'>
+            <div style='width: 80px; height: 80px; margin: 0 auto 1rem; background: white; border: 4px solid #6d8aa0; border-radius: 16px; display: flex; align-items: center; justify-content: center; color: #6d8aa0; font-size: 2rem; font-weight: 700; box-shadow: 0 6px 20px rgba(109, 138, 160, 0.25);'>⚡</div>
+            <div style='font-size: 1.5rem; font-weight: 700; color: #6d8aa0; margin-bottom: 0.25rem;'>XLR8</div>
+            <div style='font-size: 0.85rem; color: #7d96a8; font-weight: 500;'>by HCMPACT</div>
+            <div style='display: inline-block; background: rgba(109, 138, 160, 0.15); color: #6d8aa0; padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; margin-top: 0.5rem;'>v3.0</div>
         </div>
         """, unsafe_allow_html=True)
         
         # Project selector
-        _render_project_selector_11()
+        _render_project_selector()
         
-        st.markdown("<div style='border-top: 2px solid #e8eef3; margin: 1.5rem 0;'></div>", unsafe_allow_html=True)
+        st.markdown("---")
         
         # AI/RAG status
-        _render_ai_selector_11()
+        _render_ai_selector()
         
-        st.markdown("<div style='border-top: 2px solid #e8eef3; margin: 1.5rem 0;'></div>", unsafe_allow_html=True)
+        st.markdown("---")
         
         # Status
-        _render_status_11()
+        _render_status()
 
 
-def _render_project_selector_11():
-    """Render project selector with professional polish"""
-    st.markdown("""
-    <h3 style='color: #6d8aa0; font-size: 1.1rem; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; font-weight: 700;'>
-        📁 Active Project
-    </h3>
-    """, unsafe_allow_html=True)
+def _render_project_selector():
+    """Render project selector"""
+    st.markdown("### 📁 Project")
     
+    # Safe check for projects
     if st.session_state.get('projects'):
         project_names = list(st.session_state.projects.keys())
         current = st.session_state.get('current_project')
@@ -51,8 +49,7 @@ def _render_project_selector_11():
             "Select Project",
             [""] + project_names,
             index=project_names.index(current) + 1 if current in project_names else 0,
-            key="sidebar_project_selector",
-            label_visibility="collapsed"
+            key="sidebar_project_selector"
         )
         
         if selected and selected != st.session_state.get('current_project'):
@@ -61,59 +58,19 @@ def _render_project_selector_11():
         
         if current:
             project_data = st.session_state.projects.get(current, {})
-            
-            # Get project type styling
-            impl_type = project_data.get('implementation_type', 'N/A')
-            if 'Pro' in impl_type and 'WFM' in impl_type:
-                type_icon = "🔵🟢"
-                bg_color = "linear-gradient(135deg, #e3f2fd 0%, #e8f5e9 100%)"
-            elif 'Pro' in impl_type:
-                type_icon = "🔵"
-                bg_color = "linear-gradient(135deg, #e3f2fd 0%, #f0f7ff 100%)"
-            elif 'WFM' in impl_type:
-                type_icon = "🟢"
-                bg_color = "linear-gradient(135deg, #e8f5e9 0%, #f1f8f4 100%)"
-            else:
-                type_icon = "📁"
-                bg_color = "linear-gradient(135deg, #f5f7f9 0%, #e8eef3 100%)"
-            
             st.markdown(f"""
-            <div style='background: {bg_color}; padding: 1rem; border-radius: 10px; margin-top: 0.75rem; border: 2px solid rgba(109, 138, 160, 0.15); box-shadow: 0 2px 8px rgba(0,0,0,0.05);'>
-                <div style='font-size: 1.5rem; margin-bottom: 0.5rem;'>{type_icon}</div>
-                <div style='color: #6c757d; font-size: 0.85rem; line-height: 1.6;'>
-                    <div style='margin-bottom: 0.4rem;'>
-                        <strong style='color: #8ca6be;'>Type:</strong> 
-                        <span style='color: #6d8aa0; font-weight: 600;'>{impl_type}</span>
-                    </div>
-                    <div style='margin-bottom: 0.4rem;'>
-                        <strong style='color: #8ca6be;'>Customer:</strong> 
-                        <span style='color: #6d8aa0; font-weight: 600;'>{project_data.get('customer_id', 'N/A')}</span>
-                    </div>
-                    {f"<div><strong style='color: #8ca6be;'>Consultant:</strong> <span style='color: #6d8aa0; font-weight: 600;'>{project_data.get('consultant')}</span></div>" if project_data.get('consultant') else ""}
-                </div>
+            <div style='font-size: 0.85rem; color: #6c757d; margin-top: 0.5rem;'>
+                <strong>Type:</strong> {project_data.get('implementation_type', 'N/A')}<br>
+                <strong>Customer:</strong> {project_data.get('customer_id', 'N/A')}
             </div>
             """, unsafe_allow_html=True)
     else:
-        st.markdown("""
-        <div style='background: linear-gradient(135deg, #fff3cd 0%, #fffef0 100%); padding: 1rem; border-radius: 10px; border: 2px solid #ffc107; text-align: center;'>
-            <div style='font-size: 1.5rem; margin-bottom: 0.5rem;'>📋</div>
-            <div style='color: #856404; font-size: 0.85rem; font-weight: 600;'>
-                No projects yet
-            </div>
-            <div style='color: #856404; font-size: 0.75rem; margin-top: 0.25rem;'>
-                Create one in Setup tab
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.info("No projects yet")
 
 
-def _render_ai_selector_11():
-    """Render AI/RAG status and LLM provider selector with professional polish"""
-    st.markdown("""
-    <h3 style='color: #6d8aa0; font-size: 1.1rem; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; font-weight: 700;'>
-        🧠 AI System
-    </h3>
-    """, unsafe_allow_html=True)
+def _render_ai_selector():
+    """Render AI/RAG status and LLM provider selector - FIXED VERSION"""
+    st.markdown("### 🧠 AI System")
     
     # LLM Provider Selection
     llm_provider = st.selectbox(
@@ -131,19 +88,36 @@ def _render_ai_selector_11():
     # Show provider-specific config
     if llm_provider == "Local LLM":
         st.markdown("""
-        <div style='background: linear-gradient(135deg, #e8f5e9 0%, #f1f8f4 100%); padding: 1rem; border-radius: 10px; border: 2px solid #28a745; margin-top: 0.75rem; box-shadow: 0 2px 8px rgba(40, 167, 69, 0.1);'>
-            <div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;'>
-                <span style='font-size: 1.2rem;'>⚡</span>
-                <strong style='color: #28a745; font-size: 0.95rem;'>Local DeepSeek</strong>
-            </div>
-            <div style='color: #155724; font-size: 0.8rem; line-height: 1.6;'>
-                <div>✓ Free & Private</div>
-                <div>✓ Good for detailed docs</div>
-                <div>✓ Model: deepseek-r1:7b</div>
-            </div>
+        <div style='font-size: 0.8rem; color: #28a745; padding: 0.5rem; background: rgba(40, 167, 69, 0.1); border-radius: 4px; margin-bottom: 0.5rem;'>
+            ⚡ <strong>Local DeepSeek</strong><br>
+            • Free, Private<br>
+            • Good for detailed docs<br>
+            • Model: deepseek-r1:7b
         </div>
         """, unsafe_allow_html=True)
+        
+        # ✅ FIX #2: LLM Connection Test Button
+        if st.button("🔌 Test Connection", use_container_width=True):
+            with st.spinner("Testing..."):
+                try:
+                    endpoint = st.session_state.get('llm_endpoint', 'http://178.156.190.64:11435')
+                    username = st.session_state.get('llm_username', 'xlr8')
+                    password = st.session_state.get('llm_password', 'Argyle76226#')
+                    
+                    response = requests.get(
+                        f"{endpoint}/api/tags",
+                        auth=HTTPBasicAuth(username, password),
+                        timeout=5
+                    )
+                    
+                    if response.status_code == 200:
+                        st.success("✅ Connected!")
+                    else:
+                        st.error(f"❌ Failed: HTTP {response.status_code}")
+                except Exception as e:
+                    st.error(f"❌ Error: {str(e)[:50]}")
     else:  # Claude API
+        # API Key input
         api_key = st.text_input(
             "Claude API Key",
             type="password",
@@ -152,147 +126,95 @@ def _render_ai_selector_11():
             key="claude_api_key_input"
         )
         
-        if st.button("💾 Save API Key", type="primary", use_container_width=True):
+        # Save button
+        if st.button("💾 Save API Key", type="primary"):
             st.session_state.claude_api_key = api_key
             st.success("API Key saved!")
             st.rerun()
         
+        # Show status
         if st.session_state.get('claude_api_key'):
             st.markdown("""
-            <div style='background: linear-gradient(135deg, #e3f2fd 0%, #f0f7ff 100%); padding: 1rem; border-radius: 10px; border: 2px solid #2196F3; margin-top: 0.75rem; box-shadow: 0 2px 8px rgba(33, 150, 243, 0.1);'>
-                <div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;'>
-                    <span style='font-size: 1.2rem;'>🧠</span>
-                    <strong style='color: #1976d2; font-size: 0.95rem;'>Claude API</strong>
-                </div>
-                <div style='color: #0d47a1; font-size: 0.8rem; line-height: 1.6;'>
-                    <div>✓ Excellent quality</div>
-                    <div>✓ ~$0.015 per response</div>
-                    <div>✓ Model: Claude Sonnet 4</div>
-                </div>
+            <div style='font-size: 0.8rem; color: #007bff; padding: 0.5rem; background: rgba(0, 123, 255, 0.1); border-radius: 4px; margin-top: 0.5rem;'>
+                🧠 <strong>Claude API</strong><br>
+                • Excellent quality<br>
+                • ~$0.015 per response<br>
+                • Model: Claude Sonnet 4
             </div>
             """, unsafe_allow_html=True)
         else:
-            st.markdown("""
-            <div style='background: linear-gradient(135deg, #fff3cd 0%, #fffef0 100%); padding: 1rem; border-radius: 10px; border: 2px solid #ffc107; margin-top: 0.75rem; text-align: center;'>
-                <div style='color: #856404; font-size: 0.85rem; font-weight: 600;'>⚠️ API key required</div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.warning("⚠️ API key required")
             st.markdown("[Get API key →](https://console.anthropic.com/)", unsafe_allow_html=True)
     
-    st.markdown("<div style='height: 1rem;'></div>", unsafe_allow_html=True)
+    st.markdown("---")
     
-    # RAG Status
+    # ✅ FIX #1: ChromaDB Status Display
+    st.markdown("#### 🗄️ Knowledge Base")
+    
     rag_handler = st.session_state.get('rag_handler')
-    rag_type = st.session_state.get('rag_type', 'none')
     
     if rag_handler:
         try:
-            rag_stats = rag_handler.get_stats()
+            stats = rag_handler.get_stats()
             
-            # Check if advanced format
-            if isinstance(rag_stats, dict) and any(isinstance(v, dict) for v in rag_stats.values()):
-                total_docs = sum(s.get('unique_documents', 0) for s in rag_stats.values() if isinstance(s, dict))
-                total_chunks = sum(s.get('total_chunks', 0) for s in rag_stats.values() if isinstance(s, dict))
+            # Handle both basic and advanced RAG formats
+            if isinstance(stats, dict) and any(isinstance(v, dict) for v in stats.values()):
+                # Advanced RAG - aggregate
+                total_docs = sum(s.get('unique_documents', 0) for s in stats.values() if isinstance(s, dict))
+                total_chunks = sum(s.get('total_chunks', 0) for s in stats.values() if isinstance(s, dict))
             else:
-                total_docs = rag_stats.get('unique_documents', 0)
-                total_chunks = rag_stats.get('total_chunks', 0)
+                # Basic RAG
+                total_docs = stats.get('unique_documents', 0) if stats else 0
+                total_chunks = stats.get('total_chunks', 0) if stats else 0
             
             if total_docs > 0:
-                st.markdown(f"""
-                <div style='background: linear-gradient(135deg, #e8f5e9 0%, #f1f8f4 100%); padding: 1rem; border-radius: 10px; border: 2px solid #28a745; box-shadow: 0 2px 8px rgba(40, 167, 69, 0.1);'>
-                    <div style='display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem;'>
-                        <div style='display: flex; align-items: center; gap: 0.5rem;'>
-                            <span style='font-size: 1.2rem;'>📚</span>
-                            <strong style='color: #28a745; font-size: 0.95rem;'>RAG Active</strong>
-                        </div>
-                        <div style='background: #28a745; color: white; padding: 0.2rem 0.6rem; border-radius: 8px; font-size: 0.7rem; font-weight: 700;'>✓</div>
-                    </div>
-                    <div style='color: #155724; font-size: 0.85rem; font-weight: 600;'>
-                        <div>{total_docs} documents</div>
-                        <div>{total_chunks} chunks indexed</div>
-                    </div>
-                    <div style='margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid rgba(40, 167, 69, 0.2);'>
-                        <small style='color: #155724; font-size: 0.75rem;'>
-                            {'🚀 Advanced RAG' if rag_type == 'advanced' else '📚 Standard RAG'}
-                        </small>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+                st.success(f"✅ Active: {total_docs} docs")
+                st.caption(f"📊 {total_chunks} chunks indexed")
             else:
-                st.markdown("""
-                <div style='background: linear-gradient(135deg, #fff3cd 0%, #fffef0 100%); padding: 1rem; border-radius: 10px; border: 2px solid #ffc107; text-align: center;'>
-                    <div style='font-size: 1.2rem; margin-bottom: 0.25rem;'>📋</div>
-                    <div style='color: #856404; font-size: 0.85rem; font-weight: 600;'>No documents yet</div>
-                    <div style='color: #856404; font-size: 0.75rem; margin-top: 0.25rem;'>Upload in HCMPACT LLM</div>
-                </div>
-                """, unsafe_allow_html=True)
+                st.warning("⚠️ Connected but empty")
+                st.caption("Upload docs to Knowledge Base")
                 
         except Exception as e:
-            st.markdown("""
-            <div style='background: #f8d7da; padding: 1rem; border-radius: 10px; border: 2px solid #dc3545; text-align: center;'>
-                <div style='color: #721c24; font-size: 0.85rem; font-weight: 600;'>⚠️ RAG status unavailable</div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.error("❌ ChromaDB Error")
+            st.caption(f"{str(e)[:40]}...")
     else:
-        st.markdown("""
-        <div style='background: #f8d7da; padding: 1rem; border-radius: 10px; border: 2px solid #dc3545; text-align: center;'>
-            <div style='color: #721c24; font-size: 0.85rem; font-weight: 600;'>⚠️ RAG not initialized</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.info("💤 Not initialized")
+        st.caption("Will activate on first upload")
     
-    # LLM config - Collapsible
-    with st.expander("🤖 LLM Configuration"):
+    # LLM Config expander
+    with st.expander("🤖 LLM Config"):
         llm_endpoint = st.session_state.get('llm_endpoint', 'Not configured')
         llm_model = st.session_state.get('llm_model', 'Not configured')
-        
         st.markdown(f"""
-        <div style='background: #f8f9fa; padding: 0.75rem; border-radius: 8px; font-size: 0.8rem; line-height: 1.6;'>
-            <div><strong style='color: #8ca6be;'>Endpoint:</strong><br>
-            <span style='color: #6d8aa0; font-size: 0.75rem;'>{llm_endpoint}</span></div>
-            <div style='margin-top: 0.5rem;'><strong style='color: #8ca6be;'>Model:</strong><br>
-            <span style='color: #6d8aa0; font-size: 0.75rem;'>{llm_model}</span></div>
+        <div style='font-size: 0.8rem;'>
+            <strong>Endpoint:</strong> {llm_endpoint}<br>
+            <strong>Model:</strong> {llm_model}
         </div>
         """, unsafe_allow_html=True)
 
 
-def _render_status_11():
-    """Render system status with professional polish"""
-    st.markdown("""
-    <h3 style='color: #6d8aa0; font-size: 1.1rem; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; font-weight: 700;'>
-        ⚡ System Status
-    </h3>
-    """, unsafe_allow_html=True)
+def _render_status():
+    """Render system status"""
+    st.markdown("### ⚡ Status")
     
-    # API status
+    # API status - safe checks
     api_credentials = st.session_state.get('api_credentials', {'pro': {}, 'wfm': {}})
     pro_configured = bool(api_credentials.get('pro'))
     wfm_configured = bool(api_credentials.get('wfm'))
     
     st.markdown(f"""
-    <div style='background: white; padding: 1rem; border-radius: 10px; border: 2px solid #e8eef3; box-shadow: 0 2px 8px rgba(0,0,0,0.05);'>
-        <div style='font-size: 0.9rem; line-height: 2;'>
-            <div style='display: flex; justify-content: space-between; align-items: center;'>
-                <span style='color: #6c757d;'><strong style='color: #8ca6be;'>UKG Pro:</strong></span>
-                <span style='font-size: 1.2rem;'>{'✅' if pro_configured else '⚪'}</span>
-            </div>
-            <div style='display: flex; justify-content: space-between; align-items: center; padding-top: 0.5rem; border-top: 1px solid #e8eef3; margin-top: 0.5rem;'>
-                <span style='color: #6c757d;'><strong style='color: #8ca6be;'>UKG WFM:</strong></span>
-                <span style='font-size: 1.2rem;'>{'✅' if wfm_configured else '⚪'}</span>
-            </div>
-        </div>
+    <div style='font-size: 0.85rem; line-height: 1.8;'>
+        <div>UKG Pro: {'✅' if pro_configured else '⚪'}</div>
+        <div>UKG WFM: {'✅' if wfm_configured else '⚪'}</div>
     </div>
     """, unsafe_allow_html=True)
     
-    # Security info
-    with st.expander("🔒 Security & Privacy"):
+    with st.expander("🔒 Security"):
         st.markdown("""
-        <div style='background: linear-gradient(135deg, #f5f7f9 0%, #e8eef3 100%); padding: 1rem; border-radius: 8px; font-size: 0.8rem; line-height: 1.8; border: 2px solid rgba(109, 138, 160, 0.15);'>
-            <div style='color: #28a745; font-weight: 600; margin-bottom: 0.5rem;'>✓ Fully Secure</div>
-            <div style='color: #6c757d;'>
-                <div>• Local Processing</div>
-                <div>• Session-Only Storage</div>
-                <div>• No External APIs</div>
-                <div>• PII Protected</div>
-            </div>
+        <div style='font-size: 0.8rem; line-height: 1.6;'>
+        ✓ Local Processing<br>
+        ✓ Session-Only Storage<br>
+        ✓ No External APIs<br>
+        ✓ PII Protected
         </div>
         """, unsafe_allow_html=True)
