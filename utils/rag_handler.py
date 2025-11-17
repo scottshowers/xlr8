@@ -132,12 +132,19 @@ class RAGHandler:
                 "prompt": text
             }
             
+            logger.info(f"Getting embedding from {url} (text length: {len(text)})")
+            
             response = requests.post(
                 url,
                 json=payload,
                 auth=HTTPBasicAuth(self.ollama_username, self.ollama_password),
-                timeout=30
+                timeout=10  # Reduced timeout
             )
+            
+            if response.status_code != 200:
+                logger.error(f"Ollama returned status {response.status_code}: {response.text}")
+                return None
+                
             response.raise_for_status()
             
             raw_embedding = response.json()["embedding"]
@@ -145,10 +152,17 @@ class RAGHandler:
             # Normalize the embedding
             normalized_embedding = self._normalize_embedding(raw_embedding)
             
+            logger.debug(f"Successfully got embedding (dimension: {len(normalized_embedding)})")
             return normalized_embedding
             
+        except requests.exceptions.Timeout:
+            logger.error(f"Timeout connecting to Ollama at {self.ollama_base_url}")
+            return None
+        except requests.exceptions.ConnectionError:
+            logger.error(f"Cannot connect to Ollama at {self.ollama_base_url}")
+            return None
         except Exception as e:
-            logger.error(f"Error getting embedding: {str(e)}")
+            logger.error(f"Error getting embedding: {str(e)}", exc_info=True)
             return None
 
     def chunk_text(self, text: str) -> List[str]:
