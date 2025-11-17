@@ -6,7 +6,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def show():
+def render_knowledge_page():
     """Knowledge page for managing HCMPACT LLM documents."""
     
     st.title("📚 HCMPACT LLM Base")
@@ -122,4 +122,4 @@ def show():
 
 
 if __name__ == "__main__":
-    show()
+    render_knowledge_page()
