@@ -1,593 +1,320 @@
-"""
-Advanced RAG (Retrieval Augmented Generation) Handler for XLR8
-Manages ChromaDB vector store with multiple chunking strategies for optimal retrieval
-"""
-
+import os
+import re
+import numpy as np
+from typing import List, Dict, Any, Optional
 import chromadb
 from chromadb.config import Settings
-import hashlib
-import re
-from typing import List, Dict, Any, Callable
 import requests
 from requests.auth import HTTPBasicAuth
-import nltk
-from collections import defaultdict
-import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 
-class AdvancedRAGHandler:
-    """
-    Advanced RAG handler with multiple chunking strategies.
-    Supports: semantic, recursive, sliding window, paragraph-based, adaptive, and all strategies.
-    """
+class RAGHandler:
+    """Handles all RAG operations including document processing, embedding, and retrieval."""
     
-    def __init__(self, persist_directory: str = "/root/.xlr8_chroma", 
-                 embed_endpoint: str = None, embed_username: str = None, embed_password: str = None):
+    def __init__(self):
+        """Initialize the RAG handler with ChromaDB and embedding configuration."""
+        # Ensure persistent directory exists
+        persist_directory = "/data/chromadb"
+        os.makedirs(persist_directory, exist_ok=True)
+        
+        # Initialize ChromaDB with PERSISTENT storage
+        self.client = chromadb.PersistentClient(
+            path=persist_directory,
+            settings=Settings(
+                anonymized_telemetry=False,
+                allow_reset=True
+            )
+        )
+        
+        # Ollama configuration
+        self.ollama_base_url = os.getenv("LLM_ENDPOINT", "http://178.156.190.64:11435")
+        self.ollama_username = os.getenv("LLM_USERNAME", "xlr8")
+        self.ollama_password = os.getenv("LLM_PASSWORD", "Argyle76226#")
+        
+        # Embedding settings
+        self.embedding_model = "nomic-embed-text"
+        self.chunk_size = 800
+        self.chunk_overlap = 100
+        
+        logger.info(f"RAGHandler initialized with persistent ChromaDB at {persist_directory}")
+        logger.info(f"Ollama endpoint: {self.ollama_base_url}")
+
+    def _normalize_embedding(self, embedding: List[float]) -> List[float]:
         """
-        Initialize ChromaDB client with advanced chunking capabilities
+        Normalize embedding to unit length (L2 norm = 1.0).
         
         Args:
-            persist_directory: Where to store the vector database
-            embed_endpoint: Ollama endpoint URL (defaults to env var or localhost)
-            embed_username: Username for Ollama auth
-            embed_password: Password for Ollama auth
-        """
-        self.persist_directory = persist_directory
-        
-        # Download NLTK data if needed
-        try:
-            nltk.data.find('tokenizers/punkt')
-        except LookupError:
-            nltk.download('punkt', quiet=True)
-        
-        # Initialize ChromaDB with persistence
-        self.client = chromadb.Client(Settings(
-            persist_directory=persist_directory,
-            anonymized_telemetry=False
-        ))
-        
-        # Collections for different chunking strategies
-        self.collections = {}
-        self.chunking_strategies = {
-            'semantic': self._semantic_chunking,
-            'recursive': self._recursive_chunking,
-            'sliding': self._sliding_window_chunking,
-            'paragraph': self._paragraph_chunking,
-            'adaptive': self._adaptive_chunking
-        }
-        
-        # Initialize collections
-        for strategy in self.chunking_strategies.keys():
-            collection_name = f"hcmpact_{strategy}"
-            self.collections[strategy] = self.client.get_or_create_collection(
-                name=collection_name,
-                metadata={"description": f"HCMPACT knowledge with {strategy} chunking"}
-            )
-        
-        # Ollama embedding endpoint - GET FROM ENVIRONMENT OR PARAMETER
-        self.embed_endpoint = embed_endpoint or os.environ.get('LLM_ENDPOINT', 'http://178.156.190.64:11435')
-        self.embed_model = "nomic-embed-text"
-        self.embed_username = embed_username or os.environ.get('LLM_USERNAME', 'xlr8')
-        self.embed_password = embed_password or os.environ.get('LLM_PASSWORD', 'Argyle76226#')
-    
-    def _clean_text(self, text: str) -> str:
-        """Clean and normalize text"""
-        # Remove excessive whitespace
-        text = re.sub(r'\s+', ' ', text)
-        # Remove special characters but keep punctuation
-        text = re.sub(r'[^\w\s.,!?;:()\-\'"]+', '', text)
-        return text.strip()
-    
-    def _semantic_chunking(self, content: str, chunk_size: int = 800) -> List[str]:
-        """
-        Semantic chunking: Split by sentences and group semantically related ones
-        Uses sentence boundaries and tries to keep related sentences together
-        """
-        content = self._clean_text(content)
-        
-        # Split into sentences
-        try:
-            sentences = nltk.sent_tokenize(content)
-        except:
-            # Fallback if NLTK fails
-            sentences = re.split(r'[.!?]+', content)
-            sentences = [s.strip() for s in sentences if s.strip()]
-        
-        chunks = []
-        current_chunk = []
-        current_length = 0
-        
-        for sentence in sentences:
-            sentence_length = len(sentence)
+            embedding: Raw embedding vector
             
-            if current_length + sentence_length > chunk_size and current_chunk:
-                # Chunk is full, save it
-                chunks.append(' '.join(current_chunk))
-                current_chunk = [sentence]
-                current_length = sentence_length
-            else:
-                current_chunk.append(sentence)
-                current_length += sentence_length
-        
-        # Add remaining chunk
-        if current_chunk:
-            chunks.append(' '.join(current_chunk))
-        
-        return chunks
-    
-    def _recursive_chunking(self, content: str, chunk_size: int = 800) -> List[str]:
+        Returns:
+            Normalized embedding vector
         """
-        Recursive chunking: Split by paragraphs, then sentences, then words
-        Hierarchical splitting for better coherence
+        embedding_array = np.array(embedding)
+        norm = np.linalg.norm(embedding_array)
+        
+        if norm == 0:
+            logger.warning("Zero norm embedding detected, returning as-is")
+            return embedding
+            
+        normalized = embedding_array / norm
+        logger.debug(f"Embedding normalized: L2 norm = {np.linalg.norm(normalized):.6f}")
+        return normalized.tolist()
+
+    def get_embedding(self, text: str) -> Optional[List[float]]:
         """
-        content = self._clean_text(content)
-        
-        def split_recursive(text: str, size: int) -> List[str]:
-            if len(text) <= size:
-                return [text] if text else []
-            
-            # Try to split by double newline (paragraphs)
-            paragraphs = re.split(r'\n\s*\n', text)
-            if len(paragraphs) > 1:
-                result = []
-                for para in paragraphs:
-                    result.extend(split_recursive(para, size))
-                return result
-            
-            # Try to split by sentences
-            try:
-                sentences = nltk.sent_tokenize(text)
-            except:
-                sentences = re.split(r'[.!?]+', text)
-                sentences = [s.strip() for s in sentences if s.strip()]
-            
-            if len(sentences) > 1:
-                mid = len(sentences) // 2
-                left = ' '.join(sentences[:mid])
-                right = ' '.join(sentences[mid:])
-                return split_recursive(left, size) + split_recursive(right, size)
-            
-            # Last resort: split by words
-            words = text.split()
-            if len(words) > 1:
-                mid = len(words) // 2
-                left = ' '.join(words[:mid])
-                right = ' '.join(words[mid:])
-                return split_recursive(left, size) + split_recursive(right, size)
-            
-            # Can't split further
-            return [text]
-        
-        return split_recursive(content, chunk_size)
-    
-    def _sliding_window_chunking(self, content: str, chunk_size: int = 800, overlap: int = 100) -> List[str]:
-        """
-        Sliding window chunking: Fixed-size chunks with overlap
-        Good for ensuring no context is lost at boundaries
-        """
-        content = self._clean_text(content)
-        
-        if len(content) <= chunk_size:
-            return [content]
-        
-        chunks = []
-        start = 0
-        
-        while start < len(content):
-            end = start + chunk_size
-            
-            # Try to break at sentence boundary
-            if end < len(content):
-                # Look for sentence endings near the target
-                for i in range(end, max(start + chunk_size - 100, start), -1):
-                    if content[i] in '.!?\n':
-                        end = i + 1
-                        break
-            
-            chunk = content[start:end].strip()
-            if chunk:
-                chunks.append(chunk)
-            
-            # Slide window with overlap
-            start = end - overlap
-            
-            # Prevent infinite loop
-            if start >= len(content) - overlap:
-                break
-        
-        return chunks
-    
-    def _paragraph_chunking(self, content: str, max_paragraphs_per_chunk: int = 3) -> List[str]:
-        """
-        Paragraph-based chunking: Keep paragraph integrity
-        Groups multiple paragraphs into chunks
-        """
-        content = self._clean_text(content)
-        
-        # Split by double newline or multiple spaces
-        paragraphs = re.split(r'\n\s*\n|\n{2,}', content)
-        paragraphs = [p.strip() for p in paragraphs if p.strip()]
-        
-        if not paragraphs:
-            return [content]
-        
-        chunks = []
-        current_chunk = []
-        
-        for para in paragraphs:
-            current_chunk.append(para)
-            
-            if len(current_chunk) >= max_paragraphs_per_chunk:
-                chunks.append('\n\n'.join(current_chunk))
-                current_chunk = []
-        
-        # Add remaining paragraphs
-        if current_chunk:
-            chunks.append('\n\n'.join(current_chunk))
-        
-        return chunks
-    
-    def _adaptive_chunking(self, content: str, chunk_size: int = 800) -> List[str]:
-        """
-        Adaptive chunking: Automatically choose best strategy based on content
-        Analyzes content structure and selects optimal chunking method
-        """
-        content = self._clean_text(content)
-        
-        # Analyze content structure
-        has_paragraphs = bool(re.search(r'\n\s*\n', content))
-        avg_sentence_length = len(content) / max(len(re.findall(r'[.!?]+', content)), 1)
-        has_structure = bool(re.search(r'(Chapter|Section|\d+\.)', content))
-        
-        # Choose strategy based on analysis
-        if has_structure:
-            # Structured document: use recursive
-            return self._recursive_chunking(content, chunk_size)
-        elif has_paragraphs and avg_sentence_length > 100:
-            # Long paragraphs: use paragraph chunking
-            return self._paragraph_chunking(content)
-        elif avg_sentence_length < 50:
-            # Short sentences: use semantic
-            return self._semantic_chunking(content, chunk_size)
-        else:
-            # Default: use sliding window for safety
-            return self._sliding_window_chunking(content, chunk_size)
-    
-    def generate_embedding(self, text: str) -> List[float]:
-        """
-        Generate embedding vector for text using Ollama
+        Get normalized embedding from Ollama for the given text.
         
         Args:
             text: Text to embed
             
         Returns:
-            Embedding vector (normalized)
+            Normalized embedding vector or None if failed
         """
         try:
-            url = f"{self.embed_endpoint}/api/embeddings"
-            
+            url = f"{self.ollama_base_url}/api/embeddings"
             payload = {
-                "model": self.embed_model,
+                "model": self.embedding_model,
                 "prompt": text
             }
             
-            auth = HTTPBasicAuth(self.embed_username, self.embed_password)
-            
-            print(f"[EMBED DEBUG] Generating embedding for: '{text[:50]}...'")
-            print(f"[EMBED DEBUG] Using endpoint: {url}")
-            
-            response = requests.post(url, json=payload, auth=auth, timeout=30)
+            response = requests.post(
+                url,
+                json=payload,
+                auth=HTTPBasicAuth(self.ollama_username, self.ollama_password),
+                timeout=30
+            )
             response.raise_for_status()
             
-            result = response.json()
-            embedding = result.get('embedding', [])
+            raw_embedding = response.json()["embedding"]
             
-            if not embedding or len(embedding) == 0:
-                print(f"[EMBED ERROR] Empty embedding returned!")
-                return [0.0] * 768
+            # Normalize the embedding
+            normalized_embedding = self._normalize_embedding(raw_embedding)
             
-            # Calculate L2 norm for diagnostics
-            import math
-            norm = math.sqrt(sum(x*x for x in embedding))
-            
-            print(f"[EMBED DEBUG] Raw embedding: {len(embedding)} dims, sum={sum(embedding):.4f}, L2_norm={norm:.4f}")
-            
-            # CRITICAL FIX: Normalize the embedding
-            # ChromaDB uses L2 distance which requires normalized vectors
-            if norm > 0:
-                normalized = [x / norm for x in embedding]
-                norm_check = math.sqrt(sum(x*x for x in normalized))
-                print(f"[EMBED DEBUG] Normalized: L2_norm={norm_check:.4f} (should be 1.0)")
-                embedding = normalized
-            else:
-                print(f"[EMBED ERROR] Zero norm - cannot normalize!")
-            
-            return embedding
+            return normalized_embedding
             
         except Exception as e:
-            print(f"[EMBED ERROR] Exception: {e}")
-            # Return zero vector as fallback
-            return [0.0] * 768  # nomic-embed-text dimension
-    
-    def add_document(self, name: str, content: str, category: str, 
-                    chunking_strategy: str = "adaptive", metadata: Dict[str, Any] = None) -> Dict[str, int]:
+            logger.error(f"Error getting embedding: {str(e)}")
+            return None
+
+    def chunk_text(self, text: str) -> List[str]:
         """
-        Add a document to the vector store using specified or all chunking strategies
+        Split text into chunks with overlap.
         
         Args:
-            name: Document name
-            content: Document text content
-            category: Document category (PRO Core, WFM, etc.)
-            chunking_strategy: Strategy to use ("semantic", "recursive", "sliding", 
-                             "paragraph", "adaptive", or "all")
-            metadata: Additional metadata
+            text: Text to chunk
             
         Returns:
-            Dictionary with strategy names and chunk counts
+            List of text chunks
         """
-        # Generate unique document ID
-        doc_id = hashlib.md5(f"{name}_{category}".encode()).hexdigest()
+        # Clean the text
+        text = re.sub(r'\s+', ' ', text).strip()
         
-        # Determine which strategies to use
-        if chunking_strategy == "all":
-            strategies_to_use = list(self.chunking_strategies.keys())
-        elif chunking_strategy in self.chunking_strategies:
-            strategies_to_use = [chunking_strategy]
-        else:
-            # Default to adaptive if invalid strategy specified
-            strategies_to_use = ["adaptive"]
+        chunks = []
+        start = 0
+        text_length = len(text)
         
-        results = {}
+        while start < text_length:
+            end = start + self.chunk_size
+            
+            # Try to break at sentence boundary
+            if end < text_length:
+                # Look for sentence endings
+                sentence_end = max(
+                    text.rfind('. ', start, end),
+                    text.rfind('! ', start, end),
+                    text.rfind('? ', start, end)
+                )
+                if sentence_end > start:
+                    end = sentence_end + 1
+            
+            chunk = text[start:end].strip()
+            if chunk:
+                chunks.append(chunk)
+            
+            start = end - self.chunk_overlap if end < text_length else text_length
         
-        for strategy in strategies_to_use:
-            # Get collection for this strategy
-            collection = self.collections[strategy]
+        logger.info(f"Created {len(chunks)} chunks from text (size={self.chunk_size}, overlap={self.chunk_overlap})")
+        return chunks
+
+    def add_document(self, collection_name: str, text: str, metadata: Dict[str, Any]) -> bool:
+        """
+        Add a document to a ChromaDB collection.
+        
+        Args:
+            collection_name: Name of the collection
+            text: Document text
+            metadata: Document metadata
             
-            # Delete existing document if it exists
-            try:
-                collection.delete(where={"doc_id": doc_id})
-            except:
-                pass
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Get or create collection
+            collection = self.client.get_or_create_collection(
+                name=collection_name,
+                metadata={"hnsw:space": "cosine"}
+            )
             
-            # Chunk the document using the strategy
-            chunking_func = self.chunking_strategies[strategy]
-            chunks = chunking_func(content)
+            # Chunk the text
+            chunks = self.chunk_text(text)
             
-            # Prepare data for ChromaDB
-            ids = []
-            embeddings = []
-            documents = []
-            metadatas = []
-            
+            # Process each chunk
             for i, chunk in enumerate(chunks):
-                chunk_id = f"{doc_id}_{strategy}_chunk_{i}"
-                ids.append(chunk_id)
+                # Get normalized embedding
+                embedding = self.get_embedding(chunk)
+                if embedding is None:
+                    logger.warning(f"Failed to get embedding for chunk {i}, skipping")
+                    continue
                 
-                # Generate embedding
-                embedding = self.generate_embedding(chunk)
-                embeddings.append(embedding)
+                # Create unique ID
+                doc_id = f"{metadata.get('source', 'unknown')}_{i}"
                 
-                documents.append(chunk)
-                
-                # Metadata
-                chunk_metadata = {
-                    "doc_id": doc_id,
-                    "doc_name": name,
-                    "category": category,
-                    "chunking_strategy": strategy,
-                    "chunk_index": i,
-                    "total_chunks": len(chunks)
-                }
-                if metadata:
-                    chunk_metadata.update(metadata)
-                
-                metadatas.append(chunk_metadata)
-            
-            # Add to collection
-            if ids:  # Only add if we have chunks
+                # Add to collection
                 collection.add(
-                    ids=ids,
-                    embeddings=embeddings,
-                    documents=documents,
-                    metadatas=metadatas
+                    embeddings=[embedding],
+                    documents=[chunk],
+                    metadatas=[{**metadata, "chunk_index": i}],
+                    ids=[doc_id]
                 )
             
-            results[strategy] = len(chunks)
-        
-        return results
-    
-    def search(self, query: str, n_results: int = 5, category_filter: str = None,
-              chunking_strategy: str = "adaptive") -> List[Dict[str, Any]]:
+            logger.info(f"Added {len(chunks)} chunks to collection '{collection_name}'")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error adding document to collection: {str(e)}")
+            return False
+
+    def search(self, collection_name: str, query: str, n_results: int = 12) -> List[Dict[str, Any]]:
         """
-        Semantic search across knowledge base
+        Search for relevant documents in a collection.
         
         Args:
+            collection_name: Name of the collection to search
             query: Search query
             n_results: Number of results to return
-            category_filter: Optional category to filter by
-            chunking_strategy: Which strategy collection to search ("adaptive" default)
             
         Returns:
-            List of search results with content and metadata
+            List of search results with documents, metadata, and distances
         """
-        print(f"\n=== SEARCH METHOD CALLED ===")
-        print(f"Query: '{query}'")
-        print(f"Strategy: {chunking_strategy}")
-        print(f"Requesting {n_results} results")
-        
-        # Use adaptive collection by default
-        if chunking_strategy not in self.collections:
-            chunking_strategy = "adaptive"
-        
-        collection = self.collections[chunking_strategy]
-        print(f"Using collection: {chunking_strategy} (count: {collection.count()})")
-        
-        # Generate query embedding
-        print(f"About to generate embedding for query...")
-        query_embedding = self.generate_embedding(query)
-        print(f"Query embedding generated: {len(query_embedding)} dims, sum={sum(query_embedding):.4f}")
-        
-        # Build where clause for filtering
-        where_clause = None
-        if category_filter:
-            where_clause = {"category": category_filter}
-        
-        # Search
         try:
+            # Get collection
+            collection = self.client.get_collection(name=collection_name)
+            
+            # Get normalized query embedding
+            query_embedding = self.get_embedding(query)
+            if query_embedding is None:
+                logger.error("Failed to get query embedding")
+                return []
+            
+            # Perform search
             results = collection.query(
                 query_embeddings=[query_embedding],
                 n_results=n_results,
-                where=where_clause,
-                include=['embeddings', 'documents', 'metadatas', 'distances']  # Include embeddings for debug
+                include=["documents", "metadatas", "distances"]
             )
-            print(f"Query executed successfully")
-        except Exception as e:
-            print(f"Search error: {e}")
-            return []
-        
-        # Format results
-        formatted_results = []
-        
-        # Fix: Check dict keys instead of array truth values
-        if results and 'documents' in results and results['documents'] is not None:
-            if len(results['documents']) > 0 and len(results['documents'][0]) > 0:
-                print(f"\n=== SEARCH RESULTS ===")
-                print(f"Found {len(results['documents'][0])} results")
             
-            # DEBUG: Check if embeddings are included in results
-            if 'embeddings' in results and results['embeddings'] is not None:
-                if len(results['embeddings']) > 0 and len(results['embeddings'][0]) > 0:
-                    first_emb = results['embeddings'][0][0]
-                    if first_emb is not None:
-                        emb_sum = sum(first_emb)
-                        print(f"First result embedding: {len(first_emb)} dims, sum={emb_sum:.4f}")
-                        if emb_sum == 0.0:
-                            print(f"WARNING: Stored embedding is ZERO VECTOR!")
+            # Format results
+            formatted_results = []
             
-            for i in range(len(results['documents'][0])):
+            # Check if we have results
+            if not results or not results.get('documents'):
+                logger.info(f"No results found in collection '{collection_name}'")
+                return []
+            
+            # Check if documents list is empty or contains empty lists
+            documents = results['documents']
+            if not documents or (isinstance(documents, list) and len(documents) > 0 and not documents[0]):
+                logger.info(f"Empty documents in search results for collection '{collection_name}'")
+                return []
+            
+            # Process results
+            docs = results['documents'][0] if results['documents'] else []
+            metadatas = results['metadatas'][0] if results.get('metadatas') else []
+            distances = results['distances'][0] if results.get('distances') else []
+            
+            for i, doc in enumerate(docs):
                 result = {
-                    'content': results['documents'][0][i],
-                    'metadata': results['metadatas'][0][i],
-                    'distance': results['distances'][0][i] if 'distances' in results else None
+                    'document': doc,
+                    'metadata': metadatas[i] if i < len(metadatas) else {},
+                    'distance': distances[i] if i < len(distances) else None
                 }
-                if i == 0:
-                    print(f"Top result distance: {result['distance']:.3f}")
-                    print(f"Top result content preview: {result['content'][:80]}...")
                 formatted_results.append(result)
-        
-        return formatted_results
-    
-    def multi_strategy_search(self, query: str, n_results_per_strategy: int = 3,
-                             category_filter: str = None) -> Dict[str, List[Dict[str, Any]]]:
-        """
-        Search across all chunking strategies and return combined results
-        
-        Args:
-            query: Search query
-            n_results_per_strategy: Results to get from each strategy
-            category_filter: Optional category filter
             
-        Returns:
-            Dictionary mapping strategy names to their results
+            logger.info(f"Search returned {len(formatted_results)} results from '{collection_name}'")
+            if formatted_results and formatted_results[0].get('distance') is not None:
+                logger.info(f"Best match distance: {formatted_results[0]['distance']:.4f}")
+            
+            return formatted_results
+            
+        except Exception as e:
+            logger.error(f"Error searching collection '{collection_name}': {str(e)}")
+            return []
+
+    def list_collections(self) -> List[str]:
         """
-        all_results = {}
-        
-        for strategy in self.chunking_strategies.keys():
-            results = self.search(
-                query=query,
-                n_results=n_results_per_strategy,
-                category_filter=category_filter,
-                chunking_strategy=strategy
-            )
-            all_results[strategy] = results
-        
-        return all_results
-    
-    def delete_document(self, name: str, category: str):
-        """
-        Delete a document from all vector stores
-        
-        Args:
-            name: Document name
-            category: Document category
-        """
-        doc_id = hashlib.md5(f"{name}_{category}".encode()).hexdigest()
-        
-        for collection in self.collections.values():
-            try:
-                collection.delete(where={"doc_id": doc_id})
-            except Exception as e:
-                print(f"Error deleting document: {e}")
-    
-    def get_stats(self) -> Dict[str, Dict[str, Any]]:
-        """
-        Get statistics about the knowledge base for each chunking strategy
+        List all available collections.
         
         Returns:
-            Dictionary with stats per strategy
+            List of collection names
         """
-        all_stats = {}
+        try:
+            collections = self.client.list_collections()
+            return [col.name for col in collections]
+        except Exception as e:
+            logger.error(f"Error listing collections: {str(e)}")
+            return []
+
+    def get_collection_count(self, collection_name: str) -> int:
+        """
+        Get the number of documents in a collection.
         
-        for strategy, collection in self.collections.items():
-            count = collection.count()
+        Args:
+            collection_name: Name of the collection
             
-            # Get unique documents
-            try:
-                all_results = collection.get()
-                unique_docs = set()
-                categories = {}
-                
-                if all_results and all_results['metadatas']:
-                    for metadata in all_results['metadatas']:
-                        doc_id = metadata.get('doc_id')
-                        if doc_id:
-                            unique_docs.add(doc_id)
-                        
-                        category = metadata.get('category', 'Unknown')
-                        categories[category] = categories.get(category, 0) + 1
-                
-                all_stats[strategy] = {
-                    'total_chunks': count,
-                    'unique_documents': len(unique_docs),
-                    'categories': categories
-                }
-            except Exception as e:
-                print(f"Error getting stats for {strategy}: {e}")
-                all_stats[strategy] = {
-                    'total_chunks': 0,
-                    'unique_documents': 0,
-                    'categories': {}
-                }
+        Returns:
+            Number of documents in the collection
+        """
+        try:
+            collection = self.client.get_collection(name=collection_name)
+            return collection.count()
+        except Exception as e:
+            logger.error(f"Error getting collection count: {str(e)}")
+            return 0
+
+    def delete_collection(self, collection_name: str) -> bool:
+        """
+        Delete a collection.
         
-        return all_stats
-    
-    def clear_all(self):
-        """Clear all documents from all knowledge bases"""
-        for strategy in list(self.chunking_strategies.keys()):
-            try:
-                collection_name = f"hcmpact_{strategy}"
-                self.client.delete_collection(collection_name)
-                
-                # Recreate collection
-                self.collections[strategy] = self.client.get_or_create_collection(
-                    name=collection_name,
-                    metadata={"description": f"HCMPACT knowledge with {strategy} chunking"}
-                )
-            except Exception as e:
-                print(f"Error clearing {strategy} collection: {e}")
-    
-    def get_collection_info(self) -> Dict[str, Any]:
-        """Get information about all collections"""
-        info = {
-            'strategies': list(self.chunking_strategies.keys()),
-            'collections': {}
-        }
+        Args:
+            collection_name: Name of the collection to delete
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            self.client.delete_collection(name=collection_name)
+            logger.info(f"Deleted collection '{collection_name}'")
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting collection: {str(e)}")
+            return False
+
+    def reset_all(self) -> bool:
+        """
+        Delete all collections and reset the database.
         
-        for strategy, collection in self.collections.items():
-            info['collections'][strategy] = {
-                'name': collection.name,
-                'count': collection.count(),
-                'metadata': collection.metadata
-            }
-        
-        return info
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            collections = self.list_collections()
+            for collection_name in collections:
+                self.delete_collection(collection_name)
+            logger.info("Reset all collections")
+            return True
+        except Exception as e:
+            logger.error(f"Error resetting database: {str(e)}")
+            return False
