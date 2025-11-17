@@ -15,13 +15,13 @@ try:
     RAG_AVAILABLE = True
     RAG_TYPE = 'advanced'
 except ImportError as e:
-    print(f"âš ï¸ Warning: Could not import AdvancedRAGHandler: {e}")
+    print(f"Warning: Could not import AdvancedRAGHandler: {e}")
     try:
         from utils.rag_handler import RAGHandler as AdvancedRAGHandler
         RAG_AVAILABLE = True
         RAG_TYPE = 'basic'
     except ImportError as e2:
-        print(f"âŒ Error: Could not import any RAG handler: {e2}")
+        print(f"Error: Could not import any RAG handler: {e2}")
         RAG_AVAILABLE = False
         RAG_TYPE = None
         AdvancedRAGHandler = None
@@ -86,7 +86,7 @@ def initialize_session():
             embed_username = st.session_state.llm_username
             embed_password = st.session_state.llm_password
             
-            print(f"ðŸ"§ Initializing RAG handler with endpoint: {embed_endpoint}")
+            print(f"[RAG] Initializing RAG handler with endpoint: {embed_endpoint}")
             
             # Initialize AdvancedRAGHandler WITH ENDPOINTS
             st.session_state.rag_handler = AdvancedRAGHandler(
@@ -100,23 +100,23 @@ def initialize_session():
             if hasattr(st.session_state.rag_handler, 'chunking_strategies'):
                 st.session_state.rag_type = 'advanced'
                 st.session_state.rag_enabled = True
-                print(f"âœ… Advanced RAG initialized successfully with endpoint: {embed_endpoint}")
+                print(f"[RAG] SUCCESS: Advanced RAG initialized with endpoint: {embed_endpoint}")
             else:
                 st.session_state.rag_type = 'basic'
                 st.session_state.rag_enabled = True
-                print("âš ï¸ Basic RAG initialized (no chunking strategies)")
+                print("[RAG] WARNING: Basic RAG initialized (no chunking strategies)")
                 
         except Exception as e:
             st.session_state.rag_enabled = False
             st.session_state.rag_handler = None
             st.session_state.rag_type = None
-            print(f"âŒ Failed to initialize RAG handler: {e}")
+            print(f"[RAG] ERROR: Failed to initialize RAG handler: {e}")
             import traceback
             traceback.print_exc()
     elif not RAG_AVAILABLE:
-        print(f"âš ï¸ RAG not available - RAG_AVAILABLE={RAG_AVAILABLE}, RAG_TYPE={RAG_TYPE}")
+        print(f"[RAG] WARNING: RAG not available - RAG_AVAILABLE={RAG_AVAILABLE}, RAG_TYPE={RAG_TYPE}")
     elif 'rag_handler' in st.session_state:
-        print(f"âœ… RAG handler already initialized")
+        print("[RAG] INFO: RAG handler already initialized")
     
     # Project management
     if 'current_project' not in st.session_state:
@@ -267,4 +267,3 @@ initialize_session_state = initialize_session
 
 # DO NOT AUTO-INITIALIZE ON IMPORT
 # Let app.py control when initialization happens
-# This ensures Streamlit is fully ready before we try to access session_state
