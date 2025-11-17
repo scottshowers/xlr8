@@ -1,6 +1,6 @@
 """
-HCMPACT LLM Seeding Management - FIXED VERSION
-Upload and manage documents for RAG system with chunking strategy support
+HCMPACT LLM Seeding Management
+Upload and manage documents for RAG system
 """
 
 import streamlit as st
@@ -13,7 +13,7 @@ import pandas as pd
 def render_knowledge_page():
     """Render LLM seeding management page"""
     
-    st.markdown("##  HCMPACT LLM Seeding")
+    st.markdown("## HCMPACT LLM Seeding")
     
     st.markdown("""
     <div class='info-box'>
@@ -27,8 +27,8 @@ def render_knowledge_page():
     rag_type = st.session_state.get('rag_type', 'basic')
     
     if not rag_handler:
-        st.error(" RAG system not initialized")
-        st.info(" Make sure the RAG handler is properly configured in session.py")
+        st.error("RAG system not initialized")
+        st.info("Make sure the RAG handler is properly configured in session.py")
         return
     
     # Detect if this is advanced RAG
@@ -67,34 +67,34 @@ def render_knowledge_page():
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric(" Documents", total_docs)
+        st.metric("Documents", total_docs)
     with col2:
-        st.metric(" Total Chunks", total_chunks)
+        st.metric("Total Chunks", total_chunks)
     with col3:
-        metric_label = " Strategies" if is_advanced else " Collections"
+        metric_label = "Strategies" if is_advanced else "Collections"
         st.metric(metric_label, strategies_used)
     with col4:
-        st.metric(" Categories", category_count)
+        st.metric("Categories", category_count)
     
     # Show RAG type info
     if is_advanced:
-        st.success("... Advanced RAG with multiple chunking strategies enabled")
-        with st.expander(" Available Chunking Strategies"):
+        st.success("Advanced RAG with multiple chunking strategies enabled")
+        with st.expander("Available Chunking Strategies"):
             st.markdown("""
             - **Adaptive** (Recommended): Automatically chooses best strategy based on content
             - **Semantic**: Groups semantically related sentences together
-            - **Recursive**: Hierarchical splitting (paragraphs  sentences  words)
+            - **Recursive**: Hierarchical splitting (paragraphs -> sentences -> words)
             - **Sliding**: Fixed-size chunks with overlap for context preservation
             - **Paragraph**: Maintains paragraph integrity
             - **All**: Uses ALL strategies (creates multiple representations)
             """)
     else:
-        st.info(" Using basic RAG (single chunking method)")
+        st.info("Using basic RAG (single chunking method)")
     
     st.markdown("---")
     
     # Upload section
-    st.markdown("###  Upload Documents")
+    st.markdown("### Upload Documents")
     
     col1, col2 = st.columns([2, 1])
     
@@ -125,7 +125,7 @@ def render_knowledge_page():
             chunking_strategy = None
     
     if uploaded_files:
-        if st.button(" Process and Seed LLM", type="primary", use_container_width=True):
+        if st.button("Process and Seed LLM", type="primary", use_container_width=True):
             progress_bar = st.progress(0)
             status_text = st.empty()
             
@@ -163,22 +163,22 @@ def render_knowledge_page():
                             # Advanced RAG: dict of strategy -> chunk_count
                             total_chunk_count = sum(result.values())
                             strategy_info = ", ".join([f"{k}: {v}" for k, v in result.items()])
-                            status_text.success(f"... {uploaded_file.name}: {total_chunk_count} chunks ({strategy_info})")
+                            status_text.success(f"SUCCESS: {uploaded_file.name}: {total_chunk_count} chunks ({strategy_info})")
                         else:
                             # Basic RAG: just a number
-                            status_text.success(f"... {uploaded_file.name}: {result} chunks")
+                            status_text.success(f"SUCCESS: {uploaded_file.name}: {result} chunks")
                     
                     except Exception as e:
-                        status_text.error(f" Error processing {uploaded_file.name}: {str(e)}")
+                        status_text.error(f"ERROR processing {uploaded_file.name}: {str(e)}")
                         import traceback
                         with st.expander("Error details"):
                             st.code(traceback.format_exc())
                 else:
-                    status_text.error(f" Failed to extract text from {uploaded_file.name}")
+                    status_text.error(f"Failed to extract text from {uploaded_file.name}")
                 
                 progress_bar.progress((idx + 1) / total_files)
             
-            st.success(f"... Processed {total_files} document(s)")
+            st.success(f"Processed {total_files} document(s)")
             st.balloons()
             
             # Small delay to show success message
@@ -191,12 +191,12 @@ def render_knowledge_page():
     # Display detailed statistics
     if total_chunks > 0:
         st.markdown("---")
-        st.markdown("###  LLM Base Statistics")
+        st.markdown("### LLM Base Statistics")
         
         try:
             if is_advanced:
                 # Advanced RAG - show strategy breakdown and categories
-                strategy_tab, category_tab = st.tabs([" By Strategy", " By Category"])
+                strategy_tab, category_tab = st.tabs(["By Strategy", "By Category"])
                 
                 with strategy_tab:
                     st.markdown("#### Chunks by Chunking Strategy")
@@ -258,56 +258,46 @@ def render_knowledge_page():
         
         # Management section
         st.markdown("---")
-        st.markdown("### - Manage Knowledge Base")
+        st.markdown("### Manage HCMPACT LLM")
         
         col1, col2 = st.columns([2, 1])
         
         with col1:
-            st.warning(" **Clear All Documents**: This will permanently delete all documents from the knowledge base.")
+            st.warning("**Clear All Documents**: This will permanently delete all documents from the knowledge base.")
         
         with col2:
-            if st.button("- Clear All", type="secondary", use_container_width=True):
-                # Use a confirmation checkbox
+            if st.button("Clear All", type="secondary", use_container_width=True):
                 st.session_state.confirm_clear = True
         
         if st.session_state.get('confirm_clear', False):
-            st.error(" **Are you sure?** This action cannot be undone!")
+            st.error("**Are you sure?** This action cannot be undone!")
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                if st.button("... Yes, Clear All", type="primary"):
+                if st.button("Yes, Clear All", type="primary"):
                     try:
                         rag_handler.clear_all()
-                        st.success("... All documents cleared from knowledge base")
+                        st.success("All documents cleared from knowledge base")
                         st.session_state.confirm_clear = False
                         import time
                         time.sleep(1)
                         st.rerun()
                     except Exception as e:
-                        st.error(f" Failed to clear: {str(e)}")
+                        st.error(f"Failed to clear: {str(e)}")
             
             with col2:
-                if st.button(" Cancel"):
+                if st.button("Cancel"):
                     st.session_state.confirm_clear = False
                     st.rerun()
 
 
 def _extract_text(uploaded_file) -> str:
-    """
-    Extract text from uploaded file
-    
-    Args:
-        uploaded_file: Streamlit uploaded file object
-        
-    Returns:
-        Extracted text content or None if failed
-    """
+    """Extract text from uploaded file"""
     
     try:
         file_type = uploaded_file.name.split('.')[-1].lower()
         
         if file_type == 'pdf':
-            # Extract from PDF
             pdf_reader = PyPDF2.PdfReader(uploaded_file)
             text = ""
             for page in pdf_reader.pages:
@@ -317,13 +307,11 @@ def _extract_text(uploaded_file) -> str:
             return text.strip()
         
         elif file_type == 'docx':
-            # Extract from Word document
             doc = Document(uploaded_file)
             text = "\n\n".join([para.text for para in doc.paragraphs if para.text.strip()])
             return text
         
         elif file_type in ['txt', 'md']:
-            # Plain text or markdown
             text = uploaded_file.read().decode('utf-8')
             return text
         
@@ -337,10 +325,3 @@ def _extract_text(uploaded_file) -> str:
         with st.expander("Error details"):
             st.code(traceback.format_exc())
         return None
-
-
-# For testing
-if __name__ == "__main__":
-    st.set_page_config(page_title="HCMPACT LLM Seeding - Test", layout="wide")
-    st.title("HCMPACT LLM Seeding - Test Mode")
-    render_knowledge_page()
