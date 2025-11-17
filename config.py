@@ -48,7 +48,7 @@ class AppConfig:
     APP_NAME = "XLR8 by HCMPACT"
     APP_VERSION = "3.0"
     VERSION = "3.0"  # Alias for compatibility
-    APP_ICON = "âš¡"
+    APP_ICON = ""
     TAGLINE = "UKG Implementation Accelerator by HCMPACT"
     
     # ============================================================================
@@ -96,7 +96,7 @@ class AppConfig:
     LLM_DEFAULT_MODEL = os.environ.get('LLM_DEFAULT_MODEL', 'deepseek-r1:7b')
     LLM_FAST_MODEL = "mistral:7b"  # Fast alternative
     
-    # Claude API Configuration (optional but recommended for hybrid mode)
+    # Claude API Configuration (optional - enables hybrid mode)
     CLAUDE_API_KEY = os.environ.get('CLAUDE_API_KEY', '')
     CLAUDE_MODEL = "claude-sonnet-4-20250514"
     
@@ -349,7 +349,7 @@ class AppConfig:
         
         # Print warnings
         if warnings and cls.ENABLE_DEBUG_MODE:
-            print("âš ï¸ Configuration warnings:")
+            print(" Configuration warnings:")
             for warning in warnings:
                 print(f"  - {warning}")
         
@@ -366,7 +366,6 @@ class AppConfig:
             'llm_configured': bool(cls.LLM_ENDPOINT and cls.LLM_USERNAME and cls.LLM_PASSWORD),
             'llm_endpoint': cls.LLM_ENDPOINT[:50] + '...' if cls.LLM_ENDPOINT else 'Not configured',
             'llm_model': cls.LLM_DEFAULT_MODEL,
-            'claude_api_configured': bool(cls.CLAUDE_API_KEY),
             'advanced_rag': cls.USE_ADVANCED_RAG,
             'debug_mode': cls.ENABLE_DEBUG_MODE
         }
@@ -407,7 +406,7 @@ def is_supabase_enabled() -> bool:
 # Validate configuration on import
 is_valid, errors = AppConfig.validate_config()
 if not is_valid:
-    print("âŒ Configuration errors:")
+    print(" Configuration errors:")
     for error in errors:
         print(f"  - {error}")
-    print("\nðŸ’¡ Set these environment variables in Railway or .env file")
+    print("\n Set these environment variables in Railway or .env file")
