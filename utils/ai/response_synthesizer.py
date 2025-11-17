@@ -8,7 +8,7 @@ Handles:
 - Context enhancement
 
 Author: HCMPACT
-Version: 1.1 - Enhanced prompts for detailed responses
+Version: 1.0
 """
 
 from typing import List, Dict, Any, Optional
@@ -195,7 +195,6 @@ class ResponseSynthesizer:
                             system_context: Optional[str] = None) -> str:
         """
         Build an enhanced prompt that includes ChromaDB context.
-        UPDATED: Now demands detailed, step-by-step responses for procedures.
         
         Args:
             user_query: Original user query
@@ -301,15 +300,15 @@ class ResponseSynthesizer:
             
             if response.confidence_level:
                 confidence_emoji = {
-                    'high': '[OK]',
-                    'medium': '[!]',
-                    'low': '[i]'
+                    'high': '',
+                    'medium': '',
+                    'low': ''
                 }
-                emoji = confidence_emoji.get(response.confidence_level, '[?]')
+                emoji = confidence_emoji.get(response.confidence_level, '')
                 metadata_lines.append(f"**Confidence:** {emoji} {response.confidence_level.capitalize()}")
             
             if response.has_pii_protection:
-                metadata_lines.append("**Security:** [CFG] PII Protection Active")
+                metadata_lines.append("**Security:**  PII Protection Active")
             
             output_parts.append("\n".join(metadata_lines))
         
@@ -321,18 +320,7 @@ class ResponseSynthesizer:
                 source_line = f"{source['index']}. **{source['document_name']}** ({source['category']})"
                 if source.get('relevance_score'):
                     score = 1.0 - source['relevance_score']  # Convert distance to similarity
-                    
-                    # Add relevancy label
-                    if score >= 0.85:
-                        relevancy = "Highly Relevant"
-                    elif score >= 0.70:
-                        relevancy = "Relevant"
-                    elif score >= 0.55:
-                        relevancy = "Moderately Relevant"
-                    else:
-                        relevancy = "Somewhat Relevant"
-                    
-                    source_line += f" - {score*100:.1f}% {relevancy}"
+                    source_line += f" - Relevance: {score:.0%}"
                 output_parts.append(source_line)
                 
                 if source.get('excerpt'):
