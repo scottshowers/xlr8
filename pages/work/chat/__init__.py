@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 def render_chat_page():
     """Main chat page function"""
     
-    st.title("ðŸ’¬ Intelligent Chat Assistant")
+    st.title(" Intelligent Chat Assistant")
     
     # Compact subtitle
     st.markdown("""
@@ -74,7 +74,7 @@ def _initialize_chat_system() -> Dict[str, Any]:
         if not ollama_endpoint:
             return {
                 'success': False,
-                'message': "âš ï¸ Local LLM endpoint not configured. Please configure in Connectivity tab."
+                'message': " Local LLM endpoint not configured. Please configure in Connectivity tab."
             }
         
         # Ollama auth (if configured)
@@ -87,12 +87,12 @@ def _initialize_chat_system() -> Dict[str, Any]:
         # Claude API key (optional but recommended)
         claude_api_key = st.session_state.get('claude_api_key', '').strip()
         if not claude_api_key:
-            warnings.append("ðŸ’¡ Claude API key not configured - all queries will use local LLM. Add API key in Connectivity tab for faster general knowledge responses.")
+            warnings.append(" Claude API key not configured - all queries will use local LLM. Add API key in Connectivity tab for faster general knowledge responses.")
         
         # ChromaDB handler (if available)
         chromadb_handler = st.session_state.get('rag_handler')
         if not chromadb_handler:
-            warnings.append("ðŸ“š ChromaDB not initialized - responses won't include HCMPACT knowledge. Upload documents in Knowledge tab.")
+            warnings.append(" ChromaDB not initialized - responses won't include HCMPACT knowledge. Upload documents in Knowledge tab.")
         
         # Initialize components if not already done
         if 'intelligent_router' not in st.session_state:
@@ -135,11 +135,11 @@ def _render_sidebar_settings():
     """Render chat settings in sidebar"""
     
     with st.sidebar:
-        st.markdown("### âš™ï¸ Chat Settings")
+        st.markdown("###  Chat Settings")
         
         # Debug mode
         debug_mode = st.checkbox(
-            "ðŸ” Debug Mode",
+            " Debug Mode",
             value=st.session_state.get('chat_debug_mode', False),
             help="Show routing decisions and system info"
         )
@@ -149,14 +149,14 @@ def _render_sidebar_settings():
         
         # Show/hide settings
         show_sources = st.checkbox(
-            "ðŸ“š Show Knowledge Sources",
+            " Show Knowledge Sources",
             value=st.session_state.get('show_chat_sources', True),
             help="Display HCMPACT knowledge sources used (inline with response)"
         )
         st.session_state.show_chat_sources = show_sources
         
         show_metadata = st.checkbox(
-            "ðŸ“Š Show Response Metadata",
+            " Show Response Metadata",
             value=st.session_state.get('show_chat_metadata', True),
             help="Display model used, response time, complexity, etc."
         )
@@ -175,7 +175,7 @@ def _render_sidebar_settings():
         
         # Clear chat button
         st.markdown("---")
-        if st.button("ðŸ—‘ï¸ Clear Chat History", use_container_width=True):
+        if st.button(" Clear Chat History", use_container_width=True):
             st.session_state.chat_history = []
             st.rerun()
 
@@ -236,7 +236,7 @@ def _render_message(message: Dict[str, Any]):
             message.get('sources')):
             
             st.markdown("---")
-            st.markdown("**ðŸ“š Sources:**")
+            st.markdown("** Sources:**")
             
             for source in message['sources']:
                 # Detailed source citation
@@ -248,18 +248,18 @@ def _render_message(message: Dict[str, Any]):
                 if source.get('relevance_score'):
                     score = 1.0 - source['relevance_score']
                     if score >= 0.8:
-                        relevance = "ðŸŸ¢ Highly Relevant"
+                        relevance = " Highly Relevant"
                     elif score >= 0.6:
-                        relevance = "ðŸŸ¡ Relevant"
+                        relevance = " Relevant"
                     else:
-                        relevance = "ðŸŸ  Somewhat Relevant"
+                        relevance = " Somewhat Relevant"
                     source_text += f" - {relevance} ({score:.0%})"
                 
                 st.markdown(source_text)
                 
                 # Show excerpt
                 if source.get('excerpt'):
-                    st.caption(f"â†³ *{source['excerpt']}*")
+                    st.caption(f" *{source['excerpt']}*")
                 
                 # Show metadata if available
                 if source.get('metadata'):
@@ -273,7 +273,7 @@ def _render_message(message: Dict[str, Any]):
                         details.append(f"File: {metadata['file_path'].split('/')[-1]}")
                     
                     if details:
-                        st.caption(f"â†³ {' | '.join(details)}")
+                        st.caption(f" {' | '.join(details)}")
                 
                 st.markdown("")
         
@@ -282,7 +282,7 @@ def _render_message(message: Dict[str, Any]):
             st.session_state.get('chat_debug_mode', False) and 
             message.get('debug_info')):
             
-            with st.expander("ðŸ” Debug Information", expanded=False):
+            with st.expander(" Debug Information", expanded=False):
                 debug = message['debug_info']
                 st.json(debug)
         
@@ -304,7 +304,7 @@ def _render_message(message: Dict[str, Any]):
                 st.metric("Complexity", complexity)
             with cols[3]:
                 confidence = metadata.get('confidence_level', 'medium')
-                emoji = {'high': 'ðŸŸ¢', 'medium': 'ðŸŸ¡', 'low': 'ðŸŸ '}.get(confidence, 'âšª')
+                emoji = {'high': '', 'medium': '', 'low': ''}.get(confidence, '')
                 st.metric("Confidence", f"{emoji} {confidence.capitalize()}")
             with cols[4]:
                 routing = metadata.get('routing_type', 'Unknown')
@@ -332,7 +332,7 @@ def _generate_and_display_response(user_query: str):
             
             # Show initial status
             with response_placeholder.container():
-                st.info("ðŸ§  Analyzing query and selecting best approach...")
+                st.info(" Analyzing query and selecting best approach...")
             
             # STEP 1: Make routing decision
             num_sources = st.session_state.get('num_chromadb_sources', 8)
@@ -363,9 +363,9 @@ def _generate_and_display_response(user_query: str):
             # STEP 3: Build enhanced prompt with ChromaDB context if available
             with response_placeholder.container():
                 if decision.chromadb_context:
-                    st.info(f"ðŸ“š Found {len(decision.chromadb_context)} relevant knowledge sources. Building enhanced prompt...")
+                    st.info(f" Found {len(decision.chromadb_context)} relevant knowledge sources. Building enhanced prompt...")
                 else:
-                    st.info("ðŸ¤– Generating response...")
+                    st.info(" Generating response...")
             
             if decision.chromadb_context:
                 enhanced_prompt = synthesizer.build_enhanced_prompt(
@@ -381,7 +381,7 @@ def _generate_and_display_response(user_query: str):
                 # Local Ollama call
                 with response_placeholder.container():
                     model_display = decision.model_name.replace(":7b", "").replace(":latest", "")
-                    st.info(f"ðŸ¤– Using {model_display}...")
+                    st.info(f" Using {model_display}...")
                 
                 llm_response = llm_caller.call_ollama(
                     prompt=enhanced_prompt,
@@ -395,7 +395,7 @@ def _generate_and_display_response(user_query: str):
             else:
                 # Claude API call
                 with response_placeholder.container():
-                    st.info(f"ðŸŒ Using Claude API...")
+                    st.info(f" Using Claude API...")
                 
                 llm_response = llm_caller.call_claude_api(
                     prompt=enhanced_prompt,
@@ -448,7 +448,7 @@ def _generate_and_display_response(user_query: str):
             st.session_state.chat_history.append(assistant_message)
             
         except Exception as e:
-            response_placeholder.error(f"âŒ Error generating response: {str(e)}")
+            response_placeholder.error(f" Error generating response: {str(e)}")
             logger.error(f"Response generation error: {e}", exc_info=True)
             
             # Save error to history
