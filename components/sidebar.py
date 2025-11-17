@@ -237,7 +237,9 @@ def _render_chromadb_diagnostic():
                 for i, result in enumerate(results, 1):
                     st.markdown(f"**{i}.** Dist: {result.get('distance', 'N/A'):.3f}")
                     st.text(result.get('content', '')[:100] + "...")
-                    st.caption(f"Doc: {result.get('metadata', {}).get('document', 'Unknown')}")
+                    # Fix: Use 'doc_name' not 'document'
+                    doc = result.get('metadata', {}).get('doc_name', 'Unknown')
+                    st.caption(f"Doc: {doc}")
             else:
                 st.warning("No results - collection empty?")
                 
