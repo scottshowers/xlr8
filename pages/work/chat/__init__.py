@@ -1,327 +1,361 @@
 """
-Chat Interface Page - Professional & Polished
-RAG-powered chat with HCMPACT LLM
-Version: 3.0 - Fixed LLM endpoint and updated terminology
+Intelligent Chat Page for XLR8
+
+Features:
+- Automatic PII detection and protection
+- Intelligent model routing (Mistral, DeepSeek, Claude API)
+- ChromaDB context enhancement
+- Real-time response streaming
+- Source attribution
+- Professional UX with status indicators
+
+Author: HCMPACT
+Version: 1.0
 """
 
 import streamlit as st
-import requests
-from requests.auth import HTTPBasicAuth
+import time
+import logging
+from typing import Dict, Any, Optional
+
+# Import our intelligent chat system
+from utils.ai.intelligent_router import IntelligentRouter, RouterDecision
+from utils.ai.llm_caller import LLMCaller
+from utils.ai.response_synthesizer import ResponseSynthesizer
+from utils.ai.pii_handler import PIIHandler
+
+logger = logging.getLogger(__name__)
 
 
-def render_chat_page():
-    """Render chat interface page with RAG and clean empty state"""
+def show():
+    """Main chat page function"""
     
-    st.markdown("## 💬 Chat with HCMPACT LLM")
+    st.title("💬 Intelligent Chat Assistant")
     
+    # Compact subtitle
     st.markdown("""
-    <div class='info-box'>
-        <strong>AI-Powered Chat:</strong> Ask questions about UKG implementation and get answers
-        from your HCMPACT LLM using advanced RAG (Retrieval-Augmented Generation).
+    <div style='color: #6B7280; font-size: 0.9rem; margin-bottom: 1.5rem;'>
+    AI assistant with automatic PII protection, intelligent model selection, and HCMPACT knowledge enhancement.
     </div>
     """, unsafe_allow_html=True)
     
-    # Initialize session state
-    if 'chat_history' not in st.session_state:
-        st.session_state.chat_history = []
-    if 'query_cache' not in st.session_state:
-        st.session_state.query_cache = {}
+    # Initialize chat system
+    if not _initialize_chat_system():
+        return
     
-    # Get RAG handler
-    rag_handler = st.session_state.get('rag_handler')
+    # Sidebar settings
+    _render_sidebar_settings()
     
-    # Stats
-    total_messages = len(st.session_state.get('chat_history', []))
+    # Main chat interface
+    _render_chat_interface()
+
+
+def _initialize_chat_system() -> bool:
+    """
+    Initialize the intelligent chat system components.
     
-    # Count knowledge items from RAG if available
-    knowledge_items = 0
-    if rag_handler:
-        try:
-            stats = rag_handler.get_stats()
-            if isinstance(stats, dict):
-                # Count across all strategies
-                knowledge_items = sum(s.get('unique_documents', 0) for s in stats.values() if isinstance(s, dict))
-                if knowledge_items == 0:
-                    knowledge_items = stats.get('unique_documents', 0)
-        except:
-            knowledge_items = 0
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("💬 Messages", total_messages)
-    with col2:
-        st.metric("📚 HCMPACT LLM Items", knowledge_items)
-    with col3:
-        cached_queries = len(st.session_state.get('query_cache', {}))
-        st.metric("⚡ Cached Queries", cached_queries)
-    
-    st.markdown("---")
-    
-    # Clear chat button
-    col1, col2 = st.columns([6, 1])
-    with col2:
-        if st.button("🗑️ Clear Chat"):
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        # Get configuration from session state
+        config = st.session_state.get('config', {})
+        
+        # Ollama endpoint
+        ollama_endpoint = st.session_state.get('llm_endpoint', '')
+        if not ollama_endpoint:
+            st.warning("⚠️ Local LLM endpoint not configured. Please configure in Connectivity tab.")
+            return False
+        
+        # Ollama auth (if configured)
+        ollama_auth = None
+        llm_username = st.session_state.get('llm_username', '').strip()
+        llm_password = st.session_state.get('llm_password', '').strip()
+        if llm_username and llm_password:
+            ollama_auth = (llm_username, llm_password)
+        
+        # Claude API key (optional)
+        claude_api_key = st.session_state.get('claude_api_key', '').strip()
+        
+        # ChromaDB handler (if available)
+        chromadb_handler = st.session_state.get('rag_handler')
+        
+        # Initialize components if not already done
+        if 'intelligent_router' not in st.session_state:
+            st.session_state.intelligent_router = IntelligentRouter(
+                ollama_endpoint=ollama_endpoint,
+                ollama_auth=ollama_auth,
+                claude_api_key=claude_api_key,
+                chromadb_handler=chromadb_handler
+            )
+        
+        if 'llm_caller' not in st.session_state:
+            st.session_state.llm_caller = LLMCaller(
+                ollama_endpoint=ollama_endpoint,
+                ollama_auth=ollama_auth,
+                claude_api_key=claude_api_key
+            )
+        
+        if 'response_synthesizer' not in st.session_state:
+            st.session_state.response_synthesizer = ResponseSynthesizer()
+        
+        # Initialize chat history
+        if 'chat_history' not in st.session_state:
             st.session_state.chat_history = []
-            st.session_state.query_cache = {}
-            st.rerun()
+        
+        return True
+        
+    except Exception as e:
+        st.error(f"Error initializing chat system: {e}")
+        logger.error(f"Chat initialization error: {e}", exc_info=True)
+        return False
+
+
+def _render_sidebar_settings():
+    """Render chat settings in sidebar"""
     
-    # EMPTY STATE - CLEAN & COMPACT
-    if not st.session_state.get('chat_history'):
-        st.markdown("""
-        <div style='text-align: center; padding: 2.5rem 1rem; background: linear-gradient(135deg, #f5f7f9 0%, #e8eef3 100%); border-radius: 12px; border: 2px solid rgba(140, 166, 190, 0.3); margin: 1.5rem 0;'>
-            <div style='font-size: 3rem; margin-bottom: 0.75rem;'>💬</div>
-            <h2 style='color: #6d8aa0; margin-bottom: 0.75rem; font-size: 1.3rem; font-weight: 600;'>Start a Conversation</h2>
-            <p style='color: #7d96a8; font-size: 1rem; max-width: 480px; margin: 0 auto 1.5rem;'>
-                Ask questions about UKG implementation and I'll search the HCMPACT LLM for relevant information
-            </p>
-            <div style='background: white; padding: 1.5rem; border-radius: 12px; max-width: 420px; margin: 0 auto; box-shadow: 0 4px 12px rgba(0,0,0,0.08);'>
-                <h3 style='color: #6d8aa0; margin-bottom: 0.75rem; font-size: 1.1rem;'>💡 Example Questions</h3>
-                <div style='text-align: left; color: #6c757d; line-height: 1.9;'>
-                    • "How do I configure pay codes?"<br>
-                    • "What are best practices for time entry?"<br>
-                    • "How should I set up accruals?"<br>
-                    • "What's the approval workflow process?"<br>
-                    • "How do I handle overtime rules?"
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    with st.sidebar:
+        st.markdown("### ⚙️ Chat Settings")
+        
+        # Show/hide settings
+        show_metadata = st.checkbox(
+            "Show Response Metadata",
+            value=st.session_state.get('show_chat_metadata', True),
+            help="Display model used, response time, complexity, etc."
+        )
+        st.session_state.show_chat_metadata = show_metadata
+        
+        show_sources = st.checkbox(
+            "Show Knowledge Sources",
+            value=st.session_state.get('show_chat_sources', True),
+            help="Display HCMPACT knowledge sources used"
+        )
+        st.session_state.show_chat_sources = show_sources
+        
+        show_decision = st.checkbox(
+            "Show Routing Decision",
+            value=st.session_state.get('show_routing_decision', True),
+            help="Display which model was selected and why"
+        )
+        st.session_state.show_routing_decision = show_decision
+        
+        # ChromaDB sources
+        st.markdown("---")
+        num_sources = st.slider(
+            "Knowledge Sources to Retrieve",
+            min_value=1,
+            max_value=10,
+            value=st.session_state.get('num_chromadb_sources', 5),
+            help="Number of HCMPACT documents to use for context"
+        )
+        st.session_state.num_chromadb_sources = num_sources
+        
+        # Clear chat button
+        st.markdown("---")
+        if st.button("🗑️ Clear Chat History", use_container_width=True):
+            st.session_state.chat_history = []
+            st.rerun()
+
+
+def _render_chat_interface():
+    """Render the main chat interface"""
     
     # Display chat history
     for message in st.session_state.get('chat_history', []):
-        role = message.get('role', 'user')
-        content = message.get('content', '')
-        
-        if role == 'user':
-            st.markdown(f"""
-            <div style='background: #e8f4f8; padding: 1rem; border-radius: 8px; margin: 0.5rem 0;'>
-                <strong style='color: #6d8aa0;'>👤 You:</strong><br>
-                {content}
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            sources = message.get('sources', [])
-            st.markdown(f"""
-            <div style='background: #f8f9fa; padding: 1rem; border-radius: 8px; margin: 0.5rem 0; border-left: 4px solid #8ca6be;'>
-                <strong style='color: #6d8aa0;'>🤖 Assistant:</strong><br>
-                {content}
-            </div>
-            """, unsafe_allow_html=True)
-            
-            if sources:
-                with st.expander(f"📚 View {len(sources)} Sources"):
-                    for idx, source in enumerate(sources, 1):
-                        st.markdown(f"**Source {idx}:** {source.get('doc_name', 'Unknown')}")
-                        st.markdown(f"_{source.get('content', '')[:200]}..._")
-                        st.markdown("---")
+        _render_message(message)
     
     # Chat input
-    st.markdown("---")
+    user_input = st.chat_input("Ask me anything about UKG implementations...")
     
-    with st.form(key="chat_form", clear_on_submit=True):
-        user_question = st.text_area(
-            "Ask a question",
-            placeholder="e.g., How do I configure pay codes in UKG Pro?",
-            height=100,
-            key="chat_input"
-        )
+    if user_input:
+        # Add user message to history
+        user_message = {
+            'role': 'user',
+            'content': user_input,
+            'timestamp': time.time()
+        }
+        st.session_state.chat_history.append(user_message)
         
-        col1, col2 = st.columns([5, 1])
-        with col2:
-            submit_button = st.form_submit_button("Send 💬", use_container_width=True)
-    
-    if submit_button and user_question:
-        # Check if RAG handler exists
-        if not rag_handler:
-            st.error("⚠️ HCMPACT LLM not initialized. Please check system configuration.")
-            return
+        # Display user message
+        with st.chat_message("user"):
+            st.markdown(user_input)
         
-        # Check if HCMPACT LLM has documents
-        if knowledge_items == 0:
-            st.warning("⚠️ No documents in HCMPACT LLM. Please add documents in the HCMPACT LLM tab first.")
-            return
-        
-        try:
-            # Add user message
-            st.session_state.chat_history.append({
-                'role': 'user',
-                'content': user_question
-            })
-            
-            # Show loading state
-            with st.spinner("🔍 Searching HCMPACT LLM and generating response..."):
-                # Check cache first
-                cache_key = user_question.lower().strip()
-                if cache_key in st.session_state.get('query_cache', {}):
-                    result = st.session_state.query_cache[cache_key]
-                    st.info("⚡ Retrieved from cache")
-                else:
-                    # Query RAG system
-                    result = _query_hcmpact_llm(user_question, rag_handler)
-                    
-                    # Cache the result
-                    if 'query_cache' not in st.session_state:
-                        st.session_state.query_cache = {}
-                    st.session_state.query_cache[cache_key] = result
-            
-            # Add assistant response
-            st.session_state.chat_history.append({
-                'role': 'assistant',
-                'content': result.get('answer', 'No answer generated'),
-                'sources': result.get('sources', [])
-            })
-            
-            st.success("✅ Response generated!")
-            st.rerun()
-            
-        except Exception as e:
-            st.error(f"❌ Error: {str(e)}")
-            st.markdown("""
-            <div style='background: #fff3cd; padding: 1rem; border-radius: 8px; border-left: 4px solid #ffc107; margin-top: 1rem;'>
-                <strong style='color: #856404;'>💡 Troubleshooting Tips:</strong><br>
-                <span style='color: #856404; font-size: 0.9rem;'>
-                • Check if LLM service is running<br>
-                • Verify HCMPACT LLM has documents<br>
-                • Try a simpler question<br>
-                • Check Railway logs for detailed errors
-                </span>
-            </div>
-            """, unsafe_allow_html=True)
+        # Generate and display assistant response
+        _generate_and_display_response(user_input)
 
 
-def _query_hcmpact_llm(query: str, rag_handler) -> dict:
+def _render_message(message: Dict[str, Any]):
     """
-    Query the HCMPACT LLM and generate an answer using LLM
+    Render a single chat message.
     
     Args:
-        query: User's question
-        rag_handler: RAG handler instance
-        
-    Returns:
-        Dictionary with answer and sources
+        message: Message dict with role, content, and optional metadata
     """
+    role = message.get('role', 'assistant')
+    content = message.get('content', '')
     
-    # Get LLM config - ENSURE HTTP:// PREFIX
-    llm_endpoint = st.session_state.get('llm_endpoint', 'http://localhost:11435')
-    
-    # FIX: Ensure http:// prefix exists
-    if llm_endpoint and not llm_endpoint.startswith(('http://', 'https://')):
-        llm_endpoint = f'http://{llm_endpoint}'
-    
-    llm_model = st.session_state.get('llm_model', 'llama3.2:latest')
-    llm_username = st.session_state.get('llm_username', 'xlr8')
-    llm_password = st.session_state.get('llm_password', 'Argyle76226#')
-    
-    # Check for Claude API preference
-    llm_provider = st.session_state.get('llm_provider', 'local')
-    
-    try:
-        # Search HCMPACT LLM
-        search_results = rag_handler.search(query, n_results=5)
+    with st.chat_message(role):
+        st.markdown(content)
         
-        if not search_results:
-            return {
-                'answer': "I couldn't find relevant information in the HCMPACT LLM. Please try rephrasing your question or add more documents to the HCMPACT LLM.",
-                'sources': []
+        # Show routing decision if available and enabled
+        if (role == 'assistant' and 
+            st.session_state.get('show_routing_decision', True) and 
+            message.get('routing_decision')):
+            
+            decision = message['routing_decision']
+            st.info(decision)
+        
+        # Show sources if available and enabled
+        if (role == 'assistant' and 
+            st.session_state.get('show_chat_sources', True) and 
+            message.get('sources')):
+            
+            with st.expander(f"📚 {len(message['sources'])} Knowledge Sources", expanded=False):
+                for source in message['sources']:
+                    st.markdown(f"**{source['index']}. {source['document_name']}** ({source['category']})")
+                    if source.get('excerpt'):
+                        st.caption(source['excerpt'])
+                    st.markdown("")
+        
+        # Show metadata if available and enabled
+        if (role == 'assistant' and 
+            st.session_state.get('show_chat_metadata', True) and 
+            message.get('metadata')):
+            
+            metadata = message['metadata']
+            
+            cols = st.columns(4)
+            with cols[0]:
+                st.metric("Model", metadata.get('model', 'Unknown'))
+            with cols[1]:
+                st.metric("Time", f"{metadata.get('processing_time', 0):.1f}s")
+            with cols[2]:
+                st.metric("Complexity", metadata.get('complexity', 'Unknown').capitalize())
+            with cols[3]:
+                confidence = metadata.get('confidence_level', 'medium')
+                emoji = {'high': '🟢', 'medium': '🟡', 'low': '🟠'}.get(confidence, '⚪')
+                st.metric("Confidence", f"{emoji} {confidence.capitalize()}")
+
+
+def _generate_and_display_response(user_query: str):
+    """
+    Generate and display assistant response.
+    
+    Args:
+        user_query: User's query text
+    """
+    start_time = time.time()
+    
+    with st.chat_message("assistant"):
+        # Create placeholders for progressive display
+        status_placeholder = st.empty()
+        response_placeholder = st.empty()
+        
+        try:
+            # Get router and other components
+            router = st.session_state.intelligent_router
+            llm_caller = st.session_state.llm_caller
+            synthesizer = st.session_state.response_synthesizer
+            
+            # STEP 1: Make routing decision
+            status_placeholder.info("🧠 Analyzing query and selecting best model...")
+            
+            num_sources = st.session_state.get('num_chromadb_sources', 5)
+            decision = router.make_routing_decision(user_query, num_sources)
+            
+            # Show decision if enabled
+            if st.session_state.get('show_routing_decision', True):
+                decision_text = router.get_decision_explanation(decision)
+                status_placeholder.info(decision_text)
+            else:
+                status_placeholder.info("🤖 Generating response...")
+            
+            # STEP 2: Determine the query to send (anonymized if PII detected)
+            query_to_send = decision.anonymized_query if decision.anonymized_query else user_query
+            
+            # STEP 3: Build enhanced prompt with ChromaDB context if available
+            if decision.chromadb_context:
+                enhanced_prompt = synthesizer.build_enhanced_prompt(
+                    user_query=query_to_send,
+                    chromadb_context=decision.chromadb_context,
+                    system_context="You are an expert UKG implementation consultant from HCMPACT."
+                )
+            else:
+                enhanced_prompt = query_to_send
+            
+            # STEP 4: Call appropriate LLM
+            if decision.use_local_llm:
+                # Local Ollama call
+                llm_response = llm_caller.call_ollama(
+                    prompt=enhanced_prompt,
+                    model=decision.model_name,
+                    system_prompt="You are an expert UKG implementation consultant from HCMPACT. Provide accurate, helpful answers.",
+                    temperature=0.7,
+                    max_tokens=4096
+                )
+                response_text = llm_response['response']
+            else:
+                # Claude API call
+                llm_response = llm_caller.call_claude_api(
+                    prompt=enhanced_prompt,
+                    system_prompt="You are an expert UKG implementation consultant from HCMPACT. Provide accurate, helpful answers.",
+                    max_tokens=4096,
+                    temperature=0.7
+                )
+                response_text = llm_response['response']
+            
+            # STEP 5: Process response (de-anonymize if needed)
+            final_response = router.process_response(response_text, decision)
+            
+            # STEP 6: Synthesize final response with metadata
+            processing_time = time.time() - start_time
+            
+            synthesized = synthesizer.synthesize(
+                llm_response=final_response,
+                chromadb_context=decision.chromadb_context,
+                model_used=decision.model_name,
+                has_pii_protection=decision.has_pii,
+                complexity=decision.complexity,
+                processing_time=processing_time
+            )
+            
+            # Clear status and show final response
+            status_placeholder.empty()
+            response_placeholder.markdown(synthesized.text)
+            
+            # Save to chat history
+            assistant_message = {
+                'role': 'assistant',
+                'content': synthesized.text,
+                'timestamp': time.time(),
+                'routing_decision': router.get_decision_explanation(decision) if st.session_state.get('show_routing_decision', True) else None,
+                'sources': synthesized.sources if st.session_state.get('show_chat_sources', True) else None,
+                'metadata': {
+                    'model': synthesized.model_used,
+                    'processing_time': synthesized.processing_time,
+                    'complexity': synthesized.complexity,
+                    'confidence_level': synthesized.confidence_level,
+                    'pii_protected': synthesized.has_pii_protection
+                } if st.session_state.get('show_chat_metadata', True) else None
             }
-        
-        # Build context from search results
-        context = "\n\n".join([
-            f"[{r['metadata'].get('doc_name', 'Unknown')}]: {r['content']}"
-            for r in search_results
-        ])
-        
-        # Build prompt
-        prompt = f"""You are an expert UKG implementation consultant. Answer the user's question using ONLY the provided context from HCMPACT standards and documentation.
-
-CONTEXT FROM HCMPACT LLM:
-{context}
-
-USER QUESTION:
-{query}
-
-INSTRUCTIONS:
-- Answer based ONLY on the context provided above
-- Be specific and reference the source documents when possible
-- If the context doesn't contain enough information, say so
-- Provide actionable guidance where applicable
-- Keep the answer concise but complete
-
-ANSWER:"""
-        
-        # Generate answer using LLM
-        if llm_provider == 'claude' and st.session_state.get('claude_api_key'):
-            # Use Claude API
-            answer = _call_claude_api(prompt, st.session_state.get('claude_api_key'))
-        else:
-            # Use local LLM (Ollama)
-            answer = _call_local_llm(prompt, llm_endpoint, llm_model, llm_username, llm_password)
-        
-        return {
-            'answer': answer,
-            'sources': search_results
-        }
-        
-    except Exception as e:
-        raise Exception(f"HCMPACT LLM query failed: {str(e)}")
+            
+            st.session_state.chat_history.append(assistant_message)
+            
+        except Exception as e:
+            status_placeholder.empty()
+            response_placeholder.error(f"Error generating response: {str(e)}")
+            logger.error(f"Response generation error: {e}", exc_info=True)
+            
+            # Save error to history
+            error_message = {
+                'role': 'assistant',
+                'content': f"I apologize, but I encountered an error: {str(e)}",
+                'timestamp': time.time(),
+                'error': True
+            }
+            st.session_state.chat_history.append(error_message)
 
 
-def _call_local_llm(prompt: str, endpoint: str, model: str, username: str, password: str) -> str:
-    """Call local Ollama LLM"""
-    
-    try:
-        url = f"{endpoint}/api/generate"
-        
-        payload = {
-            "model": model,
-            "prompt": prompt,
-            "stream": False
-        }
-        
-        auth = HTTPBasicAuth(username, password)
-        response = requests.post(url, json=payload, auth=auth, timeout=120)
-        response.raise_for_status()
-        
-        result = response.json()
-        return result.get('response', 'No response from LLM')
-        
-    except Exception as e:
-        raise Exception(f"Local LLM error: {str(e)}")
-
-
-def _call_claude_api(prompt: str, api_key: str) -> str:
-    """Call Claude API"""
-    
-    try:
-        import anthropic
-        
-        client = anthropic.Anthropic(api_key=api_key)
-        
-        message = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1000,
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
-        )
-        
-        return message.content[0].text
-        
-    except Exception as e:
-        # Fall back to local LLM if Claude API fails
-        st.warning(f"Claude API failed ({str(e)}), falling back to local LLM...")
-        llm_endpoint = st.session_state.get('llm_endpoint', 'http://localhost:11435')
-        
-        # Ensure http:// prefix
-        if llm_endpoint and not llm_endpoint.startswith(('http://', 'https://')):
-            llm_endpoint = f'http://{llm_endpoint}'
-        
-        llm_model = st.session_state.get('llm_model', 'llama3.2:latest')
-        llm_username = st.session_state.get('llm_username', 'xlr8')
-        llm_password = st.session_state.get('llm_password', 'Argyle76226#')
-        return _call_local_llm(prompt, llm_endpoint, llm_model, llm_username, llm_password)
-
-
+# Entry point
 if __name__ == "__main__":
-    st.title("Chat - Test")
-    render_chat_page()
+    show()
