@@ -438,18 +438,21 @@ class AdvancedRAGHandler:
         # Format results
         formatted_results = []
         
-        if results and results['documents'] and len(results['documents']) > 0:
-            print(f"\n=== SEARCH RESULTS ===")
-            print(f"Found {len(results['documents'][0])} results")
+        # Fix: Check dict keys instead of array truth values
+        if results and 'documents' in results and results['documents'] is not None:
+            if len(results['documents']) > 0 and len(results['documents'][0]) > 0:
+                print(f"\n=== SEARCH RESULTS ===")
+                print(f"Found {len(results['documents'][0])} results")
             
             # DEBUG: Check if embeddings are included in results
-            if 'embeddings' in results and results['embeddings']:
-                first_emb = results['embeddings'][0][0] if results['embeddings'][0] else None
-                if first_emb:
-                    emb_sum = sum(first_emb)
-                    print(f"First result embedding: {len(first_emb)} dims, sum={emb_sum:.4f}")
-                    if emb_sum == 0.0:
-                        print(f"WARNING: Stored embedding is ZERO VECTOR!")
+            if 'embeddings' in results and results['embeddings'] is not None:
+                if len(results['embeddings']) > 0 and len(results['embeddings'][0]) > 0:
+                    first_emb = results['embeddings'][0][0]
+                    if first_emb is not None:
+                        emb_sum = sum(first_emb)
+                        print(f"First result embedding: {len(first_emb)} dims, sum={emb_sum:.4f}")
+                        if emb_sum == 0.0:
+                            print(f"WARNING: Stored embedding is ZERO VECTOR!")
             
             for i in range(len(results['documents'][0])):
                 result = {
