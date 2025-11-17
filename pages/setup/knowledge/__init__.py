@@ -36,11 +36,11 @@ def render_knowledge_page():
     
     # Handle both basic and advanced RAG formats
     if isinstance(stats, dict) and any(isinstance(v, dict) for v in stats.values()):
-        # Advanced RAG format - aggregate across strategies
+        # Advanced RAG format
         total_docs = sum(s.get('unique_documents', 0) for s in stats.values() if isinstance(s, dict))
         total_chunks = sum(s.get('total_chunks', 0) for s in stats.values() if isinstance(s, dict))
     else:
-        # Basic RAG format (single collection)
+        # Basic RAG format
         total_docs = stats.get('unique_documents', 0)
         total_chunks = stats.get('total_chunks', 0)
     
@@ -49,14 +49,12 @@ def render_knowledge_page():
     with col2:
         st.metric("📝 Total Chunks", total_chunks)
     with col3:
-        # Count strategies/collections
         if isinstance(stats, dict) and any(isinstance(v, dict) for v in stats.values()):
             strategies_used = len([s for s in stats.values() if isinstance(s, dict) and s.get('total_chunks', 0) > 0])
         else:
             strategies_used = 1 if total_chunks > 0 else 0
         st.metric("🔧 Strategies", strategies_used)
     with col4:
-        # Count categories
         if isinstance(stats, dict) and any(isinstance(v, dict) for v in stats.values()):
             all_categories = set()
             for s in stats.values():
@@ -89,12 +87,6 @@ def render_knowledge_page():
              "Best Practices", "Technical", "Implementation Guides", "Other"],
             help="Categorize your document"
         )
-        
-        chunking_strategy = st.selectbox(
-            "Chunking Strategy",
-            ["adaptive", "semantic", "recursive", "sliding", "paragraph", "all"],
-            help="How to split the document. 'adaptive' automatically chooses best method."
-        )
     
     if uploaded_files:
         if st.button("🚀 Process and Seed LLM", type="primary", use_container_width=True):
@@ -108,25 +100,27 @@ def render_knowledge_page():
                 content = _extract_text(uploaded_file)
                 
                 if content:
-                    # Add to LLM seeding
-                    result = rag_handler.add_document(
-                        name=uploaded_file.name,
-                        content=content,
-                        category=category,
-                        metadata={
-                            'upload_date': datetime.now().isoformat(),
-                            'file_type': uploaded_file.type
-                        },
-                        chunking_strategy=chunking_strategy
-                    )
-                    
-                    # Handle both int (basic RAG) and dict (advanced RAG) return values
-                    if isinstance(result, dict):
-                        chunk_count = sum(result.values())
-                    else:
-                        chunk_count = result
-                    
-                    status_text.success(f"✅ Added {uploaded_file.name} - {chunk_count} chunks")
+                    # Add to LLM seeding - basic RAG only needs name, content, category
+                    try:
+                        result = rag_handler.add_document(
+                            name=uploaded_file.name,
+                            content=content,
+                            category=category,
+                            metadata={
+                                'upload_date': datetime.now().isoformat(),
+                                'file_type': uploaded_file.type
+                            }
+                        )
+                        
+                        # Handle both int and dict return values
+                        if isinstance(result, dict):
+                            chunk_count = sum(result.values())
+                        else:
+                            chunk_count = result
+                        
+                        status_text.success(f"✅ Added {uploaded_file.name} - {chunk_count} chunks")
+                    except Exception as e:
+                        status_text.error(f"❌ Error adding {uploaded_file.name}: {str(e)}")
                 else:
                     status_text.error(f"❌ Failed to extract text from {uploaded_file.name}")
                 
@@ -140,47 +134,24 @@ def render_knowledge_page():
         st.markdown("---")
         st.markdown("### 📊 LLM Seeding Statistics")
         
-        # Only show strategy breakdown if advanced RAG (multiple strategies)
+        # Show categories
         if isinstance(stats, dict) and any(isinstance(v, dict) for v in stats.values()):
-            # Advanced RAG with multiple strategies
-            strategy_tab, category_tab = st.tabs(["By Strategy", "By Category"])
-            
-            with strategy_tab:
-                strategy_data = []
-                for strategy_name, strategy_stats in stats.items():
-                    if isinstance(strategy_stats, dict) and strategy_stats.get('total_chunks', 0) > 0:
-                        strategy_data.append({
-                            'Strategy': strategy_name.title(),
-                            'Documents': strategy_stats.get('unique_documents', 0),
-                            'Chunks': strategy_stats.get('total_chunks', 0)
-                        })
-                
-                if strategy_data:
-                    st.dataframe(pd.DataFrame(strategy_data), use_container_width=True, hide_index=True)
-            
-            with category_tab:
-                # Aggregate categories across all strategies
-                all_categories = {}
-                for strategy_stats in stats.values():
-                    if isinstance(strategy_stats, dict):
-                        for cat, count in strategy_stats.get('categories', {}).items():
-                            all_categories[cat] = all_categories.get(cat, 0) + count
-                
-                if all_categories:
-                    category_data = [
-                        {'Category': cat, 'Chunks': count}
-                        for cat, count in sorted(all_categories.items(), key=lambda x: x[1], reverse=True)
-                    ]
-                    st.dataframe(pd.DataFrame(category_data), use_container_width=True, hide_index=True)
+            # Advanced RAG
+            all_categories = {}
+            for strategy_stats in stats.values():
+                if isinstance(strategy_stats, dict):
+                    for cat, count in strategy_stats.get('categories', {}).items():
+                        all_categories[cat] = all_categories.get(cat, 0) + count
         else:
-            # Basic RAG - just show categories
-            categories = stats.get('categories', {})
-            if categories:
-                category_data = [
-                    {'Category': cat, 'Chunks': count}
-                    for cat, count in sorted(categories.items(), key=lambda x: x[1], reverse=True)
-                ]
-                st.dataframe(pd.DataFrame(category_data), use_container_width=True, hide_index=True)
+            # Basic RAG
+            all_categories = stats.get('categories', {})
+        
+        if all_categories:
+            category_data = [
+                {'Category': cat, 'Chunks': count}
+                for cat, count in sorted(all_categories.items(), key=lambda x: x[1], reverse=True)
+            ]
+            st.dataframe(pd.DataFrame(category_data), use_container_width=True, hide_index=True)
         
         # Clear LLM documents option
         st.markdown("---")
@@ -189,21 +160,11 @@ def render_knowledge_page():
         if st.button("⚠️ Clear All Documents", help="Removes all documents from LLM seeding"):
             if st.checkbox("I understand this will delete all LLM documents"):
                 try:
-                    # Use clear_all method if available
                     rag_handler.clear_all()
                     st.success("✅ LLM documents cleared")
                     st.rerun()
-                except AttributeError:
-                    # Fallback for basic RAG without clear_all method
-                    try:
-                        if hasattr(rag_handler, 'collection'):
-                            all_ids = rag_handler.collection.get()['ids']
-                            if all_ids:
-                                rag_handler.collection.delete(ids=all_ids)
-                        st.success("✅ LLM documents cleared")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed to clear documents: {str(e)}")
+                except Exception as e:
+                    st.error(f"Failed to clear documents: {str(e)}")
 
 
 def _extract_text(uploaded_file) -> str:
@@ -213,7 +174,6 @@ def _extract_text(uploaded_file) -> str:
         file_type = uploaded_file.name.split('.')[-1].lower()
         
         if file_type == 'pdf':
-            # PDF extraction
             pdf_reader = PyPDF2.PdfReader(uploaded_file)
             text = ""
             for page in pdf_reader.pages:
@@ -221,13 +181,11 @@ def _extract_text(uploaded_file) -> str:
             return text
         
         elif file_type == 'docx':
-            # Word document
             doc = Document(uploaded_file)
             text = "\n\n".join([para.text for para in doc.paragraphs])
             return text
         
         elif file_type in ['txt', 'md']:
-            # Plain text
             text = uploaded_file.read().decode('utf-8')
             return text
         
