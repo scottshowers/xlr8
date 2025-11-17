@@ -42,10 +42,10 @@ class IntelligentRouter:
     Orchestrates query routing through the intelligent chat system.
     
     Decision Flow:
-    1. Check for PII → If found, anonymize and force local LLM
-    2. Check complexity → Simple: Mistral, Complex: DeepSeek
-    3. Check ChromaDB → If HCMPACT docs exist, enhance with context
-    4. If no PII and no ChromaDB → Route to Claude API for general knowledge
+    1. Check for PII â†’ If found, anonymize and force local LLM
+    2. Check complexity â†’ Simple: Mistral, Complex: DeepSeek
+    3. Check ChromaDB â†’ If HCMPACT docs exist, enhance with context
+    4. If no PII and no ChromaDB â†’ Route to Claude API for general knowledge
     """
     
     def __init__(self, 
@@ -162,7 +162,7 @@ class IntelligentRouter:
                 complexity=complexity_result['complexity']
             )
         else:
-            # Simple/medium questions without HCMPACT context → Claude API
+            # Simple/medium questions without HCMPACT context â†’ Claude API
             if self.claude_api_key:
                 logger.info(f"{complexity_result['complexity'].capitalize()} query - routing to Claude API")
                 return RouterDecision(
@@ -230,7 +230,7 @@ class IntelligentRouter:
         try:
             # Use the handler's search method
             results = self.chromadb_handler.search(
-                query_text=query,
+                query=query,
                 n_results=num_sources
             )
             
@@ -257,27 +257,27 @@ class IntelligentRouter:
         
         # PII status
         if decision.has_pii:
-            parts.append("🔒 PII detected - using secure local processing")
+            parts.append("ðŸ”’ PII detected - using secure local processing")
         
         # Model selection
         if decision.use_local_llm:
             model_display = decision.model_name.replace(":7b", "").replace(":latest", "")
-            parts.append(f"🤖 Using {model_display}")
+            parts.append(f"ðŸ¤– Using {model_display}")
         else:
-            parts.append("🌐 Using Claude API")
+            parts.append("ðŸŒ Using Claude API")
         
         # Complexity
         complexity_emoji = {
-            'simple': '⚡',
-            'medium': '🔄',
-            'complex': '🧠'
+            'simple': 'âš¡',
+            'medium': 'ðŸ”„',
+            'complex': 'ðŸ§ '
         }
-        emoji = complexity_emoji.get(decision.complexity, '❓')
+        emoji = complexity_emoji.get(decision.complexity, 'â“')
         parts.append(f"{emoji} {decision.complexity.capitalize()} query")
         
         # Context
         if decision.chromadb_context:
-            parts.append(f"📚 Enhanced with {len(decision.chromadb_context)} HCMPACT sources")
+            parts.append(f"ðŸ“š Enhanced with {len(decision.chromadb_context)} HCMPACT sources")
         
         return " | ".join(parts)
     
