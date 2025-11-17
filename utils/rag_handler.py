@@ -400,14 +400,22 @@ class AdvancedRAGHandler:
         Returns:
             List of search results with content and metadata
         """
+        print(f"\n=== SEARCH METHOD CALLED ===")
+        print(f"Query: '{query}'")
+        print(f"Strategy: {chunking_strategy}")
+        print(f"Requesting {n_results} results")
+        
         # Use adaptive collection by default
         if chunking_strategy not in self.collections:
             chunking_strategy = "adaptive"
         
         collection = self.collections[chunking_strategy]
+        print(f"Using collection: {chunking_strategy} (count: {collection.count()})")
         
         # Generate query embedding
+        print(f"About to generate embedding for query...")
         query_embedding = self.generate_embedding(query)
+        print(f"Query embedding generated: {len(query_embedding)} dims, sum={sum(query_embedding):.4f}")
         
         # Build where clause for filtering
         where_clause = None
@@ -419,8 +427,10 @@ class AdvancedRAGHandler:
             results = collection.query(
                 query_embeddings=[query_embedding],
                 n_results=n_results,
-                where=where_clause
+                where=where_clause,
+                include=['embeddings', 'documents', 'metadatas', 'distances']  # Include embeddings for debug
             )
+            print(f"Query executed successfully")
         except Exception as e:
             print(f"Search error: {e}")
             return []
@@ -429,12 +439,27 @@ class AdvancedRAGHandler:
         formatted_results = []
         
         if results and results['documents'] and len(results['documents']) > 0:
+            print(f"\n=== SEARCH RESULTS ===")
+            print(f"Found {len(results['documents'][0])} results")
+            
+            # DEBUG: Check if embeddings are included in results
+            if 'embeddings' in results and results['embeddings']:
+                first_emb = results['embeddings'][0][0] if results['embeddings'][0] else None
+                if first_emb:
+                    emb_sum = sum(first_emb)
+                    print(f"First result embedding: {len(first_emb)} dims, sum={emb_sum:.4f}")
+                    if emb_sum == 0.0:
+                        print(f"WARNING: Stored embedding is ZERO VECTOR!")
+            
             for i in range(len(results['documents'][0])):
                 result = {
                     'content': results['documents'][0][i],
                     'metadata': results['metadatas'][0][i],
                     'distance': results['distances'][0][i] if 'distances' in results else None
                 }
+                if i == 0:
+                    print(f"Top result distance: {result['distance']:.3f}")
+                    print(f"Top result content preview: {result['content'][:80]}...")
                 formatted_results.append(result)
         
         return formatted_results
