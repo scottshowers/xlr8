@@ -1,9 +1,6 @@
 """
-HCMPACT Knowledge Base Management
+HCMPACT LLM Seeding Management
 Upload and manage documents for RAG system
-
-FIXED VERSION - November 17, 2025
-Handles both basic RAGHandler and AdvancedRAGHandler stats formats
 """
 
 import streamlit as st
@@ -14,13 +11,13 @@ import pandas as pd
 
 
 def render_knowledge_page():
-    """Render knowledge base management page"""
+    """Render LLM seeding management page"""
     
-    st.markdown("## 🧠 HCMPACT Knowledge Base")
+    st.markdown("## 🧠 HCMPACT LLM Seeding")
     
     st.markdown("""
     <div class='info-box'>
-        <strong>Knowledge Base:</strong> Upload HCMPACT standards, best practices,
+        <strong>LLM Seeding:</strong> Upload HCMPACT standards, best practices,
         and technical documentation. These documents power the AI Assistant's responses.
     </div>
     """, unsafe_allow_html=True)
@@ -32,48 +29,26 @@ def render_knowledge_page():
         st.error("❌ RAG system not initialized")
         return
     
-    # Get stats - handle both basic and advanced RAG handler formats
-    try:
-        stats = rag_handler.get_stats()
-        
-        # Check if this is basic RAGHandler (single dict) or AdvancedRAGHandler (dict of dicts)
-        if stats and 'total_chunks' in stats:
-            # Basic RAGHandler format
-            total_docs = stats.get('unique_documents', 0)
-            total_chunks = stats.get('total_chunks', 0)
-            categories = stats.get('categories', {})
-            strategies_used = 1  # Only one collection
-        else:
-            # AdvancedRAGHandler format (dict of dicts per strategy)
-            total_docs = sum(s.get('unique_documents', 0) for s in stats.values() if isinstance(s, dict))
-            total_chunks = sum(s.get('total_chunks', 0) for s in stats.values() if isinstance(s, dict))
-            
-            # Merge categories from all strategies
-            categories = {}
-            for s in stats.values():
-                if isinstance(s, dict) and 'categories' in s:
-                    for cat, count in s['categories'].items():
-                        categories[cat] = categories.get(cat, 0) + count
-            
-            strategies_used = len([s for s in stats.values() if isinstance(s, dict) and s.get('total_chunks', 0) > 0])
-    except Exception as e:
-        st.error(f"Error getting stats: {e}")
-        total_docs = 0
-        total_chunks = 0
-        categories = {}
-        strategies_used = 0
+    # Stats
+    stats = rag_handler.get_stats()
     
-    # Display stats
     col1, col2, col3, col4 = st.columns(4)
     
+    total_docs = sum(s['unique_documents'] for s in stats.values())
+    total_chunks = sum(s['total_chunks'] for s in stats.values())
+    
     with col1:
-        st.metric("📚 Documents", total_docs)
+        st.metric("📚 LLM Documents", total_docs)
     with col2:
         st.metric("📝 Total Chunks", total_chunks)
     with col3:
+        strategies_used = len([s for s in stats.values() if s['total_chunks'] > 0])
         st.metric("🔧 Strategies", strategies_used)
     with col4:
-        st.metric("📁 Categories", len(categories))
+        all_categories = set()
+        for s in stats.values():
+            all_categories.update(s['categories'].keys())
+        st.metric("📁 Categories", len(all_categories))
     
     st.markdown("---")
     
@@ -84,7 +59,7 @@ def render_knowledge_page():
     
     with col1:
         uploaded_files = st.file_uploader(
-            "Upload HCMPACT documents",
+            "Upload HCMPACT documents for LLM seeding",
             type=['pdf', 'txt', 'md', 'docx'],
             accept_multiple_files=True,
             help="Upload standards, best practices, guides, or technical documentation"
@@ -94,176 +69,135 @@ def render_knowledge_page():
         category = st.selectbox(
             "Category",
             ["PRO Core", "WFM", "Payroll", "Benefits", "Time & Attendance", 
-             "Best Practices", "Technical", "Implementation Guides", "Templates",
-             "Configuration", "Other"],
+             "Best Practices", "Technical", "Implementation Guides", "Other"],
             help="Categorize your document"
+        )
+        
+        chunking_strategy = st.selectbox(
+            "Chunking Strategy",
+            ["adaptive", "semantic", "recursive", "sliding", "paragraph", "all"],
+            help="How to split the document. 'adaptive' automatically chooses best method."
         )
     
     if uploaded_files:
-        if st.button("📤 Upload & Index Documents", type="primary"):
-            with st.spinner("Processing documents..."):
-                success_count = 0
-                error_count = 0
+        if st.button("🚀 Process and Seed LLM", type="primary", use_container_width=True):
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            for idx, uploaded_file in enumerate(uploaded_files):
+                status_text.info(f"Processing {uploaded_file.name}...")
                 
-                for uploaded_file in uploaded_files:
-                    try:
-                        # Extract text based on file type
-                        if uploaded_file.name.endswith('.pdf'):
-                            content = _extract_pdf_text(uploaded_file)
-                        elif uploaded_file.name.endswith('.docx'):
-                            content = _extract_docx_text(uploaded_file)
-                        elif uploaded_file.name.endswith(('.txt', '.md')):
-                            content = uploaded_file.read().decode('utf-8')
-                        else:
-                            st.warning(f"Skipping {uploaded_file.name} - unsupported format")
-                            continue
-                        
-                        if not content or len(content.strip()) < 50:
-                            st.warning(f"Skipping {uploaded_file.name} - no content extracted")
-                            error_count += 1
-                            continue
-                        
-                        # Add to RAG handler
-                        num_chunks = rag_handler.add_document(
-                            name=uploaded_file.name,
-                            content=content,
-                            category=category,
-                            metadata={
-                                'upload_date': datetime.now().isoformat(),
-                                'file_size': len(content)
-                            }
-                        )
-                        
-                        st.success(f"✅ Indexed {num_chunks} chunks from **{uploaded_file.name}**")
-                        success_count += 1
-                        
-                    except Exception as e:
-                        st.error(f"❌ Error processing {uploaded_file.name}: {str(e)}")
-                        error_count += 1
+                # Extract text based on file type
+                content = _extract_text(uploaded_file)
                 
-                # Summary
-                st.markdown("---")
-                if success_count > 0:
-                    st.success(f"🎉 Successfully uploaded {success_count} document(s)")
-                if error_count > 0:
-                    st.warning(f"⚠️ {error_count} document(s) had errors")
+                if content:
+                    # Add to LLM seeding
+                    counts = rag_handler.add_document(
+                        name=uploaded_file.name,
+                        content=content,
+                        category=category,
+                        metadata={
+                            'upload_date': datetime.now().isoformat(),
+                            'file_type': uploaded_file.type
+                        },
+                        chunking_strategy=chunking_strategy
+                    )
+                    
+                    status_text.success(f"✅ Added {uploaded_file.name} - {sum(counts.values())} chunks")
+                else:
+                    status_text.error(f"❌ Failed to extract text from {uploaded_file.name}")
                 
-                # Refresh stats
-                st.rerun()
+                progress_bar.progress((idx + 1) / len(uploaded_files))
+            
+            st.success(f"✅ Processed {len(uploaded_files)} document(s)")
+            st.rerun()
     
-    st.markdown("---")
-    
-    # Current documents section
-    st.markdown("### 📚 Current Knowledge Base")
-    
-    if total_docs == 0:
-        st.info("📭 No documents uploaded yet. Upload HCMPACT standards above to get started!")
-    else:
-        # Show categories breakdown
-        if categories:
-            st.markdown("**Documents by Category:**")
-            for cat, count in sorted(categories.items(), key=lambda x: x[1], reverse=True):
-                st.markdown(f"- **{cat}:** {count} chunks")
-        
-        # Management options
+    # Display statistics by strategy
+    if total_chunks > 0:
         st.markdown("---")
-        st.markdown("### 🔧 Management")
+        st.markdown("### 📊 LLM Seeding Statistics")
         
-        col1, col2 = st.columns(2)
+        # Strategy breakdown
+        strategy_tab, category_tab = st.tabs(["By Strategy", "By Category"])
         
-        with col1:
-            if st.button("🔍 Test Search", use_container_width=True):
-                st.session_state.show_search_test = True
-        
-        with col2:
-            if st.button("🗑️ Clear All Documents", use_container_width=True, type="secondary"):
-                st.session_state.confirm_clear = True
-        
-        # Search test
-        if st.session_state.get('show_search_test', False):
-            st.markdown("---")
-            st.markdown("### 🔍 Test Search")
+        with strategy_tab:
+            strategy_data = []
+            for strategy_name, strategy_stats in stats.items():
+                if strategy_stats['total_chunks'] > 0:
+                    strategy_data.append({
+                        'Strategy': strategy_name.title(),
+                        'Documents': strategy_stats['unique_documents'],
+                        'Chunks': strategy_stats['total_chunks']
+                    })
             
-            test_query = st.text_input("Enter a test query", value="earnings configuration")
-            num_results = st.slider("Number of results", 1, 20, 8)
+            if strategy_data:
+                st.dataframe(pd.DataFrame(strategy_data), use_container_width=True, hide_index=True)
+        
+        with category_tab:
+            # Aggregate categories across all strategies
+            all_categories = {}
+            for strategy_stats in stats.values():
+                for cat, count in strategy_stats['categories'].items():
+                    all_categories[cat] = all_categories.get(cat, 0) + count
             
-            if st.button("Search"):
-                with st.spinner("Searching..."):
+            if all_categories:
+                category_data = [
+                    {'Category': cat, 'Chunks': count}
+                    for cat, count in sorted(all_categories.items(), key=lambda x: x[1], reverse=True)
+                ]
+                st.dataframe(pd.DataFrame(category_data), use_container_width=True, hide_index=True)
+        
+        # Clear LLM documents option
+        st.markdown("---")
+        st.markdown("### 🗑️ Manage LLM Documents")
+        
+        if st.button("⚠️ Clear All Documents", help="Removes all documents from LLM seeding"):
+            if st.checkbox("I understand this will delete all LLM documents"):
+                for collection in rag_handler.collections.values():
                     try:
-                        results = rag_handler.search(test_query, n_results=num_results)
-                        
-                        if results:
-                            st.success(f"✅ Found {len(results)} results")
-                            
-                            for i, result in enumerate(results, 1):
-                                with st.expander(f"Result {i}: {result.get('document', 'Unknown')}", expanded=(i<=3)):
-                                    st.markdown(f"**Document:** {result.get('document', 'N/A')}")
-                                    st.markdown(f"**Category:** {result.get('category', 'N/A')}")
-                                    
-                                    if 'distance' in result:
-                                        similarity = 1.0 - result['distance']
-                                        st.markdown(f"**Relevance:** {similarity:.0%}")
-                                    
-                                    if 'content' in result:
-                                        content = result['content']
-                                        preview = content[:300] + "..." if len(content) > 300 else content
-                                        st.markdown("**Content:**")
-                                        st.text(preview)
-                        else:
-                            st.warning("⚠️ No results found")
-                            st.markdown("""
-                            **Possible reasons:**
-                            - Query too specific
-                            - No relevant documents uploaded
-                            - Try broader search terms
-                            """)
-                    except Exception as e:
-                        st.error(f"Search error: {e}")
+                        # Clear collection
+                        all_ids = collection.get()['ids']
+                        if all_ids:
+                            collection.delete(ids=all_ids)
+                    except:
+                        pass
+                st.success("✅ LLM documents cleared")
+                st.rerun()
+
+
+def _extract_text(uploaded_file) -> str:
+    """Extract text from uploaded file"""
+    
+    try:
+        file_type = uploaded_file.name.split('.')[-1].lower()
         
-        # Clear confirmation
-        if st.session_state.get('confirm_clear', False):
-            st.markdown("---")
-            st.warning("⚠️ **Warning:** This will delete ALL documents from the knowledge base!")
+        if file_type == 'pdf':
+            # PDF extraction
+            pdf_reader = PyPDF2.PdfReader(uploaded_file)
+            text = ""
+            for page in pdf_reader.pages:
+                text += page.extract_text() + "\n\n"
+            return text
+        
+        elif file_type == 'docx':
+            # Word document
+            doc = Document(uploaded_file)
+            text = "\n\n".join([para.text for para in doc.paragraphs])
+            return text
+        
+        elif file_type in ['txt', 'md']:
+            # Plain text
+            text = uploaded_file.read().decode('utf-8')
+            return text
+        
+        else:
+            return None
             
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("✅ Yes, Clear Everything", type="primary"):
-                    try:
-                        rag_handler.clear_collection()
-                        st.success("✅ All documents cleared")
-                        st.session_state.confirm_clear = False
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error clearing: {e}")
-            
-            with col2:
-                if st.button("❌ Cancel"):
-                    st.session_state.confirm_clear = False
-                    st.rerun()
-
-
-def _extract_pdf_text(uploaded_file) -> str:
-    """Extract text from PDF file"""
-    try:
-        pdf_reader = PyPDF2.PdfReader(uploaded_file)
-        text = ""
-        for page in pdf_reader.pages:
-            text += page.extract_text() + "\n"
-        return text
     except Exception as e:
-        raise Exception(f"PDF extraction failed: {str(e)}")
+        st.error(f"Error extracting text: {str(e)}")
+        return None
 
 
-def _extract_docx_text(uploaded_file) -> str:
-    """Extract text from DOCX file"""
-    try:
-        doc = Document(uploaded_file)
-        text = "\n".join([paragraph.text for paragraph in doc.paragraphs])
-        return text
-    except Exception as e:
-        raise Exception(f"DOCX extraction failed: {str(e)}")
-
-
-# Main entry point
 if __name__ == "__main__":
+    st.title("HCMPACT LLM Seeding - Test")
     render_knowledge_page()
