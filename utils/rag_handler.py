@@ -78,7 +78,7 @@ class AdvancedRAGHandler:
         text = re.sub(r'[^\w\s.,!?;:()\-\'"]+', '', text)
         return text.strip()
     
-    def _semantic_chunking(self, content: str, chunk_size: int = 500) -> List[str]:
+    def _semantic_chunking(self, content: str, chunk_size: int = 800) -> List[str]:
         """
         Semantic chunking: Split by sentences and group semantically related ones
         Uses sentence boundaries and tries to keep related sentences together
@@ -115,7 +115,7 @@ class AdvancedRAGHandler:
         
         return chunks
     
-    def _recursive_chunking(self, content: str, chunk_size: int = 500) -> List[str]:
+    def _recursive_chunking(self, content: str, chunk_size: int = 800) -> List[str]:
         """
         Recursive chunking: Split by paragraphs, then sentences, then words
         Hierarchical splitting for better coherence
@@ -160,7 +160,7 @@ class AdvancedRAGHandler:
         
         return split_recursive(content, chunk_size)
     
-    def _sliding_window_chunking(self, content: str, chunk_size: int = 500, overlap: int = 100) -> List[str]:
+    def _sliding_window_chunking(self, content: str, chunk_size: int = 800, overlap: int = 100) -> List[str]:
         """
         Sliding window chunking: Fixed-size chunks with overlap
         Good for ensuring no context is lost at boundaries
@@ -227,7 +227,7 @@ class AdvancedRAGHandler:
         
         return chunks
     
-    def _adaptive_chunking(self, content: str, chunk_size: int = 500) -> List[str]:
+    def _adaptive_chunking(self, content: str, chunk_size: int = 800) -> List[str]:
         """
         Adaptive chunking: Automatically choose best strategy based on content
         Analyzes content structure and selects optimal chunking method
