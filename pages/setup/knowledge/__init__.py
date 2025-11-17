@@ -1,7 +1,9 @@
 """
-HCMPACT LLM Management - Professional & Polished
-Beautiful document management with enhanced visuals
-Version: 3.0
+HCMPACT Knowledge Base Management
+Upload and manage documents for RAG system
+
+FIXED VERSION - November 17, 2025
+Handles both basic RAGHandler and AdvancedRAGHandler stats formats
 """
 
 import streamlit as st
@@ -12,19 +14,14 @@ import pandas as pd
 
 
 def render_knowledge_page():
-    """Render HCMPACT LLM management page with empty state"""
+    """Render knowledge base management page"""
     
-    st.markdown("## 🧠 HCMPACT LLM Seeding")
+    st.markdown("## 🧠 HCMPACT Knowledge Base")
     
     st.markdown("""
-    <div style='background: linear-gradient(135deg, #f5f7f9 0%, #e8eef3 100%); padding: 1rem; border-radius: 12px; border-left: 4px solid #8ca6be; margin-bottom: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.05);'>
-        <div style='display: flex; align-items: center; gap: 0.75rem;'>
-            <div style='font-size: 1.3rem;'>📚</div>
-            <div>
-                <strong style='color: #6d8aa0; font-size: 1rem;'>HCMPACT LLM Management</strong><br>
-                <span style='color: #7d96a8; font-size: 0.9rem;'>Upload HCMPACT standards, best practices, and technical documentation. These documents power the AI Assistant's responses.</span>
-            </div>
-        </div>
+    <div class='info-box'>
+        <strong>Knowledge Base:</strong> Upload HCMPACT standards, best practices,
+        and technical documentation. These documents power the AI Assistant's responses.
     </div>
     """, unsafe_allow_html=True)
     
@@ -35,84 +32,50 @@ def render_knowledge_page():
         st.error("❌ RAG system not initialized")
         return
     
-    # Stats
-    stats = rag_handler.get_stats()
+    # Get stats - handle both basic and advanced RAG handler formats
+    try:
+        stats = rag_handler.get_stats()
+        
+        # Check if this is basic RAGHandler (single dict) or AdvancedRAGHandler (dict of dicts)
+        if stats and 'total_chunks' in stats:
+            # Basic RAGHandler format
+            total_docs = stats.get('unique_documents', 0)
+            total_chunks = stats.get('total_chunks', 0)
+            categories = stats.get('categories', {})
+            strategies_used = 1  # Only one collection
+        else:
+            # AdvancedRAGHandler format (dict of dicts per strategy)
+            total_docs = sum(s.get('unique_documents', 0) for s in stats.values() if isinstance(s, dict))
+            total_chunks = sum(s.get('total_chunks', 0) for s in stats.values() if isinstance(s, dict))
+            
+            # Merge categories from all strategies
+            categories = {}
+            for s in stats.values():
+                if isinstance(s, dict) and 'categories' in s:
+                    for cat, count in s['categories'].items():
+                        categories[cat] = categories.get(cat, 0) + count
+            
+            strategies_used = len([s for s in stats.values() if isinstance(s, dict) and s.get('total_chunks', 0) > 0])
+    except Exception as e:
+        st.error(f"Error getting stats: {e}")
+        total_docs = 0
+        total_chunks = 0
+        categories = {}
+        strategies_used = 0
     
+    # Display stats
     col1, col2, col3, col4 = st.columns(4)
-    
-    total_docs = sum(s['unique_documents'] for s in stats.values())
-    total_chunks = sum(s['total_chunks'] for s in stats.values())
     
     with col1:
         st.metric("📚 Documents", total_docs)
     with col2:
         st.metric("📝 Total Chunks", total_chunks)
     with col3:
-        strategies_used = len([s for s in stats.values() if s['total_chunks'] > 0])
         st.metric("🔧 Strategies", strategies_used)
     with col4:
-        all_categories = set()
-        for s in stats.values():
-            all_categories.update(s['categories'].keys())
-        st.metric("📁 Categories", len(all_categories))
+        st.metric("📁 Categories", len(categories))
     
     st.markdown("---")
-    
-    # EMPTY STATE CHECK - COMPACT
-    if total_docs == 0:
-        st.markdown("""
-        <div style='text-align: center; padding: 2.5rem 1rem; background: linear-gradient(135deg, #f5f7f9 0%, #e8eef3 100%); border-radius: 12px; border: 2px solid rgba(140, 166, 190, 0.3); margin: 1.5rem 0;'>
-            <div style='font-size: 3rem; margin-bottom: 0.75rem; opacity: 0.9;'>📚</div>
-            <h2 style='color: #6d8aa0; margin-bottom: 0.75rem; font-size: 1.3rem; font-weight: 600;'>HCMPACT LLM is Empty</h2>
-            <p style='color: #7d96a8; font-size: 1rem; margin-bottom: 1.5rem; max-width: 550px; margin-left: auto; margin-right: auto;'>
-                Upload HCMPACT standards, UKG documentation, and best practices to power your AI Assistant
-            </p>
-            <div style='background: white; padding: 1.5rem; border-radius: 12px; max-width: 480px; margin: 0 auto; box-shadow: 0 4px 12px rgba(0,0,0,0.08);'>
-                <h3 style='color: #6d8aa0; margin-bottom: 0.75rem; font-size: 1.1rem;'>📤 What to Upload First</h3>
-                <div style='text-align: left; color: #6c757d; line-height: 1.9;'>
-                    • UKG Pro configuration guides<br>
-                    • UKG WFM documentation<br>
-                    • Implementation best practices<br>
-                    • Standard templates & checklists<br>
-                    • Industry compliance guides<br>
-                    • Troubleshooting documentation
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Show example with more detail
-        with st.expander("💡 Why Upload Documents to HCMPACT LLM?", expanded=True):
-            st.markdown("""
-            **Your AI Assistant becomes smarter with each document you upload:**
-            
-            **Without HCMPACT LLM:**
-            - Generic responses based only on general AI training
-            - No company-specific context
-            - Limited to basic UKG information
-            
-            **With HCMPACT LLM:**
-            - Responds with your company's best practices
-            - References specific HCMPACT standards
-            - Pulls from actual UKG documentation
-            - Provides accurate, context-aware guidance
-            
-            **Example:**
-            
-            *Question:* "How should we configure multi-tier approvals?"
-            
-            *Without docs:* Generic explanation
-            
-            *With docs:* Specific steps from your standards, references to exact UKG screens, 
-            best practices from your implementation guides
-            
-            **🎯 Recommended Starter Pack (5-10 documents):**
-            1. UKG Pro Administration Guide
-            2. Your implementation methodology
-            3. Standard pay code template
-            4. Time & attendance best practices
-            5. Benefits configuration checklist
-            """)
     
     # Upload section
     st.markdown("### 📤 Upload Documents")
@@ -131,135 +94,176 @@ def render_knowledge_page():
         category = st.selectbox(
             "Category",
             ["PRO Core", "WFM", "Payroll", "Benefits", "Time & Attendance", 
-             "Best Practices", "Technical", "Implementation Guides", "Other"],
+             "Best Practices", "Technical", "Implementation Guides", "Templates",
+             "Configuration", "Other"],
             help="Categorize your document"
-        )
-        
-        chunking_strategy = st.selectbox(
-            "Chunking Strategy",
-            ["adaptive", "semantic", "recursive", "sliding", "paragraph", "all"],
-            help="How to split the document. 'adaptive' automatically chooses best method."
         )
     
     if uploaded_files:
-        if st.button("🚀 Process and Add to HCMPACT LLM", type="primary", use_container_width=True):
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            for idx, uploaded_file in enumerate(uploaded_files):
-                status_text.info(f"Processing {uploaded_file.name}...")
+        if st.button("📤 Upload & Index Documents", type="primary"):
+            with st.spinner("Processing documents..."):
+                success_count = 0
+                error_count = 0
                 
-                # Extract text based on file type
-                content = _extract_text(uploaded_file)
-                
-                if content:
-                    # Add to HCMPACT LLM
-                    counts = rag_handler.add_document(
-                        name=uploaded_file.name,
-                        content=content,
-                        category=category,
-                        metadata={
-                            'upload_date': datetime.now().isoformat(),
-                            'file_type': uploaded_file.type
-                        },
-                        chunking_strategy=chunking_strategy
-                    )
-                    
-                    status_text.success(f"✅ Added {uploaded_file.name} - {sum(counts.values())} chunks")
-                else:
-                    status_text.error(f"❌ Failed to extract text from {uploaded_file.name}")
-                
-                progress_bar.progress((idx + 1) / len(uploaded_files))
-            
-            st.success(f"✅ Processed {len(uploaded_files)} document(s)")
-            st.rerun()
-    
-    # Display statistics by strategy (only if documents exist)
-    if total_chunks > 0:
-        st.markdown("---")
-        st.markdown("### 📊 HCMPACT LLM Statistics")
-        
-        # Strategy breakdown
-        strategy_tab, category_tab = st.tabs(["By Strategy", "By Category"])
-        
-        with strategy_tab:
-            strategy_data = []
-            for strategy_name, strategy_stats in stats.items():
-                if strategy_stats['total_chunks'] > 0:
-                    strategy_data.append({
-                        'Strategy': strategy_name.title(),
-                        'Documents': strategy_stats['unique_documents'],
-                        'Chunks': strategy_stats['total_chunks']
-                    })
-            
-            if strategy_data:
-                st.dataframe(pd.DataFrame(strategy_data), use_container_width=True, hide_index=True)
-        
-        with category_tab:
-            # Aggregate categories across all strategies
-            all_categories = {}
-            for strategy_stats in stats.values():
-                for cat, count in strategy_stats['categories'].items():
-                    all_categories[cat] = all_categories.get(cat, 0) + count
-            
-            if all_categories:
-                category_data = [
-                    {'Category': cat, 'Chunks': count}
-                    for cat, count in sorted(all_categories.items(), key=lambda x: x[1], reverse=True)
-                ]
-                st.dataframe(pd.DataFrame(category_data), use_container_width=True, hide_index=True)
-        
-        # Clear HCMPACT LLM option
-        st.markdown("---")
-        st.markdown("### 🗑️ Manage HCMPACT LLM")
-        
-        if st.button("⚠️ Clear All Documents", help="Removes all documents from HCMPACT LLM"):
-            if st.checkbox("I understand this will delete all HCMPACT LLM documents"):
-                for collection in rag_handler.collections.values():
+                for uploaded_file in uploaded_files:
                     try:
-                        # Clear collection
-                        all_ids = collection.get()['ids']
-                        if all_ids:
-                            collection.delete(ids=all_ids)
-                    except:
-                        pass
-                st.success("✅ HCMPACT LLM cleared")
+                        # Extract text based on file type
+                        if uploaded_file.name.endswith('.pdf'):
+                            content = _extract_pdf_text(uploaded_file)
+                        elif uploaded_file.name.endswith('.docx'):
+                            content = _extract_docx_text(uploaded_file)
+                        elif uploaded_file.name.endswith(('.txt', '.md')):
+                            content = uploaded_file.read().decode('utf-8')
+                        else:
+                            st.warning(f"Skipping {uploaded_file.name} - unsupported format")
+                            continue
+                        
+                        if not content or len(content.strip()) < 50:
+                            st.warning(f"Skipping {uploaded_file.name} - no content extracted")
+                            error_count += 1
+                            continue
+                        
+                        # Add to RAG handler
+                        num_chunks = rag_handler.add_document(
+                            name=uploaded_file.name,
+                            content=content,
+                            category=category,
+                            metadata={
+                                'upload_date': datetime.now().isoformat(),
+                                'file_size': len(content)
+                            }
+                        )
+                        
+                        st.success(f"✅ Indexed {num_chunks} chunks from **{uploaded_file.name}**")
+                        success_count += 1
+                        
+                    except Exception as e:
+                        st.error(f"❌ Error processing {uploaded_file.name}: {str(e)}")
+                        error_count += 1
+                
+                # Summary
+                st.markdown("---")
+                if success_count > 0:
+                    st.success(f"🎉 Successfully uploaded {success_count} document(s)")
+                if error_count > 0:
+                    st.warning(f"⚠️ {error_count} document(s) had errors")
+                
+                # Refresh stats
                 st.rerun()
-
-
-def _extract_text(uploaded_file) -> str:
-    """Extract text from uploaded file"""
     
-    try:
-        file_type = uploaded_file.name.split('.')[-1].lower()
+    st.markdown("---")
+    
+    # Current documents section
+    st.markdown("### 📚 Current Knowledge Base")
+    
+    if total_docs == 0:
+        st.info("📭 No documents uploaded yet. Upload HCMPACT standards above to get started!")
+    else:
+        # Show categories breakdown
+        if categories:
+            st.markdown("**Documents by Category:**")
+            for cat, count in sorted(categories.items(), key=lambda x: x[1], reverse=True):
+                st.markdown(f"- **{cat}:** {count} chunks")
         
-        if file_type == 'pdf':
-            # PDF extraction
-            pdf_reader = PyPDF2.PdfReader(uploaded_file)
-            text = ""
-            for page in pdf_reader.pages:
-                text += page.extract_text() + "\n\n"
-            return text
+        # Management options
+        st.markdown("---")
+        st.markdown("### 🔧 Management")
         
-        elif file_type == 'docx':
-            # Word document
-            doc = Document(uploaded_file)
-            text = "\n\n".join([para.text for para in doc.paragraphs])
-            return text
+        col1, col2 = st.columns(2)
         
-        elif file_type in ['txt', 'md']:
-            # Plain text
-            text = uploaded_file.read().decode('utf-8')
-            return text
+        with col1:
+            if st.button("🔍 Test Search", use_container_width=True):
+                st.session_state.show_search_test = True
         
-        else:
-            return None
+        with col2:
+            if st.button("🗑️ Clear All Documents", use_container_width=True, type="secondary"):
+                st.session_state.confirm_clear = True
+        
+        # Search test
+        if st.session_state.get('show_search_test', False):
+            st.markdown("---")
+            st.markdown("### 🔍 Test Search")
             
+            test_query = st.text_input("Enter a test query", value="earnings configuration")
+            num_results = st.slider("Number of results", 1, 20, 8)
+            
+            if st.button("Search"):
+                with st.spinner("Searching..."):
+                    try:
+                        results = rag_handler.search(test_query, n_results=num_results)
+                        
+                        if results:
+                            st.success(f"✅ Found {len(results)} results")
+                            
+                            for i, result in enumerate(results, 1):
+                                with st.expander(f"Result {i}: {result.get('document', 'Unknown')}", expanded=(i<=3)):
+                                    st.markdown(f"**Document:** {result.get('document', 'N/A')}")
+                                    st.markdown(f"**Category:** {result.get('category', 'N/A')}")
+                                    
+                                    if 'distance' in result:
+                                        similarity = 1.0 - result['distance']
+                                        st.markdown(f"**Relevance:** {similarity:.0%}")
+                                    
+                                    if 'content' in result:
+                                        content = result['content']
+                                        preview = content[:300] + "..." if len(content) > 300 else content
+                                        st.markdown("**Content:**")
+                                        st.text(preview)
+                        else:
+                            st.warning("⚠️ No results found")
+                            st.markdown("""
+                            **Possible reasons:**
+                            - Query too specific
+                            - No relevant documents uploaded
+                            - Try broader search terms
+                            """)
+                    except Exception as e:
+                        st.error(f"Search error: {e}")
+        
+        # Clear confirmation
+        if st.session_state.get('confirm_clear', False):
+            st.markdown("---")
+            st.warning("⚠️ **Warning:** This will delete ALL documents from the knowledge base!")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("✅ Yes, Clear Everything", type="primary"):
+                    try:
+                        rag_handler.clear_collection()
+                        st.success("✅ All documents cleared")
+                        st.session_state.confirm_clear = False
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error clearing: {e}")
+            
+            with col2:
+                if st.button("❌ Cancel"):
+                    st.session_state.confirm_clear = False
+                    st.rerun()
+
+
+def _extract_pdf_text(uploaded_file) -> str:
+    """Extract text from PDF file"""
+    try:
+        pdf_reader = PyPDF2.PdfReader(uploaded_file)
+        text = ""
+        for page in pdf_reader.pages:
+            text += page.extract_text() + "\n"
+        return text
     except Exception as e:
-        st.error(f"Error extracting text: {str(e)}")
-        return None
+        raise Exception(f"PDF extraction failed: {str(e)}")
 
 
+def _extract_docx_text(uploaded_file) -> str:
+    """Extract text from DOCX file"""
+    try:
+        doc = Document(uploaded_file)
+        text = "\n".join([paragraph.text for paragraph in doc.paragraphs])
+        return text
+    except Exception as e:
+        raise Exception(f"DOCX extraction failed: {str(e)}")
+
+
+# Main entry point
 if __name__ == "__main__":
-    st.title("HCMPACT LLM - Test")
     render_knowledge_page()
