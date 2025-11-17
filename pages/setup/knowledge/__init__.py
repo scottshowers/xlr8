@@ -91,6 +91,46 @@ def render_knowledge_page():
     else:
         st.info(" Using basic RAG (single chunking method)")
     
+    # CLEAR CHROMADB BUTTON (for corrupted data)
+    with st.expander("[X] Clear All Data (Reset ChromaDB)"):
+        st.warning("This will DELETE all uploaded documents and chunks. Use this if search is returning bad results.")
+        st.markdown("**When to use:**")
+        st.markdown("- Search returns distance >100 (embeddings corrupted)")
+        st.markdown("- After fixing encoding issues")
+        st.markdown("- To start fresh with clean data")
+        
+        confirm = st.checkbox("I understand this will delete all data")
+        
+        if confirm:
+            if st.button("[X] DELETE ALL AND RESET", type="primary"):
+                try:
+                    deleted_count = 0
+                    
+                    if hasattr(rag_handler, 'collections'):
+                        for strategy, collection in rag_handler.collections.items():
+                            count = collection.count()
+                            if count > 0:
+                                collection.delete(where={})
+                                st.success(f"Cleared {strategy}: {count} chunks")
+                                deleted_count += count
+                    else:
+                        if hasattr(rag_handler, 'collection'):
+                            count = rag_handler.collection.count()
+                            if count > 0:
+                                rag_handler.collection.delete(where={})
+                                st.success(f"Cleared: {count} chunks")
+                                deleted_count += count
+                    
+                    if deleted_count > 0:
+                        st.success(f"[OK] Deleted {deleted_count} total chunks")
+                        st.info("Now re-upload your documents with clean embeddings")
+                        st.rerun()
+                    else:
+                        st.info("No data to clear")
+                        
+                except Exception as e:
+                    st.error(f"Error: {e}")
+    
     st.markdown("---")
     
     # Upload section
@@ -118,7 +158,7 @@ def render_knowledge_page():
         if is_advanced:
             chunking_strategy = st.selectbox(
                 "Chunking Strategy",
-                ["adaptive", "semantic", "recursive", "sliding", "paragraph", "all"],
+                ["adaptive", "semantic", "recursive", "sliding", "paragraph"],
                 help="How to split the document. 'adaptive' automatically chooses the best method."
             )
         else:
