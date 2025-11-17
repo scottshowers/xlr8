@@ -230,5 +230,8 @@ def verify_advanced_rag():
     return True
 
 
+# Alias for backward compatibility
+initialize_session_state = initialize_session
+
 # Auto-initialize on import
 initialize_session()
