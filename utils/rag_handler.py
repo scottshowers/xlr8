@@ -1,28 +1,39 @@
 """
-RAG (Retrieval Augmented Generation) Handler for XLR8
-Manages ChromaDB vector store for HCMPACT knowledge base
+Advanced RAG (Retrieval Augmented Generation) Handler for XLR8
+Manages ChromaDB vector store with multiple chunking strategies for optimal retrieval
 """
 
 import chromadb
 from chromadb.config import Settings
 import hashlib
 import re
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Callable
 import requests
 from requests.auth import HTTPBasicAuth
+import nltk
+from collections import defaultdict
 
 
-class RAGHandler:
-    """Handles vector storage and semantic search for HCMPACT documents"""
+class AdvancedRAGHandler:
+    """
+    Advanced RAG handler with multiple chunking strategies.
+    Supports: semantic, recursive, sliding window, paragraph-based, adaptive, and all strategies.
+    """
     
     def __init__(self, persist_directory: str = "/root/.xlr8_chroma"):
         """
-        Initialize ChromaDB client
+        Initialize ChromaDB client with advanced chunking capabilities
         
         Args:
             persist_directory: Where to store the vector database
         """
         self.persist_directory = persist_directory
+        
+        # Download NLTK data if needed
+        try:
+            nltk.data.find('tokenizers/punkt')
+        except LookupError:
+            nltk.download('punkt', quiet=True)
         
         # Initialize ChromaDB with persistence
         self.client = chromadb.Client(Settings(
@@ -30,11 +41,23 @@ class RAGHandler:
             anonymized_telemetry=False
         ))
         
-        # Get or create collection for HCMPACT knowledge
-        self.collection = self.client.get_or_create_collection(
-            name="hcmpact_knowledge",
-            metadata={"description": "HCMPACT standards and best practices"}
-        )
+        # Collections for different chunking strategies
+        self.collections = {}
+        self.chunking_strategies = {
+            'semantic': self._semantic_chunking,
+            'recursive': self._recursive_chunking,
+            'sliding': self._sliding_window_chunking,
+            'paragraph': self._paragraph_chunking,
+            'adaptive': self._adaptive_chunking
+        }
+        
+        # Initialize collections
+        for strategy in self.chunking_strategies.keys():
+            collection_name = f"hcmpact_{strategy}"
+            self.collections[strategy] = self.client.get_or_create_collection(
+                name=collection_name,
+                metadata={"description": f"HCMPACT knowledge with {strategy} chunking"}
+            )
         
         # Ollama embedding endpoint
         self.embed_endpoint = "http://localhost:11435"
@@ -42,20 +65,102 @@ class RAGHandler:
         self.embed_username = "xlr8"
         self.embed_password = "Argyle76226#"
     
-    def chunk_document(self, content: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
+    def _clean_text(self, text: str) -> str:
+        """Clean and normalize text"""
+        # Remove excessive whitespace
+        text = re.sub(r'\s+', ' ', text)
+        # Remove special characters but keep punctuation
+        text = re.sub(r'[^\w\s.,!?;:()\-\'"]+', '', text)
+        return text.strip()
+    
+    def _semantic_chunking(self, content: str, chunk_size: int = 500) -> List[str]:
         """
-        Split document into overlapping chunks for better retrieval
+        Semantic chunking: Split by sentences and group semantically related ones
+        Uses sentence boundaries and tries to keep related sentences together
+        """
+        content = self._clean_text(content)
         
-        Args:
-            content: Document text content
-            chunk_size: Target characters per chunk
-            overlap: Characters to overlap between chunks
+        # Split into sentences
+        try:
+            sentences = nltk.sent_tokenize(content)
+        except:
+            # Fallback if NLTK fails
+            sentences = re.split(r'[.!?]+', content)
+            sentences = [s.strip() for s in sentences if s.strip()]
+        
+        chunks = []
+        current_chunk = []
+        current_length = 0
+        
+        for sentence in sentences:
+            sentence_length = len(sentence)
             
-        Returns:
-            List of text chunks
+            if current_length + sentence_length > chunk_size and current_chunk:
+                # Chunk is full, save it
+                chunks.append(' '.join(current_chunk))
+                current_chunk = [sentence]
+                current_length = sentence_length
+            else:
+                current_chunk.append(sentence)
+                current_length += sentence_length
+        
+        # Add remaining chunk
+        if current_chunk:
+            chunks.append(' '.join(current_chunk))
+        
+        return chunks
+    
+    def _recursive_chunking(self, content: str, chunk_size: int = 500) -> List[str]:
         """
-        # Clean up content
-        content = re.sub(r'\s+', ' ', content).strip()
+        Recursive chunking: Split by paragraphs, then sentences, then words
+        Hierarchical splitting for better coherence
+        """
+        content = self._clean_text(content)
+        
+        def split_recursive(text: str, size: int) -> List[str]:
+            if len(text) <= size:
+                return [text] if text else []
+            
+            # Try to split by double newline (paragraphs)
+            paragraphs = re.split(r'\n\s*\n', text)
+            if len(paragraphs) > 1:
+                result = []
+                for para in paragraphs:
+                    result.extend(split_recursive(para, size))
+                return result
+            
+            # Try to split by sentences
+            try:
+                sentences = nltk.sent_tokenize(text)
+            except:
+                sentences = re.split(r'[.!?]+', text)
+                sentences = [s.strip() for s in sentences if s.strip()]
+            
+            if len(sentences) > 1:
+                mid = len(sentences) // 2
+                left = ' '.join(sentences[:mid])
+                right = ' '.join(sentences[mid:])
+                return split_recursive(left, size) + split_recursive(right, size)
+            
+            # Last resort: split by words
+            words = text.split()
+            if len(words) > 1:
+                mid = len(words) // 2
+                left = ' '.join(words[:mid])
+                right = ' '.join(words[mid:])
+                return split_recursive(left, size) + split_recursive(right, size)
+            
+            # Can't split further
+            return [text]
+        
+        return split_recursive(content, chunk_size)
+    
+    def _sliding_window_chunking(self, content: str, chunk_size: int = 500, overlap: int = 100) -> List[str]:
+        """
+        Sliding window chunking: Fixed-size chunks with overlap
+        Good for ensuring no context is lost at boundaries
+        """
+        content = self._clean_text(content)
         
         if len(content) <= chunk_size:
             return [content]
@@ -78,10 +183,70 @@ class RAGHandler:
             if chunk:
                 chunks.append(chunk)
             
-            # Move start with overlap
+            # Slide window with overlap
             start = end - overlap
+            
+            # Prevent infinite loop
+            if start >= len(content) - overlap:
+                break
         
         return chunks
+    
+    def _paragraph_chunking(self, content: str, max_paragraphs_per_chunk: int = 3) -> List[str]:
+        """
+        Paragraph-based chunking: Keep paragraph integrity
+        Groups multiple paragraphs into chunks
+        """
+        content = self._clean_text(content)
+        
+        # Split by double newline or multiple spaces
+        paragraphs = re.split(r'\n\s*\n|\n{2,}', content)
+        paragraphs = [p.strip() for p in paragraphs if p.strip()]
+        
+        if not paragraphs:
+            return [content]
+        
+        chunks = []
+        current_chunk = []
+        
+        for para in paragraphs:
+            current_chunk.append(para)
+            
+            if len(current_chunk) >= max_paragraphs_per_chunk:
+                chunks.append('\n\n'.join(current_chunk))
+                current_chunk = []
+        
+        # Add remaining paragraphs
+        if current_chunk:
+            chunks.append('\n\n'.join(current_chunk))
+        
+        return chunks
+    
+    def _adaptive_chunking(self, content: str, chunk_size: int = 500) -> List[str]:
+        """
+        Adaptive chunking: Automatically choose best strategy based on content
+        Analyzes content structure and selects optimal chunking method
+        """
+        content = self._clean_text(content)
+        
+        # Analyze content structure
+        has_paragraphs = bool(re.search(r'\n\s*\n', content))
+        avg_sentence_length = len(content) / max(len(re.findall(r'[.!?]+', content)), 1)
+        has_structure = bool(re.search(r'(Chapter|Section|\d+\.)', content))
+        
+        # Choose strategy based on analysis
+        if has_structure:
+            # Structured document: use recursive
+            return self._recursive_chunking(content, chunk_size)
+        elif has_paragraphs and avg_sentence_length > 100:
+            # Long paragraphs: use paragraph chunking
+            return self._paragraph_chunking(content)
+        elif avg_sentence_length < 50:
+            # Short sentences: use semantic
+            return self._semantic_chunking(content, chunk_size)
+        else:
+            # Default: use sliding window for safety
+            return self._sliding_window_chunking(content, chunk_size)
     
     def generate_embedding(self, text: str) -> List[float]:
         """
@@ -114,71 +279,95 @@ class RAGHandler:
             # Return zero vector as fallback
             return [0.0] * 768  # nomic-embed-text dimension
     
-    def add_document(self, name: str, content: str, category: str, metadata: Dict[str, Any] = None) -> int:
+    def add_document(self, name: str, content: str, category: str, 
+                    chunking_strategy: str = "adaptive", metadata: Dict[str, Any] = None) -> Dict[str, int]:
         """
-        Add a document to the vector store
+        Add a document to the vector store using specified or all chunking strategies
         
         Args:
             name: Document name
             content: Document text content
             category: Document category (PRO Core, WFM, etc.)
+            chunking_strategy: Strategy to use ("semantic", "recursive", "sliding", 
+                             "paragraph", "adaptive", or "all")
             metadata: Additional metadata
             
         Returns:
-            Number of chunks added
+            Dictionary with strategy names and chunk counts
         """
         # Generate unique document ID
         doc_id = hashlib.md5(f"{name}_{category}".encode()).hexdigest()
         
-        # Delete existing document if it exists (update scenario)
-        try:
-            self.collection.delete(where={"doc_id": doc_id})
-        except:
-            pass
+        # Determine which strategies to use
+        if chunking_strategy == "all":
+            strategies_to_use = list(self.chunking_strategies.keys())
+        elif chunking_strategy in self.chunking_strategies:
+            strategies_to_use = [chunking_strategy]
+        else:
+            # Default to adaptive if invalid strategy specified
+            strategies_to_use = ["adaptive"]
         
-        # Chunk the document
-        chunks = self.chunk_document(content)
+        results = {}
         
-        # Prepare data for ChromaDB
-        ids = []
-        embeddings = []
-        documents = []
-        metadatas = []
-        
-        for i, chunk in enumerate(chunks):
-            chunk_id = f"{doc_id}_chunk_{i}"
-            ids.append(chunk_id)
+        for strategy in strategies_to_use:
+            # Get collection for this strategy
+            collection = self.collections[strategy]
             
-            # Generate embedding
-            embedding = self.generate_embedding(chunk)
-            embeddings.append(embedding)
+            # Delete existing document if it exists
+            try:
+                collection.delete(where={"doc_id": doc_id})
+            except:
+                pass
             
-            documents.append(chunk)
+            # Chunk the document using the strategy
+            chunking_func = self.chunking_strategies[strategy]
+            chunks = chunking_func(content)
             
-            # Metadata
-            chunk_metadata = {
-                "doc_id": doc_id,
-                "doc_name": name,
-                "category": category,
-                "chunk_index": i,
-                "total_chunks": len(chunks)
-            }
-            if metadata:
-                chunk_metadata.update(metadata)
+            # Prepare data for ChromaDB
+            ids = []
+            embeddings = []
+            documents = []
+            metadatas = []
             
-            metadatas.append(chunk_metadata)
+            for i, chunk in enumerate(chunks):
+                chunk_id = f"{doc_id}_{strategy}_chunk_{i}"
+                ids.append(chunk_id)
+                
+                # Generate embedding
+                embedding = self.generate_embedding(chunk)
+                embeddings.append(embedding)
+                
+                documents.append(chunk)
+                
+                # Metadata
+                chunk_metadata = {
+                    "doc_id": doc_id,
+                    "doc_name": name,
+                    "category": category,
+                    "chunking_strategy": strategy,
+                    "chunk_index": i,
+                    "total_chunks": len(chunks)
+                }
+                if metadata:
+                    chunk_metadata.update(metadata)
+                
+                metadatas.append(chunk_metadata)
+            
+            # Add to collection
+            if ids:  # Only add if we have chunks
+                collection.add(
+                    ids=ids,
+                    embeddings=embeddings,
+                    documents=documents,
+                    metadatas=metadatas
+                )
+            
+            results[strategy] = len(chunks)
         
-        # Add to collection
-        self.collection.add(
-            ids=ids,
-            embeddings=embeddings,
-            documents=documents,
-            metadatas=metadatas
-        )
-        
-        return len(chunks)
+        return results
     
-    def search(self, query: str, n_results: int = 5, category_filter: str = None) -> List[Dict[str, Any]]:
+    def search(self, query: str, n_results: int = 5, category_filter: str = None,
+              chunking_strategy: str = "adaptive") -> List[Dict[str, Any]]:
         """
         Semantic search across knowledge base
         
@@ -186,10 +375,17 @@ class RAGHandler:
             query: Search query
             n_results: Number of results to return
             category_filter: Optional category to filter by
+            chunking_strategy: Which strategy collection to search ("adaptive" default)
             
         Returns:
             List of search results with content and metadata
         """
+        # Use adaptive collection by default
+        if chunking_strategy not in self.collections:
+            chunking_strategy = "adaptive"
+        
+        collection = self.collections[chunking_strategy]
+        
         # Generate query embedding
         query_embedding = self.generate_embedding(query)
         
@@ -199,11 +395,15 @@ class RAGHandler:
             where_clause = {"category": category_filter}
         
         # Search
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=n_results,
-            where=where_clause
-        )
+        try:
+            results = collection.query(
+                query_embeddings=[query_embedding],
+                n_results=n_results,
+                where=where_clause
+            )
+        except Exception as e:
+            print(f"Search error: {e}")
+            return []
         
         # Format results
         formatted_results = []
@@ -219,9 +419,35 @@ class RAGHandler:
         
         return formatted_results
     
+    def multi_strategy_search(self, query: str, n_results_per_strategy: int = 3,
+                             category_filter: str = None) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Search across all chunking strategies and return combined results
+        
+        Args:
+            query: Search query
+            n_results_per_strategy: Results to get from each strategy
+            category_filter: Optional category filter
+            
+        Returns:
+            Dictionary mapping strategy names to their results
+        """
+        all_results = {}
+        
+        for strategy in self.chunking_strategies.keys():
+            results = self.search(
+                query=query,
+                n_results=n_results_per_strategy,
+                category_filter=category_filter,
+                chunking_strategy=strategy
+            )
+            all_results[strategy] = results
+        
+        return all_results
+    
     def delete_document(self, name: str, category: str):
         """
-        Delete a document from the vector store
+        Delete a document from all vector stores
         
         Args:
             name: Document name
@@ -229,47 +455,81 @@ class RAGHandler:
         """
         doc_id = hashlib.md5(f"{name}_{category}".encode()).hexdigest()
         
-        try:
-            self.collection.delete(where={"doc_id": doc_id})
-        except Exception as e:
-            print(f"Error deleting document: {e}")
+        for collection in self.collections.values():
+            try:
+                collection.delete(where={"doc_id": doc_id})
+            except Exception as e:
+                print(f"Error deleting document: {e}")
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> Dict[str, Dict[str, Any]]:
         """
-        Get statistics about the knowledge base
+        Get statistics about the knowledge base for each chunking strategy
         
         Returns:
-            Dictionary with stats
+            Dictionary with stats per strategy
         """
-        count = self.collection.count()
+        all_stats = {}
         
-        # Get unique documents
-        all_results = self.collection.get()
-        unique_docs = set()
-        categories = {}
-        
-        if all_results and all_results['metadatas']:
-            for metadata in all_results['metadatas']:
-                doc_id = metadata.get('doc_id')
-                if doc_id:
-                    unique_docs.add(doc_id)
+        for strategy, collection in self.collections.items():
+            count = collection.count()
+            
+            # Get unique documents
+            try:
+                all_results = collection.get()
+                unique_docs = set()
+                categories = {}
                 
-                category = metadata.get('category', 'Unknown')
-                categories[category] = categories.get(category, 0) + 1
+                if all_results and all_results['metadatas']:
+                    for metadata in all_results['metadatas']:
+                        doc_id = metadata.get('doc_id')
+                        if doc_id:
+                            unique_docs.add(doc_id)
+                        
+                        category = metadata.get('category', 'Unknown')
+                        categories[category] = categories.get(category, 0) + 1
+                
+                all_stats[strategy] = {
+                    'total_chunks': count,
+                    'unique_documents': len(unique_docs),
+                    'categories': categories
+                }
+            except Exception as e:
+                print(f"Error getting stats for {strategy}: {e}")
+                all_stats[strategy] = {
+                    'total_chunks': 0,
+                    'unique_documents': 0,
+                    'categories': {}
+                }
         
-        return {
-            'total_chunks': count,
-            'unique_documents': len(unique_docs),
-            'categories': categories
-        }
+        return all_stats
     
     def clear_all(self):
-        """Clear all documents from the knowledge base"""
-        try:
-            self.client.delete_collection("hcmpact_knowledge")
-            self.collection = self.client.get_or_create_collection(
-                name="hcmpact_knowledge",
-                metadata={"description": "HCMPACT standards and best practices"}
-            )
-        except Exception as e:
-            print(f"Error clearing collection: {e}")
+        """Clear all documents from all knowledge bases"""
+        for strategy in list(self.chunking_strategies.keys()):
+            try:
+                collection_name = f"hcmpact_{strategy}"
+                self.client.delete_collection(collection_name)
+                
+                # Recreate collection
+                self.collections[strategy] = self.client.get_or_create_collection(
+                    name=collection_name,
+                    metadata={"description": f"HCMPACT knowledge with {strategy} chunking"}
+                )
+            except Exception as e:
+                print(f"Error clearing {strategy} collection: {e}")
+    
+    def get_collection_info(self) -> Dict[str, Any]:
+        """Get information about all collections"""
+        info = {
+            'strategies': list(self.chunking_strategies.keys()),
+            'collections': {}
+        }
+        
+        for strategy, collection in self.collections.items():
+            info['collections'][strategy] = {
+                'name': collection.name,
+                'count': collection.count(),
+                'metadata': collection.metadata
+            }
+        
+        return info
