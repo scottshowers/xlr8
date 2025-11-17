@@ -13,8 +13,15 @@ class DocumentProcessor:
     """Handles document upload and processing with proper metadata."""
     
     def __init__(self):
-        self.rag_handler = RAGHandler()
-        self.supported_extensions = ['.pdf', '.docx', '.txt', '.md']
+        try:
+            self.rag_handler = RAGHandler()
+            self.supported_extensions = ['.pdf', '.docx', '.txt', '.md']
+            logger.info("DocumentProcessor initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize DocumentProcessor: {e}")
+            self.rag_handler = None
+            self.supported_extensions = ['.pdf', '.docx', '.txt', '.md']
+            raise RuntimeError(f"DocumentProcessor initialization failed: {e}")
     
     def extract_text_from_pdf(self, file) -> str:
         """Extract text from PDF file."""
