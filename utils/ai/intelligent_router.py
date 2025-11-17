@@ -42,10 +42,10 @@ class IntelligentRouter:
     Orchestrates query routing through the intelligent chat system.
     
     Decision Flow:
-    1. Check for PII → If found, anonymize and force local LLM
-    2. Check complexity → Simple: Mistral, Complex: DeepSeek
-    3. Check ChromaDB → If HCMPACT docs exist, enhance with context
-    4. If no PII and no ChromaDB → Route to Claude API for general knowledge
+    1. Check for PII  If found, anonymize and force local LLM
+    2. Check complexity  Simple: Mistral, Complex: DeepSeek
+    3. Check ChromaDB  If HCMPACT docs exist, enhance with context
+    4. If no PII and no ChromaDB  Route to Claude API for general knowledge
     """
     
     def __init__(self, 
@@ -162,7 +162,7 @@ class IntelligentRouter:
                 complexity=complexity_result['complexity']
             )
         else:
-            # Simple/medium questions without HCMPACT context → Claude API
+            # Simple/medium questions without HCMPACT context  Claude API
             if self.claude_api_key:
                 logger.info(f"{complexity_result['complexity'].capitalize()} query - routing to Claude API")
                 return RouterDecision(
