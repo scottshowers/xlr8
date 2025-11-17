@@ -273,14 +273,29 @@ class AdvancedRAGHandler:
             
             auth = HTTPBasicAuth(self.embed_username, self.embed_password)
             
+            print(f"[EMBED DEBUG] Generating embedding for: '{text[:50]}...'")
+            print(f"[EMBED DEBUG] Using endpoint: {url}")
+            
             response = requests.post(url, json=payload, auth=auth, timeout=30)
             response.raise_for_status()
             
             result = response.json()
-            return result.get('embedding', [])
+            embedding = result.get('embedding', [])
+            
+            if not embedding or len(embedding) == 0:
+                print(f"[EMBED ERROR] Empty embedding returned!")
+                return [0.0] * 768
+            
+            # Check if embedding is all zeros
+            if sum(embedding) == 0.0:
+                print(f"[EMBED ERROR] Zero vector returned!")
+            else:
+                print(f"[EMBED DEBUG] Valid embedding: {len(embedding)} dims, sum={sum(embedding):.2f}")
+            
+            return embedding
             
         except Exception as e:
-            print(f"Error generating embedding: {e}")
+            print(f"[EMBED ERROR] Exception: {e}")
             # Return zero vector as fallback
             return [0.0] * 768  # nomic-embed-text dimension
     
