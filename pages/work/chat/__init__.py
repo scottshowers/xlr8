@@ -4,13 +4,12 @@ Intelligent Chat Page for XLR8
 Features:
 - Automatic PII detection and protection
 - Intelligent model routing (Mistral, DeepSeek, Claude API)
-- ChromaDB context enhancement
-- Real-time response streaming
-- Source attribution
-- Professional UX with status indicators
+- ChromaDB context enhancement with detailed citations
+- Chat input at bottom, conversation flows above
+- Detailed source attribution
 
 Author: HCMPACT
-Version: 1.0
+Version: 1.1
 """
 
 import streamlit as st
@@ -40,8 +39,15 @@ def render_chat_page():
     """, unsafe_allow_html=True)
     
     # Initialize chat system
-    if not _initialize_chat_system():
+    init_result = _initialize_chat_system()
+    if not init_result['success']:
+        st.error(init_result['message'])
         return
+    
+    # Show configuration status
+    if init_result.get('warnings'):
+        for warning in init_result['warnings']:
+            st.warning(warning)
     
     # Sidebar settings
     _render_sidebar_settings()
@@ -50,22 +56,26 @@ def render_chat_page():
     _render_chat_interface()
 
 
-def _initialize_chat_system() -> bool:
+def _initialize_chat_system() -> Dict[str, Any]:
     """
     Initialize the intelligent chat system components.
     
     Returns:
-        True if successful, False otherwise
+        Dict with success, message, and warnings
     """
     try:
+        warnings = []
+        
         # Get configuration from session state
         config = st.session_state.get('config', {})
         
         # Ollama endpoint
         ollama_endpoint = st.session_state.get('llm_endpoint', '')
         if not ollama_endpoint:
-            st.warning("⚠️ Local LLM endpoint not configured. Please configure in Connectivity tab.")
-            return False
+            return {
+                'success': False,
+                'message': "⚠️ Local LLM endpoint not configured. Please configure in Connectivity tab."
+            }
         
         # Ollama auth (if configured)
         ollama_auth = None
@@ -74,11 +84,15 @@ def _initialize_chat_system() -> bool:
         if llm_username and llm_password:
             ollama_auth = (llm_username, llm_password)
         
-        # Claude API key (optional)
+        # Claude API key (optional but recommended)
         claude_api_key = st.session_state.get('claude_api_key', '').strip()
+        if not claude_api_key:
+            warnings.append("💡 Claude API key not configured - all queries will use local LLM. Add API key in Connectivity tab for faster general knowledge responses.")
         
         # ChromaDB handler (if available)
         chromadb_handler = st.session_state.get('rag_handler')
+        if not chromadb_handler:
+            warnings.append("📚 ChromaDB not initialized - responses won't include HCMPACT knowledge. Upload documents in Knowledge tab.")
         
         # Initialize components if not already done
         if 'intelligent_router' not in st.session_state:
@@ -103,12 +117,18 @@ def _initialize_chat_system() -> bool:
         if 'chat_history' not in st.session_state:
             st.session_state.chat_history = []
         
-        return True
+        return {
+            'success': True,
+            'message': 'Chat system initialized',
+            'warnings': warnings
+        }
         
     except Exception as e:
-        st.error(f"Error initializing chat system: {e}")
         logger.error(f"Chat initialization error: {e}", exc_info=True)
-        return False
+        return {
+            'success': False,
+            'message': f"Error initializing chat system: {e}"
+        }
 
 
 def _render_sidebar_settings():
@@ -117,35 +137,38 @@ def _render_sidebar_settings():
     with st.sidebar:
         st.markdown("### ⚙️ Chat Settings")
         
+        # Debug mode
+        debug_mode = st.checkbox(
+            "🔍 Debug Mode",
+            value=st.session_state.get('chat_debug_mode', False),
+            help="Show routing decisions and system info"
+        )
+        st.session_state.chat_debug_mode = debug_mode
+        
+        st.markdown("---")
+        
         # Show/hide settings
+        show_sources = st.checkbox(
+            "📚 Show Knowledge Sources",
+            value=st.session_state.get('show_chat_sources', True),
+            help="Display HCMPACT knowledge sources used (inline with response)"
+        )
+        st.session_state.show_chat_sources = show_sources
+        
         show_metadata = st.checkbox(
-            "Show Response Metadata",
+            "📊 Show Response Metadata",
             value=st.session_state.get('show_chat_metadata', True),
             help="Display model used, response time, complexity, etc."
         )
         st.session_state.show_chat_metadata = show_metadata
-        
-        show_sources = st.checkbox(
-            "Show Knowledge Sources",
-            value=st.session_state.get('show_chat_sources', True),
-            help="Display HCMPACT knowledge sources used"
-        )
-        st.session_state.show_chat_sources = show_sources
-        
-        show_decision = st.checkbox(
-            "Show Routing Decision",
-            value=st.session_state.get('show_routing_decision', True),
-            help="Display which model was selected and why"
-        )
-        st.session_state.show_routing_decision = show_decision
         
         # ChromaDB sources
         st.markdown("---")
         num_sources = st.slider(
             "Knowledge Sources to Retrieve",
             min_value=1,
-            max_value=10,
-            value=st.session_state.get('num_chromadb_sources', 5),
+            max_value=15,
+            value=st.session_state.get('num_chromadb_sources', 8),
             help="Number of HCMPACT documents to use for context"
         )
         st.session_state.num_chromadb_sources = num_sources
@@ -160,11 +183,15 @@ def _render_sidebar_settings():
 def _render_chat_interface():
     """Render the main chat interface"""
     
-    # Display chat history
-    for message in st.session_state.get('chat_history', []):
-        _render_message(message)
+    # Container for chat messages (scrollable)
+    chat_container = st.container()
     
-    # Chat input
+    with chat_container:
+        # Display chat history
+        for message in st.session_state.get('chat_history', []):
+            _render_message(message)
+    
+    # Chat input at bottom (always visible)
     user_input = st.chat_input("Ask me anything about UKG implementations...")
     
     if user_input:
@@ -176,12 +203,17 @@ def _render_chat_interface():
         }
         st.session_state.chat_history.append(user_message)
         
-        # Display user message
-        with st.chat_message("user"):
-            st.markdown(user_input)
-        
         # Generate and display assistant response
-        _generate_and_display_response(user_input)
+        with chat_container:
+            # Display user message
+            with st.chat_message("user"):
+                st.markdown(user_input)
+            
+            # Generate response
+            _generate_and_display_response(user_input)
+        
+        # Rerun to update the display
+        st.rerun()
 
 
 def _render_message(message: Dict[str, Any]):
@@ -195,46 +227,88 @@ def _render_message(message: Dict[str, Any]):
     content = message.get('content', '')
     
     with st.chat_message(role):
+        # Main response
         st.markdown(content)
         
-        # Show routing decision if available and enabled
-        if (role == 'assistant' and 
-            st.session_state.get('show_routing_decision', True) and 
-            message.get('routing_decision')):
-            
-            decision = message['routing_decision']
-            st.info(decision)
-        
-        # Show sources if available and enabled
+        # Show inline citations if available
         if (role == 'assistant' and 
             st.session_state.get('show_chat_sources', True) and 
             message.get('sources')):
             
-            with st.expander(f"📚 {len(message['sources'])} Knowledge Sources", expanded=False):
-                for source in message['sources']:
-                    st.markdown(f"**{source['index']}. {source['document_name']}** ({source['category']})")
-                    if source.get('excerpt'):
-                        st.caption(source['excerpt'])
-                    st.markdown("")
+            st.markdown("---")
+            st.markdown("**📚 Sources:**")
+            
+            for source in message['sources']:
+                # Detailed source citation
+                source_text = f"**[{source['index']}]** {source['document_name']}"
+                
+                if source.get('category'):
+                    source_text += f" *({source['category']})*"
+                
+                if source.get('relevance_score'):
+                    score = 1.0 - source['relevance_score']
+                    if score >= 0.8:
+                        relevance = "🟢 Highly Relevant"
+                    elif score >= 0.6:
+                        relevance = "🟡 Relevant"
+                    else:
+                        relevance = "🟠 Somewhat Relevant"
+                    source_text += f" - {relevance} ({score:.0%})"
+                
+                st.markdown(source_text)
+                
+                # Show excerpt
+                if source.get('excerpt'):
+                    st.caption(f"↳ *{source['excerpt']}*")
+                
+                # Show metadata if available
+                if source.get('metadata'):
+                    metadata = source['metadata']
+                    details = []
+                    if metadata.get('page'):
+                        details.append(f"Page {metadata['page']}")
+                    if metadata.get('section'):
+                        details.append(f"Section: {metadata['section']}")
+                    if metadata.get('file_path'):
+                        details.append(f"File: {metadata['file_path'].split('/')[-1]}")
+                    
+                    if details:
+                        st.caption(f"↳ {' | '.join(details)}")
+                
+                st.markdown("")
+        
+        # Show debug info if enabled
+        if (role == 'assistant' and 
+            st.session_state.get('chat_debug_mode', False) and 
+            message.get('debug_info')):
+            
+            with st.expander("🔍 Debug Information", expanded=False):
+                debug = message['debug_info']
+                st.json(debug)
         
         # Show metadata if available and enabled
         if (role == 'assistant' and 
             st.session_state.get('show_chat_metadata', True) and 
             message.get('metadata')):
             
+            st.markdown("---")
             metadata = message['metadata']
             
-            cols = st.columns(4)
+            cols = st.columns(5)
             with cols[0]:
-                st.metric("Model", metadata.get('model', 'Unknown'))
+                st.metric("Model", metadata.get('model_display', 'Unknown'))
             with cols[1]:
                 st.metric("Time", f"{metadata.get('processing_time', 0):.1f}s")
             with cols[2]:
-                st.metric("Complexity", metadata.get('complexity', 'Unknown').capitalize())
+                complexity = metadata.get('complexity', 'Unknown').capitalize()
+                st.metric("Complexity", complexity)
             with cols[3]:
                 confidence = metadata.get('confidence_level', 'medium')
                 emoji = {'high': '🟢', 'medium': '🟡', 'low': '🟠'}.get(confidence, '⚪')
                 st.metric("Confidence", f"{emoji} {confidence.capitalize()}")
+            with cols[4]:
+                routing = metadata.get('routing_type', 'Unknown')
+                st.metric("Route", routing)
 
 
 def _generate_and_display_response(user_query: str):
@@ -247,8 +321,7 @@ def _generate_and_display_response(user_query: str):
     start_time = time.time()
     
     with st.chat_message("assistant"):
-        # Create placeholders for progressive display
-        status_placeholder = st.empty()
+        # Create placeholder for response
         response_placeholder = st.empty()
         
         try:
@@ -257,28 +330,48 @@ def _generate_and_display_response(user_query: str):
             llm_caller = st.session_state.llm_caller
             synthesizer = st.session_state.response_synthesizer
             
-            # STEP 1: Make routing decision
-            status_placeholder.info("🧠 Analyzing query and selecting best model...")
+            # Show initial status
+            with response_placeholder.container():
+                st.info("🧠 Analyzing query and selecting best approach...")
             
-            num_sources = st.session_state.get('num_chromadb_sources', 5)
+            # STEP 1: Make routing decision
+            num_sources = st.session_state.get('num_chromadb_sources', 8)
             decision = router.make_routing_decision(user_query, num_sources)
             
-            # Show decision if enabled
-            if st.session_state.get('show_routing_decision', True):
-                decision_text = router.get_decision_explanation(decision)
-                status_placeholder.info(decision_text)
-            else:
-                status_placeholder.info("🤖 Generating response...")
+            # Debug info
+            debug_info = {
+                'routing_decision': {
+                    'use_local_llm': decision.use_local_llm,
+                    'model': decision.model_name,
+                    'reason': decision.reason,
+                    'has_pii': decision.has_pii,
+                    'complexity': decision.complexity,
+                    'chromadb_sources': len(decision.chromadb_context) if decision.chromadb_context else 0
+                }
+            }
+            
+            # Show routing decision
+            if st.session_state.get('chat_debug_mode', False):
+                with response_placeholder.container():
+                    decision_text = router.get_decision_explanation(decision)
+                    st.info(f"**Routing Decision:** {decision_text}")
+                    st.caption(f"Reason: {decision.reason}")
             
             # STEP 2: Determine the query to send (anonymized if PII detected)
             query_to_send = decision.anonymized_query if decision.anonymized_query else user_query
             
             # STEP 3: Build enhanced prompt with ChromaDB context if available
+            with response_placeholder.container():
+                if decision.chromadb_context:
+                    st.info(f"📚 Found {len(decision.chromadb_context)} relevant knowledge sources. Building enhanced prompt...")
+                else:
+                    st.info("🤖 Generating response...")
+            
             if decision.chromadb_context:
                 enhanced_prompt = synthesizer.build_enhanced_prompt(
                     user_query=query_to_send,
                     chromadb_context=decision.chromadb_context,
-                    system_context="You are an expert UKG implementation consultant from HCMPACT."
+                    system_context="You are an expert UKG implementation consultant from HCMPACT. Use the provided knowledge sources to give accurate, detailed answers. Always cite which sources you're referencing."
                 )
             else:
                 enhanced_prompt = query_to_send
@@ -286,16 +379,24 @@ def _generate_and_display_response(user_query: str):
             # STEP 4: Call appropriate LLM
             if decision.use_local_llm:
                 # Local Ollama call
+                with response_placeholder.container():
+                    model_display = decision.model_name.replace(":7b", "").replace(":latest", "")
+                    st.info(f"🤖 Using {model_display}...")
+                
                 llm_response = llm_caller.call_ollama(
                     prompt=enhanced_prompt,
                     model=decision.model_name,
-                    system_prompt="You are an expert UKG implementation consultant from HCMPACT. Provide accurate, helpful answers.",
+                    system_prompt="You are an expert UKG implementation consultant from HCMPACT. Provide accurate, helpful answers. When using provided knowledge sources, cite them specifically (e.g., 'According to the UKG Pro Configuration Guide...').",
                     temperature=0.7,
                     max_tokens=4096
                 )
                 response_text = llm_response['response']
+                routing_type = "Local LLM"
             else:
                 # Claude API call
+                with response_placeholder.container():
+                    st.info(f"🌐 Using Claude API...")
+                
                 llm_response = llm_caller.call_claude_api(
                     prompt=enhanced_prompt,
                     system_prompt="You are an expert UKG implementation consultant from HCMPACT. Provide accurate, helpful answers.",
@@ -303,6 +404,7 @@ def _generate_and_display_response(user_query: str):
                     temperature=0.7
                 )
                 response_text = llm_response['response']
+                routing_type = "Claude API"
             
             # STEP 5: Process response (de-anonymize if needed)
             final_response = router.process_response(response_text, decision)
@@ -320,36 +422,39 @@ def _generate_and_display_response(user_query: str):
             )
             
             # Clear status and show final response
-            status_placeholder.empty()
             response_placeholder.markdown(synthesized.text)
+            
+            # Prepare model display name
+            model_display = decision.model_name.replace(":7b", "").replace(":latest", "").replace("-", " ").title()
             
             # Save to chat history
             assistant_message = {
                 'role': 'assistant',
                 'content': synthesized.text,
                 'timestamp': time.time(),
-                'routing_decision': router.get_decision_explanation(decision) if st.session_state.get('show_routing_decision', True) else None,
-                'sources': synthesized.sources if st.session_state.get('show_chat_sources', True) else None,
+                'sources': synthesized.sources,
                 'metadata': {
-                    'model': synthesized.model_used,
+                    'model': decision.model_name,
+                    'model_display': model_display,
                     'processing_time': synthesized.processing_time,
                     'complexity': synthesized.complexity,
                     'confidence_level': synthesized.confidence_level,
-                    'pii_protected': synthesized.has_pii_protection
-                } if st.session_state.get('show_chat_metadata', True) else None
+                    'pii_protected': synthesized.has_pii_protection,
+                    'routing_type': routing_type
+                },
+                'debug_info': debug_info if st.session_state.get('chat_debug_mode', False) else None
             }
             
             st.session_state.chat_history.append(assistant_message)
             
         except Exception as e:
-            status_placeholder.empty()
-            response_placeholder.error(f"Error generating response: {str(e)}")
+            response_placeholder.error(f"❌ Error generating response: {str(e)}")
             logger.error(f"Response generation error: {e}", exc_info=True)
             
             # Save error to history
             error_message = {
                 'role': 'assistant',
-                'content': f"I apologize, but I encountered an error: {str(e)}",
+                'content': f"I apologize, but I encountered an error while processing your request:\n\n```\n{str(e)}\n```\n\nPlease try rephrasing your question or contact support if the issue persists.",
                 'timestamp': time.time(),
                 'error': True
             }
