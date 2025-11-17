@@ -1,5 +1,5 @@
 """
-HCMPACT LLM Seeding - With Real-time Progress
+HCMPACT LLM Seeding - Progress v2 with forced UI updates
 """
 
 import streamlit as st
@@ -7,6 +7,7 @@ from datetime import datetime
 import PyPDF2
 from docx import Document
 import pandas as pd
+import time
 
 
 def render_knowledge_page():
@@ -17,7 +18,7 @@ def render_knowledge_page():
     st.markdown("""
     <div class='info-box'>
         <strong>LLM Seeding:</strong> Upload HCMPACT standards, best practices,
-        and technical documentation. These documents power the AI Assistant's responses.
+        and technical documentation.
     </div>
     """, unsafe_allow_html=True)
     
@@ -97,22 +98,27 @@ def render_knowledge_page():
     
     if uploaded_files:
         if st.button("Process and Seed LLM", type="primary", use_container_width=True):
-            # Create containers for real-time updates
-            progress_container = st.container()
-            status_container = st.container()
+            print(f"[UPLOAD] Starting upload of {len(uploaded_files)} files")
             
-            with progress_container:
-                progress_bar = st.progress(0)
+            # Create placeholders OUTSIDE the loop
+            progress_placeholder = st.empty()
+            status_placeholder = st.empty()
             
             total_files = len(uploaded_files)
             
             for idx, uploaded_file in enumerate(uploaded_files):
-                # Update status
-                with status_container:
-                    st.info(f"Processing {uploaded_file.name}... ({idx+1}/{total_files})")
+                print(f"[UPLOAD] Processing file {idx+1}/{total_files}: {uploaded_file.name}")
+                
+                # Update status FIRST
+                status_placeholder.info(f"Processing {uploaded_file.name}... ({idx+1}/{total_files})")
+                progress_placeholder.progress((idx) / total_files)
+                
+                start_time = time.time()
                 
                 # Extract text
                 content = _extract_text(uploaded_file)
+                extract_time = time.time() - start_time
+                print(f"[UPLOAD] Text extraction took {extract_time:.2f}s")
                 
                 if content:
                     try:
@@ -131,35 +137,35 @@ def render_knowledge_page():
                             kwargs['chunking_strategy'] = chunking_strategy
                         
                         # Process document
+                        chunk_start = time.time()
                         result = rag_handler.add_document(**kwargs)
+                        chunk_time = time.time() - chunk_start
+                        
+                        print(f"[UPLOAD] Chunking/embedding took {chunk_time:.2f}s")
                         
                         # Show result
-                        with status_container:
-                            if isinstance(result, dict):
-                                total_chunk_count = sum(result.values())
-                                strategy_info = ", ".join([f"{k}: {v}" for k, v in result.items()])
-                                st.success(f"SUCCESS: {uploaded_file.name} - {total_chunk_count} chunks ({strategy_info})")
-                            else:
-                                st.success(f"SUCCESS: {uploaded_file.name} - {result} chunks")
+                        if isinstance(result, dict):
+                            total_chunk_count = sum(result.values())
+                            strategy_info = ", ".join([f"{k}: {v}" for k, v in result.items()])
+                            status_placeholder.success(f"SUCCESS: {uploaded_file.name} - {total_chunk_count} chunks ({strategy_info})")
+                        else:
+                            status_placeholder.success(f"SUCCESS: {uploaded_file.name} - {result} chunks")
                     
                     except Exception as e:
-                        with status_container:
-                            st.error(f"ERROR: {uploaded_file.name} - {str(e)}")
+                        print(f"[UPLOAD] ERROR: {str(e)}")
+                        status_placeholder.error(f"ERROR: {uploaded_file.name} - {str(e)}")
                         import traceback
-                        with st.expander("Error details"):
-                            st.code(traceback.format_exc())
+                        traceback.print_exc()
                 else:
-                    with status_container:
-                        st.error(f"Failed to extract text from {uploaded_file.name}")
+                    status_placeholder.error(f"Failed to extract text from {uploaded_file.name}")
                 
                 # Update progress
-                with progress_container:
-                    progress_bar.progress((idx + 1) / total_files)
+                progress_placeholder.progress((idx + 1) / total_files)
             
-            st.success(f"Processed {total_files} document(s)")
+            status_placeholder.success(f"Processed {total_files} document(s)")
             st.balloons()
             
-            import time
+            print("[UPLOAD] Complete, reloading page...")
             time.sleep(2)
             st.rerun()
     
