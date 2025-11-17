@@ -16,9 +16,24 @@ class RAGHandler:
     
     def __init__(self):
         """Initialize the RAG handler with ChromaDB and embedding configuration."""
-        # Ensure persistent directory exists
-        persist_directory = "/data/chromadb"
-        os.makedirs(persist_directory, exist_ok=True)
+        # Try to use persistent directory, fall back to local if /data not available
+        persist_directory = None
+        
+        # Try /data first (Railway volume)
+        if os.path.exists("/data") or os.access("/", os.W_OK):
+            try:
+                persist_directory = "/data/chromadb"
+                os.makedirs(persist_directory, exist_ok=True)
+                logger.info(f"Using persistent storage at {persist_directory}")
+            except (OSError, PermissionError) as e:
+                logger.warning(f"Cannot use /data: {e}, falling back to local storage")
+                persist_directory = None
+        
+        # Fall back to local directory if /data not available
+        if persist_directory is None:
+            persist_directory = os.path.join(os.getcwd(), ".chromadb")
+            os.makedirs(persist_directory, exist_ok=True)
+            logger.warning(f"Using local storage at {persist_directory} (will reset on deploy)")
         
         # Initialize ChromaDB with PERSISTENT storage
         self.client = chromadb.PersistentClient(
