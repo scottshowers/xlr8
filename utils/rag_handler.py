@@ -261,7 +261,7 @@ class AdvancedRAGHandler:
             text: Text to embed
             
         Returns:
-            Embedding vector
+            Embedding vector (normalized)
         """
         try:
             url = f"{self.embed_endpoint}/api/embeddings"
@@ -286,11 +286,21 @@ class AdvancedRAGHandler:
                 print(f"[EMBED ERROR] Empty embedding returned!")
                 return [0.0] * 768
             
-            # Check if embedding is all zeros
-            if sum(embedding) == 0.0:
-                print(f"[EMBED ERROR] Zero vector returned!")
+            # Calculate L2 norm for diagnostics
+            import math
+            norm = math.sqrt(sum(x*x for x in embedding))
+            
+            print(f"[EMBED DEBUG] Raw embedding: {len(embedding)} dims, sum={sum(embedding):.4f}, L2_norm={norm:.4f}")
+            
+            # CRITICAL FIX: Normalize the embedding
+            # ChromaDB uses L2 distance which requires normalized vectors
+            if norm > 0:
+                normalized = [x / norm for x in embedding]
+                norm_check = math.sqrt(sum(x*x for x in normalized))
+                print(f"[EMBED DEBUG] Normalized: L2_norm={norm_check:.4f} (should be 1.0)")
+                embedding = normalized
             else:
-                print(f"[EMBED DEBUG] Valid embedding: {len(embedding)} dims, sum={sum(embedding):.2f}")
+                print(f"[EMBED ERROR] Zero norm - cannot normalize!")
             
             return embedding
             
