@@ -94,12 +94,47 @@ def render_knowledge_page():
     # NUCLEAR CLEAR CHROMADB (deletes persist directory)
     with st.expander("[X] NUCLEAR RESET (Delete ALL ChromaDB Data)"):
         st.error("NUCLEAR OPTION: This physically deletes the ChromaDB directory and restarts from scratch.")
+        
+        # Show actual persist directory
+        persist_dir = getattr(rag_handler, 'persist_directory', '/root/.xlr8_chroma')
+        st.info(f"Persist directory: {persist_dir}")
+        
+        # Check if directory exists
+        import os
+        if os.path.exists(persist_dir):
+            st.success(f"[OK] Directory exists")
+            try:
+                # Show size
+                import subprocess
+                result = subprocess.run(['du', '-sh', persist_dir], capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    st.write(f"Size: {result.stdout.strip()}")
+            except:
+                pass
+        else:
+            st.warning(f"[!] Directory doesn't exist at {persist_dir}")
+            st.info("Checking alternate locations...")
+            
+            # Check common locations
+            possible_paths = [
+                '/root/.xlr8_chroma',
+                '/tmp/xlr8_chroma',
+                '/home/claude/.xlr8_chroma',
+                os.path.expanduser('~/.xlr8_chroma'),
+                './chroma_db',
+                './.xlr8_chroma'
+            ]
+            
+            for path in possible_paths:
+                if os.path.exists(path):
+                    st.success(f"[OK] Found at: {path}")
+                    persist_dir = path
+                    break
+        
         st.warning("Use this if:")
         st.markdown("- Search distance >100 after re-upload")
         st.markdown("- Regular clear didn't work")
         st.markdown("- Embeddings are corrupted beyond repair")
-        
-        st.info("This will require app restart after deletion.")
         
         confirm = st.checkbox("I understand this will delete everything and require restart")
         
@@ -107,9 +142,6 @@ def render_knowledge_page():
             if st.button("[X] NUCLEAR DELETE", type="primary"):
                 try:
                     import shutil
-                    import os
-                    
-                    persist_dir = rag_handler.persist_directory if hasattr(rag_handler, 'persist_directory') else '/root/.xlr8_chroma'
                     
                     if os.path.exists(persist_dir):
                         # Delete the entire directory
@@ -118,11 +150,12 @@ def render_knowledge_page():
                         st.warning("RESTART REQUIRED: Refresh the page or restart Railway service")
                         st.info("After restart, re-upload your documents")
                     else:
-                        st.info(f"Directory doesn't exist: {persist_dir}")
+                        st.error(f"Directory doesn't exist: {persist_dir}")
+                        st.info("Check Railway environment or use Railway shell")
                         
                 except Exception as e:
                     st.error(f"Error: {e}")
-                    st.info("If this fails, use Railway shell: rm -rf /root/.xlr8_chroma")
+                    st.code(str(e))
     
     st.markdown("---")
     
