@@ -1,248 +1,220 @@
 """
-HCMPACT LLM Seeding - Progress v2 with forced UI updates
+Sidebar Component - COMPLETE FIXED VERSION
+Fixes: ChromaDB status display, LLM connection test button
 """
 
 import streamlit as st
-from datetime import datetime
-import PyPDF2
-from docx import Document
-import pandas as pd
-import time
+import requests
+from requests.auth import HTTPBasicAuth
 
 
-def render_knowledge_page():
-    """Render LLM seeding page"""
+def render_sidebar():
+    """Render the main sidebar"""
     
-    st.markdown("## HCMPACT LLM Seeding")
+    with st.sidebar:
+        # Logo
+        st.markdown("""
+        <div style='text-align: center; padding-bottom: 2rem; border-bottom: 2px solid #d1dce5; margin-bottom: 2rem;'>
+            <div style='width: 80px; height: 80px; margin: 0 auto 1rem; background: white; border: 4px solid #6d8aa0; border-radius: 16px; display: flex; align-items: center; justify-content: center; color: #6d8aa0; font-size: 2rem; font-weight: 700; box-shadow: 0 6px 20px rgba(109, 138, 160, 0.25);'></div>
+            <div style='font-size: 1.5rem; font-weight: 700; color: #6d8aa0; margin-bottom: 0.25rem;'>XLR8</div>
+            <div style='font-size: 0.85rem; color: #7d96a8; font-weight: 500;'>by HCMPACT</div>
+            <div style='display: inline-block; background: rgba(109, 138, 160, 0.15); color: #6d8aa0; padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; margin-top: 0.5rem;'>v3.0</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Project selector
+        _render_project_selector()
+        
+        st.markdown("---")
+        
+        # AI/RAG status
+        _render_ai_selector()
+        
+        st.markdown("---")
+        
+        # Status
+        _render_status()
+
+
+def _render_project_selector():
+    """Render project selector"""
+    st.markdown("###  Project")
     
-    st.markdown("""
-    <div class='info-box'>
-        <strong>LLM Seeding:</strong> Upload HCMPACT standards, best practices,
-        and technical documentation.
-    </div>
-    """, unsafe_allow_html=True)
+    # Safe check for projects
+    if st.session_state.get('projects'):
+        project_names = list(st.session_state.projects.keys())
+        current = st.session_state.get('current_project')
+        
+        selected = st.selectbox(
+            "Select Project",
+            [""] + project_names,
+            index=project_names.index(current) + 1 if current in project_names else 0,
+            key="sidebar_project_selector"
+        )
+        
+        if selected and selected != st.session_state.get('current_project'):
+            st.session_state.current_project = selected
+            st.rerun()
+        
+        if current:
+            project_data = st.session_state.projects.get(current, {})
+            st.markdown(f"""
+            <div style='font-size: 0.85rem; color: #6c757d; margin-top: 0.5rem;'>
+                <strong>Type:</strong> {project_data.get('implementation_type', 'N/A')}<br>
+                <strong>Customer:</strong> {project_data.get('customer_id', 'N/A')}
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.info("No projects yet")
+
+
+def _render_ai_selector():
+    """Render AI/RAG status and LLM provider selector - FIXED VERSION"""
+    st.markdown("###  AI System")
+    
+    # LLM Provider Selection
+    llm_provider = st.selectbox(
+        "- AI Provider",
+        ["Local LLM", "Claude API"],
+        index=0 if st.session_state.get('llm_provider', 'local') == 'local' else 1,
+        help="Choose between local DeepSeek or Claude API"
+    )
+    
+    # Update session state
+    new_provider = 'local' if llm_provider == "Local LLM" else 'claude'
+    if st.session_state.get('llm_provider') != new_provider:
+        st.session_state.llm_provider = new_provider
+    
+    # Show provider-specific config
+    if llm_provider == "Local LLM":
+        st.markdown("""
+        <div style='font-size: 0.8rem; color: #28a745; padding: 0.5rem; background: rgba(40, 167, 69, 0.1); border-radius: 4px; margin-bottom: 0.5rem;'>
+             <strong>Local DeepSeek</strong><br>
+             Free, Private<br>
+             Good for detailed docs<br>
+             Model: deepseek-r1:7b
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # ... FIX #2: LLM Connection Test Button
+        if st.button(" Test Connection", use_container_width=True):
+            with st.spinner("Testing..."):
+                try:
+                    endpoint = st.session_state.get('llm_endpoint', 'http://178.156.190.64:11435')
+                    username = st.session_state.get('llm_username', 'xlr8')
+                    password = st.session_state.get('llm_password', 'Argyle76226#')
+                    
+                    response = requests.get(
+                        f"{endpoint}/api/tags",
+                        auth=HTTPBasicAuth(username, password),
+                        timeout=5
+                    )
+                    
+                    if response.status_code == 200:
+                        st.success("... Connected!")
+                    else:
+                        st.error(f" Failed: HTTP {response.status_code}")
+                except Exception as e:
+                    st.error(f" Error: {str(e)[:50]}")
+    else:  # Claude API
+        # API Key input
+        api_key = st.text_input(
+            "Claude API Key",
+            type="password",
+            value=st.session_state.get('claude_api_key', ''),
+            help="Get your key at console.anthropic.com",
+            key="claude_api_key_input"
+        )
+        
+        # Save button
+        if st.button(" Save API Key", type="primary"):
+            st.session_state.claude_api_key = api_key
+            st.success("API Key saved!")
+            st.rerun()
+        
+        # Show status
+        if st.session_state.get('claude_api_key'):
+            st.markdown("""
+            <div style='font-size: 0.8rem; color: #007bff; padding: 0.5rem; background: rgba(0, 123, 255, 0.1); border-radius: 4px; margin-top: 0.5rem;'>
+                 <strong>Claude API</strong><br>
+                 Excellent quality<br>
+                 ~$0.015 per response<br>
+                 Model: Claude Sonnet 4
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.warning(" API key required")
+            st.markdown("[Get API key ](https://console.anthropic.com/)", unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # ... FIX #1: ChromaDB Status Display
+    st.markdown("#### - HCMPACT LLM")
     
     rag_handler = st.session_state.get('rag_handler')
     
-    if not rag_handler:
-        st.error("RAG system not initialized")
-        return
-    
-    is_advanced = hasattr(rag_handler, 'chunking_strategies') and rag_handler.chunking_strategies
-    
-    # Get stats
-    try:
-        stats = rag_handler.get_stats()
-        
-        if isinstance(stats, dict) and any(isinstance(v, dict) for v in stats.values()):
-            total_docs = sum(s.get('unique_documents', 0) for s in stats.values() if isinstance(s, dict))
-            total_chunks = sum(s.get('total_chunks', 0) for s in stats.values() if isinstance(s, dict))
-            strategies_used = len([s for s in stats.values() if isinstance(s, dict) and s.get('total_chunks', 0) > 0])
-            
-            all_categories = set()
-            for s in stats.values():
-                if isinstance(s, dict):
-                    all_categories.update(s.get('categories', {}).keys())
-            category_count = len(all_categories)
-        else:
-            total_docs = stats.get('unique_documents', 0)
-            total_chunks = stats.get('total_chunks', 0)
-            strategies_used = 1 if total_chunks > 0 else 0
-            category_count = len(stats.get('categories', {}))
-    except Exception as e:
-        st.error(f"Error getting stats: {str(e)}")
-        total_docs = total_chunks = strategies_used = category_count = 0
-    
-    # Display stats
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Documents", total_docs)
-    with col2:
-        st.metric("Total Chunks", total_chunks)
-    with col3:
-        st.metric("Strategies" if is_advanced else "Collections", strategies_used)
-    with col4:
-        st.metric("Categories", category_count)
-    
-    if is_advanced:
-        st.success("Advanced RAG enabled")
-    
-    st.markdown("---")
-    st.markdown("### Upload Documents")
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        uploaded_files = st.file_uploader(
-            "Upload HCMPACT documents",
-            type=['pdf', 'txt', 'md', 'docx'],
-            accept_multiple_files=True,
-            help="Upload standards, best practices, guides"
-        )
-    
-    with col2:
-        category = st.selectbox(
-            "Category",
-            ["PRO Core", "WFM", "Payroll", "Benefits", "Time & Attendance", 
-             "Best Practices", "Technical", "Implementation Guides", "Other"]
-        )
-        
-        if is_advanced:
-            chunking_strategy = st.selectbox(
-                "Chunking Strategy",
-                ["adaptive", "semantic", "recursive", "sliding", "paragraph", "all"],
-                help="'adaptive' automatically chooses best method"
-            )
-        else:
-            chunking_strategy = None
-    
-    if uploaded_files:
-        if st.button("Process and Seed LLM", type="primary", use_container_width=True):
-            print(f"[UPLOAD] Starting upload of {len(uploaded_files)} files")
-            
-            # Create placeholders OUTSIDE the loop
-            progress_placeholder = st.empty()
-            status_placeholder = st.empty()
-            
-            total_files = len(uploaded_files)
-            
-            for idx, uploaded_file in enumerate(uploaded_files):
-                print(f"[UPLOAD] Processing file {idx+1}/{total_files}: {uploaded_file.name}")
-                
-                # Update status FIRST
-                status_placeholder.info(f"Processing {uploaded_file.name}... ({idx+1}/{total_files})")
-                progress_placeholder.progress((idx) / total_files)
-                
-                start_time = time.time()
-                
-                # Extract text
-                content = _extract_text(uploaded_file)
-                extract_time = time.time() - start_time
-                print(f"[UPLOAD] Text extraction took {extract_time:.2f}s")
-                
-                if content:
-                    try:
-                        kwargs = {
-                            'name': uploaded_file.name,
-                            'content': content,
-                            'category': category,
-                            'metadata': {
-                                'upload_date': datetime.now().isoformat(),
-                                'file_type': uploaded_file.type,
-                                'file_size': len(content)
-                            }
-                        }
-                        
-                        if is_advanced and chunking_strategy:
-                            kwargs['chunking_strategy'] = chunking_strategy
-                        
-                        # Process document
-                        chunk_start = time.time()
-                        result = rag_handler.add_document(**kwargs)
-                        chunk_time = time.time() - chunk_start
-                        
-                        print(f"[UPLOAD] Chunking/embedding took {chunk_time:.2f}s")
-                        
-                        # Show result
-                        if isinstance(result, dict):
-                            total_chunk_count = sum(result.values())
-                            strategy_info = ", ".join([f"{k}: {v}" for k, v in result.items()])
-                            status_placeholder.success(f"SUCCESS: {uploaded_file.name} - {total_chunk_count} chunks ({strategy_info})")
-                        else:
-                            status_placeholder.success(f"SUCCESS: {uploaded_file.name} - {result} chunks")
-                    
-                    except Exception as e:
-                        print(f"[UPLOAD] ERROR: {str(e)}")
-                        status_placeholder.error(f"ERROR: {uploaded_file.name} - {str(e)}")
-                        import traceback
-                        traceback.print_exc()
-                else:
-                    status_placeholder.error(f"Failed to extract text from {uploaded_file.name}")
-                
-                # Update progress
-                progress_placeholder.progress((idx + 1) / total_files)
-            
-            status_placeholder.success(f"Processed {total_files} document(s)")
-            st.balloons()
-            
-            print("[UPLOAD] Complete, reloading page...")
-            time.sleep(2)
-            st.rerun()
-    
-    # Statistics section
-    if total_chunks > 0:
-        st.markdown("---")
-        st.markdown("### LLM Base Statistics")
-        
+    if rag_handler:
         try:
-            if is_advanced:
-                strategy_tab, category_tab = st.tabs(["By Strategy", "By Category"])
-                
-                with strategy_tab:
-                    st.markdown("#### Chunks by Strategy")
-                    strategy_data = []
-                    
-                    for strategy_name, strategy_stats in stats.items():
-                        if isinstance(strategy_stats, dict) and strategy_stats.get('total_chunks', 0) > 0:
-                            strategy_data.append({
-                                'Strategy': strategy_name.title(),
-                                'Documents': strategy_stats.get('unique_documents', 0),
-                                'Chunks': strategy_stats.get('total_chunks', 0)
-                            })
-                    
-                    if strategy_data:
-                        df = pd.DataFrame(strategy_data)
-                        st.dataframe(df, use_container_width=True, hide_index=True)
-                        st.bar_chart(df.set_index('Strategy')['Chunks'])
-                
-                with category_tab:
-                    st.markdown("#### Chunks by Category")
-                    all_categories = {}
-                    for strategy_stats in stats.values():
-                        if isinstance(strategy_stats, dict):
-                            for cat, count in strategy_stats.get('categories', {}).items():
-                                all_categories[cat] = all_categories.get(cat, 0) + count
-                    
-                    if all_categories:
-                        category_data = [
-                            {'Category': cat, 'Chunks': count}
-                            for cat, count in sorted(all_categories.items(), key=lambda x: x[1], reverse=True)
-                        ]
-                        df = pd.DataFrame(category_data)
-                        st.dataframe(df, use_container_width=True, hide_index=True)
-                        st.bar_chart(df.set_index('Category')['Chunks'])
-        except Exception as e:
-            st.warning(f"Could not display statistics: {str(e)}")
-
-
-def _extract_text(uploaded_file) -> str:
-    """Extract text from uploaded file"""
-    
-    try:
-        file_type = uploaded_file.name.split('.')[-1].lower()
-        
-        if file_type == 'pdf':
-            pdf_reader = PyPDF2.PdfReader(uploaded_file)
-            text = ""
-            for page in pdf_reader.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text + "\n\n"
-            return text.strip()
-        
-        elif file_type == 'docx':
-            doc = Document(uploaded_file)
-            text = "\n\n".join([para.text for para in doc.paragraphs if para.text.strip()])
-            return text
-        
-        elif file_type in ['txt', 'md']:
-            text = uploaded_file.read().decode('utf-8')
-            return text
-        
-        else:
-            st.error(f"Unsupported file type: {file_type}")
-            return None
+            stats = rag_handler.get_stats()
             
-    except Exception as e:
-        st.error(f"Error extracting text: {str(e)}")
-        return None
+            # Handle both basic and advanced RAG formats
+            if isinstance(stats, dict) and any(isinstance(v, dict) for v in stats.values()):
+                # Advanced RAG - aggregate
+                total_docs = sum(s.get('unique_documents', 0) for s in stats.values() if isinstance(s, dict))
+                total_chunks = sum(s.get('total_chunks', 0) for s in stats.values() if isinstance(s, dict))
+            else:
+                # Basic RAG
+                total_docs = stats.get('unique_documents', 0) if stats else 0
+                total_chunks = stats.get('total_chunks', 0) if stats else 0
+            
+            if total_docs > 0:
+                st.success(f"... Active: {total_docs} docs")
+                st.caption(f" {total_chunks} chunks indexed")
+            else:
+                st.warning(" Connected but empty")
+                st.caption("Upload docs to HCMPACT LLM")
+                
+        except Exception as e:
+            st.error(" ChromaDB Error")
+            st.caption(f"{str(e)[:40]}...")
+    else:
+        st.info(" Not initialized")
+        st.caption("Will activate on first upload")
+    
+    # LLM Config expander
+    with st.expander("- LLM Config"):
+        llm_endpoint = st.session_state.get('llm_endpoint', 'Not configured')
+        llm_model = st.session_state.get('llm_model', 'Not configured')
+        st.markdown(f"""
+        <div style='font-size: 0.8rem;'>
+            <strong>Endpoint:</strong> {llm_endpoint}<br>
+            <strong>Model:</strong> {llm_model}
+        </div>
+        """, unsafe_allow_html=True)
+
+
+def _render_status():
+    """Render system status"""
+    st.markdown("###  Status")
+    
+    # API status - safe checks
+    api_credentials = st.session_state.get('api_credentials', {'pro': {}, 'wfm': {}})
+    pro_configured = bool(api_credentials.get('pro'))
+    wfm_configured = bool(api_credentials.get('wfm'))
+    
+    st.markdown(f"""
+    <div style='font-size: 0.85rem; line-height: 1.8;'>
+        <div>UKG Pro: {'...' if pro_configured else ''}</div>
+        <div>UKG WFM: {'...' if wfm_configured else ''}</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    with st.expander(" Security"):
+        st.markdown("""
+        <div style='font-size: 0.8rem; line-height: 1.6;'>
+         Local Processing<br>
+         Session-Only Storage<br>
+         No External APIs<br>
+         PII Protected
+        </div>
+        """, unsafe_allow_html=True)
