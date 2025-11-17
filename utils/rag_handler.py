@@ -14,12 +14,25 @@ logger = logging.getLogger(__name__)
 class RAGHandler:
     """Handles all RAG operations including document processing, embedding, and retrieval."""
     
-    def __init__(self, persist_directory: Optional[str] = None):
+    def __init__(
+        self, 
+        persist_directory: Optional[str] = None,
+        embed_endpoint: Optional[str] = None,
+        llm_endpoint: Optional[str] = None,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+        **kwargs  # Catch any other parameters
+    ):
         """Initialize the RAG handler with ChromaDB and embedding configuration.
         
         Args:
             persist_directory: Optional custom directory for ChromaDB storage.
                              If None, uses /data/chromadb or falls back to .chromadb
+            embed_endpoint: Optional Ollama endpoint for embeddings (overrides env var)
+            llm_endpoint: Optional Ollama endpoint for LLM (overrides env var)
+            username: Optional username for Ollama auth
+            password: Optional password for Ollama auth
+            **kwargs: Additional parameters (ignored for compatibility)
         """
         try:
             # Use provided directory or determine automatically
@@ -60,10 +73,14 @@ class RAGHandler:
                 logger.warning("Falling back to in-memory ChromaDB (data will not persist)")
                 self.client = chromadb.Client()
             
-            # Ollama configuration
-            self.ollama_base_url = os.getenv("LLM_ENDPOINT", "http://178.156.190.64:11435")
-            self.ollama_username = os.getenv("LLM_USERNAME", "xlr8")
-            self.ollama_password = os.getenv("LLM_PASSWORD", "Argyle76226#")
+            # Ollama configuration - use provided values or fall back to env vars
+            self.ollama_base_url = (
+                embed_endpoint or 
+                llm_endpoint or 
+                os.getenv("LLM_ENDPOINT", "http://178.156.190.64:11435")
+            )
+            self.ollama_username = username or os.getenv("LLM_USERNAME", "xlr8")
+            self.ollama_password = password or os.getenv("LLM_PASSWORD", "Argyle76226#")
             
             # Embedding settings
             self.embedding_model = "nomic-embed-text"
