@@ -14,48 +14,68 @@ logger = logging.getLogger(__name__)
 class RAGHandler:
     """Handles all RAG operations including document processing, embedding, and retrieval."""
     
-    def __init__(self):
-        """Initialize the RAG handler with ChromaDB and embedding configuration."""
-        # Try to use persistent directory, fall back to local if /data not available
-        persist_directory = None
+    def __init__(self, persist_directory: Optional[str] = None):
+        """Initialize the RAG handler with ChromaDB and embedding configuration.
         
-        # Try /data first (Railway volume)
-        if os.path.exists("/data") or os.access("/", os.W_OK):
-            try:
-                persist_directory = "/data/chromadb"
+        Args:
+            persist_directory: Optional custom directory for ChromaDB storage.
+                             If None, uses /data/chromadb or falls back to .chromadb
+        """
+        try:
+            # Use provided directory or determine automatically
+            if persist_directory is None:
+                # Try /data first (Railway volume)
+                if os.path.exists("/data") or os.access("/", os.W_OK):
+                    try:
+                        persist_directory = "/data/chromadb"
+                        os.makedirs(persist_directory, exist_ok=True)
+                        logger.info(f"Using persistent storage at {persist_directory}")
+                    except (OSError, PermissionError) as e:
+                        logger.warning(f"Cannot use /data: {e}, falling back to local storage")
+                        persist_directory = None
+                
+                # Fall back to local directory if /data not available
+                if persist_directory is None:
+                    persist_directory = os.path.join(os.getcwd(), ".chromadb")
+                    os.makedirs(persist_directory, exist_ok=True)
+                    logger.warning(f"Using local storage at {persist_directory} (will reset on deploy)")
+            else:
+                # Use provided directory
                 os.makedirs(persist_directory, exist_ok=True)
-                logger.info(f"Using persistent storage at {persist_directory}")
-            except (OSError, PermissionError) as e:
-                logger.warning(f"Cannot use /data: {e}, falling back to local storage")
-                persist_directory = None
-        
-        # Fall back to local directory if /data not available
-        if persist_directory is None:
-            persist_directory = os.path.join(os.getcwd(), ".chromadb")
-            os.makedirs(persist_directory, exist_ok=True)
-            logger.warning(f"Using local storage at {persist_directory} (will reset on deploy)")
-        
-        # Initialize ChromaDB with PERSISTENT storage
-        self.client = chromadb.PersistentClient(
-            path=persist_directory,
-            settings=Settings(
-                anonymized_telemetry=False,
-                allow_reset=True
-            )
-        )
-        
-        # Ollama configuration
-        self.ollama_base_url = os.getenv("LLM_ENDPOINT", "http://178.156.190.64:11435")
-        self.ollama_username = os.getenv("LLM_USERNAME", "xlr8")
-        self.ollama_password = os.getenv("LLM_PASSWORD", "Argyle76226#")
-        
-        # Embedding settings
-        self.embedding_model = "nomic-embed-text"
-        self.chunk_size = 800
-        self.chunk_overlap = 100
-        
-        logger.info(f"RAGHandler initialized with persistent ChromaDB at {persist_directory}")
-        logger.info(f"Ollama endpoint: {self.ollama_base_url}")
+                logger.info(f"Using provided storage at {persist_directory}")
+            
+            # Initialize ChromaDB with PERSISTENT storage
+            try:
+                self.client = chromadb.PersistentClient(
+                    path=persist_directory,
+                    settings=Settings(
+                        anonymized_telemetry=False,
+                        allow_reset=True
+                    )
+                )
+                logger.info(f"ChromaDB client initialized successfully at {persist_directory}")
+            except Exception as e:
+                logger.error(f"Failed to initialize ChromaDB PersistentClient: {e}")
+                # Last resort: use in-memory client
+                logger.warning("Falling back to in-memory ChromaDB (data will not persist)")
+                self.client = chromadb.Client()
+            
+            # Ollama configuration
+            self.ollama_base_url = os.getenv("LLM_ENDPOINT", "http://178.156.190.64:11435")
+            self.ollama_username = os.getenv("LLM_USERNAME", "xlr8")
+            self.ollama_password = os.getenv("LLM_PASSWORD", "Argyle76226#")
+            
+            # Embedding settings
+            self.embedding_model = "nomic-embed-text"
+            self.chunk_size = 800
+            self.chunk_overlap = 100
+            
+            logger.info("RAGHandler initialized successfully")
+            logger.info(f"Ollama endpoint: {self.ollama_base_url}")
+            
+        except Exception as e:
+            logger.error(f"Critical error in RAGHandler initialization: {e}")
+            raise RuntimeError(f"Failed to initialize RAGHandler: {e}")
 
     def _normalize_embedding(self, embedding: List[float]) -> List[float]:
         """
@@ -333,3 +353,7 @@ class RAGHandler:
         except Exception as e:
             logger.error(f"Error resetting database: {str(e)}")
             return False
+
+
+# Backward compatibility alias
+AdvancedRAGHandler = RAGHandler
