@@ -91,45 +91,38 @@ def render_knowledge_page():
     else:
         st.info(" Using basic RAG (single chunking method)")
     
-    # CLEAR CHROMADB BUTTON (for corrupted data)
-    with st.expander("[X] Clear All Data (Reset ChromaDB)"):
-        st.warning("This will DELETE all uploaded documents and chunks. Use this if search is returning bad results.")
-        st.markdown("**When to use:**")
-        st.markdown("- Search returns distance >100 (embeddings corrupted)")
-        st.markdown("- After fixing encoding issues")
-        st.markdown("- To start fresh with clean data")
+    # NUCLEAR CLEAR CHROMADB (deletes persist directory)
+    with st.expander("[X] NUCLEAR RESET (Delete ALL ChromaDB Data)"):
+        st.error("NUCLEAR OPTION: This physically deletes the ChromaDB directory and restarts from scratch.")
+        st.warning("Use this if:")
+        st.markdown("- Search distance >100 after re-upload")
+        st.markdown("- Regular clear didn't work")
+        st.markdown("- Embeddings are corrupted beyond repair")
         
-        confirm = st.checkbox("I understand this will delete all data")
+        st.info("This will require app restart after deletion.")
+        
+        confirm = st.checkbox("I understand this will delete everything and require restart")
         
         if confirm:
-            if st.button("[X] DELETE ALL AND RESET", type="primary"):
+            if st.button("[X] NUCLEAR DELETE", type="primary"):
                 try:
-                    deleted_count = 0
+                    import shutil
+                    import os
                     
-                    if hasattr(rag_handler, 'collections'):
-                        for strategy, collection in rag_handler.collections.items():
-                            count = collection.count()
-                            if count > 0:
-                                collection.delete(where={})
-                                st.success(f"Cleared {strategy}: {count} chunks")
-                                deleted_count += count
-                    else:
-                        if hasattr(rag_handler, 'collection'):
-                            count = rag_handler.collection.count()
-                            if count > 0:
-                                rag_handler.collection.delete(where={})
-                                st.success(f"Cleared: {count} chunks")
-                                deleted_count += count
+                    persist_dir = rag_handler.persist_directory if hasattr(rag_handler, 'persist_directory') else '/root/.xlr8_chroma'
                     
-                    if deleted_count > 0:
-                        st.success(f"[OK] Deleted {deleted_count} total chunks")
-                        st.info("Now re-upload your documents with clean embeddings")
-                        st.rerun()
+                    if os.path.exists(persist_dir):
+                        # Delete the entire directory
+                        shutil.rmtree(persist_dir)
+                        st.success(f"[OK] Deleted: {persist_dir}")
+                        st.warning("RESTART REQUIRED: Refresh the page or restart Railway service")
+                        st.info("After restart, re-upload your documents")
                     else:
-                        st.info("No data to clear")
+                        st.info(f"Directory doesn't exist: {persist_dir}")
                         
                 except Exception as e:
                     st.error(f"Error: {e}")
+                    st.info("If this fails, use Railway shell: rm -rf /root/.xlr8_chroma")
     
     st.markdown("---")
     
