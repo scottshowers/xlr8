@@ -317,9 +317,16 @@ def render_question_browser(questions: List[Dict[str, Any]], questions_data: Dic
     
     # Pagination
     questions_per_page = 10
-    total_pages = (len(filtered_questions) + questions_per_page - 1) // questions_per_page
+    total_pages = max(1, (len(filtered_questions) + questions_per_page - 1) // questions_per_page)
     
+    # Initialize or validate current page
     if 'current_page' not in st.session_state:
+        st.session_state.current_page = 0
+    
+    # Ensure current_page is valid integer within range
+    current_page = int(st.session_state.current_page)
+    if current_page >= total_pages:
+        current_page = 0
         st.session_state.current_page = 0
     
     # Page controls
@@ -327,11 +334,12 @@ def render_question_browser(questions: List[Dict[str, Any]], questions_data: Dic
     with col2:
         page = st.selectbox(
             f"Page (showing {questions_per_page} per page)",
-            range(total_pages),
-            index=st.session_state.current_page,
-            format_func=lambda x: f"Page {x+1} of {total_pages}"
+            options=list(range(total_pages)),
+            index=current_page,
+            format_func=lambda x: f"Page {x+1} of {total_pages}",
+            key="page_selector"
         )
-        st.session_state.current_page = page
+        st.session_state.current_page = int(page)
     
     # Get questions for current page
     start_idx = page * questions_per_page
