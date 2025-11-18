@@ -10,6 +10,7 @@ This module orchestrates the entire query processing flow:
 
 Author: HCMPACT
 Version: 1.0.1 - Fixed ChromaDB search call
+
 """
 
 from typing import Dict, Any, Optional, List, Tuple
