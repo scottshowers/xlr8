@@ -28,6 +28,7 @@ from pages.work.chat import render_chat_page
 from pages.work.library import render_library_page
 from pages.setup.projects import render_projects_page
 from pages.setup.knowledge import render_knowledge_page
+from pages.setup.manage import render_manage_page
 from pages.setup.connections import render_connections_page
 from pages.qa.sit import render_sit_page
 from pages.qa.uat import render_uat_page
@@ -137,9 +138,10 @@ with tab1:
 
 # TAB 2: SETUP (Configuration)
 with tab2:
-    setup_subtab1, setup_subtab2, setup_subtab3 = st.tabs([
+    setup_subtab1, setup_subtab2, setup_subtab3, setup_subtab4 = st.tabs([
         "📁 Projects & Clients",
         "🧠 HCMPACT LLM Seeding",
+        "📊 Document Management",
         "🔌 Connections"
     ])
     
@@ -150,6 +152,9 @@ with tab2:
         render_knowledge_page()
     
     with setup_subtab3:
+        render_manage_page()
+    
+    with setup_subtab4:
         render_connections_page()
 
 # TAB 3: QA (Testing)
