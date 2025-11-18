@@ -10,7 +10,6 @@ This module orchestrates the entire query processing flow:
 
 Author: HCMPACT
 Version: 1.0.1 - Fixed ChromaDB search call
-
 """
 
 from typing import Dict, Any, Optional, List, Tuple
@@ -244,10 +243,22 @@ class IntelligentRouter:
             return None
         
         try:
-            # FIXED: Added collection_name parameter
+            # FIXED: Dynamically find the collection name
+            # List all available collections
+            collections = self.chromadb_handler.list_collections()
+            
+            if not collections:
+                logger.info("No ChromaDB collections found")
+                return None
+            
+            # Use the first available collection
+            # (In a single-tenant app, there should only be one collection)
+            collection_name = collections[0]
+            logger.info(f"Using ChromaDB collection: '{collection_name}'")
+            
             results = self.chromadb_handler.search(
                 query=query,
-                collection_name="default",  # ← FIX: Added required parameter
+                collection_name=collection_name,
                 n_results=num_sources
             )
             
