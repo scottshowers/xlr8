@@ -243,18 +243,11 @@ class IntelligentRouter:
             return None
         
         try:
-            # FIXED: Dynamically find the collection name
-            # List all available collections
-            collections = self.chromadb_handler.list_collections()
+            # FIXED: Use the correct collection name "hcmpact_docs"
+            # This matches what document_processor.py uses when uploading documents
+            collection_name = "hcmpact_docs"
             
-            if not collections:
-                logger.info("No ChromaDB collections found")
-                return None
-            
-            # Use the first available collection
-            # (In a single-tenant app, there should only be one collection)
-            collection_name = collections[0]
-            logger.info(f"Using ChromaDB collection: '{collection_name}'")
+            logger.info(f"Searching ChromaDB collection: '{collection_name}'")
             
             results = self.chromadb_handler.search(
                 query=query,
@@ -263,9 +256,11 @@ class IntelligentRouter:
             )
             
             if results and len(results) > 0:
+                logger.info(f"Found {len(results)} results from ChromaDB")
                 return results
-            
-            return None
+            else:
+                logger.info("No results found in ChromaDB")
+                return None
             
         except Exception as e:
             logger.warning(f"ChromaDB context retrieval failed: {e}")
