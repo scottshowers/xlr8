@@ -105,7 +105,7 @@ def render_manage_page():
     # TAB 1: ALL DOCUMENTS
     with tab1:
         st.subheader("All Documents")
-        render_document_table(doc_status, total_chunks)
+        render_document_table(doc_status, total_chunks, table_key="all_docs")
     
     # TAB 2: CUSTOMER DOCUMENTS
     with tab2:
@@ -115,7 +115,7 @@ def render_manage_page():
         if customer_status:
             customer_chunks = sum(d['chunks'] for d in customer_status.values())
             st.info(f"**{len(customer_status)} customer documents** with **{customer_chunks:,} chunks**")
-            render_document_table(customer_status, customer_chunks)
+            render_document_table(customer_status, customer_chunks, table_key="customer_docs")
         else:
             st.warning("No customer documents found. Templates only.")
             st.info("💡 Upload customer documents to Setup → HCMPACT LLM Seeding")
@@ -128,12 +128,12 @@ def render_manage_page():
         if template_status:
             template_chunks = sum(d['chunks'] for d in template_status.values())
             st.info(f"**{len(template_status)} templates** with **{template_chunks:,} chunks**")
-            render_document_table(template_status, template_chunks)
+            render_document_table(template_status, template_chunks, table_key="templates")
         else:
             st.info("No templates loaded yet.")
 
 
-def render_document_table(doc_status: Dict[str, Any], total_chunks: int):
+def render_document_table(doc_status: Dict[str, Any], total_chunks: int, table_key: str = "default"):
     """Render a table of documents with their status."""
     
     if not doc_status:
@@ -188,7 +188,8 @@ def render_document_table(doc_status: Dict[str, Any], total_chunks: int):
         data=csv,
         file_name="document_status.csv",
         mime="text/csv",
-        help="Download the complete document list with chunk counts"
+        help="Download the complete document list with chunk counts",
+        key=f"download_csv_{table_key}"  # UNIQUE KEY
     )
     
     # Danger zone
@@ -207,7 +208,7 @@ def render_document_table(doc_status: Dict[str, Any], total_chunks: int):
         if doc_to_remove:
             st.error(f"You are about to delete all chunks from: **{doc_to_remove}**")
             
-            if st.button("🗑️ DELETE THIS DOCUMENT", type="primary"):
+            if st.button("🗑️ DELETE THIS DOCUMENT", type="primary", key="delete_doc_button"):
                 try:
                     rag = RAGHandler()
                     collection = rag.client.get_collection("hcmpact_docs")
