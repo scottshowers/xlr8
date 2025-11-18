@@ -1,5 +1,6 @@
 # Railway Nixpacks Configuration - Complete Version
 # Combines apt packages for document processing with direct Python installation
+# UPDATED: Clears Python cache before start
 
 [phases.setup]
 # System packages for PDF/document processing
@@ -15,13 +16,14 @@ aptPkgs = [
 nixPkgs = ['python311', 'python311Packages.pip']
 
 [phases.install]
-# Install Python dependencies
+# Install Python dependencies + clear cache
 cmds = [
   'pip install --upgrade pip',
-  'pip install -r requirements.txt'
+  'pip install -r requirements.txt',
+  'find . -type d -name __pycache__ -exec rm -rf {} + || true',
+  'find . -type f -name "*.pyc" -delete || true'
 ]
 
 [start]
-# Start Streamlit app
-cmd = 'streamlit run app.py --server.port $PORT --server.address 0.0.0.0'
-
+# Clear cache and start Streamlit app
+cmd = 'find . -type d -name __pycache__ -exec rm -rf {} + || true && find . -type f -name "*.pyc" -delete || true && streamlit run app.py --server.port $PORT --server.address 0.0.0.0'
