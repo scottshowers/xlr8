@@ -9,7 +9,7 @@ This module orchestrates the entire query processing flow:
 5. Response Synthesis & De-anonymization
 
 Author: HCMPACT
-Version: 1.0
+Version: 1.0.1 - Fixed ChromaDB search call
 """
 
 from typing import Dict, Any, Optional, List, Tuple
@@ -42,10 +42,10 @@ class IntelligentRouter:
     Orchestrates query routing through the intelligent chat system.
     
     Decision Flow:
-    1. Check for PII  If found, anonymize and force local LLM
-    2. Check complexity  Simple: Mistral, Complex: DeepSeek
-    3. Check ChromaDB  If HCMPACT docs exist, enhance with context
-    4. If no PII and no ChromaDB  Route to Claude API for general knowledge
+    1. Check for PII → If found, anonymize and force local LLM
+    2. Check complexity → Simple: Mistral, Complex: DeepSeek
+    3. Check ChromaDB → If HCMPACT docs exist, enhance with context
+    4. If no PII and no ChromaDB → Route to Claude API for general knowledge
     """
     
     def __init__(self, 
@@ -177,7 +177,7 @@ class IntelligentRouter:
                 complexity=complexity_result['complexity']
             )
         else:
-            # Simple/medium questions without HCMPACT context  Claude API
+            # Simple/medium questions without HCMPACT context → Claude API
             if self.claude_api_key:
                 logger.info(f"{complexity_result['complexity'].capitalize()} query - routing to Claude API")
                 return RouterDecision(
@@ -243,9 +243,10 @@ class IntelligentRouter:
             return None
         
         try:
-            # Use the handler's search method
+            # FIXED: Added collection_name parameter
             results = self.chromadb_handler.search(
                 query=query,
+                collection_name="default",  # ← FIX: Added required parameter
                 n_results=num_sources
             )
             
@@ -272,27 +273,27 @@ class IntelligentRouter:
         
         # PII status
         if decision.has_pii:
-            parts.append(" PII detected - using secure local processing")
+            parts.append("🔒 PII detected - using secure local processing")
         
         # Model selection
         if decision.use_local_llm:
             model_display = decision.model_name.replace(":7b", "").replace(":latest", "")
-            parts.append(f" Using {model_display}")
+            parts.append(f"🤖 Using {model_display}")
         else:
-            parts.append(" Using Claude API")
+            parts.append("🤖 Using Claude API")
         
         # Complexity
         complexity_emoji = {
-            'simple': '',
-            'medium': '',
-            'complex': ''
+            'simple': '⚡',
+            'medium': '🎯',
+            'complex': '🧠'
         }
         emoji = complexity_emoji.get(decision.complexity, '')
         parts.append(f"{emoji} {decision.complexity.capitalize()} query")
         
         # Context
         if decision.chromadb_context:
-            parts.append(f" Enhanced with {len(decision.chromadb_context)} HCMPACT sources")
+            parts.append(f"📚 Enhanced with {len(decision.chromadb_context)} HCMPACT sources")
         
         return " | ".join(parts)
     
