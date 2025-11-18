@@ -241,24 +241,6 @@ def analyze_single_question(question: Dict[str, Any], rag_handler: RAGHandler) -
             'confidence': 0.0,
             'status': 'pending'
         }
-        else:
-            answer = "Information found but could not extract meaningful content."
-        
-        return {
-            'answer': answer,
-            'sources': sources,
-            'confidence': confidence,
-            'status': 'analyzed'
-        }
-        
-    except Exception as e:
-        logger.error(f"Error analyzing question: {e}", exc_info=True)
-        return {
-            'answer': f'Error during analysis: {str(e)}',
-            'sources': [],
-            'confidence': 0.0,
-            'status': 'pending'
-        }
 
 
 def render_analysis_page():
