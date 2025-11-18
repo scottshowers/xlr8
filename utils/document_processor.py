@@ -144,7 +144,7 @@ class DocumentProcessor:
             
             # Prepare metadata with ACTUAL FILENAME
             metadata = {
-                'source': filename,  # This is the key field - the actual filename
+                'source': filename,
                 'category': category,
                 'file_size': len(text),
                 'type': os.path.splitext(filename)[1].lower()
@@ -163,30 +163,54 @@ class DocumentProcessor:
                 }
             progress_container.success("✅ Ollama connection successful")
             
-            # Add to ChromaDB
-            progress_container.info(f"📦 Adding to ChromaDB (chunk size: 800 chars)...")
-            success = self.rag_handler.add_document(
-                collection_name=collection_name,
-                text=text,
-                metadata=metadata
+            # Calculate expected chunks
+            expected_chunks = max(1, len(text) // 800)
+            progress_container.info(f"📦 Will create ~{expected_chunks} chunks, processing now...")
+            
+            # Process with progress updates
+            collection = self.rag_handler.client.get_or_create_collection(
+                name=collection_name,
+                metadata={"hnsw:space": "cosine"}
             )
             
-            if success:
-                chunks = len(text) // 800
-                progress_container.success(f"✅ Successfully processed {filename} ({chunks} chunks)")
-                logger.info(f"Successfully processed: {filename}")
+            chunks = self.rag_handler.chunk_text(text)
+            progress_container.info(f"📦 Created {len(chunks)} chunks, embedding now...")
+            
+            successful = 0
+            failed = 0
+            
+            for i, chunk in enumerate(chunks):
+                progress_container.info(f"🔄 Processing chunk {i+1}/{len(chunks)}...")
+                
+                embedding = self.rag_handler.get_embedding(chunk)
+                if embedding is None:
+                    failed += 1
+                    progress_container.warning(f"⚠️ Chunk {i+1} failed, continuing...")
+                    continue
+                
+                doc_id = f"{filename}_{i}"
+                collection.add(
+                    embeddings=[embedding],
+                    documents=[chunk],
+                    metadatas=[{**metadata, "chunk_index": i}],
+                    ids=[doc_id]
+                )
+                successful += 1
+            
+            if successful > 0:
+                progress_container.success(f"✅ Successfully processed {filename} ({successful}/{len(chunks)} chunks)")
                 return {
                     'success': True,
                     'filename': filename,
-                    'chunks': chunks,
+                    'chunks': successful,
                     'category': category
                 }
             else:
-                progress_container.error(f"❌ Failed to add {filename} to ChromaDB")
+                progress_container.error(f"❌ All chunks failed for {filename}")
                 return {
                     'success': False,
                     'filename': filename,
-                    'error': 'Failed to add to ChromaDB'
+                    'error': 'All chunks failed to process'
                 }
                 
         except Exception as e:
