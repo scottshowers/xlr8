@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 # Print to logs
 print("=" * 80)
-print("🚀 ANALYSIS_ENGINE.PY LOADING - COMPLETE WITH BATCH + EXPORT - BUILD 2340")
+print("🚀 ANALYSIS_ENGINE.PY LOADING - CUSTOMER DOCS ONLY - BUILD 2341")
 print("=" * 80)
 
 
@@ -162,17 +162,28 @@ def analyze_single_question(question: Dict[str, Any], rag_handler: RAGHandler) -
                 'status': 'analyzed'
             }
         
-        # Filter out template documents (improves quality)
+        # Filter out template documents by category (much more robust!)
         filtered_results = []
         for doc, meta, dist in zip(documents, metadatas, distances):
+            category = meta.get('category', '')
             source = meta.get('source', '')
-            # Skip template documents
-            if 'Analysis_Workbook' not in source and 'BRIT' not in source:
-                filtered_results.append((doc, meta, dist))
+            
+            # ONLY include customer documents - exclude ALL templates
+            # Templates have category: "UKG Templates" or similar
+            # Customer docs have category: "Customer Documents" or other non-template categories
+            if category not in ['UKG Templates', 'Templates', 'UKG Pro', 'WFM', 'Implementation Guide']:
+                # Also double-check filename as backup
+                if 'Analysis_Workbook' not in source and 'BRIT' not in source and 'Items_to_Gather' not in source:
+                    filtered_results.append((doc, meta, dist))
         
-        # If we filtered out everything, use original results
+        # If we filtered out everything, inform user (don't fall back to templates!)
         if not filtered_results:
-            filtered_results = list(zip(documents, metadatas, distances))
+            return {
+                'answer': 'No relevant information found in customer documents. All results were from templates. Please ensure customer documents are uploaded with category "Customer Documents".',
+                'sources': [],
+                'confidence': 0.0,
+                'status': 'analyzed'
+            }
         
         # Extract chunks and sources for LLM
         chunks = []
