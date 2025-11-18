@@ -2,6 +2,7 @@
 XLR8 by HCMPACT - Main Application Entry Point
 Version: 3.0 - Modular Architecture
 
+
 This file is INTENTIONALLY MINIMAL - it only handles:
 1. Page configuration
 2. Session state initialization
