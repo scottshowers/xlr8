@@ -129,15 +129,28 @@ class DocumentProcessor:
             status_placeholder.success(f"✅ Ollama OK ({test_time:.1f}s)")
             
             # Get collection
-            collection = self.rag_handler.client.get_or_create_collection(
-                name=collection_name,
-                metadata={"hnsw:space": "cosine"}
-            )
+            status_placeholder.info(f"📁 Getting ChromaDB collection '{collection_name}'...")
+            try:
+                collection = self.rag_handler.client.get_or_create_collection(
+                    name=collection_name,
+                    metadata={"hnsw:space": "cosine"}
+                )
+                status_placeholder.success(f"✅ Collection ready: {collection.count()} existing chunks")
+            except Exception as e:
+                status_placeholder.error(f"❌ ChromaDB collection error: {str(e)}")
+                return {'success': False, 'filename': filename, 'error': f'Collection error: {str(e)}'}
             
             # Chunk text
-            chunks = self.rag_handler.chunk_text(text)
-            total_chunks = len(chunks)
-            status_placeholder.info(f"📦 Processing {total_chunks} chunks...")
+            status_placeholder.info(f"✂️ Chunking text (800 chars per chunk)...")
+            try:
+                chunks = self.rag_handler.chunk_text(text)
+                total_chunks = len(chunks)
+                status_placeholder.success(f"✅ Created {total_chunks} chunks")
+            except Exception as e:
+                status_placeholder.error(f"❌ Chunking error: {str(e)}")
+                return {'success': False, 'filename': filename, 'error': f'Chunking error: {str(e)}'}
+            
+            status_placeholder.info(f"📦 Starting batch processing ({total_chunks} chunks)...")
             
             # Process in batches to avoid timeout
             BATCH_SIZE = 10
