@@ -5,6 +5,7 @@ import PyPDF2
 import docx
 import logging
 from utils.rag_handler import RAGHandler
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,6 @@ class DocumentProcessor:
     def extract_text_from_txt(self, file) -> str:
         """Extract text from TXT file."""
         try:
-            # Read and decode text file
             content = file.read()
             if isinstance(content, bytes):
                 text = content.decode('utf-8', errors='ignore')
@@ -60,16 +60,7 @@ class DocumentProcessor:
             return ""
     
     def extract_text(self, file, filename: str) -> str:
-        """
-        Extract text from uploaded file based on extension.
-        
-        Args:
-            file: Uploaded file object
-            filename: Name of the file
-            
-        Returns:
-            Extracted text content
-        """
+        """Extract text from uploaded file based on extension."""
         _, ext = os.path.splitext(filename.lower())
         
         if ext == '.pdf':
@@ -83,22 +74,10 @@ class DocumentProcessor:
             return ""
     
     def clean_text(self, text: str) -> str:
-        """
-        Clean text by removing non-ASCII characters and extra whitespace.
-        
-        Args:
-            text: Raw text
-            
-        Returns:
-            Cleaned text
-        """
-        # Remove non-ASCII characters
+        """Clean text by removing non-ASCII characters and extra whitespace."""
         text = text.encode('ascii', 'ignore').decode('ascii')
-        
-        # Remove extra whitespace
         import re
         text = re.sub(r'\s+', ' ', text)
-        
         return text.strip()
     
     def process_document(
@@ -108,41 +87,27 @@ class DocumentProcessor:
         collection_name: str = "hcmpact_docs",
         category: str = "General"
     ) -> Dict[str, Any]:
-        """
-        Process a document and add it to ChromaDB.
+        """Process a document with batch embedding and proper error handling."""
         
-        Args:
-            file: Uploaded file object
-            filename: Name of the file
-            collection_name: ChromaDB collection name
-            category: Document category (e.g., "UKG Pro", "WFM", "Implementation")
-            
-        Returns:
-            Dictionary with processing results
-        """
-        progress_container = st.empty()
+        status_placeholder = st.empty()
+        progress_bar = st.progress(0)
         
         try:
             # Extract text
-            progress_container.info(f"📄 Extracting text from {filename}...")
-            logger.info(f"Processing document: {filename}")
+            status_placeholder.info(f"📄 Extracting text from {filename}...")
             text = self.extract_text(file, filename)
             
             if not text:
-                progress_container.error(f"❌ No text extracted from {filename}")
-                return {
-                    'success': False,
-                    'filename': filename,
-                    'error': 'No text extracted from document'
-                }
+                status_placeholder.error(f"❌ No text extracted from {filename}")
+                return {'success': False, 'filename': filename, 'error': 'No text extracted'}
             
-            progress_container.info(f"✅ Extracted {len(text)} characters")
+            status_placeholder.info(f"✅ Extracted {len(text):,} characters")
             
             # Clean text
             text = self.clean_text(text)
-            progress_container.info(f"🧹 Cleaned text: {len(text)} characters")
+            status_placeholder.info(f"🧹 Cleaned: {len(text):,} characters")
             
-            # Prepare metadata with ACTUAL FILENAME
+            # Metadata
             metadata = {
                 'source': filename,
                 'category': category,
@@ -150,55 +115,73 @@ class DocumentProcessor:
                 'type': os.path.splitext(filename)[1].lower()
             }
             
-            # Test embedding first
-            progress_container.info(f"🧪 Testing Ollama connection...")
+            # Test Ollama
+            status_placeholder.info(f"🧪 Testing Ollama...")
+            test_start = time.time()
             test_embedding = self.rag_handler.get_embedding("test")
+            test_time = time.time() - test_start
+            
             if test_embedding is None:
-                progress_container.error("❌ Cannot connect to Ollama embedding service!")
-                progress_container.error(f"Endpoint: {self.rag_handler.ollama_base_url}")
-                return {
-                    'success': False,
-                    'filename': filename,
-                    'error': 'Ollama embedding service unavailable'
-                }
-            progress_container.success("✅ Ollama connection successful")
+                status_placeholder.error("❌ Ollama unreachable!")
+                status_placeholder.error(f"Endpoint: {self.rag_handler.ollama_base_url}")
+                return {'success': False, 'filename': filename, 'error': 'Ollama unavailable'}
             
-            # Calculate expected chunks
-            expected_chunks = max(1, len(text) // 800)
-            progress_container.info(f"📦 Will create ~{expected_chunks} chunks, processing now...")
+            status_placeholder.success(f"✅ Ollama OK ({test_time:.1f}s)")
             
-            # Process with progress updates
+            # Get collection
             collection = self.rag_handler.client.get_or_create_collection(
                 name=collection_name,
                 metadata={"hnsw:space": "cosine"}
             )
             
+            # Chunk text
             chunks = self.rag_handler.chunk_text(text)
-            progress_container.info(f"📦 Created {len(chunks)} chunks, embedding now...")
+            total_chunks = len(chunks)
+            status_placeholder.info(f"📦 Processing {total_chunks} chunks...")
             
+            # Process in batches to avoid timeout
+            BATCH_SIZE = 10
             successful = 0
             failed = 0
             
-            for i, chunk in enumerate(chunks):
-                progress_container.info(f"🔄 Processing chunk {i+1}/{len(chunks)}...")
+            for batch_start in range(0, total_chunks, BATCH_SIZE):
+                batch_end = min(batch_start + BATCH_SIZE, total_chunks)
+                batch_chunks = chunks[batch_start:batch_end]
                 
-                embedding = self.rag_handler.get_embedding(chunk)
-                if embedding is None:
-                    failed += 1
-                    progress_container.warning(f"⚠️ Chunk {i+1} failed, continuing...")
-                    continue
+                status_placeholder.info(f"🔄 Batch {batch_start//BATCH_SIZE + 1} (chunks {batch_start+1}-{batch_end}/{total_chunks})")
                 
-                doc_id = f"{filename}_{i}"
-                collection.add(
-                    embeddings=[embedding],
-                    documents=[chunk],
-                    metadatas=[{**metadata, "chunk_index": i}],
-                    ids=[doc_id]
-                )
-                successful += 1
+                for i, chunk in enumerate(batch_chunks):
+                    chunk_idx = batch_start + i
+                    
+                    # Update progress
+                    progress = (chunk_idx + 1) / total_chunks
+                    progress_bar.progress(progress)
+                    
+                    # Get embedding
+                    embedding = self.rag_handler.get_embedding(chunk)
+                    if embedding is None:
+                        failed += 1
+                        logger.warning(f"Chunk {chunk_idx+1} failed")
+                        continue
+                    
+                    # Add to ChromaDB
+                    try:
+                        doc_id = f"{filename}_{chunk_idx}"
+                        collection.add(
+                            embeddings=[embedding],
+                            documents=[chunk],
+                            metadatas=[{**metadata, "chunk_index": chunk_idx}],
+                            ids=[doc_id]
+                        )
+                        successful += 1
+                    except Exception as e:
+                        failed += 1
+                        logger.error(f"Failed to add chunk {chunk_idx}: {e}")
+            
+            progress_bar.progress(1.0)
             
             if successful > 0:
-                progress_container.success(f"✅ Successfully processed {filename} ({successful}/{len(chunks)} chunks)")
+                status_placeholder.success(f"✅ {filename}: {successful}/{total_chunks} chunks ({failed} failed)")
                 return {
                     'success': True,
                     'filename': filename,
@@ -206,21 +189,13 @@ class DocumentProcessor:
                     'category': category
                 }
             else:
-                progress_container.error(f"❌ All chunks failed for {filename}")
-                return {
-                    'success': False,
-                    'filename': filename,
-                    'error': 'All chunks failed to process'
-                }
+                status_placeholder.error(f"❌ All chunks failed for {filename}")
+                return {'success': False, 'filename': filename, 'error': 'All chunks failed'}
                 
         except Exception as e:
-            progress_container.error(f"❌ Error: {str(e)}")
-            logger.error(f"Error processing document {filename}: {str(e)}")
-            return {
-                'success': False,
-                'filename': filename,
-                'error': str(e)
-            }
+            status_placeholder.error(f"❌ ERROR: {str(e)}")
+            logger.error(f"Error processing {filename}: {str(e)}", exc_info=True)
+            return {'success': False, 'filename': filename, 'error': str(e)}
     
     def process_multiple_documents(
         self, 
@@ -228,48 +203,27 @@ class DocumentProcessor:
         collection_name: str = "hcmpact_docs",
         category: str = "General"
     ) -> List[Dict[str, Any]]:
-        """
-        Process multiple documents.
-        
-        Args:
-            files: List of uploaded file objects
-            collection_name: ChromaDB collection name
-            category: Document category
-            
-        Returns:
-            List of processing results
-        """
+        """Process multiple documents."""
         results = []
         
-        with st.spinner(f"Processing {len(files)} documents..."):
-            for file in files:
-                # Reset file pointer
-                file.seek(0)
-                
-                # Process document
-                result = self.process_document(
-                    file=file,
-                    filename=file.name,
-                    collection_name=collection_name,
-                    category=category
-                )
-                results.append(result)
+        for idx, file in enumerate(files):
+            st.markdown(f"### Document {idx+1}/{len(files)}")
+            file.seek(0)
+            result = self.process_document(
+                file=file,
+                filename=file.name,
+                collection_name=collection_name,
+                category=category
+            )
+            results.append(result)
+            st.markdown("---")
         
         return results
     
     def get_upload_stats(self, results: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Get statistics from upload results.
-        
-        Args:
-            results: List of processing results
-            
-        Returns:
-            Statistics dictionary
-        """
+        """Get statistics from upload results."""
         successful = [r for r in results if r.get('success')]
         failed = [r for r in results if not r.get('success')]
-        
         total_chunks = sum(r.get('chunks', 0) for r in successful)
         
         return {
@@ -283,63 +237,63 @@ class DocumentProcessor:
 
 def render_upload_interface():
     """Render the document upload interface with proper metadata capture."""
-    st.subheader("Upload Documents to HCMPACT LLM")
-    
-    # Category selection
-    category = st.selectbox(
-        "Document Category",
-        ["UKG Pro", "WFM", "Implementation Guide", "Best Practices", "Configuration", "General"],
-        help="Select the category for better organization"
-    )
-    
-    # File uploader
-    uploaded_files = st.file_uploader(
-        "Choose files",
-        type=['pdf', 'docx', 'txt', 'md'],
-        accept_multiple_files=True,
-        help="Supported formats: PDF, DOCX, TXT, MD"
-    )
-    
-    if uploaded_files:
-        st.info(f"{len(uploaded_files)} file(s) selected")
+    try:
+        st.subheader("Upload Documents to HCMPACT LLM")
         
-        # Display file list
-        with st.expander("📄 Selected Files"):
-            for file in uploaded_files:
-                st.write(f"- {file.name} ({file.size:,} bytes)")
+        category = st.selectbox(
+            "Document Category",
+            ["UKG Pro", "WFM", "Implementation Guide", "Best Practices", "Configuration", "General"],
+            help="Select the category for better organization"
+        )
         
-        if st.button("🚀 Process Documents", type="primary"):
-            processor = DocumentProcessor()
+        uploaded_files = st.file_uploader(
+            "Choose files",
+            type=['pdf', 'docx', 'txt', 'md'],
+            accept_multiple_files=True,
+            help="Supported formats: PDF, DOCX, TXT, MD"
+        )
+        
+        if uploaded_files:
+            st.info(f"{len(uploaded_files)} file(s) selected")
             
-            # Process documents
-            results = processor.process_multiple_documents(
-                files=uploaded_files,
-                collection_name="hcmpact_docs",
-                category=category
-            )
+            with st.expander("📄 Selected Files"):
+                for file in uploaded_files:
+                    st.write(f"- {file.name} ({file.size:,} bytes)")
             
-            # Get statistics
-            stats = processor.get_upload_stats(results)
-            
-            # Display results
-            if stats['successful'] > 0:
-                st.success(f"✅ Successfully processed {stats['successful']}/{stats['total']} documents")
-                st.info(f"📦 Created {stats['total_chunks']} chunks in ChromaDB")
-                
-                # Show successful files
-                with st.expander("✅ Successful Uploads"):
-                    for result in results:
-                        if result.get('success'):
-                            st.write(f"- **{result['filename']}** ({result.get('chunks', 0)} chunks)")
-            
-            if stats['failed'] > 0:
-                st.error(f"❌ Failed to process {stats['failed']} documents")
-                with st.expander("❌ Failed Uploads"):
-                    for result in results:
-                        if not result.get('success'):
-                            st.write(f"- **{result['filename']}**: {result.get('error', 'Unknown error')}")
-            
-            # Show collection info
-            rag = RAGHandler()
-            count = rag.get_collection_count("hcmpact_docs")
-            st.metric("Total Chunks in HCMPACT LLM", count)
+            if st.button("🚀 Process Documents", type="primary"):
+                try:
+                    processor = DocumentProcessor()
+                    
+                    results = processor.process_multiple_documents(
+                        files=uploaded_files,
+                        collection_name="hcmpact_docs",
+                        category=category
+                    )
+                    
+                    stats = processor.get_upload_stats(results)
+                    
+                    st.markdown("---")
+                    st.markdown("### Results")
+                    
+                    if stats['successful'] > 0:
+                        st.success(f"✅ {stats['successful']}/{stats['total']} documents processed")
+                        st.info(f"📦 Total chunks: {stats['total_chunks']:,}")
+                    
+                    if stats['failed'] > 0:
+                        st.error(f"❌ {stats['failed']} documents failed")
+                        with st.expander("Failed Files"):
+                            for fname in stats['failed_files']:
+                                st.write(f"- {fname}")
+                    
+                    rag = RAGHandler()
+                    count = rag.get_collection_count("hcmpact_docs")
+                    st.metric("Total Chunks in HCMPACT LLM", f"{count:,}")
+                    
+                except Exception as e:
+                    st.error(f"❌ Error: {str(e)}")
+                    logger.error(f"Upload error: {e}", exc_info=True)
+    
+    except Exception as e:
+        st.error("❌ Failed to initialize upload interface")
+        st.error(f"Error: {str(e)}")
+        logger.error(f"Upload interface error: {e}", exc_info=True)
