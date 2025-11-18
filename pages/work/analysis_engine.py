@@ -109,11 +109,25 @@ def analyze_single_question(question: Dict[str, Any], rag_handler: RAGHandler) -
         
         logger.info(f"Analyzing question {question['id']}: {question['question'][:50]}...")
         
-        # Query RAG system for relevant chunks
-        results = rag_handler.query(
-            query_text=query_text,
-            collection_name="hcmpact_docs",
-            n_results=5  # Get top 5 most relevant chunks
+        # Get the collection
+        collection = rag_handler.client.get_collection(name="hcmpact_docs")
+        
+        # Generate embedding for query
+        query_embedding = rag_handler.get_embedding(query_text)
+        
+        if query_embedding is None:
+            return {
+                'answer': 'Error: Could not generate embedding for query.',
+                'sources': [],
+                'confidence': 0.0,
+                'status': 'pending'
+            }
+        
+        # Query collection directly
+        results = collection.query(
+            query_embeddings=[query_embedding],
+            n_results=5,
+            include=['documents', 'metadatas', 'distances']
         )
         
         if not results or not results.get('documents'):
@@ -145,11 +159,23 @@ def analyze_single_question(question: Dict[str, Any], rag_handler: RAGHandler) -
         else:
             confidence = 0.5
         
+        # Filter out template documents (optional - improves quality)
+        filtered_results = []
+        for doc, meta, dist in zip(documents, metadatas, distances):
+            source = meta.get('source', '')
+            # Skip template documents
+            if 'Analysis_Workbook' not in source and 'BRIT' not in source:
+                filtered_results.append((doc, meta, dist))
+        
+        # If we filtered out everything, use original results
+        if not filtered_results:
+            filtered_results = list(zip(documents, metadatas, distances))
+        
         # Build answer from top chunks
         answer_parts = []
         sources = []
         
-        for i, (doc, meta) in enumerate(zip(documents[:3], metadatas[:3])):
+        for i, (doc, meta, dist) in enumerate(filtered_results[:3]):
             # Extract source information
             source_name = meta.get('source', 'Unknown')
             if source_name not in sources:
@@ -174,7 +200,7 @@ def analyze_single_question(question: Dict[str, Any], rag_handler: RAGHandler) -
         }
         
     except Exception as e:
-        logger.error(f"Error analyzing question: {e}")
+        logger.error(f"Error analyzing question: {e}", exc_info=True)
         return {
             'answer': f'Error during analysis: {str(e)}',
             'sources': [],
