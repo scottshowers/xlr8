@@ -8,7 +8,6 @@ This module orchestrates the entire query processing flow:
 4. LLM Routing (Local vs Claude API)
 5. Response Synthesis & De-anonymization
 
-
 Author: HCMPACT
 Version: 1.0.1 - Fixed ChromaDB search call
 """
