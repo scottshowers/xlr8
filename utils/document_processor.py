@@ -8,19 +8,17 @@ import logging
 from utils.rag_handler import RAGHandler
 import time
 
-
 logger = logging.getLogger(__name__)
 
 
 class DocumentProcessor:
-    """Handles document upload and processing with proper metadata - NOW WITH EXCEL SUPPORT!"""
+    """Handles document upload and processing with proper metadata - ENHANCED EXCEL SUPPORT"""
     
     def __init__(self):
         try:
             self.rag_handler = RAGHandler()
-            # UPDATED: Added Excel support for UKG templates
             self.supported_extensions = ['.pdf', '.docx', '.txt', '.md', '.xlsx', '.xls']
-            logger.info("DocumentProcessor initialized successfully with Excel support")
+            logger.info("DocumentProcessor initialized successfully with enhanced Excel support")
         except Exception as e:
             logger.error(f"Failed to initialize DocumentProcessor: {e}")
             self.rag_handler = None
@@ -51,57 +49,112 @@ class DocumentProcessor:
     
     def extract_text_from_excel(self, file) -> str:
         """
-        Extract text from Excel file (.xlsx or .xls).
-        Reads ALL sheets and converts to text format.
-        
-        Critical for UKG templates like:
-        - Analysis_Workbook.xlsx
-        - BRIT_Master.xlsx
-        - Data conversion templates
+        ENHANCED: Extract text from Excel file (.xlsx or .xls).
+        Now with better error handling for complex files like BRIT.
         """
         try:
-            # Read all sheets
-            excel_file = pd.ExcelFile(file)
             all_text = []
+            sheets_processed = 0
+            sheets_failed = 0
             
-            logger.info(f"Excel file has {len(excel_file.sheet_names)} sheets")
-            
-            for sheet_name in excel_file.sheet_names:
+            # Try to read Excel file with both engines
+            try:
+                # First try openpyxl (for .xlsx)
+                excel_file = pd.ExcelFile(file, engine='openpyxl')
+            except Exception as e1:
+                logger.warning(f"openpyxl failed: {e1}, trying xlrd...")
                 try:
-                    # Read sheet
-                    df = pd.read_excel(file, sheet_name=sheet_name)
+                    # Fallback to xlrd (for older .xls)
+                    file.seek(0)  # Reset file pointer
+                    excel_file = pd.ExcelFile(file, engine='xlrd')
+                except Exception as e2:
+                    logger.error(f"Both engines failed. openpyxl: {e1}, xlrd: {e2}")
+                    return ""
+            
+            total_sheets = len(excel_file.sheet_names)
+            logger.info(f"Excel file has {total_sheets} sheets")
+            
+            # Process each sheet individually with error handling
+            for sheet_idx, sheet_name in enumerate(excel_file.sheet_names):
+                try:
+                    logger.info(f"Processing sheet {sheet_idx+1}/{total_sheets}: '{sheet_name}'")
+                    
+                    # Try to read the sheet
+                    try:
+                        df = pd.read_excel(file, sheet_name=sheet_name, engine=excel_file.engine)
+                    except Exception as read_error:
+                        # If normal read fails, try with header=None
+                        logger.warning(f"Normal read failed for '{sheet_name}', trying without headers...")
+                        file.seek(0)
+                        df = pd.read_excel(file, sheet_name=sheet_name, engine=excel_file.engine, header=None)
+                    
+                    # Skip completely empty sheets
+                    if df.empty or df.shape[0] == 0:
+                        logger.info(f"Sheet '{sheet_name}' is empty, skipping")
+                        continue
                     
                     # Add sheet header
                     all_text.append(f"\n\n=== SHEET: {sheet_name} ===\n")
                     
-                    # Convert dataframe to text
-                    # Include column names and all cell values
-                    all_text.append(f"Columns: {', '.join([str(col) for col in df.columns])}\n")
+                    # Get column names (handling unnamed columns)
+                    columns = []
+                    for col in df.columns:
+                        col_str = str(col)
+                        # Skip purely numeric or "Unnamed" columns without data
+                        if not col_str.startswith('Unnamed'):
+                            columns.append(col_str)
                     
-                    # Convert each row to text
+                    if columns:
+                        all_text.append(f"Columns: {', '.join(columns)}\n")
+                    
+                    # Extract rows - simplified approach
+                    rows_added = 0
                     for idx, row in df.iterrows():
                         # Skip completely empty rows
                         if row.notna().any():
-                            row_text = " | ".join([
-                                f"{col}: {val}" 
-                                for col, val in zip(df.columns, row) 
-                                if pd.notna(val) and str(val).strip()
-                            ])
-                            if row_text:
-                                all_text.append(row_text + "\n")
+                            # Convert row to simple text
+                            row_values = []
+                            for val in row:
+                                if pd.notna(val):
+                                    val_str = str(val).strip()
+                                    if val_str and val_str != 'nan':
+                                        row_values.append(val_str)
+                            
+                            if row_values:
+                                all_text.append(" | ".join(row_values) + "\n")
+                                rows_added += 1
+                        
+                        # Limit rows per sheet to prevent massive files
+                        if rows_added >= 500:
+                            all_text.append(f"[... {len(df) - rows_added} more rows ...]\n")
+                            break
                     
-                    logger.info(f"Extracted {len(df)} rows from sheet '{sheet_name}'")
+                    sheets_processed += 1
+                    logger.info(f"✓ Sheet '{sheet_name}': {rows_added} rows extracted")
                     
                 except Exception as e:
-                    logger.warning(f"Could not read sheet '{sheet_name}': {e}")
+                    sheets_failed += 1
+                    logger.warning(f"✗ Could not process sheet '{sheet_name}': {e}")
+                    # Continue to next sheet instead of failing entire file
                     continue
             
             full_text = "".join(all_text)
-            logger.info(f"Excel extraction complete: {len(full_text)} characters")
-            return full_text.strip()
+            
+            logger.info(f"Excel extraction complete: {sheets_processed}/{total_sheets} sheets processed")
+            logger.info(f"Total text: {len(full_text)} characters")
+            
+            if sheets_failed > 0:
+                logger.warning(f"{sheets_failed} sheets failed to process")
+            
+            # Return text even if some sheets failed
+            if len(full_text) > 100:  # At least some content extracted
+                return full_text.strip()
+            else:
+                logger.error("No meaningful text extracted from any sheet")
+                return ""
             
         except Exception as e:
-            logger.error(f"Error extracting Excel text: {str(e)}")
+            logger.error(f"Error extracting Excel text: {str(e)}", exc_info=True)
             return ""
     
     def extract_text_from_txt(self, file) -> str:
@@ -157,8 +210,9 @@ class DocumentProcessor:
             status_placeholder.info(f"📄 Extracting text from {filename}...")
             text = self.extract_text(file, filename)
             
-            if not text:
+            if not text or len(text) < 50:
                 status_placeholder.error(f"❌ No text extracted from {filename}")
+                status_placeholder.warning("This might be due to: file format issues, protected sheets, or unsupported Excel features")
                 return {'success': False, 'filename': filename, 'error': 'No text extracted'}
             
             status_placeholder.info(f"✅ Extracted {len(text):,} characters")
@@ -319,7 +373,6 @@ def render_upload_interface():
             help="Select the category for better organization"
         )
         
-        # UPDATED: Added Excel file types for UKG templates
         uploaded_files = st.file_uploader(
             "Choose files",
             type=['pdf', 'docx', 'txt', 'md', 'xlsx', 'xls'],
