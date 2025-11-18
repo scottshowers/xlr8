@@ -120,20 +120,27 @@ class DocumentProcessor:
         Returns:
             Dictionary with processing results
         """
+        progress_container = st.empty()
+        
         try:
             # Extract text
+            progress_container.info(f"📄 Extracting text from {filename}...")
             logger.info(f"Processing document: {filename}")
             text = self.extract_text(file, filename)
             
             if not text:
+                progress_container.error(f"❌ No text extracted from {filename}")
                 return {
                     'success': False,
                     'filename': filename,
                     'error': 'No text extracted from document'
                 }
             
+            progress_container.info(f"✅ Extracted {len(text)} characters")
+            
             # Clean text
             text = self.clean_text(text)
+            progress_container.info(f"🧹 Cleaned text: {len(text)} characters")
             
             # Prepare metadata with ACTUAL FILENAME
             metadata = {
@@ -143,7 +150,21 @@ class DocumentProcessor:
                 'type': os.path.splitext(filename)[1].lower()
             }
             
+            # Test embedding first
+            progress_container.info(f"🧪 Testing Ollama connection...")
+            test_embedding = self.rag_handler.get_embedding("test")
+            if test_embedding is None:
+                progress_container.error("❌ Cannot connect to Ollama embedding service!")
+                progress_container.error(f"Endpoint: {self.rag_handler.ollama_base_url}")
+                return {
+                    'success': False,
+                    'filename': filename,
+                    'error': 'Ollama embedding service unavailable'
+                }
+            progress_container.success("✅ Ollama connection successful")
+            
             # Add to ChromaDB
+            progress_container.info(f"📦 Adding to ChromaDB (chunk size: 800 chars)...")
             success = self.rag_handler.add_document(
                 collection_name=collection_name,
                 text=text,
@@ -151,14 +172,17 @@ class DocumentProcessor:
             )
             
             if success:
+                chunks = len(text) // 800
+                progress_container.success(f"✅ Successfully processed {filename} ({chunks} chunks)")
                 logger.info(f"Successfully processed: {filename}")
                 return {
                     'success': True,
                     'filename': filename,
-                    'chunks': len(text) // 800,  # Approximate chunk count
+                    'chunks': chunks,
                     'category': category
                 }
             else:
+                progress_container.error(f"❌ Failed to add {filename} to ChromaDB")
                 return {
                     'success': False,
                     'filename': filename,
@@ -166,6 +190,7 @@ class DocumentProcessor:
                 }
                 
         except Exception as e:
+            progress_container.error(f"❌ Error: {str(e)}")
             logger.error(f"Error processing document {filename}: {str(e)}")
             return {
                 'success': False,
