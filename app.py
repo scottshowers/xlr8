@@ -23,7 +23,7 @@ from components.sidebar import render_sidebar
 from utils.data.session import initialize_session_state
 
 # Page imports
-from pages.work.analysis import render_analysis_page
+from pages.work.analysis_engine import render_analysis_page
 from pages.work.chat import render_chat_page
 from pages.work.library import render_library_page
 from pages.setup.projects import render_projects_page
