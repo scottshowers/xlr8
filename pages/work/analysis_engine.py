@@ -1,7 +1,7 @@
 """
 Analysis & Templates Page - XLR8 Analysis Engine
-COMPLETE VERSION - Question Browser + RAG Analysis
-BUILD 20251118-2315
+COMPLETE VERSION - Question Browser + RAG Analysis + LLM Synthesis
+BUILD 20251118-2330
 """
 
 import streamlit as st
@@ -11,6 +11,8 @@ import logging
 from typing import List, Dict, Any
 import os
 import sys
+import time
+from datetime import datetime
 
 # Import RAG handler for document querying
 try:
@@ -20,11 +22,20 @@ except ImportError:
     RAG_AVAILABLE = False
     st.error("RAG Handler not available")
 
+# Import LLM synthesizer for answer generation
+try:
+    from utils.ai.llm_synthesizer import get_synthesizer
+    LLM_AVAILABLE = True
+except ImportError:
+    LLM_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning("LLM Synthesizer not available - will use raw chunks")
+
 logger = logging.getLogger(__name__)
 
 # Print to logs
 print("=" * 80)
-print("🚀 ANALYSIS_ENGINE.PY LOADING - COMPLETE VERSION - BUILD 2315")
+print("🚀 ANALYSIS_ENGINE.PY LOADING - COMPLETE WITH BATCH + EXPORT - BUILD 2340")
 print("=" * 80)
 
 
@@ -90,7 +101,7 @@ def save_questions(questions_data: Dict[str, Any]) -> bool:
 
 def analyze_single_question(question: Dict[str, Any], rag_handler: RAGHandler) -> Dict[str, Any]:
     """
-    Analyze a single question using RAG to query customer documents.
+    Analyze a single question using RAG to query customer documents + LLM synthesis.
     
     Args:
         question: Question dictionary with 'question', 'keywords', etc.
@@ -151,15 +162,7 @@ def analyze_single_question(question: Dict[str, Any], rag_handler: RAGHandler) -
                 'status': 'analyzed'
             }
         
-        # Calculate confidence based on distances (lower distance = higher confidence)
-        # ChromaDB uses cosine distance, so 0 = perfect match, 2 = opposite
-        if distances:
-            avg_distance = sum(distances) / len(distances)
-            confidence = max(0.0, min(1.0, 1.0 - (avg_distance / 2.0)))
-        else:
-            confidence = 0.5
-        
-        # Filter out template documents (optional - improves quality)
+        # Filter out template documents (improves quality)
         filtered_results = []
         for doc, meta, dist in zip(documents, metadatas, distances):
             source = meta.get('source', '')
@@ -171,24 +174,73 @@ def analyze_single_question(question: Dict[str, Any], rag_handler: RAGHandler) -
         if not filtered_results:
             filtered_results = list(zip(documents, metadatas, distances))
         
-        # Build answer from top chunks
-        answer_parts = []
+        # Extract chunks and sources for LLM
+        chunks = []
         sources = []
         
-        for i, (doc, meta, dist) in enumerate(filtered_results[:3]):
-            # Extract source information
+        for doc, meta, dist in filtered_results[:3]:  # Top 3 chunks
             source_name = meta.get('source', 'Unknown')
             if source_name not in sources:
                 sources.append(source_name)
-            
-            # Add chunk content to answer
-            chunk_text = doc.strip()
-            if chunk_text and len(chunk_text) > 20:
-                answer_parts.append(f"**From {source_name}:**\n{chunk_text[:300]}...")
+            chunks.append(doc.strip())
+        
+        # USE LLM TO SYNTHESIZE ANSWER (if available)
+        if LLM_AVAILABLE:
+            try:
+                synthesizer = get_synthesizer()
+                result = synthesizer.synthesize_answer(
+                    question=question['question'],
+                    chunks=chunks,
+                    sources=sources,
+                    reason=question.get('reason', '')
+                )
+                
+                return {
+                    'answer': result['answer'],
+                    'sources': sources,
+                    'confidence': result['confidence'],
+                    'status': 'analyzed'
+                }
+                
+            except Exception as e:
+                logger.error(f"LLM synthesis failed, falling back to raw chunks: {e}")
+                # Fall through to raw chunk method below
+        
+        # FALLBACK: Build answer from raw chunks (if LLM not available or failed)
+        answer_parts = []
+        
+        for chunk, source in zip(chunks, sources):
+            if chunk and len(chunk) > 20:
+                answer_parts.append(f"**From {source}:**\n{chunk[:300]}...")
         
         # Combine answer parts
         if answer_parts:
             answer = "\n\n".join(answer_parts)
+        else:
+            answer = "Information found but could not extract meaningful content."
+        
+        # Calculate confidence from distances
+        if distances:
+            avg_distance = sum(distances[:len(filtered_results)]) / len(filtered_results)
+            confidence = max(0.0, min(1.0, 1.0 - (avg_distance / 2.0)))
+        else:
+            confidence = 0.5
+        
+        return {
+            'answer': answer,
+            'sources': sources,
+            'confidence': confidence,
+            'status': 'analyzed'
+        }
+        
+    except Exception as e:
+        logger.error(f"Error analyzing question: {e}", exc_info=True)
+        return {
+            'answer': f'Error during analysis: {str(e)}',
+            'sources': [],
+            'confidence': 0.0,
+            'status': 'pending'
+        }
         else:
             answer = "Information found but could not extract meaningful content."
         
@@ -458,7 +510,7 @@ def render_question_browser(questions: List[Dict[str, Any]], questions_data: Dic
 
 
 def render_batch_analysis(questions: List[Dict[str, Any]], questions_data: Dict[str, Any], rag_handler):
-    """Render the batch analysis interface."""
+    """Render the batch analysis interface with working batch processing."""
     
     st.subheader("⚡ Batch Analysis")
     
@@ -466,48 +518,446 @@ def render_batch_analysis(questions: List[Dict[str, Any]], questions_data: Dict[
         st.error("⚠️ RAG system not available. Cannot perform batch analysis.")
         return
     
-    st.info("🚧 **Batch analysis coming in next conversation!**")
+    # Calculate stats
+    pending = [q for q in questions if q.get('status') == 'pending']
+    analyzed = [q for q in questions if q.get('status') in ['analyzed', 'reviewed']]
     
-    st.markdown("""
-    ### Batch Analysis Features:
+    # Summary metrics
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Questions", len(questions))
+    with col2:
+        st.metric("Analyzed", len(analyzed), delta=f"{len(analyzed)/len(questions)*100:.0f}%")
+    with col3:
+        st.metric("Pending", len(pending))
+    with col4:
+        avg_conf = sum(q.get('confidence', 0) for q in analyzed) / len(analyzed) if analyzed else 0
+        st.metric("Avg Confidence", f"{avg_conf*100:.0f}%")
     
-    **🎯 What it will do:**
-    - Analyze ALL 254 questions automatically
-    - Process in batches of 10 (to avoid timeout)
-    - Real-time progress bar
-    - Auto-save every 10 questions
-    - Estimated time: ~30-45 minutes for all questions
+    st.markdown("---")
     
-    **💾 Smart Features:**
-    - Skip already-analyzed questions
-    - Resume from last checkpoint
-    - Pause/resume capability
-    - Never lose progress
+    if len(pending) == 0:
+        st.success("✅ All questions have been analyzed!")
+        st.info("👉 Go to Export & Review tab to download results")
+        return
     
-    **🔍 Quality Control:**
-    - Confidence scores for each answer
-    - Flag low-confidence answers for review
-    - Detect conflicting information
-    - Source citation tracking
-    """)
+    # Batch processing controls
+    st.markdown("### 🚀 Batch Processing")
     
-    # Show stats
-    pending = sum(1 for q in questions if q.get('status') == 'pending')
-    st.metric("Pending Questions", pending, help="Questions not yet analyzed")
+    # Options
+    col1, col2 = st.columns(2)
+    with col1:
+        batch_size = st.selectbox(
+            "Batch Size",
+            [5, 10, 20, 50],
+            index=1,
+            help="Process this many questions before auto-saving"
+        )
     
-    if pending > 0:
-        st.info(f"💡 You can analyze all {pending} pending questions manually one by one for now, or wait for batch analysis in the next conversation.")
+    with col2:
+        process_mode = st.selectbox(
+            "Process",
+            ["All Pending", "By Category", "Required Only"],
+            help="Choose which questions to process"
+        )
+    
+    # Filter questions based on mode
+    if process_mode == "By Category":
+        categories = sorted(list(set(q['category'] for q in pending)))
+        selected_category = st.selectbox("Select Category", categories)
+        questions_to_process = [q for q in pending if q['category'] == selected_category]
+    elif process_mode == "Required Only":
+        questions_to_process = [q for q in pending if q.get('required')]
+    else:
+        questions_to_process = pending
+    
+    st.info(f"📊 **{len(questions_to_process)} questions** will be processed")
+    
+    # Estimate time
+    time_per_question = 12  # seconds (with LLM synthesis)
+    estimated_time = (len(questions_to_process) * time_per_question) / 60
+    st.caption(f"⏱️ Estimated time: ~{estimated_time:.0f} minutes")
+    
+    # Start button
+    if st.button("🚀 Start Batch Analysis", type="primary", disabled=len(questions_to_process)==0):
+        st.session_state.batch_processing = True
+        st.session_state.batch_questions = questions_to_process
+        st.session_state.batch_size = batch_size
+        st.rerun()
+    
+    # Process if triggered
+    if st.session_state.get('batch_processing'):
+        run_batch_analysis(
+            questions_to_process=st.session_state.batch_questions,
+            questions_data=questions_data,
+            rag_handler=rag_handler,
+            batch_size=st.session_state.batch_size
+        )
+
+
+def run_batch_analysis(
+    questions_to_process: List[Dict[str, Any]],
+    questions_data: Dict[str, Any],
+    rag_handler: RAGHandler,
+    batch_size: int = 10
+):
+    """Run batch analysis with progress tracking and auto-save."""
+    
+    st.markdown("---")
+    st.markdown("### 📊 Processing in Progress...")
+    
+    total = len(questions_to_process)
+    
+    # Progress tracking
+    progress_bar = st.progress(0.0)
+    status_text = st.empty()
+    stats_container = st.empty()
+    
+    # Track results
+    successful = 0
+    failed = 0
+    start_time = time.time()
+    
+    # Process questions
+    for idx, question in enumerate(questions_to_process):
+        # Update progress
+        progress = (idx + 1) / total
+        progress_bar.progress(progress)
+        
+        # Update status
+        status_text.info(f"🔍 Processing question {idx+1}/{total}: **{question['id']}** - {question['question'][:60]}...")
+        
+        # Analyze question
+        try:
+            result = analyze_single_question(question, rag_handler)
+            
+            # Update question with results
+            question['answer'] = result['answer']
+            question['sources'] = result['sources']
+            question['confidence'] = result['confidence']
+            question['status'] = result['status']
+            
+            successful += 1
+            
+        except Exception as e:
+            logger.error(f"Error analyzing {question['id']}: {e}")
+            question['answer'] = f"Error during analysis: {str(e)}"
+            question['status'] = 'pending'
+            failed += 1
+        
+        # Auto-save at batch intervals
+        if (idx + 1) % batch_size == 0 or (idx + 1) == total:
+            if save_questions(questions_data):
+                status_text.success(f"💾 Auto-saved progress at {idx+1}/{total} questions")
+            else:
+                status_text.warning(f"⚠️ Failed to auto-save at {idx+1}/{total}")
+        
+        # Update stats
+        elapsed = time.time() - start_time
+        avg_time = elapsed / (idx + 1)
+        remaining = (total - (idx + 1)) * avg_time
+        
+        with stats_container.container():
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Processed", f"{idx+1}/{total}")
+            with col2:
+                st.metric("Successful", successful)
+            with col3:
+                st.metric("Failed", failed)
+            with col4:
+                st.metric("Time Remaining", f"{remaining/60:.0f}m")
+    
+    # Completion
+    progress_bar.progress(1.0)
+    status_text.success(f"✅ Batch analysis complete!")
+    
+    # Final save
+    if save_questions(questions_data):
+        st.success("💾 Final results saved successfully!")
+    
+    # Summary
+    st.markdown("---")
+    st.markdown("### 📊 Batch Analysis Summary")
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total Processed", total)
+    with col2:
+        st.metric("Successful", successful, delta="✅")
+    with col3:
+        st.metric("Failed", failed, delta="❌" if failed > 0 else None)
+    
+    total_time = time.time() - start_time
+    st.info(f"⏱️ Total time: {total_time/60:.1f} minutes ({total_time/total:.1f}s per question)")
+    
+    # Clear state
+    if st.button("✅ Done - Return to Analysis"):
+        st.session_state.pop('batch_processing', None)
+        st.session_state.pop('batch_questions', None)
+        st.session_state.pop('batch_size', None)
+        st.rerun()
 
 
 def render_export_review(questions: List[Dict[str, Any]]):
-    """Render the export and review interface."""
+    """Render the export and review interface with Excel export."""
     
     st.subheader("📤 Export & Review")
     
-    st.info("🚧 **Export feature coming in next conversation!**")
-    
     # Show summary of analyzed questions
     analyzed = [q for q in questions if q.get('answer')]
+    pending = [q for q in questions if q.get('status') == 'pending']
+    
+    if not analyzed:
+        st.warning("⚠️ No analyzed questions to export yet.")
+        st.info("👉 Go to Question Browser or Batch Analysis to analyze questions first")
+        return
+    
+    st.success(f"✅ {len(analyzed)} questions have been analyzed and are ready for export!")
+    
+    # Confidence breakdown
+    high_conf = [q for q in analyzed if q.get('confidence', 0) > 0.8]
+    med_conf = [q for q in analyzed if 0.6 < q.get('confidence', 0) <= 0.8]
+    low_conf = [q for q in analyzed if q.get('confidence', 0) <= 0.6]
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("High Confidence", len(high_conf), help=">80%", delta="🟢")
+    with col2:
+        st.metric("Medium Confidence", len(med_conf), help="60-80%", delta="🟡")
+    with col3:
+        st.metric("Low Confidence", len(low_conf), help="<60%", delta="🔴")
+    with col4:
+        st.metric("Still Pending", len(pending))
+    
+    st.markdown("---")
+    
+    # Export options
+    st.markdown("### 📥 Export Options")
+    
+    export_format = st.radio(
+        "Export Format",
+        ["Excel (XLSX)", "CSV", "JSON"],
+        help="Choose the export format"
+    )
+    
+    include_options = st.multiselect(
+        "Include in Export",
+        ["All Questions", "Analyzed Only", "High Confidence Only", "Include Sources", "Include Confidence Scores"],
+        default=["All Questions", "Include Sources", "Include Confidence Scores"]
+    )
+    
+    # Export button
+    if st.button("📥 Generate Export File", type="primary"):
+        # Filter questions based on options
+        if "Analyzed Only" in include_options:
+            export_questions = analyzed
+        elif "High Confidence Only" in include_options:
+            export_questions = high_conf
+        else:
+            export_questions = questions
+        
+        # Generate export based on format
+        if export_format == "Excel (XLSX)":
+            export_data = generate_excel_export(
+                export_questions,
+                include_sources="Include Sources" in include_options,
+                include_confidence="Include Confidence Scores" in include_options
+            )
+            
+            if export_data:
+                st.download_button(
+                    label="📥 Download Analysis_Workbook_Completed.xlsx",
+                    data=export_data,
+                    file_name=f"Analysis_Workbook_Completed_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="download_excel"
+                )
+                st.success("✅ Excel file ready for download!")
+            else:
+                st.error("❌ Failed to generate Excel file")
+        
+        elif export_format == "CSV":
+            export_data = generate_csv_export(export_questions)
+            st.download_button(
+                label="📥 Download analysis_results.csv",
+                data=export_data,
+                file_name=f"analysis_results_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                mime="text/csv",
+                key="download_csv"
+            )
+            st.success("✅ CSV file ready for download!")
+        
+        elif export_format == "JSON":
+            export_data = json.dumps({
+                'exported_at': datetime.now().isoformat(),
+                'total_questions': len(export_questions),
+                'questions': export_questions
+            }, indent=2)
+            st.download_button(
+                label="📥 Download analysis_results.json",
+                data=export_data,
+                file_name=f"analysis_results_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
+                mime="application/json",
+                key="download_json"
+            )
+            st.success("✅ JSON file ready for download!")
+    
+    # Preview section
+    st.markdown("---")
+    st.markdown("### 👁️ Preview Export Data")
+    
+    with st.expander("Show Export Preview (First 5 Questions)"):
+        import pandas as pd
+        
+        preview_data = []
+        for q in analyzed[:5]:
+            preview_data.append({
+                'ID': q['id'],
+                'Category': q['category'],
+                'Question': q['question'][:60] + '...',
+                'Answer': q.get('answer', 'N/A')[:100] + '...' if q.get('answer') else 'N/A',
+                'Confidence': f"{q.get('confidence', 0)*100:.0f}%",
+                'Sources': ', '.join(q.get('sources', [])[:2])
+            })
+        
+        df = pd.DataFrame(preview_data)
+        st.dataframe(df, use_container_width=True)
+
+
+def generate_excel_export(
+    questions: List[Dict[str, Any]],
+    include_sources: bool = True,
+    include_confidence: bool = True
+) -> bytes:
+    """Generate Excel export file."""
+    
+    try:
+        from io import BytesIO
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment
+        from datetime import datetime
+        
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Analysis Results"
+        
+        # Headers
+        headers = ['ID', 'Category', 'Question', 'Answer', 'Status']
+        if include_sources:
+            headers.append('Sources')
+        if include_confidence:
+            headers.append('Confidence')
+        headers.append('Required')
+        
+        # Write headers
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=header)
+            cell.font = Font(bold=True, size=12)
+            cell.fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        
+        # Write data
+        for row_idx, q in enumerate(questions, 2):
+            col_idx = 1
+            
+            # ID
+            ws.cell(row=row_idx, column=col_idx, value=q['id'])
+            col_idx += 1
+            
+            # Category
+            ws.cell(row=row_idx, column=col_idx, value=q['category'])
+            col_idx += 1
+            
+            # Question
+            ws.cell(row=row_idx, column=col_idx, value=q['question'])
+            col_idx += 1
+            
+            # Answer
+            answer_cell = ws.cell(row=row_idx, column=col_idx, value=q.get('answer', 'Not analyzed'))
+            
+            # Color-code by confidence
+            if include_confidence and q.get('confidence'):
+                conf = q['confidence']
+                if conf > 0.8:
+                    answer_cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")  # Green
+                elif conf > 0.6:
+                    answer_cell.fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")  # Yellow
+                else:
+                    answer_cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")  # Red
+            
+            col_idx += 1
+            
+            # Status
+            ws.cell(row=row_idx, column=col_idx, value=q.get('status', 'pending').capitalize())
+            col_idx += 1
+            
+            # Sources
+            if include_sources:
+                sources = ', '.join(q.get('sources', []))
+                ws.cell(row=row_idx, column=col_idx, value=sources)
+                col_idx += 1
+            
+            # Confidence
+            if include_confidence:
+                conf_val = f"{q.get('confidence', 0)*100:.0f}%" if q.get('confidence') else 'N/A'
+                ws.cell(row=row_idx, column=col_idx, value=conf_val)
+                col_idx += 1
+            
+            # Required
+            ws.cell(row=row_idx, column=col_idx, value="Yes" if q.get('required') else "No")
+        
+        # Auto-adjust column widths
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)  # Cap at 50
+            ws.column_dimensions[column_letter].width = adjusted_width
+        
+        # Save to bytes
+        output = BytesIO()
+        wb.save(output)
+        output.seek(0)
+        return output.getvalue()
+        
+    except Exception as e:
+        logger.error(f"Error generating Excel export: {e}")
+        return None
+
+
+def generate_csv_export(questions: List[Dict[str, Any]]) -> str:
+    """Generate CSV export."""
+    
+    import csv
+    from io import StringIO
+    
+    output = StringIO()
+    writer = csv.writer(output)
+    
+    # Headers
+    writer.writerow(['ID', 'Category', 'Question', 'Answer', 'Confidence', 'Sources', 'Status', 'Required'])
+    
+    # Data
+    for q in questions:
+        writer.writerow([
+            q['id'],
+            q['category'],
+            q['question'],
+            q.get('answer', 'Not analyzed'),
+            f"{q.get('confidence', 0)*100:.0f}%",
+            ', '.join(q.get('sources', [])),
+            q.get('status', 'pending'),
+            'Yes' if q.get('required') else 'No'
+        ])
+    
+    return output.getvalue()
     
     if not analyzed:
         st.warning("No analyzed questions to export yet.")
