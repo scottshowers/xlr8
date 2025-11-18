@@ -3,6 +3,7 @@ import streamlit as st
 from typing import List, Dict, Any
 import PyPDF2
 import docx
+import pandas as pd
 import logging
 from utils.rag_handler import RAGHandler
 import time
@@ -11,17 +12,18 @@ logger = logging.getLogger(__name__)
 
 
 class DocumentProcessor:
-    """Handles document upload and processing with proper metadata."""
+    """Handles document upload and processing with proper metadata - NOW WITH EXCEL SUPPORT!"""
     
     def __init__(self):
         try:
             self.rag_handler = RAGHandler()
-            self.supported_extensions = ['.pdf', '.docx', '.txt', '.md']
-            logger.info("DocumentProcessor initialized successfully")
+            # UPDATED: Added Excel support for UKG templates
+            self.supported_extensions = ['.pdf', '.docx', '.txt', '.md', '.xlsx', '.xls']
+            logger.info("DocumentProcessor initialized successfully with Excel support")
         except Exception as e:
             logger.error(f"Failed to initialize DocumentProcessor: {e}")
             self.rag_handler = None
-            self.supported_extensions = ['.pdf', '.docx', '.txt', '.md']
+            self.supported_extensions = ['.pdf', '.docx', '.txt', '.md', '.xlsx', '.xls']
             raise RuntimeError(f"DocumentProcessor initialization failed: {e}")
     
     def extract_text_from_pdf(self, file) -> str:
@@ -46,6 +48,61 @@ class DocumentProcessor:
             logger.error(f"Error extracting DOCX text: {str(e)}")
             return ""
     
+    def extract_text_from_excel(self, file) -> str:
+        """
+        Extract text from Excel file (.xlsx or .xls).
+        Reads ALL sheets and converts to text format.
+        
+        Critical for UKG templates like:
+        - Analysis_Workbook.xlsx
+        - BRIT_Master.xlsx
+        - Data conversion templates
+        """
+        try:
+            # Read all sheets
+            excel_file = pd.ExcelFile(file)
+            all_text = []
+            
+            logger.info(f"Excel file has {len(excel_file.sheet_names)} sheets")
+            
+            for sheet_name in excel_file.sheet_names:
+                try:
+                    # Read sheet
+                    df = pd.read_excel(file, sheet_name=sheet_name)
+                    
+                    # Add sheet header
+                    all_text.append(f"\n\n=== SHEET: {sheet_name} ===\n")
+                    
+                    # Convert dataframe to text
+                    # Include column names and all cell values
+                    all_text.append(f"Columns: {', '.join([str(col) for col in df.columns])}\n")
+                    
+                    # Convert each row to text
+                    for idx, row in df.iterrows():
+                        # Skip completely empty rows
+                        if row.notna().any():
+                            row_text = " | ".join([
+                                f"{col}: {val}" 
+                                for col, val in zip(df.columns, row) 
+                                if pd.notna(val) and str(val).strip()
+                            ])
+                            if row_text:
+                                all_text.append(row_text + "\n")
+                    
+                    logger.info(f"Extracted {len(df)} rows from sheet '{sheet_name}'")
+                    
+                except Exception as e:
+                    logger.warning(f"Could not read sheet '{sheet_name}': {e}")
+                    continue
+            
+            full_text = "".join(all_text)
+            logger.info(f"Excel extraction complete: {len(full_text)} characters")
+            return full_text.strip()
+            
+        except Exception as e:
+            logger.error(f"Error extracting Excel text: {str(e)}")
+            return ""
+    
     def extract_text_from_txt(self, file) -> str:
         """Extract text from TXT file."""
         try:
@@ -67,6 +124,8 @@ class DocumentProcessor:
             return self.extract_text_from_pdf(file)
         elif ext == '.docx':
             return self.extract_text_from_docx(file)
+        elif ext in ['.xlsx', '.xls']:
+            return self.extract_text_from_excel(file)
         elif ext in ['.txt', '.md']:
             return self.extract_text_from_txt(file)
         else:
@@ -129,7 +188,7 @@ class DocumentProcessor:
             status_placeholder.success(f"✅ Ollama OK ({test_time:.1f}s)")
             
             # Get collection
-            status_placeholder.info(f"📁 Getting ChromaDB collection '{collection_name}'...")
+            status_placeholder.info(f"📂 Getting ChromaDB collection '{collection_name}'...")
             try:
                 collection = self.rag_handler.client.get_or_create_collection(
                     name=collection_name,
@@ -161,7 +220,7 @@ class DocumentProcessor:
                 batch_end = min(batch_start + BATCH_SIZE, total_chunks)
                 batch_chunks = chunks[batch_start:batch_end]
                 
-                status_placeholder.info(f"🔄 Batch {batch_start//BATCH_SIZE + 1} (chunks {batch_start+1}-{batch_end}/{total_chunks})")
+                status_placeholder.info(f"📄 Batch {batch_start//BATCH_SIZE + 1} (chunks {batch_start+1}-{batch_end}/{total_chunks})")
                 
                 for i, chunk in enumerate(batch_chunks):
                     chunk_idx = batch_start + i
@@ -255,15 +314,16 @@ def render_upload_interface():
         
         category = st.selectbox(
             "Document Category",
-            ["UKG Pro", "WFM", "Implementation Guide", "Best Practices", "Configuration", "General"],
+            ["UKG Templates", "UKG Pro", "WFM", "Implementation Guide", "Best Practices", "Configuration", "General"],
             help="Select the category for better organization"
         )
         
+        # UPDATED: Added Excel file types for UKG templates
         uploaded_files = st.file_uploader(
             "Choose files",
-            type=['pdf', 'docx', 'txt', 'md'],
+            type=['pdf', 'docx', 'txt', 'md', 'xlsx', 'xls'],
             accept_multiple_files=True,
-            help="Supported formats: PDF, DOCX, TXT, MD"
+            help="Supported formats: PDF, DOCX, TXT, MD, XLSX, XLS"
         )
         
         if uploaded_files:
