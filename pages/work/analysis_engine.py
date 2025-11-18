@@ -319,15 +319,22 @@ def render_question_browser(questions: List[Dict[str, Any]], questions_data: Dic
     questions_per_page = 10
     total_pages = max(1, (len(filtered_questions) + questions_per_page - 1) // questions_per_page)
     
+    # Use unique key to avoid conflicts with other parts of the app
+    page_key = 'analysis_questions_page'
+    
     # Initialize or validate current page
-    if 'current_page' not in st.session_state:
-        st.session_state.current_page = 0
+    if page_key not in st.session_state:
+        st.session_state[page_key] = 0
     
     # Ensure current_page is valid integer within range
-    current_page = int(st.session_state.current_page)
-    if current_page >= total_pages:
+    try:
+        current_page = int(st.session_state[page_key])
+        if current_page >= total_pages or current_page < 0:
+            current_page = 0
+            st.session_state[page_key] = 0
+    except (ValueError, TypeError):
         current_page = 0
-        st.session_state.current_page = 0
+        st.session_state[page_key] = 0
     
     # Page controls
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -337,9 +344,9 @@ def render_question_browser(questions: List[Dict[str, Any]], questions_data: Dic
             options=list(range(total_pages)),
             index=current_page,
             format_func=lambda x: f"Page {x+1} of {total_pages}",
-            key="page_selector"
+            key="analysis_page_selector"
         )
-        st.session_state.current_page = int(page)
+        st.session_state[page_key] = int(page)
     
     # Get questions for current page
     start_idx = page * questions_per_page
