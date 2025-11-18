@@ -8,6 +8,7 @@ import logging
 from utils.rag_handler import RAGHandler
 import time
 
+
 logger = logging.getLogger(__name__)
 
 
