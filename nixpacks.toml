@@ -1,4 +1,8 @@
+# Railway Nixpacks Configuration - Complete Version
+# Combines apt packages for document processing with direct Python installation
+
 [phases.setup]
+# System packages for PDF/document processing
 aptPkgs = [
     "ghostscript",
     "python3-tk",
@@ -6,3 +10,17 @@ aptPkgs = [
     "tesseract-ocr",
     "default-jre"
 ]
+
+# Use Python 3.11 directly from nixpkgs (bypasses MISE)
+nixPkgs = ['python311', 'python311Packages.pip']
+
+[phases.install]
+# Install Python dependencies
+cmds = [
+  'pip install --upgrade pip',
+  'pip install -r requirements.txt'
+]
+
+[start]
+# Start Streamlit app
+cmd = 'streamlit run app.py --server.port $PORT --server.address 0.0.0.0'
