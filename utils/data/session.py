@@ -1,7 +1,7 @@
 """
 XLR8 Session Management - FIXED VERSION
 Properly initializes AdvancedRAGHandler with endpoints from environment/session
-NO AUTO-INITIALIZATION - let app.py control when initialization happens
+Uses /data/chromadb to match RAGHandler default - CRITICAL FIX
 """
 
 import streamlit as st
@@ -78,8 +78,10 @@ def initialize_session():
     # Initialize AdvancedRAGHandler if available - PASS ENDPOINTS
     if RAG_AVAILABLE and 'rag_handler' not in st.session_state:
         try:
-            # Determine persist directory
-            persist_dir = os.path.expanduser("~/.xlr8_chroma")
+            # CRITICAL FIX: Use /data/chromadb to match RAGHandler default
+            # This ensures all parts of the app (chat, knowledge page, etc.) 
+            # see the same ChromaDB database with the same documents
+            persist_dir = "/data/chromadb"
             
             # Get endpoints from session state (already initialized above)
             embed_endpoint = st.session_state.llm_endpoint
@@ -87,6 +89,7 @@ def initialize_session():
             embed_password = st.session_state.llm_password
             
             print(f"[RAG] Initializing RAG handler with endpoint: {embed_endpoint}")
+            print(f"[RAG] Using persist directory: {persist_dir}")
             
             # Initialize AdvancedRAGHandler WITH ENDPOINTS
             st.session_state.rag_handler = AdvancedRAGHandler(
@@ -101,6 +104,7 @@ def initialize_session():
                 st.session_state.rag_type = 'advanced'
                 st.session_state.rag_enabled = True
                 print(f"[RAG] SUCCESS: Advanced RAG initialized with endpoint: {embed_endpoint}")
+                print(f"[RAG] SUCCESS: Using persist directory: {persist_dir}")
             else:
                 st.session_state.rag_type = 'basic'
                 st.session_state.rag_enabled = True
