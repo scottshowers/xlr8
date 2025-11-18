@@ -1,6 +1,8 @@
 """
 Analysis & Templates Page - XLR8 Analysis Engine
 Main interface for automated UKG analysis question answering
+
+ROBUST VERSION: Won't fail if questions_database.json is missing
 """
 
 import streamlit as st
@@ -9,24 +11,74 @@ import json
 from pathlib import Path
 import logging
 from typing import List, Dict, Any
+import os
 
 logger = logging.getLogger(__name__)
 
-# Path to questions database
-QUESTIONS_DB_PATH = Path(__file__).parent.parent.parent / "data" / "questions_database.json"
+
+def find_questions_database() -> Path:
+    """
+    Find questions_database.json by checking multiple possible locations.
+    Returns Path object or None if not found.
+    """
+    # Try multiple possible locations
+    possible_paths = [
+        Path(__file__).parent.parent.parent / "data" / "questions_database.json",  # Root/data/
+        Path(__file__).parent / "questions_database.json",  # Same directory as this file
+        Path.cwd() / "data" / "questions_database.json",  # Current working directory
+        Path("/app/data/questions_database.json"),  # Railway absolute path
+    ]
+    
+    for path in possible_paths:
+        if path.exists():
+            logger.info(f"Found questions database at: {path}")
+            return path
+    
+    logger.warning("Questions database not found in any expected location")
+    return None
 
 
 def load_questions() -> Dict[str, Any]:
-    """Load questions database from JSON file."""
+    """
+    Load questions database from JSON file.
+    Returns empty structure if file not found (graceful degradation).
+    """
     try:
-        if QUESTIONS_DB_PATH.exists():
-            with open(QUESTIONS_DB_PATH, 'r') as f:
-                return json.load(f)
-        else:
-            return {'metadata': {'total_questions': 0}, 'questions': []}
+        db_path = find_questions_database()
+        
+        if db_path is None:
+            logger.warning("Questions database not found")
+            return {
+                'metadata': {
+                    'total_questions': 0,
+                    'error': 'questions_database.json not found'
+                },
+                'questions': []
+            }
+        
+        with open(db_path, 'r') as f:
+            data = json.load(f)
+            logger.info(f"Loaded {data['metadata']['total_questions']} questions")
+            return data
+            
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error: {e}")
+        return {
+            'metadata': {
+                'total_questions': 0,
+                'error': f'Invalid JSON: {str(e)}'
+            },
+            'questions': []
+        }
     except Exception as e:
         logger.error(f"Error loading questions: {e}")
-        return {'metadata': {'total_questions': 0}, 'questions': []}
+        return {
+            'metadata': {
+                'total_questions': 0,
+                'error': str(e)
+            },
+            'questions': []
+        }
 
 
 def render_analysis_page():
@@ -43,11 +95,55 @@ def render_analysis_page():
     questions_data = load_questions()
     questions = questions_data.get('questions', [])
     total_questions = questions_data.get('metadata', {}).get('total_questions', 0)
+    error = questions_data.get('metadata', {}).get('error')
+    
+    # Show error if questions failed to load
+    if error:
+        st.error(f"⚠️ Error loading questions database: {error}")
+        st.info("**Troubleshooting:**")
+        st.code("""
+# Expected file location:
+data/questions_database.json
+
+# File should be at root of your repository:
+your-repo/
+├── app.py
+├── data/
+│   └── questions_database.json  ← Here!
+├── pages/
+│   └── work/
+│       └── analysis.py
+        """)
+        
+        # Show debug info
+        with st.expander("🔍 Debug Information"):
+            st.write("**Current working directory:**", os.getcwd())
+            st.write("**This file location:**", __file__)
+            st.write("**Checked paths:**")
+            for path in [
+                Path(__file__).parent.parent.parent / "data" / "questions_database.json",
+                Path.cwd() / "data" / "questions_database.json",
+            ]:
+                exists = "✅" if path.exists() else "❌"
+                st.write(f"{exists} {path}")
+        
+        return
     
     if total_questions == 0:
-        st.warning("⚠️ No questions loaded. Please upload Analysis_Workbook.xlsx to HCMPACT LLM.")
-        st.info("👉 Go to Setup → HCMPACT LLM Seeding to upload templates")
+        st.warning("⚠️ No questions loaded yet.")
+        st.info("""
+        **To set up the Analysis Engine:**
+        
+        1. Download `questions_database.json` from your conversation history
+        2. Create `data/` folder at root of your GitHub repo
+        3. Place `questions_database.json` inside it
+        4. Push to GitHub
+        5. Railway will redeploy automatically
+        """)
         return
+    
+    # SUCCESS - Questions loaded!
+    st.success(f"✅ Loaded {total_questions} analysis questions")
     
     # Create tabs
     tab1, tab2, tab3 = st.tabs([
@@ -169,7 +265,7 @@ def render_question_browser(questions: List[Dict[str, Any]]):
             col1, col2, col3 = st.columns(3)
             with col1:
                 if st.button("🔍 Analyze This Question", key=f"analyze_{q['id']}"):
-                    st.info("Analysis feature coming in Phase 3! (This afternoon)")
+                    st.info("✨ Analysis feature coming next! (Within the hour)")
             with col2:
                 if st.button("✏️ Edit Answer", key=f"edit_{q['id']}"):
                     st.info("Edit feature coming soon!")
@@ -183,7 +279,7 @@ def render_batch_analysis(questions: List[Dict[str, Any]]):
     
     st.subheader("⚡ Batch Analysis")
     
-    st.info("🚧 **Coming This Afternoon:** Automated batch analysis of all questions!")
+    st.info("🚧 **Coming Within the Hour:** Automated batch analysis of all questions!")
     
     # Show what's coming
     st.markdown("""
@@ -222,7 +318,7 @@ def render_batch_analysis(questions: List[Dict[str, Any]]):
     st.progress(0.0, text="Ready to analyze...")
     
     if st.button("🚀 Start Batch Analysis", type="primary", disabled=True):
-        st.info("Coming this afternoon!")
+        st.info("Coming within the hour!")
 
 
 def render_export_review(questions: List[Dict[str, Any]]):
@@ -230,7 +326,7 @@ def render_export_review(questions: List[Dict[str, Any]]):
     
     st.subheader("📤 Export & Review")
     
-    st.info("🚧 **Coming This Afternoon:** Export completed analysis to Excel!")
+    st.info("🚧 **Coming Within the Hour:** Export completed analysis to Excel!")
     
     # Show what's coming
     st.markdown("""
@@ -271,7 +367,7 @@ def render_export_review(questions: List[Dict[str, Any]]):
     st.markdown("---")
     
     if st.button("📥 Export to Excel", type="primary", disabled=True):
-        st.info("Coming this afternoon!")
+        st.info("Coming within the hour!")
 
 
 # Entry point
