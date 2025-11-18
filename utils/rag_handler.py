@@ -167,7 +167,12 @@ class RAGHandler:
 
     def chunk_text(self, text: str) -> List[str]:
         """
-        Split text into chunks with overlap.
+        Ultra-simple chunking - splits at fixed intervals with overlap.
+        
+        SIMPLIFIED FOR P0 FIX:
+        - No sentence boundary detection (that was causing hangs)
+        - Fixed-size chunks
+        - Guaranteed to complete
         
         Args:
             text: Text to chunk
@@ -175,34 +180,42 @@ class RAGHandler:
         Returns:
             List of text chunks
         """
+        logger.info(f"[CHUNK] Starting, text length: {len(text)}")
+        
         # Clean the text
         text = re.sub(r'\s+', ' ', text).strip()
+        logger.info(f"[CHUNK] After cleaning: {len(text)} chars")
         
         chunks = []
-        start = 0
-        text_length = len(text)
+        position = 0
+        chunk_count = 0
         
-        while start < text_length:
-            end = start + self.chunk_size
+        logger.info(f"[CHUNK] Will create ~{len(text) // self.chunk_size} chunks")
+        
+        while position < len(text):
+            chunk_count += 1
             
-            # Try to break at sentence boundary
-            if end < text_length:
-                # Look for sentence endings
-                sentence_end = max(
-                    text.rfind('. ', start, end),
-                    text.rfind('! ', start, end),
-                    text.rfind('? ', start, end)
-                )
-                if sentence_end > start:
-                    end = sentence_end + 1
+            # Get chunk
+            end = min(position + self.chunk_size, len(text))
+            chunk = text[position:end].strip()
             
-            chunk = text[start:end].strip()
+            # Only add non-empty chunks
             if chunk:
                 chunks.append(chunk)
+                logger.debug(f"[CHUNK] Added chunk #{chunk_count}, length: {len(chunk)}")
             
-            start = end - self.chunk_overlap if end < text_length else text_length
+            # Move to next position with overlap
+            if end < len(text):
+                position = end - self.chunk_overlap
+            else:
+                position = len(text)  # Done
+            
+            # Safety check
+            if position < 0:
+                logger.error(f"[CHUNK] ERROR: position went negative! Breaking.")
+                break
         
-        logger.info(f"Created {len(chunks)} chunks from text (size={self.chunk_size}, overlap={self.chunk_overlap})")
+        logger.info(f"[CHUNK] COMPLETED: {len(chunks)} chunks created")
         return chunks
 
     def add_document(self, collection_name: str, text: str, metadata: Dict[str, Any]) -> bool:
