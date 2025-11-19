@@ -207,6 +207,9 @@ class IntelligentParserOrchestratorV2:
             employee_data = section_data['employee_info']['data']
             structured['employees'] = self._parse_employee_info(employee_data)
         
+        # Get list of employee names for stripping from lines
+        employee_names = [emp['name'] for emp in structured['employees'] if emp.get('name')]
+        
         # Get combined text from all sections
         all_text = ""
         for section_type in ['employee_info', 'earnings', 'taxes', 'deductions']:
@@ -225,7 +228,7 @@ class IntelligentParserOrchestratorV2:
             for emp_block, emp_info in zip(employee_blocks, structured['employees']):
                 # Parse earnings for this employee
                 earnings_data = {'text': emp_block, 'lines': emp_block.split('\n')}
-                emp_earnings = self._parse_earnings(earnings_data)
+                emp_earnings = self._parse_earnings(earnings_data, employee_names=[emp_info['name']])
                 for earning in emp_earnings:
                     earning['employee_id'] = emp_info['employee_id']
                     earning['employee_name'] = emp_info['name']
@@ -233,7 +236,7 @@ class IntelligentParserOrchestratorV2:
                 
                 # Parse taxes for this employee  
                 taxes_data = {'text': emp_block, 'lines': emp_block.split('\n')}
-                emp_taxes = self._parse_taxes(taxes_data)
+                emp_taxes = self._parse_taxes(taxes_data, employee_names=[emp_info['name']])
                 for tax in emp_taxes:
                     tax['employee_id'] = emp_info['employee_id']
                     tax['employee_name'] = emp_info['name']
@@ -241,7 +244,7 @@ class IntelligentParserOrchestratorV2:
                 
                 # Parse deductions for this employee
                 deductions_data = {'text': emp_block, 'lines': emp_block.split('\n')}
-                emp_deductions = self._parse_deductions(deductions_data)
+                emp_deductions = self._parse_deductions(deductions_data, employee_names=[emp_info['name']])
                 for deduction in emp_deductions:
                     deduction['employee_id'] = emp_info['employee_id']
                     deduction['employee_name'] = emp_info['name']
@@ -250,15 +253,15 @@ class IntelligentParserOrchestratorV2:
             # Single employee - parse globally
             if 'earnings' in section_data:
                 earnings_data = section_data['earnings']['data']
-                structured['earnings'] = self._parse_earnings(earnings_data)
+                structured['earnings'] = self._parse_earnings(earnings_data, employee_names)
             
             if 'taxes' in section_data:
                 taxes_data = section_data['taxes']['data']
-                structured['taxes'] = self._parse_taxes(taxes_data)
+                structured['taxes'] = self._parse_taxes(taxes_data, employee_names)
             
             if 'deductions' in section_data:
                 deductions_data = section_data['deductions']['data']
-                structured['deductions'] = self._parse_deductions(deductions_data)
+                structured['deductions'] = self._parse_deductions(deductions_data, employee_names)
             
             # Add employee info to each item
             if structured['employees']:
@@ -310,7 +313,7 @@ class IntelligentParserOrchestratorV2:
         return blocks
     
     def _parse_employee_info(self, data: Dict[str, Any]) -> List[Dict]:
-        """Parse employee info from extracted data - handles multiple employees."""
+        """Parse employee info from extracted data - handles Dayforce layout."""
         import re
         employees = []
         
@@ -321,41 +324,46 @@ class IntelligentParserOrchestratorV2:
         elif data.get('text'):
             text_content = data['text']
         
-        # Pattern that captures name + employee ID together
-        # Format: "FirstName LastName\nEmp #: 12345"
-        emp_pattern = r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\s*[\n\r]+\s*Emp\s*#?\s*:?\s*(\d+)'
-        matches = re.findall(emp_pattern, text_content, flags=re.IGNORECASE | re.MULTILINE)
+        # In Dayforce PDFs, the layout is:
+        # Line 1: "FirstName LastName Regular Hourly $18.19 55.28 $1,005.60..."
+        # Line 2: "Emp #: 10807"
+        # So we need to find "Emp #:" and look BACK to the previous line for the name
         
-        if matches:
-            # Found employees with name+ID pattern
-            for name, emp_id in matches:
-                emp = {
-                    'employee_id': emp_id.strip(),
-                    'name': name.strip(),
-                    'department': ''
-                }
+        lines = text_content.split('\n')
+        
+        for i, line in enumerate(lines):
+            # Find "Emp #:" lines
+            emp_match = re.search(r'Emp\s*#:\s*(\d+)', line)
+            if emp_match:
+                emp_id = emp_match.group(1)
                 
-                # Try to find department for this employee
-                # Look for "Dept:" after this employee ID
-                dept_pattern = rf'Emp\s*#?\s*:?\s*{emp_id}.*?Dept\s*:?\s*([^\n]+)'
-                dept_match = re.search(dept_pattern, text_content, flags=re.IGNORECASE | re.DOTALL)
-                if dept_match:
-                    emp['department'] = dept_match.group(1).strip()
+                # Look at previous line for employee name
+                name = ''
+                if i > 0:
+                    prev_line = lines[i-1].strip()
+                    # Extract name from start of line (before any dollar signs or lots of numbers)
+                    # Pattern: "FirstName LastName" at start of line
+                    name_match = re.match(r'^([A-Z][a-z]+\s+[A-Z][a-z]+)', prev_line)
+                    if name_match:
+                        name = name_match.group(1).strip()
                 
-                employees.append(emp)
-        else:
-            # Fallback: try to find employee IDs without names
-            emp_id_matches = re.findall(r'Emp\s*#?\s*:?\s*(\d+)', text_content, flags=re.IGNORECASE)
-            for emp_id in emp_id_matches:
+                # Look for department in following lines
+                dept = ''
+                for j in range(i+1, min(i+10, len(lines))):
+                    dept_match = re.search(r'Dept:\s*([^\n]+)', lines[j])
+                    if dept_match:
+                        dept = dept_match.group(1).strip()
+                        break
+                
                 employees.append({
                     'employee_id': emp_id,
-                    'name': '',
-                    'department': ''
+                    'name': name,
+                    'department': dept
                 })
         
         return employees if employees else [{'employee_id': 'Unknown', 'name': 'Unknown', 'department': ''}]
     
-    def _parse_earnings(self, data: Dict[str, Any]) -> List[Dict]:
+    def _parse_earnings(self, data: Dict[str, Any], employee_names: List[str] = None) -> List[Dict]:
         """Parse earnings from extracted data using regex patterns."""
         import re
         earnings = []
@@ -374,7 +382,12 @@ class IntelligentParserOrchestratorV2:
         # Format: Description Rate Hours Amount HoursYTD AmountYTD
         lines = text_content.split('\n')
         
+        # Build list of employee names to strip
+        if employee_names is None:
+            employee_names = []
+        
         for line in lines:
+            original_line = line
             line = line.strip()
             if not line or len(line) < 10:
                 continue
@@ -384,20 +397,31 @@ class IntelligentParserOrchestratorV2:
                 continue
             
             # Skip employee info lines
-            if re.match(r'^(Emp\s*#|Dept|Hire|Term|SSN|Status|Frequency|Type|Rate|Federal|State|Res|Transit)', line, re.IGNORECASE):
+            if re.match(r'^(Emp\s*#|Dept|Hire|Term|SSN|Status|Frequency|Type:|Rate:|Federal|State|Res|Transit)', line, re.IGNORECASE):
                 continue
             
-            # Skip lines that are just employee names (capitalized name with no numbers)
+            # CRITICAL: Strip employee name from start of line if present
+            # In Dayforce, first earning line is: "Christian Tisher Regular Hourly $18.19..."
+            for emp_name in employee_names:
+                if emp_name and line.startswith(emp_name):
+                    line = line[len(emp_name):].strip()
+                    break
+            
+            # Skip lines that are now empty after stripping
+            if not line or len(line) < 10:
+                continue
+            
+            # Skip lines that are JUST employee names (no earning data)
             if re.match(r'^[A-Z][a-z]+\s+[A-Z][a-z]+\s*$', line):
                 continue
             
-            # Look for lines with dollar amounts (likely earnings)
-            if '$' in line or re.search(r'\d+\.\d{2}', line):
+            # Look for lines with dollar amounts or multiple numbers (likely earnings)
+            if '$' in line or re.search(r'\d+\.?\d*\s+\$?\d+\.?\d*', line):
                 # Extract all numbers from the line
                 numbers = re.findall(r'[\d,]+\.?\d*', line)
                 
                 # Extract description (text before first number or dollar sign)
-                desc_match = re.match(r'^([A-Za-z\s\-]+?)(?:\s+\$|\s+\d)', line)
+                desc_match = re.match(r'^([A-Za-z\s\-/]+?)(?:\s+\$|\s+\d)', line)
                 description = desc_match.group(1).strip() if desc_match else ''
                 
                 if description and numbers and len(numbers) >= 2:
@@ -416,7 +440,7 @@ class IntelligentParserOrchestratorV2:
         
         return earnings
     
-    def _parse_taxes(self, data: Dict[str, Any]) -> List[Dict]:
+    def _parse_taxes(self, data: Dict[str, Any], employee_names: List[str] = None) -> List[Dict]:
         """Parse taxes from extracted data using regex patterns."""
         import re
         taxes = []
@@ -430,6 +454,10 @@ class IntelligentParserOrchestratorV2:
         
         if not text_content:
             return taxes
+        
+        # Build list of employee names to strip
+        if employee_names is None:
+            employee_names = []
         
         # Pattern for tax lines like: "Fed W/H $1,005.60 $62.46 $14,559.63 $902.70"
         # Format: Description Wages Amount WagesYTD AmountYTD
@@ -445,10 +473,20 @@ class IntelligentParserOrchestratorV2:
                 continue
             
             # Skip employee info lines
-            if re.match(r'^(Emp\s*#|Dept|Hire|Term|SSN|Status|Frequency|Type|Rate|Federal|State|Res|Transit)', line, re.IGNORECASE):
+            if re.match(r'^(Emp\s*#|Dept|Hire|Term|SSN|Status|Frequency|Type:|Rate:|Federal|State|Res|Transit)', line, re.IGNORECASE):
                 continue
             
-            # Skip lines that are just employee names
+            # Strip employee name from start of line if present
+            for emp_name in employee_names:
+                if emp_name and line.startswith(emp_name):
+                    line = line[len(emp_name):].strip()
+                    break
+            
+            # Skip lines that are now empty or too short
+            if not line or len(line) < 10:
+                continue
+            
+            # Skip lines that are JUST employee names
             if re.match(r'^[A-Z][a-z]+\s+[A-Z][a-z]+\s*$', line):
                 continue
             
@@ -476,7 +514,7 @@ class IntelligentParserOrchestratorV2:
         
         return taxes
     
-    def _parse_deductions(self, data: Dict[str, Any]) -> List[Dict]:
+    def _parse_deductions(self, data: Dict[str, Any], employee_names: List[str] = None) -> List[Dict]:
         """Parse deductions from extracted data using regex patterns."""
         import re
         deductions = []
@@ -490,6 +528,10 @@ class IntelligentParserOrchestratorV2:
         
         if not text_content:
             return deductions
+        
+        # Build list of employee names to strip
+        if employee_names is None:
+            employee_names = []
         
         # Pattern for deduction lines like: "Medical Pre Tax $403.81 $403.81 $6,057.15"
         # Format: Description Scheduled Amount AmountYTD
@@ -505,10 +547,20 @@ class IntelligentParserOrchestratorV2:
                 continue
             
             # Skip employee info lines
-            if re.match(r'^(Emp\s*#|Dept|Hire|Term|SSN|Status|Frequency|Type|Rate|Federal|State|Res|Transit)', line, re.IGNORECASE):
+            if re.match(r'^(Emp\s*#|Dept|Hire|Term|SSN|Status|Frequency|Type:|Rate:|Federal|State|Res|Transit)', line, re.IGNORECASE):
                 continue
             
-            # Skip lines that are just employee names
+            # Strip employee name from start of line if present
+            for emp_name in employee_names:
+                if emp_name and line.startswith(emp_name):
+                    line = line[len(emp_name):].strip()
+                    break
+            
+            # Skip lines that are now empty or too short
+            if not line or len(line) < 10:
+                continue
+            
+            # Skip lines that are JUST employee names
             if re.match(r'^[A-Z][a-z]+\s+[A-Z][a-z]+\s*$', line):
                 continue
             
@@ -517,7 +569,7 @@ class IntelligentParserOrchestratorV2:
                 continue
             
             # Look for lines with dollar amounts (likely deductions)
-            if '$' in line or re.search(r'\d+\.\d{2}', line):
+            if '$' in line or re.search(r'\d+\.?\d*\s+\$?\d+\.?\d*', line):
                 # Extract all numbers from the line
                 numbers = re.findall(r'[\d,]+\.?\d*', line)
                 
