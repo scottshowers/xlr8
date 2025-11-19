@@ -2,6 +2,7 @@ import streamlit as st
 from utils.rag_handler import RAGHandler
 from utils.document_processor import DocumentProcessor, render_upload_interface
 from utils.pdf_parsers import extract_register_adaptive, extract_payroll_register
+from utils.column_editor import render_column_editor
 from pathlib import Path
 import os
 import logging
@@ -224,6 +225,10 @@ def render_knowledge_page():
                                         )
                                     
                                     st.info(f"💾 Excel file saved to: `{parsed_dir}/{Path(excel_path).name}`")
+                                    
+                                    # Column Editor
+                                    if st.checkbox("✏️ Edit Column Names", key="edit_columns_checkbox"):
+                                        render_column_editor(excel_path, result['table_info'])
                                 
                                 else:
                                     st.error(f"❌ Extraction failed: {result.get('error', 'Unknown error')}")
