@@ -11,7 +11,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 
-def render():
+def render_knowledge_page():
     """
     Main render function for knowledge page with 4 tabs.
     """
@@ -298,4 +298,4 @@ def render_parser_tab():
 
 
 if __name__ == "__main__":
-    render()
+    render_knowledge_page()
