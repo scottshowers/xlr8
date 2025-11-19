@@ -19,18 +19,115 @@ def render_settings_page():
 def render_ollama_diagnostics():
     """Ollama authentication diagnostics."""
     
-    st.subheader("🔍 Ollama Authentication Discovery")
+    st.subheader("🔍 Ollama Diagnostics")
     
     st.markdown("""
-    This tool tests your Ollama server to discover the authentication method.
-    Useful for debugging LLM synthesis issues.
+    Test Ollama server connection and discover available models.
     """)
     
     OLLAMA_URL = "http://178.156.190.64:11435"
     
     st.info(f"**Testing:** {OLLAMA_URL}")
     
-    if st.button("🚀 Run Authentication Tests", type="primary"):
+    if st.button("🚀 Check Ollama Server", type="primary"):
+        
+        # Test 1: Check available models
+        st.markdown("### Test 1: Available Models")
+        with st.spinner("Fetching models..."):
+            try:
+                from requests.auth import HTTPBasicAuth
+                
+                response = requests.get(
+                    f"{OLLAMA_URL}/api/tags",
+                    auth=HTTPBasicAuth("xlr8", "Argyle76226#"),
+                    timeout=10
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    models = data.get('models', [])
+                    
+                    if models:
+                        st.success(f"✅ Found {len(models)} model(s)")
+                        
+                        st.markdown("**Available Models:**")
+                        for model in models:
+                            model_name = model.get('name', 'Unknown')
+                            model_size = model.get('size', 0)
+                            size_gb = model_size / (1024**3) if model_size else 0
+                            
+                            st.code(f"{model_name}  ({size_gb:.1f} GB)")
+                        
+                        # Show recommendation
+                        st.markdown("---")
+                        st.markdown("### 🎯 Recommendation")
+                        
+                        # Look for llama models
+                        llama_models = [m['name'] for m in models if 'llama' in m['name'].lower()]
+                        
+                        if llama_models:
+                            recommended = llama_models[0]
+                            st.success(f"**Use this model:** `{recommended}`")
+                            
+                            st.code(f"""# Update enhanced_llm_synthesizer.py line 88:
+self.model = "{recommended}"
+
+# Or add to Railway Variables:
+LLM_MODEL = {recommended}
+""", language="python")
+                        else:
+                            st.warning("No Llama models found. Using first available model:")
+                            if models:
+                                st.code(f"Use: {models[0]['name']}")
+                    else:
+                        st.warning("No models found on server")
+                elif response.status_code == 401:
+                    st.error("❌ Authentication failed")
+                else:
+                    st.error(f"❌ Server returned: {response.status_code}")
+                    
+            except Exception as e:
+                st.error(f"❌ Error: {e}")
+        
+        # Test 2: Test model generation
+        st.markdown("---")
+        st.markdown("### Test 2: Test Text Generation")
+        
+        test_model = st.text_input("Enter model name to test:", "llama3.2")
+        
+        if st.button("Test This Model"):
+            with st.spinner(f"Testing {test_model}..."):
+                try:
+                    from requests.auth import HTTPBasicAuth
+                    
+                    payload = {
+                        "model": test_model,
+                        "prompt": "Say 'Hello, I am working!' and nothing else.",
+                        "stream": False,
+                        "options": {"num_predict": 20}
+                    }
+                    
+                    response = requests.post(
+                        f"{OLLAMA_URL}/api/generate",
+                        json=payload,
+                        auth=HTTPBasicAuth("xlr8", "Argyle76226#"),
+                        timeout=30
+                    )
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        answer = result.get('response', '')
+                        st.success(f"✅ Model works!")
+                        st.code(answer)
+                    elif response.status_code == 404:
+                        st.error(f"❌ Model '{test_model}' not found")
+                        st.info("Try one of the models listed above")
+                    else:
+                        st.error(f"❌ Error: {response.status_code}")
+                        st.code(response.text)
+                        
+                except Exception as e:
+                    st.error(f"❌ Error: {e}")
         
         # Test 1: No auth
         st.markdown("### Test 1: No Authentication")
