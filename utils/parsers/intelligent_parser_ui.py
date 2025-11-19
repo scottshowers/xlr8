@@ -353,3 +353,23 @@ def _display_custom_parsers(parsers_dir: str):
 def render_intelligent_parser(orchestrator=None):
     """Legacy function name"""
     render_intelligent_parser_ui()
+
+
+# Class wrapper for backward compatibility
+class IntelligentParserUI:
+    """
+    Backward compatibility wrapper.
+    Old code imports this class, but new code uses the function.
+    """
+    
+    def __init__(self):
+        pass
+    
+    def render(self):
+        """Render the UI"""
+        render_intelligent_parser_ui()
+    
+    @staticmethod
+    def render_ui():
+        """Static method for rendering"""
+        render_intelligent_parser_ui()
