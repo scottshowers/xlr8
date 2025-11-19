@@ -1,423 +1,466 @@
 """
-Intelligent Parser Orchestrator for XLR8
-Orchestrates 3-stage parsing system and calculates accuracy
+Enhanced Intelligent Parser Orchestrator
+Handles complex multi-section PDFs with iterative parsing
 """
 
 import logging
 from pathlib import Path
-from typing import Dict, Optional
-import importlib.util
+from typing import Dict, List, Any, Optional
+import importlib
 import sys
-import time
-import pandas as pd
 from datetime import datetime
-
-from utils.pdf_parsers import extract_register_adaptive, extract_payroll_register
-from utils.parsers.pdf_structure_analyzer import PDFStructureAnalyzer
-from utils.parsers.parser_code_generator import ParserCodeGenerator
 
 logger = logging.getLogger(__name__)
 
 
 class IntelligentParserOrchestrator:
     """
-    Orchestrates 3-stage intelligent parsing system:
-    1. Custom parsers (saved from previous successful parses)
-    2. Adaptive parsers (existing adaptive parsers)
-    3. Generated parsers (analyzes PDF, generates code, tests, saves if accuracy >= 70%)
+    Orchestrates 3-stage parsing with support for complex multi-section documents.
+    
+    Stage 1: Custom parsers (saved from previous successes)
+    Stage 2: Built-in specialized parsers (Dayforce, ADP, etc.)
+    Stage 3: Adaptive parsers (general purpose)
+    Stage 4: Generated parsers (analyze and create new parser)
     """
     
     def __init__(self):
-        self.analyzer = PDFStructureAnalyzer()
-        self.generator = ParserCodeGenerator()
-        self.custom_parsers_dir = Path("/data/custom_parsers")
-        self.uploads_dir = Path("/data/uploads")
-        self.output_dir = Path("/data/parsed_registers")
-        
-        # Create directories
+        self.custom_parsers_dir = Path('/data/custom_parsers')
         self.custom_parsers_dir.mkdir(parents=True, exist_ok=True)
-        self.uploads_dir.mkdir(parents=True, exist_ok=True)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        
+        self.parsed_output_dir = Path('/data/parsed_registers')
+        self.parsed_output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Built-in specialized parsers
+        self.specialized_parsers = {
+            'dayforce': 'utils.parsers.dayforce_parser_enhanced',
+            'adp': None,  # Future
+            'paychex': None,  # Future
+        }
     
-    def parse_with_intelligence(
-        self,
-        pdf_path: str,
-        auto_save: bool = True,
-        min_accuracy_to_save: int = 70
-    ) -> Dict:
+    def parse(self, pdf_path: str, document_type: Optional[str] = None) -> Dict[str, Any]:
         """
-        Intelligently parse PDF using 3-stage approach
+        Intelligently parse PDF using 4-stage approach.
         
         Args:
-            pdf_path: Path to input PDF
-            auto_save: Whether to auto-save successful parsers
-            min_accuracy_to_save: Minimum accuracy to save parser (0-100)
+            pdf_path: Path to PDF file
+            document_type: Optional hint ('dayforce', 'adp', etc.)
             
         Returns:
-            Dict with parsing results and accuracy metrics
+            Dict with status, output_path, accuracy, stage_used, etc.
         """
-        start_time = time.time()
-        pdf_name = Path(pdf_path).stem
+        logger.info(f"Starting intelligent parse of: {pdf_path}")
         
-        logger.info(f"Starting intelligent parsing for: {pdf_path}")
+        result = {
+            'status': 'pending',
+            'pdf_path': pdf_path,
+            'stages_attempted': [],
+            'stage_used': None,
+            'output_path': None,
+            'accuracy': 0,
+            'employee_count': 0,
+            'errors': []
+        }
         
-        # Stage 1: Try custom parsers
-        logger.info("STAGE 1: Trying custom parsers...")
-        result = self._try_custom_parsers(pdf_path, pdf_name)
-        
-        if result['success'] and result.get('accuracy', 0) >= 70:
-            result['stage_used'] = 'custom_parser'
-            result['execution_time'] = time.time() - start_time
-            logger.info(f"Custom parser succeeded with {result['accuracy']}% accuracy")
+        try:
+            # Stage 1: Try custom parsers (if any exist)
+            stage1_result = self._try_custom_parsers(pdf_path)
+            result['stages_attempted'].append({
+                'stage': 1,
+                'name': 'Custom Parsers',
+                'attempted': stage1_result['attempted'],
+                'success': stage1_result['success'],
+                'accuracy': stage1_result.get('accuracy', 0)
+            })
+            
+            if stage1_result['success'] and stage1_result.get('accuracy', 0) >= 70:
+                logger.info(f"Stage 1 success with {stage1_result['accuracy']}% accuracy")
+                result.update(stage1_result)
+                result['stage_used'] = 1
+                return result
+            
+            # Stage 2: Try specialized parsers (Dayforce, ADP, etc.)
+            stage2_result = self._try_specialized_parsers(pdf_path, document_type)
+            result['stages_attempted'].append({
+                'stage': 2,
+                'name': 'Specialized Parsers',
+                'attempted': stage2_result['attempted'],
+                'success': stage2_result['success'],
+                'accuracy': stage2_result.get('accuracy', 0)
+            })
+            
+            if stage2_result['success'] and stage2_result.get('accuracy', 0) >= 70:
+                logger.info(f"Stage 2 success with {stage2_result['accuracy']}% accuracy")
+                result.update(stage2_result)
+                result['stage_used'] = 2
+                
+                # Offer to save as custom parser
+                if stage2_result.get('accuracy', 0) >= 80:
+                    result['save_recommended'] = True
+                    result['save_reason'] = 'High accuracy specialized parser'
+                
+                return result
+            
+            # Stage 3: Try adaptive parsers (general purpose)
+            stage3_result = self._try_adaptive_parsers(pdf_path)
+            result['stages_attempted'].append({
+                'stage': 3,
+                'name': 'Adaptive Parsers',
+                'attempted': stage3_result['attempted'],
+                'success': stage3_result['success'],
+                'accuracy': stage3_result.get('accuracy', 0)
+            })
+            
+            if stage3_result['success'] and stage3_result.get('accuracy', 0) >= 60:
+                logger.info(f"Stage 3 success with {stage3_result['accuracy']}% accuracy")
+                result.update(stage3_result)
+                result['stage_used'] = 3
+                return result
+            
+            # Stage 4: Generate custom parser (analyze structure and create)
+            stage4_result = self._generate_custom_parser(pdf_path)
+            result['stages_attempted'].append({
+                'stage': 4,
+                'name': 'Generated Parser',
+                'attempted': stage4_result['attempted'],
+                'success': stage4_result['success'],
+                'accuracy': stage4_result.get('accuracy', 0)
+            })
+            
+            if stage4_result['success']:
+                logger.info(f"Stage 4 success with {stage4_result['accuracy']}% accuracy")
+                result.update(stage4_result)
+                result['stage_used'] = 4
+                
+                # Auto-save if accuracy is high
+                if stage4_result.get('accuracy', 0) >= 70:
+                    result['save_recommended'] = True
+                    result['save_reason'] = 'Generated parser achieved good accuracy'
+                
+                return result
+            
+            # All stages failed
+            result['status'] = 'error'
+            result['message'] = 'All parsing stages failed'
             return result
-        
-        # Stage 2: Try adaptive parsers
-        logger.info("STAGE 2: Trying adaptive parsers...")
-        result = self._try_adaptive_parsers(pdf_path, pdf_name)
-        
-        if result['success'] and result.get('accuracy', 0) >= 70:
-            result['stage_used'] = 'adaptive_parser'
-            result['execution_time'] = time.time() - start_time
-            logger.info(f"Adaptive parser succeeded with {result['accuracy']}% accuracy")
+            
+        except Exception as e:
+            logger.error(f"Orchestrator error: {str(e)}", exc_info=True)
+            result['status'] = 'error'
+            result['message'] = str(e)
+            result['errors'].append(str(e))
             return result
-        
-        # Stage 3: Generate and test new parser
-        logger.info("STAGE 3: Generating custom parser...")
-        result = self._generate_and_test_parser(
-            pdf_path,
-            pdf_name,
-            auto_save=auto_save,
-            min_accuracy=min_accuracy_to_save
-        )
-        
-        result['stage_used'] = 'generated_parser'
-        result['execution_time'] = time.time() - start_time
-        
-        if result['success']:
-            logger.info(f"Generated parser succeeded with {result.get('accuracy', 0)}% accuracy")
-        else:
-            logger.warning("All parsing stages failed")
-        
-        return result
     
-    def _try_custom_parsers(self, pdf_path: str, pdf_name: str) -> Dict:
-        """Try all saved custom parsers"""
+    def _try_custom_parsers(self, pdf_path: str) -> Dict[str, Any]:
+        """
+        Stage 1: Try all saved custom parsers.
+        """
+        result = {
+            'attempted': False,
+            'success': False,
+            'parser_name': None
+        }
         
-        if not self.custom_parsers_dir.exists():
-            return {'success': False, 'error': 'No custom parsers directory'}
-        
-        parser_files = list(self.custom_parsers_dir.glob("*.py"))
+        # Get list of custom parsers
+        parser_files = list(self.custom_parsers_dir.glob('*.py'))
         
         if not parser_files:
-            return {'success': False, 'error': 'No custom parsers available'}
+            logger.info("No custom parsers available")
+            return result
+        
+        result['attempted'] = True
         
         # Try each parser
         for parser_file in parser_files:
             try:
                 logger.info(f"Trying custom parser: {parser_file.stem}")
-                result = self._execute_parser(parser_file, pdf_path, pdf_name)
                 
-                if result['success']:
-                    # Calculate accuracy
-                    accuracy = self._calculate_accuracy(result)
-                    result['accuracy'] = accuracy['total']
-                    result['accuracy_breakdown'] = accuracy
-                    result['parser_name'] = parser_file.stem
+                # Load parser module
+                spec = importlib.util.spec_from_file_location(
+                    parser_file.stem,
+                    parser_file
+                )
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                
+                # Execute parser
+                if hasattr(module, 'parse'):
+                    parse_result = module.parse(pdf_path, str(self.parsed_output_dir))
                     
-                    if accuracy['total'] >= 70:
-                        logger.info(f"Custom parser {parser_file.stem} succeeded")
+                    if parse_result.get('status') == 'success':
+                        result.update(parse_result)
+                        result['success'] = True
+                        result['parser_name'] = parser_file.stem
                         return result
-                        
+                
             except Exception as e:
                 logger.warning(f"Custom parser {parser_file.stem} failed: {str(e)}")
                 continue
         
-        return {'success': False, 'error': 'All custom parsers failed'}
+        return result
     
-    def _try_adaptive_parsers(self, pdf_path: str, pdf_name: str) -> Dict:
-        """Try existing adaptive parsers"""
+    def _try_specialized_parsers(self, pdf_path: str, document_type: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Stage 2: Try built-in specialized parsers.
+        """
+        result = {
+            'attempted': False,
+            'success': False,
+            'parser_name': None
+        }
         
-        output_path = self.output_dir / f"{pdf_name}_parsed.xlsx"
-        
-        # Try adaptive register parser first
-        try:
-            logger.info("Trying adaptive register parser...")
-            result = extract_register_adaptive(pdf_path, str(output_path))
+        # If document type is specified, try that parser first
+        if document_type and document_type.lower() in self.specialized_parsers:
+            parser_module_name = self.specialized_parsers[document_type.lower()]
             
-            if result.get('success'):
-                accuracy = self._calculate_accuracy(result)
-                result['accuracy'] = accuracy['total']
-                result['accuracy_breakdown'] = accuracy
-                result['parser_name'] = 'adaptive_register_parser'
+            if parser_module_name:
+                result['attempted'] = True
+                try:
+                    logger.info(f"Trying specialized parser: {document_type}")
+                    module = importlib.import_module(parser_module_name)
+                    
+                    if hasattr(module, 'parse_dayforce_register'):
+                        parse_result = module.parse_dayforce_register(
+                            pdf_path,
+                            str(self.parsed_output_dir)
+                        )
+                    elif hasattr(module, 'parse'):
+                        parse_result = module.parse(pdf_path, str(self.parsed_output_dir))
+                    else:
+                        raise AttributeError("Parser module missing parse function")
+                    
+                    if parse_result.get('status') == 'success':
+                        result.update(parse_result)
+                        result['success'] = True
+                        result['parser_name'] = document_type
+                        return result
+                        
+                except Exception as e:
+                    logger.warning(f"Specialized parser {document_type} failed: {str(e)}")
+        
+        # Try all available specialized parsers
+        for parser_name, module_name in self.specialized_parsers.items():
+            if not module_name or (document_type and parser_name == document_type.lower()):
+                continue  # Skip None or already tried
+            
+            result['attempted'] = True
+            
+            try:
+                logger.info(f"Trying specialized parser: {parser_name}")
+                module = importlib.import_module(module_name)
                 
-                if accuracy['total'] >= 70:
+                # Call appropriate parse function
+                if hasattr(module, f'parse_{parser_name}_register'):
+                    parse_func = getattr(module, f'parse_{parser_name}_register')
+                    parse_result = parse_func(pdf_path, str(self.parsed_output_dir))
+                elif hasattr(module, 'parse'):
+                    parse_result = module.parse(pdf_path, str(self.parsed_output_dir))
+                else:
+                    continue
+                
+                if parse_result.get('status') == 'success':
+                    result.update(parse_result)
+                    result['success'] = True
+                    result['parser_name'] = parser_name
                     return result
                     
+            except Exception as e:
+                logger.warning(f"Specialized parser {parser_name} failed: {str(e)}")
+                continue
+        
+        return result
+    
+    def _try_adaptive_parsers(self, pdf_path: str) -> Dict[str, Any]:
+        """
+        Stage 3: Try adaptive general-purpose parsers.
+        """
+        result = {
+            'attempted': True,
+            'success': False,
+            'parser_name': None
+        }
+        
+        try:
+            # Try adaptive register parser (from utils.pdf_parsers)
+            from utils.pdf_parsers import extract_register_adaptive
+            
+            logger.info("Trying adaptive register parser")
+            parse_result = extract_register_adaptive(pdf_path, str(self.parsed_output_dir))
+            
+            if parse_result.get('status') == 'success':
+                result.update(parse_result)
+                result['success'] = True
+                result['parser_name'] = 'adaptive_register'
+                return result
+            
         except Exception as e:
             logger.warning(f"Adaptive register parser failed: {str(e)}")
         
-        # Try payroll register parser
         try:
-            logger.info("Trying payroll register parser...")
-            result = extract_payroll_register(pdf_path, str(output_path))
+            # Try adaptive payroll parser
+            from utils.pdf_parsers import extract_payroll_register
             
-            if result.get('success'):
-                accuracy = self._calculate_accuracy(result)
-                result['accuracy'] = accuracy['total']
-                result['accuracy_breakdown'] = accuracy
-                result['parser_name'] = 'adaptive_payroll_parser'
+            logger.info("Trying adaptive payroll parser")
+            parse_result = extract_payroll_register(pdf_path, str(self.parsed_output_dir))
+            
+            if parse_result.get('status') == 'success':
+                result.update(parse_result)
+                result['success'] = True
+                result['parser_name'] = 'adaptive_payroll'
+                return result
                 
-                if accuracy['total'] >= 70:
-                    return result
-                    
         except Exception as e:
-            logger.warning(f"Payroll register parser failed: {str(e)}")
+            logger.warning(f"Adaptive payroll parser failed: {str(e)}")
         
-        return {'success': False, 'error': 'All adaptive parsers failed'}
+        return result
     
-    def _generate_and_test_parser(
-        self,
-        pdf_path: str,
-        pdf_name: str,
-        auto_save: bool = True,
-        min_accuracy: int = 70
-    ) -> Dict:
-        """Generate new parser, test it, and optionally save"""
+    def _generate_custom_parser(self, pdf_path: str) -> Dict[str, Any]:
+        """
+        Stage 4: Analyze PDF structure and generate custom parser.
+        """
+        result = {
+            'attempted': True,
+            'success': False,
+            'parser_name': None
+        }
         
         try:
             # Analyze PDF structure
-            logger.info("Analyzing PDF structure...")
-            analysis = self.analyzer.analyze_pdf(pdf_path)
+            from utils.parsers.pdf_structure_analyzer import PDFStructureAnalyzer
             
-            if not analysis.get('success'):
-                return {
-                    'success': False,
-                    'error': f"PDF analysis failed: {analysis.get('error')}"
-                }
+            logger.info("Analyzing PDF structure")
+            analyzer = PDFStructureAnalyzer(pdf_path)
+            structure = analyzer.analyze()
             
-            # Generate parsing hints
-            hints = self.analyzer.generate_parsing_hints()
+            if not structure.get('format_type'):
+                raise ValueError("Could not detect PDF format")
             
             # Generate parser code
-            logger.info("Generating parser code...")
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            parser_name = f"{pdf_name}_parser_{timestamp}"
+            from utils.parsers.parser_code_generator import ParserCodeGenerator
             
-            gen_result = self.generator.generate_parser(analysis, hints, parser_name)
+            logger.info(f"Generating parser for format: {structure['format_type']}")
+            generator = ParserCodeGenerator()
+            parser_code = generator.generate(structure)
             
-            if not gen_result.get('success'):
-                return {
-                    'success': False,
-                    'error': f"Parser generation failed: {gen_result.get('error')}"
-                }
+            if not parser_code:
+                raise ValueError("Could not generate parser code")
             
-            # Save parser temporarily for testing
-            temp_parser_path = self.custom_parsers_dir / f"temp_{parser_name}.py"
-            with open(temp_parser_path, 'w') as f:
-                f.write(gen_result['code'])
+            # Save and execute generated parser
+            temp_parser_path = self.custom_parsers_dir / f"temp_generated_{datetime.now().strftime('%Y%m%d_%H%M%S')}.py"
+            temp_parser_path.write_text(parser_code)
             
-            # Test the generated parser
-            logger.info("Testing generated parser...")
-            result = self._execute_parser(temp_parser_path, pdf_path, pdf_name)
+            # Execute generated parser
+            spec = importlib.util.spec_from_file_location(
+                temp_parser_path.stem,
+                temp_parser_path
+            )
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
             
-            if result['success']:
-                # Calculate accuracy
-                accuracy = self._calculate_accuracy(result)
-                result['accuracy'] = accuracy['total']
-                result['accuracy_breakdown'] = accuracy
-                result['parser_name'] = parser_name
+            if hasattr(module, 'parse'):
+                parse_result = module.parse(pdf_path, str(self.parsed_output_dir))
                 
-                # Save if meets accuracy threshold
-                if auto_save and accuracy['total'] >= min_accuracy:
-                    final_parser_path = self.custom_parsers_dir / f"{parser_name}.py"
-                    temp_parser_path.rename(final_parser_path)
-                    result['was_saved'] = True
-                    result['saved_path'] = str(final_parser_path)
-                    logger.info(f"Parser saved with {accuracy['total']}% accuracy")
-                else:
-                    temp_parser_path.unlink()  # Delete temp file
-                    result['was_saved'] = False
-                    if accuracy['total'] < min_accuracy:
-                        logger.info(f"Parser not saved: accuracy {accuracy['total']}% < {min_accuracy}%")
-            else:
-                # Clean up temp file
-                if temp_parser_path.exists():
-                    temp_parser_path.unlink()
+                if parse_result.get('status') == 'success':
+                    result.update(parse_result)
+                    result['success'] = True
+                    result['parser_name'] = 'generated'
+                    result['parser_code'] = parser_code
+                    result['temp_parser_path'] = str(temp_parser_path)
+                    return result
             
-            return result
+            # Clean up temp file if failed
+            if temp_parser_path.exists():
+                temp_parser_path.unlink()
             
         except Exception as e:
-            logger.error(f"Generate and test failed: {str(e)}")
-            return {
-                'success': False,
-                'error': str(e)
-            }
-    
-    def _execute_parser(self, parser_file: Path, pdf_path: str, pdf_name: str) -> Dict:
-        """Execute a parser file"""
+            logger.error(f"Parser generation failed: {str(e)}", exc_info=True)
+            result['errors'] = [str(e)]
         
-        try:
-            output_path = self.output_dir / f"{pdf_name}_parsed.xlsx"
-            
-            # Load parser module
-            spec = importlib.util.spec_from_file_location("custom_parser", parser_file)
-            parser_module = importlib.util.module_from_spec(spec)
-            sys.modules["custom_parser"] = parser_module
-            spec.loader.exec_module(parser_module)
-            
-            # Execute parse function
-            result = parser_module.parse(pdf_path, str(output_path))
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Parser execution failed: {str(e)}")
-            return {
-                'success': False,
-                'error': str(e)
-            }
+        return result
     
-    def _calculate_accuracy(self, result: Dict) -> Dict:
+    def save_parser(self, parser_name: str, parser_code: str, metadata: Optional[Dict] = None) -> bool:
         """
-        Calculate parsing accuracy (0-100%)
+        Save a successful parser for future reuse.
         
-        Formula:
-        - Basic success: 30 points (parser ran successfully)
-        - Table quality: 40 points (rows extracted, columns identified)
-        - Text extraction: 20 points (non-empty cells)
-        - Data quality: 10 points (proper data types, no corruption)
-        
-        Total: 100 points
+        Args:
+            parser_name: Name for the saved parser
+            parser_code: Python code for the parser
+            metadata: Optional metadata (accuracy, date, etc.)
+            
+        Returns:
+            True if saved successfully
         """
-        
-        accuracy = {
-            'basic_success': 0,
-            'table_quality': 0,
-            'text_extraction': 0,
-            'data_quality': 0,
-            'total': 0
-        }
-        
-        # Basic success (30 points)
-        if result.get('success'):
-            accuracy['basic_success'] = 30
-        else:
-            return accuracy  # Return 0 if not successful
-        
-        # Check if output file exists
-        output_file = result.get('output_file')
-        if not output_file or not Path(output_file).exists():
-            accuracy['total'] = accuracy['basic_success']
-            return accuracy
-        
         try:
-            # Load the parsed data
-            df = pd.read_excel(output_file)
+            # Clean parser name
+            safe_name = ''.join(c if c.isalnum() or c == '_' else '_' for c in parser_name)
+            parser_path = self.custom_parsers_dir / f"{safe_name}.py"
             
-            # Table quality (40 points)
-            rows = len(df)
-            cols = len(df.columns)
+            # Add metadata as comments
+            full_code = f'''"""
+Custom Parser: {parser_name}
+Generated: {datetime.now().isoformat()}
+Metadata: {metadata if metadata else 'None'}
+"""
+
+{parser_code}
+'''
             
-            if rows > 0:
-                # Points for having data
-                accuracy['table_quality'] += 10
-                
-                # Points based on number of rows (up to 15 points)
-                if rows >= 50:
-                    accuracy['table_quality'] += 15
-                elif rows >= 20:
-                    accuracy['table_quality'] += 10
-                elif rows >= 5:
-                    accuracy['table_quality'] += 5
-                
-                # Points based on number of columns (up to 15 points)
-                if cols >= 10:
-                    accuracy['table_quality'] += 15
-                elif cols >= 5:
-                    accuracy['table_quality'] += 10
-                elif cols >= 2:
-                    accuracy['table_quality'] += 5
-            
-            # Text extraction (20 points)
-            total_cells = rows * cols
-            if total_cells > 0:
-                non_empty_cells = df.count().sum()
-                fill_rate = non_empty_cells / total_cells
-                accuracy['text_extraction'] = int(fill_rate * 20)
-            
-            # Data quality (10 points)
-            quality_score = 0
-            
-            # Check for proper column names (not all "Unnamed")
-            unnamed_cols = sum(1 for col in df.columns if 'Unnamed' in str(col))
-            if unnamed_cols < cols * 0.5:
-                quality_score += 3
-            
-            # Check for data variety (not all same value)
-            unique_values = sum(df[col].nunique() for col in df.columns)
-            if unique_values > cols:
-                quality_score += 3
-            
-            # Check for reasonable data types
-            numeric_cols = df.select_dtypes(include=['number']).columns
-            if len(numeric_cols) > 0:
-                quality_score += 2
-            
-            # Check for no excessive NaN
-            nan_rate = df.isna().sum().sum() / total_cells if total_cells > 0 else 1
-            if nan_rate < 0.5:
-                quality_score += 2
-            
-            accuracy['data_quality'] = quality_score
+            parser_path.write_text(full_code)
+            logger.info(f"Saved custom parser: {safe_name}")
+            return True
             
         except Exception as e:
-            logger.warning(f"Accuracy calculation error: {str(e)}")
-            # Keep basic success points
-        
-        # Calculate total
-        accuracy['total'] = (
-            accuracy['basic_success'] +
-            accuracy['table_quality'] +
-            accuracy['text_extraction'] +
-            accuracy['data_quality']
-        )
-        
-        # Ensure within bounds
-        accuracy['total'] = max(0, min(100, accuracy['total']))
-        
-        return accuracy
+            logger.error(f"Failed to save parser: {str(e)}")
+            return False
     
-    def list_custom_parsers(self) -> list:
-        """List all saved custom parsers"""
-        
-        if not self.custom_parsers_dir.exists():
-            return []
-        
-        parser_files = list(self.custom_parsers_dir.glob("*.py"))
-        
+    def list_custom_parsers(self) -> List[Dict[str, Any]]:
+        """
+        List all saved custom parsers.
+        """
         parsers = []
-        for parser_file in parser_files:
+        
+        for parser_file in self.custom_parsers_dir.glob('*.py'):
             if parser_file.stem.startswith('temp_'):
                 continue  # Skip temp files
-                
+            
             stat = parser_file.stat()
             parsers.append({
                 'name': parser_file.stem,
                 'path': str(parser_file),
-                'created': datetime.fromtimestamp(stat.st_mtime),
-                'size': stat.st_size
+                'size': stat.st_size,
+                'modified': datetime.fromtimestamp(stat.st_mtime)
             })
         
-        return sorted(parsers, key=lambda x: x['created'], reverse=True)
+        return sorted(parsers, key=lambda x: x['modified'], reverse=True)
     
-    def delete_custom_parser(self, parser_name: str) -> bool:
-        """Delete a custom parser"""
+    def delete_parser(self, parser_name: str) -> bool:
+        """
+        Delete a custom parser.
+        """
+        try:
+            parser_path = self.custom_parsers_dir / f"{parser_name}.py"
+            
+            if parser_path.exists():
+                parser_path.unlink()
+                logger.info(f"Deleted parser: {parser_name}")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Failed to delete parser: {str(e)}")
+            return False
+
+
+def parse_pdf_intelligent(pdf_path: str, document_type: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Convenience function for intelligent PDF parsing.
+    
+    Args:
+        pdf_path: Path to PDF file
+        document_type: Optional document type hint ('dayforce', 'adp', etc.)
         
-        parser_path = self.custom_parsers_dir / f"{parser_name}.py"
-        
-        if parser_path.exists():
-            parser_path.unlink()
-            logger.info(f"Deleted parser: {parser_name}")
-            return True
-        
-        return False
+    Returns:
+        Dict with parse results
+    """
+    orchestrator = IntelligentParserOrchestrator()
+    return orchestrator.parse(pdf_path, document_type)
