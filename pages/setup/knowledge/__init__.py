@@ -1,410 +1,301 @@
 """
 Complete Knowledge Management Page
-Restores ALL original functionality + adds Intelligent Parser
+4 tabs: Upload | Status | Search | Intelligent Parser
 """
 
 import streamlit as st
 from pathlib import Path
-import pandas as pd
+import logging
 from datetime import datetime
-import os
 
-# Import RAG handler
-try:
-    from utils.rag_handler import RAGHandler
-    RAG_AVAILABLE = True
-except ImportError:
-    RAG_AVAILABLE = False
-
-# Import intelligent parser components
-try:
-    from utils.parsers.intelligent_parser_orchestrator import IntelligentParserOrchestrator
-    from utils.parsers.intelligent_parser_ui import render_intelligent_parser
-    INTELLIGENT_PARSER_AVAILABLE = True
-except ImportError:
-    INTELLIGENT_PARSER_AVAILABLE = False
+logger = logging.getLogger(__name__)
 
 
-def render_knowledge_page():
-    """Render complete knowledge management page"""
+def render():
+    """
+    Main render function for knowledge page with 4 tabs.
+    """
+    st.title("HCMPACT LLM Seeding & Document Management")
     
-    st.title("Knowledge Management")
-    
-    # Create tabs for different functionality
+    # Create tabs
     tabs = st.tabs([
-        "Document Upload",
-        "Collection Status",
-        "Test Search",
-        "Intelligent Parser"
+        "📤 Document Upload",
+        "📊 Collection Status",
+        "🔍 Test Search",
+        "🤖 Intelligent Parser"
     ])
     
     # Tab 1: Document Upload
     with tabs[0]:
-        render_document_upload()
+        render_upload_tab()
     
     # Tab 2: Collection Status
     with tabs[1]:
-        render_collection_status()
+        render_status_tab()
     
-    # Tab 3: Test Search
+    # Tab 2: Test Search
     with tabs[2]:
-        render_test_search()
+        render_search_tab()
     
     # Tab 4: Intelligent Parser
     with tabs[3]:
-        render_intelligent_parser_tab()
+        render_parser_tab()
 
 
-def render_document_upload():
-    """Document upload interface with progress tracking"""
-    
-    st.header("Upload Documents")
-    
-    if not RAG_AVAILABLE:
-        st.error("RAG system not available")
-        return
+def render_upload_tab():
+    """
+    Tab 1: Document upload with chunking to ChromaDB.
+    """
+    st.header("Upload Documents to Knowledge Base")
     
     st.markdown("""
-    Upload documents to the knowledge base. The system will:
-    - Extract text from PDFs, Word docs, and text files
-    - Split into optimized chunks
-    - Generate embeddings
-    - Store in ChromaDB for retrieval
+    Upload documents to seed the HCMPACT LLM knowledge base. Supported formats:
+    - **PDF** - Payroll registers, configuration guides, manuals
+    - **DOCX** - Word documents, procedures, templates
+    - **TXT/MD** - Text files, markdown documentation
+    
+    Documents are automatically:
+    1. Chunked into searchable segments
+    2. Embedded using Ollama
+    3. Stored in ChromaDB for RAG
+    4. Saved to `/data/uploads/` for parsing
     """)
     
-    # Category selection
-    categories = [
-        "UKG Pro", "WFM", "Implementation Guide", "Best Practices",
-        "Configuration", "Training", "Technical", "General"
-    ]
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        category = st.selectbox(
-            "Document Category",
-            categories,
-            help="Select category for better organization"
-        )
-    
-    with col2:
-        collection_name = st.text_input(
-            "Collection Name",
-            value="hcmpact_docs",
-            help="ChromaDB collection to store documents"
-        )
-    
-    # File upload
+    # File uploader
     uploaded_files = st.file_uploader(
-        "Choose files",
+        "Select files to upload",
         type=['pdf', 'docx', 'txt', 'md'],
         accept_multiple_files=True,
-        help="Supported formats: PDF, Word, Text, Markdown"
+        help="Upload one or more documents"
     )
     
     if uploaded_files:
-        st.info(f"{len(uploaded_files)} file(s) selected")
+        st.info(f"Selected {len(uploaded_files)} file(s)")
         
-        # Show selected files
-        with st.expander("Selected Files"):
-            for file in uploaded_files:
-                st.write(f"- {file.name} ({file.size:,} bytes)")
-        
-        # Process button
-        if st.button("Process Documents", type="primary"):
-            process_documents(uploaded_files, collection_name, category)
+        if st.button("Upload and Process", type="primary", use_container_width=True):
+            process_uploads(uploaded_files)
 
 
-def process_documents(files, collection_name, category):
-    """Process uploaded documents with progress tracking"""
+def process_uploads(uploaded_files):
+    """
+    Process uploaded files: save and chunk to ChromaDB.
+    """
+    from utils.document_processor import DocumentProcessor
     
-    try:
-        from utils.rag_handler import RAGHandler
-        
-        rag = RAGHandler()
-        results = []
-        
-        # Progress tracking
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        for idx, file in enumerate(files):
+    processor = DocumentProcessor()
+    
+    # Create progress containers
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    results_container = st.empty()
+    
+    results = []
+    total = len(uploaded_files)
+    
+    for idx, uploaded_file in enumerate(uploaded_files):
+        try:
             # Update progress
-            progress = idx / len(files)
+            progress = (idx + 1) / total
             progress_bar.progress(progress)
-            status_text.info(f"Processing {file.name}...")
+            status_text.info(f"Processing {idx + 1}/{total}: {uploaded_file.name}")
             
-            try:
-                # Reset file pointer
-                file.seek(0)
-                
-                # Extract text
-                text = extract_text_from_file(file)
-                
-                if not text:
-                    results.append({
-                        'filename': file.name,
-                        'success': False,
-                        'error': 'No text extracted'
-                    })
-                    continue
-                
-                # Add to RAG
-                success = rag.add_document(
-                    collection_name=collection_name,
-                    text=text,
-                    metadata={
-                        'source': file.name,
-                        'category': category,
-                        'upload_date': datetime.now().isoformat()
-                    }
-                )
-                
-                results.append({
-                    'filename': file.name,
-                    'success': success,
-                    'text_length': len(text)
-                })
-                
-            except Exception as e:
-                results.append({
-                    'filename': file.name,
-                    'success': False,
-                    'error': str(e)
-                })
-        
-        # Complete
-        progress_bar.progress(1.0)
-        status_text.empty()
-        
-        # Display results
-        display_upload_results(results)
-        
-    except Exception as e:
-        st.error(f"Upload failed: {str(e)}")
-
-
-def extract_text_from_file(file):
-    """Extract text from uploaded file"""
+            # Process document
+            result = processor.process_document(
+                uploaded_file,
+                collection_name='hcmpact_knowledge'
+            )
+            
+            results.append({
+                'filename': uploaded_file.name,
+                'status': 'success' if result.get('status') == 'success' else 'error',
+                'chunks': result.get('num_chunks', 0),
+                'message': result.get('message', '')
+            })
+            
+        except Exception as e:
+            logger.error(f"Upload error for {uploaded_file.name}: {str(e)}", exc_info=True)
+            results.append({
+                'filename': uploaded_file.name,
+                'status': 'error',
+                'chunks': 0,
+                'message': str(e)
+            })
     
-    file_type = file.name.split('.')[-1].lower()
+    # Show results
+    progress_bar.progress(1.0)
+    status_text.empty()
+    
+    # Summary
+    success_count = sum(1 for r in results if r['status'] == 'success')
+    total_chunks = sum(r['chunks'] for r in results)
+    
+    if success_count == total:
+        st.success(f"Successfully processed {success_count} file(s) - {total_chunks} chunks created")
+    elif success_count > 0:
+        st.warning(f"Processed {success_count}/{total} files - {total_chunks} chunks created")
+    else:
+        st.error("All uploads failed")
+    
+    # Detailed results
+    with results_container.expander("View Details"):
+        for result in results:
+            if result['status'] == 'success':
+                st.write(f"✅ {result['filename']} - {result['chunks']} chunks")
+            else:
+                st.write(f"❌ {result['filename']} - {result['message']}")
+
+
+def render_status_tab():
+    """
+    Tab 2: Show collection status and statistics.
+    """
+    st.header("Knowledge Base Status")
     
     try:
-        if file_type == 'pdf':
-            import PyPDF2
-            pdf_reader = PyPDF2.PdfReader(file)
-            text = ""
-            for page in pdf_reader.pages:
-                text += page.extract_text() + "\n\n"
-            return text.strip()
+        from utils.rag.rag_handler import AdvancedRAGHandler
         
-        elif file_type == 'docx':
-            from docx import Document
-            doc = Document(file)
-            text = "\n\n".join([para.text for para in doc.paragraphs if para.text.strip()])
-            return text
+        # Initialize RAG handler
+        rag = AdvancedRAGHandler(
+            ollama_endpoint=st.session_state.get('llm_endpoint', 'http://178.156.190.64:11435'),
+            collection_name='hcmpact_knowledge'
+        )
         
-        elif file_type in ['txt', 'md']:
-            text = file.read().decode('utf-8')
-            return text
+        # Get collection stats
+        collection = rag.client.get_collection('hcmpact_knowledge')
+        count = collection.count()
         
-        else:
-            return None
-            
-    except Exception as e:
-        st.error(f"Error extracting text: {str(e)}")
-        return None
-
-
-def display_upload_results(results):
-    """Display upload results"""
-    
-    successful = [r for r in results if r.get('success')]
-    failed = [r for r in results if not r.get('success')]
-    
-    if successful:
-        st.success(f"Successfully processed {len(successful)}/{len(results)} documents")
+        # Metrics
+        col1, col2, col3 = st.columns(3)
         
-        with st.expander("Successful Uploads"):
-            for result in successful:
-                st.write(f"- **{result['filename']}** ({result.get('text_length', 0):,} chars)")
-    
-    if failed:
-        st.error(f"Failed to process {len(failed)} documents")
-        
-        with st.expander("Failed Uploads"):
-            for result in failed:
-                st.write(f"- **{result['filename']}**: {result.get('error', 'Unknown error')}")
-
-
-def render_collection_status():
-    """Display collection status and statistics"""
-    
-    st.header("Collection Status")
-    
-    if not RAG_AVAILABLE:
-        st.error("RAG system not available")
-        return
-    
-    try:
-        from utils.rag_handler import RAGHandler
-        
-        rag = RAGHandler()
-        
-        # Get collections
-        collections = rag.list_collections()
-        
-        if not collections:
-            st.info("No collections found. Upload documents to create collections.")
-            return
-        
-        # Display each collection
-        for collection_name in collections:
-            with st.expander(f"Collection: {collection_name}", expanded=True):
-                try:
-                    count = rag.get_collection_count(collection_name)
-                    st.metric("Total Chunks", count)
-                    
-                    # Action buttons
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        if st.button(f"Test Search", key=f"test_{collection_name}"):
-                            st.session_state[f'test_collection'] = collection_name
-                    
-                    with col2:
-                        if st.button(f"Delete Collection", key=f"delete_{collection_name}"):
-                            if rag.delete_collection(collection_name):
-                                st.success(f"Deleted {collection_name}")
-                                st.rerun()
-                            else:
-                                st.error("Delete failed")
-                    
-                except Exception as e:
-                    st.error(f"Error: {str(e)}")
-        
-        # Overall statistics
-        st.markdown("---")
-        st.subheader("Overall Statistics")
-        
-        total_collections = len(collections)
-        total_chunks = sum(rag.get_collection_count(c) for c in collections)
-        
-        col1, col2 = st.columns(2)
         with col1:
-            st.metric("Total Collections", total_collections)
+            st.metric("Total Chunks", f"{count:,}")
+        
         with col2:
-            st.metric("Total Chunks", total_chunks)
+            # Count unique documents
+            uploads_dir = Path('/data/uploads')
+            doc_count = len(list(uploads_dir.glob('*'))) if uploads_dir.exists() else 0
+            st.metric("Documents", doc_count)
+        
+        with col3:
+            st.metric("Collection", "hcmpact_knowledge")
+        
+        # Recent documents
+        st.markdown("---")
+        st.subheader("Recent Documents")
+        
+        uploads_dir = Path('/data/uploads')
+        if uploads_dir.exists():
+            files = sorted(
+                uploads_dir.glob('*'),
+                key=lambda f: f.stat().st_mtime,
+                reverse=True
+            )[:10]
+            
+            if files:
+                for f in files:
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.write(f"📄 {f.name}")
+                    with col2:
+                        modified = datetime.fromtimestamp(f.stat().st_mtime)
+                        st.write(modified.strftime("%Y-%m-%d %H:%M"))
+            else:
+                st.info("No documents uploaded yet")
+        else:
+            st.info("Upload directory not found")
         
     except Exception as e:
-        st.error(f"Failed to load collections: {str(e)}")
+        st.error(f"Error loading status: {str(e)}")
+        logger.error(f"Status error: {str(e)}", exc_info=True)
 
 
-def render_test_search():
-    """Test search interface"""
-    
-    st.header("Test Search")
-    
-    if not RAG_AVAILABLE:
-        st.error("RAG system not available")
-        return
+def render_search_tab():
+    """
+    Tab 3: Test search functionality.
+    """
+    st.header("Test Knowledge Base Search")
     
     st.markdown("""
-    Test document retrieval by searching the knowledge base.
-    This helps verify documents are properly indexed and searchable.
+    Test the RAG search capabilities. This searches the embedded chunks in ChromaDB
+    and returns the most relevant content.
     """)
     
+    # Search input
+    query = st.text_input(
+        "Enter search query",
+        placeholder="e.g., How do I configure absence types?",
+        help="Search the knowledge base"
+    )
+    
+    n_results = st.slider("Number of results", 1, 20, 10)
+    
+    if st.button("Search", type="primary", disabled=not query):
+        if query:
+            perform_search(query, n_results)
+
+
+def perform_search(query: str, n_results: int):
+    """
+    Perform test search on knowledge base.
+    """
     try:
-        from utils.rag_handler import RAGHandler
+        from utils.rag.rag_handler import AdvancedRAGHandler
         
-        rag = RAGHandler()
-        collections = rag.list_collections()
+        # Initialize RAG
+        rag = AdvancedRAGHandler(
+            ollama_endpoint=st.session_state.get('llm_endpoint', 'http://178.156.190.64:11435'),
+            collection_name='hcmpact_knowledge'
+        )
         
-        if not collections:
-            st.warning("No collections available. Upload documents first.")
+        # Search
+        with st.spinner("Searching..."):
+            results = rag.search(query, n_results=n_results)
+        
+        if not results:
+            st.warning("No results found")
             return
         
-        # Collection selection
-        collection = st.selectbox(
-            "Select Collection",
-            collections,
-            help="Choose which collection to search"
-        )
+        # Display results
+        st.success(f"Found {len(results)} results")
         
-        # Search query
-        query = st.text_input(
-            "Search Query",
-            placeholder="Enter search terms...",
-            help="Enter keywords or questions to search for"
-        )
-        
-        # Number of results
-        n_results = st.slider(
-            "Number of Results",
-            min_value=1,
-            max_value=20,
-            value=5,
-            help="How many results to return"
-        )
-        
-        # Search button
-        if st.button("Search", type="primary", disabled=not query):
-            with st.spinner("Searching..."):
-                results = rag.search(
-                    collection_name=collection,
-                    query=query,
-                    n_results=n_results
-                )
-                
-                if results:
-                    st.success(f"Found {len(results)} results")
-                    
-                    for i, result in enumerate(results, 1):
-                        with st.expander(f"Result {i} (Distance: {result.get('distance', 'N/A'):.4f})"):
-                            st.markdown(result.get('document', 'No content'))
-                            
-                            metadata = result.get('metadata', {})
-                            if metadata:
-                                st.caption(f"Source: {metadata.get('source', 'Unknown')}")
-                                st.caption(f"Category: {metadata.get('category', 'Unknown')}")
-                else:
-                    st.warning("No results found")
+        for idx, result in enumerate(results, 1):
+            with st.expander(f"Result {idx} - {result.get('similarity', 0):.1%} match"):
+                st.markdown(f"**Source:** {result.get('source', 'Unknown')}")
+                st.markdown(f"**Chunk:** {result.get('chunk_id', 'N/A')}")
+                st.markdown("---")
+                st.markdown(result.get('text', 'No content'))
         
     except Exception as e:
-        st.error(f"Search failed: {str(e)}")
+        st.error(f"Search error: {str(e)}")
+        logger.error(f"Search error: {str(e)}", exc_info=True)
 
 
-def render_intelligent_parser_tab():
-    """Render intelligent parser interface"""
-    
-    st.header("Intelligent PDF Parser")
-    
-    if not INTELLIGENT_PARSER_AVAILABLE:
-        st.warning("Intelligent parser not available")
-        st.info("""
-        The intelligent parser requires additional components:
-        - pdf_structure_analyzer.py
-        - parser_code_generator.py
-        - intelligent_parser_orchestrator.py
-        - intelligent_parser_ui.py
-        
-        These files should be in utils/parsers/ directory.
-        """)
-        return
-    
+def render_parser_tab():
+    """
+    Tab 4: Intelligent PDF parser.
+    """
     try:
-        # Initialize orchestrator
-        orchestrator = IntelligentParserOrchestrator()
+        from utils.parsers.intelligent_parser_ui_enhanced import render_intelligent_parser_ui
+        render_intelligent_parser_ui()
         
-        # Render the intelligent parser UI
-        render_intelligent_parser(orchestrator)
+    except ImportError as e:
+        st.error("Intelligent parser module not found")
+        logger.error(f"Import error: {str(e)}", exc_info=True)
         
+        st.info("""
+        The intelligent parser module is not yet deployed. 
+        
+        To enable:
+        1. Deploy intelligent_parser_ui_enhanced.py to utils/parsers/
+        2. Deploy intelligent_parser_orchestrator_enhanced.py to utils/parsers/
+        3. Deploy dayforce_parser_enhanced.py to utils/parsers/
+        4. Restart application
+        """)
+    
     except Exception as e:
-        st.error(f"Failed to initialize intelligent parser: {str(e)}")
-        st.exception(e)
+        st.error(f"Parser error: {str(e)}")
+        logger.error(f"Parser error: {str(e)}", exc_info=True)
 
 
-# For backward compatibility
-def render():
-    """Legacy render function"""
-    render_knowledge_page()
+if __name__ == "__main__":
+    render()
