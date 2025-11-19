@@ -132,10 +132,10 @@ class IntelligentParserOrchestratorV2:
                 )
                 
                 # Log what each method returned
-                for method_name, result in all_results.items():
-                    if result and result.get('text'):
-                        text_preview = result['text'][:200] if result.get('text') else 'No text'
-                        logger.info(f"    {method_name}: {len(result.get('text', ''))} chars - Preview: {text_preview}...")
+                for method_name, extraction_result in all_results.items():
+                    if extraction_result and extraction_result.get('text'):
+                        text_preview = extraction_result['text'][:200] if extraction_result.get('text') else 'No text'
+                        logger.info(f"    {method_name}: {len(extraction_result.get('text', ''))} chars - Preview: {text_preview}...")
                 
                 # Pick best method for this section
                 best_method, best_result = self.extractor.get_best_method(
