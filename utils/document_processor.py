@@ -200,12 +200,28 @@ class DocumentProcessor:
         collection_name: str = "hcmpact_docs",
         category: str = "General"
     ) -> Dict[str, Any]:
-        """Process a document with batch embedding and proper error handling."""
+        """Process a document with batch embedding and proper error handling. Now saves files to disk."""
         
         status_placeholder = st.empty()
         progress_bar = st.progress(0)
         
         try:
+            # SAVE FILE TO DISK FIRST
+            upload_dir = "/data/uploads"
+            os.makedirs(upload_dir, exist_ok=True)
+            
+            file_path = os.path.join(upload_dir, filename)
+            
+            status_placeholder.info(f"💾 Saving {filename} to disk...")
+            with open(file_path, "wb") as f:
+                file.seek(0)  # Reset file pointer
+                f.write(file.read())
+            
+            status_placeholder.success(f"✅ File saved")
+            
+            # Reset file pointer for text extraction
+            file.seek(0)
+            
             # Extract text
             status_placeholder.info(f"📄 Extracting text from {filename}...")
             text = self.extract_text(file, filename)
@@ -226,7 +242,8 @@ class DocumentProcessor:
                 'source': filename,
                 'category': category,
                 'file_size': len(text),
-                'type': os.path.splitext(filename)[1].lower()
+                'type': os.path.splitext(filename)[1].lower(),
+                'file_path': file_path
             }
             
             # Test Ollama
