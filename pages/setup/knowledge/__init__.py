@@ -163,7 +163,7 @@ def render_status_tab():
         )
         
         # Get collection stats
-        collection = rag.client.get_collection('hcmpact_knowledge')
+        collection = rag.client.get_or_create_collection('hcmpact_knowledge')
         count = collection.count()
         
         # Metrics
