@@ -84,13 +84,14 @@ class IntelligentParserOrchestratorV2:
         for match in re.finditer(pattern, text, re.IGNORECASE):
             emp_id = match.group(1)
             
-            # Get context around match
-            start = max(0, match.start() - 100)
-            end = min(len(text), match.end() + 100)
+            # Get context BEFORE match (name comes before "Emp #:")
+            start = max(0, match.start() - 200)
+            end = match.start()
             context = text[start:end]
             
-            # Find name: "FirstName LastName" (both capitalized)
-            name_match = re.search(r'\b([A-Z][a-z]+)\s+([A-Z][a-z]+)\b', context)
+            # Find name: "FirstName LastName" (both capitalized) - get last occurrence
+            name_matches = list(re.finditer(r'\b([A-Z][a-z]+)\s+([A-Z][a-z]+)\b', context))
+            name_match = name_matches[-1] if name_matches else None
             if name_match:
                 name = f"{name_match.group(1)} {name_match.group(2)}"
                 employees.append({
@@ -131,6 +132,10 @@ class IntelligentParserOrchestratorV2:
                 if rate > 500 or hours > 200 or amount > 50000:
                     continue
                 
+                # Skip single words (like "Holiday" alone - should be "Holiday Worked")
+                if len(desc.split()) < 2:
+                    continue
+                
                 # Map to employee
                 emp_id, emp_name = self._find_employee(line, text, employees)
                 
@@ -147,19 +152,20 @@ class IntelligentParserOrchestratorV2:
         return earnings
     
     def _parse_taxes(self, text: str, employees: List[Dict]) -> List[Dict]:
-        """Parse taxes with strict pattern: Tax Name $Amount $Amount."""
+        """Parse taxes with flexible patterns."""
         taxes = []
         
         # Tax keywords (must have at least one)
-        tax_keywords = ['fed', 'fica', 'medicare', 'ss', 'state', 'w/h', 'tax', 'ut', 'mwt']
+        tax_keywords = ['fed', 'fica', 'medicare', 'ss', 'state', 'w/h', 'tax', 'ut', 'mwt', 'er', 'ee']
         
-        # Strict pattern: Tax Name $Amount $Amount
-        # Example: "Fed W/H $1,005.60 $62.35"
-        pattern = r'([A-Z][A-Za-z\s/\-]{2,20})\s+\$?([\d,]+\.\d{2})\s+\$?([\d,]+\.\d{2})'
+        # Pattern 1: Tax Name $Amount $Amount (2 amounts)
+        pattern1 = r'([A-Z][A-Za-z\s/\-]{2,20})\s+\$?([\d,]+\.\d{2})\s+\$?([\d,]+\.\d{2})'
+        # Pattern 2: Tax Name $Amount (1 amount)
+        pattern2 = r'([A-Z][A-Za-z\s/\-]{2,20})\s+\$?([\d,]+\.\d{2})(?:\s|$)'
         
         for line in text.split('\n'):
             # Skip metadata
-            if ':' in line or 'Date' in line or 'Status' in line or len(line) < 15:
+            if ':' in line or 'Date' in line or 'Status' in line or len(line) < 10:
                 continue
             
             # Must have tax keyword
@@ -167,56 +173,65 @@ class IntelligentParserOrchestratorV2:
                 continue
             
             # Must NOT have earning keywords
-            if any(kw in line.lower() for kw in ['regular', 'overtime', 'hourly', 'salary', 'bonus']):
+            if any(kw in line.lower() for kw in ['regular', 'overtime', 'vacation', 'holiday worked', 'bonus-no']):
                 continue
             
-            match = re.search(pattern, line)
+            # Try 2-amount pattern first
+            match = re.search(pattern1, line)
             if match:
                 desc = match.group(1).strip()
                 wages = self._safe_float(match.group(2))
                 amount = self._safe_float(match.group(3))
-                
-                # Skip unrealistic values
-                if amount > 10000:
+            else:
+                # Try 1-amount pattern
+                match = re.search(pattern2, line)
+                if match:
+                    desc = match.group(1).strip()
+                    wages = 0
+                    amount = self._safe_float(match.group(2))
+                else:
                     continue
-                
-                emp_id, emp_name = self._find_employee(line, text, employees)
-                
-                taxes.append({
-                    'employee_id': emp_id,
-                    'employee_name': emp_name,
-                    'description': desc,
-                    'wages_base': wages,
-                    'amount': amount,
-                    'wages_ytd': wages,
-                    'amount_ytd': amount
-                })
+            
+            # Skip unrealistic values
+            if amount > 10000:
+                continue
+            
+            emp_id, emp_name = self._find_employee(line, text, employees)
+            
+            taxes.append({
+                'employee_id': emp_id,
+                'employee_name': emp_name,
+                'description': desc,
+                'wages_base': wages,
+                'amount': amount,
+                'wages_ytd': wages,
+                'amount_ytd': amount
+            })
         
         return taxes
     
     def _parse_deductions(self, text: str, employees: List[Dict]) -> List[Dict]:
-        """Parse deductions with strict pattern."""
+        """Parse deductions with flexible pattern."""
         deductions = []
         
         # Deduction keywords
         ded_keywords = ['401k', '401(k)', 'insurance', 'medical', 'dental', 'vision', 
-                        'life', 'hsa', 'fsa', 'uniform', 'pre-tax', 'pre tax']
+                        'life', 'hsa', 'fsa', 'uniform', 'pre-tax', 'pre tax', 'post tax']
         
-        # Strict pattern: Description $Amount (single amount)
-        # Example: "Medical Pre Tax $403.81"
-        pattern = r'([A-Z][A-Za-z\s\-()]{2,30})\s+\$?([\d,]+\.\d{2})(?:\s|$)'
+        # Flexible pattern: Description $Amount
+        pattern = r'([A-Z][A-Za-z\s\-()]{2,35})\s+\$?([\d,]+\.\d{2})(?:\s|$)'
         
         for line in text.split('\n'):
-            # Skip metadata
-            if ':' in line or 'Date' in line or 'Status' in line or len(line) < 15:
+            # Skip metadata (relaxed)
+            if ':' in line or 'Date' in line or 'Status' in line or len(line) < 10:
                 continue
             
             # Must have deduction keyword
             if not any(kw in line.lower() for kw in ded_keywords):
                 continue
             
-            # Must NOT have earning or tax keywords
-            if any(kw in line.lower() for kw in ['regular', 'overtime', 'hourly', 'salary', 'fed', 'fica']):
+            # Must NOT have earning or tax keywords (relaxed)
+            if any(kw in line.lower() for kw in ['regular hourly', 'regular salary', 'overtime', 'vacation', 'fed w/h', 'fica']):
                 continue
             
             match = re.search(pattern, line)
