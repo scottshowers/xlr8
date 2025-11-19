@@ -24,18 +24,27 @@ except ImportError:
 
 # Import LLM synthesizer for answer generation
 try:
-    from utils.ai.llm_synthesizer import get_synthesizer
+    from utils.ai.enhanced_llm_synthesizer import get_enhanced_synthesizer
     LLM_AVAILABLE = True
 except ImportError:
-    LLM_AVAILABLE = False
-    logger = logging.getLogger(__name__)
-    logger.warning("LLM Synthesizer not available - will use raw chunks")
+    try:
+        from utils.ai.llm_synthesizer import get_synthesizer
+        LLM_AVAILABLE = True
+        USING_ENHANCED = False
+    except ImportError:
+        LLM_AVAILABLE = False
+        logger = logging.getLogger(__name__)
+        logger.warning("LLM Synthesizer not available - will use raw chunks")
+    else:
+        USING_ENHANCED = False
+else:
+    USING_ENHANCED = True
 
 logger = logging.getLogger(__name__)
 
 # Print to logs
 print("=" * 80)
-print("🚀 ANALYSIS_ENGINE.PY LOADING - CUSTOMER DOCS ONLY - BUILD 2341")
+print("🚀 ANALYSIS_ENGINE.PY LOADING - ENHANCED LLM SYNTHESIS - BUILD 2342")
 print("=" * 80)
 
 
@@ -195,22 +204,36 @@ def analyze_single_question(question: Dict[str, Any], rag_handler: RAGHandler) -
                 sources.append(source_name)
             chunks.append(doc.strip())
         
-        # USE LLM TO SYNTHESIZE ANSWER (if available)
+        # USE ENHANCED LLM TO SYNTHESIZE ANSWER (if available)
         if LLM_AVAILABLE:
             try:
-                synthesizer = get_synthesizer()
-                result = synthesizer.synthesize_answer(
-                    question=question['question'],
-                    chunks=chunks,
-                    sources=sources,
-                    reason=question.get('reason', '')
-                )
+                if USING_ENHANCED:
+                    # Use enhanced synthesizer with full context
+                    synthesizer = get_enhanced_synthesizer()
+                    result = synthesizer.synthesize_answer(
+                        question=question['question'],
+                        chunks=chunks,
+                        sources=sources,
+                        reason=question.get('reason', ''),
+                        category=question.get('category', ''),
+                        required=question.get('required', False)
+                    )
+                else:
+                    # Use basic synthesizer
+                    synthesizer = get_synthesizer()
+                    result = synthesizer.synthesize_answer(
+                        question=question['question'],
+                        chunks=chunks,
+                        sources=sources,
+                        reason=question.get('reason', '')
+                    )
                 
                 return {
                     'answer': result['answer'],
                     'sources': sources,
                     'confidence': result['confidence'],
-                    'status': 'analyzed'
+                    'status': 'analyzed',
+                    'reasoning': result.get('reasoning', '')
                 }
                 
             except Exception as e:
@@ -466,6 +489,11 @@ def render_question_browser(questions: List[Dict[str, Any]], questions_data: Dic
                     confidence = q['confidence']
                     confidence_color = "🟢" if confidence > 0.8 else "🟡" if confidence > 0.6 else "🔴"
                     st.markdown(f"**Confidence:** {confidence_color} {confidence*100:.0f}%")
+                
+                # Show LLM reasoning if available (helps understand the answer)
+                if q.get('reasoning'):
+                    with st.expander("🧠 Analysis Reasoning"):
+                        st.info(q['reasoning'])
             
             # Action buttons
             st.markdown("---")
@@ -482,6 +510,7 @@ def render_question_browser(questions: List[Dict[str, Any]], questions_data: Dic
                         q['sources'] = result['sources']
                         q['confidence'] = result['confidence']
                         q['status'] = result['status']
+                        q['reasoning'] = result.get('reasoning', '')
                         
                         # Save updated questions
                         if save_questions(questions_data):
@@ -629,6 +658,7 @@ def run_batch_analysis(
             question['sources'] = result['sources']
             question['confidence'] = result['confidence']
             question['status'] = result['status']
+            question['reasoning'] = result.get('reasoning', '')
             
             successful += 1
             
