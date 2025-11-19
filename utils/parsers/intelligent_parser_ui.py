@@ -28,11 +28,11 @@ def render_intelligent_parser_ui(upload_dir: str = "/data/uploads", output_dir: 
         output_dir: Directory for parsed output
     """
     
-    st.markdown("### ðŸ§  Intelligent PDF Parser")
+    st.markdown("### Intelligent PDF Parser")
     
     st.markdown("""
     <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 1.5rem; border-radius: 12px; color: white; margin-bottom: 1.5rem;'>
-        <h4 style='margin: 0 0 0.5rem 0; color: white;'>âš¡ 3-Stage Intelligent Parsing</h4>
+        <h4 style='margin: 0 0 0.5rem 0; color: white;'>3-Stage Intelligent Parsing</h4>
         <p style='margin: 0; opacity: 0.95; font-size: 0.95rem;'>
         Automatically selects the best parsing strategy for your document:
         </p>
@@ -52,7 +52,7 @@ def render_intelligent_parser_ui(upload_dir: str = "/data/uploads", output_dir: 
     pdf_files = [f for f in os.listdir(upload_dir) if f.lower().endswith('.pdf')]
     
     if not pdf_files:
-        st.info("ðŸ"¤ No PDFs uploaded yet. Upload documents in the **Upload** tab first.")
+        st.info("No PDFs uploaded yet. Upload documents in the Upload tab first.")
         return
     
     # File selection
@@ -72,7 +72,7 @@ def render_intelligent_parser_ui(upload_dir: str = "/data/uploads", output_dir: 
         )
     
     # Parse button
-    if st.button("ðŸš€ Intelligent Parse", type="primary", use_container_width=True):
+    if st.button("Intelligent Parse", type="primary", use_container_width=True):
         pdf_path = os.path.join(upload_dir, selected_pdf)
         
         # Create progress tracking
@@ -81,17 +81,17 @@ def render_intelligent_parser_ui(upload_dir: str = "/data/uploads", output_dir: 
         
         try:
             # Initialize orchestrator
-            status_text.info("ðŸ"§ Initializing intelligent parser...")
+            status_text.info("Initializing intelligent parser...")
             progress_bar.progress(10)
             
             orchestrator = IntelligentParserOrchestrator(custom_parsers_dir="/data/custom_parsers")
             
             # Stage 0: Analyze
-            status_text.info("ðŸ" Analyzing PDF structure...")
+            status_text.info("Analyzing PDF structure...")
             progress_bar.progress(20)
             
             # Parse
-            status_text.info("âš¡ Parsing with intelligent system...")
+            status_text.info("Parsing with intelligent system...")
             progress_bar.progress(40)
             
             result = orchestrator.parse(pdf_path, force_regenerate=force_regenerate)
@@ -109,27 +109,27 @@ def render_intelligent_parser_ui(upload_dir: str = "/data/uploads", output_dir: 
         except Exception as e:
             progress_bar.empty()
             status_text.empty()
-            st.error(f"âŒ Parsing error: {str(e)}")
+            st.error(f"Parsing error: {str(e)}")
             logger.error(f"Intelligent parsing error: {e}", exc_info=True)
     
     # Show previously parsed files
     st.markdown("---")
-    st.markdown("### ðŸ"‚ Previously Parsed Documents")
+    st.markdown("### Previously Parsed Documents")
     
     _display_parsed_files(output_dir)
     
     # Show custom parsers library
     st.markdown("---")
-    st.markdown("### ðŸ"š Custom Parser Library")
+    st.markdown("### Custom Parser Library")
     
     _display_custom_parsers("/data/custom_parsers")
 
 
-def _display_parsing_results(result: Dict[str, Any], filename: str, output_dir: str):
+def _display_parsing_results(result, filename: str, output_dir: str):
     """Display parsing results with accuracy."""
     
     if not result.get('success'):
-        st.error("âŒ Parsing failed")
+        st.error("Parsing failed")
         st.markdown(f"**Error:** {result.get('error', 'Unknown error')}")
         
         if result.get('recommendations'):
@@ -147,13 +147,13 @@ def _display_parsing_results(result: Dict[str, Any], filename: str, output_dir: 
     # Color based on accuracy
     if accuracy >= 90:
         color = "#28a745"
-        emoji = "ðŸŽ‰"
+        emoji = "SUCCESS"
     elif accuracy >= 70:
         color = "#ffc107"
-        emoji = "âœ…"
+        emoji = "GOOD"
     else:
         color = "#dc3545"
-        emoji = "âš ï¸"
+        emoji = "WARNING"
     
     st.markdown(f"""
     <div style='background: linear-gradient(135deg, {color} 0%, {color}dd 100%); padding: 1.5rem; border-radius: 12px; color: white; margin-bottom: 1.5rem;'>
@@ -189,7 +189,7 @@ def _display_parsing_results(result: Dict[str, Any], filename: str, output_dir: 
     # Table details
     tables = result.get('tables', [])
     if tables:
-        st.markdown("#### ðŸ"Š Extracted Tables")
+        st.markdown("#### Extracted Tables")
         
         for i, table in enumerate(tables, 1):
             with st.expander(f"Table {i}", expanded=(i == 1)):
@@ -203,9 +203,9 @@ def _display_parsing_results(result: Dict[str, Any], filename: str, output_dir: 
     
     # Save to Excel option
     st.markdown("---")
-    st.markdown("### ðŸ'¾ Save Results")
+    st.markdown("### Save Results")
     
-    if st.button("ðŸ"Š Save as Excel", use_container_width=True):
+    if st.button("Save as Excel", use_container_width=True):
         try:
             import pandas as pd
             from datetime import datetime
@@ -222,12 +222,12 @@ def _display_parsing_results(result: Dict[str, Any], filename: str, output_dir: 
                     if df is not None:
                         df.to_excel(writer, sheet_name=f'Table_{i}', index=False)
             
-            st.success(f"âœ… Saved to: {excel_filename}")
+            st.success(f"Saved to: {excel_filename}")
             
             # Download button
             with open(excel_path, "rb") as f:
                 st.download_button(
-                    label="ðŸ"¥ Download Excel",
+                    label="Download Excel",
                     data=f.read(),
                     file_name=excel_filename,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -238,7 +238,7 @@ def _display_parsing_results(result: Dict[str, Any], filename: str, output_dir: 
             st.error(f"Error saving: {e}")
     
     # Show parser details
-    with st.expander("ðŸ" Parser Details"):
+    with st.expander("Parser Details"):
         st.json({
             'stage': stage,
             'stage_name': stage_name,
@@ -272,13 +272,13 @@ def _display_parsed_files(output_dir: str):
         col1, col2, col3 = st.columns([4, 1, 1])
         
         with col1:
-            st.markdown(f"ðŸ"Š **{excel_file}**")
+            st.markdown(f"**{excel_file}**")
             st.caption(f"Size: {file_size:.1f} KB")
         
         with col2:
             with open(excel_path, "rb") as f:
                 st.download_button(
-                    label="ðŸ"¥",
+                    label="Download",
                     data=f.read(),
                     file_name=excel_file,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -286,7 +286,7 @@ def _display_parsed_files(output_dir: str):
                 )
         
         with col3:
-            if st.button("ðŸ—'ï¸", key=f"del_intel_{excel_file}"):
+            if st.button("Delete", key=f"del_intel_{excel_file}"):
                 try:
                     os.remove(excel_path)
                     st.success("Deleted")
@@ -308,7 +308,7 @@ def _display_custom_parsers(parsers_dir: str):
         st.info("No custom parsers yet. Successfully parsed documents will be saved as custom parsers for reuse.")
         return
     
-    st.success(f"ðŸ"š {len(parser_files)} custom parser(s) available")
+    st.success(f"{len(parser_files)} custom parser(s) available")
     
     for parser_file in sorted(parser_files):
         parser_path = os.path.join(parsers_dir, parser_file)
@@ -318,7 +318,7 @@ def _display_custom_parsers(parsers_dir: str):
         accuracy = parts[-1] if parts[-1].isdigit() else '?'
         doc_type = '_'.join(parts[1:-1]) if len(parts) > 2 else 'unknown'
         
-        with st.expander(f"ðŸ" {parser_file} - {doc_type} ({accuracy}% accuracy)"):
+        with st.expander(f"{parser_file} - {doc_type} ({accuracy}% accuracy)"):
             st.markdown(f"**Document Type:** {doc_type}")
             st.markdown(f"**Accuracy:** {accuracy}%")
             st.markdown(f"**Path:** `{parser_path}`")
@@ -326,43 +326,16 @@ def _display_custom_parsers(parsers_dir: str):
             col1, col2 = st.columns(2)
             
             with col1:
-                if st.button("ðŸ'€ View Code", key=f"view_{parser_file}"):
+                if st.button("View Code", key=f"view_{parser_file}"):
                     with open(parser_path, 'r') as f:
                         code = f.read()
                     st.code(code, language='python')
             
             with col2:
-                if st.button("ðŸ—'ï¸ Delete", key=f"del_parser_{parser_file}"):
+                if st.button("Delete", key=f"del_parser_{parser_file}"):
                     try:
                         os.remove(parser_path)
                         st.success("Deleted")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Delete failed: {e}")
-
-
-# Integration example for render_knowledge_page()
-def add_to_knowledge_page():
-    """
-    Example of how to add this to render_knowledge_page().
-    
-    In pages/setup/knowledge/__init__.py, add a new tab:
-    
-    ```python
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "ðŸ"¤ Upload", 
-        "ðŸ"Š Status", 
-        "ðŸ—'ï¸ Manage", 
-        "ðŸ"‹ Parse Registers",
-        "ðŸ§  Intelligent Parser"  # NEW TAB
-    ])
-    
-    # ... existing tabs ...
-    
-    # TAB 5: INTELLIGENT PARSER
-    with tab5:
-        from utils.parsers.intelligent_parser_ui import render_intelligent_parser_ui
-        render_intelligent_parser_ui()
-    ```
-    """
-    pass
