@@ -1,7 +1,7 @@
 import streamlit as st
 from utils.rag_handler import RAGHandler
 from utils.document_processor import DocumentProcessor, render_upload_interface
-from utils.pdf_parsers import extract_register_adaptive
+from utils.pdf_parsers import extract_register_adaptive, extract_payroll_register
 from pathlib import Path
 import os
 import logging
@@ -160,24 +160,53 @@ def render_knowledge_page():
                         
                         with st.spinner(f"Extracting tables from {selected_pdf}..."):
                             try:
-                                result = extract_register_adaptive(
+                                # Try payroll-specific parser first
+                                st.info("🔄 Trying payroll register parser...")
+                                result = extract_payroll_register(
                                     pdf_path=pdf_path,
                                     output_dir=parsed_dir
                                 )
                                 
+                                # If payroll parser fails, fall back to general parser
+                                if not result['success']:
+                                    st.info("🔄 Trying general table parser...")
+                                    result = extract_register_adaptive(
+                                        pdf_path=pdf_path,
+                                        output_dir=parsed_dir
+                                    )
+                                
                                 if result['success']:
                                     excel_path = result['excel_path']
                                     table_count = result['table_count']
-                                    strategy_used = result.get('strategy_used', 'Unknown')
+                                    
+                                    # Get strategy and accuracy
+                                    metadata = result.get('metadata', {})
+                                    strategy_used = metadata.get('parsing_strategy', result.get('strategy_used', 'Unknown'))
+                                    accuracy = metadata.get('accuracy', None)
                                     
                                     st.success(f"✅ Successfully extracted {table_count} table(s)!")
-                                    st.info(f"🔧 **Strategy used:** {strategy_used}")
+                                    
+                                    # Show parsing info
+                                    col1, col2 = st.columns(2)
+                                    with col1:
+                                        st.info(f"🔧 **Strategy:** {strategy_used}")
+                                    with col2:
+                                        if accuracy is not None:
+                                            st.metric("Accuracy", f"{accuracy:.1f}%")
+                                    
+                                    # Show metadata if available
+                                    if 'columns_found' in metadata:
+                                        with st.expander("📊 Columns Discovered"):
+                                            for tab, cols in metadata['columns_found'].items():
+                                                if cols:
+                                                    st.markdown(f"**{tab}:** {', '.join(cols)}")
                                     
                                     # Show table details
                                     with st.expander("📋 Table Details", expanded=True):
                                         for info in result['table_info']:
+                                            sheet_name = info.get('sheet_name', f"Table {info.get('table_number', '?')}")
                                             st.markdown(f"""
-**Table {info['table_number']}:**
+**{sheet_name}:**
 - **Rows:** {info['rows']:,}
 - **Columns:** {info['columns']}
 - **Headers:** {', '.join(info['headers'][:5])}{'...' if len(info['headers']) > 5 else ''}
