@@ -1,6 +1,6 @@
 # ⚡ XLR8 by HCMPACT v2.0
 
-**Advanced UKG Pro/WFM Implementation Accelerator with Custom PDF Mapping**
+**Advanced UKG PRO/WFM Implementation Accelerator (future state not limited to PRO/WFM**
 
 ## 🎯 What's New in v2.0
 
