@@ -7,6 +7,9 @@ from pathlib import Path
 import os
 import logging
 
+# ADDED: Import intelligent parser UI
+from utils.parsers.intelligent_parser_ui import render_intelligent_parser_ui
+
 logger = logging.getLogger(__name__)
 
 
@@ -19,8 +22,14 @@ def render_knowledge_page():
     # Initialize handlers
     rag = RAGHandler()
     
-    # Create tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["📤 Upload", "📊 Status", "🗑️ Manage", "📋 Parse Registers"])
+    # MODIFIED: Changed from 4 tabs to 5 tabs
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📤 Upload", 
+        "📊 Status", 
+        "🗑️ Manage", 
+        "📋 Parse Registers",
+        "🧠 Intelligent Parser"  # NEW TAB
+    ])
     
     # TAB 1: UPLOAD
     with tab1:
@@ -124,7 +133,7 @@ def render_knowledge_page():
         - ✅ Backed up by Railway volume
         """)
     
-    # TAB 4: PARSE REGISTERS (NEW)
+    # TAB 4: PARSE REGISTERS
     with tab4:
         st.subheader("📋 Parse Payroll Registers to Excel")
         
@@ -162,7 +171,7 @@ def render_knowledge_page():
                         with st.spinner(f"Extracting tables from {selected_pdf}..."):
                             try:
                                 # Try payroll-specific parser first
-                                st.info("🔄 Trying payroll register parser...")
+                                st.info("📄 Trying payroll register parser...")
                                 result = extract_payroll_register(
                                     pdf_path=pdf_path,
                                     output_dir=parsed_dir
@@ -170,7 +179,7 @@ def render_knowledge_page():
                                 
                                 # If payroll parser fails, fall back to general parser
                                 if not result['success']:
-                                    st.info("🔄 Trying general table parser...")
+                                    st.info("📄 Trying general table parser...")
                                     result = extract_register_adaptive(
                                         pdf_path=pdf_path,
                                         output_dir=parsed_dir
@@ -312,6 +321,13 @@ def render_knowledge_page():
 - Files persist across deployments
 - Available for download anytime
 """)
+    
+    # TAB 5: INTELLIGENT PARSER (NEW!)
+    with tab5:
+        render_intelligent_parser_ui(
+            upload_dir="/data/uploads",
+            output_dir="/data/parsed_registers"
+        )
 
 
 if __name__ == "__main__":
