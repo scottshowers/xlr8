@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 
 # Print to logs
 print("=" * 80)
-print("🚀 ANALYSIS_ENGINE.PY LOADING - ENHANCED LLM SYNTHESIS - BUILD 2342")
+print("🚀 ANALYSIS_ENGINE.PY LOADING - HTTP BASIC AUTH FIX - BUILD 2343")
 print("=" * 80)
 
 
