@@ -1,6 +1,6 @@
 """
-Admin Section Router
-Routes to different admin functions
+Admin Section Router - Updated Nov 19 2025
+Routes to different admin functions 
 """
 
 import streamlit as st
