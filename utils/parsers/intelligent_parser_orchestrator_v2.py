@@ -29,8 +29,9 @@ class IntelligentParserOrchestratorV2:
     3. No bbox detection needed
     """
     
-    def __init__(self):
+    def __init__(self, custom_parsers_dir: str = None):
         self.logger = logging.getLogger(__name__)
+        self.custom_parsers_dir = custom_parsers_dir  # Accept but don't use for now
         
         # Keywords for filtering sections
         self.earning_keywords = [
