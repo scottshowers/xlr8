@@ -46,8 +46,16 @@ class IntelligentParserOrchestratorV2:
         self.v1_orchestrator = None
         if V1_AVAILABLE:
             try:
+                # Try with custom_parsers_dir parameter first
                 self.v1_orchestrator = OrchestratorV1(custom_parsers_dir=str(self.custom_parsers_dir))
                 logger.info("V1 orchestrator loaded as fallback")
+            except TypeError:
+                # V1 doesn't accept custom_parsers_dir, try without it
+                try:
+                    self.v1_orchestrator = OrchestratorV1()
+                    logger.info("V1 orchestrator loaded as fallback (no custom_parsers_dir)")
+                except Exception as e:
+                    logger.warning(f"Could not load V1 orchestrator: {str(e)}")
             except Exception as e:
                 logger.warning(f"Could not load V1 orchestrator: {str(e)}")
         
@@ -115,12 +123,19 @@ class IntelligentParserOrchestratorV2:
                     continue
                 
                 logger.info(f"  {section_type}: Testing all methods...")
+                logger.info(f"    Section bbox: {section_info.get('bbox')}")
                 
                 # Try all methods on this section
                 all_results = self.extractor.extract_all_methods(
                     pdf_path,
                     section_bbox=section_info.get('bbox')
                 )
+                
+                # Log what each method returned
+                for method_name, result in all_results.items():
+                    if result and result.get('text'):
+                        text_preview = result['text'][:200] if result.get('text') else 'No text'
+                        logger.info(f"    {method_name}: {len(result.get('text', ''))} chars - Preview: {text_preview}...")
                 
                 # Pick best method for this section
                 best_method, best_result = self.extractor.get_best_method(
@@ -131,6 +146,11 @@ class IntelligentParserOrchestratorV2:
                 if best_method:
                     accuracy = self.extractor.score_extraction(best_result, section_type)
                     logger.info(f"    Best: {best_method} ({accuracy:.1f}%)")
+                    
+                    # Log what the best result contains
+                    if best_result.get('text'):
+                        logger.info(f"    Best result text length: {len(best_result['text'])} chars")
+                        logger.info(f"    Best result preview: {best_result['text'][:300]}...")
                     
                     section_data[section_type] = {
                         'method': best_method,
@@ -195,6 +215,8 @@ class IntelligentParserOrchestratorV2:
         """
         import re
         
+        logger.info("=== Structuring Section Data ===")
+        
         structured = {
             'employees': [],
             'earnings': [],
@@ -205,10 +227,15 @@ class IntelligentParserOrchestratorV2:
         # First, extract all employees
         if 'employee_info' in section_data:
             employee_data = section_data['employee_info']['data']
+            logger.info(f"Employee info data keys: {employee_data.keys()}")
+            if employee_data.get('text'):
+                logger.info(f"Employee info text length: {len(employee_data['text'])} chars")
             structured['employees'] = self._parse_employee_info(employee_data)
+            logger.info(f"Found {len(structured['employees'])} employees: {[e['employee_id'] for e in structured['employees']]}")
         
         # Get list of employee names for stripping from lines
         employee_names = [emp['name'] for emp in structured['employees'] if emp.get('name')]
+        logger.info(f"Employee names for stripping: {employee_names}")
         
         # Get combined text from all sections
         all_text = ""
@@ -216,9 +243,15 @@ class IntelligentParserOrchestratorV2:
             if section_type in section_data:
                 data = section_data[section_type]['data']
                 if data.get('text'):
-                    all_text += data['text'] + "\n"
+                    section_text = data['text']
+                    all_text += section_text + "\n"
+                    logger.info(f"{section_type} text length: {len(section_text)} chars")
                 elif data.get('lines'):
-                    all_text += '\n'.join(data['lines']) + "\n"
+                    section_text = '\n'.join(data['lines'])
+                    all_text += section_text + "\n"
+                    logger.info(f"{section_type} lines count: {len(data['lines'])}")
+        
+        logger.info(f"Combined text length: {len(all_text)} chars")
         
         # Split text by employee for proper attribution
         if structured['employees'] and len(structured['employees']) > 1:
@@ -229,6 +262,7 @@ class IntelligentParserOrchestratorV2:
                 # Parse earnings for this employee
                 earnings_data = {'text': emp_block, 'lines': emp_block.split('\n')}
                 emp_earnings = self._parse_earnings(earnings_data, employee_names=[emp_info['name']])
+                logger.info(f"  Employee {emp_info['employee_id']} - Found {len(emp_earnings)} earnings")
                 for earning in emp_earnings:
                     earning['employee_id'] = emp_info['employee_id']
                     earning['employee_name'] = emp_info['name']
@@ -237,6 +271,7 @@ class IntelligentParserOrchestratorV2:
                 # Parse taxes for this employee  
                 taxes_data = {'text': emp_block, 'lines': emp_block.split('\n')}
                 emp_taxes = self._parse_taxes(taxes_data, employee_names=[emp_info['name']])
+                logger.info(f"  Employee {emp_info['employee_id']} - Found {len(emp_taxes)} taxes")
                 for tax in emp_taxes:
                     tax['employee_id'] = emp_info['employee_id']
                     tax['employee_name'] = emp_info['name']
@@ -245,6 +280,7 @@ class IntelligentParserOrchestratorV2:
                 # Parse deductions for this employee
                 deductions_data = {'text': emp_block, 'lines': emp_block.split('\n')}
                 emp_deductions = self._parse_deductions(deductions_data, employee_names=[emp_info['name']])
+                logger.info(f"  Employee {emp_info['employee_id']} - Found {len(emp_deductions)} deductions")
                 for deduction in emp_deductions:
                     deduction['employee_id'] = emp_info['employee_id']
                     deduction['employee_name'] = emp_info['name']
@@ -276,6 +312,12 @@ class IntelligentParserOrchestratorV2:
                 for deduction in structured['deductions']:
                     deduction['employee_id'] = emp_id
                     deduction['employee_name'] = emp_name
+        
+        logger.info(f"=== Structuring Complete ===")
+        logger.info(f"Total employees: {len(structured['employees'])}")
+        logger.info(f"Total earnings: {len(structured['earnings'])}")
+        logger.info(f"Total taxes: {len(structured['taxes'])}")
+        logger.info(f"Total deductions: {len(structured['deductions'])}")
         
         return structured
     
@@ -618,7 +660,7 @@ class IntelligentParserOrchestratorV2:
             return 0.0
     
     def _create_four_tabs(self, structured_data: Dict[str, Any]) -> Dict[str, pd.DataFrame]:
-        """Create 4-tab structure from structured data."""
+        """Create 4-tab structure from structured data with ALL columns."""
         
         employees = structured_data.get('employees', [])
         earnings = structured_data.get('earnings', [])
@@ -646,36 +688,43 @@ class IntelligentParserOrchestratorV2:
             }
             summary_data.append(summary)
         
-        # Tab 2: Earnings (already has employee_id from parsing)
+        # Tab 2: Earnings (ALL columns from Dayforce)
         earnings_data = []
         for earning in earnings:
             earnings_data.append({
                 'Employee ID': earning.get('employee_id', ''),
                 'Name': earning.get('employee_name', ''),
                 'Description': earning.get('description', ''),
-                'Hours': earning.get('hours', 0),
                 'Rate': earning.get('rate', 0),
-                'Amount': earning.get('amount', 0)
+                'Hours': earning.get('hours', 0),
+                'Amount': earning.get('amount', 0),
+                'Hours YTD': earning.get('hours_ytd', 0),
+                'Amount YTD': earning.get('amount_ytd', 0)
             })
         
-        # Tab 3: Taxes (already has employee_id from parsing)
+        # Tab 3: Taxes (ALL columns from Dayforce)
         taxes_data = []
         for tax in taxes:
             taxes_data.append({
                 'Employee ID': tax.get('employee_id', ''),
                 'Name': tax.get('employee_name', ''),
                 'Description': tax.get('description', ''),
-                'Amount': tax.get('amount', 0)
+                'Wages': tax.get('wages', 0),
+                'Amount': tax.get('amount', 0),
+                'Wages YTD': tax.get('wages_ytd', 0),
+                'Amount YTD': tax.get('amount_ytd', 0)
             })
         
-        # Tab 4: Deductions (already has employee_id from parsing)
+        # Tab 4: Deductions (ALL columns from Dayforce)
         deductions_data = []
         for deduction in deductions:
             deductions_data.append({
                 'Employee ID': deduction.get('employee_id', ''),
                 'Name': deduction.get('employee_name', ''),
                 'Description': deduction.get('description', ''),
-                'Amount': deduction.get('amount', 0)
+                'Scheduled': deduction.get('scheduled', ''),
+                'Amount': deduction.get('amount', 0),
+                'Amount YTD': deduction.get('amount_ytd', 0)
             })
         
         return {
