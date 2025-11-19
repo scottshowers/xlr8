@@ -53,6 +53,10 @@ def render_upload_tab():
     - **PDF** - Payroll registers, configuration guides, manuals
     - **DOCX** - Word documents, procedures, templates
     - **TXT/MD** - Text files, markdown documentation
+    - **XLSX** - Excel files
+    - **XLS** - Older Excel files
+    - **CSV** - Comma delimited files
+    - **PNG/JPG/JPEG** - image files
     
     Documents are automatically:
     1. Chunked into searchable segments
@@ -64,7 +68,7 @@ def render_upload_tab():
     # File uploader
     uploaded_files = st.file_uploader(
         "Select files to upload",
-        type=['pdf', 'docx', 'txt', 'md'],
+        type=['pdf', 'docx', 'txt', 'md', 'xlsx', 'xls', 'csv', 'png', 'jpg', 'jpeg'],
         accept_multiple_files=True,
         help="Upload one or more documents"
     )
