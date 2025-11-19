@@ -1,359 +1,586 @@
 """
-Parser Code Generator for Intelligent Parsing
-Generates custom Python parser code based on PDF structure analysis
-
-Author: HCMPACT
-Version: 1.0
+Parser Code Generator for XLR8 Intelligent Parser
+Generates custom Python parser code based on PDF analysis
 """
 
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Optional
+from pathlib import Path
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 
 class ParserCodeGenerator:
-    """
-    Generates executable Python parser code based on PDF structure analysis.
-    
-    Creates custom parsers that are optimized for specific document types.
-    """
+    """Generates custom parser code based on PDF structure analysis"""
     
     def __init__(self):
-        self.templates = self._load_templates()
-    
-    def generate(self, structure_analysis: Dict[str, Any], pdf_path: str, sample_output: Dict[str, Any] = None) -> str:
+        self.template_version = "1.0"
+        
+    def generate_parser(self, analysis: Dict, hints: Dict, parser_name: Optional[str] = None) -> Dict:
         """
-        Generate parser code based on structure analysis.
+        Generate custom parser code based on analysis
         
         Args:
-            structure_analysis: Output from PDFStructureAnalyzer
-            pdf_path: Path to PDF (for metadata)
-            sample_output: Optional sample output to guide generation
+            analysis: PDF structure analysis result
+            hints: Parsing hints from analyzer
+            parser_name: Optional custom name for parser
             
         Returns:
-            Complete Python code as string
+            Dict with parser code and metadata
         """
+        try:
+            if not parser_name:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                doc_type = analysis.get('document_type', 'unknown')
+                parser_name = f"{doc_type}_parser_{timestamp}"
+            
+            # Generate parser code based on document type and structure
+            doc_type = analysis.get('document_type', 'unknown')
+            
+            if doc_type in ['payroll_register', 'register']:
+                code = self._generate_register_parser(analysis, hints, parser_name)
+            elif analysis.get('has_tables'):
+                code = self._generate_table_parser(analysis, hints, parser_name)
+            elif analysis.get('has_text'):
+                code = self._generate_text_parser(analysis, hints, parser_name)
+            else:
+                code = self._generate_generic_parser(analysis, hints, parser_name)
+            
+            return {
+                'success': True,
+                'parser_name': parser_name,
+                'code': code,
+                'document_type': doc_type,
+                'complexity': analysis.get('layout_complexity', 'unknown'),
+                'confidence': analysis.get('confidence', 50)
+            }
+            
+        except Exception as e:
+            logger.error(f"Parser generation failed: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
+    def _generate_register_parser(self, analysis: Dict, hints: Dict, parser_name: str) -> str:
+        """Generate parser for register documents"""
         
-        logger.info(f"Generating parser code for: {structure_analysis.get('document_type', 'unknown')}")
+        code = f'''"""
+Custom Register Parser: {parser_name}
+Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+Document Type: {analysis.get('document_type', 'register')}
+Complexity: {analysis.get('layout_complexity', 'moderate')}
+"""
+
+import pdfplumber
+import pandas as pd
+from typing import Dict, List, Optional
+import logging
+import re
+
+logger = logging.getLogger(__name__)
+
+
+def parse_register(pdf_path: str, output_path: str) -> Dict:
+    """
+    Parse register document to Excel
+    
+    Args:
+        pdf_path: Path to input PDF
+        output_path: Path to output Excel file
         
-        # Select template based on document type and strategy
-        doc_type = structure_analysis.get('document_type', 'unknown')
-        strategy = structure_analysis.get('recommended_strategy', 'pdfplumber')
+    Returns:
+        Dict with parsing results and metadata
+    """
+    try:
+        all_data = []
+        metadata = {{
+            'total_pages': 0,
+            'total_rows': 0,
+            'tables_found': 0
+        }}
         
-        # Generate code
-        code = self._generate_parser_code(structure_analysis, pdf_path, sample_output)
+        with pdfplumber.open(pdf_path) as pdf:
+            metadata['total_pages'] = len(pdf.pages)
+            
+            for page_num, page in enumerate(pdf.pages):
+                # Extract tables from page
+                tables = page.extract_tables()
+                
+                if not tables:
+                    continue
+                
+                for table in tables:
+                    if not table or len(table) < 2:
+                        continue
+                    
+                    metadata['tables_found'] += 1
+                    
+                    # Process table
+                    processed_data = process_table(table, page_num)
+                    if processed_data:
+                        all_data.extend(processed_data)
+        
+        # Create DataFrame
+        if all_data:
+            df = pd.DataFrame(all_data)
+            
+            # Clean and standardize column names
+            df.columns = [clean_column_name(col) for col in df.columns]
+            
+            # Remove empty rows
+            df = df.dropna(how='all')
+            
+            # Save to Excel
+            df.to_excel(output_path, index=False, engine='openpyxl')
+            
+            metadata['total_rows'] = len(df)
+            
+            return {{
+                'success': True,
+                'output_file': output_path,
+                'rows_extracted': len(df),
+                'columns': list(df.columns),
+                'metadata': metadata
+            }}
+        else:
+            return {{
+                'success': False,
+                'error': 'No data extracted from PDF'
+            }}
+            
+    except Exception as e:
+        logger.error(f"Parsing failed: {{str(e)}}")
+        return {{
+            'success': False,
+            'error': str(e)
+        }}
+
+
+def process_table(table: List[List], page_num: int) -> List[Dict]:
+    """Process a table and convert to list of dicts"""
+    if not table or len(table) < 2:
+        return []
+    
+    # Identify header row
+    header_row = None
+    data_start = 0
+    
+    # Check first few rows for header
+    for i in range(min(3, len(table))):
+        if is_header_row(table[i], table[i+1] if i+1 < len(table) else None):
+            header_row = table[i]
+            data_start = i + 1
+            break
+    
+    if header_row is None:
+        # No header found, use first row as header
+        header_row = table[0]
+        data_start = 1
+    
+    # Clean headers
+    headers = [clean_header(h) for h in header_row]
+    
+    # Process data rows
+    result = []
+    for row in table[data_start:]:
+        if not row or all(cell is None or str(cell).strip() == '' for cell in row):
+            continue
+        
+        # Create row dict
+        row_dict = {{}}
+        for i, value in enumerate(row):
+            if i < len(headers):
+                header = headers[i]
+                row_dict[header] = clean_value(value)
+        
+        result.append(row_dict)
+    
+    return result
+
+
+def is_header_row(row: List, next_row: Optional[List]) -> bool:
+    """Determine if row is a header"""
+    if not row:
+        return False
+    
+    # Headers usually have text in most cells
+    non_empty = sum(1 for cell in row if cell and str(cell).strip())
+    if non_empty < len(row) * 0.5:
+        return False
+    
+    # Headers usually don't have many numbers
+    numeric_count = sum(1 for cell in row if is_numeric(cell))
+    if numeric_count > len(row) * 0.5:
+        return False
+    
+    # Compare with next row if available
+    if next_row:
+        next_numeric = sum(1 for cell in next_row if is_numeric(cell))
+        # If next row is more numeric, this is likely a header
+        if next_numeric > numeric_count:
+            return True
+    
+    return True
+
+
+def is_numeric(value) -> bool:
+    """Check if value is numeric"""
+    if value is None:
+        return False
+    s = str(value).strip().replace(',', '').replace('$', '')
+    try:
+        float(s)
+        return True
+    except:
+        return False
+
+
+def clean_header(header) -> str:
+    """Clean and standardize header name"""
+    if header is None:
+        return 'Unknown'
+    
+    s = str(header).strip()
+    
+    # Remove special characters
+    s = re.sub(r'[^a-zA-Z0-9\\s_-]', '', s)
+    
+    # Replace spaces with underscores
+    s = re.sub(r'\\s+', '_', s)
+    
+    # Remove multiple underscores
+    s = re.sub(r'_+', '_', s)
+    
+    return s if s else 'Unknown'
+
+
+def clean_column_name(name) -> str:
+    """Clean column name for Excel"""
+    if not name:
+        return 'Column'
+    
+    s = str(name).strip()
+    
+    # Standardize common column names
+    name_map = {{
+        'emp_id': 'Employee_ID',
+        'employee_id': 'Employee_ID',
+        'empid': 'Employee_ID',
+        'name': 'Employee_Name',
+        'employee_name': 'Employee_Name',
+        'dept': 'Department',
+        'department': 'Department',
+        'pos': 'Position',
+        'position': 'Position',
+        'salary': 'Salary',
+        'pay': 'Pay',
+        'date': 'Date',
+        'hours': 'Hours',
+        'rate': 'Rate'
+    }}
+    
+    lower_s = s.lower()
+    if lower_s in name_map:
+        return name_map[lower_s]
+    
+    # Capitalize first letter of each word
+    s = '_'.join(word.capitalize() for word in s.split('_'))
+    
+    return s
+
+
+def clean_value(value):
+    """Clean cell value"""
+    if value is None:
+        return ''
+    
+    s = str(value).strip()
+    
+    # Remove excessive whitespace
+    s = re.sub(r'\\s+', ' ', s)
+    
+    return s
+
+
+# Entry point for orchestrator
+def parse(pdf_path: str, output_path: str) -> Dict:
+    """Main entry point for parser"""
+    return parse_register(pdf_path, output_path)
+'''
         
         return code
     
-    def _load_templates(self) -> Dict[str, str]:
-        """Load code generation templates."""
+    def _generate_table_parser(self, analysis: Dict, hints: Dict, parser_name: str) -> str:
+        """Generate parser for table-based documents"""
         
-        return {
-            'header': '''"""
-Custom PDF Parser - Auto-generated by XLR8 Intelligent Parser
-Generated: {timestamp}
-Document Type: {doc_type}
-Strategy: {strategy}
-Confidence: {confidence:.1%}
-
-This parser was automatically generated based on PDF structure analysis.
+        code = f'''"""
+Custom Table Parser: {parser_name}
+Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+Document Type: Table-based document
+Complexity: {analysis.get('layout_complexity', 'moderate')}
 """
 
-import pymupdf
 import pdfplumber
 import pandas as pd
-from typing import Dict, Any, List
+from typing import Dict, List
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-class CustomParser:
-    """Auto-generated custom parser for specific document structure."""
+def parse(pdf_path: str, output_path: str) -> Dict:
+    """
+    Parse table-based document to Excel
     
-    def __init__(self):
-        self.parser_version = "1.0.0"
-        self.generated_date = "{timestamp}"
-        self.confidence = {confidence}
-    
-''',
+    Args:
+        pdf_path: Path to input PDF
+        output_path: Path to output Excel file
+        
+    Returns:
+        Dict with parsing results
+    """
+    try:
+        all_tables = []
+        
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                tables = page.extract_tables()
+                
+                for table in tables:
+                    if table and len(table) > 1:
+                        # Convert to DataFrame
+                        df = pd.DataFrame(table[1:], columns=table[0])
+                        all_tables.append(df)
+        
+        if all_tables:
+            # Combine all tables
+            final_df = pd.concat(all_tables, ignore_index=True)
             
-            'pdfplumber_table': '''    def parse(self, pdf_path: str) -> Dict[str, Any]:
-        """Parse PDF using pdfplumber (table-focused)."""
-        
-        logger.info(f"Parsing with pdfplumber: {{pdf_path}}")
-        
-        tables = []
-        text_content = ""
-        
-        try:
-            with pdfplumber.open(pdf_path) as pdf:
-                for page_num, page in enumerate(pdf.pages):
-                    # Extract tables
-                    page_tables = page.extract_tables()
-                    
-                    for table in page_tables:
-                        if table and len(table) > 1:  # Has header + data
-                            # Convert to DataFrame
-                            df = pd.DataFrame(table[1:], columns=table[0])
-                            
-                            # Clean DataFrame
-                            df = self._clean_dataframe(df)
-                            
-                            tables.append({{
-                                'page': page_num + 1,
-                                'data': df,
-                                'rows': len(df),
-                                'columns': len(df.columns)
-                            }})
-                    
-                    # Extract text
-                    page_text = page.extract_text()
-                    if page_text:
-                        text_content += page_text + "\\n"
+            # Clean data
+            final_df = final_df.dropna(how='all')
+            
+            # Save to Excel
+            final_df.to_excel(output_path, index=False, engine='openpyxl')
             
             return {{
                 'success': True,
-                'tables': tables,
-                'text': text_content,
-                'method': 'pdfplumber_custom',
-                'confidence': self.confidence
+                'output_file': output_path,
+                'rows_extracted': len(final_df),
+                'columns': list(final_df.columns)
             }}
-            
-        except Exception as e:
-            logger.error(f"Parse error: {{e}}")
-            return {{
-                'success': False,
-                'tables': [],
-                'text': '',
-                'error': str(e)
-            }}
-    
-    def _clean_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Clean extracted DataFrame."""
-        
-        # Remove empty columns
-        df = df.dropna(axis=1, how='all')
-        
-        # Remove empty rows
-        df = df.dropna(axis=0, how='all')
-        
-        # Reset index
-        df = df.reset_index(drop=True)
-        
-        # Strip whitespace from string columns
-        for col in df.columns:
-            if df[col].dtype == 'object':
-                df[col] = df[col].astype(str).str.strip()
-        
-        return df
-''',
-            
-            'pymupdf4llm': '''    def parse(self, pdf_path: str) -> Dict[str, Any]:
-        """Parse PDF using pymupdf4llm (text-focused)."""
-        
-        logger.info(f"Parsing with pymupdf4llm: {{pdf_path}}")
-        
-        try:
-            import pymupdf4llm
-            
-            # Extract markdown
-            md_text = pymupdf4llm.to_markdown(pdf_path)
-            
-            # Convert markdown tables to DataFrames
-            tables = self._extract_tables_from_markdown(md_text)
-            
-            return {{
-                'success': True,
-                'tables': tables,
-                'text': md_text,
-                'method': 'pymupdf4llm_custom',
-                'confidence': self.confidence
-            }}
-            
-        except Exception as e:
-            logger.error(f"Parse error: {{e}}")
-            return {{
-                'success': False,
-                'tables': [],
-                'text': '',
-                'error': str(e)
-            }}
-    
-    def _extract_tables_from_markdown(self, md_text: str) -> List[Dict[str, Any]]:
-        """Extract tables from markdown text."""
-        
-        tables = []
-        
-        # Simple markdown table detection
-        lines = md_text.split('\\n')
-        in_table = False
-        table_lines = []
-        
-        for line in lines:
-            if '|' in line:
-                if not in_table:
-                    in_table = True
-                    table_lines = []
-                table_lines.append(line)
-            else:
-                if in_table and table_lines:
-                    # Convert to DataFrame
-                    df = self._markdown_table_to_df(table_lines)
-                    if df is not None:
-                        tables.append({{
-                            'data': df,
-                            'rows': len(df),
-                            'columns': len(df.columns)
-                        }})
-                    in_table = False
-                    table_lines = []
-        
-        return tables
-    
-    def _markdown_table_to_df(self, lines: List[str]) -> pd.DataFrame:
-        """Convert markdown table to DataFrame."""
-        
-        if len(lines) < 2:
-            return None
-        
-        # Parse header
-        header = [c.strip() for c in lines[0].split('|') if c.strip()]
-        
-        # Parse data rows (skip separator line)
-        data = []
-        for line in lines[2:]:
-            row = [c.strip() for c in line.split('|') if c.strip()]
-            if row:
-                data.append(row)
-        
-        if not data:
-            return None
-        
-        return pd.DataFrame(data, columns=header)
-''',
-            
-            'footer': '''
-# Convenience function
-def parse_pdf(pdf_path: str) -> Dict[str, Any]:
-    """Parse PDF using custom parser."""
-    parser = CustomParser()
-    return parser.parse(pdf_path)
-'''
-        }
-    
-    def _generate_parser_code(self, analysis: Dict[str, Any], pdf_path: str, sample_output: Dict[str, Any] = None) -> str:
-        """Generate complete parser code."""
-        
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        doc_type = analysis.get('document_type', 'unknown')
-        strategy = analysis.get('recommended_strategy', 'pdfplumber')
-        confidence = analysis.get('confidence', 0.5)
-        
-        # Start with header
-        code = self.templates['header'].format(
-            timestamp=timestamp,
-            doc_type=doc_type,
-            strategy=strategy,
-            confidence=confidence
-        )
-        
-        # Add parsing method based on strategy
-        if strategy == 'pdfplumber' or strategy == 'camelot':
-            code += self.templates['pdfplumber_table']
-        elif strategy == 'pymupdf4llm':
-            code += self.templates['pymupdf4llm']
         else:
-            # Default to pdfplumber
-            code += self.templates['pdfplumber_table']
-        
-        # Add footer
-        code += self.templates['footer']
+            return {{
+                'success': False,
+                'error': 'No tables found in PDF'
+            }}
+            
+    except Exception as e:
+        logger.error(f"Parsing failed: {{str(e)}}")
+        return {{
+            'success': False,
+            'error': str(e)
+        }}
+'''
         
         return code
     
-    def save_parser(self, code: str, output_path: str) -> bool:
+    def _generate_text_parser(self, analysis: Dict, hints: Dict, parser_name: str) -> str:
+        """Generate parser for text-based documents"""
+        
+        code = f'''"""
+Custom Text Parser: {parser_name}
+Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+Document Type: Text-based document
+Complexity: {analysis.get('layout_complexity', 'simple')}
+"""
+
+import pdfplumber
+import pandas as pd
+from typing import Dict
+import logging
+import re
+
+logger = logging.getLogger(__name__)
+
+
+def parse(pdf_path: str, output_path: str) -> Dict:
+    """
+    Parse text-based document to Excel
+    
+    Args:
+        pdf_path: Path to input PDF
+        output_path: Path to output Excel file
+        
+    Returns:
+        Dict with parsing results
+    """
+    try:
+        all_text = []
+        
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text()
+                if text:
+                    all_text.append(text)
+        
+        if all_text:
+            # Parse text into structured data
+            data = parse_text_content('\\n'.join(all_text))
+            
+            # Convert to DataFrame
+            df = pd.DataFrame(data)
+            
+            # Save to Excel
+            df.to_excel(output_path, index=False, engine='openpyxl')
+            
+            return {{
+                'success': True,
+                'output_file': output_path,
+                'rows_extracted': len(df),
+                'columns': list(df.columns)
+            }}
+        else:
+            return {{
+                'success': False,
+                'error': 'No text extracted from PDF'
+            }}
+            
+    except Exception as e:
+        logger.error(f"Parsing failed: {{str(e)}}")
+        return {{
+            'success': False,
+            'error': str(e)
+        }}
+
+
+def parse_text_content(text: str) -> List[Dict]:
+    """Parse text content into structured data"""
+    # Basic text parsing - extract lines as rows
+    lines = text.split('\\n')
+    
+    data = []
+    for line in lines:
+        line = line.strip()
+        if line:
+            data.append({{'Content': line}})
+    
+    return data
+'''
+        
+        return code
+    
+    def _generate_generic_parser(self, analysis: Dict, hints: Dict, parser_name: str) -> str:
+        """Generate generic fallback parser"""
+        
+        code = f'''"""
+Generic Parser: {parser_name}
+Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+Document Type: {analysis.get('document_type', 'unknown')}
+Complexity: {analysis.get('layout_complexity', 'unknown')}
+"""
+
+import pdfplumber
+import pandas as pd
+from typing import Dict, List
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def parse(pdf_path: str, output_path: str) -> Dict:
+    """
+    Generic PDF parser
+    
+    Args:
+        pdf_path: Path to input PDF
+        output_path: Path to output Excel file
+        
+    Returns:
+        Dict with parsing results
+    """
+    try:
+        all_data = []
+        
+        with pdfplumber.open(pdf_path) as pdf:
+            for page_num, page in enumerate(pdf.pages):
+                # Try tables first
+                tables = page.extract_tables()
+                if tables:
+                    for table in tables:
+                        if table and len(table) > 1:
+                            df = pd.DataFrame(table[1:], columns=table[0])
+                            all_data.append(df)
+                else:
+                    # Fall back to text extraction
+                    text = page.extract_text()
+                    if text:
+                        lines = text.split('\\n')
+                        for line in lines:
+                            if line.strip():
+                                all_data.append(pd.DataFrame([{{'Content': line.strip()}}]))
+        
+        if all_data:
+            final_df = pd.concat(all_data, ignore_index=True)
+            final_df = final_df.dropna(how='all')
+            
+            final_df.to_excel(output_path, index=False, engine='openpyxl')
+            
+            return {{
+                'success': True,
+                'output_file': output_path,
+                'rows_extracted': len(final_df),
+                'columns': list(final_df.columns)
+            }}
+        else:
+            return {{
+                'success': False,
+                'error': 'No data extracted from PDF'
+            }}
+            
+    except Exception as e:
+        logger.error(f"Parsing failed: {{str(e)}}")
+        return {{
+            'success': False,
+            'error': str(e)
+        }}
+'''
+        
+        return code
+    
+    def save_parser(self, code: str, parser_name: str, output_dir: str = "/data/custom_parsers") -> Dict:
         """
-        Save generated parser code to file.
+        Save generated parser code to file
         
         Args:
-            code: Generated Python code
-            output_path: Path to save to
+            code: Parser code
+            parser_name: Name for parser file
+            output_dir: Directory to save parser
             
         Returns:
-            True if successful
+            Dict with save result
         """
-        
         try:
-            with open(output_path, 'w') as f:
+            output_path = Path(output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
+            
+            parser_file = output_path / f"{parser_name}.py"
+            
+            with open(parser_file, 'w') as f:
                 f.write(code)
             
-            logger.info(f"Saved parser to: {output_path}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error saving parser: {e}")
-            return False
-    
-    def test_generated_parser(self, code: str, pdf_path: str) -> Dict[str, Any]:
-        """
-        Test generated parser code.
-        
-        Args:
-            code: Generated parser code
-            pdf_path: PDF to test on
-            
-        Returns:
-            Test result dictionary
-        """
-        
-        try:
-            # Create a temporary module
-            import sys
-            from types import ModuleType
-            
-            # Create module
-            temp_module = ModuleType('temp_parser')
-            
-            # Execute code in module namespace
-            exec(code, temp_module.__dict__)
-            
-            # Get parser class
-            CustomParser = temp_module.CustomParser
-            
-            # Test parsing
-            parser = CustomParser()
-            result = parser.parse(pdf_path)
+            logger.info(f"Parser saved to {parser_file}")
             
             return {
                 'success': True,
-                'result': result,
-                'tables_found': len(result.get('tables', [])),
-                'text_length': len(result.get('text', '')),
-                'method': result.get('method', 'unknown')
+                'parser_path': str(parser_file),
+                'parser_name': parser_name
             }
             
         except Exception as e:
-            logger.error(f"Error testing parser: {e}")
+            logger.error(f"Failed to save parser: {str(e)}")
             return {
                 'success': False,
                 'error': str(e)
             }
-
-
-# Convenience function
-def generate_parser(structure_analysis: Dict[str, Any], pdf_path: str) -> str:
-    """
-    Quick parser generation.
-    
-    Args:
-        structure_analysis: PDF structure analysis result
-        pdf_path: Path to PDF
-        
-    Returns:
-        Generated Python code
-    """
-    generator = ParserCodeGenerator()
-    return generator.generate(structure_analysis, pdf_path)
