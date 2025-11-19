@@ -1,365 +1,276 @@
 """
-PDF Structure Analyzer for XLR8 Intelligent Parser
-Analyzes PDF structure and recommends parsing strategies
+PDF Structure Analyzer
+Analyzes PDF structure to detect document type and extraction strategy
 """
 
-import pdfplumber
-import pandas as pd
+import fitz  # PyMuPDF
 import re
-from typing import Dict, List, Tuple, Optional
-from pathlib import Path
+from typing import Dict, List, Any, Optional
 import logging
 
 logger = logging.getLogger(__name__)
 
 
 class PDFStructureAnalyzer:
-    """Analyzes PDF structure to determine optimal parsing strategy"""
+    """
+    Analyzes PDF structure to identify document type and recommend parsing strategy.
+    """
     
-    def __init__(self):
-        self.analysis_result = {}
-        
-    def analyze_pdf(self, pdf_path: str) -> Dict:
+    def __init__(self, pdf_path: str):
         """
-        Comprehensive PDF structure analysis
+        Initialize analyzer with PDF path.
+        
+        Args:
+            pdf_path: Path to PDF file
+        """
+        self.pdf_path = pdf_path
+        self.text = ""
+        self.pages = []
+        
+    def analyze(self) -> Dict[str, Any]:
+        """
+        Analyze PDF structure and detect document type.
         
         Returns:
-            Dict with structure analysis and recommended strategy
+            Dict with structure info:
+            - format_type: 'payroll_register', 'benefits', 'timecard', etc.
+            - sections: List of detected sections
+            - has_tables: Boolean
+            - employee_count: Estimated number of employees
+            - complexity: 'simple', 'medium', 'complex'
+            - recommended_strategy: Parsing approach to use
         """
         try:
-            with pdfplumber.open(pdf_path) as pdf:
-                analysis = {
-                    'success': True,
-                    'total_pages': len(pdf.pages),
-                    'document_type': None,
-                    'has_tables': False,
-                    'table_count': 0,
-                    'has_text': False,
-                    'text_density': 0,
-                    'layout_complexity': 'simple',
-                    'recommended_strategy': None,
-                    'page_samples': [],
-                    'table_structures': [],
-                    'text_patterns': [],
-                    'confidence': 0
-                }
-                
-                # Analyze first 3 pages for structure
-                sample_pages = min(3, len(pdf.pages))
-                for i in range(sample_pages):
-                    page = pdf.pages[i]
-                    page_analysis = self._analyze_page(page, i)
-                    analysis['page_samples'].append(page_analysis)
-                    
-                    if page_analysis['tables']:
-                        analysis['has_tables'] = True
-                        analysis['table_count'] += len(page_analysis['tables'])
-                        analysis['table_structures'].extend(page_analysis['table_structures'])
-                    
-                    if page_analysis['text']:
-                        analysis['has_text'] = True
-                        analysis['text_density'] += page_analysis['text_density']
-                
-                # Calculate average text density
-                if sample_pages > 0:
-                    analysis['text_density'] = analysis['text_density'] / sample_pages
-                
-                # Detect document type
-                analysis['document_type'] = self._detect_document_type(analysis)
-                
-                # Determine layout complexity
-                analysis['layout_complexity'] = self._determine_complexity(analysis)
-                
-                # Recommend strategy
-                strategy = self._recommend_strategy(analysis)
-                analysis['recommended_strategy'] = strategy['strategy']
-                analysis['confidence'] = strategy['confidence']
-                analysis['reasoning'] = strategy['reasoning']
-                
-                self.analysis_result = analysis
-                return analysis
-                
+            # Open PDF and extract text
+            doc = fitz.open(self.pdf_path)
+            
+            for page_num, page in enumerate(doc):
+                page_text = page.get_text()
+                self.pages.append({
+                    'page_num': page_num,
+                    'text': page_text
+                })
+                self.text += page_text + "\n\n"
+            
+            doc.close()
+            
+            # Analyze structure
+            structure = {
+                'format_type': self._detect_format_type(),
+                'sections': self._detect_sections(),
+                'has_tables': self._detect_tables(),
+                'employee_count': self._estimate_employee_count(),
+                'complexity': self._assess_complexity(),
+                'column_patterns': self._detect_column_patterns(),
+                'recommended_strategy': None
+            }
+            
+            # Determine recommended strategy
+            structure['recommended_strategy'] = self._recommend_strategy(structure)
+            
+            logger.info(f"Analyzed PDF: {structure['format_type']} with {structure['employee_count']} employees")
+            return structure
+            
         except Exception as e:
-            logger.error(f"PDF analysis failed: {str(e)}")
+            logger.error(f"Analysis error: {str(e)}", exc_info=True)
             return {
-                'success': False,
-                'error': str(e),
-                'recommended_strategy': 'adaptive'
+                'format_type': 'unknown',
+                'sections': [],
+                'has_tables': False,
+                'employee_count': 0,
+                'complexity': 'unknown',
+                'recommended_strategy': 'basic_text'
             }
     
-    def _analyze_page(self, page, page_num: int) -> Dict:
-        """Analyze individual page structure"""
-        analysis = {
-            'page_num': page_num,
-            'tables': [],
-            'table_structures': [],
-            'text': None,
-            'text_density': 0,
-            'has_header': False,
-            'has_footer': False
-        }
+    def _detect_format_type(self) -> str:
+        """
+        Detect the type of document.
+        """
+        text_lower = self.text.lower()
         
-        # Extract tables
-        tables = page.extract_tables()
-        if tables:
-            analysis['tables'] = tables
-            for table in tables:
-                structure = self._analyze_table_structure(table)
-                analysis['table_structures'].append(structure)
-        
-        # Extract text
-        text = page.extract_text()
-        if text:
-            analysis['text'] = text
-            # Calculate text density (chars per area)
-            area = page.width * page.height
-            analysis['text_density'] = len(text) / area if area > 0 else 0
-            
-            # Detect header/footer
-            lines = text.split('\n')
-            if len(lines) > 2:
-                analysis['has_header'] = self._is_header_line(lines[0])
-                analysis['has_footer'] = self._is_footer_line(lines[-1])
-        
-        return analysis
-    
-    def _analyze_table_structure(self, table: List[List]) -> Dict:
-        """Analyze table structure"""
-        if not table:
-            return {'rows': 0, 'cols': 0, 'has_header': False}
-        
-        structure = {
-            'rows': len(table),
-            'cols': len(table[0]) if table else 0,
-            'has_header': False,
-            'header_row': None,
-            'data_types': []
-        }
-        
-        # Check if first row is header
-        if len(table) > 1:
-            first_row = table[0]
-            second_row = table[1]
-            structure['has_header'] = self._is_header_row(first_row, second_row)
-            if structure['has_header']:
-                structure['header_row'] = first_row
-        
-        # Detect data types in columns
-        if len(table) > 1:
-            data_rows = table[1:] if structure['has_header'] else table
-            for col_idx in range(structure['cols']):
-                col_values = [row[col_idx] for row in data_rows if col_idx < len(row)]
-                data_type = self._detect_column_type(col_values)
-                structure['data_types'].append(data_type)
-        
-        return structure
-    
-    def _is_header_row(self, first_row: List, second_row: List) -> bool:
-        """Determine if first row is a header"""
-        if not first_row or not second_row:
-            return False
-        
-        # Check if first row has text and second row has different pattern
-        first_has_text = any(isinstance(cell, str) and cell.strip() for cell in first_row)
-        
-        # Headers usually don't have numbers in every cell
-        first_numeric_count = sum(1 for cell in first_row if self._is_numeric(cell))
-        second_numeric_count = sum(1 for cell in second_row if self._is_numeric(cell))
-        
-        return first_has_text and (first_numeric_count < second_numeric_count)
-    
-    def _detect_column_type(self, values: List) -> str:
-        """Detect data type of column"""
-        if not values:
-            return 'empty'
-        
-        non_empty = [v for v in values if v is not None and str(v).strip()]
-        if not non_empty:
-            return 'empty'
-        
-        numeric_count = sum(1 for v in non_empty if self._is_numeric(v))
-        date_count = sum(1 for v in non_empty if self._is_date(v))
-        
-        total = len(non_empty)
-        if numeric_count / total > 0.8:
-            return 'numeric'
-        elif date_count / total > 0.8:
-            return 'date'
-        else:
-            return 'text'
-    
-    def _is_numeric(self, value) -> bool:
-        """Check if value is numeric"""
-        if value is None:
-            return False
-        s = str(value).strip().replace(',', '').replace('$', '')
-        try:
-            float(s)
-            return True
-        except:
-            return False
-    
-    def _is_date(self, value) -> bool:
-        """Check if value looks like a date"""
-        if value is None:
-            return False
-        s = str(value).strip()
-        # Simple date pattern matching
-        date_patterns = [
-            r'\d{1,2}/\d{1,2}/\d{2,4}',
-            r'\d{1,2}-\d{1,2}-\d{2,4}',
-            r'\d{4}-\d{1,2}-\d{1,2}'
+        # Payroll register indicators
+        payroll_keywords = [
+            'payroll', 'pay register', 'earnings', 'deductions', 
+            'gross pay', 'net pay', 'ytd', 'taxes'
         ]
-        return any(re.match(pattern, s) for pattern in date_patterns)
-    
-    def _is_header_line(self, line: str) -> bool:
-        """Check if line looks like a header"""
-        if not line:
-            return False
-        line = line.strip()
-        # Headers often have dates, report names, company names
-        header_keywords = ['report', 'register', 'date', 'company', 'period', 'page']
-        return any(keyword in line.lower() for keyword in header_keywords)
-    
-    def _is_footer_line(self, line: str) -> bool:
-        """Check if line looks like a footer"""
-        if not line:
-            return False
-        line = line.strip()
-        # Footers often have page numbers
-        return bool(re.search(r'page\s+\d+', line.lower()))
-    
-    def _detect_document_type(self, analysis: Dict) -> str:
-        """Detect type of document"""
-        text_samples = []
-        for page in analysis['page_samples']:
-            if page['text']:
-                text_samples.append(page['text'].lower())
         
-        full_text = ' '.join(text_samples)
+        # Benefits indicators
+        benefits_keywords = [
+            'benefits', 'enrollment', 'coverage', 'premium',
+            'health insurance', 'dental', 'vision'
+        ]
         
-        # Check for register indicators
-        if 'register' in full_text:
-            if 'payroll' in full_text:
-                return 'payroll_register'
-            else:
-                return 'register'
+        # Timecard indicators
+        timecard_keywords = [
+            'timecard', 'time sheet', 'hours worked', 'clock in',
+            'clock out', 'overtime'
+        ]
         
-        # Check for other document types
-        if any(keyword in full_text for keyword in ['invoice', 'bill']):
-            return 'invoice'
-        if any(keyword in full_text for keyword in ['receipt', 'payment']):
-            return 'receipt'
-        if 'report' in full_text:
-            return 'report'
+        # Count matches
+        payroll_matches = sum(1 for kw in payroll_keywords if kw in text_lower)
+        benefits_matches = sum(1 for kw in benefits_keywords if kw in text_lower)
+        timecard_matches = sum(1 for kw in timecard_keywords if kw in text_lower)
         
-        # Default based on structure
-        if analysis['has_tables']:
-            return 'tabular_document'
+        # Determine type
+        if payroll_matches >= 3:
+            return 'payroll_register'
+        elif benefits_matches >= 3:
+            return 'benefits'
+        elif timecard_matches >= 3:
+            return 'timecard'
         else:
-            return 'text_document'
+            return 'general'
     
-    def _determine_complexity(self, analysis: Dict) -> str:
-        """Determine layout complexity"""
-        score = 0
+    def _detect_sections(self) -> List[str]:
+        """
+        Detect major sections in the document.
+        """
+        sections = []
         
-        # More tables = more complex
-        if analysis['table_count'] > 3:
-            score += 2
-        elif analysis['table_count'] > 0:
-            score += 1
+        # Common section headers
+        section_patterns = {
+            'employee_info': r'(?:Employee\s+(?:Information|Info|Details)|EMP\s+INFO)',
+            'earnings': r'(?:Earnings|Pay\s+Items|Income|Wages)',
+            'taxes': r'(?:Taxes|Tax\s+Deductions|Statutory\s+Deductions)',
+            'deductions': r'(?:Deductions|Pre-Tax|Post-Tax|Benefits\s+Deductions)',
+            'summary': r'(?:Summary|Totals|Pay\s+Summary)',
+            'ytd': r'(?:YTD|Year[\s-]to[\s-]Date)'
+        }
         
-        # Multiple table structures = more complex
-        if len(set(str(s) for s in analysis['table_structures'])) > 1:
-            score += 1
+        for section_name, pattern in section_patterns.items():
+            if re.search(pattern, self.text, re.IGNORECASE):
+                sections.append(section_name)
         
-        # High text density with tables = more complex
-        if analysis['has_tables'] and analysis['text_density'] > 0.1:
-            score += 1
+        return sections
+    
+    def _detect_tables(self) -> bool:
+        """
+        Detect if document contains table structures.
+        """
+        # Look for table indicators
+        indicators = [
+            r'\|\s+\w+\s+\|',  # Pipe-separated
+            r'\t\w+\t',  # Tab-separated
+            r'\s{4,}\w+\s{4,}',  # Multiple spaces (column alignment)
+            r'[-=]{5,}',  # Horizontal lines
+        ]
         
-        if score >= 3:
-            return 'complex'
-        elif score >= 1:
-            return 'moderate'
-        else:
+        for pattern in indicators:
+            if re.search(pattern, self.text):
+                return True
+        
+        return False
+    
+    def _estimate_employee_count(self) -> int:
+        """
+        Estimate number of employees in the document.
+        """
+        # Look for employee ID patterns
+        id_patterns = [
+            r'(?:Employee\s+ID|EMP#|ID)[\s:]+(\d+)',
+            r'(?:SSN)[\s:]+(\d{3}-\d{2}-\d{4})',
+        ]
+        
+        unique_ids = set()
+        
+        for pattern in id_patterns:
+            matches = re.findall(pattern, self.text, re.IGNORECASE)
+            unique_ids.update(matches)
+        
+        # If no IDs found, estimate by page count
+        if not unique_ids:
+            # Rough estimate: 1-3 employees per page for registers
+            return max(1, len(self.pages))
+        
+        return len(unique_ids)
+    
+    def _detect_column_patterns(self) -> Dict[str, List[str]]:
+        """
+        Detect common column patterns in the document.
+        """
+        patterns = {
+            'date_columns': [],
+            'amount_columns': [],
+            'code_columns': [],
+            'text_columns': []
+        }
+        
+        # Find lines that look like headers
+        header_lines = []
+        for line in self.text.split('\n')[:50]:  # Check first 50 lines
+            if len(line) > 20 and re.search(r'[A-Z][a-z]+', line):
+                header_lines.append(line)
+        
+        # Analyze header lines for column types
+        for line in header_lines:
+            words = line.split()
+            
+            for word in words:
+                word_lower = word.lower()
+                
+                if any(kw in word_lower for kw in ['date', 'period', 'from', 'to']):
+                    patterns['date_columns'].append(word)
+                elif any(kw in word_lower for kw in ['amount', 'rate', 'hours', 'qty', 'total']):
+                    patterns['amount_columns'].append(word)
+                elif any(kw in word_lower for kw in ['code', 'id', 'type', 'class']):
+                    patterns['code_columns'].append(word)
+                elif len(word) > 3:
+                    patterns['text_columns'].append(word)
+        
+        return patterns
+    
+    def _assess_complexity(self) -> str:
+        """
+        Assess document complexity.
+        """
+        complexity_score = 0
+        
+        # Factors that increase complexity
+        if len(self.pages) > 5:
+            complexity_score += 1
+        
+        if len(self._detect_sections()) > 3:
+            complexity_score += 1
+        
+        if self._estimate_employee_count() > 10:
+            complexity_score += 1
+        
+        if self._detect_tables():
+            complexity_score += 1
+        
+        # Check for multi-column layout
+        if re.search(r'\s{10,}', self.text):
+            complexity_score += 1
+        
+        # Classify
+        if complexity_score <= 1:
             return 'simple'
+        elif complexity_score <= 3:
+            return 'medium'
+        else:
+            return 'complex'
     
-    def _recommend_strategy(self, analysis: Dict) -> Dict:
-        """Recommend parsing strategy based on analysis"""
-        strategy = {
-            'strategy': 'adaptive',
-            'confidence': 50,
-            'reasoning': []
-        }
+    def _recommend_strategy(self, structure: Dict[str, Any]) -> str:
+        """
+        Recommend parsing strategy based on structure analysis.
+        """
+        format_type = structure['format_type']
+        complexity = structure['complexity']
         
-        doc_type = analysis['document_type']
-        
-        # Strong recommendations for known document types
-        if doc_type in ['payroll_register', 'register']:
-            strategy['strategy'] = 'adaptive'
-            strategy['confidence'] = 90
-            strategy['reasoning'].append(f"Document identified as {doc_type}")
-            strategy['reasoning'].append("Adaptive parsers optimized for register documents")
-            return strategy
-        
-        # Table-based documents
-        if analysis['has_tables'] and analysis['table_count'] > 0:
-            if analysis['layout_complexity'] == 'simple':
-                strategy['strategy'] = 'table_extraction'
-                strategy['confidence'] = 75
-                strategy['reasoning'].append("Simple table structure detected")
+        # Strategy recommendations
+        if format_type == 'payroll_register':
+            if complexity == 'simple':
+                return 'basic_table_extraction'
+            elif complexity == 'medium':
+                return 'section_based_extraction'
             else:
-                strategy['strategy'] = 'adaptive'
-                strategy['confidence'] = 70
-                strategy['reasoning'].append("Complex table structure - adaptive parsing recommended")
-            return strategy
+                return 'iterative_employee_extraction'
         
-        # Text-heavy documents
-        if analysis['has_text'] and not analysis['has_tables']:
-            strategy['strategy'] = 'text_extraction'
-            strategy['confidence'] = 60
-            strategy['reasoning'].append("Text-based document without tables")
-            return strategy
+        elif format_type == 'benefits':
+            return 'section_based_extraction'
         
-        # Default to adaptive for unknown cases
-        strategy['reasoning'].append("Document type unclear - using adaptive approach")
-        return strategy
-    
-    def generate_parsing_hints(self) -> Dict:
-        """Generate hints for parser code generation"""
-        if not self.analysis_result:
-            return {}
+        elif format_type == 'timecard':
+            return 'basic_table_extraction'
         
-        hints = {
-            'document_type': self.analysis_result.get('document_type'),
-            'table_positions': [],
-            'header_rows': [],
-            'expected_columns': [],
-            'data_types': {}
-        }
-        
-        # Extract table hints
-        for i, page in enumerate(self.analysis_result.get('page_samples', [])):
-            for j, table_struct in enumerate(page.get('table_structures', [])):
-                hints['table_positions'].append({
-                    'page': i,
-                    'table_index': j,
-                    'rows': table_struct['rows'],
-                    'cols': table_struct['cols']
-                })
-                
-                if table_struct['has_header'] and table_struct['header_row']:
-                    hints['header_rows'].append({
-                        'page': i,
-                        'table_index': j,
-                        'headers': table_struct['header_row']
-                    })
-                    hints['expected_columns'].extend(table_struct['header_row'])
-                
-                # Add data types
-                for col_idx, dtype in enumerate(table_struct.get('data_types', [])):
-                    if table_struct['has_header'] and col_idx < len(table_struct['header_row']):
-                        col_name = table_struct['header_row'][col_idx]
-                        hints['data_types'][col_name] = dtype
-        
-        return hints
+        else:
+            return 'basic_text_extraction'
