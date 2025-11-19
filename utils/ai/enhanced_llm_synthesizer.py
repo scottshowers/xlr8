@@ -1,7 +1,8 @@
 """
-Enhanced LLM Answer Synthesis Module - BUILD 2343
+Enhanced LLM Answer Synthesis Module - BUILD 2344
 Optimized for UKG implementation analysis with domain-specific prompts
 Uses HTTP Basic Auth (same as RAG handler)
+Model: mistral (available on your Ollama server)
 Target: 90%+ relevancy and accuracy
 """
 
@@ -25,10 +26,13 @@ class EnhancedLLMSynthesizer:
         self, 
         ollama_base_url: str = "http://178.156.190.64:11435",
         username: str = None,
-        password: str = None
+        password: str = None,
+        model: str = None
     ):
         self.ollama_base_url = ollama_base_url
-        self.model = "llama3.2:3b"
+        
+        # Use mistral (available on your server)
+        self.model = model or os.environ.get('LLM_MODEL', 'mistral')
         
         # HTTP Basic Auth (same as RAG handler)
         self.ollama_username = username or os.environ.get('LLM_USERNAME', 'xlr8')
@@ -366,10 +370,12 @@ def get_enhanced_synthesizer() -> EnhancedLLMSynthesizer:
         ollama_url = os.environ.get('LLM_ENDPOINT', 'http://178.156.190.64:11435')
         username = os.environ.get('LLM_USERNAME', 'xlr8')
         password = os.environ.get('LLM_PASSWORD', 'Argyle76226#')
+        model = os.environ.get('LLM_MODEL', 'mistral')  # Using mistral (available on your server)
         
         _enhanced_synthesizer = EnhancedLLMSynthesizer(
             ollama_base_url=ollama_url,
             username=username,
-            password=password
+            password=password,
+            model=model
         )
     return _enhanced_synthesizer
