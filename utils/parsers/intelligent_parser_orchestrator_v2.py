@@ -51,13 +51,14 @@ class IntelligentParserOrchestratorV2:
             'child support', 'union', 'dues', 'deduction'
         ]
     
-    def parse(self, pdf_path: str, output_dir: str = '/data/parsed_registers') -> Dict[str, Any]:
+    def parse(self, pdf_path: str, output_dir: str = '/data/parsed_registers', force_v2: bool = False) -> Dict[str, Any]:
         """
         Parse PDF using simplified keyword-based approach.
         
         Args:
             pdf_path: Path to PDF file
             output_dir: Where to save Excel output
+            force_v2: Compatibility parameter (ignored, always uses V2)
             
         Returns:
             Dict with result info
