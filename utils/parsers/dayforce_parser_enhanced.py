@@ -14,7 +14,7 @@ from collections import defaultdict
 logger = logging.getLogger(__name__)
 
 
-class IntelligentAdaptiveParser:
+class DayforceParserEnhanced:
     """
     Adaptive parser that analyzes PDF structure and builds extraction rules dynamically.
     No fixed patterns - learns the layout and adapts.
@@ -549,5 +549,5 @@ def parse_dayforce_register(pdf_path: str, output_dir: str = '/data/parsed_regis
     """
     Parse Dayforce register using intelligent adaptive parser.
     """
-    parser = IntelligentAdaptiveParser()
+    parser = DayforceParserEnhanced()
     return parser.parse(pdf_path, output_dir)
