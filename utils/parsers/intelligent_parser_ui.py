@@ -1,5 +1,5 @@
 """
-Intelligent Parser UI - Fixed Status Display
+Intelligent Parser UI - Complete with Class and Function
 Shows parsing results with clear success/failure status
 """
 
@@ -10,6 +10,20 @@ import logging
 from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
+
+
+class IntelligentParserUI:
+    """
+    UI class for intelligent PDF parsing.
+    Wrapper for backwards compatibility.
+    """
+    
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+    
+    def render(self):
+        """Render the parser UI."""
+        render_intelligent_parser_ui()
 
 
 def render_intelligent_parser_ui():
