@@ -204,9 +204,15 @@ class IntelligentParserOrchestratorV2:
                 desc_match = re.search(r'([A-Za-z][\w\s]{2,30})', line)
                 description = desc_match.group(1).strip() if desc_match else ""
                 
-                # Extract numbers (hours, rate, amount)
-                numbers = re.findall(amount_pattern, line)
-                numbers = [float(n.replace(',', '')) for n in numbers if n and n.strip()]
+                # Extract numbers (hours, rate, amount) - safer extraction
+                numbers = []
+                for match in re.findall(amount_pattern, line):
+                    try:
+                        if match and match.strip():
+                            num = float(match.replace(',', ''))
+                            numbers.append(num)
+                    except (ValueError, AttributeError):
+                        continue
                 
                 if description and numbers:
                     # Try to map to employee (look for ID in line or nearby context)
@@ -259,9 +265,15 @@ class IntelligentParserOrchestratorV2:
                 desc_match = re.search(r'([A-Za-z][\w\s]{2,30})', line)
                 description = desc_match.group(1).strip() if desc_match else ""
                 
-                # Extract numbers
-                numbers = re.findall(amount_pattern, line)
-                numbers = [float(n.replace(',', '')) for n in numbers if n and n.strip()]
+                # Extract numbers - safer extraction
+                numbers = []
+                for match in re.findall(amount_pattern, line):
+                    try:
+                        if match and match.strip():
+                            num = float(match.replace(',', ''))
+                            numbers.append(num)
+                    except (ValueError, AttributeError):
+                        continue
                 
                 if description and numbers:
                     # Map to employee
@@ -314,9 +326,15 @@ class IntelligentParserOrchestratorV2:
                 desc_match = re.search(r'([A-Za-z][\w\s]{2,30})', line)
                 description = desc_match.group(1).strip() if desc_match else ""
                 
-                # Extract numbers
-                numbers = re.findall(amount_pattern, line)
-                numbers = [float(n.replace(',', '')) for n in numbers if n and n.strip()]
+                # Extract numbers - safer extraction
+                numbers = []
+                for match in re.findall(amount_pattern, line):
+                    try:
+                        if match and match.strip():
+                            num = float(match.replace(',', ''))
+                            numbers.append(num)
+                    except (ValueError, AttributeError):
+                        continue
                 
                 if description and numbers:
                     # Map to employee
