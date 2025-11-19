@@ -1,6 +1,9 @@
 import streamlit as st
 from utils.rag_handler import RAGHandler
 from utils.document_processor import DocumentProcessor, render_upload_interface
+from utils.pdf_parsers import extract_register_to_excel
+from pathlib import Path
+import os
 import logging
 
 logger = logging.getLogger(__name__)
@@ -16,7 +19,7 @@ def render_knowledge_page():
     rag = RAGHandler()
     
     # Create tabs
-    tab1, tab2, tab3 = st.tabs(["📤 Upload", "📊 Status", "🗑️ Manage"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📤 Upload", "📊 Status", "🗑️ Manage", "📋 Parse Registers"])
     
     # TAB 1: UPLOAD
     with tab1:
@@ -113,12 +116,164 @@ def render_knowledge_page():
         # Storage info
         st.divider()
         st.subheader("Storage Information")
-        st.info("📁 **Persistent Storage:** /data/chromadb")
+        st.info("💾 **Persistent Storage:** /data/chromadb")
         st.markdown("""
         - ✅ Data survives Railway deployments
         - ✅ No need to re-upload after redeploy
         - ✅ Backed up by Railway volume
         """)
+    
+    # TAB 4: PARSE REGISTERS (NEW)
+    with tab4:
+        st.subheader("📋 Parse Payroll Registers to Excel")
+        
+        st.markdown("""
+        Extract tables from payroll register PDFs into Excel format for structured analysis.
+        Works with registers from any HCM/Payroll vendor.
+        """)
+        
+        # Get list of uploaded PDFs
+        upload_dir = "/data/uploads"
+        parsed_dir = "/data/parsed_registers"
+        
+        # Ensure directories exist
+        os.makedirs(upload_dir, exist_ok=True)
+        os.makedirs(parsed_dir, exist_ok=True)
+        
+        if os.path.exists(upload_dir):
+            pdf_files = [f for f in os.listdir(upload_dir) if f.lower().endswith('.pdf')]
+            
+            if pdf_files:
+                st.markdown("### Select PDF to Parse")
+                
+                selected_pdf = st.selectbox(
+                    "Choose a PDF register:",
+                    pdf_files,
+                    help="Select which PDF to extract tables from"
+                )
+                
+                col1, col2 = st.columns([2, 1])
+                
+                with col1:
+                    if st.button("📊 Parse to Excel", type="primary", key="parse_register"):
+                        pdf_path = os.path.join(upload_dir, selected_pdf)
+                        
+                        with st.spinner(f"Extracting tables from {selected_pdf}..."):
+                            try:
+                                result = extract_register_to_excel(
+                                    pdf_path=pdf_path,
+                                    output_dir=parsed_dir
+                                )
+                                
+                                if result['success']:
+                                    excel_path = result['excel_path']
+                                    table_count = result['table_count']
+                                    
+                                    st.success(f"✅ Successfully extracted {table_count} table(s)!")
+                                    
+                                    # Show table details
+                                    with st.expander("📋 Table Details", expanded=True):
+                                        for info in result['table_info']:
+                                            st.markdown(f"""
+**Table {info['table_number']}:**
+- **Rows:** {info['rows']:,}
+- **Columns:** {info['columns']}
+- **Headers:** {', '.join(info['headers'][:5])}{'...' if len(info['headers']) > 5 else ''}
+""")
+                                    
+                                    # Download button
+                                    st.markdown("### 📥 Download Excel")
+                                    with open(excel_path, "rb") as f:
+                                        st.download_button(
+                                            label=f"💾 Download {Path(excel_path).name}",
+                                            data=f.read(),
+                                            file_name=Path(excel_path).name,
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                            key="download_parsed_register"
+                                        )
+                                    
+                                    st.info(f"💾 Excel file saved to: `{parsed_dir}/{Path(excel_path).name}`")
+                                
+                                else:
+                                    st.error(f"❌ Extraction failed: {result.get('error', 'Unknown error')}")
+                                    st.info("**Possible issues:**\n- PDF doesn't contain tables\n- PDF is scanned image (not text)\n- Complex table formatting")
+                            
+                            except Exception as e:
+                                st.error(f"❌ Error parsing register: {e}")
+                                logger.error(f"Register parsing error: {e}", exc_info=True)
+                
+                # Show previously parsed files
+                st.markdown("---")
+                st.markdown("### 📂 Previously Parsed Registers")
+                
+                if os.path.exists(parsed_dir):
+                    excel_files = [f for f in os.listdir(parsed_dir) if f.lower().endswith('.xlsx')]
+                    
+                    if excel_files:
+                        st.success(f"Found {len(excel_files)} parsed register(s)")
+                        
+                        for excel_file in sorted(excel_files):
+                            excel_path = os.path.join(parsed_dir, excel_file)
+                            file_size = os.path.getsize(excel_path) / 1024  # KB
+                            
+                            col1, col2, col3 = st.columns([3, 1, 1])
+                            
+                            with col1:
+                                st.markdown(f"📊 **{excel_file}**")
+                                st.caption(f"Size: {file_size:.1f} KB")
+                            
+                            with col2:
+                                with open(excel_path, "rb") as f:
+                                    st.download_button(
+                                        label="📥",
+                                        data=f.read(),
+                                        file_name=excel_file,
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        key=f"dl_{excel_file}"
+                                    )
+                            
+                            with col3:
+                                if st.button("🗑️", key=f"del_{excel_file}"):
+                                    try:
+                                        os.remove(excel_path)
+                                        st.success("Deleted")
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Delete failed: {e}")
+                    else:
+                        st.info("No parsed registers yet. Parse a PDF above to get started.")
+            else:
+                st.info("📤 No PDFs uploaded yet. Upload documents in the **Upload** tab first.")
+        
+        # Info section
+        st.markdown("---")
+        st.markdown("### ℹ️ About Register Parsing")
+        
+        with st.expander("How it works"):
+            st.markdown("""
+**Parsing Process:**
+1. Select a payroll register PDF from uploaded documents
+2. Click "Parse to Excel" 
+3. System extracts all tables from the PDF
+4. Tables are converted to Excel format with original structure preserved
+5. Download Excel immediately or access later
+
+**Supported Formats:**
+- ✅ Tabular payroll registers (any vendor)
+- ✅ Benefit enrollment reports
+- ✅ Employee data exports
+- ✅ Any PDF with structured tables
+
+**Not Supported:**
+- ❌ Scanned PDFs (image-only)
+- ❌ PDFs without clear table structure
+- ❌ Highly complex formatting
+
+**Storage:**
+- Parsed Excel files are saved to `/data/parsed_registers/`
+- Files persist across deployments
+- Available for download anytime
+""")
 
 
 if __name__ == "__main__":
