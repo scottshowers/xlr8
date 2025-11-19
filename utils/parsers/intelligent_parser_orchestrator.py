@@ -100,6 +100,18 @@ class IntelligentParserOrchestrator:
                 
                 return result
             
+            # SPECIAL CASE: For Dayforce documents, accept lower threshold and skip fallbacks
+            # Dayforce layout is too complex for generic parsers - better to get partial data
+            # from specialized parser than garbage from generated parser
+            if document_type and document_type.lower() == 'dayforce':
+                if stage2_result['success'] and stage2_result.get('accuracy', 0) >= 50:
+                    logger.info(f"Stage 2 Dayforce parser completed with {stage2_result['accuracy']}% accuracy")
+                    logger.info("Accepting Dayforce result without fallback (complex layout, specialized parser better than generic)")
+                    result.update(stage2_result)
+                    result['stage_used'] = 2
+                    result['dayforce_note'] = 'Dayforce-specific parser used (fallbacks skipped - complex layout requires specialized handling)'
+                    return result
+            
             # Stage 3: Try adaptive parsers (general purpose)
             stage3_result = self._try_adaptive_parsers(pdf_path)
             result['stages_attempted'].append({
