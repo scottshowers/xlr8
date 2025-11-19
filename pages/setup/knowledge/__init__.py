@@ -1,7 +1,7 @@
 import streamlit as st
 from utils.rag_handler import RAGHandler
 from utils.document_processor import DocumentProcessor, render_upload_interface
-from utils.pdf_parsers import extract_register_to_excel
+from utils.pdf_parsers import extract_register_adaptive
 from pathlib import Path
 import os
 import logging
@@ -160,7 +160,7 @@ def render_knowledge_page():
                         
                         with st.spinner(f"Extracting tables from {selected_pdf}..."):
                             try:
-                                result = extract_register_to_excel(
+                                result = extract_register_adaptive(
                                     pdf_path=pdf_path,
                                     output_dir=parsed_dir
                                 )
@@ -168,8 +168,10 @@ def render_knowledge_page():
                                 if result['success']:
                                     excel_path = result['excel_path']
                                     table_count = result['table_count']
+                                    strategy_used = result.get('strategy_used', 'Unknown')
                                     
                                     st.success(f"✅ Successfully extracted {table_count} table(s)!")
+                                    st.info(f"🔧 **Strategy used:** {strategy_used}")
                                     
                                     # Show table details
                                     with st.expander("📋 Table Details", expanded=True):
