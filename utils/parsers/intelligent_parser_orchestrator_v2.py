@@ -193,6 +193,8 @@ class IntelligentParserOrchestratorV2:
         """
         Convert raw extracted data into structured format.
         """
+        import re
+        
         structured = {
             'employees': [],
             'earnings': [],
@@ -200,27 +202,112 @@ class IntelligentParserOrchestratorV2:
             'deductions': []
         }
         
-        # Extract employee info
+        # First, extract all employees
         if 'employee_info' in section_data:
             employee_data = section_data['employee_info']['data']
             structured['employees'] = self._parse_employee_info(employee_data)
         
-        # Extract earnings
-        if 'earnings' in section_data:
-            earnings_data = section_data['earnings']['data']
-            structured['earnings'] = self._parse_earnings(earnings_data)
+        # Get combined text from all sections
+        all_text = ""
+        for section_type in ['employee_info', 'earnings', 'taxes', 'deductions']:
+            if section_type in section_data:
+                data = section_data[section_type]['data']
+                if data.get('text'):
+                    all_text += data['text'] + "\n"
+                elif data.get('lines'):
+                    all_text += '\n'.join(data['lines']) + "\n"
         
-        # Extract taxes
-        if 'taxes' in section_data:
-            taxes_data = section_data['taxes']['data']
-            structured['taxes'] = self._parse_taxes(taxes_data)
-        
-        # Extract deductions
-        if 'deductions' in section_data:
-            deductions_data = section_data['deductions']['data']
-            structured['deductions'] = self._parse_deductions(deductions_data)
+        # Split text by employee for proper attribution
+        if structured['employees'] and len(structured['employees']) > 1:
+            # Multiple employees - split data per employee
+            employee_blocks = self._split_by_employees(all_text, structured['employees'])
+            
+            for emp_block, emp_info in zip(employee_blocks, structured['employees']):
+                # Parse earnings for this employee
+                earnings_data = {'text': emp_block, 'lines': emp_block.split('\n')}
+                emp_earnings = self._parse_earnings(earnings_data)
+                for earning in emp_earnings:
+                    earning['employee_id'] = emp_info['employee_id']
+                    earning['employee_name'] = emp_info['name']
+                structured['earnings'].extend(emp_earnings)
+                
+                # Parse taxes for this employee  
+                taxes_data = {'text': emp_block, 'lines': emp_block.split('\n')}
+                emp_taxes = self._parse_taxes(taxes_data)
+                for tax in emp_taxes:
+                    tax['employee_id'] = emp_info['employee_id']
+                    tax['employee_name'] = emp_info['name']
+                structured['taxes'].extend(emp_taxes)
+                
+                # Parse deductions for this employee
+                deductions_data = {'text': emp_block, 'lines': emp_block.split('\n')}
+                emp_deductions = self._parse_deductions(deductions_data)
+                for deduction in emp_deductions:
+                    deduction['employee_id'] = emp_info['employee_id']
+                    deduction['employee_name'] = emp_info['name']
+                structured['deductions'].extend(emp_deductions)
+        else:
+            # Single employee - parse globally
+            if 'earnings' in section_data:
+                earnings_data = section_data['earnings']['data']
+                structured['earnings'] = self._parse_earnings(earnings_data)
+            
+            if 'taxes' in section_data:
+                taxes_data = section_data['taxes']['data']
+                structured['taxes'] = self._parse_taxes(taxes_data)
+            
+            if 'deductions' in section_data:
+                deductions_data = section_data['deductions']['data']
+                structured['deductions'] = self._parse_deductions(deductions_data)
+            
+            # Add employee info to each item
+            if structured['employees']:
+                emp_id = structured['employees'][0]['employee_id']
+                emp_name = structured['employees'][0]['name']
+                for earning in structured['earnings']:
+                    earning['employee_id'] = emp_id
+                    earning['employee_name'] = emp_name
+                for tax in structured['taxes']:
+                    tax['employee_id'] = emp_id
+                    tax['employee_name'] = emp_name
+                for deduction in structured['deductions']:
+                    deduction['employee_id'] = emp_id
+                    deduction['employee_name'] = emp_name
         
         return structured
+    
+    def _split_by_employees(self, text: str, employees: List[Dict]) -> List[str]:
+        """Split text into blocks, one per employee."""
+        import re
+        
+        if not employees or len(employees) < 2:
+            return [text]
+        
+        blocks = []
+        
+        # Build pattern that splits at each employee's ID
+        for i, emp in enumerate(employees):
+            emp_id = emp['employee_id']
+            
+            if i < len(employees) - 1:
+                # Not the last employee - find from this ID to next ID
+                next_id = employees[i + 1]['employee_id']
+                pattern = rf'Emp\s*#?\s*:?\s*{emp_id}(.*?)(?=Emp\s*#?\s*:?\s*{next_id})'
+                match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+                if match:
+                    blocks.append(match.group(0))
+                else:
+                    blocks.append("")
+            else:
+                # Last employee - from this ID to end
+                pattern = rf'Emp\s*#?\s*:?\s*{emp_id}(.*?)$'
+                match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+                if match:
+                    blocks.append(match.group(0))
+                else:
+                    blocks.append("")
+        
+        return blocks
     
     def _parse_employee_info(self, data: Dict[str, Any]) -> List[Dict]:
         """Parse employee info from extracted data - handles multiple employees."""
@@ -234,37 +321,37 @@ class IntelligentParserOrchestratorV2:
         elif data.get('text'):
             text_content = data['text']
         
-        # Split by "Emp #:" pattern to find each employee block
-        emp_blocks = re.split(r'(?=Emp\s*#\s*:\s*\d+)', text_content, flags=re.IGNORECASE)
+        # Pattern that captures name + employee ID together
+        # Format: "FirstName LastName\nEmp #: 12345"
+        emp_pattern = r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\s*[\n\r]+\s*Emp\s*#?\s*:?\s*(\d+)'
+        matches = re.findall(emp_pattern, text_content, flags=re.IGNORECASE | re.MULTILINE)
         
-        for block in emp_blocks:
-            if not block.strip():
-                continue
-            
-            emp = {}
-            
-            # Extract employee ID
-            emp_id_match = re.search(r'Emp\s*#\s*:\s*(\d+)', block, re.IGNORECASE)
-            if emp_id_match:
-                emp['employee_id'] = emp_id_match.group(1)
-            else:
-                continue  # Skip if no employee ID found
-            
-            # Extract name (first line before "Emp #:" or on same line before "Emp #:")
-            name_match = re.search(r'^([A-Z][a-z]+\s+[A-Z][a-z]+)', block, re.MULTILINE)
-            if name_match:
-                emp['name'] = name_match.group(1).strip()
-            else:
-                emp['name'] = ''
-            
-            # Extract department
-            dept_match = re.search(r'Dept\s*:\s*([^\n]+)', block, re.IGNORECASE)
-            if dept_match:
-                emp['department'] = dept_match.group(1).strip()
-            else:
-                emp['department'] = ''
-            
-            employees.append(emp)
+        if matches:
+            # Found employees with name+ID pattern
+            for name, emp_id in matches:
+                emp = {
+                    'employee_id': emp_id.strip(),
+                    'name': name.strip(),
+                    'department': ''
+                }
+                
+                # Try to find department for this employee
+                # Look for "Dept:" after this employee ID
+                dept_pattern = rf'Emp\s*#?\s*:?\s*{emp_id}.*?Dept\s*:?\s*([^\n]+)'
+                dept_match = re.search(dept_pattern, text_content, flags=re.IGNORECASE | re.DOTALL)
+                if dept_match:
+                    emp['department'] = dept_match.group(1).strip()
+                
+                employees.append(emp)
+        else:
+            # Fallback: try to find employee IDs without names
+            emp_id_matches = re.findall(r'Emp\s*#?\s*:?\s*(\d+)', text_content, flags=re.IGNORECASE)
+            for emp_id in emp_id_matches:
+                employees.append({
+                    'employee_id': emp_id,
+                    'name': '',
+                    'department': ''
+                })
         
         return employees if employees else [{'employee_id': 'Unknown', 'name': 'Unknown', 'department': ''}]
     
@@ -294,6 +381,14 @@ class IntelligentParserOrchestratorV2:
             
             # Skip header and total lines
             if any(word in line.lower() for word in ['description', 'rate', 'hours', 'amount', 'ytd', 'total', 'reg total', 'emp total']):
+                continue
+            
+            # Skip employee info lines
+            if re.match(r'^(Emp\s*#|Dept|Hire|Term|SSN|Status|Frequency|Type|Rate|Federal|State|Res|Transit)', line, re.IGNORECASE):
+                continue
+            
+            # Skip lines that are just employee names (capitalized name with no numbers)
+            if re.match(r'^[A-Z][a-z]+\s+[A-Z][a-z]+\s*$', line):
                 continue
             
             # Look for lines with dollar amounts (likely earnings)
@@ -346,11 +441,19 @@ class IntelligentParserOrchestratorV2:
                 continue
             
             # Skip header and total lines
-            if any(word in line.lower() for word in ['description', 'wages', 'amount', 'ytd', 'total', 'emp total', 'er total']):
+            if any(word in line.lower() for word in ['description', 'wages', 'amount', 'ytd', 'total', 'emp total', 'er total', 'memo total']):
+                continue
+            
+            # Skip employee info lines
+            if re.match(r'^(Emp\s*#|Dept|Hire|Term|SSN|Status|Frequency|Type|Rate|Federal|State|Res|Transit)', line, re.IGNORECASE):
+                continue
+            
+            # Skip lines that are just employee names
+            if re.match(r'^[A-Z][a-z]+\s+[A-Z][a-z]+\s*$', line):
                 continue
             
             # Look for tax-related keywords
-            if re.search(r'(?:fed|fica|state|w/h|mwt|ut|er|ee|medicare|social)', line, re.IGNORECASE):
+            if re.search(r'(?:fed|fica|state|w/h|mwt|ut|er|ee|medicare|social|comp|drt)', line, re.IGNORECASE):
                 # Extract all numbers from the line
                 numbers = re.findall(r'[\d,]+\.?\d*', line)
                 
@@ -398,7 +501,19 @@ class IntelligentParserOrchestratorV2:
                 continue
             
             # Skip header and total lines
-            if any(word in line.lower() for word in ['description', 'scheduled', 'amount', 'ytd', 'total', 'pre total', 'post total', 'reim total', 'memo total']):
+            if any(word in line.lower() for word in ['description', 'scheduled', 'amount', 'ytd', 'total', 'pre total', 'post total', 'reim total', 'memo total', 'company paid']):
+                continue
+            
+            # Skip employee info lines
+            if re.match(r'^(Emp\s*#|Dept|Hire|Term|SSN|Status|Frequency|Type|Rate|Federal|State|Res|Transit)', line, re.IGNORECASE):
+                continue
+            
+            # Skip lines that are just employee names
+            if re.match(r'^[A-Z][a-z]+\s+[A-Z][a-z]+\s*$', line):
+                continue
+            
+            # Skip PTO/vacation balance lines
+            if re.search(r'(hours|balance|accrued)\s*$', line, re.IGNORECASE):
                 continue
             
             # Look for lines with dollar amounts (likely deductions)
@@ -453,20 +568,23 @@ class IntelligentParserOrchestratorV2:
     def _create_four_tabs(self, structured_data: Dict[str, Any]) -> Dict[str, pd.DataFrame]:
         """Create 4-tab structure from structured data."""
         
-        # Tab 1: Employee Summary
         employees = structured_data.get('employees', [])
         earnings = structured_data.get('earnings', [])
         taxes = structured_data.get('taxes', [])
         deductions = structured_data.get('deductions', [])
         
+        # Tab 1: Employee Summary
         summary_data = []
         for emp in employees:
-            emp_earnings = sum(e.get('amount', 0) for e in earnings)
-            emp_taxes = sum(t.get('amount', 0) for t in taxes)
-            emp_deductions = sum(d.get('amount', 0) for d in deductions)
+            emp_id = emp.get('employee_id', '')
+            
+            # Calculate totals for THIS employee only
+            emp_earnings = sum(e.get('amount', 0) for e in earnings if e.get('employee_id') == emp_id)
+            emp_taxes = sum(t.get('amount', 0) for t in taxes if t.get('employee_id') == emp_id)
+            emp_deductions = sum(d.get('amount', 0) for d in deductions if d.get('employee_id') == emp_id)
             
             summary = {
-                'Employee ID': emp.get('employee_id', ''),
+                'Employee ID': emp_id,
                 'Name': emp.get('name', ''),
                 'Department': emp.get('department', ''),
                 'Total Earnings': emp_earnings,
@@ -476,46 +594,37 @@ class IntelligentParserOrchestratorV2:
             }
             summary_data.append(summary)
         
-        # Tab 2: Earnings
+        # Tab 2: Earnings (already has employee_id from parsing)
         earnings_data = []
-        for emp in employees:
-            emp_id = emp.get('employee_id', '')
-            emp_name = emp.get('name', '')
-            for earning in earnings:
-                earnings_data.append({
-                    'Employee ID': emp_id,
-                    'Name': emp_name,
-                    'Description': earning.get('description', ''),
-                    'Hours': earning.get('hours', 0),
-                    'Rate': earning.get('rate', 0),
-                    'Amount': earning.get('amount', 0)
-                })
+        for earning in earnings:
+            earnings_data.append({
+                'Employee ID': earning.get('employee_id', ''),
+                'Name': earning.get('employee_name', ''),
+                'Description': earning.get('description', ''),
+                'Hours': earning.get('hours', 0),
+                'Rate': earning.get('rate', 0),
+                'Amount': earning.get('amount', 0)
+            })
         
-        # Tab 3: Taxes
+        # Tab 3: Taxes (already has employee_id from parsing)
         taxes_data = []
-        for emp in employees:
-            emp_id = emp.get('employee_id', '')
-            emp_name = emp.get('name', '')
-            for tax in taxes:
-                taxes_data.append({
-                    'Employee ID': emp_id,
-                    'Name': emp_name,
-                    'Description': tax.get('description', ''),
-                    'Amount': tax.get('amount', 0)
-                })
+        for tax in taxes:
+            taxes_data.append({
+                'Employee ID': tax.get('employee_id', ''),
+                'Name': tax.get('employee_name', ''),
+                'Description': tax.get('description', ''),
+                'Amount': tax.get('amount', 0)
+            })
         
-        # Tab 4: Deductions
+        # Tab 4: Deductions (already has employee_id from parsing)
         deductions_data = []
-        for emp in employees:
-            emp_id = emp.get('employee_id', '')
-            emp_name = emp.get('name', '')
-            for deduction in deductions:
-                deductions_data.append({
-                    'Employee ID': emp_id,
-                    'Name': emp_name,
-                    'Description': deduction.get('description', ''),
-                    'Amount': deduction.get('amount', 0)
-                })
+        for deduction in deductions:
+            deductions_data.append({
+                'Employee ID': deduction.get('employee_id', ''),
+                'Name': deduction.get('employee_name', ''),
+                'Description': deduction.get('description', ''),
+                'Amount': deduction.get('amount', 0)
+            })
         
         return {
             'Employee Summary': pd.DataFrame(summary_data),
