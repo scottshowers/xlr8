@@ -1,10 +1,11 @@
 """
-Enhanced Dayforce Register Parser
-Handles complex multi-section layouts iteratively
+Improved Dayforce Register Parser
+Handles horizontal multi-column layout with side-by-side sections per employee
 """
 
 import re
-from typing import Dict, List, Any, Optional
+import fitz  # PyMuPDF
+from typing import Dict, List, Any, Optional, Tuple
 import pandas as pd
 from pathlib import Path
 import logging
@@ -14,28 +15,13 @@ logger = logging.getLogger(__name__)
 
 class DayforceParserEnhanced:
     """
-    Iteratively parses Dayforce payroll registers with multiple sections per employee.
-    
-    Sections: Employee Info | Earnings | Taxes | Deductions
+    Enhanced parser for Dayforce payroll registers with complex layouts.
+    Handles horizontal employee blocks with side-by-side sections.
     """
     
     def __init__(self):
-        self.section_patterns = {
-            'employee_info': r'(?:Employee\s+Info|Employee\s+Information|EMP\s+INFO)',
-            'earnings': r'(?:Earnings|PAY\s+ITEMS|Income)',
-            'taxes': r'(?:Taxes|Tax\s+Deductions|Statutory)',
-            'deductions': r'(?:Deductions|Pre-Tax|Post-Tax|Benefits)'
-        }
-        
-        # Common field patterns
-        self.field_patterns = {
-            'employee_id': r'(?:ID|EMP#|Employee\s+ID)[\s:]+(\d+)',
-            'name': r'(?:Name|Employee)[\s:]+([A-Za-z\s,]+)',
-            'ssn': r'(?:SSN)[\s:]+(\d{3}-\d{2}-\d{4})',
-            'department': r'(?:Dept|Department)[\s:]+([^\n]+)',
-            'pay_period': r'(?:Pay\s+Period|Period)[\s:]+([^\n]+)',
-            'check_date': r'(?:Check\s+Date|Date)[\s:]+([^\n]+)'
-        }
+        """Initialize parser."""
+        pass
     
     def parse(self, pdf_path: str, output_dir: str = '/data/parsed_registers') -> Dict[str, Any]:
         """
@@ -49,20 +35,25 @@ class DayforceParserEnhanced:
             Dict with status, output_path, accuracy, and employee_count
         """
         try:
-            import fitz  # PyMuPDF
+            logger.info(f"Opening Dayforce PDF: {pdf_path}")
             
-            logger.info(f"Opening PDF: {pdf_path}")
+            # Extract text with layout preservation
             doc = fitz.open(pdf_path)
             
-            # Extract all text
-            full_text = ""
-            for page in doc:
-                full_text += page.get_text()
+            # Get text blocks with position information
+            employees = []
             
-            logger.info(f"Extracted {len(full_text)} characters from PDF")
+            for page_num, page in enumerate(doc):
+                logger.info(f"Processing page {page_num + 1}")
+                
+                # Get text with layout (preserves positioning)
+                text = page.get_text("text")
+                
+                # Parse employees from this page
+                page_employees = self._parse_page_employees(text)
+                employees.extend(page_employees)
             
-            # Parse employee blocks
-            employees = self._parse_employee_blocks(full_text)
+            doc.close()
             
             if not employees:
                 logger.warning("No employee data extracted")
@@ -101,153 +92,246 @@ class DayforceParserEnhanced:
                 'employee_count': 0
             }
     
-    def _parse_employee_blocks(self, text: str) -> List[Dict[str, Any]]:
+    def _parse_page_employees(self, text: str) -> List[Dict[str, Any]]:
         """
-        Iteratively parse employee blocks from text.
-        Each employee has 4 sections.
+        Parse employees from a page of text.
+        Handles horizontal layout with side-by-side sections.
         """
         employees = []
         
-        # Split by employee boundaries (look for ID pattern)
-        # Pattern: new employee starts with ID line
-        employee_pattern = r'(?:Employee\s+ID|EMP#|ID)[\s:]+(\d+)'
+        # Split by employee - look for "Emp #:" pattern
+        emp_pattern = r'Emp #:\s*(\d+)'
+        matches = list(re.finditer(emp_pattern, text))
         
-        employee_starts = [m.start() for m in re.finditer(employee_pattern, text)]
-        
-        if not employee_starts:
+        if not matches:
             logger.warning("No employee ID patterns found")
             return employees
         
-        # Add end position
-        employee_starts.append(len(text))
-        
         # Extract each employee block
-        for i in range(len(employee_starts) - 1):
-            start = employee_starts[i]
-            end = employee_starts[i + 1]
-            block = text[start:end]
+        for i, match in enumerate(matches):
+            start_pos = match.start()
             
-            employee_data = self._parse_single_employee(block)
-            if employee_data:
-                employees.append(employee_data)
+            # Find end of this employee block
+            if i + 1 < len(matches):
+                end_pos = matches[i + 1].start()
+            else:
+                # Last employee - look for page footer or end
+                footer_match = re.search(r'(?:Confidential|Page \d+ of|\* italicized amounts)', text[start_pos:])
+                if footer_match:
+                    end_pos = start_pos + footer_match.start()
+                else:
+                    end_pos = len(text)
+            
+            # Extract employee block
+            emp_block = text[start_pos:end_pos]
+            
+            # Parse this employee
+            employee = self._parse_single_employee(emp_block, match.group(1))
+            if employee:
+                employees.append(employee)
         
         return employees
     
-    def _parse_single_employee(self, block: str) -> Optional[Dict[str, Any]]:
+    def _parse_single_employee(self, block: str, emp_id: str) -> Optional[Dict[str, Any]]:
         """
-        Parse a single employee block with 4 sections.
+        Parse a single employee block with horizontal sections.
         """
         try:
             employee = {
-                'info': {},
+                'info': {'employee_id': emp_id},
                 'earnings': [],
                 'taxes': [],
                 'deductions': []
             }
             
-            # Extract employee info fields
-            for field_name, pattern in self.field_patterns.items():
-                match = re.search(pattern, block, re.IGNORECASE)
+            # Extract employee info fields (appears at start of block)
+            info_patterns = {
+                'name': r'^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)',  # First line is name
+                'dept': r'Dept:\s*([^\n]+)',
+                'hire_date': r'Hire Date:\s*([^\n]+)',
+                'term_date': r'Term Date:\s*([^\n]+)',
+                'ssn': r'SSN:\s*(X+\d+)',
+                'status': r'Status:\s*([^\n]+)',
+                'frequency': r'Frequency:\s*([^\n]+)',
+                'type': r'Type:\s*([^\n]+)',
+                'rate': r'Rate:\s*\$?([\d,.]+)',
+                'salary': r'Sal:\s*\$?([\d,.]+)',
+                'federal': r'Federal:\s*([^\n]+)',
+                'state': r'State:\s*([^\n]+)'
+            }
+            
+            for field, pattern in info_patterns.items():
+                match = re.search(pattern, block, re.MULTILINE)
                 if match:
-                    employee['info'][field_name] = match.group(1).strip()
+                    employee['info'][field] = match.group(1).strip()
             
-            # Find section boundaries
-            sections = self._find_section_boundaries(block)
+            # Parse earnings section
+            # Earnings appear after employee info, before taxes
+            earnings_section = self._extract_section_by_header(block, 'Earnings', 'Taxes')
+            if earnings_section:
+                employee['earnings'] = self._parse_earnings(earnings_section)
             
-            # Extract each section
-            if 'earnings' in sections:
-                employee['earnings'] = self._extract_table_section(
-                    block[sections['earnings']['start']:sections['earnings']['end']]
-                )
+            # Parse taxes section
+            taxes_section = self._extract_section_by_header(block, 'Taxes', 'Deductions')
+            if taxes_section:
+                employee['taxes'] = self._parse_taxes(taxes_section)
             
-            if 'taxes' in sections:
-                employee['taxes'] = self._extract_table_section(
-                    block[sections['taxes']['start']:sections['taxes']['end']]
-                )
+            # Parse deductions section
+            deductions_section = self._extract_section_after_header(block, 'Deductions')
+            if deductions_section:
+                employee['deductions'] = self._parse_deductions(deductions_section)
             
-            if 'deductions' in sections:
-                employee['deductions'] = self._extract_table_section(
-                    block[sections['deductions']['start']:sections['deductions']['end']]
-                )
-            
-            # Only return if we have at least employee ID
-            if employee['info'].get('employee_id'):
-                return employee
-            
-            return None
+            return employee
             
         except Exception as e:
-            logger.error(f"Error parsing employee block: {str(e)}")
+            logger.error(f"Error parsing employee {emp_id}: {str(e)}")
             return None
     
-    def _find_section_boundaries(self, block: str) -> Dict[str, Dict[str, int]]:
+    def _extract_section_by_header(self, text: str, start_header: str, end_header: str) -> Optional[str]:
         """
-        Find where each section starts and ends in the employee block.
+        Extract section between two headers.
         """
-        sections = {}
+        # Find start position
+        start_match = re.search(rf'\b{start_header}\b', text, re.IGNORECASE)
+        if not start_match:
+            return None
         
-        for section_name, pattern in self.section_patterns.items():
-            match = re.search(pattern, block, re.IGNORECASE)
-            if match:
-                sections[section_name] = {
-                    'start': match.end(),
-                    'end': len(block)  # Will be updated
-                }
+        # Find end position
+        end_match = re.search(rf'\b{end_header}\b', text[start_match.end():], re.IGNORECASE)
+        if not end_match:
+            return text[start_match.end():]
         
-        # Update end positions (each section ends where next begins)
-        section_list = sorted(sections.items(), key=lambda x: x[1]['start'])
-        
-        for i in range(len(section_list) - 1):
-            section_name = section_list[i][0]
-            next_start = section_list[i + 1][1]['start']
-            sections[section_name]['end'] = next_start
-        
-        return sections
+        return text[start_match.end():start_match.end() + end_match.start()]
     
-    def _extract_table_section(self, section_text: str) -> List[Dict[str, Any]]:
+    def _extract_section_after_header(self, text: str, header: str) -> Optional[str]:
         """
-        Extract table data from a section (earnings/taxes/deductions).
-        Uses line-by-line parsing with column detection.
+        Extract section after a header to end of text.
         """
-        rows = []
+        match = re.search(rf'\b{header}\b', text, re.IGNORECASE)
+        if not match:
+            return None
+        
+        return text[match.end():]
+    
+    def _parse_earnings(self, section: str) -> List[Dict[str, Any]]:
+        """
+        Parse earnings section.
+        Expected columns: Description, Rate, Hours, Amount, HoursYTD, AmountYTD
+        """
+        earnings = []
         
         # Split into lines
-        lines = [line.strip() for line in section_text.split('\n') if line.strip()]
+        lines = section.split('\n')
         
-        if not lines:
-            return rows
-        
-        # First non-empty line is likely the header
-        header_line = lines[0]
-        headers = self._extract_columns_from_line(header_line)
-        
-        # Parse data rows
-        for line in lines[1:]:
-            # Skip total lines and separators
-            if any(word in line.lower() for word in ['total', '---', '===', 'subtotal']):
+        for line in lines:
+            line = line.strip()
+            if not line or len(line) < 10:
                 continue
             
-            values = self._extract_columns_from_line(line)
+            # Skip header lines
+            if any(word in line for word in ['Description', 'Rate', 'Hours', 'Amount', 'YTD']):
+                continue
             
-            if values and len(values) > 0:
-                # Create row dict
-                row = {}
-                for i, value in enumerate(values):
-                    col_name = headers[i] if i < len(headers) else f'Column_{i+1}'
-                    row[col_name] = value
+            # Skip total lines
+            if 'Total' in line:
+                continue
+            
+            # Look for lines with amounts (contains $)
+            if '$' in line or re.search(r'\d+\.\d{2}', line):
+                # Try to parse structured data
+                # Pattern: Description Rate Hours Amount ...
+                parts = re.split(r'\s{2,}', line)
                 
-                rows.append(row)
+                if len(parts) >= 2:
+                    earning = {
+                        'description': parts[0].strip(),
+                        'amount': self._extract_amount(line)
+                    }
+                    
+                    # Try to extract rate and hours
+                    rate_match = re.search(r'\$?([\d,]+\.\d+)', line)
+                    if rate_match:
+                        earning['rate'] = rate_match.group(1)
+                    
+                    hours_match = re.search(r'(\d+\.\d+)\s+\$', line)
+                    if hours_match:
+                        earning['hours'] = hours_match.group(1)
+                    
+                    earnings.append(earning)
         
-        return rows
+        return earnings
     
-    def _extract_columns_from_line(self, line: str) -> List[str]:
+    def _parse_taxes(self, section: str) -> List[Dict[str, Any]]:
         """
-        Extract columns from a line using whitespace detection.
-        Handles varying column widths.
+        Parse taxes section.
+        Expected columns: Description, Wages, Amount, WagesYTD, AmountYTD
         """
-        # Split by 2+ spaces (common column separator)
-        columns = re.split(r'\s{2,}', line)
-        return [col.strip() for col in columns if col.strip()]
+        taxes = []
+        
+        lines = section.split('\n')
+        
+        for line in lines:
+            line = line.strip()
+            if not line or len(line) < 10:
+                continue
+            
+            # Skip headers and totals
+            if any(word in line for word in ['Description', 'Wages', 'Amount', 'YTD', 'Total']):
+                continue
+            
+            # Look for tax lines (usually have Fed, FICA, State abbreviations)
+            if re.search(r'(?:Fed|FICA|State|W/H|MWT|UT|ER|EE)', line, re.IGNORECASE):
+                parts = re.split(r'\s{2,}', line)
+                
+                if len(parts) >= 2:
+                    tax = {
+                        'description': parts[0].strip(),
+                        'amount': self._extract_amount(line)
+                    }
+                    taxes.append(tax)
+        
+        return taxes
+    
+    def _parse_deductions(self, section: str) -> List[Dict[str, Any]]:
+        """
+        Parse deductions section.
+        Expected columns: Description, Scheduled, Amount, AmountYTD
+        """
+        deductions = []
+        
+        lines = section.split('\n')
+        
+        for line in lines:
+            line = line.strip()
+            if not line or len(line) < 10:
+                continue
+            
+            # Skip headers and totals
+            if any(word in line for word in ['Description', 'Scheduled', 'Amount', 'YTD', 'Total', 'Current']):
+                continue
+            
+            # Look for deduction lines with amounts
+            if '$' in line or re.search(r'\d+\.\d{2}', line):
+                parts = re.split(r'\s{2,}', line)
+                
+                if len(parts) >= 1:
+                    deduction = {
+                        'description': parts[0].strip(),
+                        'amount': self._extract_amount(line)
+                    }
+                    deductions.append(deduction)
+        
+        return deductions
+    
+    def _extract_amount(self, text: str) -> str:
+        """
+        Extract dollar amount from text.
+        """
+        # Look for patterns like $1,234.56 or 1234.56
+        match = re.search(r'\$?([\d,]+\.\d{2})', text)
+        if match:
+            return match.group(1).replace(',', '')
+        return '0.00'
     
     def _create_four_tabs(self, employees: List[Dict[str, Any]]) -> Dict[str, pd.DataFrame]:
         """
@@ -263,35 +347,40 @@ class DayforceParserEnhanced:
         for emp in employees:
             # Employee Summary tab
             summary = emp['info'].copy()
+            
+            # Calculate totals
             summary['Total_Earnings'] = sum(
-                float(e.get('Amount', 0)) for e in emp['earnings'] 
-                if isinstance(e.get('Amount'), (int, float, str)) and str(e.get('Amount', '')).replace('.', '').replace('-', '').isdigit()
-            ) if emp['earnings'] else 0
+                float(e.get('amount', 0)) for e in emp['earnings']
+                if str(e.get('amount', '')).replace('.', '').replace('-', '').isdigit()
+            )
+            
             summary['Total_Taxes'] = sum(
-                float(t.get('Amount', 0)) for t in emp['taxes']
-                if isinstance(t.get('Amount'), (int, float, str)) and str(t.get('Amount', '')).replace('.', '').replace('-', '').isdigit()
-            ) if emp['taxes'] else 0
+                float(t.get('amount', 0)) for t in emp['taxes']
+                if str(t.get('amount', '')).replace('.', '').replace('-', '').isdigit()
+            )
+            
             summary['Total_Deductions'] = sum(
-                float(d.get('Amount', 0)) for d in emp['deductions']
-                if isinstance(d.get('Amount'), (int, float, str)) and str(d.get('Amount', '')).replace('.', '').replace('-', '').isdigit()
-            ) if emp['deductions'] else 0
+                float(d.get('amount', 0)) for d in emp['deductions']
+                if str(d.get('amount', '')).replace('.', '').replace('-', '').isdigit()
+            )
+            
             summary['Net_Pay'] = summary['Total_Earnings'] - summary['Total_Taxes'] - summary['Total_Deductions']
             
             tabs['Employee Summary'].append(summary)
             
-            # Earnings tab
+            # Earnings tab - one row per earning type
             for earning in emp['earnings']:
                 earning_row = emp['info'].copy()
                 earning_row.update(earning)
                 tabs['Earnings'].append(earning_row)
             
-            # Taxes tab
+            # Taxes tab - one row per tax type
             for tax in emp['taxes']:
                 tax_row = emp['info'].copy()
                 tax_row.update(tax)
                 tabs['Taxes'].append(tax_row)
             
-            # Deductions tab
+            # Deductions tab - one row per deduction type
             for deduction in emp['deductions']:
                 deduction_row = emp['info'].copy()
                 deduction_row.update(deduction)
@@ -330,21 +419,27 @@ class DayforceParserEnhanced:
         if tabs and all(isinstance(df, pd.DataFrame) for df in tabs.values()):
             score += 30
         
-        # Table quality (40 pts)
-        total_rows = sum(len(df) for df in tabs.values())
+        # Table quality (40 pts) - based on row count
+        total_rows = sum(len(df) for df in tabs.values() if len(df) > 0)
+        expected_rows = len(employees) * 10  # Rough estimate
+        
         if total_rows > 0:
-            score += min(40, int(total_rows / len(employees) * 10)) if employees else 0
+            quality_score = min(40, int((total_rows / max(expected_rows, 1)) * 40))
+            score += quality_score
         
-        # Data extraction (20 pts)
-        info_fields = sum(
-            len(emp['info']) for emp in employees
-        ) / max(len(employees), 1)
-        score += min(20, int(info_fields * 3))
+        # Data extraction (20 pts) - based on fields extracted
+        total_fields = sum(len(emp['info']) for emp in employees)
+        avg_fields = total_fields / max(len(employees), 1)
         
-        # Data quality (10 pts)
-        has_required = all(
-            'employee_id' in emp['info'] for emp in employees
-        )
+        if avg_fields >= 8:
+            score += 20
+        elif avg_fields >= 5:
+            score += 15
+        elif avg_fields >= 3:
+            score += 10
+        
+        # Data quality (10 pts) - all employees have required fields
+        has_required = all('employee_id' in emp['info'] for emp in employees)
         if has_required:
             score += 10
         
