@@ -1,6 +1,6 @@
 """
-Intelligent Parser Orchestrator V2 - BBOX-BASED (Fixed)
-Uses section detection + multi-method extraction with proper bbox passing
+Intelligent Parser Orchestrator V2 - Production Keyword Parser
+Strict pattern matching, no bbox complexity
 """
 
 import logging
@@ -12,229 +12,127 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# Import dependencies
 try:
-    from .section_detector import SectionDetector
-    from .multi_method_extractor import MultiMethodExtractor
-    DEPENDENCIES_AVAILABLE = True
+    import pdfplumber
+    PDFPLUMBER_AVAILABLE = True
 except ImportError:
-    try:
-        from section_detector import SectionDetector
-        from multi_method_extractor import MultiMethodExtractor
-        DEPENDENCIES_AVAILABLE = True
-    except ImportError:
-        DEPENDENCIES_AVAILABLE = False
-        logger.error("section_detector or multi_method_extractor not available")
+    PDFPLUMBER_AVAILABLE = False
 
 
 class IntelligentParserOrchestratorV2:
-    """
-    V2 parser that uses section detection + multi-method extraction.
-    Properly passes bbox to extraction methods.
-    """
+    """Production V2 parser with strict keyword patterns."""
     
     def __init__(self, custom_parsers_dir: str = None):
         self.logger = logging.getLogger(__name__)
         self.custom_parsers_dir = custom_parsers_dir
-        
-        if not DEPENDENCIES_AVAILABLE:
-            raise Exception("Required dependencies not available")
-        
-        self.section_detector = SectionDetector()
-        self.multi_method_extractor = MultiMethodExtractor()
     
     def parse(self, pdf_path: str, output_dir: str = '/data/parsed_registers', force_v2: bool = False) -> Dict[str, Any]:
-        """
-        Parse PDF using section-based multi-method approach.
-        
-        Args:
-            pdf_path: Path to PDF file
-            output_dir: Where to save Excel output
-            force_v2: Compatibility parameter (always uses V2)
-            
-        Returns:
-            Dict with result info
-        """
+        """Parse PDF with strict pattern matching."""
         try:
-            self.logger.info(f"=== V2 Parser Starting (bbox-based) ===")
-            self.logger.info(f"PDF: {pdf_path}")
+            if not PDFPLUMBER_AVAILABLE:
+                raise Exception("pdfplumber not available")
             
-            # Step 1: Detect sections
-            self.logger.info("Step 1: Detecting sections...")
-            sections = self.section_detector.detect_sections(pdf_path)
+            # Extract full text
+            full_text = self._extract_full_text(pdf_path)
+            if not full_text:
+                raise Exception("No text extracted")
             
-            if not sections:
-                raise Exception("No sections detected")
+            # Parse with strict patterns
+            employees = self._parse_employee_info(full_text)
+            earnings = self._parse_earnings(full_text, employees)
+            taxes = self._parse_taxes(full_text, employees)
+            deductions = self._parse_deductions(full_text, employees)
             
-            self.logger.info(f"Found {len(sections)}/4 sections")
-            for section_type, section_info in sections.items():
-                bbox = section_info.get('bbox') or section_info
-                self.logger.info(f"  {section_type}: bbox={bbox}")
+            structured_data = {
+                'employees': employees,
+                'earnings': earnings,
+                'taxes': taxes,
+                'deductions': deductions
+            }
             
-            # Step 2: Extract each section with multi-method
-            self.logger.info("Step 2: Extracting sections with best methods...")
-            section_data = {}
-            
-            for section_type, section_info in sections.items():
-                bbox = section_info.get('bbox') or section_info
-                
-                # CRITICAL: Pass bbox to multi_method_extractor
-                self.logger.info(f"  Extracting {section_type} with bbox={bbox}")
-                all_results = self.multi_method_extractor.extract_all_methods(pdf_path, section_bbox=bbox)
-                
-                # Get best method
-                best_method, best_result = self.multi_method_extractor.get_best_method(all_results, section_type)
-                
-                if best_result and best_result.get('success'):
-                    text = best_result.get('text', '')
-                    self.logger.info(f"    Best: {best_method}, text length: {len(text)} chars")
-                    self.logger.info(f"    Preview: {text[:100]}...")
-                    section_data[section_type] = {
-                        'method': best_method,
-                        'data': best_result
-                    }
-                else:
-                    self.logger.warning(f"    No successful extraction for {section_type}")
-                    section_data[section_type] = {'method': 'none', 'data': {}}
-            
-            # Step 3: Parse structured data from extracted sections
-            self.logger.info("Step 3: Parsing structured data...")
-            structured_data = self._parse_sections(section_data)
-            
-            self.logger.info(f"Found {len(structured_data['employees'])} employees, "
-                           f"{len(structured_data['earnings'])} earnings, "
-                           f"{len(structured_data['taxes'])} taxes, "
-                           f"{len(structured_data['deductions'])} deductions")
-            
-            # Step 4: Create Excel tabs
             tabs = self._create_excel_tabs(structured_data)
-            
-            # Step 5: Write Excel file
             excel_path = self._write_excel(tabs, pdf_path, output_dir)
-            
-            # Step 6: Calculate accuracy
             accuracy = self._calculate_accuracy(structured_data, tabs)
-            
-            # Report methods used per section
-            methods_used = {k: v.get('method') for k, v in section_data.items()}
             
             return {
                 'success': True,
                 'excel_path': excel_path,
                 'accuracy': accuracy,
-                'method': 'V2-Bbox-Multi-Method',
-                'methods_per_section': methods_used,
-                'employees_found': len(structured_data['employees']),
-                'earnings_found': len(structured_data['earnings']),
-                'taxes_found': len(structured_data['taxes']),
-                'deductions_found': len(structured_data['deductions'])
+                'method': 'V2-Keywords-Strict',
+                'employees_found': len(employees),
+                'earnings_found': len(earnings),
+                'taxes_found': len(taxes),
+                'deductions_found': len(deductions)
             }
             
         except Exception as e:
-            self.logger.error(f"V2 bbox parsing failed: {e}", exc_info=True)
-            return {
-                'success': False,
-                'error': str(e),
-                'method': 'V2-Bbox-Failed'
-            }
+            self.logger.error(f"V2 parsing failed: {e}", exc_info=True)
+            return {'success': False, 'error': str(e)}
     
-    def _parse_sections(self, section_data: Dict) -> Dict:
-        """Parse structured data from extracted sections."""
-        structured = {
-            'employees': [],
-            'earnings': [],
-            'taxes': [],
-            'deductions': []
-        }
-        
-        # Parse employee info
-        if 'employee_info' in section_data:
-            emp_data = section_data['employee_info']['data']
-            structured['employees'] = self._parse_employee_info(emp_data)
-        
-        # Parse earnings
-        if 'earnings' in section_data:
-            earnings_data = section_data['earnings']['data']
-            structured['earnings'] = self._parse_earnings(earnings_data, structured['employees'])
-        
-        # Parse taxes
-        if 'taxes' in section_data:
-            taxes_data = section_data['taxes']['data']
-            structured['taxes'] = self._parse_taxes(taxes_data, structured['employees'])
-        
-        # Parse deductions
-        if 'deductions' in section_data:
-            deductions_data = section_data['deductions']['data']
-            structured['deductions'] = self._parse_deductions(deductions_data, structured['employees'])
-        
-        return structured
+    def _extract_full_text(self, pdf_path: str) -> str:
+        """Extract complete PDF text."""
+        with pdfplumber.open(pdf_path) as pdf:
+            return "\n".join(page.extract_text() or "" for page in pdf.pages)
     
-    def _parse_employee_info(self, data: Dict) -> List[Dict]:
-        """Parse employee info from extracted data."""
+    def _parse_employee_info(self, text: str) -> List[Dict]:
+        """Parse employees with strict pattern."""
         employees = []
-        text = data.get('text', '')
-        lines = data.get('lines', [])
         
-        # Pattern for employee ID
-        emp_id_pattern = r'(?:emp\s*#?|employee\s*id)[\s:]*(\d{4,6})'
+        # Pattern: "Emp #: 12345" followed by name within 200 chars
+        pattern = r'Emp\s*#:\s*(\d{4,6})'
         
-        # Pattern for names
-        name_pattern = r'([A-Z][a-z]+(?:,?\s+[A-Z][a-z]+)+)'
-        
-        # Find all employees in text
-        for match in re.finditer(emp_id_pattern, text, re.IGNORECASE):
+        for match in re.finditer(pattern, text, re.IGNORECASE):
             emp_id = match.group(1)
             
-            # Look for name near this ID (within 200 chars)
-            context_start = max(0, match.start() - 100)
-            context_end = min(len(text), match.end() + 100)
-            context = text[context_start:context_end]
+            # Get context around match
+            start = max(0, match.start() - 100)
+            end = min(len(text), match.end() + 100)
+            context = text[start:end]
             
-            name_match = re.search(name_pattern, context)
-            name = name_match.group(1) if name_match else f"Employee {emp_id}"
-            
-            employees.append({
-                'employee_id': emp_id,
-                'employee_name': name,
-                'department': ''
-            })
+            # Find name: "FirstName LastName" (both capitalized)
+            name_match = re.search(r'\b([A-Z][a-z]+)\s+([A-Z][a-z]+)\b', context)
+            if name_match:
+                name = f"{name_match.group(1)} {name_match.group(2)}"
+                employees.append({
+                    'employee_id': emp_id,
+                    'employee_name': name,
+                    'department': ''
+                })
         
-        # Remove duplicates
-        seen = set()
-        unique = []
+        # Deduplicate
+        seen = {}
         for emp in employees:
-            key = emp['employee_id']
-            if key not in seen:
-                seen.add(key)
-                unique.append(emp)
+            if emp['employee_id'] not in seen:
+                seen[emp['employee_id']] = emp
         
-        return unique if unique else [{'employee_id': 'Unknown', 'employee_name': 'Unknown', 'department': ''}]
+        return list(seen.values())
     
-    def _parse_earnings(self, data: Dict, employees: List[Dict]) -> List[Dict]:
-        """Parse earnings from extracted data."""
+    def _parse_earnings(self, text: str, employees: List[Dict]) -> List[Dict]:
+        """Parse earnings with strict pattern: Description Rate Hours Amount."""
         earnings = []
-        lines = data.get('lines', [])
         
-        # Pattern for earning lines: "Description $rate hours $amount"
+        # Strict pattern: Word(s) $Rate Hours $Amount with 4 numbers
         # Example: "Regular Hourly $18.1900 55.28 $1,005.60"
-        earning_pattern = r'([A-Za-z][\w\s]{2,30})\s+\$?([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+\$?([\d,]+\.?\d*)'
+        pattern = r'([A-Z][A-Za-z\s-]{2,25})\s+\$?([\d,]+\.\d{2,4})\s+([\d,]+\.\d{2})\s+\$?([\d,]+\.\d{2})'
         
-        for line in lines:
-            match = re.search(earning_pattern, line)
+        for line in text.split('\n'):
+            # Skip metadata lines
+            if ':' in line or 'Date' in line or 'Status' in line or len(line) < 20:
+                continue
+            
+            match = re.search(pattern, line)
             if match:
                 desc = match.group(1).strip()
                 rate = self._safe_float(match.group(2))
                 hours = self._safe_float(match.group(3))
                 amount = self._safe_float(match.group(4))
                 
+                # Skip if doesn't look like earnings
+                if rate > 500 or hours > 200 or amount > 50000:
+                    continue
+                
                 # Map to employee
-                emp_id = ""
-                emp_name = ""
-                for emp in employees:
-                    if emp['employee_id'] in line or emp['employee_name'] in line:
-                        emp_id = emp['employee_id']
-                        emp_name = emp['employee_name']
-                        break
+                emp_id, emp_name = self._find_employee(line, text, employees)
                 
                 earnings.append({
                     'employee_id': emp_id,
@@ -248,30 +146,41 @@ class IntelligentParserOrchestratorV2:
         
         return earnings
     
-    def _parse_taxes(self, data: Dict, employees: List[Dict]) -> List[Dict]:
-        """Parse taxes from extracted data."""
+    def _parse_taxes(self, text: str, employees: List[Dict]) -> List[Dict]:
+        """Parse taxes with strict pattern: Tax Name $Amount $Amount."""
         taxes = []
-        lines = data.get('lines', [])
         
-        # Pattern for tax lines: "Description $wages $amount"
+        # Tax keywords (must have at least one)
+        tax_keywords = ['fed', 'fica', 'medicare', 'ss', 'state', 'w/h', 'tax', 'ut', 'mwt']
+        
+        # Strict pattern: Tax Name $Amount $Amount
         # Example: "Fed W/H $1,005.60 $62.35"
-        tax_pattern = r'([A-Za-z][\w\s/]{2,20})\s+\$?([\d,]+\.?\d*)\s+\$?([\d,]+\.?\d*)'
+        pattern = r'([A-Z][A-Za-z\s/\-]{2,20})\s+\$?([\d,]+\.\d{2})\s+\$?([\d,]+\.\d{2})'
         
-        for line in lines:
-            match = re.search(tax_pattern, line)
+        for line in text.split('\n'):
+            # Skip metadata
+            if ':' in line or 'Date' in line or 'Status' in line or len(line) < 15:
+                continue
+            
+            # Must have tax keyword
+            if not any(kw in line.lower() for kw in tax_keywords):
+                continue
+            
+            # Must NOT have earning keywords
+            if any(kw in line.lower() for kw in ['regular', 'overtime', 'hourly', 'salary', 'bonus']):
+                continue
+            
+            match = re.search(pattern, line)
             if match:
                 desc = match.group(1).strip()
                 wages = self._safe_float(match.group(2))
                 amount = self._safe_float(match.group(3))
                 
-                # Map to employee
-                emp_id = ""
-                emp_name = ""
-                for emp in employees:
-                    if emp['employee_id'] in line or emp['employee_name'] in line:
-                        emp_id = emp['employee_id']
-                        emp_name = emp['employee_name']
-                        break
+                # Skip unrealistic values
+                if amount > 10000:
+                    continue
+                
+                emp_id, emp_name = self._find_employee(line, text, employees)
                 
                 taxes.append({
                     'employee_id': emp_id,
@@ -285,29 +194,41 @@ class IntelligentParserOrchestratorV2:
         
         return taxes
     
-    def _parse_deductions(self, data: Dict, employees: List[Dict]) -> List[Dict]:
-        """Parse deductions from extracted data."""
+    def _parse_deductions(self, text: str, employees: List[Dict]) -> List[Dict]:
+        """Parse deductions with strict pattern."""
         deductions = []
-        lines = data.get('lines', [])
         
-        # Pattern for deduction lines: "Description $amount"
-        # Example: "401k-PR 5.00% $261.23"
-        deduction_pattern = r'([A-Za-z][\w\s\-()]{2,30})\s+(?:[\d.]+%)?\s*\$?([\d,]+\.?\d*)'
+        # Deduction keywords
+        ded_keywords = ['401k', '401(k)', 'insurance', 'medical', 'dental', 'vision', 
+                        'life', 'hsa', 'fsa', 'uniform', 'pre-tax', 'pre tax']
         
-        for line in lines:
-            match = re.search(deduction_pattern, line)
+        # Strict pattern: Description $Amount (single amount)
+        # Example: "Medical Pre Tax $403.81"
+        pattern = r'([A-Z][A-Za-z\s\-()]{2,30})\s+\$?([\d,]+\.\d{2})(?:\s|$)'
+        
+        for line in text.split('\n'):
+            # Skip metadata
+            if ':' in line or 'Date' in line or 'Status' in line or len(line) < 15:
+                continue
+            
+            # Must have deduction keyword
+            if not any(kw in line.lower() for kw in ded_keywords):
+                continue
+            
+            # Must NOT have earning or tax keywords
+            if any(kw in line.lower() for kw in ['regular', 'overtime', 'hourly', 'salary', 'fed', 'fica']):
+                continue
+            
+            match = re.search(pattern, line)
             if match:
                 desc = match.group(1).strip()
                 amount = self._safe_float(match.group(2))
                 
-                # Map to employee
-                emp_id = ""
-                emp_name = ""
-                for emp in employees:
-                    if emp['employee_id'] in line or emp['employee_name'] in line:
-                        emp_id = emp['employee_id']
-                        emp_name = emp['employee_name']
-                        break
+                # Skip unrealistic values
+                if amount > 5000:
+                    continue
+                
+                emp_id, emp_name = self._find_employee(line, text, employees)
                 
                 deductions.append({
                     'employee_id': emp_id,
@@ -320,87 +241,89 @@ class IntelligentParserOrchestratorV2:
         
         return deductions
     
+    def _find_employee(self, line: str, full_text: str, employees: List[Dict]) -> tuple:
+        """Find which employee a line belongs to."""
+        # Check if employee ID or name in line
+        for emp in employees:
+            if emp['employee_id'] in line or emp['employee_name'] in line:
+                return emp['employee_id'], emp['employee_name']
+        
+        # Find nearest employee in text
+        line_pos = full_text.find(line)
+        if line_pos > 0:
+            # Look backwards for nearest employee
+            before_text = full_text[:line_pos]
+            for emp in reversed(employees):
+                emp_pattern = f"Emp #: {emp['employee_id']}"
+                if emp_pattern in before_text:
+                    last_pos = before_text.rfind(emp_pattern)
+                    if line_pos - last_pos < 2000:  # Within 2000 chars
+                        return emp['employee_id'], emp['employee_name']
+        
+        return "", ""
+    
     def _safe_float(self, value: str) -> float:
-        """Safely convert string to float."""
+        """Safely convert to float."""
         try:
             return float(str(value).replace(',', '').replace('$', ''))
-        except (ValueError, AttributeError):
+        except:
             return 0.0
     
     def _create_excel_tabs(self, structured: Dict) -> Dict[str, pd.DataFrame]:
-        """Create 4 Excel tabs from structured data."""
-        
-        # Employee Summary
+        """Create 4 Excel tabs."""
         summary_data = []
         for emp in structured['employees']:
             emp_id = emp['employee_id']
-            emp_name = emp['employee_name']
-            
             emp_earnings = [e for e in structured['earnings'] if e['employee_id'] == emp_id]
-            total_earnings = sum(e['amount'] for e in emp_earnings)
-            
             emp_taxes = [t for t in structured['taxes'] if t['employee_id'] == emp_id]
-            total_taxes = sum(t['amount'] for t in emp_taxes)
-            
             emp_deductions = [d for d in structured['deductions'] if d['employee_id'] == emp_id]
-            total_deductions = sum(d['amount'] for d in emp_deductions)
             
             summary_data.append({
                 'Employee ID': emp_id,
-                'Name': emp_name,
-                'Total Earnings': total_earnings,
-                'Total Taxes': total_taxes,
-                'Total Deductions': total_deductions,
-                'Net Pay': total_earnings - total_taxes - total_deductions
+                'Name': emp['employee_name'],
+                'Total Earnings': sum(e['amount'] for e in emp_earnings),
+                'Total Taxes': sum(t['amount'] for t in emp_taxes),
+                'Total Deductions': sum(d['amount'] for d in emp_deductions),
+                'Net Pay': sum(e['amount'] for e in emp_earnings) - sum(t['amount'] for t in emp_taxes) - sum(d['amount'] for d in emp_deductions)
             })
-        
-        # Earnings
-        earnings_data = [{
-            'Employee ID': e['employee_id'],
-            'Name': e['employee_name'],
-            'Description': e['description'],
-            'Hours': e['hours'],
-            'Rate': e['rate'],
-            'Amount': e['amount'],
-            'Current YTD': e['current_ytd']
-        } for e in structured['earnings']]
-        
-        # Taxes
-        taxes_data = [{
-            'Employee ID': t['employee_id'],
-            'Name': t['employee_name'],
-            'Description': t['description'],
-            'Wages Base': t['wages_base'],
-            'Amount': t['amount'],
-            'Wages YTD': t['wages_ytd'],
-            'Amount YTD': t['amount_ytd']
-        } for t in structured['taxes']]
-        
-        # Deductions
-        deductions_data = [{
-            'Employee ID': d['employee_id'],
-            'Name': d['employee_name'],
-            'Description': d['description'],
-            'Scheduled': d['scheduled'],
-            'Amount': d['amount'],
-            'Amount YTD': d['amount_ytd']
-        } for d in structured['deductions']]
         
         return {
             'Employee Summary': pd.DataFrame(summary_data),
-            'Earnings': pd.DataFrame(earnings_data),
-            'Taxes': pd.DataFrame(taxes_data),
-            'Deductions': pd.DataFrame(deductions_data)
+            'Earnings': pd.DataFrame([{
+                'Employee ID': e['employee_id'],
+                'Name': e['employee_name'],
+                'Description': e['description'],
+                'Hours': e['hours'],
+                'Rate': e['rate'],
+                'Amount': e['amount'],
+                'Current YTD': e['current_ytd']
+            } for e in structured['earnings']]),
+            'Taxes': pd.DataFrame([{
+                'Employee ID': t['employee_id'],
+                'Name': t['employee_name'],
+                'Description': t['description'],
+                'Wages Base': t['wages_base'],
+                'Amount': t['amount'],
+                'Wages YTD': t['wages_ytd'],
+                'Amount YTD': t['amount_ytd']
+            } for t in structured['taxes']]),
+            'Deductions': pd.DataFrame([{
+                'Employee ID': d['employee_id'],
+                'Name': d['employee_name'],
+                'Description': d['description'],
+                'Scheduled': d['scheduled'],
+                'Amount': d['amount'],
+                'Amount YTD': d['amount_ytd']
+            } for d in structured['deductions']])
         }
     
     def _write_excel(self, tabs: Dict[str, pd.DataFrame], pdf_path: str, output_dir: str) -> str:
-        """Write tabs to Excel file."""
+        """Write Excel file."""
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         
-        pdf_name = Path(pdf_path).stem
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        output_path = output_dir / f"{pdf_name}_parsed_v2_bbox_{timestamp}.xlsx"
+        output_path = output_dir / f"{Path(pdf_path).stem}_parsed_v2_{timestamp}.xlsx"
         
         with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
             for tab_name, df in tabs.items():
@@ -409,38 +332,16 @@ class IntelligentParserOrchestratorV2:
         return str(output_path)
     
     def _calculate_accuracy(self, structured: Dict, tabs: Dict[str, pd.DataFrame]) -> float:
-        """Calculate accuracy score."""
+        """Calculate accuracy."""
         score = 0
         
-        # Employees found (30 points)
-        if structured['employees']:
-            score += 20
-        if len(structured['employees']) >= 2:
-            score += 10
-        
-        # Data extracted (40 points)
+        if structured['employees'] and len(structured['employees']) >= 1:
+            score += 30
         if structured['earnings']:
-            score += 15
+            score += 25
         if structured['taxes']:
-            score += 15
+            score += 25
         if structured['deductions']:
-            score += 10
-        
-        # Real data (30 points)
-        emp_summary = tabs['Employee Summary']
-        if not emp_summary.empty:
-            if emp_summary['Total Earnings'].sum() > 0:
-                score += 15
-            if emp_summary['Total Taxes'].sum() > 0:
-                score += 10
-            if emp_summary['Total Deductions'].sum() > 0:
-                score += 5
+            score += 20
         
         return min(score, 100.0)
-
-
-# Convenience function
-def parse_pdf_intelligent_v2(pdf_path: str, output_dir: str = '/data/parsed_registers') -> Dict[str, Any]:
-    """Parse PDF using V2 bbox-based approach."""
-    orchestrator = IntelligentParserOrchestratorV2()
-    return orchestrator.parse(pdf_path, output_dir)
