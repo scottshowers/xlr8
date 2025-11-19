@@ -1,6 +1,7 @@
 """
-Enhanced LLM Answer Synthesis Module - BUILD 2342
+Enhanced LLM Answer Synthesis Module - BUILD 2343
 Optimized for UKG implementation analysis with domain-specific prompts
+Uses HTTP Basic Auth (same as RAG handler)
 Target: 90%+ relevancy and accuracy
 """
 
@@ -9,6 +10,7 @@ from typing import Dict, List, Any, Optional
 import requests
 import json
 import re
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +21,18 @@ class EnhancedLLMSynthesizer:
     Designed for 90%+ accuracy on implementation analysis questions.
     """
     
-    def __init__(self, ollama_base_url: str = "http://178.156.190.64:11435"):
+    def __init__(
+        self, 
+        ollama_base_url: str = "http://178.156.190.64:11435",
+        username: str = None,
+        password: str = None
+    ):
         self.ollama_base_url = ollama_base_url
         self.model = "llama3.2:3b"
+        
+        # HTTP Basic Auth (same as RAG handler)
+        self.ollama_username = username or os.environ.get('LLM_USERNAME', 'xlr8')
+        self.ollama_password = password or os.environ.get('LLM_PASSWORD', 'Argyle76226#')
         
         # UKG domain knowledge
         self.domain_knowledge = self._load_domain_knowledge()
@@ -215,9 +226,12 @@ Begin your analysis:
         """Call Ollama API with optimized parameters for accuracy."""
         
         try:
+            from requests.auth import HTTPBasicAuth
+            
             url = f"{self.ollama_base_url}/api/generate"
             
             logger.info(f"Calling Ollama at {url} with model {self.model}")
+            logger.info(f"Using HTTP Basic Auth with username: {self.ollama_username}")
             
             payload = {
                 "model": self.model,
@@ -232,12 +246,21 @@ Begin your analysis:
                 }
             }
             
-            response = requests.post(url, json=payload, timeout=120)  # 2 min for complex prompts
+            # Use HTTP Basic Auth (same as RAG handler)
+            response = requests.post(
+                url, 
+                json=payload, 
+                auth=HTTPBasicAuth(self.ollama_username, self.ollama_password),
+                timeout=120
+            )
             
             if response.status_code == 200:
                 result = response.json()
                 logger.info("Ollama synthesis successful")
                 return result.get('response', '')
+            elif response.status_code == 401:
+                logger.error(f"Ollama API authentication failed (401) - check username/password")
+                return ""
             else:
                 logger.error(f"Ollama API error: {response.status_code} - {response.text}")
                 return ""
@@ -334,8 +357,19 @@ Begin your analysis:
 _enhanced_synthesizer = None
 
 def get_enhanced_synthesizer() -> EnhancedLLMSynthesizer:
-    """Get or create enhanced synthesizer instance."""
+    """Get or create enhanced synthesizer instance with auth from environment."""
     global _enhanced_synthesizer
     if _enhanced_synthesizer is None:
-        _enhanced_synthesizer = EnhancedLLMSynthesizer()
+        import os
+        
+        # Read configuration from environment (matches RAG handler)
+        ollama_url = os.environ.get('LLM_ENDPOINT', 'http://178.156.190.64:11435')
+        username = os.environ.get('LLM_USERNAME', 'xlr8')
+        password = os.environ.get('LLM_PASSWORD', 'Argyle76226#')
+        
+        _enhanced_synthesizer = EnhancedLLMSynthesizer(
+            ollama_base_url=ollama_url,
+            username=username,
+            password=password
+        )
     return _enhanced_synthesizer
