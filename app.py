@@ -33,6 +33,7 @@ from pages.setup.connections import render_connections_page
 from pages.qa.sit import render_sit_page
 from pages.qa.uat import render_uat_page
 from pages.qa.scenarios import render_scenarios_page
+from pages.admin.analysis_questions import render_analysis_questions
 from pages.admin.users import render_users_page
 from pages.admin.audit import render_audit_page
 from pages.admin.settings import render_settings_page
@@ -174,21 +175,25 @@ with tab3:
     with qa_subtab3:
         render_scenarios_page()
 
-# TAB 4: ADMIN (Administration)
+# TAB 4: ADMIN (Administration) - NOW WITH 4 TABS
 with tab4:
-    admin_subtab1, admin_subtab2, admin_subtab3 = st.tabs([
-        "User Management",
-        "Audit Logs",
-        "System Settings"
+    admin_subtab1, admin_subtab2, admin_subtab3, admin_subtab4 = st.tabs([
+        "📋 Analysis Questions",
+        "👥 User Management",
+        "📊 Audit Logs",
+        "⚙️ System Settings"
     ])
     
     with admin_subtab1:
-        render_users_page()
+        render_analysis_questions()
     
     with admin_subtab2:
-        render_audit_page()
+        render_users_page()
     
     with admin_subtab3:
+        render_audit_page()
+    
+    with admin_subtab4:
         render_settings_page()
 
 # Footer - PROFESSIONAL & COMPACT
