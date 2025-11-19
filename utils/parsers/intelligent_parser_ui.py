@@ -1,287 +1,305 @@
 """
-Intelligent Parser UI Component for XLR8
-Streamlit interface for intelligent PDF parsing with accuracy display
+Enhanced Intelligent Parser UI
+Shows parsing stages, accuracy, and save functionality
 """
 
 import streamlit as st
-import pandas as pd
 from pathlib import Path
-from datetime import datetime
+from typing import Optional, Dict, Any
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
 class IntelligentParserUI:
-    """Streamlit UI component for intelligent PDF parsing"""
+    """
+    UI component for intelligent PDF parsing with stage visibility.
+    """
     
-    def __init__(self, orchestrator):
-        """
-        Initialize UI component
+    def __init__(self):
+        self.uploads_dir = Path('/data/uploads')
+        self.parsed_dir = Path('/data/parsed_registers')
         
-        Args:
-            orchestrator: IntelligentParserOrchestrator instance
-        """
-        self.orchestrator = orchestrator
-        
+        # Ensure directories exist
+        self.uploads_dir.mkdir(parents=True, exist_ok=True)
+        self.parsed_dir.mkdir(parents=True, exist_ok=True)
+    
     def render(self):
-        """Render the intelligent parser interface"""
+        """
+        Render the intelligent parser UI.
+        """
         st.header("Intelligent PDF Parser")
-        st.markdown("""
-        Upload a PDF register and the intelligent parser will automatically:
-        1. Try custom parsers saved from previous successful parses
-        2. Try adaptive parsers optimized for register documents
-        3. Generate and test a new custom parser if needed
         
-        The system reports parsing accuracy (0-100%) based on data quality.
+        st.markdown("""
+        **Multi-stage parsing system for complex payroll registers:**
+        1. Custom parsers (saved from previous successes)
+        2. Specialized parsers (Dayforce, ADP, etc.)
+        3. Adaptive parsers (general purpose)
+        4. Generated parsers (analyze and create new)
         """)
         
-        # File upload
-        uploaded_file = st.file_uploader(
-            "Upload PDF Register",
-            type=['pdf'],
-            help="Upload a payroll or employee register PDF"
-        )
+        # Get uploaded files
+        uploaded_files = self._get_uploaded_files()
         
-        # Parsing options
-        col1, col2 = st.columns(2)
+        if not uploaded_files:
+            st.info("No PDF files uploaded yet. Upload files in the 'Document Upload' tab first.")
+            return
+        
+        # File selection
+        col1, col2 = st.columns([2, 1])
+        
         with col1:
-            auto_save = st.checkbox(
-                "Auto-save successful parsers",
-                value=True,
-                help="Automatically save parsers with accuracy >= 70%"
+            selected_file = st.selectbox(
+                "Select PDF to Parse",
+                options=[f['name'] for f in uploaded_files],
+                help="Choose a PDF file from your uploads"
             )
+        
         with col2:
-            min_accuracy = st.slider(
-                "Minimum accuracy to save (%)",
-                min_value=50,
-                max_value=100,
-                value=70,
-                help="Only save parsers meeting this accuracy threshold"
+            document_type = st.selectbox(
+                "Document Type (optional)",
+                options=['Auto-detect', 'Dayforce', 'ADP', 'Paychex', 'Other'],
+                help="Select document type for specialized parsing"
             )
         
         # Parse button
-        if uploaded_file is not None:
-            if st.button("Parse PDF", type="primary"):
-                self._handle_parsing(uploaded_file, auto_save, min_accuracy)
+        if st.button("Parse Document", type="primary", use_container_width=True):
+            self._run_parser(selected_file, document_type)
         
-        # Display saved parsers
-        self._display_saved_parsers()
+        # Show saved parsers
+        st.markdown("---")
+        self._show_saved_parsers()
     
-    def _handle_parsing(self, uploaded_file, auto_save: bool, min_accuracy: int):
-        """Handle PDF parsing workflow"""
-        try:
-            # Save uploaded file
-            upload_dir = Path("/data/uploads")
-            upload_dir.mkdir(parents=True, exist_ok=True)
-            
-            pdf_path = upload_dir / uploaded_file.name
-            with open(pdf_path, 'wb') as f:
-                f.write(uploaded_file.getbuffer())
-            
-            st.info(f"Processing: {uploaded_file.name}")
-            
-            # Create progress indicators
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            # Stage 1: Custom parsers
-            status_text.text("Stage 1: Trying custom parsers...")
-            progress_bar.progress(10)
-            
-            result = self.orchestrator.parse_with_intelligence(
-                str(pdf_path),
-                auto_save=auto_save,
-                min_accuracy_to_save=min_accuracy
-            )
-            
-            progress_bar.progress(100)
-            status_text.empty()
-            
-            # Display results
-            self._display_parsing_results(result, uploaded_file.name)
-            
-        except Exception as e:
-            st.error(f"Parsing failed: {str(e)}")
-            logger.error(f"Parsing error: {str(e)}", exc_info=True)
-    
-    def _display_parsing_results(self, result: dict, filename: str):
-        """Display parsing results with accuracy metrics"""
+    def _get_uploaded_files(self) -> list:
+        """
+        Get list of uploaded PDF files.
+        """
+        pdf_files = list(self.uploads_dir.glob('*.pdf'))
         
-        if not result.get('success'):
-            st.error("Parsing failed")
-            if 'error' in result:
-                st.error(f"Error: {result['error']}")
+        return [
+            {
+                'name': f.name,
+                'path': str(f),
+                'size': f.stat().st_size,
+                'modified': f.stat().st_mtime
+            }
+            for f in pdf_files
+        ]
+    
+    def _run_parser(self, filename: str, document_type: str):
+        """
+        Run intelligent parser on selected file.
+        """
+        pdf_path = self.uploads_dir / filename
+        
+        if not pdf_path.exists():
+            st.error(f"File not found: {filename}")
             return
         
-        # Success header with accuracy
-        accuracy = result.get('accuracy', 0)
-        stage = result.get('stage_used', 'unknown')
+        # Convert document type
+        doc_type = None if document_type == 'Auto-detect' else document_type.lower()
         
-        # Color-coded accuracy display
-        if accuracy >= 80:
-            accuracy_color = "green"
-            accuracy_label = "Excellent"
-        elif accuracy >= 70:
-            accuracy_color = "blue"
-            accuracy_label = "Good"
-        elif accuracy >= 50:
-            accuracy_color = "orange"
-            accuracy_label = "Fair"
-        else:
-            accuracy_color = "red"
-            accuracy_label = "Poor"
+        # Show progress container
+        progress_container = st.container()
         
-        st.success(f"Parsing completed using: {stage}")
-        
-        # Accuracy metrics card
-        st.markdown(f"""
-        <div style="padding: 20px; border-radius: 10px; background-color: #f0f2f6; margin: 10px 0;">
-            <h3 style="margin: 0; color: #1f1f1f;">Parsing Accuracy</h3>
-            <div style="display: flex; align-items: center; margin-top: 10px;">
-                <div style="font-size: 48px; font-weight: bold; color: {accuracy_color}; margin-right: 20px;">
-                    {accuracy}%
-                </div>
-                <div>
-                    <div style="font-size: 20px; color: {accuracy_color}; font-weight: bold;">
-                        {accuracy_label}
-                    </div>
-                    <div style="font-size: 14px; color: #666;">
-                        Parser: {stage}
-                    </div>
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Accuracy breakdown
-        if 'accuracy_breakdown' in result:
-            breakdown = result['accuracy_breakdown']
+        with progress_container:
+            st.info(f"Parsing: {filename}")
             
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Basic Success", f"{breakdown.get('basic_success', 0)}%")
-            with col2:
-                st.metric("Table Quality", f"{breakdown.get('table_quality', 0)}%")
-            with col3:
-                st.metric("Text Extraction", f"{breakdown.get('text_extraction', 0)}%")
-            with col4:
-                st.metric("Data Quality", f"{breakdown.get('data_quality', 0)}%")
-        
-        # Parser details
-        with st.expander("Parser Details"):
-            st.write(f"**Stage Used:** {stage}")
-            if 'parser_name' in result:
-                st.write(f"**Parser Name:** {result['parser_name']}")
-            if 'execution_time' in result:
-                st.write(f"**Execution Time:** {result['execution_time']:.2f}s")
-            if 'was_saved' in result and result['was_saved']:
-                st.success("Parser saved for future use")
-        
-        # Display parsed data
-        if 'output_file' in result and Path(result['output_file']).exists():
-            st.subheader("Parsed Data Preview")
+            # Stage indicators
+            stage_cols = st.columns(4)
+            stage_status = {}
             
+            for i, col in enumerate(stage_cols, 1):
+                with col:
+                    stage_status[i] = st.empty()
+                    stage_status[i].markdown(f"**Stage {i}**\n\nPending...")
+            
+            # Run parser
             try:
-                df = pd.read_excel(result['output_file'])
+                from utils.parsers.intelligent_parser_orchestrator_enhanced import parse_pdf_intelligent
                 
-                # Show summary stats
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Total Rows", len(df))
-                with col2:
-                    st.metric("Total Columns", len(df.columns))
-                with col3:
-                    non_empty = df.count().sum()
-                    total_cells = len(df) * len(df.columns)
-                    fill_rate = (non_empty / total_cells * 100) if total_cells > 0 else 0
-                    st.metric("Fill Rate", f"{fill_rate:.1f}%")
+                result = parse_pdf_intelligent(str(pdf_path), doc_type)
                 
-                # Show data preview
-                st.dataframe(df.head(20), use_container_width=True)
-                
-                # Download button
-                with open(result['output_file'], 'rb') as f:
-                    st.download_button(
-                        label="Download Parsed Excel",
-                        data=f.read(),
-                        file_name=Path(result['output_file']).name,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
+                # Update stage indicators
+                for stage_info in result.get('stages_attempted', []):
+                    stage_num = stage_info['stage']
                     
+                    if stage_info['success']:
+                        emoji = "✅"
+                        status = f"Success\n{stage_info.get('accuracy', 0)}%"
+                        color = "green"
+                    elif stage_info['attempted']:
+                        emoji = "❌"
+                        status = "Failed"
+                        color = "red"
+                    else:
+                        emoji = "⏭️"
+                        status = "Skipped"
+                        color = "gray"
+                    
+                    stage_status[stage_num].markdown(
+                        f"**Stage {stage_num}** {emoji}\n\n{status}"
+                    )
+                
+                # Show results
+                st.markdown("---")
+                
+                if result.get('status') == 'success':
+                    self._show_success_result(result)
+                else:
+                    self._show_error_result(result)
+                
             except Exception as e:
-                st.error(f"Could not preview data: {str(e)}")
-        
-        # Show any warnings or issues
-        if 'warnings' in result and result['warnings']:
-            with st.expander("Warnings"):
-                for warning in result['warnings']:
-                    st.warning(warning)
+                st.error(f"Parser error: {str(e)}")
+                logger.error(f"Parser error: {str(e)}", exc_info=True)
     
-    def _display_saved_parsers(self):
-        """Display list of saved custom parsers"""
+    def _show_success_result(self, result: Dict[str, Any]):
+        """
+        Display successful parse results.
+        """
+        st.success(f"Parsing completed successfully! (Stage {result['stage_used']})")
+        
+        # Metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Accuracy", f"{result.get('accuracy', 0)}%")
+        
+        with col2:
+            st.metric("Employees", result.get('employee_count', 0))
+        
+        with col3:
+            st.metric("Stage Used", result.get('stage_used', 'N/A'))
+        
+        with col4:
+            tabs_info = result.get('tabs', {})
+            total_rows = sum(tabs_info.values()) if tabs_info else 0
+            st.metric("Total Rows", total_rows)
+        
+        # Download link
+        if result.get('output_path'):
+            output_path = Path(result['output_path'])
+            
+            if output_path.exists():
+                st.markdown("---")
+                
+                with open(output_path, 'rb') as f:
+                    st.download_button(
+                        label="Download Excel File",
+                        data=f,
+                        file_name=output_path.name,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
+        
+        # Save parser option
+        if result.get('save_recommended'):
+            st.markdown("---")
+            st.info(f"High accuracy achieved! Reason: {result.get('save_reason', 'Unknown')}")
+            
+            with st.expander("Save Parser for Future Use"):
+                parser_name = st.text_input(
+                    "Parser Name",
+                    value=f"custom_{Path(result['pdf_path']).stem}",
+                    help="Name for saving this parser"
+                )
+                
+                if st.button("Save Parser"):
+                    self._save_parser(result, parser_name)
+    
+    def _show_error_result(self, result: Dict[str, Any]):
+        """
+        Display error results.
+        """
+        st.error("Parsing failed")
+        
+        st.markdown("**Stages Attempted:**")
+        for stage_info in result.get('stages_attempted', []):
+            st.write(f"- Stage {stage_info['stage']} ({stage_info['name']}): {'Success' if stage_info['success'] else 'Failed'}")
+        
+        if result.get('errors'):
+            st.markdown("**Errors:**")
+            for error in result['errors']:
+                st.write(f"- {error}")
+        
+        st.info("Try selecting a different document type or uploading a clearer PDF.")
+    
+    def _save_parser(self, result: Dict[str, Any], parser_name: str):
+        """
+        Save a successful parser.
+        """
+        try:
+            from utils.parsers.intelligent_parser_orchestrator_enhanced import IntelligentParserOrchestrator
+            
+            orchestrator = IntelligentParserOrchestrator()
+            
+            # Get parser code
+            parser_code = result.get('parser_code')
+            
+            if not parser_code:
+                st.error("No parser code available to save")
+                return
+            
+            # Save with metadata
+            metadata = {
+                'accuracy': result.get('accuracy'),
+                'stage': result.get('stage_used'),
+                'employee_count': result.get('employee_count'),
+                'source_pdf': Path(result['pdf_path']).name
+            }
+            
+            success = orchestrator.save_parser(parser_name, parser_code, metadata)
+            
+            if success:
+                st.success(f"Parser saved as: {parser_name}")
+                st.balloons()
+            else:
+                st.error("Failed to save parser")
+                
+        except Exception as e:
+            st.error(f"Save error: {str(e)}")
+            logger.error(f"Save error: {str(e)}", exc_info=True)
+    
+    def _show_saved_parsers(self):
+        """
+        Display list of saved custom parsers.
+        """
         st.subheader("Saved Custom Parsers")
         
-        parsers_dir = Path("/data/custom_parsers")
-        if not parsers_dir.exists():
-            st.info("No custom parsers saved yet")
-            return
-        
-        parser_files = list(parsers_dir.glob("*.py"))
-        if not parser_files:
-            st.info("No custom parsers saved yet")
-            return
-        
-        # Create a table of saved parsers
-        parser_data = []
-        for parser_file in sorted(parser_files, key=lambda x: x.stat().st_mtime, reverse=True):
-            stat = parser_file.stat()
-            parser_data.append({
-                'Name': parser_file.stem,
-                'Created': datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M'),
-                'Size': f"{stat.st_size / 1024:.1f} KB"
-            })
-        
-        if parser_data:
-            df = pd.DataFrame(parser_data)
-            st.dataframe(df, use_container_width=True, hide_index=True)
+        try:
+            from utils.parsers.intelligent_parser_orchestrator_enhanced import IntelligentParserOrchestrator
             
-            st.caption(f"Total custom parsers: {len(parser_data)}")
+            orchestrator = IntelligentParserOrchestrator()
+            parsers = orchestrator.list_custom_parsers()
+            
+            if not parsers:
+                st.info("No custom parsers saved yet. Parse documents successfully to save parsers.")
+                return
+            
+            for parser in parsers:
+                with st.expander(f"{parser['name']}"):
+                    col1, col2 = st.columns([3, 1])
+                    
+                    with col1:
+                        st.write(f"**Modified:** {parser['modified'].strftime('%Y-%m-%d %H:%M')}")
+                        st.write(f"**Size:** {parser['size']:,} bytes")
+                    
+                    with col2:
+                        if st.button("Delete", key=f"delete_{parser['name']}"):
+                            if orchestrator.delete_parser(parser['name']):
+                                st.success(f"Deleted: {parser['name']}")
+                                st.rerun()
+                            else:
+                                st.error("Delete failed")
         
-        # Parser management
-        with st.expander("Manage Parsers"):
-            selected_parser = st.selectbox(
-                "Select parser",
-                options=[p['Name'] for p in parser_data] if parser_data else []
-            )
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("View Code"):
-                    if selected_parser:
-                        parser_path = parsers_dir / f"{selected_parser}.py"
-                        if parser_path.exists():
-                            with open(parser_path, 'r') as f:
-                                code = f.read()
-                            st.code(code, language='python')
-            
-            with col2:
-                if st.button("Delete Parser", type="secondary"):
-                    if selected_parser:
-                        parser_path = parsers_dir / f"{selected_parser}.py"
-                        if parser_path.exists():
-                            parser_path.unlink()
-                            st.success(f"Deleted {selected_parser}")
-                            st.rerun()
+        except Exception as e:
+            st.error(f"Error loading parsers: {str(e)}")
+            logger.error(f"Error loading parsers: {str(e)}", exc_info=True)
 
 
-def render_intelligent_parser(orchestrator):
+def render_intelligent_parser_ui():
     """
-    Convenience function to render intelligent parser UI
-    
-    Args:
-        orchestrator: IntelligentParserOrchestrator instance
+    Convenience function to render the UI.
     """
-    ui = IntelligentParserUI(orchestrator)
+    ui = IntelligentParserUI()
     ui.render()
