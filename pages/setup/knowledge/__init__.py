@@ -206,11 +206,13 @@ def render_knowledge_page():
                                     with st.expander("📋 Table Details", expanded=True):
                                         for info in result['table_info']:
                                             sheet_name = info.get('sheet_name', f"Table {info.get('table_number', '?')}")
+                                            # Handle None values in headers
+                                            headers = [str(h) if h is not None else 'Unnamed' for h in info.get('headers', [])]
                                             st.markdown(f"""
 **{sheet_name}:**
 - **Rows:** {info['rows']:,}
 - **Columns:** {info['columns']}
-- **Headers:** {', '.join(info['headers'][:5])}{'...' if len(info['headers']) > 5 else ''}
+- **Headers:** {', '.join(headers[:5])}{'...' if len(headers) > 5 else ''}
 """)
                                     
                                     # Download button
