@@ -275,7 +275,7 @@ def render_parser_tab():
     Tab 4: Intelligent PDF parser.
     """
     try:
-        from utils.parsers.intelligent_parser_ui_enhanced import render_intelligent_parser_ui
+        from utils.parsers.intelligent_parser_ui import render_intelligent_parser_ui
         render_intelligent_parser_ui()
         
     except ImportError as e:
@@ -286,8 +286,8 @@ def render_parser_tab():
         The intelligent parser module is not yet deployed. 
         
         To enable:
-        1. Deploy intelligent_parser_ui_enhanced.py to utils/parsers/
-        2. Deploy intelligent_parser_orchestrator_enhanced.py to utils/parsers/
+        1. Deploy intelligent_parser_ui.py to utils/parsers/
+        2. Deploy intelligent_parser_orchestrator.py to utils/parsers/
         3. Deploy dayforce_parser_enhanced.py to utils/parsers/
         4. Restart application
         """)
