@@ -116,7 +116,7 @@ class IntelligentParserUI:
             
             # Run parser
             try:
-                from utils.parsers.intelligent_parser_orchestrator_enhanced import parse_pdf_intelligent
+                from utils.parsers.intelligent_parser_orchestrator import parse_pdf_intelligent
                 
                 result = parse_pdf_intelligent(str(pdf_path), doc_type)
                 
@@ -229,7 +229,7 @@ class IntelligentParserUI:
         Save a successful parser.
         """
         try:
-            from utils.parsers.intelligent_parser_orchestrator_enhanced import IntelligentParserOrchestrator
+            from utils.parsers.intelligent_parser_orchestrator import IntelligentParserOrchestrator
             
             orchestrator = IntelligentParserOrchestrator()
             
@@ -267,7 +267,7 @@ class IntelligentParserUI:
         st.subheader("Saved Custom Parsers")
         
         try:
-            from utils.parsers.intelligent_parser_orchestrator_enhanced import IntelligentParserOrchestrator
+            from utils.parsers.intelligent_parser_orchestrator import IntelligentParserOrchestrator
             
             orchestrator = IntelligentParserOrchestrator()
             parsers = orchestrator.list_custom_parsers()
