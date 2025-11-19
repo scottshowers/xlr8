@@ -97,46 +97,45 @@ class DayforceParserEnhanced:
     
     def _extract_text_blocks_with_positions(self, pdf_path: str) -> List[Dict[str, Any]]:
         """
-        Extract text blocks with x, y coordinates for layout analysis.
+        Extract text with basic line-based parsing (more reliable than dict for finding patterns).
         """
         doc = fitz.open(pdf_path)
         all_blocks = []
         
         for page_num, page in enumerate(doc):
-            # Get text blocks with position info
-            blocks = page.get_text("dict")["blocks"]
+            # Get simple text (preserves lines better)
+            text = page.get_text()
+            lines = text.split('\n')
             
-            for block in blocks:
-                if block["type"] == 0:  # Text block
-                    for line in block.get("lines", []):
-                        for span in line.get("spans", []):
-                            text = span["text"].strip()
-                            if text:
-                                all_blocks.append({
-                                    'text': text,
-                                    'x0': span["bbox"][0],
-                                    'y0': span["bbox"][1],
-                                    'x1': span["bbox"][2],
-                                    'y1': span["bbox"][3],
-                                    'page': page_num,
-                                    'font_size': span["size"],
-                                    'font_name': span["font"]
-                                })
+            # Create pseudo-blocks from lines
+            y_pos = 0
+            for line_num, line in enumerate(lines):
+                line = line.strip()
+                if line:
+                    all_blocks.append({
+                        'text': line,
+                        'x0': 0,
+                        'y0': y_pos,
+                        'x1': 100,
+                        'y1': y_pos + 10,
+                        'page': page_num,
+                        'font_size': 10,
+                        'font_name': 'default',
+                        'line_num': line_num
+                    })
+                    y_pos += 15  # Increment y position
         
         doc.close()
-        
-        # Sort by page, then y position, then x position
-        all_blocks.sort(key=lambda b: (b['page'], b['y0'], b['x0']))
         
         return all_blocks
     
     def _analyze_layout_structure(self) -> Dict[str, Any]:
         """
-        Analyze layout structure dynamically.
-        Determines: horizontal vs vertical layout, column positions, section headers
+        Analyze layout structure from line-based text extraction.
+        Simplified approach focusing on finding employee markers.
         """
         structure = {
-            'layout_type': 'unknown',
+            'layout_type': 'simple',
             'columns': [],
             'sections': [],
             'employee_markers': []
@@ -145,43 +144,7 @@ class DayforceParserEnhanced:
         if not self.text_blocks:
             return structure
         
-        # Detect columns by x-position clustering
-        x_positions = [block['x0'] for block in self.text_blocks]
-        columns = self._cluster_positions(x_positions, threshold=50)
-        structure['columns'] = sorted(columns)
-        
-        logger.info(f"Detected {len(columns)} columns at x-positions: {columns}")
-        
-        # Detect if layout is horizontal (multiple employees side-by-side)
-        # or vertical (employees stacked)
-        y_positions = [block['y0'] for block in self.text_blocks]
-        y_clusters = self._cluster_positions(y_positions, threshold=100)
-        
-        if len(columns) >= 4 and len(y_clusters) >= 2:
-            structure['layout_type'] = 'horizontal_multi_column'
-            logger.info("Detected horizontal multi-column layout")
-        elif len(y_clusters) >= 3:
-            structure['layout_type'] = 'vertical_stacked'
-            logger.info("Detected vertical stacked layout")
-        else:
-            structure['layout_type'] = 'simple'
-            logger.info("Detected simple layout")
-        
-        # Detect section headers (larger font, specific keywords)
-        section_keywords = ['earnings', 'taxes', 'deductions', 'employee info', 'employee', 'info']
-        
-        for block in self.text_blocks:
-            text_lower = block['text'].lower()
-            
-            # Check if this looks like a section header
-            if any(keyword in text_lower for keyword in section_keywords):
-                structure['sections'].append({
-                    'text': block['text'],
-                    'x': block['x0'],
-                    'y': block['y0']
-                })
-        
-        logger.info(f"Detected {len(structure['sections'])} section headers")
+        logger.info(f"Analyzing {len(self.text_blocks)} text lines")
         
         # Detect employee markers (Emp #:, Employee ID, etc.)
         emp_patterns = [r'emp\s*#', r'employee\s*id', r'emp\s*id', r'employee\s*#']
@@ -189,14 +152,26 @@ class DayforceParserEnhanced:
         for block in self.text_blocks:
             text_lower = block['text'].lower()
             
+            # Check for employee markers
             if any(re.search(pattern, text_lower) for pattern in emp_patterns):
                 structure['employee_markers'].append({
+                    'text': block['text'],
+                    'x': block['x0'],
+                    'y': block['y0'],
+                    'line_num': block.get('line_num', 0)
+                })
+                logger.info(f"Found employee marker: {block['text']}")
+            
+            # Check for section headers
+            if any(keyword in text_lower for keyword in ['earnings', 'taxes', 'deductions']):
+                structure['sections'].append({
                     'text': block['text'],
                     'x': block['x0'],
                     'y': block['y0']
                 })
         
         logger.info(f"Detected {len(structure['employee_markers'])} employee markers")
+        logger.info(f"Detected {len(structure['sections'])} section headers")
         
         return structure
     
@@ -228,7 +203,7 @@ class DayforceParserEnhanced:
     
     def _detect_employee_regions(self) -> List[Dict[str, Any]]:
         """
-        Detect employee regions based on structure analysis.
+        Detect employee regions using line numbers (simplified approach).
         """
         regions = []
         
@@ -238,52 +213,38 @@ class DayforceParserEnhanced:
             logger.warning("No employee markers found - using entire document as single region")
             return [{
                 'blocks': self.text_blocks,
-                'x_min': min(b['x0'] for b in self.text_blocks),
-                'x_max': max(b['x1'] for b in self.text_blocks),
-                'y_min': min(b['y0'] for b in self.text_blocks),
-                'y_max': max(b['y1'] for b in self.text_blocks)
+                'start_line': 0,
+                'end_line': len(self.text_blocks)
             }]
         
-        # Sort markers by position
-        if self.structure.get('layout_type') == 'horizontal_multi_column':
-            # Sort by x position (left to right)
-            emp_markers = sorted(emp_markers, key=lambda m: m['x'])
-        else:
-            # Sort by y position (top to bottom)
-            emp_markers = sorted(emp_markers, key=lambda m: m['y'])
+        # Sort markers by line number
+        emp_markers = sorted(emp_markers, key=lambda m: m.get('line_num', 0))
         
-        # Create regions around each marker
+        logger.info(f"Creating regions from {len(emp_markers)} markers")
+        
+        # Create regions between markers
         for i, marker in enumerate(emp_markers):
-            # Determine region boundaries
-            if self.structure.get('layout_type') == 'horizontal_multi_column':
-                # Horizontal layout - split by x position
-                x_min = marker['x'] - 50
-                x_max = emp_markers[i + 1]['x'] - 50 if i + 1 < len(emp_markers) else float('inf')
-                y_min = 0
-                y_max = float('inf')
-            else:
-                # Vertical layout - split by y position
-                x_min = 0
-                x_max = float('inf')
-                y_min = marker['y'] - 20
-                y_max = emp_markers[i + 1]['y'] - 20 if i + 1 < len(emp_markers) else float('inf')
+            start_line = marker.get('line_num', 0)
             
-            # Get blocks in this region
+            if i + 1 < len(emp_markers):
+                end_line = emp_markers[i + 1].get('line_num', len(self.text_blocks))
+            else:
+                end_line = len(self.text_blocks)
+            
+            # Get blocks in this range
             region_blocks = [
                 block for block in self.text_blocks
-                if (x_min <= block['x0'] <= x_max and
-                    y_min <= block['y0'] <= y_max)
+                if start_line <= block.get('line_num', 0) < end_line
             ]
             
             if region_blocks:
                 regions.append({
                     'marker': marker,
                     'blocks': region_blocks,
-                    'x_min': x_min,
-                    'x_max': x_max,
-                    'y_min': y_min,
-                    'y_max': y_max
+                    'start_line': start_line,
+                    'end_line': end_line
                 })
+                logger.info(f"Region {i+1}: lines {start_line}-{end_line}, {len(region_blocks)} blocks")
         
         return regions
     
@@ -383,54 +344,39 @@ class DayforceParserEnhanced:
     
     def _extract_table_data(self, blocks: List[Dict[str, Any]]) -> List[Dict[str, str]]:
         """
-        Extract table data from text blocks adaptively.
-        Groups blocks into rows, extracts values.
+        Extract table data from text lines.
+        Looks for lines with amounts ($XX.XX or XX.XX patterns).
         """
         if not blocks:
             return []
         
         rows = []
         
-        # Group blocks by y-position (same row if y values close)
-        y_groups = defaultdict(list)
-        
         for block in blocks:
-            y_key = round(block['y0'] / 10) * 10  # Group within 10 pixels
-            y_groups[y_key].append(block)
-        
-        # Process each row
-        for y_key in sorted(y_groups.keys()):
-            row_blocks = sorted(y_groups[y_key], key=lambda b: b['x0'])
-            
-            # Skip if too few blocks
-            if len(row_blocks) < 2:
-                continue
-            
-            # Combine text from row
-            row_text = ' '.join(b['text'] for b in row_blocks)
+            text = block['text']
             
             # Skip headers and totals
-            if any(word in row_text.lower() for word in ['description', 'amount', 'rate', 'total', 'hours']):
+            if any(word in text.lower() for word in ['description', 'amount', 'rate', 'total', 'hours', 'ytd', '---', '===', '***']):
                 continue
             
-            # Extract description and amount
-            description = row_blocks[0]['text']
-            
-            # Find amount (look for $ or decimal pattern)
-            amount = '0.00'
-            for block in row_blocks:
-                if '$' in block['text'] or re.search(r'\d+\.\d{2}', block['text']):
-                    amount_match = re.search(r'\$?([\d,]+\.\d{2})', block['text'])
-                    if amount_match:
-                        amount = amount_match.group(1).replace(',', '')
-                        break
-            
-            # Only add if we have meaningful data
-            if description and description not in ['', '-', '----------']:
-                rows.append({
-                    'description': description,
-                    'amount': amount
-                })
+            # Look for lines with dollar amounts
+            if '$' in text or re.search(r'\d+\.\d{2}', text):
+                # Split by multiple spaces to separate description from amount
+                parts = re.split(r'\s{2,}', text)
+                
+                if len(parts) >= 2:
+                    description = parts[0].strip()
+                    
+                    # Find amount in the line
+                    amount_match = re.search(r'\$?([\d,]+\.\d{2})', text)
+                    amount = amount_match.group(1).replace(',', '') if amount_match else '0.00'
+                    
+                    # Only add if description isn't empty or just symbols
+                    if description and description not in ['', '-', '----------', '===']:
+                        rows.append({
+                            'description': description,
+                            'amount': amount
+                        })
         
         return rows
     
