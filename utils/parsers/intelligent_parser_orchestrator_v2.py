@@ -206,7 +206,7 @@ class IntelligentParserOrchestratorV2:
                 
                 # Extract numbers (hours, rate, amount)
                 numbers = re.findall(amount_pattern, line)
-                numbers = [float(n.replace(',', '')) for n in numbers if n]
+                numbers = [float(n.replace(',', '')) for n in numbers if n and n.strip()]
                 
                 if description and numbers:
                     # Try to map to employee (look for ID in line or nearby context)
@@ -261,7 +261,7 @@ class IntelligentParserOrchestratorV2:
                 
                 # Extract numbers
                 numbers = re.findall(amount_pattern, line)
-                numbers = [float(n.replace(',', '')) for n in numbers if n]
+                numbers = [float(n.replace(',', '')) for n in numbers if n and n.strip()]
                 
                 if description and numbers:
                     # Map to employee
@@ -316,7 +316,7 @@ class IntelligentParserOrchestratorV2:
                 
                 # Extract numbers
                 numbers = re.findall(amount_pattern, line)
-                numbers = [float(n.replace(',', '')) for n in numbers if n]
+                numbers = [float(n.replace(',', '')) for n in numbers if n and n.strip()]
                 
                 if description and numbers:
                     # Map to employee
