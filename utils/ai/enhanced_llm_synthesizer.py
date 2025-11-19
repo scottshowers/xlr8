@@ -19,7 +19,7 @@ class EnhancedLLMSynthesizer:
     Designed for 90%+ accuracy on implementation analysis questions.
     """
     
-    def __init__(self, ollama_base_url: str = "http://176.58.122.95:11434"):
+    def __init__(self, ollama_base_url: str = "http://178.156.190.64:11435"):
         self.ollama_base_url = ollama_base_url
         self.model = "llama3.2:3b"
         
@@ -217,6 +217,8 @@ Begin your analysis:
         try:
             url = f"{self.ollama_base_url}/api/generate"
             
+            logger.info(f"Calling Ollama at {url} with model {self.model}")
+            
             payload = {
                 "model": self.model,
                 "prompt": prompt,
@@ -230,17 +232,21 @@ Begin your analysis:
                 }
             }
             
-            response = requests.post(url, json=payload, timeout=90)  # Longer timeout for quality
+            response = requests.post(url, json=payload, timeout=120)  # 2 min for complex prompts
             
             if response.status_code == 200:
                 result = response.json()
+                logger.info("Ollama synthesis successful")
                 return result.get('response', '')
             else:
-                logger.error(f"Ollama API error: {response.status_code}")
+                logger.error(f"Ollama API error: {response.status_code} - {response.text}")
                 return ""
                 
         except requests.exceptions.Timeout:
-            logger.error("Ollama request timed out")
+            logger.error(f"Ollama request timed out after 120s to {self.ollama_base_url}")
+            return ""
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"Cannot connect to Ollama at {self.ollama_base_url}: {e}")
             return ""
         except Exception as e:
             logger.error(f"Ollama request failed: {e}")
