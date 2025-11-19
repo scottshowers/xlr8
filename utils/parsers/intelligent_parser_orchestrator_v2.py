@@ -223,92 +223,213 @@ class IntelligentParserOrchestratorV2:
         return structured
     
     def _parse_employee_info(self, data: Dict[str, Any]) -> List[Dict]:
-        """Parse employee info from extracted data."""
+        """Parse employee info from extracted data - handles multiple employees."""
+        import re
         employees = []
         
-        # Try to extract from tables first
-        if data.get('table_dfs'):
-            for df in data['table_dfs']:
-                if not df.empty:
-                    # Try to find employee info in table
-                    for _, row in df.iterrows():
-                        emp = {}
-                        for col in df.columns:
-                            if col and 'emp' in str(col).lower():
-                                emp['employee_id'] = row[col]
-                            elif col and 'name' in str(col).lower():
-                                emp['name'] = row[col]
-                            elif col and 'dept' in str(col).lower():
-                                emp['department'] = row[col]
-                        
-                        if emp:
-                            employees.append(emp)
+        # Get all text content
+        text_content = ""
+        if data.get('lines'):
+            text_content = '\n'.join(data['lines'])
+        elif data.get('text'):
+            text_content = data['text']
         
-        # Fall back to text parsing
-        if not employees and data.get('lines'):
-            import re
-            for line in data['lines']:
-                # Look for employee ID pattern
-                emp_match = re.search(r'(?:emp|employee)\s*#?\s*:?\s*(\d+)', line, re.IGNORECASE)
-                if emp_match:
-                    employees.append({
-                        'employee_id': emp_match.group(1),
-                        'name': '',
-                        'department': ''
-                    })
+        # Split by "Emp #:" pattern to find each employee block
+        emp_blocks = re.split(r'(?=Emp\s*#\s*:\s*\d+)', text_content, flags=re.IGNORECASE)
+        
+        for block in emp_blocks:
+            if not block.strip():
+                continue
+            
+            emp = {}
+            
+            # Extract employee ID
+            emp_id_match = re.search(r'Emp\s*#\s*:\s*(\d+)', block, re.IGNORECASE)
+            if emp_id_match:
+                emp['employee_id'] = emp_id_match.group(1)
+            else:
+                continue  # Skip if no employee ID found
+            
+            # Extract name (first line before "Emp #:" or on same line before "Emp #:")
+            name_match = re.search(r'^([A-Z][a-z]+\s+[A-Z][a-z]+)', block, re.MULTILINE)
+            if name_match:
+                emp['name'] = name_match.group(1).strip()
+            else:
+                emp['name'] = ''
+            
+            # Extract department
+            dept_match = re.search(r'Dept\s*:\s*([^\n]+)', block, re.IGNORECASE)
+            if dept_match:
+                emp['department'] = dept_match.group(1).strip()
+            else:
+                emp['department'] = ''
+            
+            employees.append(emp)
         
         return employees if employees else [{'employee_id': 'Unknown', 'name': 'Unknown', 'department': ''}]
     
     def _parse_earnings(self, data: Dict[str, Any]) -> List[Dict]:
-        """Parse earnings from extracted data."""
+        """Parse earnings from extracted data using regex patterns."""
+        import re
         earnings = []
         
-        if data.get('table_dfs'):
-            for df in data['table_dfs']:
-                if not df.empty:
-                    for _, row in df.iterrows():
-                        earning = {
-                            'description': str(row.iloc[0]) if len(row) > 0 else '',
-                            'hours': self._safe_float(row.iloc[1]) if len(row) > 1 else 0,
-                            'rate': self._safe_float(row.iloc[2]) if len(row) > 2 else 0,
-                            'amount': self._safe_float(row.iloc[3]) if len(row) > 3 else 0
-                        }
-                        if earning['description']:
-                            earnings.append(earning)
+        # Get all text content
+        text_content = ""
+        if data.get('lines'):
+            text_content = '\n'.join(data['lines'])
+        elif data.get('text'):
+            text_content = data['text']
+        
+        if not text_content:
+            return earnings
+        
+        # Pattern for earnings lines like: "Regular Hourly $18.1900 55.28 $1,005.60 748.73 $13,538.38"
+        # Format: Description Rate Hours Amount HoursYTD AmountYTD
+        lines = text_content.split('\n')
+        
+        for line in lines:
+            line = line.strip()
+            if not line or len(line) < 10:
+                continue
+            
+            # Skip header and total lines
+            if any(word in line.lower() for word in ['description', 'rate', 'hours', 'amount', 'ytd', 'total', 'reg total', 'emp total']):
+                continue
+            
+            # Look for lines with dollar amounts (likely earnings)
+            if '$' in line or re.search(r'\d+\.\d{2}', line):
+                # Extract all numbers from the line
+                numbers = re.findall(r'[\d,]+\.?\d*', line)
+                
+                # Extract description (text before first number or dollar sign)
+                desc_match = re.match(r'^([A-Za-z\s\-]+?)(?:\s+\$|\s+\d)', line)
+                description = desc_match.group(1).strip() if desc_match else ''
+                
+                if description and numbers and len(numbers) >= 2:
+                    # Clean numbers
+                    cleaned_nums = [self._safe_float(n) for n in numbers]
+                    
+                    earning = {
+                        'description': description,
+                        'rate': cleaned_nums[0] if len(cleaned_nums) > 0 else 0,
+                        'hours': cleaned_nums[1] if len(cleaned_nums) > 1 else 0,
+                        'amount': cleaned_nums[2] if len(cleaned_nums) > 2 else 0,
+                        'hours_ytd': cleaned_nums[3] if len(cleaned_nums) > 3 else 0,
+                        'amount_ytd': cleaned_nums[4] if len(cleaned_nums) > 4 else 0
+                    }
+                    earnings.append(earning)
         
         return earnings
     
     def _parse_taxes(self, data: Dict[str, Any]) -> List[Dict]:
-        """Parse taxes from extracted data."""
+        """Parse taxes from extracted data using regex patterns."""
+        import re
         taxes = []
         
-        if data.get('table_dfs'):
-            for df in data['table_dfs']:
-                if not df.empty:
-                    for _, row in df.iterrows():
-                        tax = {
-                            'description': str(row.iloc[0]) if len(row) > 0 else '',
-                            'amount': self._safe_float(row.iloc[1]) if len(row) > 1 else 0
-                        }
-                        if tax['description']:
-                            taxes.append(tax)
+        # Get all text content
+        text_content = ""
+        if data.get('lines'):
+            text_content = '\n'.join(data['lines'])
+        elif data.get('text'):
+            text_content = data['text']
+        
+        if not text_content:
+            return taxes
+        
+        # Pattern for tax lines like: "Fed W/H $1,005.60 $62.46 $14,559.63 $902.70"
+        # Format: Description Wages Amount WagesYTD AmountYTD
+        lines = text_content.split('\n')
+        
+        for line in lines:
+            line = line.strip()
+            if not line or len(line) < 10:
+                continue
+            
+            # Skip header and total lines
+            if any(word in line.lower() for word in ['description', 'wages', 'amount', 'ytd', 'total', 'emp total', 'er total']):
+                continue
+            
+            # Look for tax-related keywords
+            if re.search(r'(?:fed|fica|state|w/h|mwt|ut|er|ee|medicare|social)', line, re.IGNORECASE):
+                # Extract all numbers from the line
+                numbers = re.findall(r'[\d,]+\.?\d*', line)
+                
+                # Extract description (text before first dollar sign or number)
+                desc_match = re.match(r'^([A-Za-z\s/\-]+?)(?:\s+\$|\s+\d)', line)
+                description = desc_match.group(1).strip() if desc_match else ''
+                
+                if description and numbers:
+                    # Clean numbers
+                    cleaned_nums = [self._safe_float(n) for n in numbers]
+                    
+                    tax = {
+                        'description': description,
+                        'wages': cleaned_nums[0] if len(cleaned_nums) > 0 else 0,
+                        'amount': cleaned_nums[1] if len(cleaned_nums) > 1 else 0,
+                        'wages_ytd': cleaned_nums[2] if len(cleaned_nums) > 2 else 0,
+                        'amount_ytd': cleaned_nums[3] if len(cleaned_nums) > 3 else 0
+                    }
+                    taxes.append(tax)
         
         return taxes
     
     def _parse_deductions(self, data: Dict[str, Any]) -> List[Dict]:
-        """Parse deductions from extracted data."""
+        """Parse deductions from extracted data using regex patterns."""
+        import re
         deductions = []
         
-        if data.get('table_dfs'):
-            for df in data['table_dfs']:
-                if not df.empty:
-                    for _, row in df.iterrows():
-                        deduction = {
-                            'description': str(row.iloc[0]) if len(row) > 0 else '',
-                            'amount': self._safe_float(row.iloc[1]) if len(row) > 1 else 0
-                        }
-                        if deduction['description']:
-                            deductions.append(deduction)
+        # Get all text content
+        text_content = ""
+        if data.get('lines'):
+            text_content = '\n'.join(data['lines'])
+        elif data.get('text'):
+            text_content = data['text']
+        
+        if not text_content:
+            return deductions
+        
+        # Pattern for deduction lines like: "Medical Pre Tax $403.81 $403.81 $6,057.15"
+        # Format: Description Scheduled Amount AmountYTD
+        lines = text_content.split('\n')
+        
+        for line in lines:
+            line = line.strip()
+            if not line or len(line) < 10:
+                continue
+            
+            # Skip header and total lines
+            if any(word in line.lower() for word in ['description', 'scheduled', 'amount', 'ytd', 'total', 'pre total', 'post total', 'reim total', 'memo total']):
+                continue
+            
+            # Look for lines with dollar amounts (likely deductions)
+            if '$' in line or re.search(r'\d+\.\d{2}', line):
+                # Extract all numbers from the line
+                numbers = re.findall(r'[\d,]+\.?\d*', line)
+                
+                # Extract description (text before first dollar sign or number)
+                desc_match = re.match(r'^([A-Za-z\s\-()]+?)(?:\s+\$|\s+\d)', line)
+                description = desc_match.group(1).strip() if desc_match else ''
+                
+                if description and numbers:
+                    # Clean numbers
+                    cleaned_nums = [self._safe_float(n) for n in numbers]
+                    
+                    # Handle special case for percentage-based deductions (like "401k-PR 5.00%")
+                    scheduled = ''
+                    if '%' in line:
+                        pct_match = re.search(r'([\d.]+)%', line)
+                        if pct_match:
+                            scheduled = pct_match.group(1) + '%'
+                            # Adjust description to include percentage
+                            description = re.sub(r'\s+[\d.]+%', '', description).strip()
+                    
+                    deduction = {
+                        'description': description,
+                        'scheduled': scheduled if scheduled else (cleaned_nums[0] if len(cleaned_nums) > 0 else 0),
+                        'amount': cleaned_nums[1] if len(cleaned_nums) > 1 else (cleaned_nums[0] if len(cleaned_nums) > 0 else 0),
+                        'amount_ytd': cleaned_nums[2] if len(cleaned_nums) > 2 else (cleaned_nums[1] if len(cleaned_nums) > 1 else 0)
+                    }
+                    deductions.append(deduction)
         
         return deductions
     
@@ -428,13 +549,34 @@ class IntelligentParserOrchestratorV2:
         # Base score from section accuracies
         avg_accuracy = sum(section_accuracies.values()) / len(section_accuracies)
         
+        # Check if we actually have meaningful data (not just empty rows)
+        has_real_data = False
+        
+        # Check Employee Summary for actual data
+        if not tabs['Employee Summary'].empty:
+            emp_sum = tabs['Employee Summary']
+            # Check if any numeric columns have non-zero values
+            for col in ['Total Earnings', 'Total Taxes', 'Total Deductions', 'Net Pay']:
+                if col in emp_sum.columns and emp_sum[col].sum() != 0:
+                    has_real_data = True
+                    break
+        
+        # If no real data found, cap accuracy at 20%
+        if not has_real_data:
+            return min(avg_accuracy * 0.2, 20.0)
+        
         # Bonus for having data in all tabs
-        tabs_with_data = sum(1 for df in tabs.values() if not df.empty)
+        tabs_with_data = sum(1 for df in tabs.values() if not df.empty and len(df) > 0)
         completeness_bonus = (tabs_with_data / 4.0) * 10
         
         # Bonus for multiple employees
         employee_count = len(tabs['Employee Summary']) if not tabs['Employee Summary'].empty else 0
         if employee_count >= 2:
+            completeness_bonus += 5
+        
+        # Check earnings/taxes/deductions have actual line items
+        detail_items = len(tabs['Earnings']) + len(tabs['Taxes']) + len(tabs['Deductions'])
+        if detail_items > 0:
             completeness_bonus += 5
         
         overall = min(avg_accuracy + completeness_bonus, 100.0)
