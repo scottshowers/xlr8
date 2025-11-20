@@ -10,6 +10,7 @@ from pathlib import Path
 from datetime import datetime
 import logging
 from typing import List, Dict, Any
+from io import BytesIO
 
 logger = logging.getLogger(__name__)
 
@@ -61,11 +62,18 @@ def render_upload_tab():
     # Download template
     if st.button("📥 Download Template Excel", use_container_width=True):
         template_df = create_template()
+        
+        # Create buffer for Excel
+        buffer = BytesIO()
+        template_df.to_excel(buffer, index=False, engine='openpyxl')
+        buffer.seek(0)
+        
         st.download_button(
             label="Click to Download Template",
-            data=template_df.to_excel(index=False, engine='openpyxl'),
+            data=buffer.getvalue(),
             file_name="analysis_questions_template.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
         )
     
     st.markdown("---")
@@ -255,10 +263,13 @@ def render_export_tab():
     
     with col1:
         # Excel export
-        excel_bytes = df.to_excel(index=False, engine='openpyxl')
+        buffer = BytesIO()
+        df.to_excel(buffer, index=False, engine='openpyxl')
+        buffer.seek(0)
+        
         st.download_button(
             label="📥 Download as Excel",
-            data=excel_bytes,
+            data=buffer.getvalue(),
             file_name=f"analysis_questions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
