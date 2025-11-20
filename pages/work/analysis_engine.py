@@ -172,7 +172,11 @@ def render_question_browser(questions: List[Dict[str, Any]], rag_handler=None):
                 if question.get('sources'):
                     with st.expander("📚 Sources"):
                         for i, source in enumerate(question['sources'], 1):
-                            st.caption(f"{i}. {source.get('source', 'Unknown')} (score: {source.get('score', 0):.2f})")
+                            # Handle both string and dict formats
+                            if isinstance(source, dict):
+                                st.caption(f"{i}. {source.get('source', 'Unknown')} (score: {source.get('score', 0):.2f})")
+                            else:
+                                st.caption(f"{i}. {source}")
                 
                 # Status controls
                 col1, col2 = st.columns(2)
@@ -553,7 +557,14 @@ def render_export_review(questions: List[Dict[str, Any]]):
                         row['Confidence'] = f"{q.get('confidence', 0)*100:.0f}%"
                     
                     if include_sources and q.get('sources'):
-                        sources_text = "; ".join([s.get('source', 'Unknown') for s in q.get('sources', [])])
+                        # Handle both string and dict formats
+                        sources_list = []
+                        for s in q.get('sources', []):
+                            if isinstance(s, dict):
+                                sources_list.append(s.get('source', 'Unknown'))
+                            else:
+                                sources_list.append(str(s))
+                        sources_text = "; ".join(sources_list)
                         row['Sources'] = sources_text
                     
                     export_data.append(row)
@@ -620,7 +631,14 @@ def render_export_review(questions: List[Dict[str, Any]]):
                     row['Confidence'] = f"{q.get('confidence', 0)*100:.0f}%"
                 
                 if include_sources and q.get('sources'):
-                    sources_text = "; ".join([s.get('source', 'Unknown') for s in q.get('sources', [])])
+                    # Handle both string and dict formats
+                    sources_list = []
+                    for s in q.get('sources', []):
+                        if isinstance(s, dict):
+                            sources_list.append(s.get('source', 'Unknown'))
+                        else:
+                            sources_list.append(str(s))
+                    sources_text = "; ".join(sources_list)
                     row['Sources'] = sources_text
                 
                 export_data.append(row)
@@ -653,7 +671,11 @@ def render_export_review(questions: List[Dict[str, Any]]):
                 if question.get('sources'):
                     st.caption("**Sources:**")
                     for s in question.get('sources', []):
-                        st.caption(f"- {s.get('source', 'Unknown')}")
+                        # Handle both string and dict formats
+                        if isinstance(s, dict):
+                            st.caption(f"- {s.get('source', 'Unknown')}")
+                        else:
+                            st.caption(f"- {s}")
                 
                 if st.button(f"✓ Approve", key=f"approve_{idx}"):
                     question['status'] = 'reviewed'
