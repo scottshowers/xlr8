@@ -49,12 +49,13 @@ print("=" * 80)
 
 
 def find_questions_database() -> Path:
-    """Find questions_database.json by checking multiple possible locations."""
+    """Find analysis_questions.json by checking multiple possible locations."""
     possible_paths = [
-        Path(__file__).parent.parent.parent / "data" / "questions_database.json",
-        Path(__file__).parent / "questions_database.json",
-        Path.cwd() / "data" / "questions_database.json",
-        Path("/app/data/questions_database.json"),
+        Path("/data/analysis_questions.json"),  # Primary location (matches upload tool)
+        Path(__file__).parent.parent.parent / "data" / "analysis_questions.json",
+        Path(__file__).parent / "analysis_questions.json",
+        Path.cwd() / "data" / "analysis_questions.json",
+        Path("/app/data/analysis_questions.json"),
     ]
     
     for path in possible_paths:
