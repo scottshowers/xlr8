@@ -1,5 +1,5 @@
 """
-Intelligent Parser UI - FIXEDx with correct class interface
+Intelligent Parser UI - FIXED with correct class interface
 """
 
 import streamlit as st
