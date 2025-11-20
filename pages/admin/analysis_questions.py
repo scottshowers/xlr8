@@ -78,17 +78,67 @@ def render_upload_tab():
     
     st.markdown("---")
     
-    # File upload
-    uploaded_file = st.file_uploader(
-        "Upload Excel File",
-        type=['xlsx', 'xls'],
-        help="Upload questions Excel - will replace existing"
+    # TWO OPTIONS: Upload new OR select existing
+    upload_option = st.radio(
+        "Choose source:",
+        ["📤 Upload New File", "📁 Select from Existing Uploads"],
+        horizontal=True
     )
     
-    if uploaded_file:
+    uploaded_file = None
+    df = None
+    
+    if upload_option == "📤 Upload New File":
+        # Original file upload
+        uploaded_file = st.file_uploader(
+            "Upload Excel File",
+            type=['xlsx', 'xls'],
+            help="Upload questions Excel - will replace existing"
+        )
+        
+        if uploaded_file:
+            try:
+                df = pd.read_excel(uploaded_file)
+            except Exception as e:
+                st.error(f"Error reading uploaded file: {str(e)}")
+                return
+    
+    else:
+        # Select from existing uploads
+        uploads_dir = Path('/data/uploads')
+        
+        if not uploads_dir.exists():
+            st.warning("📁 No uploads directory found")
+            return
+        
+        # Find Excel files
+        excel_files = list(uploads_dir.glob('*.xlsx')) + list(uploads_dir.glob('*.xls'))
+        
+        if not excel_files:
+            st.warning("📁 No Excel files found in uploads. Upload a file first in **Setup → HCMPACT LLM Seeding**")
+            return
+        
+        # Create dropdown
+        file_names = [f.name for f in sorted(excel_files, key=lambda x: x.stat().st_mtime, reverse=True)]
+        selected_file = st.selectbox(
+            "Select Excel file from uploads:",
+            file_names,
+            help="Choose an Excel file that's already been uploaded"
+        )
+        
+        if selected_file:
+            file_path = uploads_dir / selected_file
+            try:
+                df = pd.read_excel(file_path)
+                st.success(f"✓ Selected: {selected_file}")
+            except Exception as e:
+                st.error(f"Error reading file: {str(e)}")
+                logger.error(f"Error reading {file_path}: {str(e)}", exc_info=True)
+                return
+    
+    # Process the dataframe (whether from upload or existing file)
+    if df is not None:
         try:
-            df = pd.read_excel(uploaded_file)
-            
             # Preview
             st.success(f"✓ Loaded {len(df)} rows")
             
@@ -116,8 +166,8 @@ def render_upload_tab():
                 st.warning("⚠️ This will replace ALL existing questions")
         
         except Exception as e:
-            st.error(f"Error reading Excel: {str(e)}")
-            logger.error(f"Excel read error: {str(e)}", exc_info=True)
+            st.error(f"Error processing Excel: {str(e)}")
+            logger.error(f"Excel processing error: {str(e)}", exc_info=True)
 
 
 def render_edit_tab():
