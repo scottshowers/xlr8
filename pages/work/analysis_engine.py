@@ -74,12 +74,29 @@ def load_questions() -> Dict[str, Any]:
         
         if db_path is None:
             return {
-                'metadata': {'total_questions': 0, 'error': 'questions_database.json not found'},
+                'metadata': {'total_questions': 0, 'error': 'analysis_questions.json not found'},
                 'questions': []
             }
         
         with open(db_path, 'r') as f:
             data = json.load(f)
+            
+            # Handle BOTH formats:
+            # NEW format (from analysis_questions.py): {"version": "1.0", "questions": [...]}
+            # OLD format: {"metadata": {...}, "questions": [...]}
+            
+            if 'metadata' not in data:
+                # NEW format - build metadata from questions
+                questions = data.get('questions', [])
+                data = {
+                    'metadata': {
+                        'total_questions': len(questions),
+                        'version': data.get('version', '1.0'),
+                        'updated_at': data.get('updated_at', '')
+                    },
+                    'questions': questions
+                }
+            
             logger.info(f"Loaded {data['metadata']['total_questions']} questions")
             return data
             
