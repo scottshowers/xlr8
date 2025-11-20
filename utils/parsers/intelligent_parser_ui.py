@@ -33,7 +33,13 @@ class IntelligentParserUI:
         if not pdf_files:
             st.info("📁 No PDFs uploaded yet. Upload documents in the Upload tab first.")
             return
-        
+
+        use_v3 = st.checkbox(
+            "🌟 Use V3 Parser (Universal Multi-Vendor)",
+            value=False,
+            help="V3: Auto-detects vendor, tries multiple strategies until 90%+ accuracy"
+        )
+
         # V2 CHECKBOX (ACTUALLY WORKS NOW)
         use_v2 = st.checkbox(
             "✨ Use V2 Parser (Table-Based Extraction)",
@@ -60,7 +66,11 @@ class IntelligentParserUI:
             with st.spinner(f"Parsing {selected_pdf}..."):
                 try:
                     # CRITICAL FIX: Actually import and use the selected version
-                    if use_v2:
+                    if use_v3:
+                        from .intelligent_parser_orchestrator_v3 import IntelligentParserOrchestratorV3
+                        orchestrator = IntelligentParserOrchestratorV3()
+                        parser_version = "V3"
+                    elif use_v2:
                         from .intelligent_parser_orchestrator_v2 import IntelligentParserOrchestratorV2
                         orchestrator = IntelligentParserOrchestratorV2()
                         parser_version = "V2"
@@ -68,7 +78,7 @@ class IntelligentParserUI:
                         from .intelligent_parser_orchestrator import IntelligentParserOrchestrator
                         orchestrator = IntelligentParserOrchestrator()
                         parser_version = "V1"
-                    
+                     
                     # Parse
                     result = orchestrator.parse(pdf_path, self.output_dir)
                     
