@@ -196,11 +196,19 @@ class DocumentProcessor:
     def process_document(
         self, 
         file, 
-        filename: str, 
+        filename: str = None, 
         collection_name: str = "hcmpact_docs",
         category: str = "General"
     ) -> Dict[str, Any]:
         """Process a document with batch embedding and proper error handling. Now saves files to disk."""
+        
+        # Handle missing filename - try to get from file object
+        if filename is None:
+            if hasattr(file, 'name'):
+                filename = file.name
+            else:
+                filename = f"unknown_file_{int(time.time())}.pdf"
+                logger.warning(f"No filename provided, using: {filename}")
         
         status_placeholder = st.empty()
         progress_bar = st.progress(0)
