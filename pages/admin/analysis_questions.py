@@ -101,6 +101,9 @@ def render_upload_tab():
         if uploaded_file:
             try:
                 # CRITICAL FIX: Save file to disk first
+                # Ensure directory exists
+                UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+                
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 filename = f"analysis_questions_{timestamp}.xlsx"
                 file_path = UPLOADS_DIR / filename
