@@ -6,7 +6,7 @@
 
 ### Step 1: Upload to GitHub (10 min)
 1. Go to https://github.com/signup (create account if needed)
-2. Create new repository: https://github.com/new
+2. Create new repository: https://github.com/new 
    - Name: `xlr8-hcmpact`
    - Privacy: Private
    - Don't add README
