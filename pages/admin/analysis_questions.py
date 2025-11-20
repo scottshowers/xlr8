@@ -1,6 +1,6 @@
 """
 Analysis Questions Manager - Admin Section
-Upload via Excel OR manage in-app
+FIXED: Saves uploaded files to disk for future selection
 """
 
 import streamlit as st
@@ -11,10 +11,13 @@ from datetime import datetime
 import logging
 from typing import List, Dict, Any
 from io import BytesIO
+import shutil
 
 logger = logging.getLogger(__name__)
 
+# Storage paths
 QUESTIONS_DB = Path("/data/analysis_questions.json")
+UPLOADS_DIR = Path("/mnt/user-data/uploads")  # FIXED: Correct path
 
 
 def render_analysis_questions():
@@ -41,7 +44,7 @@ def render_analysis_questions():
 
 
 def render_upload_tab():
-    """Upload and replace questions from Excel."""
+    """Upload questions from Excel - with SAVE to disk feature."""
     
     st.header("Upload Questions from Excel")
     
@@ -59,19 +62,18 @@ def render_upload_tab():
     - `Notes` - Additional context
     """)
     
-    # Download template
+    # Download template button
     if st.button("📥 Download Template Excel", use_container_width=True):
         template_df = create_template()
         
-        # Create buffer for Excel
         buffer = BytesIO()
         template_df.to_excel(buffer, index=False, engine='openpyxl')
         buffer.seek(0)
         
         st.download_button(
-            label="Click to Download Template",
+            label="⬇️ Click to Download Template",
             data=buffer.getvalue(),
-            file_name="analysis_questions_template.xlsx",
+            file_name=f"analysis_questions_template_{datetime.now().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
@@ -85,89 +87,103 @@ def render_upload_tab():
         horizontal=True
     )
     
-    uploaded_file = None
     df = None
+    file_path = None
     
     if upload_option == "📤 Upload New File":
-        # Original file upload
+        # File upload widget
         uploaded_file = st.file_uploader(
             "Upload Excel File",
             type=['xlsx', 'xls'],
-            help="Upload questions Excel - will replace existing"
+            help="Upload questions Excel - will be saved and processed"
         )
         
         if uploaded_file:
             try:
-                df = pd.read_excel(uploaded_file)
+                # CRITICAL FIX: Save file to disk first
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filename = f"analysis_questions_{timestamp}.xlsx"
+                file_path = UPLOADS_DIR / filename
+                
+                # Save uploaded file
+                with open(file_path, 'wb') as f:
+                    f.write(uploaded_file.getvalue())
+                
+                st.success(f"✅ Saved to: {filename}")
+                
+                # Now read it
+                df = pd.read_excel(file_path)
+                
             except Exception as e:
-                st.error(f"Error reading uploaded file: {str(e)}")
+                st.error(f"❌ Error saving/reading file: {str(e)}")
+                logger.error(f"Upload error: {str(e)}", exc_info=True)
                 return
     
     else:
         # Select from existing uploads
-        uploads_dir = Path('/data/uploads')
-        
-        if not uploads_dir.exists():
-            st.warning("📁 No uploads directory found")
+        if not UPLOADS_DIR.exists():
+            st.warning(f"📁 Uploads directory not found: {UPLOADS_DIR}")
             return
         
         # Find Excel files
-        excel_files = list(uploads_dir.glob('*.xlsx')) + list(uploads_dir.glob('*.xls'))
+        excel_files = sorted(
+            list(UPLOADS_DIR.glob('*.xlsx')) + list(UPLOADS_DIR.glob('*.xls')),
+            key=lambda x: x.stat().st_mtime,
+            reverse=True
+        )
         
         if not excel_files:
-            st.warning("📁 No Excel files found in uploads. Upload a file first in **Setup → HCMPACT LLM Seeding**")
+            st.warning("📁 No Excel files found in uploads. Upload a file first in Setup → HCMPACT LLM Seeding")
             return
         
-        # Create dropdown
-        file_names = [f.name for f in sorted(excel_files, key=lambda x: x.stat().st_mtime, reverse=True)]
+        # Dropdown to select file
         selected_file = st.selectbox(
-            "Select Excel file from uploads:",
-            file_names,
-            help="Choose an Excel file that's already been uploaded"
+            "Select Excel file:",
+            options=excel_files,
+            format_func=lambda x: f"{x.name} ({datetime.fromtimestamp(x.stat().st_mtime).strftime('%Y-%m-%d %H:%M')})"
         )
         
         if selected_file:
-            file_path = uploads_dir / selected_file
             try:
-                df = pd.read_excel(file_path)
-                st.success(f"✓ Selected: {selected_file}")
+                df = pd.read_excel(selected_file)
+                file_path = selected_file
+                st.success(f"✅ Loaded: {selected_file.name}")
             except Exception as e:
-                st.error(f"Error reading file: {str(e)}")
-                logger.error(f"Error reading {file_path}: {str(e)}", exc_info=True)
+                st.error(f"❌ Error reading file: {str(e)}")
+                logger.error(f"File read error: {str(e)}", exc_info=True)
                 return
     
-    # Process the dataframe (whether from upload or existing file)
+    # Process the file (common for both paths)
     if df is not None:
-        try:
-            # Preview
-            st.success(f"✓ Loaded {len(df)} rows")
-            
-            with st.expander("Preview Data"):
-                st.dataframe(df, use_container_width=True)
-            
-            # Validate
-            required_cols = ['Category', 'Question', 'Required']
-            missing = [col for col in required_cols if col not in df.columns]
-            
-            if missing:
-                st.error(f"❌ Missing required columns: {', '.join(missing)}")
-                return
-            
-            # Import button
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                if st.button("🚀 Import & Replace All Questions", type="primary", use_container_width=True):
-                    count = import_from_excel(df)
+        # Preview
+        st.success(f"📊 Loaded {len(df)} rows")
+        
+        with st.expander("👁️ Preview Data"):
+            st.dataframe(df, use_container_width=True)
+        
+        # Validate required columns
+        required_cols = ['Category', 'Question', 'Required']
+        missing = [col for col in required_cols if col not in df.columns]
+        
+        if missing:
+            st.error(f"❌ Missing required columns: {', '.join(missing)}")
+            st.info(f"Found columns: {', '.join(df.columns)}")
+            return
+        
+        # Import button
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            if st.button("🚀 Import & Replace All Questions", type="primary", use_container_width=True):
+                count = import_from_excel(df)
+                if count > 0:
                     st.success(f"✅ Imported {count} questions successfully!")
                     st.rerun()
-            
-            with col2:
-                st.warning("⚠️ This will replace ALL existing questions")
+                else:
+                    st.error("❌ Import failed")
         
-        except Exception as e:
-            st.error(f"Error processing Excel: {str(e)}")
-            logger.error(f"Excel processing error: {str(e)}", exc_info=True)
+        with col2:
+            st.warning("⚠️ Replaces ALL existing questions")
 
 
 def render_edit_tab():
@@ -175,11 +191,10 @@ def render_edit_tab():
     
     st.header("Edit Questions")
     
-    # Load questions
     questions = load_questions()
     
     if not questions:
-        st.warning("No questions found. Upload Excel in the Upload tab.")
+        st.info("📝 No questions yet. Upload Excel to get started.")
         return
     
     # Group by category
@@ -191,155 +206,170 @@ def render_edit_tab():
         categories[cat].append(q)
     
     # Filter by category
-    all_cats = ['All'] + sorted(categories.keys())
-    selected_cat = st.selectbox("Filter by Category", all_cats)
+    all_cats = ['All Categories'] + sorted(categories.keys())
+    selected_cat = st.selectbox("Filter by category:", all_cats)
     
-    # Display questions
-    if selected_cat == 'All':
-        display_questions = questions
-    else:
-        display_questions = categories.get(selected_cat, [])
+    # Show questions
+    questions_to_show = questions if selected_cat == 'All Categories' else categories.get(selected_cat, [])
     
-    st.markdown(f"**Showing {len(display_questions)} questions**")
-    
-    # Add new question button
-    if st.button("➕ Add New Question", use_container_width=True):
-        st.session_state['adding_question'] = True
-    
-    # Add new question form
-    if st.session_state.get('adding_question', False):
-        with st.form("new_question"):
-            st.markdown("### Add New Question")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                new_cat = st.text_input("Category", value="Payroll")
-            with col2:
-                new_req = st.selectbox("Required?", ["Yes", "No"])
-            
-            new_question = st.text_area("Question", height=100)
-            new_format = st.text_input("Expected Format (optional)")
-            new_keywords = st.text_input("Keywords (comma-separated, optional)")
-            new_notes = st.text_area("Notes (optional)")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.form_submit_button("Save Question", type="primary", use_container_width=True):
-                    if new_question:
-                        add_question(
-                            category=new_cat,
-                            question=new_question,
-                            required=(new_req == "Yes"),
-                            expected_format=new_format,
-                            keywords=new_keywords,
-                            notes=new_notes
-                        )
-                        st.session_state['adding_question'] = False
-                        st.success("✅ Question added!")
-                        st.rerun()
-                    else:
-                        st.error("Question text is required")
-            
-            with col2:
-                if st.form_submit_button("Cancel", use_container_width=True):
-                    st.session_state['adding_question'] = False
-                    st.rerun()
-    
+    st.markdown(f"**Showing {len(questions_to_show)} questions**")
     st.markdown("---")
     
-    # Display existing questions
-    for idx, q in enumerate(display_questions):
-        with st.expander(f"**{q.get('category')}** | {q.get('question')[:80]}..."):
-            # Display question details
-            col1, col2 = st.columns([3, 1])
+    # Add new question form
+    with st.expander("➕ Add New Question"):
+        with st.form("add_question_form"):
+            col1, col2 = st.columns(2)
             
             with col1:
-                st.markdown(f"**Question:** {q.get('question')}")
-                st.markdown(f"**Category:** {q.get('category')}")
-                st.markdown(f"**Required:** {'Yes' if q.get('required') else 'No'}")
-                
-                if q.get('expected_format'):
-                    st.markdown(f"**Expected Format:** {q.get('expected_format')}")
-                
-                if q.get('keywords'):
-                    st.markdown(f"**Keywords:** {q.get('keywords')}")
-                
-                if q.get('notes'):
-                    st.markdown(f"**Notes:** {q.get('notes')}")
+                new_cat = st.text_input("Category*", placeholder="e.g., Payroll")
+                new_question = st.text_area("Question*", placeholder="What is...")
+                new_required = st.selectbox("Required*", ["Yes", "No"])
             
             with col2:
-                # Edit button
-                if st.button("✏️ Edit", key=f"edit_{idx}"):
-                    st.session_state[f'editing_{idx}'] = True
+                new_format = st.text_input("Expected Format", placeholder="e.g., Weekly, Bi-weekly")
+                new_keywords = st.text_input("Keywords", placeholder="comma, separated")
+                new_notes = st.text_area("Notes", placeholder="Additional context")
+            
+            if st.form_submit_button("💾 Save Question", use_container_width=True):
+                if new_cat and new_question:
+                    new_q = {
+                        'id': f"Q{len(questions) + 1:04d}",
+                        'category': new_cat.strip(),
+                        'question': new_question.strip(),
+                        'required': new_required == "Yes",
+                        'expected_format': new_format.strip(),
+                        'keywords': new_keywords.strip(),
+                        'notes': new_notes.strip(),
+                        'created_at': datetime.now().isoformat()
+                    }
+                    questions.append(new_q)
+                    save_questions(questions)
+                    st.success("✅ Question added!")
                     st.rerun()
-                
-                # Delete button
-                if st.button("🗑️ Delete", key=f"delete_{idx}"):
-                    if st.session_state.get(f'confirm_delete_{idx}', False):
-                        delete_question(q.get('id'))
-                        st.success("Question deleted")
-                        st.rerun()
-                    else:
-                        st.session_state[f'confirm_delete_{idx}'] = True
-                        st.warning("Click again to confirm delete")
+                else:
+                    st.error("❌ Category and Question are required")
+    
+    # Display existing questions
+    for i, q in enumerate(questions_to_show):
+        with st.expander(f"**{q.get('category', 'N/A')}** - {q.get('question', 'N/A')[:80]}..."):
+            
+            # Display current values
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.text_input("ID", value=q.get('id', ''), disabled=True, key=f"id_{i}")
+                st.text_input("Category", value=q.get('category', ''), key=f"cat_{i}")
+                st.text_area("Question", value=q.get('question', ''), key=f"q_{i}")
+            
+            with col2:
+                st.selectbox("Required", ["Yes", "No"], 
+                           index=0 if q.get('required') else 1, 
+                           key=f"req_{i}")
+                st.text_input("Expected Format", value=q.get('expected_format', ''), key=f"fmt_{i}")
+                st.text_input("Keywords", value=q.get('keywords', ''), key=f"kw_{i}")
+            
+            st.text_area("Notes", value=q.get('notes', ''), key=f"notes_{i}")
+            
+            # Action buttons
+            btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 2])
+            
+            with btn_col1:
+                if st.button("✏️ Edit", key=f"edit_{i}"):
+                    st.info("Edit mode - update values above, then click Save Changes")
+            
+            with btn_col2:
+                if st.button("🗑️ Delete", key=f"del_{i}", type="secondary"):
+                    questions = [x for x in questions if x.get('id') != q.get('id')]
+                    save_questions(questions)
+                    st.success("✅ Deleted!")
+                    st.rerun()
 
 
 def render_export_tab():
-    """Export questions."""
+    """Export questions to Excel or JSON."""
     
     st.header("Export Questions")
     
     questions = load_questions()
     
     if not questions:
-        st.warning("No questions to export")
+        st.info("📝 No questions to export. Upload or add questions first.")
         return
     
-    st.success(f"✓ {len(questions)} questions loaded")
+    st.success(f"📊 {len(questions)} questions available for export")
     
-    # Convert to DataFrame
-    df = pd.DataFrame(questions)
-    
-    # Reorder columns
-    cols = ['category', 'question', 'required', 'expected_format', 'keywords', 'notes']
-    df = df[[col for col in cols if col in df.columns]]
-    
-    # Preview
-    with st.expander("Preview Data"):
-        st.dataframe(df, use_container_width=True)
-    
-    # Export buttons
+    # Export as Excel
     col1, col2 = st.columns(2)
     
     with col1:
-        # Excel export
-        buffer = BytesIO()
-        df.to_excel(buffer, index=False, engine='openpyxl')
-        buffer.seek(0)
+        st.subheader("📥 Export as Excel")
         
-        st.download_button(
-            label="📥 Download as Excel",
-            data=buffer.getvalue(),
-            file_name=f"analysis_questions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
+        if st.button("Download Excel", use_container_width=True):
+            df = pd.DataFrame(questions)
+            
+            # Reorder columns
+            cols = ['id', 'category', 'question', 'required', 'expected_format', 'keywords', 'notes']
+            df = df[[c for c in cols if c in df.columns]]
+            
+            # Create buffer
+            buffer = BytesIO()
+            df.to_excel(buffer, index=False, engine='openpyxl')
+            buffer.seek(0)
+            
+            st.download_button(
+                label="⬇️ Download Excel File",
+                data=buffer.getvalue(),
+                file_name=f"analysis_questions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
     
     with col2:
-        # JSON export
-        json_str = json.dumps(questions, indent=2)
-        st.download_button(
-            label="📥 Download as JSON",
-            data=json_str,
-            file_name=f"analysis_questions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-            mime="application/json",
-            use_container_width=True
-        )
+        st.subheader("📥 Export as JSON")
+        
+        if st.button("Download JSON", use_container_width=True):
+            json_str = json.dumps(questions, indent=2)
+            
+            st.download_button(
+                label="⬇️ Download JSON File",
+                data=json_str,
+                file_name=f"analysis_questions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                mime="application/json",
+                use_container_width=True
+            )
 
 
-# ==================== DATA FUNCTIONS ====================
+# Helper functions
 
-def load_questions() -> List[Dict[str, Any]]:
+def create_template() -> pd.DataFrame:
+    """Create sample template for download."""
+    return pd.DataFrame({
+        'Category': ['Payroll', 'Payroll', 'Benefits'],
+        'Question': [
+            'What is the pay frequency?',
+            'What are the standard pay codes?',
+            'What health insurance plans are offered?'
+        ],
+        'Required': ['Yes', 'Yes', 'No'],
+        'Expected_Format': [
+            'Weekly, Bi-weekly, Semi-monthly, Monthly',
+            'List of pay code names',
+            'List of plan names and types'
+        ],
+        'Keywords': [
+            'pay period, frequency, schedule',
+            'earnings, pay types, regular, overtime',
+            'medical, health, insurance, plans'
+        ],
+        'Notes': [
+            'Critical for payroll setup',
+            'Needed for earnings configuration',
+            'For benefits module setup'
+        ]
+    })
+
+
+def load_questions() -> List[Dict]:
     """Load questions from JSON file."""
     if not QUESTIONS_DB.exists():
         return []
@@ -347,106 +377,53 @@ def load_questions() -> List[Dict[str, Any]]:
     try:
         with open(QUESTIONS_DB, 'r') as f:
             data = json.load(f)
-        return data.get('questions', [])
+            return data.get('questions', [])
     except Exception as e:
         logger.error(f"Error loading questions: {str(e)}")
         return []
 
 
-def save_questions(questions: List[Dict[str, Any]]):
+def save_questions(questions: List[Dict]) -> bool:
     """Save questions to JSON file."""
-    QUESTIONS_DB.parent.mkdir(parents=True, exist_ok=True)
-    
-    data = {
-        'version': '1.0',
-        'updated_at': datetime.now().isoformat(),
-        'questions': questions
-    }
-    
-    with open(QUESTIONS_DB, 'w') as f:
-        json.dump(data, f, indent=2)
+    try:
+        # Ensure directory exists
+        QUESTIONS_DB.parent.mkdir(parents=True, exist_ok=True)
+        
+        data = {
+            'version': '1.0',
+            'updated_at': datetime.now().isoformat(),
+            'questions': questions
+        }
+        
+        with open(QUESTIONS_DB, 'w') as f:
+            json.dump(data, f, indent=2)
+        
+        return True
+    except Exception as e:
+        logger.error(f"Error saving questions: {str(e)}")
+        st.error(f"Failed to save: {str(e)}")
+        return False
 
 
 def import_from_excel(df: pd.DataFrame) -> int:
-    """Import questions from Excel DataFrame."""
+    """Import questions from dataframe."""
     questions = []
     
     for idx, row in df.iterrows():
         q = {
-            'id': f"Q{idx+1:04d}",
-            'category': str(row.get('Category', 'Uncategorized')),
-            'question': str(row.get('Question', '')),
-            'required': str(row.get('Required', 'No')).lower() == 'yes',
-            'expected_format': str(row.get('Expected_Format', '')),
-            'keywords': str(row.get('Keywords', '')),
-            'notes': str(row.get('Notes', '')),
+            'id': f"Q{idx + 1:04d}",
+            'category': str(row.get('Category', '')).strip(),
+            'question': str(row.get('Question', '')).strip(),
+            'required': str(row.get('Required', 'No')).strip().lower() in ['yes', 'true', '1'],
+            'expected_format': str(row.get('Expected_Format', '')).strip(),
+            'keywords': str(row.get('Keywords', '')).strip(),
+            'notes': str(row.get('Notes', '')).strip(),
             'created_at': datetime.now().isoformat()
         }
         
-        if q['question']:
+        if q['category'] and q['question']:
             questions.append(q)
     
-    save_questions(questions)
-    return len(questions)
-
-
-def add_question(category: str, question: str, required: bool,
-                expected_format: str = '', keywords: str = '', notes: str = ''):
-    """Add a new question."""
-    questions = load_questions()
-    
-    new_id = f"Q{len(questions)+1:04d}"
-    
-    new_q = {
-        'id': new_id,
-        'category': category,
-        'question': question,
-        'required': required,
-        'expected_format': expected_format,
-        'keywords': keywords,
-        'notes': notes,
-        'created_at': datetime.now().isoformat()
-    }
-    
-    questions.append(new_q)
-    save_questions(questions)
-
-
-def delete_question(question_id: str):
-    """Delete a question by ID."""
-    questions = load_questions()
-    questions = [q for q in questions if q.get('id') != question_id]
-    save_questions(questions)
-
-
-def create_template() -> pd.DataFrame:
-    """Create sample template DataFrame."""
-    template_data = {
-        'Category': ['Payroll', 'Payroll', 'Benefits', 'Time & Attendance'],
-        'Question': [
-            'What is the pay frequency?',
-            'What are the standard pay codes used?',
-            'What health insurance plans are offered?',
-            'What is the standard work week?'
-        ],
-        'Required': ['Yes', 'Yes', 'No', 'Yes'],
-        'Expected_Format': [
-            'Weekly, Bi-weekly, Semi-monthly, Monthly',
-            'List all pay code names and descriptions',
-            'List plan names and coverage details',
-            'Number of hours per week'
-        ],
-        'Keywords': [
-            'pay period, frequency, schedule',
-            'earnings, pay types, compensation',
-            'medical, insurance, coverage',
-            'hours, schedule, workweek'
-        ],
-        'Notes': ['', '', 'Include both medical and dental', '']
-    }
-    
-    return pd.DataFrame(template_data)
-
-
-if __name__ == "__main__":
-    render_analysis_questions()
+    if save_questions(questions):
+        return len(questions)
+    return 0
