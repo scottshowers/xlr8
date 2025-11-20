@@ -1,11 +1,14 @@
 """
-Intelligent Parser Orchestrator V2 - Production Keyword Parser
-Strict pattern matching, no bbox complexity
+Intelligent Parser Orchestrator V2 - TABLE-BASED (CORRECT APPROACH)
+
+Dayforce PDFs use a TABLE layout:
+- Row per employee
+- Columns: Employee Info | Earnings | Taxes | Deductions
 """
 
 import logging
 import re
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 from pathlib import Path
 from datetime import datetime
 import pandas as pd
@@ -20,28 +23,58 @@ except ImportError:
 
 
 class IntelligentParserOrchestratorV2:
-    """Production V2 parser with strict keyword patterns."""
+    """V2 parser using TABLE extraction."""
     
     def __init__(self, custom_parsers_dir: str = None):
         self.logger = logging.getLogger(__name__)
         self.custom_parsers_dir = custom_parsers_dir
     
     def parse(self, pdf_path: str, output_dir: str = '/data/parsed_registers', force_v2: bool = False) -> Dict[str, Any]:
-        """Parse PDF with strict pattern matching."""
+        """Parse PDF using table extraction."""
         try:
             if not PDFPLUMBER_AVAILABLE:
                 raise Exception("pdfplumber not available")
             
-            # Extract full text
-            full_text = self._extract_full_text(pdf_path)
-            if not full_text:
-                raise Exception("No text extracted")
+            # Extract table
+            with pdfplumber.open(pdf_path) as pdf:
+                tables = pdf.pages[0].extract_tables()
+                
+                if not tables:
+                    raise Exception("No tables found in PDF")
+                
+                table = tables[0]
             
-            # Parse with strict patterns
-            employees = self._parse_employee_info(full_text)
-            earnings = self._parse_earnings(full_text, employees)
-            taxes = self._parse_taxes(full_text, employees)
-            deductions = self._parse_deductions(full_text, employees)
+            # Parse table rows (skip headers)
+            employees = []
+            earnings = []
+            taxes = []
+            deductions = []
+            
+            for row in table[3:]:  # Skip header rows (0, 1, 2)
+                if not row or not row[0]:
+                    continue
+                
+                # Parse employee info (column 0)
+                emp = self._parse_employee_column(row[0])
+                if not emp:
+                    continue
+                
+                employees.append(emp)
+                
+                # Parse earnings (column 1)
+                if row[1]:
+                    emp_earnings = self._parse_earnings_column(row[1], emp)
+                    earnings.extend(emp_earnings)
+                
+                # Parse taxes (column 7)
+                if len(row) > 7 and row[7]:
+                    emp_taxes = self._parse_taxes_column(row[7], emp)
+                    taxes.extend(emp_taxes)
+                
+                # Parse deductions (column 12)
+                if len(row) > 12 and row[12]:
+                    emp_deductions = self._parse_deductions_column(row[12], emp)
+                    deductions.extend(emp_deductions)
             
             structured_data = {
                 'employees': employees,
@@ -58,7 +91,7 @@ class IntelligentParserOrchestratorV2:
                 'success': True,
                 'excel_path': excel_path,
                 'accuracy': accuracy,
-                'method': 'V2-Keywords-Strict',
+                'method': 'V2-Table-Based',
                 'employees_found': len(employees),
                 'earnings_found': len(earnings),
                 'taxes_found': len(taxes),
@@ -69,138 +102,159 @@ class IntelligentParserOrchestratorV2:
             self.logger.error(f"V2 parsing failed: {e}", exc_info=True)
             return {'success': False, 'error': str(e)}
     
-    def _extract_full_text(self, pdf_path: str) -> str:
-        """Extract complete PDF text."""
-        with pdfplumber.open(pdf_path) as pdf:
-            return "\n".join(page.extract_text() or "" for page in pdf.pages)
+    def _parse_employee_column(self, text: str) -> Dict:
+        """Parse employee info from column 0."""
+        if not text:
+            return None
+        
+        # Extract name (first line)
+        lines = text.split('\n')
+        name = lines[0].strip() if lines else ""
+        
+        # Validate name format
+        if not re.match(r'^[A-Z][a-z]+\s+[A-Z][a-z]+$', name):
+            return None
+        
+        # Extract employee ID
+        emp_id_match = re.search(r'Emp\s*#:\s*(\d{4,6})', text)
+        emp_id = emp_id_match.group(1) if emp_id_match else ""
+        
+        # Extract department
+        dept_match = re.search(r'Dept:\s*(.+)', text)
+        dept = dept_match.group(1).strip() if dept_match else ""
+        
+        return {
+            'employee_id': emp_id,
+            'employee_name': name,
+            'department': dept
+        }
     
-    def _parse_employee_info(self, text: str) -> List[Dict]:
-        """Parse employees with strict pattern."""
-        employees = []
-        
-        # Pattern: "Emp #: 12345" followed by name within 200 chars
-        pattern = r'Emp\s*#:\s*(\d{4,6})'
-        
-        for match in re.finditer(pattern, text, re.IGNORECASE):
-            emp_id = match.group(1)
-            
-            # Get context BEFORE match (name comes before "Emp #:")
-            start = max(0, match.start() - 200)
-            end = match.start()
-            context = text[start:end]
-            
-            # Find name: "FirstName LastName" (both capitalized) - get last occurrence
-            name_matches = list(re.finditer(r'\b([A-Z][a-z]+)\s+([A-Z][a-z]+)\b', context))
-            name_match = name_matches[-1] if name_matches else None
-            if name_match:
-                name = f"{name_match.group(1)} {name_match.group(2)}"
-                employees.append({
-                    'employee_id': emp_id,
-                    'employee_name': name,
-                    'department': ''
-                })
-        
-        # Deduplicate
-        seen = {}
-        for emp in employees:
-            if emp['employee_id'] not in seen:
-                seen[emp['employee_id']] = emp
-        
-        return list(seen.values())
-    
-    def _parse_earnings(self, text: str, employees: List[Dict]) -> List[Dict]:
-        """Parse earnings with strict pattern: Description Rate Hours Amount."""
+    def _parse_earnings_column(self, text: str, employee: Dict) -> List[Dict]:
+        """Parse earnings from column 1."""
         earnings = []
         
-        # Strict pattern: Word(s) $Rate Hours $Amount with 4 numbers
-        # Example: "Regular Hourly $18.1900 55.28 $1,005.60"
-        pattern = r'([A-Z][A-Za-z\s-]{2,25})\s+\$?([\d,]+\.\d{2,4})\s+([\d,]+\.\d{2})\s+\$?([\d,]+\.\d{2})'
+        # Exclusion keywords (not earnings)
+        exclusions = ['phone', 'reimbursement', 'manager fuel', 'company paid', 
+                      'memo total', 'hours', 'balance', 'accrued']
         
         for line in text.split('\n'):
-            # Skip metadata lines
-            if ':' in line or 'Date' in line or 'Status' in line or len(line) < 20:
+            line = line.strip()
+            
+            # Skip empty, short, or excluded lines
+            if len(line) < 5 or any(ex in line.lower() for ex in exclusions):
                 continue
             
-            match = re.search(pattern, line)
+            # Skip lines with just dashes or totals
+            if line.startswith('---') or 'total' in line.lower():
+                continue
+            
+            # Pattern: "Description Rate Hours Amount" or "Description Hours Amount"
+            # Examples:
+            # "Regular Hourly $18.1900 55.28 $1,005.60 748.73 $13,538.38"
+            # "Nightshift 10.68 $198.39"
+            # "Holiday Bonus $50.00"
+            
+            # Try full pattern first (with rate)
+            match = re.search(r'^([A-Z][A-Za-z\s\-]{2,30}?)\s+\$?([\d,]+\.\d{2,4})\s+([\d,]+\.\d{2})\s+\$?([\d,]+\.\d{2})', line)
             if match:
                 desc = match.group(1).strip()
                 rate = self._safe_float(match.group(2))
                 hours = self._safe_float(match.group(3))
                 amount = self._safe_float(match.group(4))
-                
-                # Skip if doesn't look like earnings
-                if rate > 500 or hours > 200 or amount > 50000:
-                    continue
-                
-                # Skip single words (like "Holiday" alone - should be "Holiday Worked")
-                if len(desc.split()) < 2:
-                    continue
-                
-                # Map to employee
-                emp_id, emp_name = self._find_employee(line, text, employees)
-                
-                earnings.append({
-                    'employee_id': emp_id,
-                    'employee_name': emp_name,
-                    'description': desc,
-                    'hours': hours,
-                    'rate': rate,
-                    'amount': amount,
-                    'current_ytd': amount
-                })
+            else:
+                # Try pattern without rate
+                match = re.search(r'^([A-Z][A-Za-z\s\-]{2,30}?)\s+([\d,]+\.\d{2})\s+\$?([\d,]+\.\d{2})', line)
+                if match:
+                    desc = match.group(1).strip()
+                    hours = self._safe_float(match.group(2))
+                    amount = self._safe_float(match.group(3))
+                    rate = 0
+                else:
+                    # Try simple: "Description $Amount"
+                    match = re.search(r'^([A-Z][A-Za-z\s\-]{2,30}?)\s+\$?([\d,]+\.\d{2})$', line)
+                    if match:
+                        desc = match.group(1).strip()
+                        amount = self._safe_float(match.group(2))
+                        hours = 0
+                        rate = 0
+                    else:
+                        continue
+            
+            # Validate
+            if amount < 1 or amount > 50000:
+                continue
+            
+            earnings.append({
+                'employee_id': employee['employee_id'],
+                'employee_name': employee['employee_name'],
+                'description': desc,
+                'hours': hours,
+                'rate': rate,
+                'amount': amount,
+                'current_ytd': amount
+            })
         
         return earnings
     
-    def _parse_taxes(self, text: str, employees: List[Dict]) -> List[Dict]:
-        """Parse taxes with flexible patterns."""
+    def _parse_taxes_column(self, text: str, employee: Dict) -> List[Dict]:
+        """Parse taxes from column 7."""
         taxes = []
         
-        # Tax keywords (must have at least one)
-        tax_keywords = ['fed', 'fica', 'medicare', 'ss', 'state', 'w/h', 'tax', 'ut', 'mwt', 'er', 'ee']
-        
-        # Pattern 1: Tax Name $Amount $Amount (2 amounts)
-        pattern1 = r'([A-Z][A-Za-z\s/\-]{2,20})\s+\$?([\d,]+\.\d{2})\s+\$?([\d,]+\.\d{2})'
-        # Pattern 2: Tax Name $Amount (1 amount)
-        pattern2 = r'([A-Z][A-Za-z\s/\-]{2,20})\s+\$?([\d,]+\.\d{2})(?:\s|$)'
+        # Exclusion keywords
+        exclusions = ['memo total', 'emp total', 'er total']
         
         for line in text.split('\n'):
-            # Skip metadata
-            if ':' in line or 'Date' in line or 'Status' in line or len(line) < 10:
+            line = line.strip()
+            
+            # Skip empty, short, dashes, or excluded
+            if len(line) < 5 or line.startswith('---') or any(ex in line.lower() for ex in exclusions):
                 continue
             
-            # Must have tax keyword
-            if not any(kw in line.lower() for kw in tax_keywords):
+            # Pattern: Handle multiple amounts in different formats
+            # Format 1: "Fed W/H $1,005.60 $14,559.63 $62.46" (3 amounts)
+            # Format 2: "FICA EE $1,005.60 $62.35 $14,559.63 $902.70" (4 amounts)
+            # Format 3: "Fed UT ER $7,000.00 $42.00" (2 amounts)
+            # Format 4: "ID DRT $7,000.00" (1 amount)
+            
+            # Extract description (everything before first dollar sign or number)
+            desc_match = re.match(r'^([A-Z][A-Za-z\s/\-]{1,20}?)\s+\$', line)
+            if not desc_match:
                 continue
             
-            # Must NOT have earning keywords
-            if any(kw in line.lower() for kw in ['regular', 'overtime', 'vacation', 'holiday worked', 'bonus-no']):
+            desc = desc_match.group(1).strip()
+            
+            # Extract all amounts from the line
+            amounts = [float(a.replace(',', '')) for a in re.findall(r'\$?([\d,]+\.\d{2})', line)]
+            
+            if not amounts:
                 continue
             
-            # Try 2-amount pattern first
-            match = re.search(pattern1, line)
-            if match:
-                desc = match.group(1).strip()
-                wages = self._safe_float(match.group(2))
-                amount = self._safe_float(match.group(3))
-            else:
-                # Try 1-amount pattern
-                match = re.search(pattern2, line)
-                if match:
-                    desc = match.group(1).strip()
-                    wages = 0
-                    amount = self._safe_float(match.group(2))
-                else:
-                    continue
+            # Logic: For tax lines, typically:
+            # - 1 amount: wages (no current tax shown)
+            # - 2 amounts: wages, current_tax
+            # - 3 amounts: wages, ytd_wages, current_tax  
+            # - 4 amounts: wages, current_tax, ytd_wages, ytd_tax
             
-            # Skip unrealistic values
-            if amount > 10000:
+            if len(amounts) == 1:
+                wages = amounts[0]
+                amount = 0
+            elif len(amounts) == 2:
+                wages = amounts[0]
+                amount = amounts[1]
+            elif len(amounts) == 3:
+                wages = amounts[0]
+                amount = amounts[2]  # 3rd amount is current period tax
+            else:  # 4+ amounts
+                wages = amounts[0]
+                amount = amounts[1]  # 2nd amount is current period tax
+            
+            # Validate
+            if amount < 0 or amount > 10000:
                 continue
-            
-            emp_id, emp_name = self._find_employee(line, text, employees)
             
             taxes.append({
-                'employee_id': emp_id,
-                'employee_name': emp_name,
+                'employee_id': employee['employee_id'],
+                'employee_name': employee['employee_name'],
                 'description': desc,
                 'wages_base': wages,
                 'amount': amount,
@@ -210,44 +264,43 @@ class IntelligentParserOrchestratorV2:
         
         return taxes
     
-    def _parse_deductions(self, text: str, employees: List[Dict]) -> List[Dict]:
-        """Parse deductions with flexible pattern."""
+    def _parse_deductions_column(self, text: str, employee: Dict) -> List[Dict]:
+        """Parse deductions from column 13."""
         deductions = []
         
-        # Deduction keywords
-        ded_keywords = ['401k', '401(k)', 'insurance', 'medical', 'dental', 'vision', 
-                        'life', 'hsa', 'fsa', 'uniform', 'pre-tax', 'pre tax', 'post tax']
-        
-        # Flexible pattern: Description $Amount
-        pattern = r'([A-Z][A-Za-z\s\-()]{2,35})\s+\$?([\d,]+\.\d{2})(?:\s|$)'
+        # Exclusion keywords
+        exclusions = ['memo total', 'pre total', 'post total', 'workers comp', 
+                      'italicized amounts', 'balance', 'accrued']
         
         for line in text.split('\n'):
-            # Skip metadata (relaxed)
-            if ':' in line or 'Date' in line or 'Status' in line or len(line) < 10:
+            line = line.strip()
+            
+            # Skip empty, short, dashes, or excluded
+            if len(line) < 5 or line.startswith('---') or any(ex in line.lower() for ex in exclusions):
                 continue
             
-            # Must have deduction keyword
-            if not any(kw in line.lower() for kw in ded_keywords):
+            # Skip year markers like "(2023)"
+            if re.match(r'^\(\d{4}\)$', line):
                 continue
             
-            # Must NOT have earning or tax keywords (relaxed)
-            if any(kw in line.lower() for kw in ['regular hourly', 'regular salary', 'overtime', 'vacation', 'fed w/h', 'fica']):
-                continue
+            # Pattern: "Description Amount" with optional percentage
+            # Examples:
+            # "Uniform Purchase $4.85"
+            # "Medical Pre Tax $403.81 $403.81 $6,057.15"
+            # "401k-PR 5.00% $261.23 $1,636.91"
+            match = re.search(r'^([A-Z][A-Za-z\s\-()]{2,35}?)(?:\s+[\d.]+%)?\s+\$?([\d,]+\.\d{2})', line)
             
-            match = re.search(pattern, line)
             if match:
                 desc = match.group(1).strip()
                 amount = self._safe_float(match.group(2))
                 
-                # Skip unrealistic values
-                if amount > 5000:
+                # Validate
+                if amount < 0.01 or amount > 5000:
                     continue
                 
-                emp_id, emp_name = self._find_employee(line, text, employees)
-                
                 deductions.append({
-                    'employee_id': emp_id,
-                    'employee_name': emp_name,
+                    'employee_id': employee['employee_id'],
+                    'employee_name': employee['employee_name'],
                     'description': desc,
                     'scheduled': 0,
                     'amount': amount,
@@ -256,31 +309,10 @@ class IntelligentParserOrchestratorV2:
         
         return deductions
     
-    def _find_employee(self, line: str, full_text: str, employees: List[Dict]) -> tuple:
-        """Find which employee a line belongs to."""
-        # Check if employee ID or name in line
-        for emp in employees:
-            if emp['employee_id'] in line or emp['employee_name'] in line:
-                return emp['employee_id'], emp['employee_name']
-        
-        # Find nearest employee in text
-        line_pos = full_text.find(line)
-        if line_pos > 0:
-            # Look backwards for nearest employee
-            before_text = full_text[:line_pos]
-            for emp in reversed(employees):
-                emp_pattern = f"Emp #: {emp['employee_id']}"
-                if emp_pattern in before_text:
-                    last_pos = before_text.rfind(emp_pattern)
-                    if line_pos - last_pos < 2000:  # Within 2000 chars
-                        return emp['employee_id'], emp['employee_name']
-        
-        return "", ""
-    
     def _safe_float(self, value: str) -> float:
         """Safely convert to float."""
         try:
-            return float(str(value).replace(',', '').replace('$', ''))
+            return float(str(value).replace(',', '').replace('$', '').replace('%', ''))
         except:
             return 0.0
     
@@ -296,6 +328,7 @@ class IntelligentParserOrchestratorV2:
             summary_data.append({
                 'Employee ID': emp_id,
                 'Name': emp['employee_name'],
+                'Department': emp['department'],
                 'Total Earnings': sum(e['amount'] for e in emp_earnings),
                 'Total Taxes': sum(t['amount'] for t in emp_taxes),
                 'Total Deductions': sum(d['amount'] for d in emp_deductions),
@@ -347,16 +380,38 @@ class IntelligentParserOrchestratorV2:
         return str(output_path)
     
     def _calculate_accuracy(self, structured: Dict, tabs: Dict[str, pd.DataFrame]) -> float:
-        """Calculate accuracy."""
+        """Calculate accuracy based on data completeness."""
         score = 0
         
-        if structured['employees'] and len(structured['employees']) >= 1:
-            score += 30
-        if structured['earnings']:
-            score += 25
-        if structured['taxes']:
-            score += 25
-        if structured['deductions']:
-            score += 20
+        # Employees with valid names (30 points)
+        employees = structured['employees']
+        if employees:
+            valid_names = sum(1 for e in employees if len(e['employee_name'].split()) == 2)
+            if valid_names == len(employees):
+                score += 30
+        
+        # Earnings quantity (25 points)
+        if employees:
+            avg_earnings = len(structured['earnings']) / len(employees)
+            if avg_earnings >= 5:
+                score += 25
+            elif avg_earnings >= 3:
+                score += 15
+        
+        # Taxes quantity (25 points)
+        if employees:
+            avg_taxes = len(structured['taxes']) / len(employees)
+            if avg_taxes >= 8:
+                score += 25
+            elif avg_taxes >= 5:
+                score += 15
+        
+        # Deductions quantity (20 points)
+        if employees:
+            avg_deductions = len(structured['deductions']) / len(employees)
+            if avg_deductions >= 2:
+                score += 20
+            elif avg_deductions >= 1:
+                score += 10
         
         return min(score, 100.0)
