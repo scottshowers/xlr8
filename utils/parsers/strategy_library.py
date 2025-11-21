@@ -45,6 +45,32 @@ class ExtractionStrategy:
             'hsa', 'fsa', 'dependent', 'garnish', 'child support', 'union', 'dues',
             'parking', 'transit', 'cafeteria', 'charity', 'donation'
         ]
+        
+        # Blacklist: Terms that are NEVER employee names (universal)
+        self.NAME_BLACKLIST = [
+            'net pay', 'gross pay', 'gross', 'net', 'total', 'subtotal', 'totals',
+            'dept code', 'department', 'code', 'profile', 'tax profile',
+            'earnings', 'taxes', 'deductions', 'ytd', 'current', 'payroll',
+            'summary', 'register', 'report', 'page', 'date', 'period',
+            'employee', 'rate', 'amount', 'hours', 'description',
+            # Job titles (not people)
+            'director', 'manager', 'supervisor', 'coordinator', 'assistant',
+            'aide', 'clerk', 'specialist', 'administrator', 'officer',
+            'technician', 'analyst', 'representative', 'receptionist',
+            # Departments (not people)
+            'nursing', 'dietary', 'maintenance', 'housekeeping', 'laundry',
+            'activities', 'administration', 'admin', 'therapy', 'rehab',
+            # Common terms
+            'nonresident', 'resident', 'voucher', 'allowance', 'reimbursement'
+        ]
+        
+        # ID Blacklist: Numbers that are NEVER employee IDs
+        self.ID_BLACKLIST_PATTERNS = [
+            r'^20\d{2}$',  # Years: 2024, 2025, etc.
+            r'^19\d{2}$',  # Years: 1990-1999
+            r'^[1-9]00$',  # Round numbers: 100, 200, 300, etc.
+            r'^[1-9]000$', # Round numbers: 1000, 2000, etc.
+        ]
     
     def can_handle(self, pdf_path: str, vendor: str = None) -> bool:
         """Check if this strategy can handle the PDF."""
@@ -98,6 +124,68 @@ class ExtractionStrategy:
         # Remove leading/trailing punctuation
         text = text.strip('.,;:- ')
         return text[:100]  # Limit length
+    
+    def _is_valid_employee_name(self, name: str) -> bool:
+        """
+        Validate if name is actually a person (not accounting term, job title, etc.)
+        
+        Returns True if name looks like a real person.
+        """
+        if not name or len(name.strip()) < 3:
+            return False
+        
+        name_lower = name.lower().strip()
+        
+        # Check against blacklist
+        for blacklisted_term in self.NAME_BLACKLIST:
+            if blacklisted_term in name_lower:
+                return False
+        
+        # Must have at least 2 words (FirstName LastName)
+        words = name.split()
+        if len(words) < 2:
+            return False
+        
+        # Each word should start with capital letter (proper name format)
+        for word in words:
+            if not word[0].isupper():
+                return False
+        
+        # Should not be all caps (likely a header/label)
+        if name.isupper():
+            return False
+        
+        # Should contain letters (not just numbers/punctuation)
+        if not any(c.isalpha() for c in name):
+            return False
+        
+        return True
+    
+    def _is_valid_employee_id(self, emp_id: str) -> bool:
+        """
+        Validate if ID is actually an employee ID (not year, dept code, etc.)
+        
+        Returns True if ID looks like a real employee ID.
+        """
+        if not emp_id or not emp_id.strip():
+            return False
+        
+        emp_id = emp_id.strip()
+        
+        # Must be numeric
+        if not emp_id.isdigit():
+            return False
+        
+        # Check against blacklist patterns
+        for pattern in self.ID_BLACKLIST_PATTERNS:
+            if re.match(pattern, emp_id):
+                return False
+        
+        # Employee IDs are typically 4-7 digits (not 1-3, not 8+)
+        if len(emp_id) < 4 or len(emp_id) > 7:
+            return False
+        
+        return True
 
 
 class TableBasedStrategy(ExtractionStrategy):
@@ -307,24 +395,24 @@ class TableBasedStrategy(ExtractionStrategy):
         return column_types
     
     def _column_has_ids(self, table: List[List], col_idx: int) -> bool:
-        """Check if column contains employee IDs."""
-        id_count = 0
+        """Check if column contains valid employee IDs."""
+        valid_id_count = 0
         for row in table[1:6]:  # Check first 5 rows
             if col_idx < len(row):
-                cell = str(row[col_idx] or '')
-                if re.match(r'^\d{4,6}$', cell.strip()):
-                    id_count += 1
-        return id_count >= 2
+                cell = str(row[col_idx] or '').strip()
+                if cell and self._is_valid_employee_id(cell):
+                    valid_id_count += 1
+        return valid_id_count >= 2
     
     def _column_has_names(self, table: List[List], col_idx: int) -> bool:
-        """Check if column contains names."""
-        name_count = 0
+        """Check if column contains valid employee names."""
+        valid_name_count = 0
         for row in table[1:6]:
             if col_idx < len(row):
-                cell = str(row[col_idx] or '')
-                if re.match(r'^[A-Z][a-z]+(\s+[A-Z][a-z]+)+$', cell.strip()):
-                    name_count += 1
-        return name_count >= 2
+                cell = str(row[col_idx] or '').strip()
+                if cell and self._is_valid_employee_name(cell):
+                    valid_name_count += 1
+        return valid_name_count >= 2
     
     def _column_has_amounts(self, table: List[List], col_idx: int) -> bool:
         """Check if column contains monetary amounts."""
@@ -349,7 +437,7 @@ class TableBasedStrategy(ExtractionStrategy):
     
     def _find_employee_in_row(self, row: List, id_col: Optional[int], 
                              name_col: Optional[int]) -> Optional[Dict]:
-        """Try to find employee info in this row."""
+        """Try to find employee info in this row with intelligent validation."""
         
         emp_id = None
         emp_name = None
@@ -357,7 +445,7 @@ class TableBasedStrategy(ExtractionStrategy):
         # Try explicit ID column
         if id_col is not None and id_col < len(row):
             cell = str(row[id_col] or '').strip()
-            if re.match(r'^\d{4,6}$', cell):
+            if re.match(r'^\d{4,7}$', cell):
                 emp_id = cell
         
         # Try explicit name column
@@ -372,14 +460,27 @@ class TableBasedStrategy(ExtractionStrategy):
                 cell_str = str(cell or '').strip()
                 
                 # Look for ID pattern
-                if not emp_id and re.match(r'^\d{4,6}$', cell_str):
+                if not emp_id and re.match(r'^\d{4,7}$', cell_str):
                     emp_id = cell_str
                 
                 # Look for name pattern
                 if not emp_name and re.match(r'^[A-Z][a-z]+(\s+[A-Z][a-z]+)+$', cell_str):
                     emp_name = cell_str
         
+        # CRITICAL VALIDATION: Only accept if BOTH pass validation
         if emp_id and emp_name:
+            # Validate ID
+            if not self._is_valid_employee_id(emp_id):
+                logger.debug(f"Rejected ID '{emp_id}' - failed validation")
+                return None
+            
+            # Validate name
+            if not self._is_valid_employee_name(emp_name):
+                logger.debug(f"Rejected name '{emp_name}' - failed validation")
+                return None
+            
+            # Both valid - accept employee
+            logger.info(f"Found valid employee: {emp_id} - {emp_name}")
             return {
                 'employee_id': emp_id,
                 'employee_name': emp_name,
@@ -503,32 +604,51 @@ class TextBasedStrategy(ExtractionStrategy):
             return {'employees': [], 'earnings': [], 'taxes': [], 'deductions': []}
     
     def _extract_employees_multi_pattern(self, text: str) -> List[Dict]:
-        """Try multiple patterns to find employees."""
+        """Try multiple patterns to find employees with intelligent validation."""
         
         employees = []
         
         # Pattern 1: "Employee: Name ID: 12345" or "Name (12345)"
-        pattern1 = r'(?:Employee:|Name:)?\s*([A-Z][a-z]+\s+[A-Z][a-z]+)[\s,]*(?:ID:|#|Employee\s*#)?\s*[:\(]?\s*(\d{4,6})'
+        pattern1 = r'(?:Employee:|Name:)?\s*([A-Z][a-z]+\s+[A-Z][a-z]+)[\s,]*(?:ID:|#|Employee\s*#)?\s*[:\(]?\s*(\d{4,7})'
         for match in re.finditer(pattern1, text, re.MULTILINE):
-            employees.append({
-                'employee_id': match.group(2),
-                'employee_name': match.group(1),
-                'department': ''
-            })
+            name = match.group(1)
+            emp_id = match.group(2)
+            
+            # Validate before adding
+            if self._is_valid_employee_id(emp_id) and self._is_valid_employee_name(name):
+                employees.append({
+                    'employee_id': emp_id,
+                    'employee_name': name,
+                    'department': ''
+                })
+                logger.info(f"Pattern 1 found: {emp_id} - {name}")
+            else:
+                logger.debug(f"Pattern 1 rejected: {emp_id} - {name}")
         
         # Pattern 2: "12345 - FirstName LastName"
-        pattern2 = r'(\d{4,6})\s*[-–]\s*([A-Z][a-z]+\s+[A-Z][a-z]+)'
+        pattern2 = r'(\d{4,7})\s*[-–]\s*([A-Z][a-z]+\s+[A-Z][a-z]+)'
         for match in re.finditer(pattern2, text):
-            employees.append({
-                'employee_id': match.group(1),
-                'employee_name': match.group(2),
-                'department': ''
-            })
+            emp_id = match.group(1)
+            name = match.group(2)
+            
+            if self._is_valid_employee_id(emp_id) and self._is_valid_employee_name(name):
+                employees.append({
+                    'employee_id': emp_id,
+                    'employee_name': name,
+                    'department': ''
+                })
+                logger.info(f"Pattern 2 found: {emp_id} - {name}")
+            else:
+                logger.debug(f"Pattern 2 rejected: {emp_id} - {name}")
         
         # Pattern 3: "EmpID: 12345" followed by "Name: FirstName LastName" within 100 chars
-        pattern3_id = r'(?:Emp|Employee)\s*(?:ID|#)\s*:?\s*(\d{4,6})'
+        pattern3_id = r'(?:Emp|Employee)\s*(?:ID|#)\s*:?\s*(\d{4,7})'
         for match in re.finditer(pattern3_id, text):
             emp_id = match.group(1)
+            
+            if not self._is_valid_employee_id(emp_id):
+                continue
+            
             # Look for name nearby
             context_start = max(0, match.start() - 50)
             context_end = min(len(text), match.end() + 150)
@@ -536,20 +656,32 @@ class TextBasedStrategy(ExtractionStrategy):
             
             name_match = re.search(r'(?:Name\s*:?)?\s*([A-Z][a-z]+\s+[A-Z][a-z]+)', context)
             if name_match:
-                employees.append({
-                    'employee_id': emp_id,
-                    'employee_name': name_match.group(1),
-                    'department': ''
-                })
+                name = name_match.group(1)
+                if self._is_valid_employee_name(name):
+                    employees.append({
+                        'employee_id': emp_id,
+                        'employee_name': name,
+                        'department': ''
+                    })
+                    logger.info(f"Pattern 3 found: {emp_id} - {name}")
+                else:
+                    logger.debug(f"Pattern 3 rejected name: {name}")
         
         # Pattern 4: Line starting with "12345  FirstName LastName"
-        pattern4 = r'^(\d{4,6})\s{2,}([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)'
+        pattern4 = r'^(\d{4,7})\s{2,}([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)'
         for match in re.finditer(pattern4, text, re.MULTILINE):
-            employees.append({
-                'employee_id': match.group(1),
-                'employee_name': match.group(2),
-                'department': ''
-            })
+            emp_id = match.group(1)
+            name = match.group(2)
+            
+            if self._is_valid_employee_id(emp_id) and self._is_valid_employee_name(name):
+                employees.append({
+                    'employee_id': emp_id,
+                    'employee_name': name,
+                    'department': ''
+                })
+                logger.info(f"Pattern 4 found: {emp_id} - {name}")
+            else:
+                logger.debug(f"Pattern 4 rejected: {emp_id} - {name}")
         
         # Deduplicate
         seen = {}
@@ -560,6 +692,7 @@ class TextBasedStrategy(ExtractionStrategy):
                 seen[emp_id] = emp
                 unique.append(emp)
         
+        logger.info(f"Found {len(unique)} valid employees after validation")
         return unique
     
     def _extract_line_items(self, text: str, employees: List[Dict]) -> Tuple[List, List, List]:
