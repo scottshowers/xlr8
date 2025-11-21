@@ -242,6 +242,7 @@ class IntelligentRouter:
     ) -> Optional[List[Dict]]:
         """
         Retrieve relevant context from ChromaDB if available.
+        SEARCHES BOTH COLLECTIONS (hcmpact_knowledge AND hcmpact_docs)
         
         Args:
             query: User's query
@@ -254,37 +255,54 @@ class IntelligentRouter:
         if not self.chromadb_handler:
             return None
         
-        try:
-            # FIXED: Use "hcmpact_knowledge" to match knowledge page uploads
-            collection_name = "hcmpact_knowledge"
-            
-            logger.info(f"Searching ChromaDB collection: '{collection_name}'")
-            
-            # Log project filtering status
-            if project_id:
-                logger.info(f"[PROJECT] Filtering search by project_id: {project_id}")
-            else:
-                logger.info("[PROJECT] Searching all projects (no filter)")
-            
-            results = self.chromadb_handler.search(
-                collection_name=collection_name,
-                query=query,
-                n_results=num_sources,
-                project_id=project_id  # ← ADDED FOR PROJECT FILTERING
-            )
-            
-            if results and len(results) > 0:
-                logger.info(f"Found {len(results)} results from ChromaDB")
+        all_results = []
+        
+        # Search BOTH collections
+        collections_to_search = ["hcmpact_knowledge", "hcmpact_docs"]
+        
+        for collection_name in collections_to_search:
+            try:
+                logger.info(f"Searching ChromaDB collection: '{collection_name}'")
+                
+                # Log project filtering status
                 if project_id:
-                    logger.info(f"[PROJECT] Results filtered to project: {project_id}")
-                return results
-            else:
-                logger.info("No results found in ChromaDB")
-                return None
+                    logger.info(f"[PROJECT] Filtering search by project_id: {project_id}")
+                else:
+                    logger.info("[PROJECT] Searching all projects (no filter)")
+                
+                results = self.chromadb_handler.search(
+                    collection_name=collection_name,
+                    query=query,
+                    n_results=num_sources,
+                    project_id=project_id  # ← ADDED FOR PROJECT FILTERING
+                )
+                
+                if results and len(results) > 0:
+                    logger.info(f"Found {len(results)} results from '{collection_name}'")
+                    all_results.extend(results)
+                else:
+                    logger.info(f"No results found in '{collection_name}'")
+                    
+            except Exception as e:
+                logger.warning(f"Search failed for '{collection_name}': {e}")
+                continue
+        
+        # Combine and sort by relevance (distance)
+        if all_results:
+            # Sort by distance (lower is better)
+            all_results.sort(key=lambda x: x.get('distance', 999))
             
-        except Exception as e:
-            logger.warning(f"ChromaDB context retrieval failed: {e}")
-            return None
+            # Take top N results
+            top_results = all_results[:num_sources]
+            
+            logger.info(f"Combined: {len(top_results)} total results from both collections")
+            if project_id:
+                logger.info(f"[PROJECT] Results filtered to project: {project_id}")
+            
+            return top_results
+        
+        logger.info("No results found in any collection")
+        return None
     
     def get_decision_explanation(self, decision: RouterDecision) -> str:
         """
