@@ -86,13 +86,19 @@ class IntelligentRouter:
             logger.warning(f"Could not check available models: {e}")
             return []
     
-    def make_routing_decision(self, query: str, num_chromadb_sources: int = 5) -> RouterDecision:
+    def make_routing_decision(
+        self, 
+        query: str, 
+        num_chromadb_sources: int = 5,
+        project_id: Optional[str] = None  # ← ADDED FOR PROJECT ISOLATION
+    ) -> RouterDecision:
         """
         Make an intelligent routing decision for the given query.
         
         Args:
             query: User's query text
             num_chromadb_sources: Number of ChromaDB sources to retrieve
+            project_id: Optional project ID to filter ChromaDB results (NEW)
             
         Returns:
             RouterDecision object with routing information
@@ -123,7 +129,7 @@ class IntelligentRouter:
         
         # STEP 2: Check ChromaDB for HCMPACT context
         logger.debug("Step 2: Checking ChromaDB for context")
-        chromadb_context = self._get_chromadb_context(query, num_chromadb_sources)
+        chromadb_context = self._get_chromadb_context(query, num_chromadb_sources, project_id)  # ← ADDED project_id
         
         if chromadb_context and len(chromadb_context) > 0:
             # HCMPACT-specific knowledge exists
@@ -228,13 +234,19 @@ class IntelligentRouter:
         # Last resort: return expected model name even if not verified
         return "mistral:7b" if complexity != 'complex' else "deepseek-r1:7b"
     
-    def _get_chromadb_context(self, query: str, num_sources: int) -> Optional[List[Dict]]:
+    def _get_chromadb_context(
+        self, 
+        query: str, 
+        num_sources: int,
+        project_id: Optional[str] = None  # ← ADDED FOR PROJECT ISOLATION
+    ) -> Optional[List[Dict]]:
         """
         Retrieve relevant context from ChromaDB if available.
         
         Args:
             query: User's query
             num_sources: Number of sources to retrieve
+            project_id: Optional project ID to filter results (NEW)
             
         Returns:
             List of context documents or None
@@ -243,20 +255,28 @@ class IntelligentRouter:
             return None
         
         try:
-            # FIXED: Use the correct collection name "hcmpact_docs"
-            # This matches what document_processor.py uses when uploading documents
-            collection_name = "hcmpact_docs"
+            # FIXED: Use "hcmpact_knowledge" to match knowledge page uploads
+            collection_name = "hcmpact_knowledge"
             
             logger.info(f"Searching ChromaDB collection: '{collection_name}'")
             
+            # Log project filtering status
+            if project_id:
+                logger.info(f"[PROJECT] Filtering search by project_id: {project_id}")
+            else:
+                logger.info("[PROJECT] Searching all projects (no filter)")
+            
             results = self.chromadb_handler.search(
-                query=query,
                 collection_name=collection_name,
-                n_results=num_sources
+                query=query,
+                n_results=num_sources,
+                project_id=project_id  # ← ADDED FOR PROJECT FILTERING
             )
             
             if results and len(results) > 0:
                 logger.info(f"Found {len(results)} results from ChromaDB")
+                if project_id:
+                    logger.info(f"[PROJECT] Results filtered to project: {project_id}")
                 return results
             else:
                 logger.info("No results found in ChromaDB")
