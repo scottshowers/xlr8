@@ -771,6 +771,8 @@ class TextBasedStrategy(ExtractionStrategy):
         Marker pattern: "LASTNAME, FIRSTNAME Regular/Hourly/Salary/Overtime"
         """
         
+        logger.info("🔧 FIXED _extract_line_items method is running!")
+        
         earnings = []
         taxes = []
         deductions = []
@@ -782,7 +784,7 @@ class TextBasedStrategy(ExtractionStrategy):
             if name:
                 employee_lookup[name] = emp
         
-        logger.debug(f"TextBasedStrategy: Employee lookup contains {len(employee_lookup)} employees")
+        logger.info(f"TextBasedStrategy: Employee lookup contains {len(employee_lookup)} employees")
         
         # Split into lines
         lines = text.split('\n')
@@ -797,6 +799,9 @@ class TextBasedStrategy(ExtractionStrategy):
             re.IGNORECASE
         )
         
+        logger.info(f"🔍 Marker pattern compiled, processing {len(lines)} lines...")
+        marker_count = 0
+        
         for line_num, line in enumerate(lines, 1):
             line = line.strip()
             if len(line) < 10:
@@ -809,13 +814,14 @@ class TextBasedStrategy(ExtractionStrategy):
             
             if marker_match:
                 marker_name = marker_match.group(1).strip()
+                marker_count += 1
                 
                 # Check if this name exists in our employee list
                 if marker_name in employee_lookup:
                     current_employee = employee_lookup[marker_name]
-                    logger.debug(f"🎯 Employee marker found at line {line_num}: {marker_name} (ID: {current_employee.get('employee_id', 'N/A')})")
+                    logger.info(f"🎯 Employee marker #{marker_count} found: {marker_name} (ID: {current_employee.get('employee_id', 'N/A')})")
                 else:
-                    logger.debug(f"⚠️  Employee marker found but not in lookup: {marker_name}")
+                    logger.info(f"⚠️  Employee marker found but not in lookup: {marker_name}")
             
             # Skip lines without a current employee context
             if not current_employee:
@@ -852,16 +858,14 @@ class TextBasedStrategy(ExtractionStrategy):
             
             if self._is_earning(description):
                 earnings.append(line_item)
-                logger.debug(f"  ✓ EARNING assigned to {current_employee['employee_name']}: {description[:50]} ${amounts[0]:.2f}")
             elif self._is_tax(description):
                 taxes.append({**line_item, 'wages_base': 0, 'wages_ytd': 0, 
                             'amount_ytd': amounts[1] if len(amounts) > 1 else amounts[0]})
-                logger.debug(f"  ✓ TAX assigned to {current_employee['employee_name']}: {description[:50]} ${amounts[0]:.2f}")
             elif self._is_deduction(description):
                 deductions.append({**line_item, 'scheduled': 0,
                                  'amount_ytd': amounts[1] if len(amounts) > 1 else amounts[0]})
-                logger.debug(f"  ✓ DEDUCTION assigned to {current_employee['employee_name']}: {description[:50]} ${amounts[0]:.2f}")
         
+        logger.info(f"✅ Found {marker_count} employee markers total")
         logger.info(f"TextBasedStrategy: Extracted {len(earnings)} earnings, {len(taxes)} taxes, {len(deductions)} deductions")
         
         return earnings, taxes, deductions
