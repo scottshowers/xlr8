@@ -323,6 +323,75 @@ def render_status_tab():
         else:
             st.info("Upload directory not found")
         
+        # CLEAN SLATE: Delete old collection button
+        st.markdown("---")
+        st.subheader("🗑️ Database Cleanup")
+        
+        st.warning("""
+        ⚠️ **Clean Slate Migration Tool**
+        
+        If you have an old `hcmpact_docs` collection from before project isolation was implemented,
+        you can delete it here. This will allow you to start fresh with properly tagged documents.
+        
+        **Important:**
+        - This only deletes the OLD collection (`hcmpact_docs`)
+        - Your current collection (`hcmpact_knowledge`) remains safe
+        - You'll need to re-upload documents after deletion
+        - **This action cannot be undone!**
+        """)
+        
+        # Check if old collection exists
+        try:
+            collections = rag.client.list_collections()
+            collection_names = [col.name for col in collections]
+            old_collection_exists = 'hcmpact_docs' in collection_names
+            
+            if old_collection_exists:
+                # Get count
+                old_col = rag.client.get_collection('hcmpact_docs')
+                old_count = old_col.count()
+                
+                st.info(f"📊 Old collection `hcmpact_docs` found: **{old_count:,} chunks**")
+                
+                # Confirmation checkbox
+                confirm_delete = st.checkbox(
+                    f"⚠️ I understand that deleting {old_count:,} chunks is permanent",
+                    key="confirm_delete_old_collection"
+                )
+                
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    if st.button(
+                        "🗑️ Delete Old Collection",
+                        type="primary",
+                        disabled=not confirm_delete,
+                        use_container_width=True
+                    ):
+                        try:
+                            rag.client.delete_collection('hcmpact_docs')
+                            st.success(f"✅ Successfully deleted `hcmpact_docs` ({old_count:,} chunks)")
+                            st.info("""
+                            **Next steps:**
+                            1. Go to Setup → Projects and activate your project
+                            2. Go to Document Upload tab
+                            3. Re-upload your documents with proper project tags
+                            4. They'll be added to `hcmpact_knowledge` with project isolation
+                            """)
+                            logger.info(f"Deleted old collection hcmpact_docs ({old_count} chunks)")
+                            st.rerun()
+                        except Exception as del_error:
+                            st.error(f"❌ Failed to delete collection: {del_error}")
+                            logger.error(f"Collection deletion error: {del_error}", exc_info=True)
+                
+                with col2:
+                    st.caption("Checkbox must be checked to enable deletion")
+            else:
+                st.success("✅ No old collection found. You're using clean project isolation!")
+                
+        except Exception as check_error:
+            st.info("Could not check for old collections. This is normal if you're starting fresh.")
+            logger.debug(f"Collection check error: {check_error}")
+        
     except Exception as e:
         st.error(f"Error loading status: {str(e)}")
         logger.error(f"Status error: {str(e)}", exc_info=True)
