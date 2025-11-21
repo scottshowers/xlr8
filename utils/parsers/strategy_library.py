@@ -129,37 +129,43 @@ class ExtractionStrategy:
         """
         Validate if name is actually a person (not accounting term, job title, etc.)
         
+        Accepts two formats:
+        - "FirstName LastName" (Title Case)
+        - "LASTNAME, FIRSTNAME" (All Caps with comma)
+        
         Returns True if name looks like a real person.
         """
         if not name or len(name.strip()) < 3:
             return False
         
-        name_lower = name.lower().strip()
+        name_clean = name.strip()
+        name_lower = name_clean.lower()
         
         # Check against blacklist
         for blacklisted_term in self.NAME_BLACKLIST:
             if blacklisted_term in name_lower:
                 return False
         
-        # Must have at least 2 words (FirstName LastName)
-        words = name.split()
-        if len(words) < 2:
-            return False
+        # Pattern 1: "LASTNAME, FIRSTNAME" (All caps with comma) - COMMON FORMAT!
+        if re.match(r'^[A-Z]{2,},\s+[A-Z\s]+$', name_clean):
+            # Must have comma and two parts
+            parts = name_clean.split(',')
+            if len(parts) == 2:
+                lastname = parts[0].strip()
+                firstname = parts[1].strip()
+                # Both should be at least 2 chars
+                if len(lastname) >= 2 and len(firstname) >= 2:
+                    return True
         
-        # Each word should start with capital letter (proper name format)
-        for word in words:
-            if not word[0].isupper():
-                return False
+        # Pattern 2: "FirstName LastName" (Title Case)
+        words = name_clean.split()
+        if len(words) >= 2:
+            # Each word should start with capital letter
+            all_title_case = all(word[0].isupper() and not word.isupper() for word in words)
+            if all_title_case:
+                return True
         
-        # Should not be all caps (likely a header/label)
-        if name.isupper():
-            return False
-        
-        # Should contain letters (not just numbers/punctuation)
-        if not any(c.isalpha() for c in name):
-            return False
-        
-        return True
+        return False
     
     def _is_valid_employee_id(self, emp_id: str) -> bool:
         """
@@ -186,6 +192,32 @@ class ExtractionStrategy:
             return False
         
         return True
+    
+    def _extract_employee_from_description(self, text: str) -> Optional[str]:
+        """
+        Try to extract employee name from a description/text.
+        
+        Looks for patterns like:
+        - "LASTNAME, FIRSTNAME Something"
+        - "FirstName LastName Something"
+        
+        Returns employee name if found, None otherwise.
+        """
+        # Pattern 1: "LASTNAME, FIRSTNAME" at start of text
+        match = re.match(r'^([A-Z]{2,},\s+[A-Z\s]+?)(?:\s+[A-Z][a-z]|\s+\d)', text)
+        if match:
+            name = match.group(1).strip()
+            if self._is_valid_employee_name(name):
+                return name
+        
+        # Pattern 2: "FirstName LastName" at start of text (Title Case)
+        match = re.match(r'^([A-Z][a-z]+\s+[A-Z][a-z]+)', text)
+        if match:
+            name = match.group(1).strip()
+            if self._is_valid_employee_name(name):
+                return name
+        
+        return None
 
 
 class TableBasedStrategy(ExtractionStrategy):
@@ -683,13 +715,47 @@ class TextBasedStrategy(ExtractionStrategy):
             else:
                 logger.debug(f"Pattern 4 rejected: {emp_id} - {name}")
         
+        # Pattern 5: "LASTNAME, FIRSTNAME" format (Paycom-style, but universal)
+        pattern5 = r'\b([A-Z]{2,},\s+[A-Z\s]{2,})\b'
+        for match in re.finditer(pattern5, text):
+            name = match.group(1).strip()
+            if self._is_valid_employee_name(name):
+                # Generate a placeholder ID if we can't find real one
+                # Try to find ID near this name
+                context_start = max(0, match.start() - 100)
+                context_end = min(len(text), match.end() + 100)
+                context = text[context_start:context_end]
+                
+                id_match = re.search(r'\b(\d{4,7})\b', context)
+                if id_match:
+                    emp_id = id_match.group(1)
+                    if self._is_valid_employee_id(emp_id):
+                        employees.append({
+                            'employee_id': emp_id,
+                            'employee_name': name,
+                            'department': ''
+                        })
+                        logger.info(f"Pattern 5 found: {emp_id} - {name}")
+                        continue
+                
+                # No ID found, but we have a valid name - use name as ID
+                # Generate simple sequential ID
+                emp_id = str(100000 + len(employees))
+                employees.append({
+                    'employee_id': emp_id,
+                    'employee_name': name,
+                    'department': ''
+                })
+                logger.info(f"Pattern 5 found (no ID): {emp_id} - {name}")
+        
         # Deduplicate
         seen = {}
         unique = []
         for emp in employees:
-            emp_id = emp['employee_id']
-            if emp_id not in seen:
-                seen[emp_id] = emp
+            # Use name as key since IDs might be generated
+            key = emp['employee_name']
+            if key not in seen:
+                seen[key] = emp
                 unique.append(emp)
         
         logger.info(f"Found {len(unique)} valid employees after validation")
