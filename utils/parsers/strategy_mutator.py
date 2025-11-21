@@ -48,6 +48,9 @@ class StrategyMutator:
             elif mutation_type == 'extract_ids_from_context':
                 adapted_strategy.extract_ids_from_context(params)
             
+            elif mutation_type == 'switch_to_text_extraction':
+                adapted_strategy.switch_to_text_extraction(params)
+            
             elif mutation_type == 'enable_row_grouping':
                 adapted_strategy.enable_row_grouping(params)
             
@@ -93,6 +96,7 @@ class AdaptedStrategy:
         # Mutation flags
         self.enhanced_id_extraction = False
         self.extract_ids_from_context_enabled = False
+        self.use_text_based_strategy = False
         self.row_grouping_enabled = False
         self.data_assignment_fixed = False
         self.broader_patterns = False
@@ -101,6 +105,7 @@ class AdaptedStrategy:
         # Configuration for mutations
         self.id_extraction_config = {}
         self.context_extraction_config = {}
+        self.text_strategy_config = {}
         self.grouping_config = {}
         self.assignment_config = {}
         self.pattern_config = {}
@@ -117,6 +122,12 @@ class AdaptedStrategy:
         logger.info("Mutation: Extracting IDs from context")
         self.extract_ids_from_context_enabled = True
         self.context_extraction_config = params
+    
+    def switch_to_text_extraction(self, params: Dict):
+        """Switch from table-based to text-based extraction."""
+        logger.info("Mutation: Switching to text-based extraction")
+        self.use_text_based_strategy = True
+        self.text_strategy_config = params
     
     def enable_row_grouping(self, params: Dict):
         """Enable grouping of multi-row data per employee."""
@@ -158,8 +169,23 @@ class AdaptedStrategy:
         """
         logger.info(f"Extracting with adapted strategy (iteration {self.iteration})")
         
-        # Step 1: Get base extraction
-        base_result = self.base_strategy.extract(pdf_path)
+        # Step 1: Check if we should switch strategies entirely
+        if self.use_text_based_strategy:
+            logger.info("⚡ SWITCHING TO TEXT-BASED STRATEGY")
+            # Import and use TextBasedStrategy instead of TableBased
+            try:
+                # Try to get TextBasedStrategy from strategy_library
+                from . import strategy_library
+                text_strategy = strategy_library.TextBasedStrategy()
+                base_result = text_strategy.extract(pdf_path)
+                logger.info(f"Text-based extraction: {len(base_result.get('employees', []))} employees, {len(base_result.get('earnings', []))} earnings")
+            except Exception as e:
+                logger.error(f"Failed to switch to text strategy: {e}")
+                # Fallback to base strategy
+                base_result = self.base_strategy.extract(pdf_path)
+        else:
+            # Step 1: Get base extraction
+            base_result = self.base_strategy.extract(pdf_path)
         
         # Step 2: Apply post-processing mutations
         adapted_result = self._apply_mutations(base_result, pdf_path)
