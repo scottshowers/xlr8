@@ -210,9 +210,9 @@ def process_uploads(uploaded_files, selected_project: Optional[str] = None):
                 'uploaded_at': datetime.now().isoformat()
             }
             
-            # Add Excel-specific metadata
+            # Add Excel-specific metadata (ChromaDB requires strings, not lists)
             if file_ext in ['.xlsx', '.xls'] and sheet_names:
-                metadata['excel_sheets'] = sheet_names
+                metadata['excel_sheets'] = ', '.join(sheet_names)  # Convert list to comma-separated string
                 metadata['sheet_count'] = len(sheet_names)
             
             if selected_project:
