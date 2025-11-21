@@ -39,6 +39,39 @@ class DiagnosticAnalyzer:
         taxes = structured_data.get('taxes', [])
         deductions = structured_data.get('deductions', [])
         
+        # ===== DIAGNOSTIC 0: ZERO EMPLOYEES FOUND (CRITICAL!) =====
+        if len(employees) == 0:
+            root_causes.append('no_employees_detected')
+            
+            # Check if we also have zero earnings/taxes
+            if len(earnings) == 0 and len(taxes) == 0:
+                # CRITICAL: TableBasedStrategy found 0 data - need to try TextBasedStrategy
+                root_causes.append('table_based_extraction_failed')
+                mutations.append({
+                    'type': 'switch_to_text_extraction',
+                    'priority': 'critical',
+                    'params': {
+                        'action': 'use_text_based_strategy',
+                        'reason': 'Table extraction returned zero data - trying text-based approach'
+                    }
+                })
+                logger.warning("⚠️ TABLE EXTRACTION FAILED - Switching to text-based extraction!")
+            else:
+                # We have earnings/taxes but no employees - extract names from descriptions
+                mutations.append({
+                    'type': 'extract_names_from_descriptions',
+                    'priority': 'critical',
+                    'params': {
+                        'action': 'scan_for_name_patterns',
+                        'patterns': [
+                            r'([A-Z]{2,},\s+[A-Z\s]+)',  # LASTNAME, FIRSTNAME
+                            r'([A-Z][a-z]+\s+[A-Z][a-z]+)'  # FirstName LastName
+                        ],
+                        'reason': 'Zero employees but earnings exist - names likely embedded in descriptions'
+                    }
+                })
+                logger.warning("⚠️ ZERO EMPLOYEES DETECTED - Triggering name extraction from descriptions!")
+        
         # ===== DIAGNOSTIC 1: Auto-generated Employee IDs =====
         auto_gen_ids = self._detect_auto_generated_ids(employees)
         if auto_gen_ids['has_fake_ids']:
