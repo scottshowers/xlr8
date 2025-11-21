@@ -12,6 +12,7 @@ import streamlit as st
 from pathlib import Path
 import logging
 from datetime import datetime
+from typing import Optional  # ← ADDED: Required for Optional[str]
 
 logger = logging.getLogger(__name__)
 
