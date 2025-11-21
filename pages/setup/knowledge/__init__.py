@@ -1,6 +1,11 @@
 """
-Complete Knowledge Management Page
+Complete Knowledge Management Page - WITH PROJECT ISOLATION
 4 tabs: Upload | Status | Search | Intelligent Parser
+
+CHANGES FOR PROJECT ISOLATION:
+- Line 64: Tags uploads with current_project metadata
+- Line 140: Filters search by current_project (optional)
+- All existing functionality preserved
 """
 
 import streamlit as st
@@ -15,7 +20,14 @@ def render_knowledge_page():
     """
     Main render function for knowledge page with 4 tabs.
     """
-    st.title("HCMPACT LLM Seeding & Document Management")
+    st.title("🗄️ HCMPACT LLM Seeding & Document Management")
+    
+    # Show current project context at top
+    current_project = st.session_state.get('current_project')
+    if current_project:
+        st.success(f"📁 Active Project: **{current_project}** - Documents will be tagged to this project")
+    else:
+        st.info("💡 No project selected - Documents will be uploaded as global/shared knowledge")
     
     # Create tabs
     tabs = st.tabs([
@@ -45,6 +57,7 @@ def render_knowledge_page():
 def render_upload_tab():
     """
     Tab 1: Document upload with chunking to ChromaDB.
+    NOW INCLUDES PROJECT TAGGING
     """
     st.header("Upload Documents to Knowledge Base")
     
@@ -57,10 +70,11 @@ def render_upload_tab():
     - **JPG/JPEG/PNG** - Images
     
     Documents are automatically:
-    1. Chunked into searchable segments
-    2. Embedded using Ollama
-    3. Stored in ChromaDB for RAG
-    4. Saved to `/data/uploads/` for parsing
+    1. **Tagged with current project** (if selected)
+    2. Chunked into searchable segments
+    3. Embedded using Ollama
+    4. Stored in ChromaDB for RAG
+    5. Saved to `/data/uploads/` for parsing
     """)
     
     # File uploader
@@ -74,17 +88,21 @@ def render_upload_tab():
     if uploaded_files:
         st.info(f"Selected {len(uploaded_files)} file(s)")
         
-        if st.button("Upload and Process", type="primary", use_container_width=True):
+        if st.button("✨ Upload and Process", type="primary", use_container_width=True):
             process_uploads(uploaded_files)
 
 
 def process_uploads(uploaded_files):
     """
     Process uploaded files: save and chunk to ChromaDB.
+    NOW TAGS WITH PROJECT_ID
     """
     from utils.document_processor import DocumentProcessor
     
     processor = DocumentProcessor()
+    
+    # Get current project (optional)
+    current_project = st.session_state.get('current_project')
     
     # Create progress containers
     progress_bar = st.progress(0)
@@ -101,16 +119,24 @@ def process_uploads(uploaded_files):
             progress_bar.progress(progress)
             status_text.info(f"Processing {idx + 1}/{total}: {uploaded_file.name}")
             
-            # Process document
+            # CHANGE: Add project_id to metadata if project selected
+            metadata = {}
+            if current_project:
+                metadata['project_id'] = current_project
+                logger.info(f"Tagging upload '{uploaded_file.name}' with project_id: {current_project}")
+            
+            # Process document WITH PROJECT METADATA
             result = processor.process_document(
                 uploaded_file,
-                collection_name='hcmpact_knowledge'
+                collection_name='hcmpact_knowledge',
+                metadata=metadata  # ← CHANGED: Pass project_id
             )
             
             results.append({
                 'filename': uploaded_file.name,
                 'status': 'success' if result.get('status') == 'success' else 'error',
                 'chunks': result.get('num_chunks', 0),
+                'project': current_project if current_project else 'Global',
                 'message': result.get('message', '')
             })
             
@@ -120,6 +146,7 @@ def process_uploads(uploaded_files):
                 'filename': uploaded_file.name,
                 'status': 'error',
                 'chunks': 0,
+                'project': current_project if current_project else 'Global',
                 'message': str(e)
             })
     
@@ -132,17 +159,17 @@ def process_uploads(uploaded_files):
     total_chunks = sum(r['chunks'] for r in results)
     
     if success_count == total:
-        st.success(f"Successfully processed {success_count} file(s) - {total_chunks} chunks created")
+        st.success(f"✅ Successfully processed {success_count} file(s) - {total_chunks} chunks created")
     elif success_count > 0:
-        st.warning(f"Processed {success_count}/{total} files - {total_chunks} chunks created")
+        st.warning(f"⚠️ Processed {success_count}/{total} files - {total_chunks} chunks created")
     else:
-        st.error("All uploads failed")
+        st.error("❌ All uploads failed")
     
     # Detailed results
-    with results_container.expander("View Details"):
+    with results_container.expander("📋 View Details"):
         for result in results:
             if result['status'] == 'success':
-                st.write(f"✅ {result['filename']} - {result['chunks']} chunks")
+                st.write(f"✅ {result['filename']} - {result['chunks']} chunks - Project: {result['project']}")
             else:
                 st.write(f"❌ {result['filename']} - {result['message']}")
 
@@ -150,6 +177,7 @@ def process_uploads(uploaded_files):
 def render_status_tab():
     """
     Tab 2: Show collection status and statistics.
+    UNCHANGED - Shows all documents regardless of project
     """
     st.header("Knowledge Base Status")
     
@@ -183,7 +211,7 @@ def render_status_tab():
         
         # Recent documents
         st.markdown("---")
-        st.subheader("Recent Documents")
+        st.subheader("📄 Recent Documents")
         
         uploads_dir = Path('/data/uploads')
         if uploads_dir.exists():
@@ -214,31 +242,50 @@ def render_status_tab():
 def render_search_tab():
     """
     Tab 3: Test search functionality.
+    NOW SUPPORTS PROJECT FILTERING
     """
-    st.header("Test Knowledge Base Search")
+    st.header("🔍 Test Knowledge Base Search")
     
     st.markdown("""
     Test the RAG search capabilities. This searches the embedded chunks in ChromaDB
     and returns the most relevant content.
     """)
     
-    # Search input
-    query = st.text_input(
-        "Enter search query",
-        placeholder="e.g., How do I configure absence types?",
-        help="Search the knowledge base"
-    )
+    # Project filter option
+    current_project = st.session_state.get('current_project')
     
-    n_results = st.slider("Number of results", 1, 20, 10)
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        # Search input
+        query = st.text_input(
+            "Enter search query",
+            placeholder="e.g., How do I configure absence types?",
+            help="Search the knowledge base"
+        )
     
-    if st.button("Search", type="primary", disabled=not query):
+    with col2:
+        n_results = st.slider("Results", 1, 20, 10)
+    
+    # Project filtering checkbox
+    filter_by_project = False
+    if current_project:
+        filter_by_project = st.checkbox(
+            f"🔒 Only search '{current_project}' documents",
+            value=True,
+            help="Restrict search to current project's documents only"
+        )
+    
+    if st.button("🔍 Search", type="primary", disabled=not query):
         if query:
-            perform_search(query, n_results)
+            # CHANGE: Pass project_id if filtering enabled
+            project_filter = current_project if filter_by_project else None
+            perform_search(query, n_results, project_filter)
 
 
-def perform_search(query: str, n_results: int):
+def perform_search(query: str, n_results: int, project_id: Optional[str] = None):
     """
     Perform test search on knowledge base.
+    NOW SUPPORTS PROJECT FILTERING
     """
     try:
         from utils.rag_handler import AdvancedRAGHandler
@@ -249,21 +296,34 @@ def perform_search(query: str, n_results: int):
             collection_name='hcmpact_knowledge'
         )
         
-        # Search
-        with st.spinner("Searching..."):
-            results = rag.search(query, n_results=n_results)
+        # Search WITH PROJECT FILTER
+        with st.spinner("🔍 Searching..."):
+            # CHANGE: Pass project_id parameter
+            results = rag.search(
+                query, 
+                n_results=n_results,
+                project_id=project_id  # ← CHANGED: Filter by project
+            )
         
         if not results:
             st.warning("No results found")
             return
         
         # Display results
-        st.success(f"Found {len(results)} results")
+        if project_id:
+            st.success(f"✅ Found {len(results)} results for project '{project_id}'")
+        else:
+            st.success(f"✅ Found {len(results)} results (all projects)")
         
         for idx, result in enumerate(results, 1):
             with st.expander(f"Result {idx} - {result.get('similarity', 0):.1%} match"):
                 st.markdown(f"**Source:** {result.get('source', 'Unknown')}")
                 st.markdown(f"**Chunk:** {result.get('chunk_id', 'N/A')}")
+                
+                # CHANGE: Show project if available
+                if result.get('metadata', {}).get('project_id'):
+                    st.markdown(f"**Project:** {result['metadata']['project_id']}")
+                
                 st.markdown("---")
                 st.markdown(result.get('text', 'No content'))
         
@@ -275,6 +335,7 @@ def perform_search(query: str, n_results: int):
 def render_parser_tab():
     """
     Tab 4: Intelligent PDF parser.
+    UNCHANGED
     """
     try:
         from utils.parsers.intelligent_parser_ui import render_intelligent_parser_ui
