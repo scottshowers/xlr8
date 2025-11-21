@@ -765,14 +765,32 @@ class TextBasedStrategy(ExtractionStrategy):
         """
         Extract and categorize line items from text.
         
-        CRITICAL FIX V3: Extensive logging to diagnose assignment issues
+        CRITICAL FIX V4: Filter out aggregate/summary lines
+        - V3: Added diagnostic logging - CONFIRMED context switching works!
+        - V4: Filter aggregate lines (GROSS, Subtotals, etc.) causing negative net pay
         """
         
-        logger.info("🔧 FIXED _extract_line_items V3 (DIAGNOSTIC) is running!")
+        logger.info("🔧 FIXED _extract_line_items V4 (AGGREGATE FILTER) is running!")
         
         earnings = []
         taxes = []
         deductions = []
+        
+        # V4 FIX: Aggregate/Summary line exclusion patterns
+        # These patterns identify lines that are totals/summaries, not individual items
+        AGGREGATE_PATTERNS = [
+            r'\bGROSS\b(?!\s*PAY)',  # "GROSS" but not "GROSS PAY"
+            r'Subtotals?\s+for\s+Dept',  # "Subtotals for Dept"
+            r'^\s*GROSS\s*$',  # Line that just says "GROSS"
+            r'Code:\s*A\w+\s+GROSS',  # "Code: A30H GROSS"
+            r'\bTotal(?:s)?\b(?!\s*(?:Hours|Compensation))',  # "Total" or "Totals" but not "Total Hours"
+            r'Grand\s+Total',  # "Grand Total"
+            r'Summary\s+Total',  # "Summary Total"
+            r'Net\s+Pay\s+Total',  # "Net Pay Total"
+        ]
+        
+        # Compile patterns for efficiency
+        aggregate_regex = re.compile('|'.join(AGGREGATE_PATTERNS), re.IGNORECASE)
         
         # Build employee lookup for fast name matching
         employee_lookup = {}
@@ -797,9 +815,11 @@ class TextBasedStrategy(ExtractionStrategy):
         )
         
         logger.info(f"🔍 Processing {len(lines)} lines for data extraction...")
+        logger.info(f"🚫 Aggregate filter enabled - will skip summary/total lines")
         marker_count = 0
         assignment_count = 0
         skipped_no_employee = 0
+        skipped_aggregate = 0
         
         for line_num, line in enumerate(lines, 1):
             line = line.strip()
@@ -841,6 +861,13 @@ class TextBasedStrategy(ExtractionStrategy):
             if len(description) < 3:
                 continue
             
+            # V4 FIX: Skip aggregate/summary lines
+            if aggregate_regex.search(description):
+                skipped_aggregate += 1
+                if skipped_aggregate <= 5:  # Log first 5 for debugging
+                    logger.info(f"   🚫 SKIPPED AGGREGATE: {description[:40]}... ${amounts[0]:.2f}")
+                continue
+            
             # Categorize and assign
             line_item = {
                 'employee_id': current_employee['employee_id'],
@@ -878,6 +905,7 @@ class TextBasedStrategy(ExtractionStrategy):
         logger.info(f"   🎯 Markers found: {marker_count}")
         logger.info(f"   ✓ Assignments made: {assignment_count}")
         logger.info(f"   ⏭️  Skipped (no employee): {skipped_no_employee}")
+        logger.info(f"   🚫 Skipped (aggregate lines): {skipped_aggregate}")
         logger.info(f"   📈 Earnings: {len(earnings)}")
         logger.info(f"   💰 Taxes: {len(taxes)}")
         logger.info(f"   💳 Deductions: {len(deductions)}")
