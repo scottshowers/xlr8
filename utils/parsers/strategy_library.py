@@ -765,12 +765,13 @@ class TextBasedStrategy(ExtractionStrategy):
         """
         Extract and categorize line items from text.
         
-        CRITICAL FIX V4: Filter out aggregate/summary lines
-        - V3: Added diagnostic logging - CONFIRMED context switching works!
-        - V4: Filter aggregate lines (GROSS, Subtotals, etc.) causing negative net pay
+        CRITICAL FIX V5: Deduplication + Tax Validation
+        - V3: Diagnostic logging - CONFIRMED context switching works!
+        - V4: Aggregate filter - CONFIRMED 89 lines filtered correctly!
+        - V5: Remove duplicates + validate tax reasonableness
         """
         
-        logger.info("🔧 FIXED _extract_line_items V4 (AGGREGATE FILTER) is running!")
+        logger.info("🔧 FIXED _extract_line_items V5 (DEDUPLICATION + VALIDATION) is running!")
         
         earnings = []
         taxes = []
@@ -919,6 +920,93 @@ class TextBasedStrategy(ExtractionStrategy):
         logger.info(f"📋 Items per employee (sample of first 5):")
         for i, (name, count) in enumerate(list(employee_counts.items())[:5]):
             logger.info(f"   {i+1}. {name}: {count} items")
+        
+        # ═══════════════════════════════════════════════════════════════════
+        # V5 POST-PROCESSING: Deduplication + Validation
+        # ═══════════════════════════════════════════════════════════════════
+        
+        logger.info(f"")
+        logger.info(f"🧹 V5 POST-PROCESSING: Cleaning data...")
+        
+        # Step 1: Deduplicate taxes (same employee + description + amount)
+        taxes_before = len(taxes)
+        seen_taxes = set()
+        taxes_deduplicated = []
+        duplicates_removed = 0
+        
+        for tax in taxes:
+            # Create unique key: employee_id + description + amount
+            key = (tax['employee_id'], tax['description'], tax['amount'])
+            if key not in seen_taxes:
+                seen_taxes.add(key)
+                taxes_deduplicated.append(tax)
+            else:
+                duplicates_removed += 1
+                if duplicates_removed <= 3:  # Log first 3
+                    logger.info(f"   🗑️  REMOVED DUPLICATE TAX: {tax['employee_name']} - {tax['description'][:30]}... ${tax['amount']:.2f}")
+        
+        taxes = taxes_deduplicated
+        
+        if duplicates_removed > 0:
+            logger.info(f"   ✅ Removed {duplicates_removed} duplicate tax entries")
+        
+        # Step 2: Validate tax reasonableness per employee
+        # Build earnings totals per employee
+        earnings_by_employee = defaultdict(float)
+        for earning in earnings:
+            earnings_by_employee[earning['employee_id']] += earning['amount']
+        
+        # Validate taxes against earnings
+        taxes_validated = []
+        unreasonable_taxes = 0
+        
+        for tax in taxes:
+            emp_id = tax['employee_id']
+            total_earnings = earnings_by_employee.get(emp_id, 0)
+            
+            # If employee has earnings, validate tax is reasonable
+            if total_earnings > 0:
+                tax_rate = tax['amount'] / total_earnings if total_earnings > 0 else 0
+                
+                # Flag taxes that are > 200% of earnings as clearly wrong
+                # (Normal tax rate is 10-40%, even with deductions shouldn't exceed 100%)
+                if tax_rate > 2.0:  # More than 200% of earnings
+                    unreasonable_taxes += 1
+                    if unreasonable_taxes <= 3:  # Log first 3
+                        logger.info(f"   ⚠️  SUSPICIOUS TAX: {tax['employee_name']} - {tax['description'][:30]}... ${tax['amount']:.2f} (earnings: ${total_earnings:.2f}, rate: {tax_rate*100:.0f}%)")
+                    # Still keep it but flag it - we'll let the user decide
+                    tax['_validation_warning'] = f"Tax rate {tax_rate*100:.0f}% seems high"
+            
+            taxes_validated.append(tax)
+        
+        taxes = taxes_validated
+        
+        if unreasonable_taxes > 0:
+            logger.info(f"   ⚠️  Found {unreasonable_taxes} taxes with suspicious amounts (>200% of earnings)")
+        
+        # Step 3: Deduplicate earnings (less common but possible)
+        earnings_before = len(earnings)
+        seen_earnings = set()
+        earnings_deduplicated = []
+        
+        for earning in earnings:
+            key = (earning['employee_id'], earning['description'], earning['amount'])
+            if key not in seen_earnings:
+                seen_earnings.add(key)
+                earnings_deduplicated.append(earning)
+        
+        earnings = earnings_deduplicated
+        
+        if len(earnings) < earnings_before:
+            logger.info(f"   ✅ Removed {earnings_before - len(earnings)} duplicate earning entries")
+        
+        # Final summary
+        logger.info(f"")
+        logger.info(f"📊 FINAL CLEAN DATA:")
+        logger.info(f"   📈 Earnings: {len(earnings)} (was {earnings_before})")
+        logger.info(f"   💰 Taxes: {len(taxes)} (was {taxes_before})")
+        logger.info(f"   💳 Deductions: {len(deductions)}")
+        logger.info(f"")
         
         return earnings, taxes, deductions
 
