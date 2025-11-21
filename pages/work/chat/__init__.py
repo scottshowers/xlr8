@@ -167,9 +167,9 @@ def _render_sidebar_settings():
         num_sources = st.slider(
             "Knowledge Sources to Retrieve",
             min_value=1,
-            max_value=20,
-            value=st.session_state.get('num_chromadb_sources', 12),
-            help="Number of HCMPACT documents to use for context"
+            max_value=150,
+            value=st.session_state.get('num_chromadb_sources', 50),
+            help="Number of HCMPACT documents to use for context (increase for large multi-sheet files)"
         )
         st.session_state.num_chromadb_sources = num_sources
         
@@ -381,7 +381,7 @@ def _generate_and_display_response(user_query: str):
                 st.info(" Analyzing query and selecting best approach...")
             
             # STEP 1: Make routing decision
-            num_sources = st.session_state.get('num_chromadb_sources', 8)
+            num_sources = st.session_state.get('num_chromadb_sources', 50)
             
             # Get current project for document filtering
             current_project = st.session_state.get('current_project')
