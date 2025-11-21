@@ -191,8 +191,54 @@ def _render_chat_interface():
         for message in st.session_state.get('chat_history', []):
             _render_message(message)
     
-    # Chat input at bottom (always visible)
-    user_input = st.chat_input("Ask me anything about UKG implementations...")
+    # ACTION BUTTONS AND PROMPT LIBRARY (above chat input)
+    st.markdown("---")
+    
+    # Row 1: Action Buttons
+    col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
+    
+    with col1:
+        if st.button("🗑️ Clear Chat & Memory", type="secondary", use_container_width=True):
+            st.session_state.chat_history = []
+            # Clear any cached data
+            if 'intelligent_router' in st.session_state:
+                st.session_state.intelligent_router = None
+            st.success("✅ Chat cleared!")
+            st.rerun()
+    
+    with col2:
+        if st.button("💾 Save Current Prompt", type="secondary", use_container_width=True):
+            _show_save_prompt_dialog()
+    
+    with col3:
+        if st.button("📋 Load Saved Prompt", type="secondary", use_container_width=True):
+            _show_load_prompt_dialog()
+    
+    with col4:
+        if st.button("📊 Export to Excel", type="secondary", use_container_width=True):
+            _export_chat_to_excel()
+    
+    # Row 2: Prompt Library (if managing prompts)
+    if st.session_state.get('show_prompt_manager', False):
+        _render_prompt_manager()
+    
+    # Row 3: Loaded prompt preview (if available)
+    if st.session_state.get('loaded_prompt'):
+        st.info("📋 Prompt loaded from library - modify below or press Enter to send:")
+        user_input_area = st.text_area(
+            "Edit prompt before sending:",
+            value=st.session_state.loaded_prompt,
+            height=100,
+            key="prompt_editor"
+        )
+        if st.button("📤 Send Prompt", type="primary", use_container_width=True):
+            user_input = user_input_area
+            st.session_state.loaded_prompt = None  # Clear after use
+        else:
+            user_input = None
+    else:
+        # Chat input at bottom (always visible)
+        user_input = st.chat_input("Ask me anything about UKG implementations...")
     
     if user_input:
         # Add user message to history
@@ -464,6 +510,242 @@ def _generate_and_display_response(user_query: str):
                 'error': True
             }
             st.session_state.chat_history.append(error_message)
+
+
+# ============================================================================
+# PROMPT LIBRARY FUNCTIONS
+# ============================================================================
+
+def _initialize_prompt_library():
+    """Initialize prompt library in session state"""
+    if 'saved_prompts' not in st.session_state:
+        st.session_state.saved_prompts = {}
+    if 'show_prompt_manager' not in st.session_state:
+        st.session_state.show_prompt_manager = False
+
+
+def _show_save_prompt_dialog():
+    """Show dialog to save current prompt"""
+    _initialize_prompt_library()
+    
+    # Get the last user message
+    user_messages = [msg for msg in st.session_state.chat_history if msg['role'] == 'user']
+    if not user_messages:
+        st.warning("No prompts to save. Ask a question first!")
+        return
+    
+    last_prompt = user_messages[-1]['content']
+    
+    # Show save dialog
+    with st.form("save_prompt_form"):
+        st.subheader("💾 Save Prompt")
+        prompt_name = st.text_input("Prompt Name", placeholder="e.g., 'OBBB Tax Impact Analysis'")
+        prompt_category = st.selectbox("Category", ["General", "Tax", "Configuration", "Implementation", "Custom"])
+        prompt_text = st.text_area("Prompt Text", value=last_prompt, height=150)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            save_btn = st.form_submit_button("💾 Save", type="primary", use_container_width=True)
+        with col2:
+            cancel_btn = st.form_submit_button("❌ Cancel", use_container_width=True)
+        
+        if save_btn and prompt_name:
+            st.session_state.saved_prompts[prompt_name] = {
+                'text': prompt_text,
+                'category': prompt_category,
+                'created': time.time()
+            }
+            st.success(f"✅ Saved prompt: {prompt_name}")
+            st.rerun()
+
+
+def _show_load_prompt_dialog():
+    """Show dialog to load saved prompt"""
+    _initialize_prompt_library()
+    
+    if not st.session_state.saved_prompts:
+        st.info("📋 No saved prompts yet. Save a prompt first using the '💾 Save Current Prompt' button.")
+        return
+    
+    st.session_state.show_prompt_manager = True
+    st.rerun()
+
+
+def _render_prompt_manager():
+    """Render the prompt library manager"""
+    _initialize_prompt_library()
+    
+    st.markdown("### 📚 Prompt Library")
+    
+    if not st.session_state.saved_prompts:
+        st.info("No saved prompts yet.")
+        if st.button("❌ Close"):
+            st.session_state.show_prompt_manager = False
+            st.rerun()
+        return
+    
+    # Group prompts by category
+    prompts_by_category = {}
+    for name, data in st.session_state.saved_prompts.items():
+        category = data.get('category', 'General')
+        if category not in prompts_by_category:
+            prompts_by_category[category] = []
+        prompts_by_category[category].append((name, data))
+    
+    # Display prompts by category
+    for category, prompts in prompts_by_category.items():
+        st.markdown(f"**{category}**")
+        
+        for name, data in prompts:
+            col1, col2, col3, col4 = st.columns([4, 1, 1, 1])
+            
+            with col1:
+                st.write(f"📝 {name}")
+            
+            with col2:
+                if st.button("📋 Use", key=f"use_{name}"):
+                    st.session_state.loaded_prompt = data['text']
+                    st.session_state.show_prompt_manager = False
+                    st.rerun()
+            
+            with col3:
+                if st.button("✏️ Edit", key=f"edit_{name}"):
+                    _show_edit_prompt_dialog(name, data)
+            
+            with col4:
+                if st.button("🗑️", key=f"delete_{name}"):
+                    del st.session_state.saved_prompts[name]
+                    st.success(f"Deleted: {name}")
+                    st.rerun()
+            
+            # Show preview
+            with st.expander("Preview", expanded=False):
+                st.text(data['text'][:200] + "..." if len(data['text']) > 200 else data['text'])
+    
+    st.markdown("---")
+    if st.button("❌ Close Prompt Library", use_container_width=True):
+        st.session_state.show_prompt_manager = False
+        st.rerun()
+
+
+def _show_edit_prompt_dialog(name, data):
+    """Show dialog to edit a saved prompt"""
+    with st.form(f"edit_prompt_{name}"):
+        st.subheader(f"✏️ Edit: {name}")
+        
+        new_name = st.text_input("Prompt Name", value=name)
+        new_category = st.selectbox("Category", 
+                                    ["General", "Tax", "Configuration", "Implementation", "Custom"],
+                                    index=["General", "Tax", "Configuration", "Implementation", "Custom"].index(data.get('category', 'General')))
+        new_text = st.text_area("Prompt Text", value=data['text'], height=150)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            save_btn = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
+        with col2:
+            cancel_btn = st.form_submit_button("❌ Cancel", use_container_width=True)
+        
+        if save_btn:
+            # Delete old if name changed
+            if new_name != name:
+                del st.session_state.saved_prompts[name]
+            
+            # Save updated prompt
+            st.session_state.saved_prompts[new_name] = {
+                'text': new_text,
+                'category': new_category,
+                'created': data.get('created', time.time())
+            }
+            st.success(f"✅ Updated: {new_name}")
+            st.rerun()
+
+
+# ============================================================================
+# EXPORT FUNCTIONS
+# ============================================================================
+
+def _export_chat_to_excel():
+    """Export chat history to Excel file"""
+    import pandas as pd
+    from io import BytesIO
+    from datetime import datetime
+    
+    if not st.session_state.get('chat_history'):
+        st.warning("No chat history to export!")
+        return
+    
+    # Prepare data for export
+    export_data = []
+    
+    for idx, message in enumerate(st.session_state.chat_history, 1):
+        role = message.get('role', 'unknown')
+        content = message.get('content', '')
+        timestamp = message.get('timestamp', time.time())
+        
+        # Format timestamp
+        dt = datetime.fromtimestamp(timestamp)
+        
+        # Extract metadata if available
+        metadata = message.get('metadata', {})
+        sources = message.get('sources', [])
+        
+        # Build source list
+        source_list = []
+        if sources:
+            for source in sources:
+                source_name = source.get('document_name', 'Unknown')
+                project = source.get('project_id', 'Global')
+                relevance = source.get('relevance_score', 0)
+                similarity = (1.0 - min(relevance, 1.0)) * 100
+                source_list.append(f"{source_name} ({project}) - {similarity:.0f}%")
+        
+        export_data.append({
+            'Index': idx,
+            'Role': role.capitalize(),
+            'Timestamp': dt.strftime('%Y-%m-%d %H:%M:%S'),
+            'Content': content,
+            'Model': metadata.get('model_display', ''),
+            'Processing Time (s)': metadata.get('processing_time', ''),
+            'Complexity': metadata.get('complexity', ''),
+            'Confidence': metadata.get('confidence_level', ''),
+            'Sources': '\n'.join(source_list) if source_list else ''
+        })
+    
+    # Create DataFrame
+    df = pd.DataFrame(export_data)
+    
+    # Create Excel file in memory
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name='Chat History', index=False)
+        
+        # Auto-adjust column widths
+        worksheet = writer.sheets['Chat History']
+        for idx, col in enumerate(df.columns):
+            max_length = max(
+                df[col].astype(str).apply(len).max(),
+                len(col)
+            )
+            worksheet.column_dimensions[chr(65 + idx)].width = min(max_length + 2, 50)
+    
+    output.seek(0)
+    
+    # Generate filename
+    current_project = st.session_state.get('current_project', 'General')
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"XLR8_Chat_{current_project}_{timestamp}.xlsx"
+    
+    # Offer download
+    st.download_button(
+        label="📥 Download Excel File",
+        data=output.getvalue(),
+        file_name=filename,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary",
+        use_container_width=True
+    )
+    
+    st.success(f"✅ Excel file ready: {filename}")
 
 
 # Entry point
