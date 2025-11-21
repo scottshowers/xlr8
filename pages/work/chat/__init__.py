@@ -336,7 +336,12 @@ def _generate_and_display_response(user_query: str):
             
             # STEP 1: Make routing decision
             num_sources = st.session_state.get('num_chromadb_sources', 8)
-            decision = router.make_routing_decision(user_query, num_sources)
+            
+            # Get current project for document filtering
+            current_project = st.session_state.get('current_project')
+            
+            # Make routing decision with project filter
+            decision = router.make_routing_decision(user_query, num_sources, project_id=current_project)
             
             # Debug info
             debug_info = {
