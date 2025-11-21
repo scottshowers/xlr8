@@ -7,8 +7,14 @@ Handles:
 - Source attribution and tracking
 - Context enhancement
 
+FIXES IN THIS VERSION:
+- Extracts actual filenames from metadata.source (not text content)
+- Shows project_id for each source document
+- Better relevance scoring display
+- Improved source formatting
+
 Author: HCMPACT
-Version: 1.0
+Version: 1.1 - Project Isolation & Better Source Display
 """
 
 from typing import List, Dict, Any, Optional
@@ -116,6 +122,8 @@ class ResponseSynthesizer:
         """
         Format ChromaDB sources for display.
         
+        FIXED: Now extracts actual filenames from metadata instead of showing text content
+        
         Args:
             chromadb_context: Raw ChromaDB context
             
@@ -125,13 +133,33 @@ class ResponseSynthesizer:
         formatted = []
         
         for idx, source in enumerate(chromadb_context, 1):
+            # Extract metadata
+            metadata = source.get('metadata', {})
+            
+            # Get actual filename from metadata (not the text content)
+            filename = metadata.get('source', source.get('document', 'Unknown'))
+            
+            # Get project if available
+            project_id = metadata.get('project_id')
+            
+            # Get the actual text content for excerpts
+            content = source.get('document', source.get('content', ''))
+            
+            # Build category display
+            category = source.get('category', 'General')
+            if project_id:
+                category = f"Project: {project_id}"
+            elif metadata.get('file_type'):
+                category = f"{metadata.get('file_type').upper()} Document"
+            
             formatted_source = {
                 'index': idx,
-                'document_name': source.get('document', 'Unknown'),
-                'category': source.get('category', 'General'),
+                'document_name': filename,  # ← Now shows actual filename
+                'category': category,  # ← Now shows project or file type
+                'project_id': project_id,  # ← Track project for filtering
                 'relevance_score': source.get('distance', 0.0),
-                'excerpt': self._create_excerpt(source.get('content', '')),
-                'metadata': source.get('metadata', {})
+                'excerpt': self._create_excerpt(content),  # ← Use actual content for excerpt
+                'metadata': metadata  # ← Keep full metadata
             }
             formatted.append(formatted_source)
         
@@ -215,9 +243,19 @@ class ResponseSynthesizer:
             prompt_parts.append("RELEVANT HCMPACT KNOWLEDGE:\n")
             
             for idx, source in enumerate(chromadb_context, 1):
-                doc_name = source.get('document', 'Unknown')
-                category = source.get('category', 'General')
-                content = source.get('content', '')
+                # Extract filename from metadata (not from 'document' which is content)
+                metadata = source.get('metadata', {})
+                doc_name = metadata.get('source', 'Unknown Document')
+                
+                # Get project info if available
+                project_id = metadata.get('project_id')
+                if project_id:
+                    category = f"Project: {project_id}"
+                else:
+                    category = source.get('category', 'General')
+                
+                # Get the actual text content
+                content = source.get('document', source.get('content', ''))
                 
                 prompt_parts.append(f"\n[Source {idx}: {doc_name} - {category}]")
                 prompt_parts.append(content)
@@ -335,17 +373,31 @@ class ResponseSynthesizer:
         
         # Add sources if requested and available
         if show_sources and response.sources:
-            output_parts.append("\n\n**Sources Used:**\n")
+            output_parts.append("\n\n**📚 Sources Used:**\n")
             
             for source in response.sources:
-                source_line = f"{source['index']}. **{source['document_name']}** ({source['category']})"
-                if source.get('relevance_score'):
-                    score = 1.0 - source['relevance_score']  # Convert distance to similarity
-                    source_line += f" - Relevance: {score:.0%}"
+                # Build source line with filename and category
+                source_line = f"{source['index']}. **{source['document_name']}**"
+                
+                # Add project tag if available
+                if source.get('project_id'):
+                    source_line += f" (📁 {source['project_id']})"
+                elif source.get('category') and source['category'] != 'General':
+                    source_line += f" ({source['category']})"
+                
+                # Add relevance score
+                if source.get('relevance_score') is not None:
+                    # Convert distance to similarity percentage (lower distance = higher similarity)
+                    similarity = (1.0 - min(source['relevance_score'], 1.0)) * 100
+                    source_line += f" - {similarity:.0f}% match"
+                
                 output_parts.append(source_line)
                 
+                # Add excerpt if available
                 if source.get('excerpt'):
                     output_parts.append(f"   _{source['excerpt']}_\n")
+                else:
+                    output_parts.append("")
         
         return "\n".join(output_parts)
     
