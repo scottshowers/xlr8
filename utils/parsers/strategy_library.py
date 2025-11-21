@@ -765,13 +765,10 @@ class TextBasedStrategy(ExtractionStrategy):
         """
         Extract and categorize line items from text.
         
-        CRITICAL FIX: Only changes current_employee at "marker" rows to properly
-        group multi-row data for each employee.
-        
-        Marker pattern: "LASTNAME, FIRSTNAME Regular/Hourly/Salary/Overtime"
+        CRITICAL FIX V3: Extensive logging to diagnose assignment issues
         """
         
-        logger.info("🔧 FIXED _extract_line_items method is running!")
+        logger.info("🔧 FIXED _extract_line_items V3 (DIAGNOSTIC) is running!")
         
         earnings = []
         taxes = []
@@ -784,7 +781,8 @@ class TextBasedStrategy(ExtractionStrategy):
             if name:
                 employee_lookup[name] = emp
         
-        logger.info(f"TextBasedStrategy: Employee lookup contains {len(employee_lookup)} employees")
+        logger.info(f"📋 Employee lookup contains {len(employee_lookup)} employees")
+        logger.info(f"📋 Sample names in lookup: {list(employee_lookup.keys())[:5]}")
         
         # Split into lines
         lines = text.split('\n')
@@ -792,51 +790,48 @@ class TextBasedStrategy(ExtractionStrategy):
         # Track current employee context (ONLY changes at marker rows)
         current_employee = None
         
-        # Employee marker pattern: "LASTNAME, FIRSTNAME Regular/Hourly/Salary"
-        # This is the CRITICAL pattern that identifies when we switch employees
+        # Employee marker pattern
         marker_pattern = re.compile(
             r'([A-Z]{2,},\s+[A-Z\s]{2,})\s+(Regular|Hourly|Salary|Overtime|Bonus)',
             re.IGNORECASE
         )
         
-        logger.info(f"🔍 Marker pattern compiled, processing {len(lines)} lines...")
+        logger.info(f"🔍 Processing {len(lines)} lines for data extraction...")
         marker_count = 0
+        assignment_count = 0
+        skipped_no_employee = 0
         
         for line_num, line in enumerate(lines, 1):
             line = line.strip()
             if len(line) < 10:
                 continue
             
-            # ═══════════════════════════════════════════════════════════════════
-            # CRITICAL FIX: Check if this is an EMPLOYEE MARKER row
-            # ═══════════════════════════════════════════════════════════════════
+            # Check for employee marker
             marker_match = marker_pattern.search(line)
             
             if marker_match:
                 marker_name = marker_match.group(1).strip()
                 marker_count += 1
                 
-                # Check if this name exists in our employee list
                 if marker_name in employee_lookup:
+                    old_employee = current_employee.get('employee_name') if current_employee else 'None'
                     current_employee = employee_lookup[marker_name]
-                    logger.info(f"🎯 Employee marker #{marker_count} found: {marker_name} (ID: {current_employee.get('employee_id', 'N/A')})")
+                    logger.info(f"🎯 Marker #{marker_count}: {marker_name} (ID: {current_employee.get('employee_id')})")
+                    logger.info(f"   ↪️  Context changed from [{old_employee}] to [{marker_name}]")
                 else:
-                    logger.info(f"⚠️  Employee marker found but not in lookup: {marker_name}")
+                    logger.info(f"⚠️  Marker found but NOT in lookup: {marker_name}")
             
-            # Skip lines without a current employee context
+            # Skip lines without current employee
             if not current_employee:
+                skipped_no_employee += 1
                 continue
             
-            # ═══════════════════════════════════════════════════════════════════
-            # Extract data and assign to current_employee
-            # ═══════════════════════════════════════════════════════════════════
-            
-            # Check if line has monetary amounts
+            # Extract amounts
             amounts = self._extract_amounts(line)
             if not amounts:
                 continue
             
-            # Get description (text before first amount)
+            # Get description
             amount_match = re.search(r'\$?\s*[\d,]+\.\d{2}', line)
             if amount_match:
                 description = line[:amount_match.start()].strip()
@@ -846,7 +841,7 @@ class TextBasedStrategy(ExtractionStrategy):
             if len(description) < 3:
                 continue
             
-            # Categorize based on keywords
+            # Categorize and assign
             line_item = {
                 'employee_id': current_employee['employee_id'],
                 'employee_name': current_employee['employee_name'],
@@ -856,17 +851,46 @@ class TextBasedStrategy(ExtractionStrategy):
                 'rate': 0
             }
             
+            category = None
             if self._is_earning(description):
                 earnings.append(line_item)
+                category = 'EARNING'
+                assignment_count += 1
+                if assignment_count <= 10:  # Only log first 10 to avoid spam
+                    logger.info(f"   ✓ {category} → {current_employee['employee_name']}: {description[:30]}... ${amounts[0]:.2f}")
             elif self._is_tax(description):
                 taxes.append({**line_item, 'wages_base': 0, 'wages_ytd': 0, 
                             'amount_ytd': amounts[1] if len(amounts) > 1 else amounts[0]})
+                category = 'TAX'
+                assignment_count += 1
+                if assignment_count <= 10:
+                    logger.info(f"   ✓ {category} → {current_employee['employee_name']}: {description[:30]}... ${amounts[0]:.2f}")
             elif self._is_deduction(description):
                 deductions.append({**line_item, 'scheduled': 0,
                                  'amount_ytd': amounts[1] if len(amounts) > 1 else amounts[0]})
+                category = 'DEDUCTION'
+                assignment_count += 1
+                if assignment_count <= 10:
+                    logger.info(f"   ✓ {category} → {current_employee['employee_name']}: {description[:30]}... ${amounts[0]:.2f}")
         
-        logger.info(f"✅ Found {marker_count} employee markers total")
-        logger.info(f"TextBasedStrategy: Extracted {len(earnings)} earnings, {len(taxes)} taxes, {len(deductions)} deductions")
+        logger.info(f"")
+        logger.info(f"📊 EXTRACTION SUMMARY:")
+        logger.info(f"   🎯 Markers found: {marker_count}")
+        logger.info(f"   ✓ Assignments made: {assignment_count}")
+        logger.info(f"   ⏭️  Skipped (no employee): {skipped_no_employee}")
+        logger.info(f"   📈 Earnings: {len(earnings)}")
+        logger.info(f"   💰 Taxes: {len(taxes)}")
+        logger.info(f"   💳 Deductions: {len(deductions)}")
+        logger.info(f"")
+        
+        # Show distribution by employee (first 5)
+        employee_counts = defaultdict(int)
+        for item in earnings + taxes + deductions:
+            employee_counts[item['employee_name']] += 1
+        
+        logger.info(f"📋 Items per employee (sample of first 5):")
+        for i, (name, count) in enumerate(list(employee_counts.items())[:5]):
+            logger.info(f"   {i+1}. {name}: {count} items")
         
         return earnings, taxes, deductions
 
