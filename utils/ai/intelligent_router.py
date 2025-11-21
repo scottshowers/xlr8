@@ -89,7 +89,7 @@ class IntelligentRouter:
     def make_routing_decision(
         self, 
         query: str, 
-        num_chromadb_sources: int = 5,
+        num_chromadb_sources: int = 50,
         project_id: Optional[str] = None  # ← ADDED FOR PROJECT ISOLATION
     ) -> RouterDecision:
         """
