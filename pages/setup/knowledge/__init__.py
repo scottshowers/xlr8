@@ -178,11 +178,27 @@ def process_uploads(uploaded_files, selected_project: Optional[str] = None):
             
             elif file_ext in ['.xlsx', '.xls', '.csv']:
                 import pandas as pd
+                sheet_names = []  # Track sheet names for metadata
+                
                 if file_ext == '.csv':
                     df = pd.read_csv(io.BytesIO(file_bytes))
+                    text_content = df.to_string()
                 else:
-                    df = pd.read_excel(io.BytesIO(file_bytes))
-                text_content = df.to_string()
+                    # Read ALL sheets in Excel file
+                    all_sheets = pd.read_excel(io.BytesIO(file_bytes), sheet_name=None)
+                    sheet_names = list(all_sheets.keys())
+                    
+                    # Combine all sheets with clear separators
+                    sheet_texts = []
+                    for sheet_name, df in all_sheets.items():
+                        sheet_header = f"\n{'='*80}\nWORKSHEET: {sheet_name}\n{'='*80}\n"
+                        sheet_content = df.to_string()
+                        sheet_texts.append(sheet_header + sheet_content)
+                    
+                    text_content = "\n\n".join(sheet_texts)
+                    
+                    # Log sheet count
+                    logger.info(f"[EXCEL] Processed {len(all_sheets)} worksheets from '{uploaded_file.name}': {sheet_names}")
             
             else:
                 raise ValueError(f"Unsupported file type: {file_ext}")
@@ -193,6 +209,11 @@ def process_uploads(uploaded_files, selected_project: Optional[str] = None):
                 'file_type': file_ext.replace('.', ''),
                 'uploaded_at': datetime.now().isoformat()
             }
+            
+            # Add Excel-specific metadata
+            if file_ext in ['.xlsx', '.xls'] and sheet_names:
+                metadata['excel_sheets'] = sheet_names
+                metadata['sheet_count'] = len(sheet_names)
             
             if selected_project:
                 metadata['project_id'] = selected_project
