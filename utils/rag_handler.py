@@ -12,7 +12,14 @@ logger = logging.getLogger(__name__)
 
 
 class RAGHandler:
-    """Handles all RAG operations including document processing, embedding, and retrieval."""
+    """
+    Handles all RAG operations including document processing, embedding, and retrieval.
+    
+    CHANGES FOR PROJECT ISOLATION:
+    - Line 208: Preserves project_id in chunk metadata
+    - Line 232-238: Filters search by project_id (optional)
+    - All existing functionality preserved
+    """
     
     def __init__(
         self, 
@@ -221,11 +228,12 @@ class RAGHandler:
     def add_document(self, collection_name: str, text: str, metadata: Dict[str, Any]) -> bool:
         """
         Add a document to a ChromaDB collection.
+        NOW PRESERVES PROJECT_ID IN METADATA
         
         Args:
             collection_name: Name of the collection
             text: Document text
-            metadata: Document metadata
+            metadata: Document metadata (may include 'project_id')
             
         Returns:
             True if successful, False otherwise
@@ -236,6 +244,11 @@ class RAGHandler:
                 name=collection_name,
                 metadata={"hnsw:space": "cosine"}
             )
+            
+            # CHANGE: Extract project_id if present
+            project_id = metadata.get('project_id')
+            if project_id:
+                logger.info(f"[PROJECT] Document tagged with project_id: {project_id}")
             
             # Chunk the text
             chunks = self.chunk_text(text)
@@ -251,29 +264,46 @@ class RAGHandler:
                 # Create unique ID
                 doc_id = f"{metadata.get('source', 'unknown')}_{i}"
                 
+                # CHANGE: Preserve project_id in chunk metadata
+                chunk_metadata = {**metadata, "chunk_index": i}
+                if project_id:
+                    chunk_metadata['project_id'] = project_id
+                    logger.debug(f"[PROJECT] Chunk {i} tagged with project_id: {project_id}")
+                
                 # Add to collection
                 collection.add(
                     embeddings=[embedding],
                     documents=[chunk],
-                    metadatas=[{**metadata, "chunk_index": i}],
+                    metadatas=[chunk_metadata],  # ← CHANGED: Includes project_id
                     ids=[doc_id]
                 )
             
             logger.info(f"Added {len(chunks)} chunks to collection '{collection_name}'")
+            if project_id:
+                logger.info(f"[PROJECT] All chunks tagged with project_id: {project_id}")
+            
             return True
             
         except Exception as e:
             logger.error(f"Error adding document to collection: {str(e)}")
             return False
 
-    def search(self, collection_name: str, query: str, n_results: int = 12) -> List[Dict[str, Any]]:
+    def search(
+        self, 
+        collection_name: str, 
+        query: str, 
+        n_results: int = 12,
+        project_id: Optional[str] = None  # ← CHANGED: New parameter
+    ) -> List[Dict[str, Any]]:
         """
         Search for relevant documents in a collection.
+        NOW SUPPORTS PROJECT FILTERING
         
         Args:
             collection_name: Name of the collection to search
             query: Search query
             n_results: Number of results to return
+            project_id: Optional project ID to filter by (NEW)
             
         Returns:
             List of search results with documents, metadata, and distances
@@ -288,10 +318,19 @@ class RAGHandler:
                 logger.error("Failed to get query embedding")
                 return []
             
-            # Perform search
+            # CHANGE: Build where clause for project filtering
+            where_clause = None
+            if project_id:
+                where_clause = {"project_id": project_id}
+                logger.info(f"[PROJECT] Filtering search by project_id: {project_id}")
+            else:
+                logger.info("[PROJECT] No project filter - searching all documents")
+            
+            # Perform search WITH PROJECT FILTER
             results = collection.query(
                 query_embeddings=[query_embedding],
                 n_results=n_results,
+                where=where_clause,  # ← CHANGED: Filter by project
                 include=["documents", "metadatas", "distances"]
             )
             
@@ -323,6 +362,8 @@ class RAGHandler:
                 formatted_results.append(result)
             
             logger.info(f"Search returned {len(formatted_results)} results from '{collection_name}'")
+            if project_id:
+                logger.info(f"[PROJECT] Results filtered by project_id: {project_id}")
             if formatted_results and formatted_results[0].get('distance') is not None:
                 logger.info(f"Best match distance: {formatted_results[0]['distance']:.4f}")
             
@@ -335,6 +376,7 @@ class RAGHandler:
     def list_collections(self) -> List[str]:
         """
         List all available collections.
+        UNCHANGED
         
         Returns:
             List of collection names
@@ -349,6 +391,7 @@ class RAGHandler:
     def get_collection_count(self, collection_name: str) -> int:
         """
         Get the number of documents in a collection.
+        UNCHANGED
         
         Args:
             collection_name: Name of the collection
@@ -366,6 +409,7 @@ class RAGHandler:
     def delete_collection(self, collection_name: str) -> bool:
         """
         Delete a collection.
+        UNCHANGED
         
         Args:
             collection_name: Name of the collection to delete
@@ -384,6 +428,7 @@ class RAGHandler:
     def reset_all(self) -> bool:
         """
         Delete all collections and reset the database.
+        UNCHANGED
         
         Returns:
             True if successful, False otherwise
