@@ -3,9 +3,16 @@ Complete Knowledge Management Page - WITH PROJECT ISOLATION
 4 tabs: Upload | Status | Search | Intelligent Parser
 
 CHANGES FOR PROJECT ISOLATION:
-- Line 64: Tags uploads with current_project metadata
-- Line 140: Filters search by current_project (optional)
+- Project selector dropdown (instead of assuming active project)
+- Tags uploads with selected project_id
+- Bypasses DocumentProcessor to add metadata directly
 - All existing functionality preserved
+
+REQUIRED LIBRARIES:
+- pdfplumber (for PDF)
+- python-docx (for DOCX)
+- pandas (for Excel/CSV)
+- openpyxl (for Excel)
 """
 
 import streamlit as st
@@ -22,13 +29,6 @@ def render_knowledge_page():
     Main render function for knowledge page with 4 tabs.
     """
     st.title("🗄️ HCMPACT LLM Seeding & Document Management")
-    
-    # Show current project context at top
-    current_project = st.session_state.get('current_project')
-    if current_project:
-        st.success(f"📁 Active Project: **{current_project}** - Documents will be tagged to this project")
-    else:
-        st.info("💡 No project selected - Documents will be uploaded as global/shared knowledge")
     
     # Create tabs
     tabs = st.tabs([
@@ -58,7 +58,7 @@ def render_knowledge_page():
 def render_upload_tab():
     """
     Tab 1: Document upload with chunking to ChromaDB.
-    NOW INCLUDES PROJECT TAGGING
+    NOW INCLUDES PROJECT SELECTOR DROPDOWN
     """
     st.header("Upload Documents to Knowledge Base")
     
@@ -71,12 +71,43 @@ def render_upload_tab():
     - **JPG/JPEG/PNG** - Images
     
     Documents are automatically:
-    1. **Tagged with current project** (if selected)
+    1. **Tagged with selected project** (or marked as Global)
     2. Chunked into searchable segments
     3. Embedded using Ollama
     4. Stored in ChromaDB for RAG
     5. Saved to `/data/uploads/` for parsing
     """)
+    
+    # PROJECT SELECTOR DROPDOWN
+    st.markdown("---")
+    st.subheader("📁 Project Assignment")
+    
+    # Build project options
+    projects = st.session_state.get('projects', {})
+    project_options = ["🌐 Global (All Projects)"] + [f"📁 {name}" for name in projects.keys()]
+    
+    # Default to active project if exists
+    current_project = st.session_state.get('current_project')
+    default_index = 0
+    if current_project and current_project in projects:
+        default_index = project_options.index(f"📁 {current_project}")
+    
+    selected_option = st.selectbox(
+        "Assign documents to:",
+        options=project_options,
+        index=default_index,
+        help="Select which project these documents belong to, or choose Global for shared resources"
+    )
+    
+    # Parse selection
+    if selected_option == "🌐 Global (All Projects)":
+        selected_project = None
+        st.info("💡 Documents will be available to ALL projects (config docs, regulations, shared resources)")
+    else:
+        selected_project = selected_option.replace("📁 ", "")
+        st.success(f"✅ Documents will be tagged to project: **{selected_project}**")
+    
+    st.markdown("---")
     
     # File uploader
     uploaded_files = st.file_uploader(
@@ -87,23 +118,29 @@ def render_upload_tab():
     )
     
     if uploaded_files:
-        st.info(f"Selected {len(uploaded_files)} file(s)")
+        st.info(f"📄 Selected {len(uploaded_files)} file(s)")
         
         if st.button("✨ Upload and Process", type="primary", use_container_width=True):
-            process_uploads(uploaded_files)
+            process_uploads(uploaded_files, selected_project)
 
 
-def process_uploads(uploaded_files):
+def process_uploads(uploaded_files, selected_project: Optional[str] = None):
     """
     Process uploaded files: save and chunk to ChromaDB.
-    NOW TAGS WITH PROJECT_ID
+    NOW TAGS WITH PROJECT_ID - BYPASSES DOCUMENTPROCESSOR TO ADD METADATA
+    
+    Args:
+        uploaded_files: List of uploaded files
+        selected_project: Project name or None for global
     """
-    from utils.document_processor import DocumentProcessor
+    import io
+    from pathlib import Path
     
-    processor = DocumentProcessor()
-    
-    # Get current project (optional)
-    current_project = st.session_state.get('current_project')
+    # Get RAG handler from session
+    rag_handler = st.session_state.get('rag_handler')
+    if not rag_handler:
+        st.error("❌ RAG handler not initialized. Please refresh the page.")
+        return
     
     # Create progress containers
     progress_bar = st.progress(0)
@@ -120,26 +157,78 @@ def process_uploads(uploaded_files):
             progress_bar.progress(progress)
             status_text.info(f"Processing {idx + 1}/{total}: {uploaded_file.name}")
             
-            # CHANGE: Add project_id to metadata if project selected
-            metadata = {}
-            if current_project:
-                metadata['project_id'] = current_project
-                logger.info(f"Tagging upload '{uploaded_file.name}' with project_id: {current_project}")
+            # Read file content
+            file_bytes = uploaded_file.read()
             
-            # Process document WITH PROJECT METADATA
-            result = processor.process_document(
-                uploaded_file,
+            # Extract text based on file type
+            file_ext = Path(uploaded_file.name).suffix.lower()
+            
+            if file_ext == '.txt' or file_ext == '.md':
+                text_content = file_bytes.decode('utf-8', errors='ignore')
+            
+            elif file_ext == '.pdf':
+                import pdfplumber
+                with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                    text_content = "\n\n".join([page.extract_text() or "" for page in pdf.pages])
+            
+            elif file_ext == '.docx':
+                from docx import Document
+                doc = Document(io.BytesIO(file_bytes))
+                text_content = "\n\n".join([para.text for para in doc.paragraphs])
+            
+            elif file_ext in ['.xlsx', '.xls', '.csv']:
+                import pandas as pd
+                if file_ext == '.csv':
+                    df = pd.read_csv(io.BytesIO(file_bytes))
+                else:
+                    df = pd.read_excel(io.BytesIO(file_bytes))
+                text_content = df.to_string()
+            
+            else:
+                raise ValueError(f"Unsupported file type: {file_ext}")
+            
+            # Prepare metadata with project_id
+            metadata = {
+                'source': uploaded_file.name,
+                'file_type': file_ext.replace('.', ''),
+                'uploaded_at': datetime.now().isoformat()
+            }
+            
+            if selected_project:
+                metadata['project_id'] = selected_project
+                logger.info(f"[PROJECT] Tagging '{uploaded_file.name}' with project_id: {selected_project}")
+            else:
+                logger.info(f"[PROJECT] Uploading '{uploaded_file.name}' as GLOBAL (no project_id)")
+            
+            # Add to ChromaDB with project metadata
+            success = rag_handler.add_document(
                 collection_name='hcmpact_knowledge',
-                metadata=metadata  # ← CHANGED: Pass project_id
+                text=text_content,
+                metadata=metadata
             )
             
-            results.append({
-                'filename': uploaded_file.name,
-                'status': 'success' if result.get('status') == 'success' else 'error',
-                'chunks': result.get('num_chunks', 0),
-                'project': current_project if current_project else 'Global',
-                'message': result.get('message', '')
-            })
+            if success:
+                # Also save to /data/uploads for parser
+                upload_dir = Path('/data/uploads')
+                upload_dir.mkdir(parents=True, exist_ok=True)
+                upload_path = upload_dir / uploaded_file.name
+                upload_path.write_bytes(file_bytes)
+                
+                results.append({
+                    'filename': uploaded_file.name,
+                    'status': 'success',
+                    'chunks': 'Added',
+                    'project': selected_project if selected_project else 'Global',
+                    'message': 'Success'
+                })
+            else:
+                results.append({
+                    'filename': uploaded_file.name,
+                    'status': 'error',
+                    'chunks': 0,
+                    'project': selected_project if selected_project else 'Global',
+                    'message': 'Failed to add to ChromaDB'
+                })
             
         except Exception as e:
             logger.error(f"Upload error for {uploaded_file.name}: {str(e)}", exc_info=True)
@@ -147,7 +236,7 @@ def process_uploads(uploaded_files):
                 'filename': uploaded_file.name,
                 'status': 'error',
                 'chunks': 0,
-                'project': current_project if current_project else 'Global',
+                'project': selected_project if selected_project else 'Global',
                 'message': str(e)
             })
     
@@ -157,12 +246,11 @@ def process_uploads(uploaded_files):
     
     # Summary
     success_count = sum(1 for r in results if r['status'] == 'success')
-    total_chunks = sum(r['chunks'] for r in results)
     
     if success_count == total:
-        st.success(f"✅ Successfully processed {success_count} file(s) - {total_chunks} chunks created")
+        st.success(f"✅ Successfully processed {success_count} file(s)")
     elif success_count > 0:
-        st.warning(f"⚠️ Processed {success_count}/{total} files - {total_chunks} chunks created")
+        st.warning(f"⚠️ Processed {success_count}/{total} files")
     else:
         st.error("❌ All uploads failed")
     
@@ -170,7 +258,7 @@ def process_uploads(uploaded_files):
     with results_container.expander("📋 View Details"):
         for result in results:
             if result['status'] == 'success':
-                st.write(f"✅ {result['filename']} - {result['chunks']} chunks - Project: {result['project']}")
+                st.write(f"✅ {result['filename']} - Project: {result['project']}")
             else:
                 st.write(f"❌ {result['filename']} - {result['message']}")
 
