@@ -216,10 +216,19 @@ def _render_sidebar_settings():
             
             # Project Filter
             projects = st.session_state.get('projects', [])
-            if projects:
+            
+            # Handle both list and dict types
+            if isinstance(projects, dict):
+                project_list = list(projects.keys()) if projects else []
+            elif isinstance(projects, list):
+                project_list = projects
+            else:
+                project_list = []
+            
+            if project_list:
                 selected_project = st.selectbox(
                     "📁 Project / Customer",
-                    options=['All Projects'] + projects,
+                    options=['All Projects'] + project_list,
                     index=0,
                     help="Filter knowledge base by specific project/customer"
                 )
