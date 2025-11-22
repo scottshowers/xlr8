@@ -309,6 +309,26 @@ def render_status_tab():
         with col3:
             st.metric("Collection", "hcmpact_knowledge")
         
+        # DEBUG: Sample chunk metadata
+        st.markdown("---")
+        with st.expander("🔍 Debug: Sample Chunk Metadata"):
+            try:
+                sample_results = collection.get(limit=3, include=["metadatas"])
+                if sample_results and sample_results['metadatas']:
+                    for i, meta in enumerate(sample_results['metadatas'], 1):
+                        st.json({
+                            f"Chunk {i}": {
+                                "project_id": meta.get('project_id', '❌ MISSING'),
+                                "source": meta.get('source', '❌ MISSING'),
+                                "functional_area": meta.get('functional_area', '❌ MISSING'),
+                                "sheet_name": meta.get('sheet_name', 'N/A')
+                            }
+                        })
+                else:
+                    st.info("No chunks to inspect")
+            except Exception as e:
+                st.error(f"Error inspecting metadata: {e}")
+        
         # Recent documents
         st.markdown("---")
         st.subheader("📄 Recent Documents")
