@@ -22,11 +22,12 @@ def _load_projects_from_supabase():
             for proj in db_projects:
                 # Map Supabase fields to session state format
                 project_name = proj.get('name')
+                metadata = proj.get('metadata', {})
                 st.session_state.projects[project_name] = {
                     'id': proj.get('id'),  # Important: Keep Supabase ID!
-                    'customer_id': proj.get('client_name', ''),
-                    'implementation_type': proj.get('type', 'UKG Pro'),
-                    'description': proj.get('notes', ''),
+                    'customer_id': proj.get('customer', ''),
+                    'project_type': metadata.get('type', 'Implementation'),
+                    'description': metadata.get('notes', ''),
                     'go_live_date': None,  # Not in Supabase schema yet
                     'consultant': '',  # Not in Supabase schema yet
                     'created_date': proj.get('created_at', '')[:10] if proj.get('created_at') else '',
@@ -68,13 +69,13 @@ def render_projects_page():
             display_name = active_project if len(active_project) < 15 else active_project[:12] + "..."
             st.metric("📌 Active Project", display_name)
         with col3:
-            pro_count = sum(1 for p in st.session_state.get('projects', {}).values() 
-                          if 'Pro' in p.get('implementation_type', ''))
-            st.metric("🔵 UKG Pro", pro_count)
+            impl_count = sum(1 for p in st.session_state.get('projects', {}).values() 
+                          if p.get('project_type', '') == 'Implementation')
+            st.metric("🔵 Implementation", impl_count)
         with col4:
-            wfm_count = sum(1 for p in st.session_state.get('projects', {}).values() 
-                          if 'WFM' in p.get('implementation_type', ''))
-            st.metric("🟢 UKG WFM", wfm_count)
+            support_count = sum(1 for p in st.session_state.get('projects', {}).values() 
+                          if 'Support' in p.get('project_type', ''))
+            st.metric("🟢 Post Launch", support_count)
         
         st.markdown("---")
     
@@ -88,7 +89,7 @@ def render_projects_page():
         with st.form("new_project_form"):
             project_name = st.text_input(
                 "Project Name *",
-                placeholder="e.g., Acme Corp - UKG Pro Implementation",
+                placeholder="e.g., Acme Corp - HCM Implementation",
                 help="Descriptive name for this implementation project"
             )
             
@@ -100,10 +101,10 @@ def render_projects_page():
                     help="Unique identifier for this customer"
                 )
             with col2:
-                implementation_type = st.selectbox(
-                    "Implementation Type *",
-                    ["UKG Pro", "UKG WFM", "UKG Pro + WFM"],
-                    help="Which UKG product(s) are being implemented"
+                project_type = st.selectbox(
+                    "Project Type *",
+                    ["Implementation", "Post Launch Support", "Assessment/Analysis"],
+                    help="Type of engagement for this project"
                 )
             
             project_description = st.text_area(
@@ -149,7 +150,7 @@ def render_projects_page():
                             st.session_state.projects[project_name] = {
                                 'id': created_project.get('id'),  # Store Supabase ID!
                                 'customer_id': customer_id,
-                                'implementation_type': implementation_type,
+                                'project_type': project_type,
                                 'description': project_description,
                                 'go_live_date': str(go_live_date) if go_live_date else None,
                                 'consultant': consultant_name,
@@ -173,7 +174,7 @@ def render_projects_page():
                         
                         st.session_state.projects[project_name] = {
                             'customer_id': customer_id,
-                            'implementation_type': implementation_type,
+                            'project_type': project_type,
                             'description': project_description,
                             'go_live_date': str(go_live_date) if go_live_date else None,
                             'consultant': consultant_name,
@@ -229,7 +230,7 @@ def render_projects_page():
                 with col1:
                     st.markdown(f"""
                     **Customer ID:** {proj_data['customer_id']}  
-                    **Type:** {proj_data['implementation_type']}  
+                    **Type:** {proj_data.get('project_type', proj_data.get('implementation_type', 'Not specified'))}  
                     **Created:** {proj_data['created_date']}  
                     **Consultant:** {proj_data.get('consultant', 'Not specified')}
                     """)
