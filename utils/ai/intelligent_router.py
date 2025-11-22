@@ -274,7 +274,7 @@ class IntelligentRouter:
     ) -> Optional[List[Dict]]:
         """
         Retrieve relevant context from ChromaDB if available.
-        SEARCHES BOTH COLLECTIONS (hcmpact_knowledge AND hcmpact_docs)
+        SEARCHES hcmpact_knowledge collection
         
         Args:
             query: User's query
@@ -290,8 +290,8 @@ class IntelligentRouter:
         
         all_results = []
         
-        # Search BOTH collections
-        collections_to_search = ["hcmpact_knowledge", "hcmpact_docs"]
+        # Search hcmpact_knowledge collection (new unified collection)
+        collections_to_search = ["hcmpact_knowledge"]
         
         for collection_name in collections_to_search:
             try:
