@@ -209,6 +209,115 @@ def submit_upload_jobs(uploaded_files, selected_project: Optional[str] = None):
         st.session_state.show_job_monitor = True
 
 
+def _run_metadata_patch(collection):
+    """
+    Helper function to patch missing functional_area and sheet_name metadata
+    Runs with progress display in Streamlit
+    """
+    import re
+    from utils.functional_areas import get_functional_area
+    
+    def extract_sheet_name_from_content(content: str) -> str:
+        """Extract sheet name from chunk content header"""
+        match = re.search(r'WORKSHEET:\s*(.+)', content)
+        if match:
+            return match.group(1).strip()
+        return None
+    
+    try:
+        # Progress container
+        with st.status("🔧 Patching metadata...", expanded=True) as status:
+            st.write("📊 Fetching all chunks...")
+            
+            # Get all chunks
+            all_chunks = collection.get(include=["metadatas", "documents"])
+            total_chunks = len(all_chunks['ids'])
+            
+            st.write(f"✅ Found {total_chunks:,} chunks")
+            
+            # Find Excel chunks missing functional_area
+            st.write("🔍 Identifying chunks to patch...")
+            excel_chunks_to_patch = []
+            
+            for chunk_id, metadata, content in zip(
+                all_chunks['ids'],
+                all_chunks['metadatas'],
+                all_chunks['documents']
+            ):
+                file_type = metadata.get('file_type', '')
+                has_functional_area = 'functional_area' in metadata
+                
+                if file_type in ['xlsx', 'xls', 'csv'] and not has_functional_area:
+                    sheet_name = extract_sheet_name_from_content(content)
+                    
+                    if sheet_name:
+                        functional_area = get_functional_area(sheet_name)
+                        
+                        excel_chunks_to_patch.append({
+                            'id': chunk_id,
+                            'sheet_name': sheet_name,
+                            'functional_area': functional_area,
+                            'current_metadata': metadata
+                        })
+            
+            if not excel_chunks_to_patch:
+                status.update(label="✅ No patches needed!", state="complete")
+                st.success("All chunks already have correct metadata!")
+                return
+            
+            st.write(f"🎯 Found {len(excel_chunks_to_patch):,} chunks to patch")
+            
+            # Show samples
+            st.write("**Sample mappings:**")
+            for chunk in excel_chunks_to_patch[:5]:
+                st.text(f"  • {chunk['sheet_name']} → {chunk['functional_area']}")
+            
+            # Patch chunks
+            st.write(f"⚙️ Patching {len(excel_chunks_to_patch):,} chunks...")
+            progress_bar = st.progress(0)
+            
+            for i, chunk_info in enumerate(excel_chunks_to_patch):
+                # Create updated metadata
+                updated_metadata = {
+                    **chunk_info['current_metadata'],
+                    'functional_area': chunk_info['functional_area'],
+                    'sheet_name': chunk_info['sheet_name']
+                }
+                
+                # Update the chunk
+                collection.update(
+                    ids=[chunk_info['id']],
+                    metadatas=[updated_metadata]
+                )
+                
+                # Update progress every 50 chunks
+                if (i + 1) % 50 == 0 or i == len(excel_chunks_to_patch) - 1:
+                    progress_bar.progress((i + 1) / len(excel_chunks_to_patch))
+            
+            # Verify
+            st.write("✔️ Verifying patch...")
+            sample_id = excel_chunks_to_patch[0]['id']
+            verified = collection.get(ids=[sample_id], include=["metadatas"])
+            
+            if verified and verified['metadatas']:
+                meta = verified['metadatas'][0]
+                st.write("**Sample verification:**")
+                st.json({
+                    "sheet_name": meta.get('sheet_name', '❌ MISSING'),
+                    "functional_area": meta.get('functional_area', '❌ MISSING'),
+                    "project_id": meta.get('project_id', 'N/A')
+                })
+            
+            status.update(label=f"✅ Patched {len(excel_chunks_to_patch):,} chunks!", state="complete")
+        
+        st.success(f"🎉 Successfully patched {len(excel_chunks_to_patch):,} chunks! RAG search should now work correctly.")
+        st.info("💡 Refresh the debug section below to see updated metadata")
+        
+    except Exception as e:
+        st.error(f"❌ Error patching metadata: {e}")
+        logger.error(f"Metadata patch error: {e}", exc_info=True)
+
+
 def render_status_tab():
     """
     Tab 2: Show collection status, statistics, AND JOB MONITOR
@@ -308,6 +417,21 @@ def render_status_tab():
         
         with col3:
             st.metric("Collection", "hcmpact_knowledge")
+        
+        # ═══════════════════════════════════════════════════════════
+        # METADATA PATCH SECTION
+        # ═══════════════════════════════════════════════════════════
+        st.markdown("---")
+        st.subheader("🔧 Metadata Repair")
+        
+        col_patch1, col_patch2 = st.columns([2, 1])
+        
+        with col_patch1:
+            st.info("**Fix missing functional_area & sheet_name metadata** - Applies to chunks uploaded before metadata preservation was added")
+        
+        with col_patch2:
+            if st.button("🔧 Patch Metadata", type="primary", use_container_width=True):
+                _run_metadata_patch(collection)
         
         # DEBUG: Sample chunk metadata
         st.markdown("---")
