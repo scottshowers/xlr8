@@ -90,7 +90,8 @@ class IntelligentRouter:
         self, 
         query: str, 
         num_chromadb_sources: int = 50,
-        project_id: Optional[str] = None  # ← ADDED FOR PROJECT ISOLATION
+        project_id: Optional[str] = None,
+        functional_areas: Optional[List[str]] = None  # ← ADDED FOR FUNCTIONAL AREA FILTERING
     ) -> RouterDecision:
         """
         Make an intelligent routing decision for the given query.
@@ -98,7 +99,8 @@ class IntelligentRouter:
         Args:
             query: User's query text
             num_chromadb_sources: Number of ChromaDB sources to retrieve
-            project_id: Optional project ID to filter ChromaDB results (NEW)
+            project_id: Optional project ID to filter ChromaDB results
+            functional_areas: Optional list of functional areas to filter results
             
         Returns:
             RouterDecision object with routing information
@@ -129,26 +131,59 @@ class IntelligentRouter:
         
         # STEP 2: Check ChromaDB for HCMPACT context
         logger.debug("Step 2: Checking ChromaDB for context")
-        chromadb_context = self._get_chromadb_context(query, num_chromadb_sources, project_id)  # ← ADDED project_id
+        chromadb_context = self._get_chromadb_context(
+            query, 
+            num_chromadb_sources, 
+            project_id,
+            functional_areas
+        )
         
         if chromadb_context and len(chromadb_context) > 0:
-            # HCMPACT-specific knowledge exists - ALWAYS USE LOCAL LLM
-            logger.info(f"Found {len(chromadb_context)} ChromaDB sources - routing to LOCAL LLM")
+            # HCMPACT-specific knowledge exists
+            num_results = len(chromadb_context)
+            logger.info(f"Found {num_results} ChromaDB sources")
             
-            complexity_result = self.complexity_analyzer.analyze(query, len(chromadb_context))
-            model_name = self._select_local_model(complexity_result['complexity'])
+            # SMART HYBRID: Source count threshold
+            # 0-40 sources + no PII → Claude API (fast, handles context well)
+            # 40+ sources → Local LLM (unlimited context, no rate limits)
             
-            logger.info(f"Using LOCAL LLM ({model_name}) with {len(chromadb_context)} HCMPACT sources")
-            logger.info("✅ ARCHITECTURE: Your proprietary data stays on your infrastructure")
-            
-            return RouterDecision(
-                use_local_llm=True,
-                model_name=model_name,
-                reason=f"HCMPACT knowledge ({len(chromadb_context)} sources) - using local LLM for proprietary data. {complexity_result['reason']}",
-                has_pii=False,
-                complexity=complexity_result['complexity'],
-                chromadb_context=chromadb_context
-            )
+            if not has_pii and num_results <= 40 and self.claude_api_key:
+                # Small context + no PII → Use Claude API
+                logger.info(f"✅ SMART HYBRID: {num_results} sources (≤40) - routing to Claude API")
+                complexity_result = self.complexity_analyzer.analyze(query, num_results)
+                
+                return RouterDecision(
+                    use_local_llm=False,
+                    model_name="claude-sonnet-4-20250514",
+                    reason=f"HCMPACT knowledge ({num_results} sources ≤40) - Claude API can handle efficiently. {complexity_result['reason']}",
+                    has_pii=False,
+                    complexity=complexity_result['complexity'],
+                    chromadb_context=chromadb_context
+                )
+            else:
+                # Large context OR PII → Use local LLM
+                reason_parts = []
+                if has_pii:
+                    reason_parts.append("PII detected")
+                if num_results > 40:
+                    reason_parts.append(f"{num_results} sources (>40)")
+                reason_suffix = " + ".join(reason_parts) if reason_parts else "HCMPACT data"
+                
+                logger.info(f"✅ Using LOCAL LLM: {reason_suffix} - your proprietary data stays secure")
+                
+                complexity_result = self.complexity_analyzer.analyze(query, num_results)
+                model_name = self._select_local_model(complexity_result['complexity'])
+                
+                logger.info(f"Using LOCAL LLM ({model_name}) with {num_results} HCMPACT sources")
+                
+                return RouterDecision(
+                    use_local_llm=True,
+                    model_name=model_name,
+                    reason=f"{reason_suffix} - using local LLM for proprietary data. {complexity_result['reason']}",
+                    has_pii=has_pii,
+                    complexity=complexity_result['complexity'],
+                    chromadb_context=chromadb_context
+                )
         
         # STEP 3: Analyze complexity for routing decision
         logger.debug("Step 3: Analyzing query complexity")
@@ -226,7 +261,8 @@ class IntelligentRouter:
         self, 
         query: str, 
         num_sources: int,
-        project_id: Optional[str] = None  # ← ADDED FOR PROJECT ISOLATION
+        project_id: Optional[str] = None,
+        functional_areas: Optional[List[str]] = None  # ← ADDED FOR FUNCTIONAL AREA FILTERING
     ) -> Optional[List[Dict]]:
         """
         Retrieve relevant context from ChromaDB if available.
@@ -235,7 +271,8 @@ class IntelligentRouter:
         Args:
             query: User's query
             num_sources: Number of sources to retrieve
-            project_id: Optional project ID to filter results (NEW)
+            project_id: Optional project ID to filter results
+            functional_areas: Optional list of functional areas to filter results
             
         Returns:
             List of context documents or None
@@ -258,11 +295,18 @@ class IntelligentRouter:
                 else:
                     logger.info("[PROJECT] Searching all projects (no filter)")
                 
+                # Log functional area filtering status
+                if functional_areas:
+                    logger.info(f"[FUNCTIONAL AREA] Filtering by: {', '.join(functional_areas)}")
+                else:
+                    logger.info("[FUNCTIONAL AREA] No filter - searching all areas")
+                
                 results = self.chromadb_handler.search(
                     collection_name=collection_name,
                     query=query,
                     n_results=num_sources,
-                    project_id=project_id  # ← ADDED FOR PROJECT FILTERING
+                    project_id=project_id,
+                    functional_areas=functional_areas  # ← ADDED FOR FUNCTIONAL AREA FILTERING
                 )
                 
                 if results and len(results) > 0:
