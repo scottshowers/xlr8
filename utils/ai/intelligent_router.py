@@ -132,35 +132,23 @@ class IntelligentRouter:
         chromadb_context = self._get_chromadb_context(query, num_chromadb_sources, project_id)  # ← ADDED project_id
         
         if chromadb_context and len(chromadb_context) > 0:
-            # HCMPACT-specific knowledge exists
-            logger.info(f"Found {len(chromadb_context)} ChromaDB sources")
+            # HCMPACT-specific knowledge exists - ALWAYS USE LOCAL LLM
+            logger.info(f"Found {len(chromadb_context)} ChromaDB sources - routing to LOCAL LLM")
             
             complexity_result = self.complexity_analyzer.analyze(query, len(chromadb_context))
+            model_name = self._select_local_model(complexity_result['complexity'])
             
-            # HYBRID MODE: If Claude API available, use it to synthesize with local context
-            if self.claude_api_key:
-                logger.info(f"Using HYBRID mode: Claude synthesizes with {len(chromadb_context)} local sources")
-                return RouterDecision(
-                    use_local_llm=False,  # Claude API will synthesize
-                    model_name="claude-sonnet-4-20250514",
-                    reason=f"Hybrid Mode: Claude synthesizing with {len(chromadb_context)} HCMPACT sources. {complexity_result['reason']}",
-                    has_pii=False,
-                    complexity=complexity_result['complexity'],
-                    chromadb_context=chromadb_context
-                )
-            else:
-                # No Claude API - use local LLM
-                model_name = self._select_local_model(complexity_result['complexity'])
-                logger.info(f"No Claude API - using local LLM with {len(chromadb_context)} sources")
-                
-                return RouterDecision(
-                    use_local_llm=True,
-                    model_name=model_name,
-                    reason=f"HCMPACT knowledge available ({len(chromadb_context)} sources). {complexity_result['reason']}",
-                    has_pii=False,
-                    complexity=complexity_result['complexity'],
-                    chromadb_context=chromadb_context
-                )
+            logger.info(f"Using LOCAL LLM ({model_name}) with {len(chromadb_context)} HCMPACT sources")
+            logger.info("✅ ARCHITECTURE: Your proprietary data stays on your infrastructure")
+            
+            return RouterDecision(
+                use_local_llm=True,
+                model_name=model_name,
+                reason=f"HCMPACT knowledge ({len(chromadb_context)} sources) - using local LLM for proprietary data. {complexity_result['reason']}",
+                has_pii=False,
+                complexity=complexity_result['complexity'],
+                chromadb_context=chromadb_context
+            )
         
         # STEP 3: Analyze complexity for routing decision
         logger.debug("Step 3: Analyzing query complexity")
