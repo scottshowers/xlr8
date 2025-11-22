@@ -218,10 +218,17 @@ def _run_metadata_patch(collection):
     from utils.functional_areas import get_functional_area
     
     def extract_sheet_name_from_content(content: str) -> str:
-        """Extract sheet name from chunk content header"""
-        match = re.search(r'WORKSHEET:\s*(.+)', content)
+        """Extract sheet name from chunk content header - try multiple formats"""
+        # Try format 1: WORKSHEET: SheetName
+        match = re.search(r'WORKSHEET:\s*(.+?)(?:\n|$)', content, re.IGNORECASE)
         if match:
             return match.group(1).strip()
+        
+        # Try format 2: Sheet name in first line after equals signs
+        match = re.search(r'={3,}\n(.+?)\n={3,}', content)
+        if match:
+            return match.group(1).strip()
+        
         return None
     
     try:
@@ -238,6 +245,7 @@ def _run_metadata_patch(collection):
             # Find Excel chunks missing functional_area
             st.write("🔍 Identifying chunks to patch...")
             excel_chunks_to_patch = []
+            excel_chunks_no_sheet_name = []
             
             for chunk_id, metadata, content in zip(
                 all_chunks['ids'],
@@ -259,11 +267,45 @@ def _run_metadata_patch(collection):
                             'functional_area': functional_area,
                             'current_metadata': metadata
                         })
+                    else:
+                        # Can't extract sheet name - store for debugging
+                        excel_chunks_no_sheet_name.append({
+                            'id': chunk_id,
+                            'source': metadata.get('source', 'unknown'),
+                            'content_preview': content[:200]
+                        })
+            
+            # Show debug info if we can't extract sheet names
+            if excel_chunks_no_sheet_name:
+                st.warning(f"⚠️ Found {len(excel_chunks_no_sheet_name)} Excel chunks where sheet name couldn't be extracted")
+                with st.expander("🔍 Debug: Show sample chunk content"):
+                    sample = excel_chunks_no_sheet_name[0]
+                    st.text("Source: " + sample['source'])
+                    st.text("Content preview:")
+                    st.code(sample['content_preview'])
+                    st.info("💡 This chunk format doesn't have WORKSHEET: header. Need to extract sheet name from source filename.")
             
             if not excel_chunks_to_patch:
-                status.update(label="✅ No patches needed!", state="complete")
-                st.success("All chunks already have correct metadata!")
-                return
+                status.update(label="⚠️ No chunks could be patched", state="error")
+                st.error("Could not extract sheet names from chunk content. Trying alternative approach...")
+                
+                # ALTERNATIVE: Extract from source filename
+                st.write("🔄 Attempting to patch using source filename...")
+                for chunk_info in excel_chunks_no_sheet_name:
+                    # Try to get sheet name from somewhere else or use default
+                    source = chunk_info['source']
+                    
+                    # For now, assign "General" as fallback
+                    excel_chunks_to_patch.append({
+                        'id': chunk_info['id'],
+                        'sheet_name': 'Unknown',
+                        'functional_area': 'Uncategorized',
+                        'current_metadata': collection.get(ids=[chunk_info['id']], include=["metadatas"])['metadatas'][0]
+                    })
+                
+                if not excel_chunks_to_patch:
+                    st.error("❌ Still no chunks to patch. Upload may need to be redone.")
+                    return
             
             st.write(f"🎯 Found {len(excel_chunks_to_patch):,} chunks to patch")
             
