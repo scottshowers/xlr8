@@ -87,6 +87,29 @@ class AppConfig:
         from utils.data.supabase_handler import SupabaseHandler
         return SupabaseHandler(cls.SUPABASE_URL, cls.SUPABASE_KEY)
     
+    @classmethod
+    def use_supabase(cls) -> bool:
+        """
+        Check if Supabase is enabled and properly configured
+        
+        Returns:
+            True if Supabase should be used for persistence
+        
+        Example:
+            if AppConfig.use_supabase():
+                # Use Supabase for storage
+            else:
+                # Fall back to session state
+        """
+        if not cls.USE_SUPABASE_PERSISTENCE:
+            return False
+        
+        if not cls.SUPABASE_URL or not cls.SUPABASE_KEY:
+            return False
+        
+        # Could add connection test here if needed
+        return True
+    
     # ============================================================================
     # LLM CONFIGURATION (SECURE - from environment)
     # ============================================================================
