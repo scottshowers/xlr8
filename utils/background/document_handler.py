@@ -21,8 +21,7 @@ def process_document_upload(input_data: Dict[str, Any], progress_callback: Calla
             'file_bytes': bytes,
             'filename': str,
             'file_ext': str,
-            'selected_project': str or None,
-            'rag_handler': RAGHandler instance
+            'selected_project': str or None
         }
         progress_callback: Function(current, total, message)
         
@@ -35,11 +34,18 @@ def process_document_upload(input_data: Dict[str, Any], progress_callback: Calla
         }
     """
     try:
+        from utils.rag_handler import RAGHandler
+        import os
+        
         file_bytes = input_data['file_bytes']
         filename = input_data['filename']
         file_ext = input_data['file_ext']
         selected_project = input_data.get('selected_project')
-        rag_handler = input_data['rag_handler']
+        
+        # Recreate RAGHandler (can't pass objects through Supabase)
+        rag_handler = RAGHandler(
+            llm_endpoint=os.getenv('LLM_ENDPOINT', 'http://178.156.190.64:11435')
+        )
         
         logger.info(f"[UPLOAD] Processing {filename} ({file_ext})")
         progress_callback(0, 100, f"Starting {filename}...")
