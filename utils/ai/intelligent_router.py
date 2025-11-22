@@ -143,9 +143,10 @@ class IntelligentRouter:
             num_results = len(chromadb_context)
             logger.info(f"Found {num_results} ChromaDB sources")
             
-            # SMART HYBRID: Source count threshold
-            # 0-40 sources + no PII → Claude API (fast, handles context well)
-            # 40+ sources → Local LLM (unlimited context, no rate limits)
+            # SMART HYBRID with RERANKING:
+            # Reranker caps results at 20 for quality
+            # 0-20 sources + no PII → Claude API (fast, high quality)
+            # 20+ sources (rare after reranking) OR PII → Local LLM
             
             if not has_pii and num_results <= 40 and self.claude_api_key:
                 # Small context + no PII → Use Claude API
@@ -331,10 +332,27 @@ class IntelligentRouter:
             # Sort by distance (lower is better)
             all_results.sort(key=lambda x: x.get('distance', 999))
             
-            # Take top N results
-            top_results = all_results[:num_sources]
+            # RERANKING: If we have many results, rerank for quality
+            if len(all_results) > 20:
+                logger.info(f"Reranking {len(all_results)} results for better relevance")
+                from utils.reranker import rerank_results
+                
+                # Calculate target: keep more results if requested, but max 20 for LLM
+                target_count = min(20, num_sources)
+                
+                reranked_results = rerank_results(
+                    query=query,
+                    results=all_results,
+                    top_k=target_count
+                )
+                
+                logger.info(f"Reranked: Keeping top {len(reranked_results)} most relevant results")
+                top_results = reranked_results
+            else:
+                # Not enough results to benefit from reranking
+                top_results = all_results[:num_sources]
             
-            logger.info(f"Combined: {len(top_results)} total results from both collections")
+            logger.info(f"Final: {len(top_results)} results for LLM")
             if project_id:
                 logger.info(f"[PROJECT] Results filtered to project: {project_id}")
             
