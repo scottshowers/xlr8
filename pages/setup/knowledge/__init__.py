@@ -178,24 +178,31 @@ def process_uploads(uploaded_files, selected_project: Optional[str] = None):
             
             elif file_ext in ['.xlsx', '.xls', '.csv']:
                 import pandas as pd
+                from utils.functional_areas import get_functional_area  # Import functional area mapper
+                
                 sheet_names = []  # Track sheet names for metadata
                 
                 if file_ext == '.csv':
                     df = pd.read_csv(io.BytesIO(file_bytes))
                     text_content = df.to_string()
+                    sheet_processing_mode = 'single'  # CSV is single sheet
                 else:
                     # Read ALL sheets in Excel file
                     all_sheets = pd.read_excel(io.BytesIO(file_bytes), sheet_name=None)
                     sheet_names = list(all_sheets.keys())
+                    sheet_processing_mode = 'multi'  # Excel with multiple sheets
                     
-                    # Combine all sheets with clear separators
-                    sheet_texts = []
+                    # Process each sheet separately for functional area tagging
+                    sheets_to_process = []
                     for sheet_name, df in all_sheets.items():
+                        functional_area = get_functional_area(sheet_name)
                         sheet_header = f"\n{'='*80}\nWORKSHEET: {sheet_name}\n{'='*80}\n"
                         sheet_content = df.to_string()
-                        sheet_texts.append(sheet_header + sheet_content)
-                    
-                    text_content = "\n\n".join(sheet_texts)
+                        sheets_to_process.append({
+                            'sheet_name': sheet_name,
+                            'functional_area': functional_area,
+                            'content': sheet_header + sheet_content
+                        })
                     
                     # Log sheet count
                     logger.info(f"[EXCEL] Processed {len(all_sheets)} worksheets from '{uploaded_file.name}': {sheet_names}")
@@ -203,53 +210,102 @@ def process_uploads(uploaded_files, selected_project: Optional[str] = None):
             else:
                 raise ValueError(f"Unsupported file type: {file_ext}")
             
-            # Prepare metadata with project_id
-            metadata = {
-                'source': uploaded_file.name,
-                'file_type': file_ext.replace('.', ''),
-                'uploaded_at': datetime.now().isoformat()
-            }
-            
-            # Add Excel-specific metadata (ChromaDB requires strings, not lists)
-            if file_ext in ['.xlsx', '.xls'] and sheet_names:
-                metadata['excel_sheets'] = ', '.join(sheet_names)  # Convert list to comma-separated string
-                metadata['sheet_count'] = len(sheet_names)
-            
-            if selected_project:
-                metadata['project_id'] = selected_project
-                logger.info(f"[PROJECT] Tagging '{uploaded_file.name}' with project_id: {selected_project}")
-            else:
-                logger.info(f"[PROJECT] Uploading '{uploaded_file.name}' as GLOBAL (no project_id)")
-            
-            # Add to ChromaDB with project metadata
-            success = rag_handler.add_document(
-                collection_name='hcmpact_knowledge',
-                text=text_content,
-                metadata=metadata
-            )
-            
-            if success:
-                # Also save to /data/uploads for parser
-                upload_dir = Path('/data/uploads')
-                upload_dir.mkdir(parents=True, exist_ok=True)
-                upload_path = upload_dir / uploaded_file.name
-                upload_path.write_bytes(file_bytes)
+            # Handle single-sheet vs multi-sheet processing
+            if sheet_processing_mode == 'multi':
+                # Multi-sheet Excel: Process each sheet separately
+                total_chunks_added = 0
+                sheets_added = 0
                 
-                results.append({
-                    'filename': uploaded_file.name,
-                    'status': 'success',
-                    'chunks': 'Added',
-                    'project': selected_project if selected_project else 'Global',
-                    'message': 'Success'
-                })
+                for sheet_info in sheets_to_process:
+                    # Prepare metadata for this specific sheet
+                    sheet_metadata = {
+                        'source': uploaded_file.name,
+                        'file_type': file_ext.replace('.', ''),
+                        'uploaded_at': datetime.now().isoformat(),
+                        'sheet_name': sheet_info['sheet_name'],
+                        'functional_area': sheet_info['functional_area']
+                    }
+                    
+                    if selected_project:
+                        sheet_metadata['project_id'] = selected_project
+                    
+                    logger.info(f"[FUNCTIONAL AREA] Sheet '{sheet_info['sheet_name']}' → {sheet_info['functional_area']}")
+                    
+                    # Add this sheet to ChromaDB
+                    success = rag_handler.add_document(
+                        collection_name='hcmpact_knowledge',
+                        text=sheet_info['content'],
+                        metadata=sheet_metadata
+                    )
+                    
+                    if success:
+                        sheets_added += 1
+                
+                if sheets_added > 0:
+                    # Save file to /data/uploads for parser
+                    upload_dir = Path('/data/uploads')
+                    upload_dir.mkdir(parents=True, exist_ok=True)
+                    upload_path = upload_dir / uploaded_file.name
+                    upload_path.write_bytes(file_bytes)
+                    
+                    results.append({
+                        'filename': uploaded_file.name,
+                        'status': 'success',
+                        'message': f'{sheets_added}/{len(sheets_to_process)} sheets added',
+                        'sheets': sheet_names
+                    })
+                    logger.info(f"[SUCCESS] Added {sheets_added}/{len(sheets_to_process)} sheets from '{uploaded_file.name}'")
+                else:
+                    results.append({
+                        'filename': uploaded_file.name,
+                        'status': 'error',
+                        'message': 'Failed to add any sheets to ChromaDB'
+                    })
+            
             else:
-                results.append({
-                    'filename': uploaded_file.name,
-                    'status': 'error',
-                    'chunks': 0,
-                    'project': selected_project if selected_project else 'Global',
-                    'message': 'Failed to add to ChromaDB'
-                })
+                # Single file (CSV, PDF, DOCX, etc.) or single-sheet processing
+                # Prepare metadata with project_id
+                metadata = {
+                    'source': uploaded_file.name,
+                    'file_type': file_ext.replace('.', ''),
+                    'uploaded_at': datetime.now().isoformat()
+                }
+                
+                if selected_project:
+                    metadata['project_id'] = selected_project
+                    logger.info(f"[PROJECT] Tagging '{uploaded_file.name}' with project_id: {selected_project}")
+                else:
+                    logger.info(f"[PROJECT] Uploading '{uploaded_file.name}' as GLOBAL (no project_id)")
+                
+                # Add to ChromaDB with project metadata
+                success = rag_handler.add_document(
+                    collection_name='hcmpact_knowledge',
+                    text=text_content,
+                    metadata=metadata
+                )
+                
+                if success:
+                    # Also save to /data/uploads for parser
+                    upload_dir = Path('/data/uploads')
+                    upload_dir.mkdir(parents=True, exist_ok=True)
+                    upload_path = upload_dir / uploaded_file.name
+                    upload_path.write_bytes(file_bytes)
+                    
+                    results.append({
+                        'filename': uploaded_file.name,
+                        'status': 'success',
+                        'chunks': 'Added',
+                        'project': selected_project if selected_project else 'Global',
+                        'message': 'Success'
+                    })
+                else:
+                    results.append({
+                        'filename': uploaded_file.name,
+                        'status': 'error',
+                        'chunks': 0,
+                        'project': selected_project if selected_project else 'Global',
+                        'message': 'Failed to add to ChromaDB'
+                    })
             
         except Exception as e:
             logger.error(f"Upload error for {uploaded_file.name}: {str(e)}", exc_info=True)
