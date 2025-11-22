@@ -172,39 +172,68 @@ class RAGHandler:
             logger.error(f"Error getting embedding: {str(e)}", exc_info=True)
             return None
 
-    def chunk_text(self, text: str) -> List[str]:
+    def chunk_text(self, text: str, file_type: str = 'txt') -> List[str]:
         """
-        Ultra-simple chunking - splits at fixed intervals with overlap.
+        Hybrid chunking - adapts chunk size based on file type.
         
-        SIMPLIFIED FOR P0 FIX:
-        - No sentence boundary detection (that was causing hangs)
-        - Fixed-size chunks
-        - Guaranteed to complete
+        CHUNK SIZES:
+        - Excel/CSV: 2000 chars (preserves ~20-30 table rows)
+        - PDF/DOCX/TXT: 800 chars (standard)
         
         Args:
             text: Text to chunk
+            file_type: File type (xlsx, xls, csv, pdf, docx, txt, md)
             
         Returns:
             List of text chunks
         """
-        logger.info(f"[CHUNK] Starting, text length: {len(text)}")
+        logger.info(f"[CHUNK] Starting, text length: {len(text)}, file_type: {file_type}")
+        
+        # Determine chunk size based on file type
+        if file_type in ['xlsx', 'xls', 'csv']:
+            chunk_size = 2000  # Larger for tabular data
+            chunk_overlap = 200  # More overlap for context
+            logger.info(f"[CHUNK] Using EXCEL mode: {chunk_size} chars, {chunk_overlap} overlap")
+        else:
+            chunk_size = self.chunk_size  # Default 800
+            chunk_overlap = self.chunk_overlap  # Default 100
+            logger.info(f"[CHUNK] Using STANDARD mode: {chunk_size} chars, {chunk_overlap} overlap")
         
         # Clean the text
         text = re.sub(r'\s+', ' ', text).strip()
         logger.info(f"[CHUNK] After cleaning: {len(text)} chars")
         
+        # Extract headers for Excel (if present)
+        header = None
+        if file_type in ['xlsx', 'xls', 'csv'] and 'WORKSHEET:' in text:
+            # Try to extract header (first line after WORKSHEET marker)
+            lines = text.split('\n')
+            for i, line in enumerate(lines):
+                if 'WORKSHEET:' in line and i + 2 < len(lines):
+                    # Skip the separator line, grab the header
+                    potential_header = lines[i + 2].strip()
+                    if potential_header and len(potential_header) < 500:
+                        header = potential_header
+                        logger.info(f"[CHUNK] Extracted header for repetition: {header[:50]}...")
+                    break
+        
         chunks = []
         position = 0
         chunk_count = 0
         
-        logger.info(f"[CHUNK] Will create ~{len(text) // self.chunk_size} chunks")
+        logger.info(f"[CHUNK] Will create ~{len(text) // chunk_size} chunks")
         
         while position < len(text):
             chunk_count += 1
             
             # Get chunk
-            end = min(position + self.chunk_size, len(text))
+            end = min(position + chunk_size, len(text))
             chunk = text[position:end].strip()
+            
+            # For Excel: Prepend header to each chunk (except first)
+            if header and chunk_count > 1 and file_type in ['xlsx', 'xls', 'csv']:
+                chunk = f"[HEADER] {header}\n{chunk}"
+                logger.debug(f"[CHUNK] Added header to chunk #{chunk_count}")
             
             # Only add non-empty chunks
             if chunk:
@@ -213,7 +242,7 @@ class RAGHandler:
             
             # Move to next position with overlap
             if end < len(text):
-                position = end - self.chunk_overlap
+                position = end - chunk_overlap
             else:
                 position = len(text)  # Done
             
@@ -250,8 +279,11 @@ class RAGHandler:
             if project_id:
                 logger.info(f"[PROJECT] Document tagged with project_id: {project_id}")
             
-            # Chunk the text
-            chunks = self.chunk_text(text)
+            # Extract file type for adaptive chunking
+            file_type = metadata.get('file_type', 'txt')
+            
+            # Chunk the text with file-type-specific strategy
+            chunks = self.chunk_text(text, file_type=file_type)
             
             # Process each chunk
             for i, chunk in enumerate(chunks):
