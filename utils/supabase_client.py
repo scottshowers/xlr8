@@ -255,3 +255,38 @@ class SupabaseProjectManager:
         except Exception as e:
             logger.error(f"❌ Failed to rename project '{old_name}': {e}")
             return False
+
+
+# ============================================================================
+# CRITICAL FIX: Add get_supabase() function for models.py
+# ============================================================================
+
+def get_supabase() -> Optional[Client]:
+    """
+    Get raw Supabase client for use in models.py
+    
+    This function is required by models.py which imports:
+        from .supabase_client import get_supabase
+    
+    Returns:
+        Supabase Client instance or None if not configured
+    
+    Example:
+        supabase = get_supabase()
+        if supabase:
+            result = supabase.table('projects').select('*').execute()
+    """
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_KEY")
+    
+    if not supabase_url or not supabase_key:
+        logger.error("❌ SUPABASE_URL or SUPABASE_KEY not set in environment variables")
+        return None
+    
+    try:
+        client = create_client(supabase_url, supabase_key)
+        logger.debug("✅ Supabase client created successfully")
+        return client
+    except Exception as e:
+        logger.error(f"❌ Failed to create Supabase client: {e}")
+        return None
