@@ -706,7 +706,7 @@ def render_status_tab():
     if supabase:
         try:
             # Query ALL recent jobs from Supabase (last 10)
-            response = supabase.table('background_jobs').select('*').order('created_at', desc=True).limit(10).execute()
+            response = supabase.table('processing_jobs').select('*').order('created_at', desc=True).limit(10).execute()
             
             if response.data and len(response.data) > 0:
                 all_jobs = response.data
@@ -719,7 +719,7 @@ def render_status_tab():
                     if st.button("🗑️ Clear All", use_container_width=True, type="secondary"):
                         try:
                             # Delete all jobs
-                            supabase.table('background_jobs').delete().neq('id', '00000000-0000-0000-0000-000000000000').execute()
+                            supabase.table('processing_jobs').delete().neq('id', '00000000-0000-0000-0000-000000000000').execute()
                             st.success("✅ All jobs cleared!")
                             st.rerun()
                         except Exception as e:
@@ -771,7 +771,7 @@ def render_status_tab():
                             # Delete button for any job
                             if st.button("🗑️", key=f"delete_{job_id}", use_container_width=True, help="Delete this job"):
                                 try:
-                                    supabase.table('background_jobs').delete().eq('id', job_id).execute()
+                                    supabase.table('processing_jobs').delete().eq('id', job_id).execute()
                                     st.success("✅ Deleted!")
                                     time.sleep(0.5)
                                     st.rerun()
