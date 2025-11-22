@@ -187,25 +187,23 @@ def process_uploads(uploaded_files, selected_project: Optional[str] = None):
                     text_content = df.to_string()
                     sheet_processing_mode = 'single'  # CSV is single sheet
                 else:
-                    # Read ALL sheets in Excel file
+                    # Read ALL sheets in Excel file (just metadata, not converting yet)
                     all_sheets = pd.read_excel(io.BytesIO(file_bytes), sheet_name=None)
                     sheet_names = list(all_sheets.keys())
                     sheet_processing_mode = 'multi'  # Excel with multiple sheets
                     
-                    # Process each sheet separately for functional area tagging
+                    # Store sheet DataFrames and metadata (NOT converted to string yet!)
                     sheets_to_process = []
                     for sheet_name, df in all_sheets.items():
                         functional_area = get_functional_area(sheet_name)
-                        sheet_header = f"\n{'='*80}\nWORKSHEET: {sheet_name}\n{'='*80}\n"
-                        sheet_content = df.to_string()
                         sheets_to_process.append({
                             'sheet_name': sheet_name,
                             'functional_area': functional_area,
-                            'content': sheet_header + sheet_content
+                            'df': df  # ← Store DataFrame, convert later one at a time
                         })
                     
                     # Log sheet count
-                    logger.info(f"[EXCEL] Processed {len(all_sheets)} worksheets from '{uploaded_file.name}': {sheet_names}")
+                    logger.info(f"[EXCEL] Found {len(all_sheets)} worksheets in '{uploaded_file.name}': {sheet_names}")
             
             else:
                 raise ValueError(f"Unsupported file type: {file_ext}")
@@ -216,7 +214,22 @@ def process_uploads(uploaded_files, selected_project: Optional[str] = None):
                 total_chunks_added = 0
                 sheets_added = 0
                 
-                for sheet_info in sheets_to_process:
+                # Progress indicator for user
+                progress_text = st.empty()
+                progress_bar = st.progress(0.0)
+                
+                for idx, sheet_info in enumerate(sheets_to_process, 1):
+                    # Update progress
+                    progress_pct = idx / len(sheets_to_process)
+                    progress_text.text(f"Processing sheet {idx}/{len(sheets_to_process)}: {sheet_info['sheet_name']}")
+                    progress_bar.progress(progress_pct)
+                    
+                    # ✅ FIX: Convert DataFrame to string ONE AT A TIME (not all at once!)
+                    logger.info(f"[EXCEL] Processing sheet {idx}/{len(sheets_to_process)}: {sheet_info['sheet_name']}")
+                    sheet_header = f"\n{'='*80}\nWORKSHEET: {sheet_info['sheet_name']}\n{'='*80}\n"
+                    sheet_content = sheet_info['df'].to_string()  # ← Convert only this sheet
+                    sheet_text = sheet_header + sheet_content
+                    
                     # Prepare metadata for this specific sheet
                     sheet_metadata = {
                         'source': uploaded_file.name,
@@ -234,12 +247,19 @@ def process_uploads(uploaded_files, selected_project: Optional[str] = None):
                     # Add this sheet to ChromaDB
                     success = rag_handler.add_document(
                         collection_name='hcmpact_knowledge',
-                        text=sheet_info['content'],
+                        text=sheet_text,  # ← Use just-converted text
                         metadata=sheet_metadata
                     )
                     
                     if success:
                         sheets_added += 1
+                        logger.info(f"[EXCEL] Sheet '{sheet_info['sheet_name']}' added successfully")
+                    else:
+                        logger.warning(f"[EXCEL] Failed to add sheet '{sheet_info['sheet_name']}'")
+                
+                # Clear progress indicators
+                progress_text.empty()
+                progress_bar.empty()
                 
                 if sheets_added > 0:
                     # Save file to /data/uploads for parser
