@@ -114,12 +114,52 @@ if st.session_state.get('projects') or st.session_state.get('knowledge_base'):
     st.markdown("<div style='margin-bottom: 2rem;'></div>", unsafe_allow_html=True)
 
 # Main content area with tabs
-tab1, tab2, tab3, tab4 = st.tabs([
+tab0, tab1, tab2, tab3, tab4 = st.tabs([
+    "🏠 HOME",
     "🚀 WORK",
     "⚙️ SETUP", 
     "🧪 QA",
     "👤 ADMIN"
 ])
+
+# TAB 0: HOME (Landing page)
+with tab0:
+    st.markdown("### 👋 Welcome to XLR8 LFG Platform")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.markdown("""
+        **Quick Start Guide:**
+        1. **Setup** → Create a project
+        2. **Setup** → Upload project documents
+        3. **Work** → Use AI Assistant or generate analysis
+        4. **Admin** → Configure global knowledge base
+        
+        ---
+        """)
+        
+        # Show recent activity or getting started tips
+        if st.session_state.get('projects'):
+            st.markdown("#### 📂 Recent Projects")
+            projects = st.session_state.get('projects', {})
+            for name, data in list(projects.items())[:3]:
+                is_active = name == st.session_state.get('current_project')
+                icon = "📌" if is_active else "📁"
+                st.markdown(f"{icon} **{name}** - {data.get('project_type', 'N/A')}")
+        else:
+            st.info("👉 Get started by creating your first project in the **SETUP** tab")
+    
+    with col2:
+        st.markdown("#### 🎯 Platform Features")
+        st.markdown("""
+        - ✅ AI-powered analysis
+        - ✅ Multi-project management
+        - ✅ Document intelligence
+        - ✅ Excel generation
+        - ✅ Global knowledge base
+        - ✅ Secure & private
+        """)
 
 # TAB 1: WORK (Primary daily use)
 with tab1:
