@@ -477,29 +477,72 @@ def _run_diagnostics(collection):
 def _execute_nuclear_reset():
     """Execute the nuclear reset - wipe ChromaDB completely"""
     import shutil
+    import chromadb
+    import gc
     
     try:
         with st.status("💣 Executing nuclear reset...", expanded=True) as status:
-            st.write("🛑 Clearing ChromaDB...")
+            st.write("🛑 Step 1: Closing all ChromaDB connections...")
+            
+            # Force garbage collection to close any open ChromaDB clients
+            gc.collect()
+            
+            st.write("📊 Step 2: Deleting collections via API...")
+            try:
+                # Try to delete collections through API first
+                temp_client = chromadb.PersistentClient(path='/data/chromadb')
+                collections = temp_client.list_collections()
+                
+                for col in collections:
+                    st.write(f"   Deleting collection: {col.name}")
+                    temp_client.delete_collection(col.name)
+                
+                st.write(f"   ✅ Deleted {len(collections)} collection(s)")
+                
+                # Close the client
+                del temp_client
+                gc.collect()
+                
+            except Exception as api_err:
+                st.write(f"   ⚠️ API deletion skipped: {api_err}")
             
             # Path to ChromaDB
             chromadb_path = Path('/data/chromadb')
             
             if chromadb_path.exists():
-                st.write(f"📂 Found ChromaDB at: {chromadb_path}")
+                st.write(f"🗑️ Step 3: Deleting ChromaDB directory...")
+                st.write(f"   Path: {chromadb_path}")
                 
                 # Get size before deletion
-                total_size = sum(f.stat().st_size for f in chromadb_path.rglob('*') if f.is_file())
-                size_mb = total_size / (1024 * 1024)
+                try:
+                    total_size = sum(f.stat().st_size for f in chromadb_path.rglob('*') if f.is_file())
+                    size_mb = total_size / (1024 * 1024)
+                    st.write(f"   Size: {size_mb:.2f} MB ({total_size:,} bytes)")
+                except:
+                    size_mb = 0
                 
-                st.write(f"💾 Current size: {size_mb:.2f} MB ({total_size:,} bytes)")
-                st.write("🗑️ Deleting all ChromaDB data...")
-                
-                # Delete the directory
-                shutil.rmtree(chromadb_path)
-                
-                st.write("✅ ChromaDB directory deleted")
-                st.write("🔄 ChromaDB will be recreated on next upload")
+                # Delete the directory - with retries
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        shutil.rmtree(chromadb_path, ignore_errors=True)
+                        
+                        # Verify deletion
+                        if not chromadb_path.exists():
+                            st.write("   ✅ Directory deleted successfully")
+                            break
+                        else:
+                            if attempt < max_retries - 1:
+                                st.write(f"   ⚠️ Retry {attempt + 1}/{max_retries}...")
+                                time.sleep(1)
+                            else:
+                                st.error("   ❌ Could not delete directory after retries")
+                    except Exception as del_err:
+                        if attempt < max_retries - 1:
+                            st.write(f"   ⚠️ Retry {attempt + 1}/{max_retries}: {del_err}")
+                            time.sleep(1)
+                        else:
+                            raise del_err
                 
                 status.update(label="✅ Nuclear reset complete!", state="complete")
                 
@@ -509,10 +552,10 @@ def _execute_nuclear_reset():
                 Deleted: {size_mb:.2f} MB
                 
                 **Next steps:**
-                1. Go to Document Upload tab
-                2. Upload your Excel file with project selection
-                3. Current code will add proper metadata automatically
-                4. Search will work correctly with filters
+                1. Refresh this page to confirm 0 chunks
+                2. Go to Document Upload tab
+                3. Upload your Excel file with project selection
+                4. Monitor progress in Status tab
                 """)
                 
                 # Clear session state
@@ -520,13 +563,15 @@ def _execute_nuclear_reset():
                     st.session_state.active_jobs = []
                 
                 st.balloons()
+                st.info("💡 **Refresh your browser** to see 0 chunks")
                 
             else:
-                st.warning("ChromaDB directory doesn't exist - already empty!")
+                st.success("✅ ChromaDB directory doesn't exist - already empty!")
                 status.update(label="⚠️ Already empty", state="complete")
     
     except Exception as e:
         st.error(f"❌ Error during nuclear reset: {e}")
+        st.warning("Try refreshing your browser and running the reset again")
         logger.error(f"Nuclear reset error: {e}", exc_info=True)
 
 
@@ -592,11 +637,14 @@ def render_status_tab():
             for job_info in completed_jobs:
                 st.session_state.active_jobs.remove(job_info)
             
-            # Auto-refresh every 2 seconds if jobs are processing
+            # Manual refresh button instead of auto-refresh (fixes page bouncing issue)
             if any(j for j in active_jobs if j not in completed_jobs):
-                st.markdown("🔄 *Auto-refreshing every 2 seconds...*")
-                time.sleep(2)
-                st.rerun()
+                col_refresh1, col_refresh2 = st.columns([3, 1])
+                with col_refresh1:
+                    st.info("💡 Jobs still processing - click refresh to update progress")
+                with col_refresh2:
+                    if st.button("🔄 Refresh", key="refresh_jobs", use_container_width=True):
+                        st.rerun()
         
         st.markdown("---")
     
