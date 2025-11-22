@@ -23,7 +23,7 @@ class ProjectModel:
     """
     
     @staticmethod
-    def create(name: str, client_name: str = None, project_type: str = 'UKG_Pro', 
+    def create(name: str, client_name: str = None, project_type: str = 'Implementation', 
               notes: str = None) -> Optional[Dict[str, Any]]:
         """
         Create a new project
@@ -31,7 +31,7 @@ class ProjectModel:
         Args:
             name: Project name
             client_name: Client name (maps to 'customer' column)
-            project_type: 'UKG_Pro', 'UKG_WFM', or 'Both' (stored in metadata)
+            project_type: 'Implementation', 'Post Launch Support', or 'Assessment/Analysis' (stored in metadata)
             notes: Optional notes (stored in metadata)
         
         Returns:
