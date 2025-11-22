@@ -137,8 +137,8 @@ def render_projects_page():
                         # Create project in Supabase via storage adapter
                         created_project = ProjectStorage.create(
                             name=project_name,
-                            client_name=customer_id,  # Map customer_id to client_name
-                            project_type=implementation_type,  # Map to 'type'
+                            client_name=customer_id,
+                            project_type=project_type,
                             notes=project_description
                         )
                         
@@ -253,29 +253,53 @@ def render_projects_page():
                     else:
                         st.success("✓ Active")
                     
-                    if st.button(f"Delete", key=f"delete_{proj_name}", use_container_width=True):
-                        if st.checkbox(f"Confirm delete {proj_name}?", key=f"confirm_del_{proj_name}"):
-                            try:
-                                # Get project ID for Supabase deletion
-                                project_id = proj_data.get('id')
+                    # Better delete flow - button opens confirmation
+                    if f"deleting_{proj_name}" not in st.session_state:
+                        st.session_state[f"deleting_{proj_name}"] = False
+                    
+                    if not st.session_state[f"deleting_{proj_name}"]:
+                        if st.button(f"Delete", key=f"delete_{proj_name}", use_container_width=True, type="secondary"):
+                            st.session_state[f"deleting_{proj_name}"] = True
+                            st.rerun()
+                    else:
+                        st.warning("⚠️ Confirm deletion?")
+                        col_a, col_b = st.columns(2)
+                        with col_a:
+                            if st.button("✓ Yes", key=f"confirm_yes_{proj_name}", use_container_width=True):
+                                try:
+                                    project_id = proj_data.get('id')
+                                    
+                                    # Delete from Supabase
+                                    if project_id:
+                                        success = ProjectStorage.delete(project_id=project_id)
+                                        if not success:
+                                            st.error("Failed to delete from database")
+                                            st.session_state[f"deleting_{proj_name}"] = False
+                                            st.rerun()
+                                            return
+                                    
+                                    # Delete from session state
+                                    if proj_name in st.session_state.get('projects', {}):
+                                        del st.session_state.projects[proj_name]
+                                    
+                                    # Clear current project if deleted
+                                    if st.session_state.get('current_project') == proj_name:
+                                        st.session_state.current_project = None
+                                    
+                                    # Clean up confirmation state
+                                    del st.session_state[f"deleting_{proj_name}"]
+                                    
+                                    st.success(f"✅ Deleted '{proj_name}'")
+                                    st.rerun()
                                 
-                                # Delete from Supabase if ID exists
-                                if project_id:
-                                    ProjectStorage.delete(project_id=project_id)
-                                
-                                # Also delete from session state
-                                if 'projects' in st.session_state and proj_name in st.session_state.projects:
-                                    del st.session_state.projects[proj_name]
-                                
-                                # Clear current project if this was it
-                                if st.session_state.get('current_project') == proj_name:
-                                    st.session_state.current_project = None
-                                
-                                st.success(f"✅ Project '{proj_name}' deleted from database")
+                                except Exception as e:
+                                    st.error(f"❌ Error: {str(e)}")
+                                    st.session_state[f"deleting_{proj_name}"] = False
+                        
+                        with col_b:
+                            if st.button("✗ No", key=f"confirm_no_{proj_name}", use_container_width=True):
+                                st.session_state[f"deleting_{proj_name}"] = False
                                 st.rerun()
-                            
-                            except Exception as e:
-                                st.error(f"❌ Error deleting project: {str(e)}")
                 
                 # Add note functionality
                 st.markdown("##### 📝 Project Notes")
