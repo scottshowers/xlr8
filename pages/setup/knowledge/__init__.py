@@ -318,6 +318,102 @@ def _run_metadata_patch(collection):
         logger.error(f"Metadata patch error: {e}", exc_info=True)
 
 
+def _run_diagnostics(collection):
+    """
+    Run diagnostics on ChromaDB metadata and search functionality
+    """
+    from utils.rag_handler import RAGHandler
+    
+    try:
+        with st.status("🔍 Running diagnostics...", expanded=True) as status:
+            # Basic stats
+            st.write("📊 Getting collection stats...")
+            total_chunks = collection.count()
+            st.write(f"✅ Total chunks: {total_chunks:,}")
+            
+            # Check Excel chunks
+            st.write("🔍 Checking Excel chunk metadata...")
+            all_chunks = collection.get(limit=100, include=["metadatas"])
+            
+            excel_chunks = [meta for meta in all_chunks['metadatas'] 
+                           if meta.get('file_type') in ['xlsx', 'xls', 'csv']]
+            
+            st.write(f"Found {len(excel_chunks)} Excel chunks in sample")
+            
+            # Check for functional_area
+            with_functional_area = [m for m in excel_chunks if 'functional_area' in m]
+            without_functional_area = [m for m in excel_chunks if 'functional_area' not in m]
+            
+            if without_functional_area:
+                st.error(f"❌ {len(without_functional_area)} chunks missing functional_area!")
+                st.warning("⚠️ Metadata patch needs to be run or re-run")
+            else:
+                st.success(f"✅ All sampled chunks have functional_area metadata")
+            
+            # Show sample
+            if with_functional_area:
+                st.write("**Sample metadata:**")
+                sample = with_functional_area[0]
+                st.json({
+                    "project_id": sample.get('project_id', '❌ MISSING'),
+                    "functional_area": sample.get('functional_area', '❌ MISSING'),
+                    "sheet_name": sample.get('sheet_name', '❌ MISSING'),
+                    "source": sample.get('source', '❌ MISSING')
+                })
+                
+                # Check unique values
+                st.write("📊 Analyzing all chunks...")
+                all_meta = collection.get(include=["metadatas"])
+                
+                # Unique project_ids
+                project_ids = set(m.get('project_id') for m in all_meta['metadatas'] if m.get('project_id'))
+                st.write(f"**Unique Projects ({len(project_ids)}):**")
+                for pid in sorted(project_ids):
+                    count = sum(1 for m in all_meta['metadatas'] if m.get('project_id') == pid)
+                    st.text(f"  • '{pid}': {count:,} chunks")
+                
+                # Unique functional_areas
+                functional_areas = set(m.get('functional_area') for m in all_meta['metadatas'] if m.get('functional_area'))
+                st.write(f"**Unique Functional Areas ({len(functional_areas)}):**")
+                for fa in sorted(functional_areas):
+                    count = sum(1 for m in all_meta['metadatas'] if m.get('functional_area') == fa)
+                    st.text(f"  • '{fa}': {count:,} chunks")
+                
+                # Test searches
+                st.write("🔍 Testing search functionality...")
+                rag = RAGHandler(llm_endpoint='http://178.156.190.64:11435')
+                
+                # Test with filters
+                test_query = "earnings"
+                test_project = list(project_ids)[0] if project_ids else None
+                
+                if test_project:
+                    st.write(f"**Test Search:** '{test_query}' with project='{test_project}'")
+                    results = rag.search(
+                        collection_name='hcmpact_knowledge',
+                        query=test_query,
+                        n_results=5,
+                        project_id=test_project
+                    )
+                    
+                    if results:
+                        st.success(f"✅ Found {len(results)} results!")
+                        st.write("Sample result:")
+                        st.json({
+                            "sheet_name": results[0]['metadata'].get('sheet_name', 'N/A'),
+                            "functional_area": results[0]['metadata'].get('functional_area', 'N/A'),
+                            "relevance": f"{results[0].get('distance', 0):.4f}"
+                        })
+                    else:
+                        st.warning("⚠️ Search returned 0 results - check query or filters")
+            
+            status.update(label="✅ Diagnostics complete!", state="complete")
+            
+    except Exception as e:
+        st.error(f"❌ Diagnostic error: {e}")
+        logger.error(f"Diagnostic error: {e}", exc_info=True)
+
+
 def render_status_tab():
     """
     Tab 2: Show collection status, statistics, AND JOB MONITOR
@@ -422,9 +518,9 @@ def render_status_tab():
         # METADATA PATCH SECTION
         # ═══════════════════════════════════════════════════════════
         st.markdown("---")
-        st.subheader("🔧 Metadata Repair")
+        st.subheader("🔧 Metadata Repair & Diagnostics")
         
-        col_patch1, col_patch2 = st.columns([2, 1])
+        col_patch1, col_patch2, col_patch3 = st.columns([2, 1, 1])
         
         with col_patch1:
             st.info("**Fix missing functional_area & sheet_name metadata** - Applies to chunks uploaded before metadata preservation was added")
@@ -432,6 +528,10 @@ def render_status_tab():
         with col_patch2:
             if st.button("🔧 Patch Metadata", type="primary", use_container_width=True):
                 _run_metadata_patch(collection)
+        
+        with col_patch3:
+            if st.button("🔍 Run Diagnostics", use_container_width=True):
+                _run_diagnostics(collection)
         
         # DEBUG: Sample chunk metadata
         st.markdown("---")
