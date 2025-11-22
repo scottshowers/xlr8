@@ -67,13 +67,19 @@ def render_upload_tab():
     - **PDF** - Payroll registers, configuration guides, manuals
     - **DOCX** - Word documents, procedures, templates
     - **TXT/MD** - Text files, markdown documentation
-    - **XLS/XLSX/CSV** - Excel
+    - **XLS/XLSX/CSV** - Excel spreadsheets
     - **JPG/JPEG/PNG** - Images
+    
+    **⚠️ IMPORTANT FOR EXCEL FILES:**
+    - Each worksheet takes 2-5 minutes to process (chunking + embeddings)
+    - Files with 10+ sheets may cause UI timeout (process continues in background)
+    - **Recommendation:** Upload Excel files with <10 sheets at a time
+    - Check logs to verify completion if UI times out
     
     Documents are automatically:
     1. **Tagged with selected project** (or marked as Global)
-    2. Chunked into searchable segments
-    3. Embedded using Ollama
+    2. Chunked into searchable segments (2000 chars for Excel, 800 for others)
+    3. Embedded using Ollama (this is the slow part - ~30-60s per chunk)
     4. Stored in ChromaDB for RAG
     5. Saved to `/data/uploads/` for parsing
     """)
@@ -221,7 +227,7 @@ def process_uploads(uploaded_files, selected_project: Optional[str] = None):
                 for idx, sheet_info in enumerate(sheets_to_process, 1):
                     # Update progress
                     progress_pct = idx / len(sheets_to_process)
-                    progress_text.text(f"Processing sheet {idx}/{len(sheets_to_process)}: {sheet_info['sheet_name']}")
+                    progress_text.text(f"⏳ Processing sheet {idx}/{len(sheets_to_process)}: {sheet_info['sheet_name']} (chunking & embedding...)")
                     progress_bar.progress(progress_pct)
                     
                     # ✅ FIX: Convert DataFrame to string ONE AT A TIME (not all at once!)
@@ -244,12 +250,20 @@ def process_uploads(uploaded_files, selected_project: Optional[str] = None):
                     
                     logger.info(f"[FUNCTIONAL AREA] Sheet '{sheet_info['sheet_name']}' → {sheet_info['functional_area']}")
                     
+                    # CRITICAL: Long-running operation (2-5 min per sheet)
+                    # Update UI to prevent Streamlit timeout
+                    status_container = st.empty()
+                    status_container.info(f"🔄 Chunking & embedding sheet {idx}/{len(sheets_to_process)}: {sheet_info['sheet_name']}... (this takes 2-5 min)")
+                    
                     # Add this sheet to ChromaDB
                     success = rag_handler.add_document(
                         collection_name='hcmpact_knowledge',
                         text=sheet_text,  # ← Use just-converted text
                         metadata=sheet_metadata
                     )
+                    
+                    # Clear status after completion
+                    status_container.empty()
                     
                     if success:
                         sheets_added += 1
@@ -260,6 +274,10 @@ def process_uploads(uploaded_files, selected_project: Optional[str] = None):
                 # Clear progress indicators
                 progress_text.empty()
                 progress_bar.empty()
+                
+                # COMPLETION SUMMARY - Persists even if UI timed out
+                st.success(f"✅ COMPLETED: {uploaded_file.name}")
+                st.info(f"📊 Processed {sheets_added}/{len(sheets_to_process)} sheets successfully")
                 
                 if sheets_added > 0:
                     # Save file to /data/uploads for parser
@@ -475,7 +493,7 @@ def render_status_tab():
                             4. They'll be added to `hcmpact_knowledge` with project isolation
                             """)
                             logger.info(f"Deleted old collection hcmpact_docs ({old_count} chunks)")
-                            st.rerun()
+                            # Page will auto-refresh on next interaction
                         except Exception as del_error:
                             st.error(f"❌ Failed to delete collection: {del_error}")
                             logger.error(f"Collection deletion error: {del_error}", exc_info=True)
