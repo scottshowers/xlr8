@@ -172,7 +172,14 @@ class IntelligentRouter:
                 logger.info(f"✅ Using LOCAL LLM: {reason_suffix} - your proprietary data stays secure")
                 
                 complexity_result = self.complexity_analyzer.analyze(query, num_results)
-                model_name = self._select_local_model(complexity_result['complexity'])
+                
+                # CRITICAL: For large context (>40 sources), ALWAYS use Mistral (fast)
+                # DeepSeek is too slow and times out with large context
+                if num_results > 40:
+                    model_name = self._select_local_model('simple')  # Force Mistral
+                    logger.info(f"Large context ({num_results} sources) - using Mistral for speed")
+                else:
+                    model_name = self._select_local_model(complexity_result['complexity'])
                 
                 logger.info(f"Using LOCAL LLM ({model_name}) with {num_results} HCMPACT sources")
                 
