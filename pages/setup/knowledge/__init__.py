@@ -421,6 +421,24 @@ def _run_diagnostics(collection):
                     count = sum(1 for m in all_meta['metadatas'] if m.get('functional_area') == fa)
                     st.text(f"  • '{fa}': {count:,} chunks")
                 
+                # CRITICAL: Count chunks WITHOUT functional_area
+                chunks_without_fa = sum(1 for m in all_meta['metadatas'] if 'functional_area' not in m)
+                if chunks_without_fa > 0:
+                    st.error(f"⚠️ **{chunks_without_fa:,} chunks still MISSING functional_area!**")
+                    st.warning("These chunks won't show up in functional area filtered searches")
+                    
+                    # Sample the missing ones
+                    missing_samples = [m for m in all_meta['metadatas'] if 'functional_area' not in m][:3]
+                    st.write("**Sample chunks missing functional_area:**")
+                    for i, m in enumerate(missing_samples, 1):
+                        st.json({
+                            f"Missing Chunk {i}": {
+                                "source": m.get('source', 'N/A'),
+                                "file_type": m.get('file_type', 'N/A'),
+                                "project_id": m.get('project_id', 'N/A')
+                            }
+                        })
+                
                 # Test searches
                 st.write("🔍 Testing search functionality...")
                 rag = RAGHandler(llm_endpoint='http://178.156.190.64:11435')
@@ -454,6 +472,62 @@ def _run_diagnostics(collection):
     except Exception as e:
         st.error(f"❌ Diagnostic error: {e}")
         logger.error(f"Diagnostic error: {e}", exc_info=True)
+
+
+def _execute_nuclear_reset():
+    """Execute the nuclear reset - wipe ChromaDB completely"""
+    import shutil
+    
+    try:
+        with st.status("💣 Executing nuclear reset...", expanded=True) as status:
+            st.write("🛑 Clearing ChromaDB...")
+            
+            # Path to ChromaDB
+            chromadb_path = Path('/data/chromadb')
+            
+            if chromadb_path.exists():
+                st.write(f"📂 Found ChromaDB at: {chromadb_path}")
+                
+                # Get size before deletion
+                total_size = sum(f.stat().st_size for f in chromadb_path.rglob('*') if f.is_file())
+                size_mb = total_size / (1024 * 1024)
+                
+                st.write(f"💾 Current size: {size_mb:.2f} MB ({total_size:,} bytes)")
+                st.write("🗑️ Deleting all ChromaDB data...")
+                
+                # Delete the directory
+                shutil.rmtree(chromadb_path)
+                
+                st.write("✅ ChromaDB directory deleted")
+                st.write("🔄 ChromaDB will be recreated on next upload")
+                
+                status.update(label="✅ Nuclear reset complete!", state="complete")
+                
+                st.success(f"""
+                ✅ **ChromaDB wiped successfully!**
+                
+                Deleted: {size_mb:.2f} MB
+                
+                **Next steps:**
+                1. Go to Document Upload tab
+                2. Upload your Excel file with project selection
+                3. Current code will add proper metadata automatically
+                4. Search will work correctly with filters
+                """)
+                
+                # Clear session state
+                if 'active_jobs' in st.session_state:
+                    st.session_state.active_jobs = []
+                
+                st.balloons()
+                
+            else:
+                st.warning("ChromaDB directory doesn't exist - already empty!")
+                status.update(label="⚠️ Already empty", state="complete")
+    
+    except Exception as e:
+        st.error(f"❌ Error during nuclear reset: {e}")
+        logger.error(f"Nuclear reset error: {e}", exc_info=True)
 
 
 def render_status_tab():
@@ -638,74 +712,44 @@ def render_status_tab():
         else:
             st.info("Upload directory not found")
         
-        # CLEAN SLATE: Delete old collection button
+        # NUCLEAR RESET: Complete ChromaDB wipe
         st.markdown("---")
-        st.subheader("🗑️ Database Cleanup")
+        st.subheader("☢️ Nuclear Reset")
         
         st.warning("""
-        ⚠️ **Clean Slate Migration Tool**
+        ⚠️ **WARNING: This will DELETE ALL ChromaDB data!**
         
-        If you have an old `hcmpact_docs` collection from before project isolation was implemented,
-        you can delete it here. This will allow you to start fresh with properly tagged documents.
+        **Use this when:**
+        - Metadata issues can't be fixed with patches
+        - Want to start completely fresh  
+        - Re-upload everything with current (fixed) code
         
-        **Important:**
-        - This only deletes the OLD collection (`hcmpact_docs`)
-        - Your current collection (`hcmpact_knowledge`) remains safe
-        - You'll need to re-upload documents after deletion
-        - **This action cannot be undone!**
+        **What gets deleted:**
+        - ALL collections (hcmpact_knowledge, hcmpact_docs, everything)
+        - ALL chunks and embeddings
+        - ALL metadata
+        
+        **This action CANNOT be undone!**
         """)
         
-        # Check if old collection exists
-        try:
-            collections = rag.client.list_collections()
-            collection_names = [col.name for col in collections]
-            old_collection_exists = 'hcmpact_docs' in collection_names
-            
-            if old_collection_exists:
-                # Get count
-                old_col = rag.client.get_collection('hcmpact_docs')
-                old_count = old_col.count()
-                
-                st.info(f"📊 Old collection `hcmpact_docs` found: **{old_count:,} chunks**")
-                
-                # Confirmation checkbox
-                confirm_delete = st.checkbox(
-                    f"⚠️ I understand that deleting {old_count:,} chunks is permanent",
-                    key="confirm_delete_old_collection"
-                )
-                
-                col1, col2 = st.columns([1, 3])
-                with col1:
-                    if st.button(
-                        "🗑️ Delete Old Collection",
-                        type="primary",
-                        disabled=not confirm_delete,
-                        use_container_width=True
-                    ):
-                        try:
-                            rag.client.delete_collection('hcmpact_docs')
-                            st.success(f"✅ Successfully deleted `hcmpact_docs` ({old_count:,} chunks)")
-                            st.info("""
-                            **Next steps:**
-                            1. Go to Setup → Projects and activate your project
-                            2. Go to Document Upload tab
-                            3. Re-upload your documents with proper project tags
-                            4. They'll be added to `hcmpact_knowledge` with project isolation
-                            """)
-                            logger.info(f"Deleted old collection hcmpact_docs ({old_count} chunks)")
-                            # Page will auto-refresh on next interaction
-                        except Exception as del_error:
-                            st.error(f"❌ Failed to delete collection: {del_error}")
-                            logger.error(f"Collection deletion error: {del_error}", exc_info=True)
-                
-                with col2:
-                    st.caption("Checkbox must be checked to enable deletion")
-            else:
-                st.success("✅ No old collection found. You're using clean project isolation!")
-                
-        except Exception as check_error:
-            st.info("Could not check for old collections. This is normal if you're starting fresh.")
-            logger.debug(f"Collection check error: {check_error}")
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            confirm_text = st.text_input(
+                "Type 'DELETE EVERYTHING' to confirm:",
+                key="nuclear_confirm"
+            )
+        
+        with col2:
+            st.write("")  # Spacing
+            st.write("")  # Spacing
+            if st.button(
+                "💣 Wipe ChromaDB", 
+                type="secondary", 
+                use_container_width=True, 
+                disabled=(confirm_text != "DELETE EVERYTHING")
+            ):
+                _execute_nuclear_reset()
         
     except Exception as e:
         st.error(f"Error loading status: {str(e)}")
