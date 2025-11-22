@@ -145,7 +145,7 @@ class RAGHandler:
                 url,
                 json=payload,
                 auth=HTTPBasicAuth(self.ollama_username, self.ollama_password),
-                timeout=10  # Reduced timeout
+                timeout=120  # 2 minutes for slow Hetzner embeddings
             )
             
             if response.status_code != 200:
