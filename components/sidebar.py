@@ -183,7 +183,7 @@ def render_sidebar():
     try:
         # App title/logo
         st.sidebar.title("⚡ XLR8")
-        st.sidebar.caption("UKG Implementation Assistant")
+        st.sidebar.caption("Implementation Assistant")
         
         # Statistics section
         _render_statistics()
