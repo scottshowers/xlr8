@@ -37,6 +37,7 @@ from pages.admin.analysis_questions import render_analysis_questions
 from pages.admin.users import render_users_page
 from pages.admin.audit import render_audit_page
 from pages.admin.settings import render_settings_page
+from pages.admin.global_knowledge import render_global_knowledge_page
 
 # Page configuration
 st.set_page_config(
@@ -59,8 +60,8 @@ render_sidebar()
 st.markdown("""
 <div style='background: linear-gradient(135deg, #8ca6be 0%, #6d8aa0 100%); padding: 0.75rem; border-radius: 12px; margin-bottom: 1.5rem; box-shadow: 0 4px 16px rgba(140, 166, 190, 0.25);'>
     <div style='text-align: center;'>
-        <h1 style='color: white; margin: 0 0 0.25rem 0; font-size: 1.8rem; font-weight: 700;'>⚡ XLR8 by HCMPACT</h1>
-        <p style='color: rgba(255,255,255,0.95); font-size: 1rem; margin: 0;'>UKG Implementation Accelerator</p>
+        <h1 style='color: white; margin: 0 0 0.25rem 0; font-size: 1.8rem; font-weight: 700;'>⚡ XLR8 LFG Platform</h1>
+        <p style='color: rgba(255,255,255,0.95); font-size: 1rem; margin: 0;'>Implementation Accelerator</p>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -175,10 +176,11 @@ with tab3:
     with qa_subtab3:
         render_scenarios_page()
 
-# TAB 4: ADMIN (Administration) - NOW WITH 4 TABS
+# TAB 4: ADMIN (Administration) - NOW WITH 5 TABS
 with tab4:
-    admin_subtab1, admin_subtab2, admin_subtab3, admin_subtab4 = st.tabs([
+    admin_subtab1, admin_subtab2, admin_subtab3, admin_subtab4, admin_subtab5 = st.tabs([
         "📋 Analysis Questions",
+        "🌐 Global Knowledge",
         "👥 User Management",
         "📊 Audit Logs",
         "⚙️ System Settings"
@@ -188,12 +190,15 @@ with tab4:
         render_analysis_questions()
     
     with admin_subtab2:
-        render_users_page()
+        render_global_knowledge_page()
     
     with admin_subtab3:
-        render_audit_page()
+        render_users_page()
     
     with admin_subtab4:
+        render_audit_page()
+    
+    with admin_subtab5:
         render_settings_page()
 
 # Footer - PROFESSIONAL & COMPACT
