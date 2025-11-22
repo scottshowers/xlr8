@@ -137,6 +137,52 @@ def _render_sidebar_settings():
     with st.sidebar:
         st.markdown("###  Chat Settings")
         
+        # MODE SELECTOR - NEW!
+        st.markdown("---")
+        st.markdown("### 🎯 Mode")
+        
+        chat_mode = st.radio(
+            "Select mode:",
+            options=["🔍 Search Mode", "📄 Analysis Mode"],
+            index=0 if st.session_state.get('chat_mode', 'search') == 'search' else 1,
+            help="Search: Query knowledge base | Analysis: Analyze specific files"
+        )
+        
+        # Store mode
+        if "Search" in chat_mode:
+            st.session_state.chat_mode = 'search'
+        else:
+            st.session_state.chat_mode = 'analysis'
+        
+        # Show mode-specific info
+        if st.session_state.chat_mode == 'search':
+            st.info("🔍 **Search Mode**: Query across all uploaded documents")
+        else:
+            st.info("📄 **Analysis Mode**: Deep analysis of attached files")
+        
+        # FILE UPLOAD - Only in Analysis Mode
+        if st.session_state.chat_mode == 'analysis':
+            st.markdown("---")
+            st.markdown("### 📎 Attach Files")
+            
+            uploaded_files = st.file_uploader(
+                "Upload files for analysis",
+                accept_multiple_files=True,
+                type=['xlsx', 'xls', 'csv', 'pdf', 'docx', 'txt'],
+                help="Attach files to analyze (not added to knowledge base)",
+                key='analysis_file_upload'
+            )
+            
+            if uploaded_files:
+                st.session_state.attached_files = uploaded_files
+                st.success(f"✅ {len(uploaded_files)} file(s) attached")
+                for file in uploaded_files:
+                    st.caption(f"📄 {file.name}")
+            else:
+                st.session_state.attached_files = None
+        
+        st.markdown("---")
+        
         # Debug mode
         debug_mode = st.checkbox(
             " Debug Mode",
@@ -151,7 +197,7 @@ def _render_sidebar_settings():
         show_sources = st.checkbox(
             " Show Knowledge Sources",
             value=st.session_state.get('show_chat_sources', True),
-            help="Display HCMPACT knowledge sources used (inline with response)"
+            help="Display HCMPACT knowledge sources used"
         )
         st.session_state.show_chat_sources = show_sources
         
@@ -162,39 +208,70 @@ def _render_sidebar_settings():
         )
         st.session_state.show_chat_metadata = show_metadata
         
-        # ChromaDB sources
-        st.markdown("---")
-        num_sources = st.slider(
-            "Knowledge Sources to Retrieve",
-            min_value=1,
-            max_value=150,
-            value=st.session_state.get('num_chromadb_sources', 50),
-            help="Number of HCMPACT documents to use for context (increase for large multi-sheet files)"
-        )
-        st.session_state.num_chromadb_sources = num_sources
-        
-        # Functional Area Filter
-        st.markdown("---")
-        st.markdown("### 🎯 Functional Area Filter")
-        
-        from utils.functional_areas import get_all_functional_areas
-        functional_areas = get_all_functional_areas()
-        
-        selected_areas = st.multiselect(
-            "Filter by functional area(s)",
-            options=functional_areas,
-            default=["All Areas"],
-            help="Select specific functional areas to search, or 'All Areas' for no filter"
-        )
-        st.session_state.functional_areas = selected_areas
-        
-        if "All Areas" not in selected_areas and len(selected_areas) > 0:
-            st.info(f"🔍 Filtering: {', '.join(selected_areas)}")
+        # SEARCH MODE SETTINGS - Only show in search mode
+        if st.session_state.chat_mode == 'search':
+            # PROJECT + FUNCTIONAL AREA FILTERS
+            st.markdown("---")
+            st.markdown("### 🎯 Search Filters")
+            
+            # Project Filter
+            projects = st.session_state.get('projects', [])
+            if projects:
+                selected_project = st.selectbox(
+                    "📁 Project / Customer",
+                    options=['All Projects'] + projects,
+                    index=0,
+                    help="Filter knowledge base by specific project/customer"
+                )
+                
+                if selected_project != 'All Projects':
+                    st.session_state.current_project = selected_project
+                    st.success(f"🔍 Project: {selected_project}")
+                else:
+                    st.session_state.current_project = None
+            else:
+                st.info("💡 Upload documents with project tags to enable filtering")
+                st.session_state.current_project = None
+            
+            # Functional Area Filter
+            from utils.functional_areas import get_all_functional_areas
+            functional_areas = get_all_functional_areas()
+            
+            selected_areas = st.multiselect(
+                "📊 Functional Area(s)",
+                options=functional_areas,
+                default=["All Areas"],
+                help="Filter by Payroll, Tax, Benefits, etc."
+            )
+            st.session_state.functional_areas = selected_areas
+            
+            # Show active filters summary
+            active_filters = []
+            if st.session_state.get('current_project'):
+                active_filters.append(f"Project: {st.session_state.current_project}")
+            if "All Areas" not in selected_areas and len(selected_areas) > 0:
+                active_filters.append(f"Areas: {', '.join(selected_areas)}")
+            
+            if active_filters:
+                st.success("✅ **Active Filters:**\n" + "\n".join([f"• {f}" for f in active_filters]))
+            
+            # ChromaDB sources
+            st.markdown("---")
+            st.markdown("**Advanced Settings**")
+            num_sources = st.slider(
+                "Knowledge Sources to Retrieve",
+                min_value=1,
+                max_value=150,
+                value=st.session_state.get('num_chromadb_sources', 50),
+                help="Higher = more comprehensive, lower = faster (reranker keeps best 15-20)"
+            )
+            st.session_state.num_chromadb_sources = num_sources
         
         # Clear chat button
         st.markdown("---")
         if st.button("🗑️ Clear Chat History", use_container_width=True):
             st.session_state.chat_history = []
+            st.session_state.attached_files = None
             st.rerun()
 
 
