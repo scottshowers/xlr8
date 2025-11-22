@@ -360,6 +360,106 @@ def _run_metadata_patch(collection):
         logger.error(f"Metadata patch error: {e}", exc_info=True)
 
 
+def _run_truth_check():
+    """
+    Definitive ChromaDB status check - no cache, shows real state
+    """
+    import chromadb
+    
+    try:
+        with st.status("✅ Running truth check...", expanded=True) as status:
+            # Check 1: Directory
+            st.write("**1. Directory Check:**")
+            chromadb_path = Path('/data/chromadb')
+            
+            if chromadb_path.exists():
+                try:
+                    total_size = sum(f.stat().st_size for f in chromadb_path.rglob('*') if f.is_file())
+                    size_mb = total_size / (1024 * 1024)
+                    file_count = len(list(chromadb_path.rglob('*')))
+                    
+                    st.write(f"   ✅ Directory EXISTS at: {chromadb_path}")
+                    st.write(f"   Size: {size_mb:.2f} MB")
+                    st.write(f"   Files: {file_count:,}")
+                except Exception as e:
+                    st.write(f"   ⚠️ Directory exists but error reading: {e}")
+            else:
+                st.write(f"   ❌ Directory DOES NOT EXIST")
+                status.update(label="✅ ChromaDB is empty!", state="complete")
+                st.success("🎉 ChromaDB is completely wiped! Ready for re-upload.")
+                return
+            
+            # Check 2: Connection
+            st.write("**2. Connection Check:**")
+            try:
+                client = chromadb.PersistentClient(path='/data/chromadb')
+                st.write("   ✅ Can connect to ChromaDB")
+            except Exception as e:
+                st.write(f"   ❌ Cannot connect: {e}")
+                status.update(label="⚠️ Connection failed", state="error")
+                return
+            
+            # Check 3: Collections
+            st.write("**3. Collections:**")
+            try:
+                collections = client.list_collections()
+                st.write(f"   Found {len(collections)} collection(s):")
+                
+                collection_details = []
+                for col in collections:
+                    count = col.count()
+                    collection_details.append({"name": col.name, "count": count})
+                    st.write(f"   • `{col.name}`: {count:,} chunks")
+                
+                if len(collections) == 0:
+                    st.write("   ❌ No collections")
+                    st.warning("Directory exists but empty - should delete directory to fully reset")
+                    
+            except Exception as e:
+                st.write(f"   ❌ Error listing: {e}")
+                collections = []
+            
+            # Check 4: Total
+            st.write("**4. Total Chunks:**")
+            try:
+                total_chunks = sum(col.count() for col in collections)
+                st.write(f"   **{total_chunks:,} total chunks**")
+                
+                status.update(label="✅ Truth check complete", state="complete")
+                
+                # Conclusion
+                st.markdown("---")
+                if total_chunks == 0:
+                    st.warning("""
+                    ⚠️ **ChromaDB directory exists but is EMPTY**
+                    
+                    Collections have 0 chunks. The directory should be deleted to fully reset.
+                    
+                    **Options:**
+                    1. Run Nuclear Reset again to delete empty directory
+                    2. Just re-upload - will work but leaves empty directory
+                    """)
+                elif total_chunks > 0:
+                    st.error(f"""
+                    ❌ **Nuclear reset DID NOT WORK**
+                    
+                    {total_chunks:,} chunks still exist in ChromaDB.
+                    
+                    **What to do:**
+                    1. Try Nuclear Reset again with both checkboxes
+                    2. If still fails, need Railway console access to manually delete
+                    """)
+                else:
+                    st.info("Unknown state - check details above")
+                    
+            except Exception as e:
+                st.write(f"   ❌ Error counting: {e}")
+        
+    except Exception as e:
+        st.error(f"❌ Truth check error: {e}")
+        logger.error(f"Truth check error: {e}", exc_info=True)
+
+
 def _run_diagnostics(collection):
     """
     Run diagnostics on ChromaDB metadata and search functionality
@@ -694,10 +794,10 @@ def render_status_tab():
         st.markdown("---")
         st.subheader("🔧 Metadata Repair & Diagnostics")
         
-        col_patch1, col_patch2, col_patch3 = st.columns([2, 1, 1])
+        col_patch1, col_patch2, col_patch3, col_patch4 = st.columns([2, 1, 1, 1])
         
         with col_patch1:
-            st.info("**Fix missing functional_area & sheet_name metadata** - Applies to chunks uploaded before metadata preservation was added")
+            st.info("**Tools for metadata debugging and repair**")
         
         with col_patch2:
             if st.button("🔧 Patch Metadata", type="primary", use_container_width=True):
@@ -706,6 +806,10 @@ def render_status_tab():
         with col_patch3:
             if st.button("🔍 Run Diagnostics", use_container_width=True):
                 _run_diagnostics(collection)
+        
+        with col_patch4:
+            if st.button("✅ Truth Check", use_container_width=True):
+                _run_truth_check()
         
         # DEBUG: Sample chunk metadata
         st.markdown("---")
