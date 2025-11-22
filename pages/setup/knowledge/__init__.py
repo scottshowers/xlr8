@@ -480,99 +480,109 @@ def _execute_nuclear_reset():
     import chromadb
     import gc
     
-    try:
-        with st.status("💣 Executing nuclear reset...", expanded=True) as status:
-            st.write("🛑 Step 1: Closing all ChromaDB connections...")
-            
-            # Force garbage collection to close any open ChromaDB clients
+    # Create a container to keep output on same page
+    reset_container = st.container()
+    
+    with reset_container:
+        st.write("### 💣 Nuclear Reset in Progress...")
+        
+        progress_placeholder = st.empty()
+        status_placeholder = st.empty()
+        
+        try:
+            # Step 1: Close connections
+            progress_placeholder.write("🛑 Step 1/3: Closing ChromaDB connections...")
             gc.collect()
+            time.sleep(0.5)
             
-            st.write("📊 Step 2: Deleting collections via API...")
+            # Step 2: Delete via API
+            progress_placeholder.write("📊 Step 2/3: Deleting collections via API...")
             try:
-                # Try to delete collections through API first
                 temp_client = chromadb.PersistentClient(path='/data/chromadb')
                 collections = temp_client.list_collections()
                 
                 for col in collections:
-                    st.write(f"   Deleting collection: {col.name}")
+                    status_placeholder.write(f"   Deleting: {col.name}")
                     temp_client.delete_collection(col.name)
                 
-                st.write(f"   ✅ Deleted {len(collections)} collection(s)")
-                
-                # Close the client
+                status_placeholder.write(f"   ✅ Deleted {len(collections)} collection(s)")
                 del temp_client
                 gc.collect()
                 
             except Exception as api_err:
-                st.write(f"   ⚠️ API deletion skipped: {api_err}")
+                status_placeholder.write(f"   ⚠️ API deletion skipped: {api_err}")
             
-            # Path to ChromaDB
+            time.sleep(0.5)
+            
+            # Step 3: Delete directory
+            progress_placeholder.write("🗑️ Step 3/3: Deleting ChromaDB directory...")
             chromadb_path = Path('/data/chromadb')
             
             if chromadb_path.exists():
-                st.write(f"🗑️ Step 3: Deleting ChromaDB directory...")
-                st.write(f"   Path: {chromadb_path}")
-                
-                # Get size before deletion
+                # Get size
                 try:
                     total_size = sum(f.stat().st_size for f in chromadb_path.rglob('*') if f.is_file())
                     size_mb = total_size / (1024 * 1024)
-                    st.write(f"   Size: {size_mb:.2f} MB ({total_size:,} bytes)")
+                    status_placeholder.write(f"   Size: {size_mb:.2f} MB")
                 except:
                     size_mb = 0
                 
-                # Delete the directory - with retries
-                max_retries = 3
-                for attempt in range(max_retries):
+                # Delete with retries
+                deleted = False
+                for attempt in range(3):
                     try:
                         shutil.rmtree(chromadb_path, ignore_errors=True)
                         
-                        # Verify deletion
                         if not chromadb_path.exists():
-                            st.write("   ✅ Directory deleted successfully")
+                            status_placeholder.write("   ✅ Directory deleted")
+                            deleted = True
                             break
                         else:
-                            if attempt < max_retries - 1:
-                                st.write(f"   ⚠️ Retry {attempt + 1}/{max_retries}...")
+                            if attempt < 2:
+                                status_placeholder.write(f"   ⚠️ Retry {attempt + 1}/3...")
                                 time.sleep(1)
-                            else:
-                                st.error("   ❌ Could not delete directory after retries")
                     except Exception as del_err:
-                        if attempt < max_retries - 1:
-                            st.write(f"   ⚠️ Retry {attempt + 1}/{max_retries}: {del_err}")
+                        if attempt < 2:
+                            status_placeholder.write(f"   ⚠️ Retry {attempt + 1}/3: {del_err}")
                             time.sleep(1)
                         else:
                             raise del_err
                 
-                status.update(label="✅ Nuclear reset complete!", state="complete")
+                progress_placeholder.empty()
+                status_placeholder.empty()
                 
-                st.success(f"""
-                ✅ **ChromaDB wiped successfully!**
-                
-                Deleted: {size_mb:.2f} MB
-                
-                **Next steps:**
-                1. Refresh this page to confirm 0 chunks
-                2. Go to Document Upload tab
-                3. Upload your Excel file with project selection
-                4. Monitor progress in Status tab
-                """)
-                
-                # Clear session state
-                if 'active_jobs' in st.session_state:
-                    st.session_state.active_jobs = []
-                
-                st.balloons()
-                st.info("💡 **Refresh your browser** to see 0 chunks")
+                if deleted:
+                    st.success(f"""
+                    ✅ **ChromaDB wiped successfully!**
+                    
+                    Deleted: {size_mb:.2f} MB
+                    
+                    **Next steps:**
+                    1. Refresh this page to confirm 0 chunks
+                    2. Go to Document Upload tab
+                    3. Upload Excel file with project selection
+                    """)
+                    
+                    # Clear session state
+                    if 'active_jobs' in st.session_state:
+                        st.session_state.active_jobs = []
+                    
+                    st.balloons()
+                else:
+                    st.error("❌ Could not completely delete ChromaDB directory")
                 
             else:
-                st.success("✅ ChromaDB directory doesn't exist - already empty!")
-                status.update(label="⚠️ Already empty", state="complete")
-    
-    except Exception as e:
-        st.error(f"❌ Error during nuclear reset: {e}")
-        st.warning("Try refreshing your browser and running the reset again")
-        logger.error(f"Nuclear reset error: {e}", exc_info=True)
+                progress_placeholder.empty()
+                status_placeholder.empty()
+                st.success("✅ ChromaDB directory already empty!")
+        
+        except Exception as e:
+            progress_placeholder.empty()
+            status_placeholder.empty()
+            st.error(f"❌ Error: {str(e)}")
+            st.warning("Try refreshing and running reset again")
+            logger.error(f"Nuclear reset error: {e}", exc_info=True)
+            raise  # Re-raise to be caught by calling function
 
 
 def render_status_tab():
@@ -780,24 +790,48 @@ def render_status_tab():
         **This action CANNOT be undone!**
         """)
         
+        # Use checkbox instead of text input to avoid Enter key issues
         col1, col2 = st.columns([3, 1])
         
         with col1:
-            confirm_text = st.text_input(
-                "Type 'DELETE EVERYTHING' to confirm:",
-                key="nuclear_confirm"
+            confirm_delete = st.checkbox(
+                "⚠️ I understand this will DELETE ALL ChromaDB data permanently",
+                key="nuclear_confirm_checkbox"
             )
+            
+            if confirm_delete:
+                confirm_delete_2 = st.checkbox(
+                    "✅ I am SURE - DELETE EVERYTHING NOW",
+                    key="nuclear_confirm_checkbox_2"
+                )
+            else:
+                confirm_delete_2 = False
         
         with col2:
             st.write("")  # Spacing
             st.write("")  # Spacing
+            
+            # Initialize reset flag in session state
+            if 'nuclear_reset_in_progress' not in st.session_state:
+                st.session_state.nuclear_reset_in_progress = False
+            
             if st.button(
                 "💣 Wipe ChromaDB", 
                 type="secondary", 
                 use_container_width=True, 
-                disabled=(confirm_text != "DELETE EVERYTHING")
+                disabled=(not confirm_delete or not confirm_delete_2 or st.session_state.nuclear_reset_in_progress)
             ):
-                _execute_nuclear_reset()
+                st.session_state.nuclear_reset_in_progress = True
+                try:
+                    _execute_nuclear_reset()
+                except Exception as e:
+                    st.error(f"❌ Reset failed: {e}")
+                    logger.error(f"Nuclear reset failed: {e}", exc_info=True)
+                finally:
+                    st.session_state.nuclear_reset_in_progress = False
+        
+        if confirm_delete and not confirm_delete_2:
+            st.info("👆 Check both boxes above to enable the wipe button")
         
     except Exception as e:
         st.error(f"Error loading status: {str(e)}")
