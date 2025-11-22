@@ -1,14 +1,53 @@
 """
-Projects & Clients Management Page - COMPLETE FIXED VERSION
-Fixes: HTML rendering with unsafe_allow_html=True, removed all debug code
+Projects & Clients Management Page - WITH SUPABASE PERSISTENCE
+Now properly integrated with Supabase for persistent storage
 """
 
 import streamlit as st
 from datetime import datetime
+from utils.database.storage_adapter import ProjectStorage
+
+
+def _load_projects_from_supabase():
+    """Load projects from Supabase into session state"""
+    try:
+        # Get projects from Supabase via storage adapter
+        db_projects = ProjectStorage.get_all()
+        
+        if db_projects:
+            # Convert Supabase format to session state format
+            if 'projects' not in st.session_state:
+                st.session_state.projects = {}
+            
+            for proj in db_projects:
+                # Map Supabase fields to session state format
+                project_name = proj.get('name')
+                st.session_state.projects[project_name] = {
+                    'id': proj.get('id'),  # Important: Keep Supabase ID!
+                    'customer_id': proj.get('client_name', ''),
+                    'implementation_type': proj.get('type', 'UKG Pro'),
+                    'description': proj.get('notes', ''),
+                    'go_live_date': None,  # Not in Supabase schema yet
+                    'consultant': '',  # Not in Supabase schema yet
+                    'created_date': proj.get('created_at', '')[:10] if proj.get('created_at') else '',
+                    'created_time': proj.get('created_at', '')[11:19] if proj.get('created_at') else '',
+                    'data_sources': [],
+                    'notes': []
+                }
+    except Exception as e:
+        st.warning(f"Could not load projects from database: {e}")
+        # Initialize empty if load fails
+        if 'projects' not in st.session_state:
+            st.session_state.projects = {}
 
 
 def render_projects_page():
     """Render projects management page with full functionality"""
+    
+    # Load projects from Supabase on page load
+    if 'projects_loaded' not in st.session_state:
+        _load_projects_from_supabase()
+        st.session_state.projects_loaded = True
     
     st.markdown("## 📁 Projects & Client Management")
     
@@ -93,25 +132,59 @@ def render_projects_page():
                 elif project_name in st.session_state.get('projects', {}):
                     st.error(f"❌ Project '{project_name}' already exists!")
                 else:
-                    # Ensure projects dict exists
-                    if 'projects' not in st.session_state:
-                        st.session_state.projects = {}
+                    try:
+                        # Create project in Supabase via storage adapter
+                        created_project = ProjectStorage.create(
+                            name=project_name,
+                            client_name=customer_id,  # Map customer_id to client_name
+                            project_type=implementation_type,  # Map to 'type'
+                            notes=project_description
+                        )
+                        
+                        if created_project:
+                            # Also add to session state for immediate display
+                            if 'projects' not in st.session_state:
+                                st.session_state.projects = {}
+                            
+                            st.session_state.projects[project_name] = {
+                                'id': created_project.get('id'),  # Store Supabase ID!
+                                'customer_id': customer_id,
+                                'implementation_type': implementation_type,
+                                'description': project_description,
+                                'go_live_date': str(go_live_date) if go_live_date else None,
+                                'consultant': consultant_name,
+                                'created_date': datetime.now().strftime("%Y-%m-%d"),
+                                'created_time': datetime.now().strftime("%H:%M:%S"),
+                                'data_sources': [],
+                                'notes': []
+                            }
+                            
+                            st.session_state.current_project = project_name
+                            st.success(f"✅ Project '{project_name}' created and saved to database!")
+                            st.rerun()
+                        else:
+                            st.error("❌ Failed to save project to database. Please try again.")
                     
-                    # Create project
-                    st.session_state.projects[project_name] = {
-                        'customer_id': customer_id,
-                        'implementation_type': implementation_type,
-                        'description': project_description,
-                        'go_live_date': str(go_live_date) if go_live_date else None,
-                        'consultant': consultant_name,
-                        'created_date': datetime.now().strftime("%Y-%m-%d"),
-                        'created_time': datetime.now().strftime("%H:%M:%S"),
-                        'data_sources': [],
-                        'notes': []
-                    }
-                    st.session_state.current_project = project_name
-                    st.success(f"✅ Project '{project_name}' created successfully!")
-                    st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error creating project: {str(e)}")
+                        # Fallback to session state only if Supabase fails
+                        if 'projects' not in st.session_state:
+                            st.session_state.projects = {}
+                        
+                        st.session_state.projects[project_name] = {
+                            'customer_id': customer_id,
+                            'implementation_type': implementation_type,
+                            'description': project_description,
+                            'go_live_date': str(go_live_date) if go_live_date else None,
+                            'consultant': consultant_name,
+                            'created_date': datetime.now().strftime("%Y-%m-%d"),
+                            'created_time': datetime.now().strftime("%H:%M:%S"),
+                            'data_sources': [],
+                            'notes': []
+                        }
+                        st.session_state.current_project = project_name
+                        st.warning("⚠️ Project saved to session only (not persisted)")
+                        st.rerun()
     
     with col_right:
         st.markdown("### 🚀 Quick Start Guide")
@@ -181,11 +254,27 @@ def render_projects_page():
                     
                     if st.button(f"Delete", key=f"delete_{proj_name}", use_container_width=True):
                         if st.checkbox(f"Confirm delete {proj_name}?", key=f"confirm_del_{proj_name}"):
-                            if 'projects' in st.session_state:
-                                del st.session_state.projects[proj_name]
-                            if st.session_state.get('current_project') == proj_name:
-                                st.session_state.current_project = None
-                            st.rerun()
+                            try:
+                                # Get project ID for Supabase deletion
+                                project_id = proj_data.get('id')
+                                
+                                # Delete from Supabase if ID exists
+                                if project_id:
+                                    ProjectStorage.delete(project_id=project_id)
+                                
+                                # Also delete from session state
+                                if 'projects' in st.session_state and proj_name in st.session_state.projects:
+                                    del st.session_state.projects[proj_name]
+                                
+                                # Clear current project if this was it
+                                if st.session_state.get('current_project') == proj_name:
+                                    st.session_state.current_project = None
+                                
+                                st.success(f"✅ Project '{proj_name}' deleted from database")
+                                st.rerun()
+                            
+                            except Exception as e:
+                                st.error(f"❌ Error deleting project: {str(e)}")
                 
                 # Add note functionality
                 st.markdown("##### 📝 Project Notes")
