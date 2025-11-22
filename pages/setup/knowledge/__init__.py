@@ -18,6 +18,7 @@ REQUIRED LIBRARIES:
 import streamlit as st
 from pathlib import Path
 import logging
+import time
 from datetime import datetime
 from typing import Optional  # ← ADDED: Required for Optional[str]
 
@@ -127,264 +128,160 @@ def render_upload_tab():
         st.info(f"📄 Selected {len(uploaded_files)} file(s)")
         
         if st.button("✨ Upload and Process", type="primary", use_container_width=True):
-            process_uploads(uploaded_files, selected_project)
+            submit_upload_jobs(uploaded_files, selected_project)
 
 
-def process_uploads(uploaded_files, selected_project: Optional[str] = None):
+def submit_upload_jobs(uploaded_files, selected_project: Optional[str] = None):
     """
-    Process uploaded files: save and chunk to ChromaDB.
-    NOW TAGS WITH PROJECT_ID - BYPASSES DOCUMENTPROCESSOR TO ADD METADATA
+    Submit document upload jobs for background processing
+    NO MORE UI TIMEOUT!
     
     Args:
         uploaded_files: List of uploaded files
         selected_project: Project name or None for global
     """
-    import io
-    from pathlib import Path
+    from utils.background.job_manager import get_job_manager
+    from utils.background.document_handler import process_document_upload
+    from utils.database.supabase_client import get_supabase
     
-    # Get RAG handler from session
+    # Get dependencies
     rag_handler = st.session_state.get('rag_handler')
     if not rag_handler:
         st.error("❌ RAG handler not initialized. Please refresh the page.")
         return
     
-    # Create progress containers
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    results_container = st.empty()
+    supabase = get_supabase()
+    if not supabase:
+        st.error("❌ Supabase not configured. Background processing requires Supabase.")
+        return
     
-    results = []
-    total = len(uploaded_files)
+    job_manager = get_job_manager()
     
-    for idx, uploaded_file in enumerate(uploaded_files):
+    # Submit each file as a job
+    job_ids = []
+    
+    for uploaded_file in uploaded_files:
         try:
-            # Update progress
-            progress = (idx + 1) / total
-            progress_bar.progress(progress)
-            status_text.info(f"Processing {idx + 1}/{total}: {uploaded_file.name}")
-            
-            # Read file content
+            # Read file
             file_bytes = uploaded_file.read()
+            filename = uploaded_file.name
+            file_ext = Path(filename).suffix.lower()
             
-            # Extract text based on file type
-            file_ext = Path(uploaded_file.name).suffix.lower()
+            # Prepare input data
+            input_data = {
+                'file_bytes': file_bytes,
+                'filename': filename,
+                'file_ext': file_ext,
+                'selected_project': selected_project,
+                'rag_handler': rag_handler
+            }
             
-            if file_ext == '.txt' or file_ext == '.md':
-                text_content = file_bytes.decode('utf-8', errors='ignore')
+            # Submit job
+            job_id = job_manager.submit_job(
+                job_type='document_upload',
+                handler=process_document_upload,
+                input_data=input_data,
+                project_id=selected_project,
+                supabase_client=supabase
+            )
             
-            elif file_ext == '.pdf':
-                import pdfplumber
-                with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-                    text_content = "\n\n".join([page.extract_text() or "" for page in pdf.pages])
-            
-            elif file_ext == '.docx':
-                from docx import Document
-                doc = Document(io.BytesIO(file_bytes))
-                text_content = "\n\n".join([para.text for para in doc.paragraphs])
-            
-            elif file_ext in ['.xlsx', '.xls', '.csv']:
-                import pandas as pd
-                from utils.functional_areas import get_functional_area  # Import functional area mapper
-                
-                sheet_names = []  # Track sheet names for metadata
-                
-                if file_ext == '.csv':
-                    df = pd.read_csv(io.BytesIO(file_bytes))
-                    text_content = df.to_string()
-                    sheet_processing_mode = 'single'  # CSV is single sheet
-                else:
-                    # Read ALL sheets in Excel file (just metadata, not converting yet)
-                    all_sheets = pd.read_excel(io.BytesIO(file_bytes), sheet_name=None)
-                    sheet_names = list(all_sheets.keys())
-                    sheet_processing_mode = 'multi'  # Excel with multiple sheets
-                    
-                    # Store sheet DataFrames and metadata (NOT converted to string yet!)
-                    sheets_to_process = []
-                    for sheet_name, df in all_sheets.items():
-                        functional_area = get_functional_area(sheet_name)
-                        sheets_to_process.append({
-                            'sheet_name': sheet_name,
-                            'functional_area': functional_area,
-                            'df': df  # ← Store DataFrame, convert later one at a time
-                        })
-                    
-                    # Log sheet count
-                    logger.info(f"[EXCEL] Found {len(all_sheets)} worksheets in '{uploaded_file.name}': {sheet_names}")
-            
-            else:
-                raise ValueError(f"Unsupported file type: {file_ext}")
-            
-            # Handle single-sheet vs multi-sheet processing
-            if sheet_processing_mode == 'multi':
-                # Multi-sheet Excel: Process each sheet separately
-                total_chunks_added = 0
-                sheets_added = 0
-                
-                # Progress indicator for user
-                progress_text = st.empty()
-                progress_bar = st.progress(0.0)
-                
-                for idx, sheet_info in enumerate(sheets_to_process, 1):
-                    # Update progress
-                    progress_pct = idx / len(sheets_to_process)
-                    progress_text.text(f"⏳ Processing sheet {idx}/{len(sheets_to_process)}: {sheet_info['sheet_name']} (chunking & embedding...)")
-                    progress_bar.progress(progress_pct)
-                    
-                    # ✅ FIX: Convert DataFrame to string ONE AT A TIME (not all at once!)
-                    logger.info(f"[EXCEL] Processing sheet {idx}/{len(sheets_to_process)}: {sheet_info['sheet_name']}")
-                    sheet_header = f"\n{'='*80}\nWORKSHEET: {sheet_info['sheet_name']}\n{'='*80}\n"
-                    sheet_content = sheet_info['df'].to_string()  # ← Convert only this sheet
-                    sheet_text = sheet_header + sheet_content
-                    
-                    # Prepare metadata for this specific sheet
-                    sheet_metadata = {
-                        'source': uploaded_file.name,
-                        'file_type': file_ext.replace('.', ''),
-                        'uploaded_at': datetime.now().isoformat(),
-                        'sheet_name': sheet_info['sheet_name'],
-                        'functional_area': sheet_info['functional_area']
-                    }
-                    
-                    if selected_project:
-                        sheet_metadata['project_id'] = selected_project
-                    
-                    logger.info(f"[FUNCTIONAL AREA] Sheet '{sheet_info['sheet_name']}' → {sheet_info['functional_area']}")
-                    
-                    # CRITICAL: Long-running operation (2-5 min per sheet)
-                    # Update UI to prevent Streamlit timeout
-                    status_container = st.empty()
-                    status_container.info(f"🔄 Chunking & embedding sheet {idx}/{len(sheets_to_process)}: {sheet_info['sheet_name']}... (this takes 2-5 min)")
-                    
-                    # Add this sheet to ChromaDB
-                    success = rag_handler.add_document(
-                        collection_name='hcmpact_knowledge',
-                        text=sheet_text,  # ← Use just-converted text
-                        metadata=sheet_metadata
-                    )
-                    
-                    # Clear status after completion
-                    status_container.empty()
-                    
-                    if success:
-                        sheets_added += 1
-                        logger.info(f"[EXCEL] Sheet '{sheet_info['sheet_name']}' added successfully")
-                    else:
-                        logger.warning(f"[EXCEL] Failed to add sheet '{sheet_info['sheet_name']}'")
-                
-                # Clear progress indicators
-                progress_text.empty()
-                progress_bar.empty()
-                
-                # COMPLETION SUMMARY - Persists even if UI timed out
-                st.success(f"✅ COMPLETED: {uploaded_file.name}")
-                st.info(f"📊 Processed {sheets_added}/{len(sheets_to_process)} sheets successfully")
-                
-                if sheets_added > 0:
-                    # Save file to /data/uploads for parser
-                    upload_dir = Path('/data/uploads')
-                    upload_dir.mkdir(parents=True, exist_ok=True)
-                    upload_path = upload_dir / uploaded_file.name
-                    upload_path.write_bytes(file_bytes)
-                    
-                    results.append({
-                        'filename': uploaded_file.name,
-                        'status': 'success',
-                        'message': f'{sheets_added}/{len(sheets_to_process)} sheets added',
-                        'sheets': sheet_names
-                    })
-                    logger.info(f"[SUCCESS] Added {sheets_added}/{len(sheets_to_process)} sheets from '{uploaded_file.name}'")
-                else:
-                    results.append({
-                        'filename': uploaded_file.name,
-                        'status': 'error',
-                        'message': 'Failed to add any sheets to ChromaDB'
-                    })
-            
-            else:
-                # Single file (CSV, PDF, DOCX, etc.) or single-sheet processing
-                # Prepare metadata with project_id
-                metadata = {
-                    'source': uploaded_file.name,
-                    'file_type': file_ext.replace('.', ''),
-                    'uploaded_at': datetime.now().isoformat()
-                }
-                
-                if selected_project:
-                    metadata['project_id'] = selected_project
-                    logger.info(f"[PROJECT] Tagging '{uploaded_file.name}' with project_id: {selected_project}")
-                else:
-                    logger.info(f"[PROJECT] Uploading '{uploaded_file.name}' as GLOBAL (no project_id)")
-                
-                # Add to ChromaDB with project metadata
-                success = rag_handler.add_document(
-                    collection_name='hcmpact_knowledge',
-                    text=text_content,
-                    metadata=metadata
-                )
-                
-                if success:
-                    # Also save to /data/uploads for parser
-                    upload_dir = Path('/data/uploads')
-                    upload_dir.mkdir(parents=True, exist_ok=True)
-                    upload_path = upload_dir / uploaded_file.name
-                    upload_path.write_bytes(file_bytes)
-                    
-                    results.append({
-                        'filename': uploaded_file.name,
-                        'status': 'success',
-                        'chunks': 'Added',
-                        'project': selected_project if selected_project else 'Global',
-                        'message': 'Success'
-                    })
-                else:
-                    results.append({
-                        'filename': uploaded_file.name,
-                        'status': 'error',
-                        'chunks': 0,
-                        'project': selected_project if selected_project else 'Global',
-                        'message': 'Failed to add to ChromaDB'
-                    })
-            
-        except Exception as e:
-            logger.error(f"Upload error for {uploaded_file.name}: {str(e)}", exc_info=True)
-            results.append({
-                'filename': uploaded_file.name,
-                'status': 'error',
-                'chunks': 0,
-                'project': selected_project if selected_project else 'Global',
-                'message': str(e)
+            job_ids.append({
+                'job_id': job_id,
+                'filename': filename
             })
+            
+            st.success(f"✅ Queued: {filename} (Job ID: {job_id[:8]}...)")
+        
+        except Exception as e:
+            st.error(f"❌ Failed to queue {uploaded_file.name}: {str(e)}")
     
-    # Show results
-    progress_bar.progress(1.0)
-    status_text.empty()
-    
-    # Summary
-    success_count = sum(1 for r in results if r['status'] == 'success')
-    
-    if success_count == total:
-        st.success(f"✅ Successfully processed {success_count} file(s)")
-    elif success_count > 0:
-        st.warning(f"⚠️ Processed {success_count}/{total} files")
-    else:
-        st.error("❌ All uploads failed")
-    
-    # Detailed results
-    with results_container.expander("📋 View Details"):
-        for result in results:
-            if result['status'] == 'success':
-                st.write(f"✅ {result['filename']} - Project: {result['project']}")
-            else:
-                st.write(f"❌ {result['filename']} - {result['message']}")
+    if job_ids:
+        # Store in session for monitoring
+        if 'active_jobs' not in st.session_state:
+            st.session_state.active_jobs = []
+        
+        st.session_state.active_jobs.extend(job_ids)
+        
+        st.success(f"🚀 {len(job_ids)} job(s) submitted for background processing!")
+        st.info("💡 Go to 'Collection Status' tab to monitor progress. Your UI will not freeze!")
+        
+        # Auto-switch to status tab (store preference)
+        st.session_state.show_job_monitor = True
 
 
 def render_status_tab():
     """
-    Tab 2: Show collection status and statistics.
-    UNCHANGED - Shows all documents regardless of project
+    Tab 2: Show collection status, statistics, AND JOB MONITOR
     """
     st.header("Knowledge Base Status")
     
+    # ═══════════════════════════════════════════════════════════
+    # JOB MONITOR - Real-time progress updates
+    # ═══════════════════════════════════════════════════════════
+    if st.session_state.get('active_jobs'):
+        st.markdown("### 🔄 Background Jobs")
+        
+        from utils.database.supabase_client import get_supabase
+        from utils.background.job_manager import get_job_manager
+        
+        supabase = get_supabase()
+        job_manager = get_job_manager()
+        
+        if supabase:
+            active_jobs = st.session_state.active_jobs
+            completed_jobs = []
+            
+            for job_info in active_jobs:
+                job_id = job_info['job_id']
+                filename = job_info['filename']
+                
+                # Get current status
+                job_data = job_manager.get_job_status(job_id, supabase)
+                
+                if job_data:
+                    status = job_data['status']
+                    progress = job_data.get('progress', {})
+                    current = progress.get('current', 0)
+                    total = progress.get('total', 100)
+                    message = progress.get('message', '')
+                    
+                    # Display job status
+                    with st.expander(f"{'✅' if status == 'completed' else '🔄' if status == 'processing' else '⏳'} {filename} - {status.upper()}", expanded=(status == 'processing')):
+                        st.text(f"Job ID: {job_id}")
+                        
+                        if status == 'processing':
+                            st.progress(current / max(total, 1))
+                            st.info(f"📊 {message}")
+                        
+                        elif status == 'completed':
+                            result = job_data.get('result_data', {})
+                            st.success(f"✅ Complete! Added {result.get('chunks_added', '?')} chunks")
+                            if result.get('sheets_processed'):
+                                st.text(f"Sheets: {', '.join(result['sheets_processed'])}")
+                            completed_jobs.append(job_info)
+                        
+                        elif status == 'failed':
+                            st.error(f"❌ Failed: {job_data.get('error_message', 'Unknown error')}")
+                            completed_jobs.append(job_info)
+                        
+                        elif status == 'queued':
+                            st.info("⏳ Waiting in queue...")
+            
+            # Remove completed/failed jobs from active list
+            for job_info in completed_jobs:
+                st.session_state.active_jobs.remove(job_info)
+            
+            # Auto-refresh every 2 seconds if jobs are processing
+            if any(j for j in active_jobs if j not in completed_jobs):
+                st.markdown("🔄 *Auto-refreshing every 2 seconds...*")
+                time.sleep(2)
+                st.rerun()
+        
+        st.markdown("---")
+    
+    # ═══════════════════════════════════════════════════════════
+    # Regular Status Display
+    # ═══════════════════════════════════════════════════════════
     try:
         from utils.rag_handler import AdvancedRAGHandler
         
