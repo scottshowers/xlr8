@@ -311,19 +311,37 @@ def render_status_tab():
         
         # DEBUG: Sample chunk metadata
         st.markdown("---")
-        with st.expander("🔍 Debug: Sample Chunk Metadata"):
+        with st.expander("🔍 Debug: Sample Chunk Metadata (showing Excel chunks)"):
             try:
-                sample_results = collection.get(limit=3, include=["metadatas"])
+                # Get more chunks to find Excel ones
+                sample_results = collection.get(limit=100, include=["metadatas"])
                 if sample_results and sample_results['metadatas']:
-                    for i, meta in enumerate(sample_results['metadatas'], 1):
-                        st.json({
-                            f"Chunk {i}": {
-                                "project_id": meta.get('project_id', '❌ MISSING'),
-                                "source": meta.get('source', '❌ MISSING'),
-                                "functional_area": meta.get('functional_area', '❌ MISSING'),
-                                "sheet_name": meta.get('sheet_name', 'N/A')
-                            }
-                        })
+                    # Filter for Excel/CSV files
+                    excel_chunks = [(i, meta) for i, meta in enumerate(sample_results['metadatas']) 
+                                   if meta.get('source', '').endswith(('.xlsx', '.xls', '.csv'))]
+                    
+                    if excel_chunks:
+                        st.success(f"Found {len(excel_chunks)} Excel chunks out of {len(sample_results['metadatas'])} total")
+                        for i, (idx, meta) in enumerate(excel_chunks[:10], 1):
+                            st.json({
+                                f"Excel Chunk {i}": {
+                                    "project_id": meta.get('project_id', '❌ MISSING'),
+                                    "source": meta.get('source', '❌ MISSING'),
+                                    "functional_area": meta.get('functional_area', '❌ MISSING'),
+                                    "sheet_name": meta.get('sheet_name', 'N/A')
+                                }
+                            })
+                    else:
+                        st.warning("No Excel chunks found in first 100 chunks")
+                        st.info("Showing first 5 chunks instead:")
+                        for i, meta in enumerate(sample_results['metadatas'][:5], 1):
+                            st.json({
+                                f"Chunk {i}": {
+                                    "project_id": meta.get('project_id', '❌ MISSING'),
+                                    "source": meta.get('source', '❌ MISSING'),
+                                    "functional_area": meta.get('functional_area', '❌ MISSING')
+                                }
+                            })
                 else:
                     st.info("No chunks to inspect")
             except Exception as e:
