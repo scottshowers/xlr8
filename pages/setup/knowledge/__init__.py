@@ -283,12 +283,11 @@ def render_status_tab():
     # Regular Status Display
     # ═══════════════════════════════════════════════════════════
     try:
-        from utils.rag_handler import AdvancedRAGHandler
+        from utils.rag_handler import RAGHandler
         
         # Initialize RAG handler
-        rag = AdvancedRAGHandler(
-            ollama_endpoint=st.session_state.get('llm_endpoint', 'http://178.156.190.64:11435'),
-            collection_name='hcmpact_knowledge'
+        rag = RAGHandler(
+            llm_endpoint=st.session_state.get('llm_endpoint', 'http://178.156.190.64:11435')
         )
         
         # Get collection stats
@@ -458,21 +457,20 @@ def perform_search(query: str, n_results: int, project_id: Optional[str] = None)
     NOW SUPPORTS PROJECT FILTERING
     """
     try:
-        from utils.rag_handler import AdvancedRAGHandler
+        from utils.rag_handler import RAGHandler
         
         # Initialize RAG
-        rag = AdvancedRAGHandler(
-            ollama_endpoint=st.session_state.get('llm_endpoint', 'http://178.156.190.64:11435'),
-            collection_name='hcmpact_knowledge'
+        rag = RAGHandler(
+            llm_endpoint=st.session_state.get('llm_endpoint', 'http://178.156.190.64:11435')
         )
         
         # Search WITH PROJECT FILTER
         with st.spinner("🔍 Searching..."):
-            # CHANGE: Pass project_id parameter
             results = rag.search(
-                query, 
+                collection_name='hcmpact_knowledge',
+                query=query, 
                 n_results=n_results,
-                project_id=project_id  # ← CHANGED: Filter by project
+                project_id=project_id
             )
         
         if not results:
