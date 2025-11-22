@@ -173,9 +173,27 @@ def _render_sidebar_settings():
         )
         st.session_state.num_chromadb_sources = num_sources
         
+        # Functional Area Filter
+        st.markdown("---")
+        st.markdown("### 🎯 Functional Area Filter")
+        
+        from utils.functional_areas import get_all_functional_areas
+        functional_areas = get_all_functional_areas()
+        
+        selected_areas = st.multiselect(
+            "Filter by functional area(s)",
+            options=functional_areas,
+            default=["All Areas"],
+            help="Select specific functional areas to search, or 'All Areas' for no filter"
+        )
+        st.session_state.functional_areas = selected_areas
+        
+        if "All Areas" not in selected_areas and len(selected_areas) > 0:
+            st.info(f"🔍 Filtering: {', '.join(selected_areas)}")
+        
         # Clear chat button
         st.markdown("---")
-        if st.button(" Clear Chat History", use_container_width=True):
+        if st.button("🗑️ Clear Chat History", use_container_width=True):
             st.session_state.chat_history = []
             st.rerun()
 
@@ -386,8 +404,21 @@ def _generate_and_display_response(user_query: str):
             # Get current project for document filtering
             current_project = st.session_state.get('current_project')
             
-            # Make routing decision with project filter
-            decision = router.make_routing_decision(user_query, num_sources, project_id=current_project)
+            # Get functional area filter
+            functional_areas = st.session_state.get('functional_areas', ["All Areas"])
+            # Convert "All Areas" to None for no filtering
+            if "All Areas" in functional_areas:
+                functional_areas_filter = None
+            else:
+                functional_areas_filter = functional_areas
+            
+            # Make routing decision with project and functional area filters
+            decision = router.make_routing_decision(
+                user_query, 
+                num_sources, 
+                project_id=current_project,
+                functional_areas=functional_areas_filter
+            )
             
             # Debug info
             debug_info = {
