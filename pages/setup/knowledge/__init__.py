@@ -692,71 +692,109 @@ def render_status_tab():
     st.header("Knowledge Base Status")
     
     # ═══════════════════════════════════════════════════════════
-    # JOB MONITOR - Real-time progress updates
+    # JOB MONITOR - Shows ALL jobs from database (PERMANENT)
+    # No longer depends on session state - always visible
     # ═══════════════════════════════════════════════════════════
-    if st.session_state.get('active_jobs'):
-        st.markdown("### 🔄 Background Jobs")
-        
-        from utils.database.supabase_client import get_supabase
-        from utils.background.job_manager import get_job_manager
-        
-        supabase = get_supabase()
-        job_manager = get_job_manager()
-        
-        if supabase:
-            active_jobs = st.session_state.active_jobs
-            completed_jobs = []
+    st.markdown("### 🔄 Background Jobs")
+    
+    from utils.database.supabase_client import get_supabase
+    from utils.background.job_manager import get_job_manager
+    
+    supabase = get_supabase()
+    job_manager = get_job_manager()
+    
+    if supabase:
+        try:
+            # Query ALL recent jobs from Supabase (last 10)
+            response = supabase.table('background_jobs').select('*').order('created_at', desc=True).limit(10).execute()
             
-            for job_info in active_jobs:
-                job_id = job_info['job_id']
-                filename = job_info['filename']
+            if response.data and len(response.data) > 0:
+                all_jobs = response.data
                 
-                # Get current status
-                job_data = job_manager.get_job_status(job_id, supabase)
+                # Header with clear all button
+                col_header1, col_header2 = st.columns([3, 1])
+                with col_header1:
+                    st.info(f"📋 Showing {len(all_jobs)} most recent jobs")
+                with col_header2:
+                    if st.button("🗑️ Clear All", use_container_width=True, type="secondary"):
+                        try:
+                            # Delete all jobs
+                            supabase.table('background_jobs').delete().neq('id', '00000000-0000-0000-0000-000000000000').execute()
+                            st.success("✅ All jobs cleared!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error clearing: {e}")
                 
-                if job_data:
+                # Display each job
+                for job_data in all_jobs:
+                    job_id = job_data['id']
                     status = job_data['status']
+                    job_type = job_data.get('job_type', 'unknown')
+                    input_data = job_data.get('input_data', {})
+                    filename = input_data.get('filename', 'Unknown file')
                     progress = job_data.get('progress', {})
                     current = progress.get('current', 0)
                     total = progress.get('total', 100)
                     message = progress.get('message', '')
                     
-                    # Display job status
-                    with st.expander(f"{'✅' if status == 'completed' else '🔄' if status == 'processing' else '⏳'} {filename} - {status.upper()}", expanded=(status == 'processing')):
-                        st.text(f"Job ID: {job_id}")
+                    # Icon based on status
+                    icon = '✅' if status == 'completed' else '❌' if status == 'failed' else '🔄' if status == 'processing' else '⏳'
+                    
+                    with st.expander(f"{icon} {filename} - {status.upper()}", expanded=(status in ['processing', 'failed'])):
+                        col_job1, col_job2 = st.columns([3, 1])
                         
-                        if status == 'processing':
-                            st.progress(current / max(total, 1))
-                            st.info(f"📊 {message}")
+                        with col_job1:
+                            st.text(f"Job ID: {job_id[:8]}...")
+                            st.text(f"Type: {job_type}")
+                            
+                            if status == 'processing':
+                                pct = int((current / total * 100)) if total > 0 else 0
+                                st.progress(pct / 100)
+                                st.text(f"{message} ({pct}%)")
+                            elif status == 'completed':
+                                result = job_data.get('result_data', {})
+                                chunks = result.get('chunks_added', 0)
+                                st.success(f"✅ Completed: {chunks} chunks added")
+                                if 'sheets_processed' in result:
+                                    sheets = result.get('sheets_processed', [])
+                                    if len(sheets) > 5:
+                                        st.text(f"Sheets: {len(sheets)} processed")
+                                    else:
+                                        st.text(f"Sheets: {', '.join(sheets)}")
+                            elif status == 'failed':
+                                error = job_data.get('error_message', 'Unknown error')
+                                st.error(f"❌ {error}")
+                            elif status == 'queued':
+                                st.info("⏳ Waiting in queue...")
                         
-                        elif status == 'completed':
-                            result = job_data.get('result_data', {})
-                            st.success(f"✅ Complete! Added {result.get('chunks_added', '?')} chunks")
-                            if result.get('sheets_processed'):
-                                st.text(f"Sheets: {', '.join(result['sheets_processed'])}")
-                            completed_jobs.append(job_info)
-                        
-                        elif status == 'failed':
-                            st.error(f"❌ Failed: {job_data.get('error_message', 'Unknown error')}")
-                            completed_jobs.append(job_info)
-                        
-                        elif status == 'queued':
-                            st.info("⏳ Waiting in queue...")
-            
-            # Remove completed/failed jobs from active list
-            for job_info in completed_jobs:
-                st.session_state.active_jobs.remove(job_info)
-            
-            # Manual refresh button instead of auto-refresh (fixes page bouncing issue)
-            if any(j for j in active_jobs if j not in completed_jobs):
+                        with col_job2:
+                            # Delete button for any job
+                            if st.button("🗑️", key=f"delete_{job_id}", use_container_width=True, help="Delete this job"):
+                                try:
+                                    supabase.table('background_jobs').delete().eq('id', job_id).execute()
+                                    st.success("✅ Deleted!")
+                                    time.sleep(0.5)
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Error: {e}")
+                
+                # Manual refresh button
                 col_refresh1, col_refresh2 = st.columns([3, 1])
                 with col_refresh1:
-                    st.info("💡 Jobs still processing - click refresh to update progress")
+                    st.info("💡 Click refresh to update job progress")
                 with col_refresh2:
                     if st.button("🔄 Refresh", key="refresh_jobs", use_container_width=True):
                         st.rerun()
-        
-        st.markdown("---")
+            else:
+                st.info("✨ No background jobs yet - upload a document to see jobs here")
+                
+        except Exception as e:
+            st.error(f"Error loading jobs: {e}")
+            logger.error(f"Job loading error: {e}", exc_info=True)
+    else:
+        st.warning("⚠️ Supabase not configured - cannot show job history")
+    
+    st.markdown("---")
     
     # ═══════════════════════════════════════════════════════════
     # Regular Status Display
