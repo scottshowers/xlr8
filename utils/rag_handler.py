@@ -293,17 +293,19 @@ class RAGHandler:
         collection_name: str, 
         query: str, 
         n_results: int = 12,
-        project_id: Optional[str] = None  # ← CHANGED: New parameter
+        project_id: Optional[str] = None,
+        functional_areas: Optional[List[str]] = None  # ← NEW: Functional area filtering
     ) -> List[Dict[str, Any]]:
         """
         Search for relevant documents in a collection.
-        NOW SUPPORTS PROJECT FILTERING
+        SUPPORTS PROJECT AND FUNCTIONAL AREA FILTERING
         
         Args:
             collection_name: Name of the collection to search
             query: Search query
             n_results: Number of results to return
-            project_id: Optional project ID to filter by (NEW)
+            project_id: Optional project ID to filter by
+            functional_areas: Optional list of functional areas to filter by
             
         Returns:
             List of search results with documents, metadata, and distances
@@ -318,19 +320,35 @@ class RAGHandler:
                 logger.error("Failed to get query embedding")
                 return []
             
-            # CHANGE: Build where clause for project filtering
+            # Build where clause for filtering
             where_clause = None
-            if project_id:
+            
+            if project_id and functional_areas:
+                # Both filters: project_id AND functional_area in list
+                where_clause = {
+                    "$and": [
+                        {"project_id": project_id},
+                        {"functional_area": {"$in": functional_areas}}
+                    ]
+                }
+                logger.info(f"[PROJECT] Filtering by project_id: {project_id}")
+                logger.info(f"[FUNCTIONAL AREA] Filtering by areas: {', '.join(functional_areas)}")
+            elif project_id:
+                # Only project filter
                 where_clause = {"project_id": project_id}
                 logger.info(f"[PROJECT] Filtering search by project_id: {project_id}")
+            elif functional_areas:
+                # Only functional area filter
+                where_clause = {"functional_area": {"$in": functional_areas}}
+                logger.info(f"[FUNCTIONAL AREA] Filtering by areas: {', '.join(functional_areas)}")
             else:
-                logger.info("[PROJECT] No project filter - searching all documents")
+                logger.info("[FILTER] No filters - searching all documents")
             
-            # Perform search WITH PROJECT FILTER
+            # Perform search WITH FILTERS
             results = collection.query(
                 query_embeddings=[query_embedding],
                 n_results=n_results,
-                where=where_clause,  # ← CHANGED: Filter by project
+                where=where_clause,
                 include=["documents", "metadatas", "distances"]
             )
             
