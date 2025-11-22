@@ -206,11 +206,18 @@ class JobManager:
         # Create job record in Supabase
         if supabase_client:
             try:
+                # Store only JSON-serializable metadata in DB
+                db_metadata = {
+                    'filename': input_data.get('filename', 'unknown'),
+                    'file_type': input_data.get('file_ext', 'unknown'),
+                    'project': project_id or 'global'
+                }
+                
                 supabase_client.table('processing_jobs').insert({
                     'id': job_id,
                     'job_type': job_type,
                     'status': 'queued',
-                    'input_data': input_data,
+                    'input_data': db_metadata,  # ← Only metadata, not bytes/objects
                     'project_id': project_id,
                     'user_id': user_id,
                     'progress': {'current': 0, 'total': 100, 'message': 'Queued'}
