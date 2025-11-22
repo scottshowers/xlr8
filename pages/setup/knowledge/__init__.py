@@ -167,13 +167,13 @@ def submit_upload_jobs(uploaded_files, selected_project: Optional[str] = None):
             filename = uploaded_file.name
             file_ext = Path(filename).suffix.lower()
             
-            # Prepare input data
+            # Prepare input data (passed to worker)
             input_data = {
-                'file_bytes': file_bytes,
+                'file_bytes': file_bytes,  # Raw bytes
                 'filename': filename,
                 'file_ext': file_ext,
-                'selected_project': selected_project,
-                'rag_handler': rag_handler
+                'selected_project': selected_project
+                # rag_handler will be recreated in worker
             }
             
             # Submit job
