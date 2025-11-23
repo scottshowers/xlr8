@@ -11,6 +11,7 @@ sys.path.insert(0, '/app')
 sys.path.insert(0, '/data')
 
 from utils.rag_handler import RAGHandler
+from backend.routers.jobs import create_job, update_job, complete_job, fail_job
 
 router = APIRouter()
 
@@ -47,9 +48,15 @@ async def upload_file(
     project: str = Form(...),
     functional_area: Optional[str] = Form(None)
 ):
+    job_id = str(uuid.uuid4())
+    file_path = None
+    
     try:
-        job_id = str(uuid.uuid4())
+        # Create job
+        create_job(job_id, file.filename, project)
         
+        # Save file
+        update_job(job_id, status="processing", progress=10, current_step="Saving file...")
         os.makedirs("/data/uploads", exist_ok=True)
         file_path = f"/data/uploads/{job_id}_{file.filename}"
         
@@ -57,16 +64,20 @@ async def upload_file(
         with open(file_path, "wb") as f:
             f.write(content)
         
+        # Extract text
+        update_job(job_id, progress=30, current_step="Extracting text...")
         text = extract_text(file_path)
         
         if not text:
+            fail_job(job_id, "No text could be extracted from file")
             raise HTTPException(status_code=400, detail="No text extracted")
         
+        # Prepare metadata
+        update_job(job_id, progress=50, current_step="Preparing metadata...")
         file_ext = file.filename.split('.')[-1].lower()
         
-        # Build metadata, exclude None values
         metadata = {
-            "project_id": project,
+            "project": project,
             "filename": file.filename,
             "file_type": file_ext,
             "source": file.filename
@@ -75,6 +86,8 @@ async def upload_file(
         if functional_area:
             metadata["functional_area"] = functional_area
         
+        # Add to vector store
+        update_job(job_id, progress=70, current_step="Creating embeddings...")
         rag = RAGHandler()
         success = rag.add_document(
             collection_name="documents",
@@ -82,12 +95,33 @@ async def upload_file(
             metadata=metadata
         )
         
-        os.remove(file_path)
+        if not success:
+            fail_job(job_id, "Failed to add document to vector store")
+            raise HTTPException(status_code=500, detail="Failed to process document")
+        
+        # Cleanup
+        update_job(job_id, progress=90, current_step="Finalizing...")
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+        
+        # Complete
+        complete_job(job_id, f"Successfully processed {file.filename}")
         
         return {
             "job_id": job_id,
-            "status": "completed" if success else "failed",
-            "chunks": "processed"
+            "status": "completed",
+            "message": f"File {file.filename} uploaded successfully"
         }
+        
+    except HTTPException:
+        # Cleanup on error
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+        raise
+        
     except Exception as e:
+        # Cleanup on error
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+        fail_job(job_id, str(e))
         raise HTTPException(status_code=500, detail=str(e))
