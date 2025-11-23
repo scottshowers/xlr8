@@ -8,6 +8,7 @@ sys.path.insert(0, '/app')
 sys.path.insert(0, '/data')
 
 from utils.rag_handler import RAGHandler
+from utils.document_processor import DocumentProcessor
 
 router = APIRouter()
 
@@ -27,20 +28,37 @@ async def upload_file(
         with open(file_path, "wb") as f:
             f.write(content)
         
+        # Process document to extract text
+        processor = DocumentProcessor()
+        text = processor.process_file(file_path)
+        
+        if not text:
+            raise HTTPException(status_code=400, detail="Could not extract text from file")
+        
+        # Get file extension
+        file_ext = file.filename.split('.')[-1].lower()
+        
+        # Add to RAG
         rag = RAGHandler()
-        result = rag.add_document(
-            file_path=file_path,
+        success = rag.add_document(
+            collection_name="documents",
+            text=text,
             metadata={
-                "project": project,
+                "project_id": project,
                 "functional_area": functional_area,
-                "filename": file.filename
+                "filename": file.filename,
+                "file_type": file_ext,
+                "source": file.filename
             }
         )
         
+        # Clean up temp file
+        os.remove(file_path)
+        
         return {
             "job_id": job_id,
-            "status": "completed",
-            "chunks": result.get("chunks_added", 0) if isinstance(result, dict) else 0
+            "status": "completed" if success else "failed",
+            "chunks": "unknown"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
