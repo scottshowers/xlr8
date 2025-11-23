@@ -15,7 +15,7 @@ from utils.database.models import ProjectModel
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/projects", tags=["projects"])
+router = APIRouter(prefix="/projects", tags=["projects"])
 
 
 class ProjectCreate(BaseModel):
