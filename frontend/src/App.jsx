@@ -1,9 +1,9 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import { MessageSquare, Upload as UploadIcon, Activity, FileText, FolderKanban } from 'lucide-react';
-import Chat from './pages/Chat';
-import Upload from './pages/Upload';
-import Status from './pages/Status';
+import Chat from './components/Chat';
+import Upload from './components/Upload';
+import Status from './components/Status';
 import Secure20Analysis from './pages/Secure20Analysis';
 import Projects from './pages/Projects';
 
