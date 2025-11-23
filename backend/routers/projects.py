@@ -14,25 +14,39 @@ router = APIRouter(tags=["projects"])
 
 class ProjectCreate(BaseModel):
     name: str
-    description: Optional[str] = None
+    customer: Optional[str] = None
+    project_type: Optional[str] = 'Implementation'
+    start_date: Optional[str] = None
+    notes: Optional[str] = None
 
 class Project(BaseModel):
     id: str
     name: str
-    customer: Optional[str] = None  # FastAPI calls it 'description' but DB has 'customer'
+    customer: Optional[str] = None
+    start_date: Optional[str] = None
+    status: Optional[str] = None
     created_at: str
 
 @router.post("/projects")
 async def create_project(project: ProjectCreate):
     """Create a new project using existing Supabase models"""
     try:
-        # Use YOUR existing ProjectModel
+        # Use YOUR existing ProjectModel with all fields
         result = ProjectModel.create(
             name=project.name,
-            client_name=project.description,  # Maps description -> customer
-            project_type='Implementation',
-            notes=None
+            client_name=project.customer,
+            project_type=project.project_type,
+            notes=project.notes
         )
+        
+        # Also update start_date if provided (not in create method)
+        if result and project.start_date:
+            from utils.database.supabase_client import get_supabase
+            supabase = get_supabase()
+            if supabase:
+                supabase.table('projects').update({
+                    'start_date': project.start_date
+                }).eq('id', result['id']).execute()
         
         if not result:
             raise HTTPException(status_code=500, detail="Failed to create project")
