@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { Plus } from 'lucide-react'
 import api from '../services/api'
+import CreateProject from './CreateProject'
 
 export default function Upload({ projects, functionalAreas }) {
   const [file, setFile] = useState(null)
@@ -8,6 +10,8 @@ export default function Upload({ projects, functionalAreas }) {
   const [uploading, setUploading] = useState(false)
   const [result, setResult] = useState(null)
   const [dragActive, setDragActive] = useState(false)
+  const [showCreateProject, setShowCreateProject] = useState(false)
+  const [projectList, setProjectList] = useState(projects)
 
   const handleDrag = (e) => {
     e.preventDefault()
@@ -72,7 +76,17 @@ export default function Upload({ projects, functionalAreas }) {
 
         <form onSubmit={handleUpload} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium mb-2">Project *</label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-medium">Project / Customer *</label>
+              <button
+                type="button"
+                onClick={() => setShowCreateProject(true)}
+                className="flex items-center gap-1 px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded"
+              >
+                <Plus className="w-4 h-4" />
+                New Project
+              </button>
+            </div>
             <select
               value={selectedProject}
               onChange={(e) => setSelectedProject(e.target.value)}
@@ -80,10 +94,16 @@ export default function Upload({ projects, functionalAreas }) {
               required
             >
               <option value="">Select project</option>
-              {projects.map(p => (
+              <option value="__GLOBAL__">🌐 Global (All Customers)</option>
+              {projectList.map(p => (
                 <option key={p.id} value={p.name}>{p.name}</option>
               ))}
             </select>
+            {selectedProject === '__GLOBAL__' && (
+              <p className="text-xs text-blue-600 mt-1">
+                This file will be available to all customers
+              </p>
+            )}
           </div>
 
           <div>
@@ -157,6 +177,17 @@ export default function Upload({ projects, functionalAreas }) {
           </div>
         )}
       </div>
+
+      {showCreateProject && (
+        <CreateProject
+          onProjectCreated={(newProject) => {
+            setProjectList([...projectList, newProject]);
+            setSelectedProject(newProject.name);
+            setShowCreateProject(false);
+          }}
+          onClose={() => setShowCreateProject(false)}
+        />
+      )}
     </div>
   )
 }
