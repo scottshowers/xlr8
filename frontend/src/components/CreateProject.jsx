@@ -4,7 +4,10 @@ import api from '../services/api';
 
 export default function CreateProject({ onProjectCreated, onClose }) {
   const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
+  const [customer, setCustomer] = useState('');
+  const [projectType, setProjectType] = useState('Implementation');
+  const [startDate, setStartDate] = useState('');
+  const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -22,7 +25,10 @@ export default function CreateProject({ onProjectCreated, onClose }) {
     try {
       const response = await api.post('/projects', {
         name: name.trim(),
-        description: description.trim() || null
+        customer: customer.trim() || null,
+        project_type: projectType,
+        start_date: startDate || null,
+        notes: notes.trim() || null
       });
       
       onProjectCreated(response.data);
@@ -36,7 +42,7 @@ export default function CreateProject({ onProjectCreated, onClose }) {
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-lg p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-lg p-6 w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-bold text-gray-900">Create New Project</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
@@ -53,6 +59,20 @@ export default function CreateProject({ onProjectCreated, onClose }) {
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
+              placeholder="Meyer Company Implementation"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={loading}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Customer Name
+            </label>
+            <input
+              type="text"
+              value={customer}
+              onChange={(e) => setCustomer(e.target.value)}
               placeholder="Meyer Company"
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               disabled={loading}
@@ -61,12 +81,41 @@ export default function CreateProject({ onProjectCreated, onClose }) {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Description (optional)
+              Project Type *
+            </label>
+            <select
+              value={projectType}
+              onChange={(e) => setProjectType(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={loading}
+            >
+              <option value="Implementation">Implementation</option>
+              <option value="Post Launch Support">Post Launch Support</option>
+              <option value="Assessment/Analysis">Assessment/Analysis</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Start Date
+            </label>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={loading}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Notes
             </label>
             <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="SECURE 2.0 implementation"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="SECURE 2.0 implementation with payroll focus..."
               rows={3}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               disabled={loading}
