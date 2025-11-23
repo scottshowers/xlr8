@@ -1,0 +1,14 @@
+[phases.setup]
+nixPkgs = ["nodejs", "python311"]
+
+[phases.install]
+cmds = [
+  "cd frontend && npm install",
+  "cd backend && pip install -r requirements.txt --break-system-packages"
+]
+
+[phases.build]
+cmds = ["cd frontend && npm run build"]
+
+[start]
+cmd = "cd /app && uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
