@@ -59,23 +59,28 @@ async def delete_document(filename: str, project: Optional[str] = None):
     """Delete all chunks for a specific document"""
     try:
         rag = RAGHandler()
-        collection = rag.client.get_collection(name="documents")
         
-        # Get all chunks for this document
+        try:
+            collection = rag.client.get_collection(name="documents")
+        except:
+            # Collection doesn't exist, nothing to delete
+            return {"deleted": 0, "filename": filename}
+        
+        # Get all chunks
         results = collection.get(include=["metadatas"])
         
-        # Find IDs to delete
+        # Find IDs to delete - match on filename only
         ids_to_delete = []
         for i, metadata in enumerate(results["metadatas"]):
-            if metadata.get("filename") == filename:
-                if project is None or metadata.get("project") == project:
-                    ids_to_delete.append(results["ids"][i])
+            # Match on filename, ignore project for now since metadata is inconsistent
+            if metadata.get("filename") == filename or metadata.get("source") == filename:
+                ids_to_delete.append(results["ids"][i])
         
         # Delete the chunks
         if ids_to_delete:
             collection.delete(ids=ids_to_delete)
         
-        return {"deleted": len(ids_to_delete), "filename": filename}
+        return {"deleted": len(ids_to_delete), "filename": filename, "message": f"Deleted {len(ids_to_delete)} chunks"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
