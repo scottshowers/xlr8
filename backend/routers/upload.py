@@ -1,7 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from typing import Optional
 import sys
-import uuid
 import os
 import PyPDF2
 import docx
@@ -11,7 +10,7 @@ sys.path.insert(0, '/app')
 sys.path.insert(0, '/data')
 
 from utils.rag_handler import RAGHandler
-from backend.routers.jobs import create_job, update_job, complete_job, fail_job
+from utils.database.models import ProcessingJobModel, DocumentModel
 
 router = APIRouter()
 
@@ -48,15 +47,24 @@ async def upload_file(
     project: str = Form(...),
     functional_area: Optional[str] = Form(None)
 ):
-    job_id = str(uuid.uuid4())
     file_path = None
     
     try:
-        # Create job
-        create_job(job_id, file.filename, project)
+        # Create processing job in database
+        job = ProcessingJobModel.create(
+            job_type='file_upload',
+            project_id=project,
+            filename=file.filename,
+            input_data={'filename': file.filename, 'functional_area': functional_area}
+        )
+        
+        if not job:
+            raise HTTPException(status_code=500, detail="Failed to create processing job")
+        
+        job_id = job['id']
         
         # Save file
-        update_job(job_id, status="processing", progress=10, current_step="Saving file...")
+        ProcessingJobModel.update_progress(job_id, 10, "Saving file...")
         os.makedirs("/data/uploads", exist_ok=True)
         file_path = f"/data/uploads/{job_id}_{file.filename}"
         
@@ -65,15 +73,15 @@ async def upload_file(
             f.write(content)
         
         # Extract text
-        update_job(job_id, progress=30, current_step="Extracting text...")
+        ProcessingJobModel.update_progress(job_id, 30, "Extracting text...")
         text = extract_text(file_path)
         
         if not text:
-            fail_job(job_id, "No text could be extracted from file")
+            ProcessingJobModel.fail(job_id, "No text could be extracted from file")
             raise HTTPException(status_code=400, detail="No text extracted")
         
         # Prepare metadata
-        update_job(job_id, progress=50, current_step="Preparing metadata...")
+        ProcessingJobModel.update_progress(job_id, 50, "Preparing metadata...")
         file_ext = file.filename.split('.')[-1].lower()
         
         metadata = {
@@ -87,7 +95,7 @@ async def upload_file(
             metadata["functional_area"] = functional_area
         
         # Add to vector store
-        update_job(job_id, progress=70, current_step="Creating embeddings...")
+        ProcessingJobModel.update_progress(job_id, 70, "Creating embeddings...")
         rag = RAGHandler()
         success = rag.add_document(
             collection_name="documents",
@@ -96,16 +104,31 @@ async def upload_file(
         )
         
         if not success:
-            fail_job(job_id, "Failed to add document to vector store")
+            ProcessingJobModel.fail(job_id, "Failed to add document to vector store")
             raise HTTPException(status_code=500, detail="Failed to process document")
         
+        # Save to documents table
+        ProcessingJobModel.update_progress(job_id, 90, "Saving to database...")
+        DocumentModel.create(
+            project_id=project,
+            name=file.filename,
+            category=functional_area or 'General',
+            file_type=file_ext,
+            file_size=len(content),
+            content=text[:5000],  # Store first 5000 chars
+            metadata=metadata
+        )
+        
         # Cleanup
-        update_job(job_id, progress=90, current_step="Finalizing...")
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
         
-        # Complete
-        complete_job(job_id, f"Successfully processed {file.filename}")
+        # Complete job
+        ProcessingJobModel.complete(job_id, {
+            'filename': file.filename,
+            'chunks_created': 'processed',
+            'project': project
+        })
         
         return {
             "job_id": job_id,
@@ -114,14 +137,13 @@ async def upload_file(
         }
         
     except HTTPException:
-        # Cleanup on error
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
         raise
         
     except Exception as e:
-        # Cleanup on error
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
-        fail_job(job_id, str(e))
+        if 'job_id' in locals():
+            ProcessingJobModel.fail(job_id, str(e))
         raise HTTPException(status_code=500, detail=str(e))
