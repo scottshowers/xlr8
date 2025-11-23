@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import Chat from './components/Chat'
 import Upload from './components/Upload'
 import Status from './components/Status'
+import Secure20Analysis from './pages/Secure20Analysis'
 import api from './services/api'
 
 function App() {
@@ -39,6 +40,7 @@ function App() {
               <Link to="/" className="hover:underline">Chat</Link>
               <Link to="/upload" className="hover:underline">Upload</Link>
               <Link to="/status" className="hover:underline">Status</Link>
+              <Link to="/secure20" className="hover:underline">SECURE 2.0</Link>
             </div>
             {health && (
               <div className="flex items-center gap-2">
@@ -54,6 +56,7 @@ function App() {
             <Route path="/" element={<Chat projects={projects} functionalAreas={functionalAreas} />} />
             <Route path="/upload" element={<Upload projects={projects} functionalAreas={functionalAreas} />} />
             <Route path="/status" element={<Status />} />
+            <Route path="/secure20" element={<Secure20Analysis />} />
           </Routes>
         </div>
       </div>
