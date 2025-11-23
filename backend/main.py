@@ -31,15 +31,13 @@ app.include_router(projects.router, prefix="/api")
 
 @app.get("/api/health")
 async def health():
-    from utils.rag_handler import RAGHandler
-    
     try:
+        from utils.rag_handler import RAGHandler
         rag = RAGHandler()
-        stats = rag.get_stats()
         
         return {
             "status": "healthy",
-            "chromadb": stats
+            "chromadb": "connected"
         }
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}
