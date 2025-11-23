@@ -4,7 +4,7 @@ import sys
 sys.path.insert(0, '/app')
 sys.path.insert(0, '/data')
 
-from utils.database.supabase_client import get_supabase_client
+from utils.database.supabase_client import get_supabase
 
 router = APIRouter()
 
@@ -16,7 +16,9 @@ FUNCTIONAL_AREAS = [
 @router.get("/projects")
 async def get_projects():
     try:
-        supabase = get_supabase_client()
+        supabase = get_supabase()
+        if not supabase:
+            return {"projects": []}
         result = supabase.table("projects").select("*").execute()
         return {"projects": result.data}
     except Exception as e:
