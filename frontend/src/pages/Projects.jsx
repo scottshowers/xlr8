@@ -35,7 +35,16 @@ function Projects({ onProjectsChanged }) {
     try {
       setLoading(true);
       const response = await axios.get(`${API_URL}/api/projects/list`);
-      setProjects(response.data);
+      
+      // Handle both response formats
+      let projectsArray = [];
+      if (Array.isArray(response.data)) {
+        projectsArray = response.data;
+      } else if (response.data && Array.isArray(response.data.projects)) {
+        projectsArray = response.data.projects;
+      }
+      
+      setProjects(projectsArray);
     } catch (error) {
       console.error('Failed to load projects:', error);
       setError('Failed to load projects');
