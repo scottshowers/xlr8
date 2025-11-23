@@ -23,10 +23,10 @@ export default function CreateProject({ onProjectCreated, onClose }) {
     setError(null);
 
     try {
-      const response = await api.post('/projects', {
+      const response = await api.post('/projects/create', {
         name: name.trim(),
         customer: customer.trim() || null,
-        project_type: projectType,
+        type: projectType,
         start_date: startDate || null,
         notes: notes.trim() || null
       });
