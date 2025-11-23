@@ -38,7 +38,7 @@ class ProjectUpdate(BaseModel):
 @router.get("/list")
 async def list_projects():
     try:
-        projects = ProjectModel.list_all()
+        projects = ProjectModel.get_all(status=None)  # Get all, not just active
         
         formatted = []
         for proj in projects:
@@ -108,7 +108,7 @@ async def update_project(project_id: str, updates: ProjectUpdate):
                 update_dict['metadata'] = {}
             update_dict['metadata']['notes'] = update_dict.pop('notes')
         
-        updated = ProjectModel.update(project_id, update_dict)
+        updated = ProjectModel.update(project_id, **update_dict)
         
         if not updated:
             raise HTTPException(status_code=404, detail="Project not found")
