@@ -1,29 +1,140 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit2, Trash2, CheckCircle, Circle } from 'lucide-react';
+import { FolderKanban, Plus, Edit2, Trash2, AlertCircle, CheckCircle, Circle } from 'lucide-react';
+import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://hcmpact-xlr8-production.up.railway.app';
 
-export default function Projects() {
+function Projects({ onProjectsChanged }) {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeProjectId, setActiveProjectId] = useState(localStorage.getItem('activeProjectId'));
-  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showForm, setShowForm] = useState(false);
   const [editingProject, setEditingProject] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [activeProjectId, setActiveProjectId] = useState(null);
+  const [error, setError] = useState('');
+
+  const [formData, setFormData] = useState({
+    customer: '',
+    name: '',
+    type: 'Implementation',
+    start_date: '',
+    notes: '',
+    status: 'active'
+  });
+
+  // Load active project from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem('activeProjectId');
+    if (saved) {
+      setActiveProjectId(saved);
+    }
+  }, []);
+
+  // Load projects
+  const loadProjects = async () => {
+    try {
+      setLoading(true);
+      const response = await axios.get(`${API_URL}/api/projects/list`);
+      setProjects(response.data);
+    } catch (error) {
+      console.error('Failed to load projects:', error);
+      setError('Failed to load projects');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     loadProjects();
   }, []);
 
-  const loadProjects = async () => {
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+
     try {
-      const response = await fetch(`${API_URL}/api/projects/list`);
-      const data = await response.json();
-      setProjects(data.projects || []);
+      if (editingProject) {
+        // Update existing project
+        await axios.put(
+          `${API_URL}/api/projects/${editingProject.id}`,
+          formData
+        );
+      } else {
+        // Create new project
+        await axios.post(
+          `${API_URL}/api/projects/create`,
+          formData
+        );
+      }
+
+      // Reload projects
+      await loadProjects();
+      
+      // Notify parent to refresh its project list
+      if (onProjectsChanged) {
+        await onProjectsChanged();
+      }
+
+      // Reset form
+      setShowForm(false);
+      setEditingProject(null);
+      setFormData({
+        customer: '',
+        name: '',
+        type: 'Implementation',
+        start_date: '',
+        notes: '',
+        status: 'active'
+      });
     } catch (error) {
-      console.error('Error loading projects:', error);
-    } finally {
-      setLoading(false);
+      console.error('Failed to save project:', error);
+      setError(error.response?.data?.detail || 'Failed to save project');
+    }
+  };
+
+  const handleEdit = (project) => {
+    setEditingProject(project);
+    setFormData({
+      customer: project.customer || '',
+      name: project.name || '',
+      type: project.metadata?.type || 'Implementation',
+      start_date: project.start_date || '',
+      notes: project.metadata?.notes || '',
+      status: project.status || 'active'
+    });
+    setShowForm(true);
+  };
+
+  const handleDelete = async (projectId) => {
+    try {
+      await axios.delete(`${API_URL}/api/projects/${projectId}`);
+      
+      // If deleted project was active, clear active status
+      if (activeProjectId === projectId) {
+        setActiveProjectId(null);
+        localStorage.removeItem('activeProjectId');
+      }
+      
+      // Reload projects
+      await loadProjects();
+      
+      // Notify parent to refresh its project list
+      if (onProjectsChanged) {
+        await onProjectsChanged();
+      }
+      
+      setDeleteConfirm(null);
+    } catch (error) {
+      console.error('Failed to delete project:', error);
+      setError('Failed to delete project');
     }
   };
 
@@ -32,26 +143,22 @@ export default function Projects() {
     localStorage.setItem('activeProjectId', projectId);
   };
 
-  const handleDelete = async (projectId) => {
-    try {
-      const response = await fetch(`${API_URL}/api/projects/${projectId}`, {
-        method: 'DELETE'
-      });
-      
-      if (response.ok) {
-        if (activeProjectId === projectId) {
-          setActiveProjectId(null);
-          localStorage.removeItem('activeProjectId');
-        }
-        loadProjects();
-        setDeleteConfirm(null);
-      }
-    } catch (error) {
-      console.error('Error deleting project:', error);
-    }
+  const getStatusBadge = (status) => {
+    const colors = {
+      active: 'bg-green-100 text-green-800',
+      'on-hold': 'bg-yellow-100 text-yellow-800',
+      completed: 'bg-blue-100 text-blue-800',
+      cancelled: 'bg-red-100 text-red-800'
+    };
+    return colors[status] || 'bg-gray-100 text-gray-800';
   };
 
-  const activeProject = projects.find(p => p.id === activeProjectId);
+  const stats = {
+    total: projects.length,
+    active: projects.filter(p => p.status === 'active').length,
+    onHold: projects.filter(p => p.status === 'on-hold').length,
+    completed: projects.filter(p => p.status === 'completed').length
+  };
 
   if (loading) {
     return (
@@ -62,96 +169,239 @@ export default function Projects() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto p-6">
+    <div className="max-w-7xl mx-auto">
       {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Projects</h1>
-        <p className="text-gray-600">Manage your UKG implementation projects</p>
-      </div>
-
-      {/* Active Project Banner */}
-      {activeProject && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <CheckCircle className="text-blue-600" size={24} />
-              <div>
-                <div className="font-semibold text-blue-900">Active Project</div>
-                <div className="text-blue-700">{activeProject.customer} - AR# {activeProject.name}</div>
-              </div>
-            </div>
-            <button
-              onClick={() => handleSetActive(null)}
-              className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-            >
-              Clear Active
-            </button>
-          </div>
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Projects</h1>
+          <p className="text-gray-600 mt-1">Manage your customer projects</p>
         </div>
-      )}
-
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <div className="text-sm text-gray-600">Total Projects</div>
-          <div className="text-2xl font-bold text-gray-900">{projects.length}</div>
-        </div>
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <div className="text-sm text-gray-600">Active</div>
-          <div className="text-2xl font-bold text-green-600">
-            {projects.filter(p => p.status === 'active').length}
-          </div>
-        </div>
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <div className="text-sm text-gray-600">On Hold</div>
-          <div className="text-2xl font-bold text-yellow-600">
-            {projects.filter(p => p.status === 'on_hold').length}
-          </div>
-        </div>
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <div className="text-sm text-gray-600">Completed</div>
-          <div className="text-2xl font-bold text-gray-600">
-            {projects.filter(p => p.status === 'completed').length}
-          </div>
-        </div>
-      </div>
-
-      {/* Create Button */}
-      <div className="mb-6">
         <button
-          onClick={() => setShowCreateForm(!showCreateForm)}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center space-x-2"
+          onClick={() => {
+            setShowForm(true);
+            setEditingProject(null);
+            setFormData({
+              customer: '',
+              name: '',
+              type: 'Implementation',
+              start_date: '',
+              notes: '',
+              status: 'active'
+            });
+          }}
+          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
         >
-          <Plus size={20} />
-          <span>Create New Project</span>
+          <Plus className="mr-2 h-5 w-5" />
+          New Project
         </button>
       </div>
 
-      {/* Create Form */}
-      {showCreateForm && (
-        <CreateProjectForm
-          onSuccess={() => {
-            setShowCreateForm(false);
-            loadProjects();
-          }}
-          onCancel={() => setShowCreateForm(false)}
-        />
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Total Projects</p>
+              <p className="text-3xl font-bold text-gray-900">{stats.total}</p>
+            </div>
+            <FolderKanban className="h-10 w-10 text-blue-600" />
+          </div>
+        </div>
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Active</p>
+              <p className="text-3xl font-bold text-green-600">{stats.active}</p>
+            </div>
+            <CheckCircle className="h-10 w-10 text-green-600" />
+          </div>
+        </div>
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">On Hold</p>
+              <p className="text-3xl font-bold text-yellow-600">{stats.onHold}</p>
+            </div>
+            <AlertCircle className="h-10 w-10 text-yellow-600" />
+          </div>
+        </div>
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Completed</p>
+              <p className="text-3xl font-bold text-blue-600">{stats.completed}</p>
+            </div>
+            <CheckCircle className="h-10 w-10 text-blue-600" />
+          </div>
+        </div>
+      </div>
+
+      {/* Error Display */}
+      {error && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <div className="flex items-center text-red-800">
+            <AlertCircle className="h-5 w-5 mr-2" />
+            <p>{error}</p>
+          </div>
+        </div>
       )}
 
-      {/* Edit Form */}
-      {editingProject && (
-        <EditProjectForm
-          project={editingProject}
-          onSuccess={() => {
-            setEditingProject(null);
-            loadProjects();
-          }}
-          onCancel={() => setEditingProject(null)}
-        />
+      {/* Create/Edit Form */}
+      {showForm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-2xl">
+            <h2 className="text-2xl font-bold text-gray-900 mb-6">
+              {editingProject ? 'Edit Project' : 'Create New Project'}
+            </h2>
+            <form onSubmit={handleSubmit}>
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Customer Name *
+                    </label>
+                    <input
+                      type="text"
+                      name="customer"
+                      value={formData.customer}
+                      onChange={handleInputChange}
+                      required
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="e.g., Meyer Company"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Customer AR# (Project ID) *
+                    </label>
+                    <input
+                      type="text"
+                      name="name"
+                      value={formData.name}
+                      onChange={handleInputChange}
+                      required
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="e.g., AR-2024-001"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Project Type *
+                    </label>
+                    <select
+                      name="type"
+                      value={formData.type}
+                      onChange={handleInputChange}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="Implementation">Implementation</option>
+                      <option value="Upgrade">Upgrade</option>
+                      <option value="Support">Support</option>
+                      <option value="Consulting">Consulting</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Start Date
+                    </label>
+                    <input
+                      type="date"
+                      name="start_date"
+                      value={formData.start_date}
+                      onChange={handleInputChange}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Status *
+                  </label>
+                  <select
+                    name="status"
+                    value={formData.status}
+                    onChange={handleInputChange}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="active">Active</option>
+                    <option value="on-hold">On Hold</option>
+                    <option value="completed">Completed</option>
+                    <option value="cancelled">Cancelled</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Notes
+                  </label>
+                  <textarea
+                    name="notes"
+                    value={formData.notes}
+                    onChange={handleInputChange}
+                    rows={3}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Additional project details..."
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-4 mt-6">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowForm(false);
+                    setEditingProject(null);
+                    setError('');
+                  }}
+                  className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  {editingProject ? 'Update Project' : 'Create Project'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+            <h2 className="text-xl font-bold text-gray-900 mb-4">Confirm Delete</h2>
+            <p className="text-gray-600 mb-6">
+              Are you sure you want to delete project "{deleteConfirm.customer} - {deleteConfirm.name}"? 
+              This action cannot be undone.
+            </p>
+            <div className="flex justify-end space-x-4">
+              <button
+                onClick={() => setDeleteConfirm(null)}
+                className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleDelete(deleteConfirm.id)}
+                className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Projects Table */}
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-lg shadow overflow-hidden">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
@@ -173,7 +423,7 @@ export default function Projects() {
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Created
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Actions
               </th>
             </tr>
@@ -183,362 +433,75 @@ export default function Projects() {
               <tr key={project.id} className="hover:bg-gray-50">
                 <td className="px-6 py-4 whitespace-nowrap">
                   <button
-                    onClick={() => handleSetActive(project.id === activeProjectId ? null : project.id)}
-                    className="text-gray-400 hover:text-blue-600"
+                    onClick={() => handleSetActive(project.id)}
+                    className={`${
+                      activeProjectId === project.id
+                        ? 'text-green-600'
+                        : 'text-gray-300 hover:text-green-600'
+                    }`}
                   >
-                    {project.id === activeProjectId ? (
-                      <CheckCircle className="text-blue-600" size={20} />
-                    ) : (
-                      <Circle size={20} />
-                    )}
+                    <Circle
+                      className="h-5 w-5"
+                      fill={activeProjectId === project.id ? 'currentColor' : 'none'}
+                    />
                   </button>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="text-sm font-medium text-gray-900">{project.customer}</div>
+                  <div className="text-sm font-medium text-gray-900">
+                    {project.customer}
+                  </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="text-sm text-gray-900">{project.name}</div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="text-sm text-gray-600">{project.metadata?.type || 'N/A'}</div>
+                  <div className="text-sm text-gray-500">
+                    {project.metadata?.type || 'Implementation'}
+                  </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full
-                    ${project.status === 'active' ? 'bg-green-100 text-green-800' : ''}
-                    ${project.status === 'on_hold' ? 'bg-yellow-100 text-yellow-800' : ''}
-                    ${project.status === 'completed' ? 'bg-gray-100 text-gray-800' : ''}
-                  `}>
+                  <span
+                    className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusBadge(
+                      project.status
+                    )}`}
+                  >
                     {project.status}
                   </span>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                   {new Date(project.created_at).toLocaleDateString()}
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                   <button
-                    onClick={() => setEditingProject(project)}
-                    className="text-blue-600 hover:text-blue-900"
+                    onClick={() => handleEdit(project)}
+                    className="text-blue-600 hover:text-blue-900 mr-4"
                   >
-                    <Edit2 size={16} />
+                    <Edit2 className="h-5 w-5" />
                   </button>
                   <button
-                    onClick={() => setDeleteConfirm(project.id)}
+                    onClick={() => setDeleteConfirm(project)}
                     className="text-red-600 hover:text-red-900"
                   >
-                    <Trash2 size={16} />
+                    <Trash2 className="h-5 w-5" />
                   </button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-      </div>
 
-      {/* Delete Confirmation Modal */}
-      {deleteConfirm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-            <h3 className="text-lg font-semibold mb-4">Confirm Delete</h3>
-            <p className="text-gray-600 mb-6">
-              Are you sure you want to delete this project? This action cannot be undone.
+        {projects.length === 0 && (
+          <div className="text-center py-12">
+            <FolderKanban className="mx-auto h-12 w-12 text-gray-400" />
+            <h3 className="mt-2 text-sm font-medium text-gray-900">No projects</h3>
+            <p className="mt-1 text-sm text-gray-500">
+              Get started by creating a new project.
             </p>
-            <div className="flex justify-end space-x-3">
-              <button
-                onClick={() => setDeleteConfirm(null)}
-                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => handleDelete(deleteConfirm)}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
-              >
-                Delete
-              </button>
-            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
 
-function CreateProjectForm({ onSuccess, onCancel }) {
-  const [formData, setFormData] = useState({
-    name: '',
-    customer: '',
-    project_type: 'Implementation',
-    start_date: '',
-    notes: ''
-  });
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState(null);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setSubmitting(true);
-    setError(null);
-
-    try {
-      const response = await fetch(`${API_URL}/api/projects/create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        onSuccess();
-      } else {
-        setError(data.detail || 'Failed to create project');
-      }
-    } catch (error) {
-      console.error('Error creating project:', error);
-      setError('Network error - check console');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
-      <h3 className="text-lg font-semibold mb-4">Create New Project</h3>
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
-          {error}
-        </div>
-      )}
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Customer Name *
-            </label>
-            <input
-              type="text"
-              required
-              value={formData.customer}
-              onChange={(e) => setFormData({ ...formData, customer: e.target.value })}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2"
-              placeholder="e.g., Meyer Company"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Customer AR# (Project ID) *
-            </label>
-            <input
-              type="text"
-              required
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2"
-              placeholder="e.g., MEY1000"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Project Type *
-            </label>
-            <select
-              value={formData.project_type}
-              onChange={(e) => setFormData({ ...formData, project_type: e.target.value })}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2"
-            >
-              <option>Implementation</option>
-              <option>Assessment/Analysis</option>
-              <option>Upgrade</option>
-              <option>Support</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Start Date
-            </label>
-            <input
-              type="date"
-              value={formData.start_date}
-              onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2"
-            />
-          </div>
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Notes
-          </label>
-          <textarea
-            value={formData.notes}
-            onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-            rows={3}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2"
-            placeholder="Project notes..."
-          />
-        </div>
-        <div className="flex justify-end space-x-3">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={submitting}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-          >
-            {submitting ? 'Creating...' : 'Create Project'}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function EditProjectForm({ project, onSuccess, onCancel }) {
-  const [formData, setFormData] = useState({
-    name: project.name,
-    customer: project.customer,
-    project_type: project.metadata?.type || 'Implementation',
-    start_date: project.start_date || '',
-    notes: project.metadata?.notes || '',
-    status: project.status
-  });
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState(null);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setSubmitting(true);
-    setError(null);
-
-    try {
-      const response = await fetch(`${API_URL}/api/projects/${project.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        onSuccess();
-      } else {
-        setError(data.detail || 'Failed to update project');
-      }
-    } catch (error) {
-      console.error('Error updating project:', error);
-      setError('Network error - check console');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
-      <h3 className="text-lg font-semibold mb-4">Edit Project</h3>
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
-          {error}
-        </div>
-      )}
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Customer Name *
-            </label>
-            <input
-              type="text"
-              required
-              value={formData.customer}
-              onChange={(e) => setFormData({ ...formData, customer: e.target.value })}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Customer AR# (Project ID) *
-            </label>
-            <input
-              type="text"
-              required
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Project Type *
-            </label>
-            <select
-              value={formData.project_type}
-              onChange={(e) => setFormData({ ...formData, project_type: e.target.value })}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2"
-            >
-              <option>Implementation</option>
-              <option>Assessment/Analysis</option>
-              <option>Upgrade</option>
-              <option>Support</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Status *
-            </label>
-            <select
-              value={formData.status}
-              onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2"
-            >
-              <option value="active">Active</option>
-              <option value="on_hold">On Hold</option>
-              <option value="completed">Completed</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Start Date
-            </label>
-            <input
-              type="date"
-              value={formData.start_date}
-              onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2"
-            />
-          </div>
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Notes
-          </label>
-          <textarea
-            value={formData.notes}
-            onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-            rows={3}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2"
-          />
-        </div>
-        <div className="flex justify-end space-x-3">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={submitting}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-          >
-            {submitting ? 'Saving...' : 'Save Changes'}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
+export default Projects;
