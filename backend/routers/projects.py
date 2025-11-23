@@ -1,16 +1,11 @@
-"""
-Projects Router - Complete CRUD
-"""
-
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
-import sys
+from datetime import datetime
 import logging
 
-sys.path.insert(0, '/app')
-sys.path.insert(0, '/data')
-
+from utils.database.connection import get_db
 from utils.database.models import ProjectModel
 
 logger = logging.getLogger(__name__)
@@ -18,127 +13,151 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects", tags=["projects"])
 
 
-class ProjectCreate(BaseModel):
-    name: str
+# Pydantic models for request bodies
+class ProjectCreateRequest(BaseModel):
     customer: str
-    project_type: str
+    name: str
+    type: str = "Implementation"
     start_date: Optional[str] = None
     notes: Optional[str] = None
+    status: str = "active"
 
 
-class ProjectUpdate(BaseModel):
-    name: Optional[str] = None
+class ProjectUpdateRequest(BaseModel):
     customer: Optional[str] = None
-    project_type: Optional[str] = None
+    name: Optional[str] = None
+    type: Optional[str] = None
     start_date: Optional[str] = None
     notes: Optional[str] = None
     status: Optional[str] = None
 
 
 @router.get("/list")
-async def list_projects():
+async def list_projects(
+    status: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """List all projects, optionally filtered by status"""
     try:
-        projects = ProjectModel.get_all(status=None)  # Get all, not just active
-        
-        formatted = []
-        for proj in projects:
-            formatted.append({
-                'id': proj.get('id'),
-                'name': proj.get('name'),
-                'customer': proj.get('customer'),
-                'start_date': proj.get('start_date'),
-                'status': proj.get('status', 'active'),
-                'is_active': proj.get('is_active', False),
-                'created_at': proj.get('created_at'),
-                'updated_at': proj.get('updated_at'),
-                'created_by': proj.get('created_by'),
-                'metadata': proj.get('metadata', {})
-            })
-        
-        return {"projects": formatted}
-        
+        projects = ProjectModel.get_all(db, status=status)
+        # Return array directly
+        return projects
     except Exception as e:
-        logger.error(f"Error listing projects: {e}")
+        logger.error(f"Failed to list projects: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/create")
-async def create_project(project: ProjectCreate):
+async def create_project(
+    request: ProjectCreateRequest,
+    db: Session = Depends(get_db)
+):
+    """Create a new project"""
     try:
-        logger.info(f"Creating project: {project.name}")
+        # Parse start_date if provided
+        parsed_start_date = None
+        if request.start_date:
+            try:
+                parsed_start_date = datetime.fromisoformat(request.start_date.replace('Z', '+00:00'))
+            except ValueError:
+                logger.warning(f"Invalid start_date format: {request.start_date}")
         
-        new_project = ProjectModel.create(
-            name=project.name,
-            client_name=project.customer,
-            project_type=project.project_type,
-            notes=project.notes or ""
-        )
-        
-        if not new_project:
-            raise HTTPException(status_code=500, detail="Failed to create project")
-        
-        return {
-            "success": True,
-            "project": new_project,
-            "message": f"Project '{project.name}' created successfully"
+        # Prepare metadata
+        metadata = {
+            "type": request.type,
+            "notes": request.notes
         }
         
+        # Create project
+        project = ProjectModel.create(
+            db=db,
+            name=request.name,
+            customer=request.customer,
+            start_date=parsed_start_date,
+            status=request.status,
+            metadata=metadata
+        )
+        
+        logger.info(f"Created project: {project.id} - {request.customer}")
+        return project
+        
     except Exception as e:
-        logger.error(f"Error creating project: {e}")
+        logger.error(f"Failed to create project: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.put("/{project_id}")
-async def update_project(project_id: str, updates: ProjectUpdate):
+async def update_project(
+    project_id: str,
+    request: ProjectUpdateRequest,
+    db: Session = Depends(get_db)
+):
+    """Update an existing project"""
     try:
-        logger.info(f"Updating project {project_id}")
-        
-        update_dict = updates.dict(exclude_unset=True)
-        
-        if 'customer' in update_dict:
-            update_dict['client_name'] = update_dict.pop('customer')
-        
-        if 'project_type' in update_dict:
-            if 'metadata' not in update_dict:
-                update_dict['metadata'] = {}
-            update_dict['metadata']['type'] = update_dict.pop('project_type')
-        
-        if 'notes' in update_dict:
-            if 'metadata' not in update_dict:
-                update_dict['metadata'] = {}
-            update_dict['metadata']['notes'] = update_dict.pop('notes')
-        
-        updated = ProjectModel.update(project_id, **update_dict)
-        
-        if not updated:
+        # Get existing project
+        project = ProjectModel.get_by_id(db, project_id)
+        if not project:
             raise HTTPException(status_code=404, detail="Project not found")
         
-        return {
-            "success": True,
-            "project": updated,
-            "message": "Project updated successfully"
-        }
+        # Build update dict
+        update_dict = {}
         
+        if request.customer is not None:
+            update_dict["customer"] = request.customer
+        if request.name is not None:
+            update_dict["name"] = request.name
+        if request.status is not None:
+            update_dict["status"] = request.status
+            
+        # Handle start_date
+        if request.start_date is not None:
+            try:
+                update_dict["start_date"] = datetime.fromisoformat(request.start_date.replace('Z', '+00:00'))
+            except ValueError:
+                logger.warning(f"Invalid start_date format: {request.start_date}")
+        
+        # Handle metadata fields
+        if request.type is not None or request.notes is not None:
+            current_metadata = project.metadata or {}
+            if request.type is not None:
+                current_metadata["type"] = request.type
+            if request.notes is not None:
+                current_metadata["notes"] = request.notes
+            update_dict["metadata"] = current_metadata
+        
+        # Update project
+        updated_project = ProjectModel.update(db, project_id, **update_dict)
+        
+        logger.info(f"Updated project: {project_id}")
+        return updated_project
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error updating project: {e}")
+        logger.error(f"Failed to update project {project_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.delete("/{project_id}")
-async def delete_project(project_id: str):
+async def delete_project(
+    project_id: str,
+    db: Session = Depends(get_db)
+):
+    """Delete a project"""
     try:
-        logger.info(f"Deleting project {project_id}")
-        
-        success = ProjectModel.delete(project_id)
-        
-        if not success:
+        # Check if project exists
+        project = ProjectModel.get_by_id(db, project_id)
+        if not project:
             raise HTTPException(status_code=404, detail="Project not found")
         
-        return {
-            "success": True,
-            "message": "Project deleted successfully"
-        }
+        # Delete project
+        ProjectModel.delete(db, project_id)
         
+        logger.info(f"Deleted project: {project_id}")
+        return {"success": True, "message": "Project deleted"}
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error deleting project: {e}")
+        logger.error(f"Failed to delete project {project_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
