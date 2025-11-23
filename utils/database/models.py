@@ -279,6 +279,138 @@ class ChatHistoryModel:
             return False
 
 
+class ProcessingJobModel:
+    """Processing job database operations"""
+    
+    @staticmethod
+    def create(job_type: str, project_id: str = None, filename: str = None,
+              input_data: dict = None) -> Optional[Dict[str, Any]]:
+        """Create a new processing job"""
+        supabase = get_supabase()
+        if not supabase:
+            return None
+        
+        try:
+            data = {
+                'job_type': job_type,
+                'project_id': project_id,
+                'status': 'queued',
+                'progress': {'percent': 0, 'step': 'Queued...'},
+                'input_data': input_data or {'filename': filename}
+            }
+            
+            response = supabase.table('processing_jobs').insert(data).execute()
+            return response.data[0] if response.data else None
+        
+        except Exception as e:
+            print(f"Error creating job: {e}")
+            return None
+    
+    @staticmethod
+    def update_progress(job_id: str, percent: int, step: str) -> bool:
+        """Update job progress"""
+        supabase = get_supabase()
+        if not supabase:
+            return False
+        
+        try:
+            data = {
+                'status': 'processing',
+                'progress': {'percent': percent, 'step': step},
+                'updated_at': datetime.utcnow().isoformat()
+            }
+            
+            if percent == 0:
+                data['started_at'] = datetime.utcnow().isoformat()
+            
+            supabase.table('processing_jobs').update(data).eq('id', job_id).execute()
+            return True
+        
+        except Exception as e:
+            print(f"Error updating job progress: {e}")
+            return False
+    
+    @staticmethod
+    def complete(job_id: str, result_data: dict = None) -> bool:
+        """Mark job as completed"""
+        supabase = get_supabase()
+        if not supabase:
+            return False
+        
+        try:
+            data = {
+                'status': 'completed',
+                'progress': {'percent': 100, 'step': 'Complete'},
+                'result_data': result_data or {},
+                'completed_at': datetime.utcnow().isoformat(),
+                'updated_at': datetime.utcnow().isoformat()
+            }
+            
+            supabase.table('processing_jobs').update(data).eq('id', job_id).execute()
+            return True
+        
+        except Exception as e:
+            print(f"Error completing job: {e}")
+            return False
+    
+    @staticmethod
+    def fail(job_id: str, error_message: str) -> bool:
+        """Mark job as failed"""
+        supabase = get_supabase()
+        if not supabase:
+            return False
+        
+        try:
+            data = {
+                'status': 'failed',
+                'error_message': error_message,
+                'completed_at': datetime.utcnow().isoformat(),
+                'updated_at': datetime.utcnow().isoformat()
+            }
+            
+            supabase.table('processing_jobs').update(data).eq('id', job_id).execute()
+            return True
+        
+        except Exception as e:
+            print(f"Error failing job: {e}")
+            return False
+    
+    @staticmethod
+    def get_all(limit: int = 50) -> List[Dict[str, Any]]:
+        """Get recent jobs"""
+        supabase = get_supabase()
+        if not supabase:
+            return []
+        
+        try:
+            response = supabase.table('processing_jobs') \
+                .select('*') \
+                .order('created_at', desc=True) \
+                .limit(limit) \
+                .execute()
+            
+            return response.data if response.data else []
+        
+        except Exception as e:
+            print(f"Error getting jobs: {e}")
+            return []
+    
+    @staticmethod
+    def get_by_id(job_id: str) -> Optional[Dict[str, Any]]:
+        """Get job by ID"""
+        supabase = get_supabase()
+        if not supabase:
+            return None
+        
+        try:
+            response = supabase.table('processing_jobs').select('*').eq('id', job_id).execute()
+            return response.data[0] if response.data else None
+        
+        except Exception as e:
+            print(f"Error getting job: {e}")
+            return None
+
+
 # Convenience functions
 def create_project(name: str, **kwargs) -> Optional[Dict]:
     """Shortcut to create project"""
@@ -299,3 +431,23 @@ def add_chat_message(session_id: str, role: str, content: str, **kwargs) -> Opti
 def get_chat_history(session_id: str) -> List[Dict]:
     """Shortcut to get chat history"""
     return ChatHistoryModel.get_by_session(session_id)
+
+
+def create_job(job_type: str, **kwargs) -> Optional[Dict]:
+    """Shortcut to create job"""
+    return ProcessingJobModel.create(job_type, **kwargs)
+
+
+def update_job_progress(job_id: str, percent: int, step: str) -> bool:
+    """Shortcut to update job progress"""
+    return ProcessingJobModel.update_progress(job_id, percent, step)
+
+
+def complete_job(job_id: str, result_data: dict = None) -> bool:
+    """Shortcut to complete job"""
+    return ProcessingJobModel.complete(job_id, result_data)
+
+
+def fail_job(job_id: str, error: str) -> bool:
+    """Shortcut to fail job"""
+    return ProcessingJobModel.fail(job_id, error)
