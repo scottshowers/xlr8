@@ -1,6 +1,6 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
-import { MessageSquare, Upload, Activity, FileText, FolderKanban } from 'lucide-react';
+import { MessageSquare, Upload as UploadIcon, Activity, FileText, FolderKanban } from 'lucide-react';
 import Chat from './pages/Chat';
 import Upload from './pages/Upload';
 import Status from './pages/Status';
@@ -31,7 +31,7 @@ function App() {
                     to="/upload"
                     className="inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-900 hover:text-blue-600"
                   >
-                    <Upload className="mr-2" size={18} />
+                    <UploadIcon className="mr-2" size={18} />
                     Upload
                   </Link>
                   <Link
