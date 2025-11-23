@@ -9,7 +9,7 @@ import logging
 sys.path.insert(0, '/app')
 sys.path.insert(0, '/data')
 
-from backend.routers import chat, upload, status, projects
+from backend.routers import chat, upload, status, projects, jobs
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,6 +28,7 @@ app.include_router(chat.router, prefix="/api")
 app.include_router(upload.router, prefix="/api")
 app.include_router(status.router, prefix="/api")
 app.include_router(projects.router, prefix="/api")
+app.include_router(jobs.router, prefix="/api")
 
 @app.get("/api/health")
 async def health():
