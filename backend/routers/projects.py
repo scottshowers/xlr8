@@ -50,30 +50,18 @@ async def list_projects(status: Optional[str] = None):
 async def create_project(request: ProjectCreateRequest):
     """Create a new project"""
     try:
-        # Parse start_date if provided
-        parsed_start_date = None
-        if request.start_date:
-            try:
-                parsed_start_date = datetime.fromisoformat(request.start_date.replace('Z', '+00:00'))
-            except ValueError:
-                logger.warning(f"Invalid start_date format: {request.start_date}")
-        
-        # Prepare metadata
-        metadata = {
-            "type": request.type,
-            "notes": request.notes
-        }
-        
-        # Create project
+        # Create project using model's simplified signature
         project = ProjectModel.create(
             name=request.name,
-            customer=request.customer,
-            start_date=parsed_start_date,
-            status=request.status,
-            metadata=metadata
+            client_name=request.customer,
+            project_type=request.type,
+            notes=request.notes
         )
         
-        logger.info(f"Created project: {project['id']} - {request.customer}")
+        if not project:
+            raise HTTPException(status_code=500, detail="Failed to create project")
+        
+        logger.info(f"Created project: {project.get('id')} - {request.customer}")
         return project
         
     except Exception as e:
@@ -90,7 +78,7 @@ async def update_project(project_id: str, request: ProjectUpdateRequest):
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
         
-        # Build update dict
+        # Build update dict using actual Supabase column names
         update_dict = {}
         
         if request.customer is not None:
@@ -103,11 +91,12 @@ async def update_project(project_id: str, request: ProjectUpdateRequest):
         # Handle start_date
         if request.start_date is not None:
             try:
-                update_dict["start_date"] = datetime.fromisoformat(request.start_date.replace('Z', '+00:00'))
+                parsed_date = datetime.fromisoformat(request.start_date.replace('Z', '+00:00'))
+                update_dict["start_date"] = parsed_date.isoformat()
             except ValueError:
                 logger.warning(f"Invalid start_date format: {request.start_date}")
         
-        # Handle metadata fields
+        # Handle metadata fields (type and notes go in metadata JSON)
         if request.type is not None or request.notes is not None:
             current_metadata = project.get('metadata', {})
             if request.type is not None:
