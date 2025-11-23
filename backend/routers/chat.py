@@ -1,11 +1,7 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 from typing import Optional
 import sys
-import uuid
-import os
-import PyPDF2
-import docx
-import pandas as pd
 
 sys.path.insert(0, '/app')
 sys.path.insert(0, '/data')
@@ -14,75 +10,45 @@ from utils.rag_handler import RAGHandler
 
 router = APIRouter()
 
-def extract_text(file_path: str) -> str:
-    """Extract text from file"""
-    ext = file_path.split('.')[-1].lower()
-    
-    try:
-        if ext == 'pdf':
-            with open(file_path, 'rb') as f:
-                pdf = PyPDF2.PdfReader(f)
-                return "\n".join([p.extract_text() for p in pdf.pages])
-        elif ext == 'docx':
-            doc = docx.Document(file_path)
-            return "\n".join([p.text for p in doc.paragraphs])
-        elif ext in ['xlsx', 'xls']:
-            excel = pd.ExcelFile(file_path)
-            texts = []
-            for sheet in excel.sheet_names:
-                df = pd.read_excel(file_path, sheet_name=sheet)
-                texts.append(f"=== {sheet} ===\n{df.to_string()}")
-            return "\n\n".join(texts)
-        elif ext in ['txt', 'md']:
-            with open(file_path, 'r') as f:
-                return f.read()
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Text extraction failed: {str(e)}")
-    
-    return ""
+class ChatRequest(BaseModel):
+    message: str
+    project: Optional[str] = None
+    functional_area: Optional[str] = None
 
-@router.post("/upload")
-async def upload_file(
-    file: UploadFile = File(...),
-    project: str = Form(...),
-    functional_area: Optional[str] = Form(None)
-):
+@router.post("/chat")
+async def chat(request: ChatRequest):
     try:
-        job_id = str(uuid.uuid4())
-        
-        os.makedirs("/data/uploads", exist_ok=True)
-        file_path = f"/data/uploads/{job_id}_{file.filename}"
-        
-        content = await file.read()
-        with open(file_path, "wb") as f:
-            f.write(content)
-        
-        text = extract_text(file_path)
-        
-        if not text:
-            raise HTTPException(status_code=400, detail="No text extracted")
-        
-        file_ext = file.filename.split('.')[-1].lower()
-        
         rag = RAGHandler()
-        success = rag.add_document(
+        
+        # Convert to correct parameters
+        project_id = request.project if request.project else None
+        functional_areas = [request.functional_area] if request.functional_area else None
+        
+        results = rag.search(
             collection_name="documents",
-            text=text,
-            metadata={
-                "project_id": project,
-                "functional_area": functional_area,
-                "filename": file.filename,
-                "file_type": file_ext,
-                "source": file.filename
-            }
+            query=request.message,
+            n_results=5,
+            project_id=project_id,
+            functional_areas=functional_areas
         )
         
-        os.remove(file_path)
+        # Format response
+        if not results:
+            return {
+                "response": "No relevant documents found.",
+                "routing_decision": "local",
+                "sources_count": 0
+            }
+        
+        docs = [r['document'] for r in results[:3]]
+        context = "\n\n".join(docs)
+        
+        response_text = f"Based on {len(results)} sources:\n\n{context}"
         
         return {
-            "job_id": job_id,
-            "status": "completed" if success else "failed",
-            "chunks": "processed"
+            "response": response_text,
+            "routing_decision": "local",
+            "sources_count": len(results)
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
