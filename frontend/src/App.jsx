@@ -4,7 +4,7 @@ import { MessageSquare, Upload as UploadIcon, Activity, FileText, FolderKanban }
 import Chat from './pages/Chat';
 import Upload from './pages/Upload';
 import Status from './pages/Status';
-import SecureTwo from './pages/SecureTwo';
+import Secure20Analysis from './pages/Secure20Analysis';
 import Projects from './pages/Projects';
 
 function App() {
@@ -69,7 +69,7 @@ function App() {
             <Route path="/upload" element={<Upload />} />
             <Route path="/status" element={<Status />} />
             <Route path="/projects" element={<Projects />} />
-            <Route path="/secure2" element={<SecureTwo />} />
+            <Route path="/secure2" element={<Secure20Analysis />} />
           </Routes>
         </div>
       </div>
