@@ -19,12 +19,13 @@ export default function Status() {
 
   const loadData = async () => {
     try {
-      const [chromaRes, docsRes, jobsRes, projectsRes] = await Promise.all([
-        api.get('/status/chromadb'),
-        api.get('/status/documents', { params: selectedProject !== 'all' ? { project: selectedProject } : {} }),
-        api.get('/jobs').catch(() => ({ data: { jobs: [] } })),
-        api.get('/projects')
-      ])
+      // Load each endpoint separately so one failure doesn't break everything
+      const chromaRes = await api.get('/status/chromadb').catch(() => ({ data: { total_chunks: 0 } }))
+      const docsRes = await api.get('/status/documents', { 
+        params: selectedProject !== 'all' ? { project: selectedProject } : {} 
+      }).catch(() => ({ data: { documents: [] } }))
+      const jobsRes = await api.get('/jobs').catch(() => ({ data: { jobs: [] } }))
+      const projectsRes = await api.get('/projects').catch(() => ({ data: { projects: [] } }))
       
       setChromaStats(chromaRes.data)
       setDocuments(docsRes.data.documents || [])
