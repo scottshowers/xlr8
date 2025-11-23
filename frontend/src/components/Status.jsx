@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { FileText, Loader2, CheckCircle, XCircle, Clock, Database } from 'lucide-react'
+import { FileText, Loader2, CheckCircle, XCircle, Clock, Database, Trash2 } from 'lucide-react'
 import api from '../services/api'
 
 export default function Status() {
@@ -63,6 +63,19 @@ export default function Status() {
       case 'failed': return 'bg-red-100 text-red-800'
       case 'processing': return 'bg-blue-100 text-blue-800'
       default: return 'bg-gray-100 text-gray-800'
+    }
+  }
+
+  const deleteDocument = async (filename, project) => {
+    if (!confirm(`Delete "${filename}"? This cannot be undone.`)) return
+    
+    try {
+      await api.delete(`/status/documents/${encodeURIComponent(filename)}`, {
+        params: { project }
+      })
+      loadData()
+    } catch (err) {
+      alert('Error deleting document: ' + err.message)
     }
   }
 
@@ -138,6 +151,7 @@ export default function Status() {
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Area</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Chunks</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Uploaded</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -162,6 +176,15 @@ export default function Status() {
                     <td className="px-4 py-3 text-sm text-gray-600">{doc.chunks}</td>
                     <td className="px-4 py-3 text-sm text-gray-500">
                       {doc.upload_date ? new Date(doc.upload_date).toLocaleDateString() : '-'}
+                    </td>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => deleteDocument(doc.filename, doc.project)}
+                        className="text-red-600 hover:text-red-800 p-1 hover:bg-red-50 rounded transition-colors"
+                        title="Delete document"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </td>
                   </tr>
                 ))}
