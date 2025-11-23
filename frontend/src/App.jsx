@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import { MessageSquare, Upload as UploadIcon, Activity, FileText, FolderKanban } from 'lucide-react';
 import Chat from './components/Chat';
@@ -7,7 +7,49 @@ import Status from './components/Status';
 import Secure20Analysis from './pages/Secure20Analysis';
 import Projects from './pages/Projects';
 
+const API_URL = import.meta.env.VITE_API_URL || 'https://hcmpact-xlr8-production.up.railway.app';
+
 function App() {
+  const [projects, setProjects] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const functionalAreas = [
+    'Payroll',
+    'Benefits',
+    'Time & Attendance',
+    'Recruiting',
+    'Onboarding',
+    'Performance',
+    'Compensation',
+    'Learning',
+    'Analytics'
+  ];
+
+  useEffect(() => {
+    loadProjects();
+  }, []);
+
+  const loadProjects = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/projects/list`);
+      const data = await response.json();
+      setProjects(data.projects || []);
+    } catch (error) {
+      console.error('Error loading projects:', error);
+      setProjects([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-gray-500">Loading...</div>
+      </div>
+    );
+  }
+
   return (
     <Router>
       <div className="min-h-screen bg-gray-50">
@@ -64,9 +106,9 @@ function App() {
         {/* Main Content */}
         <div className="py-10">
           <Routes>
-            <Route path="/" element={<Chat />} />
-            <Route path="/chat" element={<Chat />} />
-            <Route path="/upload" element={<Upload />} />
+            <Route path="/" element={<Chat projects={projects} functionalAreas={functionalAreas} />} />
+            <Route path="/chat" element={<Chat projects={projects} functionalAreas={functionalAreas} />} />
+            <Route path="/upload" element={<Upload projects={projects} functionalAreas={functionalAreas} />} />
             <Route path="/status" element={<Status />} />
             <Route path="/projects" element={<Projects />} />
             <Route path="/secure2" element={<Secure20Analysis />} />
