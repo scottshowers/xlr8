@@ -12,10 +12,11 @@ router = APIRouter()
 async def get_chromadb_stats():
     try:
         rag = RAGHandler()
-        stats = rag.get_stats()
-        return stats
+        collection = rag.collection
+        count = collection.count() if hasattr(collection, 'count') else 0
+        return {"total_chunks": count}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"total_chunks": 0, "error": str(e)}
 
 @router.post("/status/chromadb/reset")
 async def reset_chromadb():
