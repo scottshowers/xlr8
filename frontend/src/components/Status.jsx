@@ -9,6 +9,7 @@ export default function Status() {
   const [loading, setLoading] = useState(true)
   const [selectedProject, setSelectedProject] = useState('all')
   const [projects, setProjects] = useState([])
+  const [deleting, setDeleting] = useState(null)
 
   useEffect(() => {
     loadData()
@@ -69,13 +70,23 @@ export default function Status() {
   const deleteDocument = async (filename, project) => {
     if (!confirm(`Delete "${filename}"? This cannot be undone.`)) return
     
+    setDeleting(filename)
+    
     try {
       await api.delete(`/status/documents/${encodeURIComponent(filename)}`, {
         params: { project }
       })
-      loadData()
+      
+      // Refresh immediately
+      await loadData()
+      
+      // Show success briefly
+      alert(`"${filename}" deleted successfully`)
     } catch (err) {
-      alert('Error deleting document: ' + err.message)
+      console.error('Delete error:', err)
+      alert('Error deleting document: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setDeleting(null)
     }
   }
 
@@ -180,10 +191,15 @@ export default function Status() {
                     <td className="px-4 py-3">
                       <button
                         onClick={() => deleteDocument(doc.filename, doc.project)}
-                        className="text-red-600 hover:text-red-800 p-1 hover:bg-red-50 rounded transition-colors"
+                        disabled={deleting === doc.filename}
+                        className="text-red-600 hover:text-red-800 p-1 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         title="Delete document"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        {deleting === doc.filename ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-4 h-4" />
+                        )}
                       </button>
                     </td>
                   </tr>
