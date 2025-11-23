@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -35,7 +34,7 @@ class ProjectUpdateRequest(BaseModel):
 @router.get("/list")
 async def list_projects(
     status: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db = Depends(get_db)
 ):
     """List all projects, optionally filtered by status"""
     try:
@@ -50,7 +49,7 @@ async def list_projects(
 @router.post("/create")
 async def create_project(
     request: ProjectCreateRequest,
-    db: Session = Depends(get_db)
+    db = Depends(get_db)
 ):
     """Create a new project"""
     try:
@@ -90,7 +89,7 @@ async def create_project(
 async def update_project(
     project_id: str,
     request: ProjectUpdateRequest,
-    db: Session = Depends(get_db)
+    db = Depends(get_db)
 ):
     """Update an existing project"""
     try:
@@ -141,7 +140,7 @@ async def update_project(
 @router.delete("/{project_id}")
 async def delete_project(
     project_id: str,
-    db: Session = Depends(get_db)
+    db = Depends(get_db)
 ):
     """Delete a project"""
     try:
