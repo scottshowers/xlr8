@@ -21,9 +21,27 @@ function App() {
   const refreshProjects = async () => {
     try {
       const response = await axios.get(`${API_URL}/api/projects/list`);
-      setProjects(response.data);
+      console.log('Projects API response:', response.data);
+      
+      // Handle both response formats:
+      // Backend currently returns: {"projects": [...]}
+      // But we want: [...]
+      let projectsArray = [];
+      
+      if (Array.isArray(response.data)) {
+        // Direct array response
+        projectsArray = response.data;
+      } else if (response.data && Array.isArray(response.data.projects)) {
+        // Wrapped in "projects" key
+        projectsArray = response.data.projects;
+      } else {
+        console.error('Unexpected projects API response format:', response.data);
+      }
+      
+      setProjects(projectsArray);
     } catch (error) {
       console.error('Failed to load projects:', error);
+      setProjects([]); // Set empty array on error
     }
   };
 
