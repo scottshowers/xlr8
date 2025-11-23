@@ -1,10 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 import logging
+import sys
 
-from utils.database.connection import get_db
+sys.path.insert(0, '/app')
+sys.path.insert(0, '/data')
+
 from utils.database.models import ProjectModel
 
 logger = logging.getLogger(__name__)
@@ -32,13 +35,10 @@ class ProjectUpdateRequest(BaseModel):
 
 
 @router.get("/list")
-async def list_projects(
-    status: Optional[str] = None,
-    db = Depends(get_db)
-):
+async def list_projects(status: Optional[str] = None):
     """List all projects, optionally filtered by status"""
     try:
-        projects = ProjectModel.get_all(db, status=status)
+        projects = ProjectModel.get_all(status=status)
         # Return array directly
         return projects
     except Exception as e:
@@ -47,10 +47,7 @@ async def list_projects(
 
 
 @router.post("/create")
-async def create_project(
-    request: ProjectCreateRequest,
-    db = Depends(get_db)
-):
+async def create_project(request: ProjectCreateRequest):
     """Create a new project"""
     try:
         # Parse start_date if provided
@@ -69,7 +66,6 @@ async def create_project(
         
         # Create project
         project = ProjectModel.create(
-            db=db,
             name=request.name,
             customer=request.customer,
             start_date=parsed_start_date,
@@ -77,7 +73,7 @@ async def create_project(
             metadata=metadata
         )
         
-        logger.info(f"Created project: {project.id} - {request.customer}")
+        logger.info(f"Created project: {project['id']} - {request.customer}")
         return project
         
     except Exception as e:
@@ -86,15 +82,11 @@ async def create_project(
 
 
 @router.put("/{project_id}")
-async def update_project(
-    project_id: str,
-    request: ProjectUpdateRequest,
-    db = Depends(get_db)
-):
+async def update_project(project_id: str, request: ProjectUpdateRequest):
     """Update an existing project"""
     try:
         # Get existing project
-        project = ProjectModel.get_by_id(db, project_id)
+        project = ProjectModel.get_by_id(project_id)
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
         
@@ -117,7 +109,7 @@ async def update_project(
         
         # Handle metadata fields
         if request.type is not None or request.notes is not None:
-            current_metadata = project.metadata or {}
+            current_metadata = project.get('metadata', {})
             if request.type is not None:
                 current_metadata["type"] = request.type
             if request.notes is not None:
@@ -125,7 +117,7 @@ async def update_project(
             update_dict["metadata"] = current_metadata
         
         # Update project
-        updated_project = ProjectModel.update(db, project_id, **update_dict)
+        updated_project = ProjectModel.update(project_id, **update_dict)
         
         logger.info(f"Updated project: {project_id}")
         return updated_project
@@ -138,19 +130,16 @@ async def update_project(
 
 
 @router.delete("/{project_id}")
-async def delete_project(
-    project_id: str,
-    db = Depends(get_db)
-):
+async def delete_project(project_id: str):
     """Delete a project"""
     try:
         # Check if project exists
-        project = ProjectModel.get_by_id(db, project_id)
+        project = ProjectModel.get_by_id(project_id)
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
         
         # Delete project
-        ProjectModel.delete(db, project_id)
+        ProjectModel.delete(project_id)
         
         logger.info(f"Deleted project: {project_id}")
         return {"success": True, "message": "Project deleted"}
