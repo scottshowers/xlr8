@@ -64,17 +64,22 @@ async def upload_file(
         
         file_ext = file.filename.split('.')[-1].lower()
         
+        # Build metadata, exclude None values
+        metadata = {
+            "project_id": project,
+            "filename": file.filename,
+            "file_type": file_ext,
+            "source": file.filename
+        }
+        
+        if functional_area:
+            metadata["functional_area"] = functional_area
+        
         rag = RAGHandler()
         success = rag.add_document(
             collection_name="documents",
             text=text,
-            metadata={
-                "project_id": project,
-                "functional_area": functional_area,
-                "filename": file.filename,
-                "file_type": file_ext,
-                "source": file.filename
-            }
+            metadata=metadata
         )
         
         os.remove(file_path)
