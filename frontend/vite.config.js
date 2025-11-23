@@ -6,11 +6,11 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'https://your-railway-app.up.railway.app',
+        target: 'https://hcmpact-xlr8-production.up.railway.app',
         changeOrigin: true
       },
       '/ws': {
-        target: 'wss://your-railway-app.up.railway.app',
+        target: 'wss://hcmpact-xlr8-production.up.railway.app',
         ws: true
       }
     }
