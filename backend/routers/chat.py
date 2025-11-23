@@ -20,28 +20,35 @@ async def chat(request: ChatRequest):
     try:
         rag = RAGHandler()
         
-        metadata_filter = {}
-        if request.project:
-            metadata_filter["project"] = request.project
-        if request.functional_area:
-            metadata_filter["functional_area"] = request.functional_area
+        # Convert to correct parameters
+        project_id = request.project if request.project else None
+        functional_areas = [request.functional_area] if request.functional_area else None
         
         results = rag.search(
+            collection_name="documents",
             query=request.message,
             n_results=5,
-            metadata_filter=metadata_filter if metadata_filter else None
+            project_id=project_id,
+            functional_areas=functional_areas
         )
         
-        # Simple response without intelligent routing for now
-        docs = results.get("documents", [[]])[0] if results else []
-        context = "\n\n".join(docs[:3]) if docs else "No relevant documents found."
+        # Format response
+        if not results:
+            return {
+                "response": "No relevant documents found.",
+                "routing_decision": "local",
+                "sources_count": 0
+            }
         
-        response_text = f"Based on {len(docs)} sources:\n\n{context}"
+        docs = [r['document'] for r in results[:3]]
+        context = "\n\n".join(docs)
+        
+        response_text = f"Based on {len(results)} sources:\n\n{context}"
         
         return {
             "response": response_text,
             "routing_decision": "local",
-            "sources_count": len(docs)
+            "sources_count": len(results)
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
