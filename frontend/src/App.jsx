@@ -101,7 +101,7 @@ function Navigation() {
               fontFamily: "'Sora', sans-serif",
               fontSize: '1.65rem',
               fontWeight: '700',
-              color: '#2a3441',
+              color: '#83b16d',
               letterSpacing: '-0.02em'
             }}>
               XLR8
