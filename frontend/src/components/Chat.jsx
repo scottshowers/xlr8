@@ -126,10 +126,13 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
   }
 
   const getModelBadge = (model) => {
-    if (model.includes('mistral')) return { icon: '🔵', label: 'Mistral', color: '#3b82f6' }
-    if (model.includes('deepseek')) return { icon: '🟣', label: 'DeepSeek', color: '#8b5cf6' }
-    if (model.includes('claude')) return { icon: '🟠', label: 'Claude', color: '#f97316' }
-    return { icon: '⚪', label: model, color: '#6b7280' }
+    const modelLower = model.toLowerCase()
+    if (modelLower.includes('mistral')) return { icon: '🔵', label: 'Mistral', color: '#3b82f6' }
+    if (modelLower.includes('deepseek')) return { icon: '🟣', label: 'DeepSeek', color: '#8b5cf6' }
+    if (modelLower.includes('llama')) return { icon: '🟢', label: 'Llama', color: '#22c55e' }
+    if (modelLower.includes('claude')) return { icon: '🟠', label: 'Claude', color: '#f97316' }
+    // Default for any local model
+    return { icon: '🔵', label: 'Local', color: '#3b82f6' }
   }
 
   // Styles matching your app's design
@@ -441,7 +444,7 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
             fontSize: '0.75rem',
             color: '#5f6c7b'
           }}>
-            <span title="Local AI (can see data)">🔵 Local</span>
+            <span title="Local Mistral (sees all data)">🔵 Mistral</span>
             <span>→</span>
             <span title="PII Sanitized">🔒</span>
             <span>→</span>
@@ -505,40 +508,60 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
                 }}>
                   <div style={styles.messageContent}>{message.content}</div>
                   
-                  {/* Sources Section - ALWAYS VISIBLE */}
+                  {/* Sources Section - GROUPED BY DOCUMENT */}
                   {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
                     <div style={styles.sourcesSection}>
                       <div style={styles.sourcesHeader}>
-                        📄 {message.chunks_found} Sources Referenced
+                        📄 Sources Referenced
                       </div>
                       
                       <div style={styles.sourcesList}>
-                        {message.sources.map((source, sIdx) => (
-                          <div key={sIdx} style={styles.sourceItem}>
-                            <div style={styles.sourceHeader}>
-                              <span style={styles.sourceFilename}>{source.filename}</span>
-                              <span style={{
-                                ...styles.sourceRelevance,
-                                background: source.relevance > 80 ? 'rgba(22, 163, 74, 0.1)' : 
-                                           source.relevance > 60 ? 'rgba(131, 177, 109, 0.1)' : 
-                                           source.relevance > 40 ? 'rgba(234, 179, 8, 0.1)' : 'rgba(220, 38, 38, 0.1)',
-                                color: source.relevance > 80 ? '#16a34a' : 
-                                       source.relevance > 60 ? '#16a34a' : 
-                                       source.relevance > 40 ? '#ca8a04' : '#dc2626',
-                                padding: '0.125rem 0.5rem',
-                                borderRadius: '4px',
-                                fontWeight: '600'
-                              }}>
-                                {source.relevance}%
-                              </span>
+                        {/* Group sources by filename */}
+                        {(() => {
+                          const grouped = message.sources.reduce((acc, source) => {
+                            const key = source.filename || 'Unknown';
+                            if (!acc[key]) {
+                              acc[key] = {
+                                filename: key,
+                                functional_area: source.functional_area,
+                                chunks: [],
+                                maxRelevance: 0,
+                                sheets: new Set()
+                              };
+                            }
+                            acc[key].chunks.push(source);
+                            acc[key].maxRelevance = Math.max(acc[key].maxRelevance, source.relevance || 0);
+                            if (source.sheet) acc[key].sheets.add(source.sheet);
+                            return acc;
+                          }, {});
+                          
+                          return Object.values(grouped).map((doc, idx) => (
+                            <div key={idx} style={styles.sourceItem}>
+                              <div style={styles.sourceHeader}>
+                                <span style={styles.sourceFilename}>{doc.filename}</span>
+                                <span style={{
+                                  ...styles.sourceRelevance,
+                                  background: doc.maxRelevance > 80 ? 'rgba(22, 163, 74, 0.1)' : 
+                                             doc.maxRelevance > 60 ? 'rgba(131, 177, 109, 0.1)' : 
+                                             doc.maxRelevance > 40 ? 'rgba(234, 179, 8, 0.1)' : 'rgba(220, 38, 38, 0.1)',
+                                  color: doc.maxRelevance > 80 ? '#16a34a' : 
+                                         doc.maxRelevance > 60 ? '#16a34a' : 
+                                         doc.maxRelevance > 40 ? '#ca8a04' : '#dc2626',
+                                  padding: '0.125rem 0.5rem',
+                                  borderRadius: '4px',
+                                  fontWeight: '600'
+                                }}>
+                                  {Math.round(doc.maxRelevance)}% best match
+                                </span>
+                              </div>
+                              <div style={styles.sourceMetadata}>
+                                <span style={styles.metadataTag}>📊 {doc.chunks.length} relevant section{doc.chunks.length > 1 ? 's' : ''}</span>
+                                {doc.functional_area && <span style={styles.metadataTag}>📁 {doc.functional_area}</span>}
+                                {doc.sheets.size > 0 && <span style={styles.metadataTag}>📋 {doc.sheets.size} sheet{doc.sheets.size > 1 ? 's' : ''}</span>}
+                              </div>
                             </div>
-                            <div style={styles.sourceMetadata}>
-                              {source.sheet && <span style={styles.metadataTag}>📋 {source.sheet}</span>}
-                              {source.functional_area && <span style={styles.metadataTag}>📁 {source.functional_area}</span>}
-                            </div>
-                            <p style={styles.sourcePreview}>{source.preview}</p>
-                          </div>
-                        ))}
+                          ));
+                        })()}
                       </div>
                     </div>
                   )}
