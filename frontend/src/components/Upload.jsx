@@ -1,19 +1,18 @@
 import { useState, useEffect } from 'react'
-import { Upload as UploadIcon, FileText, CheckCircle, AlertCircle, Loader2, ArrowRight } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 
-export default function Upload() {
+export default function Upload({ projects = [], functionalAreas = [], onProjectCreated }) {
   const navigate = useNavigate()
   const [files, setFiles] = useState([])
   const [selectedArea, setSelectedArea] = useState('')
   const [selectedProject, setSelectedProject] = useState('')
-  const [projects, setProjects] = useState([])
+  const [projectList, setProjectList] = useState(projects)
   const [uploading, setUploading] = useState(false)
   const [uploadResult, setUploadResult] = useState(null)
   const [error, setError] = useState(null)
 
-  const functionalAreas = [
+  const defaultAreas = [
     'Payroll',
     'Time & Attendance', 
     'Benefits',
@@ -26,14 +25,20 @@ export default function Upload() {
     'Other'
   ]
 
+  const areas = functionalAreas.length > 0 ? functionalAreas : defaultAreas
+
   useEffect(() => {
-    loadProjects()
-  }, [])
+    if (projects.length > 0) {
+      setProjectList(projects)
+    } else {
+      loadProjects()
+    }
+  }, [projects])
 
   const loadProjects = async () => {
     try {
       const response = await api.get('/projects/list')
-      setProjects(response.data || [])
+      setProjectList(response.data || [])
     } catch (err) {
       console.error('Failed to load projects:', err)
     }
@@ -62,7 +67,7 @@ export default function Upload() {
     setUploadResult(null)
 
     try {
-      const file = files[0] // Upload first file
+      const file = files[0]
       
       const formData = new FormData()
       formData.append('file', file)
@@ -71,22 +76,19 @@ export default function Upload() {
         formData.append('functional_area', selectedArea)
       }
 
-      // Call async upload endpoint
       const response = await api.post('/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 30000 // 30 second timeout for initial upload (just file save)
+        timeout: 30000
       })
 
       const { job_id, message } = response.data
 
-      // Show success and redirect to status page
       setUploadResult({
         success: true,
         message: message || 'File queued for processing!',
         job_id: job_id
       })
 
-      // Clear form
       setFiles([])
       setSelectedArea('')
       
@@ -109,188 +111,354 @@ export default function Upload() {
     return (bytes / (1024 * 1024)).toFixed(2) + ' MB'
   }
 
+  // Styles matching your app's design
+  const styles = {
+    container: {
+      maxWidth: '800px',
+      margin: '0 auto'
+    },
+    header: {
+      marginBottom: '2rem'
+    },
+    title: {
+      fontSize: '1.75rem',
+      fontWeight: '700',
+      color: '#2a3441',
+      marginBottom: '0.5rem',
+      fontFamily: "'Sora', sans-serif"
+    },
+    subtitle: {
+      fontSize: '1rem',
+      color: '#5f6c7b'
+    },
+    card: {
+      background: 'white',
+      borderRadius: '16px',
+      padding: '2rem',
+      boxShadow: '0 1px 3px rgba(42, 52, 65, 0.08)',
+      marginBottom: '1.5rem'
+    },
+    label: {
+      display: 'block',
+      fontSize: '0.9rem',
+      fontWeight: '600',
+      color: '#2a3441',
+      marginBottom: '0.5rem'
+    },
+    required: {
+      color: '#e53e3e',
+      marginLeft: '2px'
+    },
+    select: {
+      width: '100%',
+      padding: '0.75rem 1rem',
+      fontSize: '1rem',
+      border: '1px solid #e1e8ed',
+      borderRadius: '8px',
+      background: 'white',
+      color: '#2a3441',
+      outline: 'none',
+      cursor: 'pointer',
+      marginBottom: '1.5rem'
+    },
+    dropzone: {
+      border: '2px dashed #d1d9e0',
+      borderRadius: '12px',
+      padding: '3rem 2rem',
+      textAlign: 'center',
+      cursor: 'pointer',
+      transition: 'all 0.2s ease',
+      background: '#fafbfc',
+      marginBottom: '1.5rem'
+    },
+    dropzoneIcon: {
+      fontSize: '3rem',
+      marginBottom: '1rem'
+    },
+    dropzoneText: {
+      fontSize: '1rem',
+      color: '#2a3441',
+      marginBottom: '0.5rem'
+    },
+    dropzoneSubtext: {
+      fontSize: '0.875rem',
+      color: '#5f6c7b'
+    },
+    filePreview: {
+      background: '#f0fdf4',
+      border: '1px solid #86efac',
+      borderRadius: '8px',
+      padding: '1rem',
+      marginBottom: '1.5rem',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.75rem'
+    },
+    fileIcon: {
+      fontSize: '1.5rem'
+    },
+    fileName: {
+      flex: 1,
+      color: '#2a3441',
+      fontWeight: '500'
+    },
+    fileSize: {
+      color: '#5f6c7b',
+      fontSize: '0.875rem'
+    },
+    button: {
+      width: '100%',
+      padding: '1rem',
+      fontSize: '1rem',
+      fontWeight: '600',
+      color: 'white',
+      background: 'linear-gradient(135deg, #83b16d, #6b9956)',
+      border: 'none',
+      borderRadius: '10px',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: '0.5rem',
+      transition: 'all 0.2s ease',
+      boxShadow: '0 2px 8px rgba(131, 177, 109, 0.3)'
+    },
+    buttonDisabled: {
+      background: '#d1d9e0',
+      cursor: 'not-allowed',
+      boxShadow: 'none'
+    },
+    infoBox: {
+      background: 'linear-gradient(135deg, rgba(131, 177, 109, 0.1), rgba(147, 171, 217, 0.08))',
+      border: '1px solid rgba(131, 177, 109, 0.3)',
+      borderRadius: '10px',
+      padding: '1rem 1.25rem',
+      marginTop: '1.5rem'
+    },
+    infoText: {
+      fontSize: '0.9rem',
+      color: '#2a3441',
+      lineHeight: '1.5'
+    },
+    infoLabel: {
+      fontWeight: '600',
+      color: '#83b16d'
+    },
+    errorBox: {
+      background: '#fef2f2',
+      border: '1px solid #fecaca',
+      borderRadius: '10px',
+      padding: '1rem 1.25rem',
+      marginTop: '1rem',
+      display: 'flex',
+      alignItems: 'flex-start',
+      gap: '0.75rem'
+    },
+    errorIcon: {
+      color: '#dc2626',
+      fontSize: '1.25rem'
+    },
+    errorText: {
+      color: '#dc2626',
+      fontSize: '0.9rem'
+    },
+    successBox: {
+      background: '#f0fdf4',
+      border: '1px solid #86efac',
+      borderRadius: '10px',
+      padding: '1.25rem',
+      marginTop: '1rem'
+    },
+    successTitle: {
+      color: '#166534',
+      fontWeight: '600',
+      fontSize: '1rem',
+      marginBottom: '0.5rem',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.5rem'
+    },
+    successText: {
+      color: '#15803d',
+      fontSize: '0.9rem'
+    },
+    formatsGrid: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))',
+      gap: '0.75rem'
+    },
+    formatBadge: {
+      background: 'linear-gradient(135deg, rgba(131, 177, 109, 0.1), rgba(147, 171, 217, 0.08))',
+      borderRadius: '8px',
+      padding: '0.75rem',
+      textAlign: 'center'
+    },
+    formatExt: {
+      color: '#83b16d',
+      fontWeight: '700',
+      fontFamily: 'monospace',
+      fontSize: '0.9rem'
+    },
+    formatDesc: {
+      color: '#5f6c7b',
+      fontSize: '0.75rem',
+      marginTop: '0.25rem'
+    }
+  }
+
+  const isDisabled = uploading || files.length === 0 || !selectedProject
+
   return (
-    <div className="min-h-screen bg-gray-900 p-6">
-      <div className="max-w-4xl mx-auto space-y-6">
-        {/* Header */}
+    <div style={styles.container}>
+      {/* Header */}
+      <div style={styles.header}>
+        <h1 style={styles.title}>Upload Documents</h1>
+        <p style={styles.subtitle}>
+          Upload files for analysis. Large files process in the background.
+        </p>
+      </div>
+
+      {/* Upload Form Card */}
+      <div style={styles.card}>
+        {/* Project Selection */}
         <div>
-          <h1 className="text-2xl font-bold text-white">Upload Documents</h1>
-          <p className="text-gray-400 mt-1">
-            Upload files for analysis. Large files process in the background.
+          <label style={styles.label}>
+            Project <span style={styles.required}>*</span>
+          </label>
+          <select
+            value={selectedProject}
+            onChange={(e) => setSelectedProject(e.target.value)}
+            style={styles.select}
+          >
+            <option value="">Select a project...</option>
+            {projectList.map(project => (
+              <option key={project.id} value={project.name}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Functional Area */}
+        <div>
+          <label style={styles.label}>
+            Functional Area
+          </label>
+          <select
+            value={selectedArea}
+            onChange={(e) => setSelectedArea(e.target.value)}
+            style={styles.select}
+          >
+            <option value="">Select area (optional)...</option>
+            {areas.map(area => (
+              <option key={area} value={area}>{area}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* File Drop Zone */}
+        <div>
+          <label style={styles.label}>
+            File <span style={styles.required}>*</span>
+          </label>
+          <div 
+            style={styles.dropzone}
+            onClick={() => document.getElementById('file-upload').click()}
+          >
+            <input
+              type="file"
+              onChange={handleFileChange}
+              style={{ display: 'none' }}
+              id="file-upload"
+              accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.txt,.md"
+            />
+            <div style={styles.dropzoneIcon}>📄</div>
+            <p style={styles.dropzoneText}>
+              Click to select a file
+            </p>
+            <p style={styles.dropzoneSubtext}>
+              PDF, Word, Excel, CSV, or Text files
+            </p>
+          </div>
+        </div>
+
+        {/* Selected Files */}
+        {files.length > 0 && (
+          <div style={styles.filePreview}>
+            <span style={styles.fileIcon}>✅</span>
+            <span style={styles.fileName}>{files[0].name}</span>
+            <span style={styles.fileSize}>{formatFileSize(files[0].size)}</span>
+          </div>
+        )}
+
+        {/* Upload Button */}
+        <button
+          onClick={handleUpload}
+          disabled={isDisabled}
+          style={{
+            ...styles.button,
+            ...(isDisabled ? styles.buttonDisabled : {})
+          }}
+        >
+          {uploading ? (
+            <>⏳ Uploading...</>
+          ) : (
+            <>📤 Upload File</>
+          )}
+        </button>
+
+        {/* Info Box */}
+        <div style={styles.infoBox}>
+          <p style={styles.infoText}>
+            <span style={styles.infoLabel}>How it works: </span>
+            Files are queued for background processing. Large files may take several minutes. 
+            Check the Status page to monitor progress.
           </p>
         </div>
 
-        {/* Upload Form */}
-        <div className="bg-gray-800 rounded-lg p-6 space-y-6">
-          
-          {/* Project Selection */}
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Project <span className="text-red-400">*</span>
-            </label>
-            <select
-              value={selectedProject}
-              onChange={(e) => setSelectedProject(e.target.value)}
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-green-500 focus:border-transparent"
-            >
-              <option value="">Select a project...</option>
-              {projects.map(project => (
-                <option key={project.id} value={project.name}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
+        {/* Error Message */}
+        {error && (
+          <div style={styles.errorBox}>
+            <span style={styles.errorIcon}>⚠️</span>
+            <span style={styles.errorText}>{error}</span>
           </div>
+        )}
 
-          {/* Functional Area */}
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Functional Area
-            </label>
-            <select
-              value={selectedArea}
-              onChange={(e) => setSelectedArea(e.target.value)}
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-green-500 focus:border-transparent"
-            >
-              <option value="">Select area (optional)...</option>
-              {functionalAreas.map(area => (
-                <option key={area} value={area}>{area}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* File Drop Zone */}
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              File <span className="text-red-400">*</span>
-            </label>
-            <div className="border-2 border-dashed border-gray-600 rounded-lg p-8 text-center hover:border-green-500 transition-colors">
-              <input
-                type="file"
-                onChange={handleFileChange}
-                className="hidden"
-                id="file-upload"
-                accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.txt,.md"
-              />
-              <label htmlFor="file-upload" className="cursor-pointer">
-                <UploadIcon className="w-12 h-12 text-gray-500 mx-auto mb-4" />
-                <p className="text-gray-300 mb-2">
-                  Click to select a file
-                </p>
-                <p className="text-gray-500 text-sm">
-                  PDF, Word, Excel, CSV, or Text files
-                </p>
-              </label>
+        {/* Success Message */}
+        {uploadResult?.success && (
+          <div style={styles.successBox}>
+            <div style={styles.successTitle}>
+              ✅ Upload Queued!
             </div>
-          </div>
-
-          {/* Selected Files */}
-          {files.length > 0 && (
-            <div className="bg-gray-700/50 rounded-lg p-4">
-              <h3 className="text-sm font-medium text-gray-300 mb-3">Selected File:</h3>
-              <div className="space-y-2">
-                {files.map((file, index) => (
-                  <div key={index} className="flex items-center gap-3 text-gray-300">
-                    <FileText className="w-5 h-5 text-green-400" />
-                    <span className="flex-1 truncate">{file.name}</span>
-                    <span className="text-gray-500 text-sm">
-                      {formatFileSize(file.size)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-              {files.length > 1 && (
-                <p className="text-yellow-400 text-sm mt-2">
-                  Note: Only the first file will be uploaded. Multiple file support coming soon!
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Upload Button */}
-          <button
-            onClick={handleUpload}
-            disabled={uploading || files.length === 0 || !selectedProject}
-            className={`w-full py-3 px-4 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors ${
-              uploading || files.length === 0 || !selectedProject
-                ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
-                : 'bg-green-600 hover:bg-green-700 text-white'
-            }`}
-          >
-            {uploading ? (
-              <>
-                <Loader2 className="w-5 h-5 animate-spin" />
-                Uploading...
-              </>
-            ) : (
-              <>
-                <UploadIcon className="w-5 h-5" />
-                Upload File
-              </>
-            )}
-          </button>
-
-          {/* Info Box */}
-          <div className="bg-blue-900/30 border border-blue-700 rounded-lg p-4">
-            <p className="text-blue-300 text-sm">
-              <strong>How it works:</strong> Files are queued for background processing. 
-              Large files may take several minutes. Check the Status page to monitor progress.
+            <p style={styles.successText}>
+              {uploadResult.message}
+            </p>
+            <p style={{ ...styles.successText, marginTop: '0.5rem' }}>
+              Redirecting to Status page...
             </p>
           </div>
+        )}
+      </div>
 
-          {/* Error Message */}
-          {error && (
-            <div className="bg-red-900/50 border border-red-700 rounded-lg p-4 flex items-start gap-3">
-              <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="text-red-300 font-medium">Upload Error</p>
-                <p className="text-red-400 text-sm mt-1">{error}</p>
-              </div>
+      {/* Supported Formats Card */}
+      <div style={styles.card}>
+        <h2 style={{ ...styles.title, fontSize: '1.1rem', marginBottom: '1rem' }}>
+          Supported Formats
+        </h2>
+        <div style={styles.formatsGrid}>
+          {[
+            { ext: '.PDF', desc: 'Documents' },
+            { ext: '.DOCX', desc: 'Word files' },
+            { ext: '.XLSX', desc: 'Excel files' },
+            { ext: '.CSV', desc: 'Data files' },
+            { ext: '.TXT', desc: 'Text files' },
+            { ext: '.MD', desc: 'Markdown' },
+          ].map(format => (
+            <div key={format.ext} style={styles.formatBadge}>
+              <div style={styles.formatExt}>{format.ext}</div>
+              <div style={styles.formatDesc}>{format.desc}</div>
             </div>
-          )}
-
-          {/* Success Message */}
-          {uploadResult?.success && (
-            <div className="bg-green-900/50 border border-green-700 rounded-lg p-4">
-              <div className="flex items-start gap-3">
-                <CheckCircle className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
-                <div className="flex-1">
-                  <p className="text-green-300 font-medium">Upload Queued!</p>
-                  <p className="text-green-400 text-sm mt-1">{uploadResult.message}</p>
-                  <p className="text-green-400 text-sm mt-2">
-                    Redirecting to Status page...
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => navigate('/status')}
-                className="mt-4 w-full bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors"
-              >
-                Go to Status Page
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Supported Formats */}
-        <div className="bg-gray-800 rounded-lg p-6">
-          <h2 className="text-lg font-semibold text-white mb-4">Supported Formats</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[
-              { ext: 'PDF', desc: 'Documents' },
-              { ext: 'DOCX', desc: 'Word files' },
-              { ext: 'XLSX', desc: 'Excel files' },
-              { ext: 'CSV', desc: 'Data files' },
-              { ext: 'TXT', desc: 'Text files' },
-              { ext: 'MD', desc: 'Markdown' },
-            ].map(format => (
-              <div key={format.ext} className="bg-gray-700/50 rounded-lg p-3 text-center">
-                <p className="text-green-400 font-mono font-bold">.{format.ext}</p>
-                <p className="text-gray-400 text-sm">{format.desc}</p>
-              </div>
-            ))}
-          </div>
+          ))}
         </div>
       </div>
     </div>
