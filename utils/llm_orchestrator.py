@@ -191,8 +191,8 @@ class LLMOrchestrator:
         # Use LLM_MODEL directly - this is mistral:7b
         self.local_model = os.getenv("LLM_MODEL", "mistral:7b")
         
-        # Claude configuration
-        self.claude_api_key = os.getenv("ANTHROPIC_API_KEY")
+        # Claude configuration - check both possible env var names
+        self.claude_api_key = os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
         self.claude_model = "claude-sonnet-4-20250514"
         
         # Sanitizer
@@ -205,7 +205,7 @@ class LLMOrchestrator:
     
     def _call_ollama(self, model: str, prompt: str, system_prompt: str = None) -> Tuple[str, bool]:
         """
-        Call Ollama (Mistral or DeepSeek)
+        Call Ollama (Mistral)
         
         Returns: (response_text, success)
         """
@@ -226,25 +226,39 @@ class LLMOrchestrator:
                 }
             }
             
-            logger.info(f"Calling Ollama model: {model}")
+            logger.info(f"Calling Ollama: {self.ollama_url}")
+            logger.info(f"  Model: {model}")
+            logger.info(f"  Auth: {self.ollama_username}:***")
+            logger.info(f"  Prompt length: {len(full_prompt)} chars")
             
             response = requests.post(
                 url,
                 json=payload,
                 auth=HTTPBasicAuth(self.ollama_username, self.ollama_password),
-                timeout=120
+                timeout=90  # 90 seconds - less than frontend timeout
             )
             
+            logger.info(f"Ollama response status: {response.status_code}")
+            
+            if response.status_code == 401:
+                logger.error("Ollama authentication failed!")
+                return "Authentication failed - check LLM_USERNAME and LLM_PASSWORD", False
+            
             if response.status_code != 200:
-                logger.error(f"Ollama returned {response.status_code}: {response.text}")
-                return f"Error from {model}: {response.status_code}", False
+                logger.error(f"Ollama returned {response.status_code}: {response.text[:500]}")
+                return f"Error from {model}: HTTP {response.status_code}", False
             
             result = response.json()
-            return result.get("response", ""), True
+            response_text = result.get("response", "")
+            logger.info(f"Ollama response length: {len(response_text)} chars")
+            return response_text, True
             
         except requests.exceptions.Timeout:
-            logger.error(f"Ollama timeout for {model}")
-            return f"Timeout calling {model}", False
+            logger.error(f"Ollama timeout after 90s for {model}")
+            return f"Timeout calling {model} - Ollama server may be overloaded", False
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"Ollama connection error: {e}")
+            return f"Cannot connect to Ollama at {self.ollama_url} - check if server is running", False
         except Exception as e:
             logger.error(f"Ollama error for {model}: {e}")
             return f"Error: {str(e)}", False
@@ -455,8 +469,9 @@ Maintain the sanitized placeholders (like [Employee A], [AMOUNT REDACTED], etc.)
                         
         except Exception as e:
             logger.error(f"Failed to check Ollama models: {e}")
+            status["ollama_error"] = str(e)
         
-        # Check Claude
+        # Check Claude - use instance variable (already resolved from env)
         status["claude"] = bool(self.claude_api_key)
         
         return status
