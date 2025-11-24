@@ -24,10 +24,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Register routers
 app.include_router(chat.router, prefix="/api")
 app.include_router(upload.router, prefix="/api")
 app.include_router(status.router, prefix="/api")
-app.include_router(projects.router, prefix="/api")
+app.include_router(projects.router, prefix="/api/projects")  # ✅ FIXED: Added /projects to prefix
 app.include_router(jobs.router, prefix="/api")
 
 @app.get("/api/health")
@@ -43,6 +44,7 @@ async def health():
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}
 
+# Serve frontend
 frontend_path = Path("/app/frontend/dist")
 if frontend_path.exists():
     app.mount("/assets", StaticFiles(directory=str(frontend_path / "assets")), name="assets")
