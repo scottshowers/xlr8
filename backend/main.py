@@ -16,19 +16,26 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="XLR8", version="2.0")
 
+# CORS Configuration - Fixed for Vercel
+# NOTE: allow_credentials=True requires explicit origins (no "*")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://xlr8-six.vercel.app",   # Production Vercel
+        "http://localhost:5173",          # Vite dev server
+        "http://localhost:3000",          # Alternative dev server
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # Register routers
 app.include_router(chat.router, prefix="/api")
 app.include_router(upload.router, prefix="/api")
 app.include_router(status.router, prefix="/api")
-app.include_router(projects.router, prefix="/api/projects")  # ✅ FIXED: Added /projects to prefix
+app.include_router(projects.router, prefix="/api/projects")
 app.include_router(jobs.router, prefix="/api")
 
 @app.get("/api/health")
