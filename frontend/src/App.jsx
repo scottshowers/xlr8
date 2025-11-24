@@ -97,15 +97,27 @@ function Navigation() {
             }}>
               <HLogo />
             </div>
-            <span style={{ 
-              fontFamily: "'Sora', sans-serif",
-              fontSize: '1.65rem',
-              fontWeight: '700',
-              color: '#83b16d',
-              letterSpacing: '-0.02em'
-            }}>
-              XLR8
-            </span>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
+              <span style={{ 
+                fontFamily: "'Sora', sans-serif",
+                fontSize: '1.65rem',
+                fontWeight: '700',
+                color: '#83b16d',
+                letterSpacing: '-0.02em',
+                textShadow: '0 2px 8px rgba(131, 177, 109, 0.3), 0 1px 2px rgba(131, 177, 109, 0.2)'
+              }}>
+                XLR8
+              </span>
+              <span style={{
+                fontFamily: "'Manrope', sans-serif",
+                fontSize: '0.95rem',
+                fontWeight: '500',
+                color: '#5f6c7b',
+                letterSpacing: '0.01em'
+              }}>
+                - HCMPACT Analysis Engine
+              </span>
+            </div>
           </Link>
           <ul style={{ display: 'flex', gap: '0.25rem', listStyle: 'none', margin: 0, padding: 0 }}>
             <li><Link to="/chat" style={navLinkStyle('/chat')}>Chat</Link></li>
