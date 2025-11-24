@@ -178,7 +178,7 @@ class LLMOrchestrator:
     Orchestrates multi-model LLM calls with privacy protection
     
     ARCHITECTURE:
-    - Local LLMs (Ollama on Hetzner): Handle raw data with PII
+    - Local LLM (Ollama on Hetzner): Handles raw data with PII
     - Claude (API): Synthesis only, sanitized data only
     """
     
@@ -188,9 +188,8 @@ class LLMOrchestrator:
         self.ollama_username = os.getenv("LLM_USERNAME", "xlr8")
         self.ollama_password = os.getenv("LLM_PASSWORD", "Argyle76226#")
         
-        # Model names on Ollama
-        self.mistral_model = os.getenv("MISTRAL_MODEL", "mistral:latest")
-        self.deepseek_model = os.getenv("DEEPSEEK_MODEL", "deepseek-coder:6.7b")
+        # Use LLM_MODEL directly - this is mistral:7b
+        self.local_model = os.getenv("LLM_MODEL", "mistral:7b")
         
         # Claude configuration
         self.claude_api_key = os.getenv("ANTHROPIC_API_KEY")
@@ -201,8 +200,7 @@ class LLMOrchestrator:
         
         logger.info(f"LLMOrchestrator initialized")
         logger.info(f"  Ollama: {self.ollama_url}")
-        logger.info(f"  Mistral: {self.mistral_model}")
-        logger.info(f"  DeepSeek: {self.deepseek_model}")
+        logger.info(f"  Local Model: {self.local_model}")
         logger.info(f"  Claude: {'enabled' if self.claude_api_key else 'disabled'}")
     
     def _call_ollama(self, model: str, prompt: str, system_prompt: str = None) -> Tuple[str, bool]:
@@ -285,37 +283,12 @@ class LLMOrchestrator:
     
     def _determine_local_model(self, query: str, chunks: List[Dict]) -> str:
         """
-        Determine which local model to use based on query content
+        Returns the local model to use
         
-        Mistral: General HR, policy, document understanding
-        DeepSeek: Data analysis, code, technical queries, calculations
+        Currently just returns the configured LLM_MODEL (mistral:7b)
+        Future: Could add DeepSeek for data-heavy queries
         """
-        query_lower = query.lower()
-        
-        # DeepSeek indicators (data/technical focus)
-        deepseek_keywords = [
-            'calculate', 'compute', 'formula', 'code', 'script',
-            'data', 'analysis', 'spreadsheet', 'excel', 'csv',
-            'sum', 'average', 'total', 'count', 'percentage',
-            'compare', 'difference', 'trend', 'statistics'
-        ]
-        
-        # Check query for DeepSeek indicators
-        for keyword in deepseek_keywords:
-            if keyword in query_lower:
-                logger.info(f"Routing to DeepSeek (keyword: {keyword})")
-                return self.deepseek_model
-        
-        # Check if chunks are mostly tabular data
-        if chunks:
-            tabular_count = sum(1 for c in chunks if c.get('metadata', {}).get('chunk_type') == 'table_row')
-            if tabular_count > len(chunks) / 2:
-                logger.info("Routing to DeepSeek (tabular data)")
-                return self.deepseek_model
-        
-        # Default to Mistral for general queries
-        logger.info("Routing to Mistral (general query)")
-        return self.mistral_model
+        return self.local_model
     
     def process_query(
         self,
@@ -456,12 +429,12 @@ Maintain the sanitized placeholders (like [Employee A], [AMOUNT REDACTED], etc.)
     def check_models_available(self) -> Dict[str, bool]:
         """Check which models are available"""
         status = {
-            "mistral": False,
-            "deepseek": False,
+            "local": False,
+            "local_model": self.local_model,
             "claude": False
         }
         
-        # Check Ollama models
+        # Check Ollama local model
         try:
             response = requests.get(
                 f"{self.ollama_url}/api/tags",
@@ -471,12 +444,14 @@ Maintain the sanitized placeholders (like [Employee A], [AMOUNT REDACTED], etc.)
             if response.status_code == 200:
                 models = response.json().get("models", [])
                 model_names = [m.get("name", "") for m in models]
+                status["available_models"] = model_names
                 
-                for name in model_names:
-                    if "mistral" in name.lower():
-                        status["mistral"] = True
-                    if "deepseek" in name.lower():
-                        status["deepseek"] = True
+                # Check if our configured model is available
+                if self.local_model in model_names:
+                    status["local"] = True
+                # Also check without version tag
+                elif any(self.local_model.split(':')[0] in m for m in model_names):
+                    status["local"] = True
                         
         except Exception as e:
             logger.error(f"Failed to check Ollama models: {e}")
