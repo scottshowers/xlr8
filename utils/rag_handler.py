@@ -255,24 +255,47 @@ class RAGHandler:
         if self.chunker:
             # Use enhanced chunker
             try:
+                logger.info(f"[CHUNK] Calling enhanced chunker...")
                 chunk_dicts = self.chunker.chunk_text(text, file_type)
-                chunks = [c['text'] for c in chunk_dicts]
+                
+                # Validate result
+                if not isinstance(chunk_dicts, list):
+                    raise TypeError(f"Enhanced chunker returned {type(chunk_dicts)}, expected list")
+                
+                if not chunk_dicts:
+                    raise ValueError("Enhanced chunker returned empty list")
+                
+                # Extract text strings from dicts
+                chunks = []
+                for i, c in enumerate(chunk_dicts):
+                    if not isinstance(c, dict):
+                        logger.error(f"[CHUNK] Chunk {i} is {type(c)}, expected dict")
+                        raise TypeError(f"Chunk {i} is {type(c)}, expected dict")
+                    
+                    if 'text' not in c:
+                        logger.error(f"[CHUNK] Chunk {i} missing 'text' key: {c.keys()}")
+                        raise KeyError(f"Chunk {i} missing 'text' key")
+                    
+                    chunks.append(c['text'])
                 
                 # Store enhanced metadata for later retrieval
                 self._last_chunk_metadata = chunk_dicts
                 
                 logger.info(f"[CHUNK] Enhanced chunking: {len(chunks)} chunks created")
-                logger.info(f"[CHUNK] Chunk types: {set(c['chunk_type'] for c in chunk_dicts)}")
-                logger.info(f"[CHUNK] Avg size: {sum(len(c['text']) for c in chunks) / len(chunks):.0f} chars")
+                logger.info(f"[CHUNK] Chunk types: {set(c.get('chunk_type', 'unknown') for c in chunk_dicts)}")
+                logger.info(f"[CHUNK] Avg size: {sum(len(c['text']) for c in chunk_dicts) / len(chunk_dicts):.0f} chars")
                 
                 return chunks
                 
             except Exception as e:
-                logger.error(f"[CHUNK] Enhanced chunking failed: {e}, falling back to basic")
+                logger.error(f"[CHUNK] Enhanced chunking failed: {e}", exc_info=True)
+                logger.warning("[CHUNK] Falling back to basic chunking")
                 # Fall through to basic chunking
+        else:
+            logger.info("[CHUNK] Enhanced chunker not available")
         
         # Fallback: Basic chunking (original logic)
-        logger.warning("[CHUNK] Using basic chunking (enhanced chunker not available)")
+        logger.warning("[CHUNK] Using basic chunking (enhanced chunker not available or failed)")
         
         # Determine chunk size based on file type
         if file_type in ['xlsx', 'xls', 'csv']:
