@@ -81,29 +81,29 @@ function Secure20Analysis() {
   return (
     <div>
       {/* Page Header */}
-      <div style={{ marginBottom: '2rem', animation: 'fadeIn 0.8s ease-out 0.1s both' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
+      <div style={{ marginBottom: '1.5rem', animation: 'fadeIn 0.8s ease-out 0.1s both' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
           <div style={{
-            width: '48px',
-            height: '48px',
+            width: '40px',
+            height: '40px',
             background: 'linear-gradient(135deg, #83b16d, #93abd9)',
-            borderRadius: '12px',
+            borderRadius: '10px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            boxShadow: '0 4px 12px rgba(131, 177, 109, 0.25)'
+            boxShadow: '0 2px 8px rgba(131, 177, 109, 0.2)'
           }}>
-            <TrendingUp size={24} color="white" />
+            <TrendingUp size={20} color="white" />
           </div>
           <div>
             <h1 style={{
               fontFamily: "'Sora', sans-serif",
-              fontSize: '2.25rem',
+              fontSize: '1.75rem',
               fontWeight: '700',
               color: '#2a3441',
               margin: 0,
               letterSpacing: '-0.02em',
-              lineHeight: '1.1'
+              lineHeight: '1.2'
             }}>
               SECURE <span style={{
                 background: 'linear-gradient(135deg, #83b16d, #2766b1)',
@@ -113,9 +113,9 @@ function Secure20Analysis() {
             </h1>
             <p style={{
               color: '#5f6c7b',
-              fontSize: '1rem',
+              fontSize: '0.875rem',
               fontWeight: '500',
-              margin: '0.5rem 0 0 0'
+              margin: '0.25rem 0 0 0'
             }}>
               ROTH Catch-up Compliance Engine
             </p>
@@ -128,8 +128,8 @@ function Secure20Analysis() {
         background: '#ffffff',
         border: '1px solid #e1e8ed',
         borderRadius: '16px',
-        padding: '2.5rem',
-        marginBottom: '2rem',
+        padding: '1.75rem',
+        marginBottom: '1.5rem',
         boxShadow: '0 1px 3px rgba(42, 52, 65, 0.06)',
         animation: 'fadeIn 0.8s ease-out 0.2s both',
         transition: 'all 0.3s ease',
@@ -194,8 +194,8 @@ function Secure20Analysis() {
         background: '#ffffff',
         border: '1px solid #e1e8ed',
         borderRadius: '16px',
-        padding: '2.5rem',
-        marginBottom: '2rem',
+        padding: '1.75rem',
+        marginBottom: '1.5rem',
         boxShadow: '0 1px 3px rgba(42, 52, 65, 0.06)',
         animation: 'fadeIn 0.8s ease-out 0.3s both',
         transition: 'all 0.3s ease',
@@ -216,11 +216,11 @@ function Secure20Analysis() {
 
         <h3 style={{
           fontFamily: "'Sora', sans-serif",
-          fontSize: '1.5rem',
+          fontSize: '1.25rem',
           fontWeight: '700',
           color: '#2a3441',
           letterSpacing: '-0.02em',
-          marginBottom: '1.5rem'
+          marginBottom: '1.25rem'
         }}>
           Excel File Upload
         </h3>
@@ -232,7 +232,7 @@ function Secure20Analysis() {
           style={{
             border: '2.5px dashed #e1e8ed',
             borderRadius: '16px',
-            padding: '4rem 2rem',
+            padding: '2.5rem 1.5rem',
             textAlign: 'center',
             background: 'linear-gradient(135deg, #f0f4f7 0%, #ffffff 100%)',
             transition: 'all 0.4s ease',
@@ -251,8 +251,8 @@ function Secure20Analysis() {
           }}
         >
           <div style={{
-            fontSize: '4rem',
-            marginBottom: '1.5rem',
+            fontSize: '3rem',
+            marginBottom: '1rem',
             opacity: 0.5,
             transition: 'all 0.3s ease'
           }}>
@@ -262,15 +262,15 @@ function Secure20Analysis() {
           <p style={{
             color: '#2a3441',
             fontWeight: '600',
-            marginBottom: '0.5rem',
-            fontSize: '1.15rem'
+            marginBottom: '0.375rem',
+            fontSize: '1rem'
           }}>
             Drop Excel file here
           </p>
           <p style={{
             color: '#5f6c7b',
-            fontSize: '0.95rem',
-            marginBottom: '1.5rem'
+            fontSize: '0.875rem',
+            marginBottom: '1.25rem'
           }}>
             or click to browse
           </p>
@@ -321,7 +321,7 @@ function Secure20Analysis() {
         {/* Selected File Display */}
         {file && (
           <div style={{
-            marginTop: '2rem',
+            marginTop: '1.5rem',
             padding: '1.25rem 1.5rem',
             background: '#f0f4f7',
             border: '1.5px solid #e1e8ed',
@@ -421,7 +421,7 @@ function Secure20Analysis() {
           disabled={uploading || !companyName || !file}
           style={{
             width: '100%',
-            marginTop: '2rem',
+            marginTop: '1.5rem',
             padding: '0.875rem 1.75rem',
             background: uploading || !companyName || !file ? '#e1e8ed' : 'linear-gradient(135deg, #83b16d, #93abd9)',
             border: 'none',
