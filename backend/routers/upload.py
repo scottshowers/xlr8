@@ -10,7 +10,7 @@ sys.path.insert(0, '/app')
 sys.path.insert(0, '/data')
 
 from utils.rag_handler import RAGHandler
-from utils.database.models import ProcessingJobModel, DocumentModel
+from utils.database.models import ProcessingJobModel, DocumentModel, ProjectModel
 
 router = APIRouter()
 
@@ -31,7 +31,8 @@ def extract_text(file_path: str) -> str:
             texts = []
             for sheet in excel.sheet_names:
                 df = pd.read_excel(file_path, sheet_name=sheet)
-                texts.append(f"=== {sheet} ===\n{df.to_string()}")
+                # Format to match enhanced chunker expectations
+                texts.append(f"WORKSHEET: {sheet}\n{'=' * 40}\n{df.to_string()}")
             return "\n\n".join(texts)
         elif ext in ['txt', 'md']:
             with open(file_path, 'r') as f:
@@ -50,10 +51,27 @@ async def upload_file(
     file_path = None
     
     try:
+        # Look up project UUID from project name
+        project_id = None
+        if project and project not in ['global', '__GLOBAL__', '']:
+            # Look up project by name
+            projects = ProjectModel.get_all(status='active')
+            matching_project = next((p for p in projects if p.get('name') == project), None)
+            
+            if matching_project:
+                project_id = matching_project['id']
+            else:
+                # Project name not found - use the name as-is for ChromaDB but skip DocumentModel
+                project_id = None
+        else:
+            # Global project
+            project = '__GLOBAL__'
+            project_id = None
+        
         # Create processing job in database
         job = ProcessingJobModel.create(
             job_type='file_upload',
-            project_id=project,
+            project_id=project,  # Use name for job tracking
             filename=file.filename,
             input_data={'filename': file.filename, 'functional_area': functional_area}
         )
@@ -85,11 +103,15 @@ async def upload_file(
         file_ext = file.filename.split('.')[-1].lower()
         
         metadata = {
-            "project": project,
+            "project": project,  # Keep name for ChromaDB searches
             "filename": file.filename,
             "file_type": file_ext,
             "source": file.filename
         }
+        
+        # Add project_id if we have it (for filtering)
+        if project_id:
+            metadata["project_id"] = project_id
         
         if functional_area:
             metadata["functional_area"] = functional_area
@@ -116,17 +138,26 @@ async def upload_file(
             ProcessingJobModel.fail(job_id, "Failed to add document to vector store")
             raise HTTPException(status_code=500, detail="Failed to process document")
         
-        # Save to documents table
+        # Save to documents table (only if we have a valid project UUID)
         ProcessingJobModel.update_progress(job_id, 96, "Saving to database...")
-        DocumentModel.create(
-            project_id=project,
-            name=file.filename,
-            category=functional_area or 'General',
-            file_type=file_ext,
-            file_size=len(content),
-            content=text[:5000],  # Store first 5000 chars
-            metadata=metadata
-        )
+        if project_id:
+            try:
+                DocumentModel.create(
+                    project_id=project_id,  # Use UUID not name!
+                    name=file.filename,
+                    category=functional_area or 'General',
+                    file_type=file_ext,
+                    file_size=len(content),
+                    content=text[:5000],  # Store first 5000 chars
+                    metadata=metadata
+                )
+            except Exception as e:
+                # Log error but don't fail - document is already in ChromaDB
+                print(f"Warning: Could not save to documents table: {e}")
+        else:
+            # Global project or project not found - skip DocumentModel
+            print(f"Skipping DocumentModel.create for project '{project}' (no UUID)")
+
         
         # Cleanup
         ProcessingJobModel.update_progress(job_id, 98, "Cleaning up...")
