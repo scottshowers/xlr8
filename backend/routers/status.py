@@ -87,6 +87,37 @@ async def fail_job_manually(job_id: str, error_message: str = "Manually terminat
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.delete("/jobs/{job_id}")
+async def delete_job(job_id: str):
+    """Delete a processing job from history"""
+    try:
+        job = ProcessingJobModel.get_by_id(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        # Delete the job from Supabase
+        from utils.database.supabase_client import get_supabase
+        supabase = get_supabase()
+        
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        supabase.table('processing_jobs').delete().eq('id', job_id).execute()
+        logger.info(f"Job {job_id} deleted by user")
+        
+        return {
+            "success": True,
+            "message": f"Job {job_id} deleted successfully",
+            "job_id": job_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/status/documents")
 async def get_documents(project: Optional[str] = None, limit: int = 1000):
     """
