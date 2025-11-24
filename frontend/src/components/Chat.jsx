@@ -9,6 +9,7 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
   const [projectList, setProjectList] = useState(projects)
   const [error, setError] = useState(null)
   const [expandedSources, setExpandedSources] = useState({})
+  const [modelInfo, setModelInfo] = useState(null)
   const messagesEndRef = useRef(null)
 
   useEffect(() => {
@@ -17,6 +18,7 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
     } else {
       loadProjects()
     }
+    loadModelInfo()
   }, [projects])
 
   useEffect(() => {
@@ -33,6 +35,15 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
       setProjectList(response.data || [])
     } catch (err) {
       console.error('Failed to load projects:', err)
+    }
+  }
+
+  const loadModelInfo = async () => {
+    try {
+      const response = await api.get('/chat/models')
+      setModelInfo(response.data)
+    } catch (err) {
+      console.error('Failed to load model info:', err)
     }
   }
 
@@ -61,17 +72,19 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
       const response = await api.post('/chat', {
         message: userMessage.content,
         project: selectedProject || null,
-        max_results: 10
+        max_results: 10,
+        use_claude: true
       })
 
-      const { response: llmResponse, sources, chunks_found, model_used } = response.data
+      const { response: llmResponse, sources, chunks_found, models_used, sanitized } = response.data
 
       const assistantMessage = {
         role: 'assistant',
         content: llmResponse,
         sources: sources || [],
         chunks_found: chunks_found || 0,
-        model_used: model_used || 'unknown',
+        models_used: models_used || [],
+        sanitized: sanitized || false,
         timestamp: new Date().toISOString()
       }
 
@@ -110,6 +123,13 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
       hour: '2-digit', 
       minute: '2-digit' 
     })
+  }
+
+  const getModelBadge = (model) => {
+    if (model.includes('mistral')) return { icon: '🔵', label: 'Mistral', color: '#3b82f6' }
+    if (model.includes('deepseek')) return { icon: '🟣', label: 'DeepSeek', color: '#8b5cf6' }
+    if (model.includes('claude')) return { icon: '🟠', label: 'Claude', color: '#f97316' }
+    return { icon: '⚪', label: model, color: '#6b7280' }
   }
 
   // Styles matching your app's design
@@ -259,8 +279,14 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
     },
     sourcesSection: {
       marginTop: '1rem',
-      paddingTop: '0.75rem',
+      paddingTop: '1rem',
       borderTop: '1px solid #e1e8ed'
+    },
+    sourcesHeader: {
+      fontSize: '0.9rem',
+      fontWeight: '600',
+      color: '#2a3441',
+      marginBottom: '0.75rem'
     },
     sourcesToggle: {
       display: 'flex',
@@ -274,35 +300,50 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
       padding: 0
     },
     sourcesList: {
-      marginTop: '0.75rem',
       display: 'flex',
       flexDirection: 'column',
-      gap: '0.5rem'
+      gap: '0.5rem',
+      maxHeight: '300px',
+      overflowY: 'auto'
     },
     sourceItem: {
       background: '#f6f5fa',
       borderRadius: '8px',
       padding: '0.75rem',
-      fontSize: '0.8rem'
+      fontSize: '0.8rem',
+      border: '1px solid #e1e8ed'
     },
     sourceHeader: {
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'center',
-      marginBottom: '0.25rem'
+      marginBottom: '0.5rem'
     },
     sourceFilename: {
       color: '#83b16d',
-      fontWeight: '600'
+      fontWeight: '600',
+      fontSize: '0.85rem'
     },
     sourceRelevance: {
-      color: '#5f6c7b',
       fontSize: '0.75rem'
+    },
+    sourceMetadata: {
+      display: 'flex',
+      gap: '0.75rem',
+      marginBottom: '0.5rem',
+      flexWrap: 'wrap'
+    },
+    metadataTag: {
+      fontSize: '0.7rem',
+      color: '#5f6c7b',
+      background: 'rgba(131, 177, 109, 0.1)',
+      padding: '0.125rem 0.5rem',
+      borderRadius: '4px'
     },
     sourcePreview: {
       color: '#5f6c7b',
       fontSize: '0.75rem',
-      marginTop: '0.5rem',
+      marginTop: '0.25rem',
       lineHeight: 1.4,
       overflow: 'hidden',
       display: '-webkit-box',
@@ -390,6 +431,23 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
         </div>
         
         <div style={styles.headerControls}>
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '0.5rem',
+            padding: '0.25rem 0.75rem',
+            background: 'rgba(131, 177, 109, 0.1)',
+            borderRadius: '6px',
+            fontSize: '0.75rem',
+            color: '#5f6c7b'
+          }}>
+            <span title="Local AI (can see data)">🔵 Local</span>
+            <span>→</span>
+            <span title="PII Sanitized">🔒</span>
+            <span>→</span>
+            <span title="Claude (synthesis only)">🟠 Claude</span>
+          </div>
+
           <select
             value={selectedProject}
             onChange={(e) => setSelectedProject(e.target.value)}
@@ -447,40 +505,41 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
                 }}>
                   <div style={styles.messageContent}>{message.content}</div>
                   
-                  {/* Sources Section */}
+                  {/* Sources Section - ALWAYS VISIBLE */}
                   {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
                     <div style={styles.sourcesSection}>
-                      <button
-                        onClick={() => toggleSources(index)}
-                        style={styles.sourcesToggle}
-                      >
-                        📄 {message.chunks_found} sources found
-                        {expandedSources[index] ? ' ▲' : ' ▼'}
-                      </button>
+                      <div style={styles.sourcesHeader}>
+                        📄 {message.chunks_found} Sources Referenced
+                      </div>
                       
-                      {expandedSources[index] && (
-                        <div style={styles.sourcesList}>
-                          {message.sources.slice(0, 5).map((source, sIdx) => (
-                            <div key={sIdx} style={styles.sourceItem}>
-                              <div style={styles.sourceHeader}>
-                                <span style={styles.sourceFilename}>{source.filename}</span>
-                                <span style={styles.sourceRelevance}>{source.relevance}% match</span>
-                              </div>
-                              {source.sheet && (
-                                <span style={{ color: '#5f6c7b', fontSize: '0.75rem' }}>
-                                  Sheet: {source.sheet}
-                                </span>
-                              )}
-                              <p style={styles.sourcePreview}>{source.preview}</p>
+                      <div style={styles.sourcesList}>
+                        {message.sources.map((source, sIdx) => (
+                          <div key={sIdx} style={styles.sourceItem}>
+                            <div style={styles.sourceHeader}>
+                              <span style={styles.sourceFilename}>{source.filename}</span>
+                              <span style={{
+                                ...styles.sourceRelevance,
+                                background: source.relevance > 80 ? 'rgba(22, 163, 74, 0.1)' : 
+                                           source.relevance > 60 ? 'rgba(131, 177, 109, 0.1)' : 
+                                           source.relevance > 40 ? 'rgba(234, 179, 8, 0.1)' : 'rgba(220, 38, 38, 0.1)',
+                                color: source.relevance > 80 ? '#16a34a' : 
+                                       source.relevance > 60 ? '#16a34a' : 
+                                       source.relevance > 40 ? '#ca8a04' : '#dc2626',
+                                padding: '0.125rem 0.5rem',
+                                borderRadius: '4px',
+                                fontWeight: '600'
+                              }}>
+                                {source.relevance}%
+                              </span>
                             </div>
-                          ))}
-                          {message.sources.length > 5 && (
-                            <p style={{ color: '#5f6c7b', fontSize: '0.75rem', textAlign: 'center' }}>
-                              + {message.sources.length - 5} more sources
-                            </p>
-                          )}
-                        </div>
-                      )}
+                            <div style={styles.sourceMetadata}>
+                              {source.sheet && <span style={styles.metadataTag}>📋 {source.sheet}</span>}
+                              {source.functional_area && <span style={styles.metadataTag}>📁 {source.functional_area}</span>}
+                            </div>
+                            <p style={styles.sourcePreview}>{source.preview}</p>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -490,8 +549,22 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
                   textAlign: message.role === 'user' ? 'right' : 'left'
                 }}>
                   {formatTimestamp(message.timestamp)}
-                  {message.model_used && message.model_used !== 'none' && (
-                    <span> • {message.model_used}</span>
+                  {message.models_used && message.models_used.length > 0 && (
+                    <span style={{ marginLeft: '0.5rem' }}>
+                      {message.models_used.map((model, idx) => {
+                        const badge = getModelBadge(model)
+                        return (
+                          <span key={idx} style={{ marginLeft: '0.25rem' }} title={model}>
+                            {badge.icon}
+                          </span>
+                        )
+                      })}
+                      {message.sanitized && (
+                        <span style={{ marginLeft: '0.25rem' }} title="PII Sanitized">
+                          🔒
+                        </span>
+                      )}
+                    </span>
                   )}
                 </div>
               </div>
