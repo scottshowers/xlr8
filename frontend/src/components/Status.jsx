@@ -11,6 +11,7 @@ export default function Status() {
   const [projects, setProjects] = useState([])
   const [deleting, setDeleting] = useState(null)
   const [killingJob, setKillingJob] = useState(null)
+  const [deletingJob, setDeletingJob] = useState(null)
 
   useEffect(() => {
     loadData()
@@ -67,6 +68,24 @@ export default function Status() {
       alert('Error killing job: ' + (err.response?.data?.detail || err.message))
     } finally {
       setKillingJob(null)
+    }
+  }
+
+  const deleteJob = async (jobId) => {
+    if (!confirm('Delete this job from history? This cannot be undone.')) return
+    
+    setDeletingJob(jobId)
+    
+    try {
+      await api.delete(`/jobs/${jobId}`)
+      
+      alert('Job deleted successfully')
+      await loadData()
+    } catch (err) {
+      console.error('Delete job error:', err)
+      alert('Error deleting job: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setDeletingJob(null)
     }
   }
 
@@ -297,6 +316,7 @@ export default function Status() {
                     <span className={`text-xs px-3 py-1 rounded-full font-medium ${getStatusColor(job.status)}`}>
                       {job.status}
                     </span>
+                    {/* Kill button for processing jobs */}
                     {job.status === 'processing' && (
                       <button
                         onClick={() => killJob(job.id)}
@@ -313,6 +333,27 @@ export default function Status() {
                           <>
                             <StopCircle className="w-3 h-3" />
                             <span>Kill Job</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+                    {/* Delete button for completed/failed jobs */}
+                    {(job.status === 'completed' || job.status === 'failed') && (
+                      <button
+                        onClick={() => deleteJob(job.id)}
+                        disabled={deletingJob === job.id}
+                        className="flex items-center gap-1 px-3 py-1 bg-gray-600 text-white text-xs rounded hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Delete job from history"
+                      >
+                        {deletingJob === job.id ? (
+                          <>
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                            <span>Deleting...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Trash2 className="w-3 h-3" />
+                            <span>Delete</span>
                           </>
                         )}
                       </button>
