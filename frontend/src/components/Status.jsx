@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { FileText, Loader2, CheckCircle, XCircle, Clock, Database, Trash2, StopCircle } from 'lucide-react'
+import { FileText, Loader2, CheckCircle, XCircle, Clock, Database, Trash2, StopCircle, Calendar, HardDrive } from 'lucide-react'
 import api from '../services/api'
 
 export default function Status() {
@@ -20,7 +20,6 @@ export default function Status() {
 
   const loadData = async () => {
     try {
-      // Load each endpoint separately so one failure doesn't break everything
       const chromaRes = await api.get('/status/chromadb').catch(() => ({ data: { total_chunks: 0 } }))
       const docsRes = await api.get('/status/documents', { 
         params: selectedProject !== 'all' ? { project: selectedProject } : {} 
@@ -62,8 +61,6 @@ export default function Status() {
       })
       
       alert('Job terminated successfully')
-      
-      // Refresh immediately
       await loadData()
     } catch (err) {
       console.error('Kill job error:', err)
@@ -109,6 +106,31 @@ export default function Status() {
     } finally {
       setDeleting(null)
     }
+  }
+
+  const formatDate = (dateString) => {
+    if (!dateString) return '-'
+    try {
+      const date = new Date(dateString)
+      return date.toLocaleDateString('en-US', { 
+        month: 'short', 
+        day: 'numeric', 
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+    } catch {
+      return '-'
+    }
+  }
+
+  const formatFileSize = (bytes) => {
+    if (!bytes) return '-'
+    const mb = bytes / (1024 * 1024)
+    if (mb < 1) {
+      return `${(bytes / 1024).toFixed(1)} KB`
+    }
+    return `${mb.toFixed(2)} MB`
   }
 
   if (loading) {
@@ -182,7 +204,12 @@ export default function Status() {
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Project</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Area</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Chunks</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Uploaded</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">
+                    <div className="flex items-center gap-1">
+                      <Calendar className="w-3 h-3" />
+                      Uploaded
+                    </div>
+                  </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Actions</th>
                 </tr>
               </thead>
@@ -192,7 +219,14 @@ export default function Status() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <FileText className="w-4 h-4 text-gray-400" />
-                        <span className="text-sm font-medium">{doc.filename}</span>
+                        <div>
+                          <span className="text-sm font-medium">{doc.filename}</span>
+                          {doc.file_type && (
+                            <span className="ml-2 text-xs text-gray-500 uppercase">
+                              .{doc.file_type}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </td>
                     <td className="px-4 py-3">
@@ -205,9 +239,14 @@ export default function Status() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">{doc.functional_area || '-'}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{doc.chunks}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1 text-sm text-gray-600">
+                        <Database className="w-3 h-3" />
+                        {doc.chunks}
+                      </div>
+                    </td>
                     <td className="px-4 py-3 text-sm text-gray-500">
-                      {doc.upload_date ? new Date(doc.upload_date).toLocaleDateString() : '-'}
+                      {formatDate(doc.upload_date)}
                     </td>
                     <td className="px-4 py-3">
                       <button
@@ -243,14 +282,21 @@ export default function Status() {
                     {getStatusIcon(job.status)}
                     <div className="flex-1">
                       <p className="font-medium">{job.input_data?.filename || 'Processing...'}</p>
-                      <p className="text-sm text-gray-500">{job.project_id || '-'}</p>
+                      <div className="flex items-center gap-3 mt-1">
+                        <p className="text-sm text-gray-500">{job.project_id || '-'}</p>
+                        {job.created_at && (
+                          <p className="text-xs text-gray-400 flex items-center gap-1">
+                            <Calendar className="w-3 h-3" />
+                            {formatDate(job.created_at)}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className={`text-xs px-3 py-1 rounded-full font-medium ${getStatusColor(job.status)}`}>
                       {job.status}
                     </span>
-                    {/* 🛑 KILL JOB BUTTON - Only show for processing jobs */}
                     {job.status === 'processing' && (
                       <button
                         onClick={() => killJob(job.id)}
