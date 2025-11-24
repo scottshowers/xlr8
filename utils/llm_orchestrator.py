@@ -222,20 +222,19 @@ class LLMOrchestrator:
                 "stream": False,
                 "options": {
                     "temperature": 0.3,
-                    "num_predict": 2048
+                    "num_predict": 1024  # Shorter responses
                 }
             }
             
             logger.info(f"Calling Ollama: {self.ollama_url}")
             logger.info(f"  Model: {model}")
-            logger.info(f"  Auth: {self.ollama_username}:***")
             logger.info(f"  Prompt length: {len(full_prompt)} chars")
             
             response = requests.post(
                 url,
                 json=payload,
                 auth=HTTPBasicAuth(self.ollama_username, self.ollama_password),
-                timeout=90  # 90 seconds - less than frontend timeout
+                timeout=60  # 60 seconds - reduced from 90
             )
             
             logger.info(f"Ollama response status: {response.status_code}")
@@ -254,11 +253,11 @@ class LLMOrchestrator:
             return response_text, True
             
         except requests.exceptions.Timeout:
-            logger.error(f"Ollama timeout after 90s for {model}")
-            return f"Timeout calling {model} - Ollama server may be overloaded", False
+            logger.error(f"Ollama timeout after 60s for {model}")
+            return None, False  # Return None to trigger Claude fallback
         except requests.exceptions.ConnectionError as e:
             logger.error(f"Ollama connection error: {e}")
-            return f"Cannot connect to Ollama at {self.ollama_url} - check if server is running", False
+            return f"Cannot connect to Ollama at {self.ollama_url}", False
         except Exception as e:
             logger.error(f"Ollama error for {model}: {e}")
             return f"Error: {str(e)}", False
@@ -339,37 +338,42 @@ class LLMOrchestrator:
         }
         
         # Step 1: Build context from chunks (CONTAINS PII)
+        # LIMIT: Use top 5 chunks, max 1000 chars each to avoid timeout
+        MAX_CHUNKS = 5
+        MAX_CHUNK_LENGTH = 1000
+        
         context_parts = []
-        for i, chunk in enumerate(chunks, 1):
+        for i, chunk in enumerate(chunks[:MAX_CHUNKS], 1):
             source = chunk.get('metadata', {}).get('source', 'Unknown')
+            filename = chunk.get('metadata', {}).get('filename', source)
             text = chunk.get('document', chunk.get('text', ''))
-            context_parts.append(f"[Document {i}: {source}]\n{text}")
+            
+            # Truncate long chunks
+            if len(text) > MAX_CHUNK_LENGTH:
+                text = text[:MAX_CHUNK_LENGTH] + "..."
+            
+            context_parts.append(f"[Source {i}: {filename}]\n{text}")
         
         full_context = "\n\n---\n\n".join(context_parts)
+        
+        logger.info(f"Context prepared: {len(chunks)} chunks -> {len(context_parts)} used, {len(full_context)} chars")
         
         # Step 2: Determine which local model to use
         local_model = self._determine_local_model(query, chunks)
         
         # Step 3: Build prompt for local LLM (can see everything)
         local_system_prompt = """You are an expert HCM implementation consultant analyzing customer documents.
-Your task is to analyze the provided documents and answer the user's question accurately.
+Answer the question based on the provided document excerpts. Be specific and concise.
+If the documents don't contain relevant information, say so."""
 
-IMPORTANT RULES:
-1. Be specific and cite which document your information comes from
-2. If analyzing employee data, provide accurate details
-3. If you find specific names, salaries, or other data - include them in your analysis
-4. Be thorough but concise
+        local_user_prompt = f"""Question: {query}
 
-Analyze the documents and provide a detailed answer."""
-
-        local_user_prompt = f"""Based on the following documents, please answer this question:
-
-QUESTION: {query}
-
-DOCUMENTS:
+Document excerpts:
 {full_context}
 
-Provide a detailed, accurate answer based on the documents above."""
+Provide a clear, concise answer based on these documents."""
+
+        logger.info(f"Total prompt length: {len(local_system_prompt) + len(local_user_prompt)} chars")
 
         # Step 4: Call local LLM
         logger.info(f"Step 1: Calling local LLM ({local_model})")
@@ -378,6 +382,47 @@ Provide a detailed, accurate answer based on the documents above."""
             local_user_prompt, 
             local_system_prompt
         )
+        
+        # Check if Mistral timed out - if so, fallback to Claude with SANITIZED context
+        if local_response is None:
+            logger.warning("Mistral timed out - falling back to Claude with sanitized context")
+            
+            if self.claude_api_key:
+                # IMPORTANT: Sanitize the document context before Claude sees it!
+                sanitized_context = self.sanitizer.sanitize(full_context)
+                logger.info(f"Sanitized context for Claude fallback: {len(self.sanitizer.name_map)} names replaced")
+                
+                claude_system_prompt = """You are an expert HCM implementation consultant.
+Analyze the provided document excerpts and answer the user's question.
+Be specific and provide a professional response.
+Note: Personal information has been redacted with placeholders like [Employee A], [SSN REDACTED], etc."""
+
+                claude_user_prompt = f"""Question: {query}
+
+Sanitized document excerpts:
+{sanitized_context}
+
+Provide a clear, professional answer based on these documents."""
+
+                claude_response, claude_success = self._call_claude(
+                    claude_user_prompt,
+                    claude_system_prompt
+                )
+                
+                result["models_used"].append("claude-sonnet (direct-sanitized)")
+                result["sanitized"] = True
+                
+                if claude_success:
+                    result["response"] = claude_response
+                    return result
+                else:
+                    result["error"] = "Both Mistral and Claude failed"
+                    result["response"] = "Sorry, I couldn't process your request. Please try again in a moment."
+                    return result
+            else:
+                result["error"] = "Mistral timed out and Claude not configured"
+                result["response"] = "The local AI server timed out. Please try again with a simpler question."
+                return result
         
         result["models_used"].append(local_model)
         result["local_analysis"] = local_response
