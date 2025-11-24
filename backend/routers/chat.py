@@ -309,6 +309,7 @@ async def chat_models():
             }
         ],
         "available_ollama_models": model_status.get("available_models", []),
+        "ollama_error": model_status.get("ollama_error"),
         "flow": [
             "1. User query → Search documents in ChromaDB",
             "2. Documents → Local LLM (can see PII)",
@@ -316,4 +317,57 @@ async def chat_models():
             "4. Sanitized analysis → Claude (synthesis)",
             "5. Final response → User"
         ]
+    }
+
+
+@router.get("/chat/test-ollama")
+async def test_ollama():
+    """Test Ollama connectivity directly"""
+    import os
+    
+    config = {
+        "LLM_ENDPOINT": os.getenv("LLM_ENDPOINT", "NOT SET"),
+        "LLM_MODEL": os.getenv("LLM_MODEL", "NOT SET"),
+        "LLM_USERNAME": os.getenv("LLM_USERNAME", "NOT SET"),
+        "LLM_PASSWORD": "***" if os.getenv("LLM_PASSWORD") else "NOT SET",
+        "CLAUDE_API_KEY": "***" if os.getenv("CLAUDE_API_KEY") else "NOT SET"
+    }
+    
+    # Test Ollama connection
+    ollama_test = {"status": "unknown"}
+    try:
+        import requests
+        from requests.auth import HTTPBasicAuth
+        
+        url = os.getenv("LLM_ENDPOINT", "") + "/api/tags"
+        response = requests.get(
+            url,
+            auth=HTTPBasicAuth(
+                os.getenv("LLM_USERNAME", ""),
+                os.getenv("LLM_PASSWORD", "")
+            ),
+            timeout=10
+        )
+        
+        ollama_test["status_code"] = response.status_code
+        if response.status_code == 200:
+            ollama_test["status"] = "connected"
+            ollama_test["models"] = [m.get("name") for m in response.json().get("models", [])]
+        elif response.status_code == 401:
+            ollama_test["status"] = "auth_failed"
+        else:
+            ollama_test["status"] = f"error_{response.status_code}"
+            
+    except requests.exceptions.Timeout:
+        ollama_test["status"] = "timeout"
+    except requests.exceptions.ConnectionError as e:
+        ollama_test["status"] = "connection_failed"
+        ollama_test["error"] = str(e)
+    except Exception as e:
+        ollama_test["status"] = "error"
+        ollama_test["error"] = str(e)
+    
+    return {
+        "config": config,
+        "ollama_test": ollama_test
     }
