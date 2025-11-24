@@ -262,9 +262,12 @@ async def chat_health():
             "status": "healthy",
             "chromadb_chunks": chunk_count,
             "models": {
-                "mistral": "available" if model_status["mistral"] else "not found",
-                "deepseek": "available" if model_status["deepseek"] else "not found",
-                "claude": "configured" if model_status["claude"] else "not configured"
+                "local": {
+                    "available": model_status.get("local", False),
+                    "model": model_status.get("local_model", "unknown"),
+                    "all_models": model_status.get("available_models", [])
+                },
+                "claude": "configured" if model_status.get("claude") else "not configured"
             },
             "privacy": {
                 "pii_sanitization": "enabled",
@@ -288,30 +291,26 @@ async def chat_models():
     return {
         "models": [
             {
-                "name": "mistral",
+                "name": model_status.get("local_model", "mistral:7b"),
                 "type": "local",
-                "purpose": "General HR analysis, document understanding, policy interpretation",
+                "purpose": "Document analysis, data extraction, HR queries",
                 "can_see_pii": True,
-                "available": model_status["mistral"]
+                "available": model_status.get("local", False),
+                "location": "Hetzner (your server)"
             },
             {
-                "name": "deepseek",
-                "type": "local", 
-                "purpose": "Data analysis, calculations, technical queries, spreadsheet processing",
-                "can_see_pii": True,
-                "available": model_status["deepseek"]
-            },
-            {
-                "name": "claude",
+                "name": "claude-sonnet",
                 "type": "cloud",
                 "purpose": "Final synthesis, response formatting, best practice recommendations",
                 "can_see_pii": False,
                 "note": "Only receives SANITIZED data - never sees PII",
-                "available": model_status["claude"]
+                "available": model_status.get("claude", False),
+                "location": "Anthropic API"
             }
         ],
+        "available_ollama_models": model_status.get("available_models", []),
         "flow": [
-            "1. User query → Search documents",
+            "1. User query → Search documents in ChromaDB",
             "2. Documents → Local LLM (can see PII)",
             "3. Local analysis → SANITIZE (remove all PII)",
             "4. Sanitized analysis → Claude (synthesis)",
