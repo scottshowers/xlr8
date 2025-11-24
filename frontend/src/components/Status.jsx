@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { FileText, Loader2, CheckCircle, XCircle, Clock, Database, Trash2 } from 'lucide-react'
+import { FileText, Loader2, CheckCircle, XCircle, Clock, Database, Trash2, StopCircle } from 'lucide-react'
 import api from '../services/api'
 
 export default function Status() {
@@ -10,6 +10,7 @@ export default function Status() {
   const [selectedProject, setSelectedProject] = useState('all')
   const [projects, setProjects] = useState([])
   const [deleting, setDeleting] = useState(null)
+  const [killingJob, setKillingJob] = useState(null)
 
   useEffect(() => {
     loadData()
@@ -25,13 +26,11 @@ export default function Status() {
         params: selectedProject !== 'all' ? { project: selectedProject } : {} 
       }).catch(() => ({ data: { documents: [] } }))
       const jobsRes = await api.get('/jobs').catch(() => ({ data: { jobs: [] } }))
-      // ✅ FIXED: Changed /projects to /projects/list
       const projectsRes = await api.get('/projects/list').catch(() => ({ data: [] }))
       
       setChromaStats(chromaRes.data)
       setDocuments(docsRes.data.documents || [])
       setJobs(jobsRes.data.jobs || [])
-      // ✅ FIXED: Handle both array and {projects: []} response formats
       setProjects(Array.isArray(projectsRes.data) ? projectsRes.data : projectsRes.data.projects || [])
     } catch (err) {
       console.error('Error loading data:', err)
@@ -49,6 +48,28 @@ export default function Status() {
       loadData()
     } catch (err) {
       alert('Error resetting ChromaDB: ' + err.message)
+    }
+  }
+
+  const killJob = async (jobId) => {
+    if (!confirm('Kill this stuck job? It will be marked as failed.')) return
+    
+    setKillingJob(jobId)
+    
+    try {
+      await api.post(`/jobs/${jobId}/fail`, null, {
+        params: { error_message: 'Job manually terminated - stuck/hung' }
+      })
+      
+      alert('Job terminated successfully')
+      
+      // Refresh immediately
+      await loadData()
+    } catch (err) {
+      console.error('Kill job error:', err)
+      alert('Error killing job: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setKillingJob(null)
     }
   }
 
@@ -80,10 +101,7 @@ export default function Status() {
         params: { project }
       })
       
-      // Refresh immediately
       await loadData()
-      
-      // Show success briefly
       alert(`"${filename}" deleted successfully`)
     } catch (err) {
       console.error('Delete error:', err)
@@ -221,19 +239,41 @@ export default function Status() {
             {jobs.map((job) => (
               <div key={job.id} className="border rounded-lg p-4">
                 <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 flex-1">
                     {getStatusIcon(job.status)}
-                    <div>
+                    <div className="flex-1">
                       <p className="font-medium">{job.input_data?.filename || 'Processing...'}</p>
                       <p className="text-sm text-gray-500">{job.project_id || '-'}</p>
                     </div>
                   </div>
-                  <span className={`text-xs px-3 py-1 rounded-full font-medium ${getStatusColor(job.status)}`}>
-                    {job.status}
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className={`text-xs px-3 py-1 rounded-full font-medium ${getStatusColor(job.status)}`}>
+                      {job.status}
+                    </span>
+                    {/* 🛑 KILL JOB BUTTON - Only show for processing jobs */}
+                    {job.status === 'processing' && (
+                      <button
+                        onClick={() => killJob(job.id)}
+                        disabled={killingJob === job.id}
+                        className="flex items-center gap-1 px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Kill stuck job"
+                      >
+                        {killingJob === job.id ? (
+                          <>
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                            <span>Killing...</span>
+                          </>
+                        ) : (
+                          <>
+                            <StopCircle className="w-3 h-3" />
+                            <span>Kill Job</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
                 </div>
                 
-                {/* ✅ FIXED: Access progress.step and progress.percent correctly */}
                 {job.progress && job.status === 'processing' && (
                   <div className="mt-3">
                     <div className="flex justify-between text-sm mb-1">
