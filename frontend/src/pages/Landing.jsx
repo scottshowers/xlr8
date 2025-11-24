@@ -114,7 +114,7 @@ export default function Landing() {
             lineHeight: '1.7',
             opacity: 0.9
           }}>
-            Enterprise-grade AI platform for UKG implementation analysis. 
+            Enterprise-grade AI platform for HCM Technology Projects. 
             Secure, scalable, and purpose-built for HCM consultants.
           </p>
           
@@ -429,7 +429,7 @@ export default function Landing() {
               maxWidth: '600px',
               margin: '0 auto'
             }}>
-              Everything you need for UKG implementation analysis
+              Everything you need for HCM Technology Projects
             </p>
           </div>
 
@@ -462,7 +462,7 @@ export default function Landing() {
               { 
                 icon: <Shield className="w-5 h-5" />, 
                 title: 'SECURE 2.0',
-                desc: 'Specialized analysis for UKG implementations'
+                desc: 'Specialized analysis for HCM Technology Projects'
               },
               { 
                 icon: <CheckCircle2 className="w-5 h-5" />, 
@@ -541,7 +541,7 @@ export default function Landing() {
             margin: '0 auto 2rem',
             lineHeight: '1.7'
           }}>
-            Start using XLR8 to analyze UKG implementations faster, 
+            Start using XLR8 to analyze HCM Technology Projects faster, 
             more accurately, and with complete data security.
           </p>
           <Link 
