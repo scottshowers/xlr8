@@ -8,6 +8,7 @@ import Upload from './components/Upload';
 import Status from './components/Status';
 
 // Pages
+import Landing from './pages/Landing';
 import Projects from './pages/Projects';
 import Secure20Analysis from './pages/Secure20Analysis';
 
@@ -57,7 +58,7 @@ function Navigation() {
   const location = useLocation();
   
   const isActive = (path) => {
-    return location.pathname === path || (path === '/chat' && location.pathname === '/');
+    return location.pathname === path;
   };
 
   const navLinkStyle = (path) => ({
@@ -179,7 +180,7 @@ function App() {
         
         <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '2rem 1.5rem' }}>
           <Routes>
-            <Route path="/" element={<Chat projects={projects} functionalAreas={functionalAreas} />} />
+            <Route path="/" element={<Landing />} />
             <Route path="/chat" element={<Chat projects={projects} functionalAreas={functionalAreas} />} />
             <Route 
               path="/upload" 
