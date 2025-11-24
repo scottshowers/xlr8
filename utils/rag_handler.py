@@ -350,8 +350,16 @@ class RAGHandler:
             if progress_callback:
                 progress_callback(60, 100, f"Embeddings complete, adding to database...")
             
-            # Process chunks with their embeddings
+            # Process chunks with their embeddings - BATCH INSERTIONS
             chunks_added = 0
+            batch_size = 50  # Insert 50 chunks at once
+            
+            # Prepare all valid chunks/embeddings/metadata
+            valid_chunks = []
+            valid_embeddings = []
+            valid_metadatas = []
+            valid_ids = []
+            
             for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
                 if embedding is None:
                     logger.warning(f"Failed to get embedding for chunk {i}, skipping")
@@ -364,21 +372,32 @@ class RAGHandler:
                 chunk_metadata = {**metadata, "chunk_index": i}
                 if project_id:
                     chunk_metadata['project_id'] = project_id
-                    logger.debug(f"[PROJECT] Chunk {i} tagged with project_id: {project_id}")
                 
-                # Add to collection
+                valid_chunks.append(chunk)
+                valid_embeddings.append(embedding)
+                valid_metadatas.append(chunk_metadata)
+                valid_ids.append(doc_id)
+            
+            # Add in batches for speed
+            total_valid = len(valid_chunks)
+            for batch_start in range(0, total_valid, batch_size):
+                batch_end = min(batch_start + batch_size, total_valid)
+                
                 collection.add(
-                    embeddings=[embedding],
-                    documents=[chunk],
-                    metadatas=[chunk_metadata],  # ← CHANGED: Includes project_id
-                    ids=[doc_id]
+                    embeddings=valid_embeddings[batch_start:batch_end],
+                    documents=valid_chunks[batch_start:batch_end],
+                    metadatas=valid_metadatas[batch_start:batch_end],
+                    ids=valid_ids[batch_start:batch_end]
                 )
-                chunks_added += 1
                 
-                # Report progress every 10 chunks
-                if progress_callback and i % 10 == 0:
-                    pct = 60 + int((i / len(chunks)) * 35)  # 60-95% range
-                    progress_callback(pct, 100, f"Adding chunk {i+1}/{len(chunks)} to database...")
+                chunks_added += (batch_end - batch_start)
+                
+                # Report progress after each batch
+                if progress_callback:
+                    pct = 70 + int((batch_end / total_valid) * 25)  # 70-95% range
+                    progress_callback(pct, 100, f"Adding to database... ({batch_end}/{total_valid} chunks)")
+                
+                logger.info(f"Added batch {batch_start}-{batch_end} ({batch_end - batch_start} chunks)")
             
             if progress_callback:
                 progress_callback(100, 100, f"Complete! Added {chunks_added} chunks")
