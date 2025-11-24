@@ -81,11 +81,11 @@ function Secure20Analysis() {
   return (
     <div>
       {/* Page Header */}
-      <div style={{ marginBottom: '3rem', animation: 'fadeIn 0.8s ease-out 0.1s both' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.75rem' }}>
+      <div style={{ marginBottom: '2rem', animation: 'fadeIn 0.8s ease-out 0.1s both' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
           <div style={{
-            width: '56px',
-            height: '56px',
+            width: '48px',
+            height: '48px',
             background: 'linear-gradient(135deg, #83b16d, #93abd9)',
             borderRadius: '12px',
             display: 'flex',
@@ -93,12 +93,12 @@ function Secure20Analysis() {
             justifyContent: 'center',
             boxShadow: '0 4px 12px rgba(131, 177, 109, 0.25)'
           }}>
-            <TrendingUp size={32} color="white" />
+            <TrendingUp size={24} color="white" />
           </div>
           <div>
             <h1 style={{
               fontFamily: "'Sora', sans-serif",
-              fontSize: '3.5rem',
+              fontSize: '2.25rem',
               fontWeight: '700',
               color: '#2a3441',
               margin: 0,
@@ -113,7 +113,7 @@ function Secure20Analysis() {
             </h1>
             <p style={{
               color: '#5f6c7b',
-              fontSize: '1.15rem',
+              fontSize: '1rem',
               fontWeight: '500',
               margin: '0.5rem 0 0 0'
             }}>
