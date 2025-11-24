@@ -59,6 +59,34 @@ async def get_job_status(job_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/jobs/{job_id}/fail")
+async def fail_job_manually(job_id: str, error_message: str = "Manually terminated by user"):
+    """Manually fail a stuck processing job"""
+    try:
+        job = ProcessingJobModel.get_by_id(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        # Fail the job
+        success = ProcessingJobModel.fail(job_id, error_message)
+        
+        if success:
+            logger.info(f"Job {job_id} manually failed by user")
+            return {
+                "success": True,
+                "message": f"Job {job_id} marked as failed",
+                "job_id": job_id
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to update job status")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to fail job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/status/documents")
 async def get_documents(project: Optional[str] = None, limit: int = 1000):
     """
