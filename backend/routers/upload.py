@@ -94,13 +94,22 @@ async def upload_file(
         if functional_area:
             metadata["functional_area"] = functional_area
         
-        # Add to vector store
-        ProcessingJobModel.update_progress(job_id, 70, "Creating embeddings...")
+        # Progress callback for RAG operations
+        def update_progress(current: int, total: int, message: str):
+            """Callback to update job progress during RAG operations"""
+            # current = percent (0-100) from RAG handler
+            # We're in the 50-95% range of overall upload
+            overall_percent = 50 + int(current * 0.45)  # Map 0-100 to 50-95%
+            ProcessingJobModel.update_progress(job_id, overall_percent, message)
+        
+        # Add to vector store with progress tracking
+        ProcessingJobModel.update_progress(job_id, 60, "Creating embeddings...")
         rag = RAGHandler()
         success = rag.add_document(
             collection_name="documents",
             text=text,
-            metadata=metadata
+            metadata=metadata,
+            progress_callback=update_progress  # ✅ Pass callback!
         )
         
         if not success:
@@ -108,7 +117,7 @@ async def upload_file(
             raise HTTPException(status_code=500, detail="Failed to process document")
         
         # Save to documents table
-        ProcessingJobModel.update_progress(job_id, 90, "Saving to database...")
+        ProcessingJobModel.update_progress(job_id, 96, "Saving to database...")
         DocumentModel.create(
             project_id=project,
             name=file.filename,
@@ -120,6 +129,7 @@ async def upload_file(
         )
         
         # Cleanup
+        ProcessingJobModel.update_progress(job_id, 98, "Cleaning up...")
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
         
