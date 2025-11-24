@@ -25,12 +25,14 @@ export default function Status() {
         params: selectedProject !== 'all' ? { project: selectedProject } : {} 
       }).catch(() => ({ data: { documents: [] } }))
       const jobsRes = await api.get('/jobs').catch(() => ({ data: { jobs: [] } }))
-      const projectsRes = await api.get('/projects').catch(() => ({ data: { projects: [] } }))
+      // ✅ FIXED: Changed /projects to /projects/list
+      const projectsRes = await api.get('/projects/list').catch(() => ({ data: [] }))
       
       setChromaStats(chromaRes.data)
       setDocuments(docsRes.data.documents || [])
       setJobs(jobsRes.data.jobs || [])
-      setProjects(projectsRes.data.projects || [])
+      // ✅ FIXED: Handle both array and {projects: []} response formats
+      setProjects(Array.isArray(projectsRes.data) ? projectsRes.data : projectsRes.data.projects || [])
     } catch (err) {
       console.error('Error loading data:', err)
     } finally {
@@ -222,8 +224,8 @@ export default function Status() {
                   <div className="flex items-center gap-3">
                     {getStatusIcon(job.status)}
                     <div>
-                      <p className="font-medium">{job.filename}</p>
-                      <p className="text-sm text-gray-500">{job.project}</p>
+                      <p className="font-medium">{job.input_data?.filename || 'Processing...'}</p>
+                      <p className="text-sm text-gray-500">{job.project_id || '-'}</p>
                     </div>
                   </div>
                   <span className={`text-xs px-3 py-1 rounded-full font-medium ${getStatusColor(job.status)}`}>
@@ -231,27 +233,30 @@ export default function Status() {
                   </span>
                 </div>
                 
-                {job.progress !== undefined && job.status === 'processing' && (
+                {/* ✅ FIXED: Access progress.step and progress.percent correctly */}
+                {job.progress && job.status === 'processing' && (
                   <div className="mt-3">
                     <div className="flex justify-between text-sm mb-1">
-                      <span className="text-gray-600">{job.current_step || 'Processing...'}</span>
-                      <span className="text-gray-600">{job.progress}%</span>
+                      <span className="text-gray-600">{job.progress.step || 'Processing...'}</span>
+                      <span className="text-gray-600">{job.progress.percent || 0}%</span>
                     </div>
                     <div className="w-full bg-gray-200 rounded-full h-2">
                       <div 
                         className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                        style={{ width: `${job.progress}%` }}
+                        style={{ width: `${job.progress.percent || 0}%` }}
                       />
                     </div>
                   </div>
                 )}
                 
-                {job.error && (
-                  <p className="mt-2 text-sm text-red-600">{job.error}</p>
+                {job.error_message && (
+                  <p className="mt-2 text-sm text-red-600">{job.error_message}</p>
                 )}
 
-                {job.result && (
-                  <p className="mt-2 text-sm text-green-600">{job.result}</p>
+                {job.result_data && (
+                  <p className="mt-2 text-sm text-green-600">
+                    {typeof job.result_data === 'string' ? job.result_data : 'Completed'}
+                  </p>
                 )}
               </div>
             ))}
