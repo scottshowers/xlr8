@@ -8,6 +8,14 @@ import requests
 from requests.auth import HTTPBasicAuth
 import logging
 
+# Import enhanced chunker
+try:
+    from utils.enhanced_chunker import EnhancedChunker
+    ENHANCED_CHUNKING_AVAILABLE = True
+except ImportError:
+    ENHANCED_CHUNKING_AVAILABLE = False
+    logging.warning("Enhanced chunker not available, falling back to basic chunking")
+
 logger = logging.getLogger(__name__)
 
 
@@ -93,6 +101,14 @@ class RAGHandler:
             self.embedding_model = "nomic-embed-text"
             self.chunk_size = 800
             self.chunk_overlap = 100
+            
+            # Initialize enhanced chunker
+            if ENHANCED_CHUNKING_AVAILABLE:
+                self.chunker = EnhancedChunker()
+                logger.info("Enhanced chunker initialized")
+            else:
+                self.chunker = None
+                logger.warning("Using fallback basic chunking")
             
             logger.info("RAGHandler initialized successfully")
             logger.info(f"Ollama endpoint: {self.ollama_base_url}")
@@ -219,84 +235,74 @@ class RAGHandler:
 
     def chunk_text(self, text: str, file_type: str = 'txt') -> List[str]:
         """
-        Hybrid chunking - adapts chunk size based on file type.
+        Chunk text using enhanced chunker with smart boundaries
         
-        CHUNK SIZES:
-        - Excel/CSV: 2000 chars (preserves ~20-30 table rows)
-        - PDF/DOCX/TXT: 800 chars (standard)
+        This method now uses the EnhancedChunker for:
+        1. Smart sentence/paragraph boundary detection
+        2. Adaptive chunk sizing based on file type
+        3. Enhanced metadata tracking
+        4. File-type specific optimization
         
         Args:
             text: Text to chunk
             file_type: File type (xlsx, xls, csv, pdf, docx, txt, md)
             
         Returns:
-            List of text chunks
+            List of text chunks (strings)
         """
         logger.info(f"[CHUNK] Starting, text length: {len(text)}, file_type: {file_type}")
         
+        if self.chunker:
+            # Use enhanced chunker
+            try:
+                chunk_dicts = self.chunker.chunk_text(text, file_type)
+                chunks = [c['text'] for c in chunk_dicts]
+                
+                # Store enhanced metadata for later retrieval
+                self._last_chunk_metadata = chunk_dicts
+                
+                logger.info(f"[CHUNK] Enhanced chunking: {len(chunks)} chunks created")
+                logger.info(f"[CHUNK] Chunk types: {set(c['chunk_type'] for c in chunk_dicts)}")
+                logger.info(f"[CHUNK] Avg size: {sum(len(c['text']) for c in chunks) / len(chunks):.0f} chars")
+                
+                return chunks
+                
+            except Exception as e:
+                logger.error(f"[CHUNK] Enhanced chunking failed: {e}, falling back to basic")
+                # Fall through to basic chunking
+        
+        # Fallback: Basic chunking (original logic)
+        logger.warning("[CHUNK] Using basic chunking (enhanced chunker not available)")
+        
         # Determine chunk size based on file type
         if file_type in ['xlsx', 'xls', 'csv']:
-            chunk_size = 2000  # Larger for tabular data
-            chunk_overlap = 200  # More overlap for context
+            chunk_size = 2000
+            chunk_overlap = 200
             logger.info(f"[CHUNK] Using EXCEL mode: {chunk_size} chars, {chunk_overlap} overlap")
         else:
-            chunk_size = self.chunk_size  # Default 800
-            chunk_overlap = self.chunk_overlap  # Default 100
+            chunk_size = self.chunk_size
+            chunk_overlap = self.chunk_overlap
             logger.info(f"[CHUNK] Using STANDARD mode: {chunk_size} chars, {chunk_overlap} overlap")
         
         # Clean the text
         text = re.sub(r'\s+', ' ', text).strip()
-        logger.info(f"[CHUNK] After cleaning: {len(text)} chars")
-        
-        # Extract headers for Excel (if present)
-        header = None
-        if file_type in ['xlsx', 'xls', 'csv'] and 'WORKSHEET:' in text:
-            # Try to extract header (first line after WORKSHEET marker)
-            lines = text.split('\n')
-            for i, line in enumerate(lines):
-                if 'WORKSHEET:' in line and i + 2 < len(lines):
-                    # Skip the separator line, grab the header
-                    potential_header = lines[i + 2].strip()
-                    if potential_header and len(potential_header) < 500:
-                        header = potential_header
-                        logger.info(f"[CHUNK] Extracted header for repetition: {header[:50]}...")
-                    break
         
         chunks = []
         position = 0
-        chunk_count = 0
-        
-        logger.info(f"[CHUNK] Will create ~{len(text) // chunk_size} chunks")
         
         while position < len(text):
-            chunk_count += 1
-            
-            # Get chunk
             end = min(position + chunk_size, len(text))
             chunk = text[position:end].strip()
             
-            # For Excel: Prepend header to each chunk (except first)
-            if header and chunk_count > 1 and file_type in ['xlsx', 'xls', 'csv']:
-                chunk = f"[HEADER] {header}\n{chunk}"
-                logger.debug(f"[CHUNK] Added header to chunk #{chunk_count}")
-            
-            # Only add non-empty chunks
             if chunk:
                 chunks.append(chunk)
-                logger.debug(f"[CHUNK] Added chunk #{chunk_count}, length: {len(chunk)}")
             
-            # Move to next position with overlap
             if end < len(text):
                 position = end - chunk_overlap
             else:
-                position = len(text)  # Done
-            
-            # Safety check
-            if position < 0:
-                logger.error(f"[CHUNK] ERROR: position went negative! Breaking.")
-                break
+                position = len(text)
         
-        logger.info(f"[CHUNK] COMPLETED: {len(chunks)} chunks created")
+        logger.info(f"[CHUNK] COMPLETED: {len(chunks)} basic chunks created")
         return chunks
 
     def add_document(
@@ -340,6 +346,9 @@ class RAGHandler:
             
             chunks = self.chunk_text(text, file_type=file_type)
             
+            # Get enhanced metadata if available
+            chunk_metadata_enhanced = getattr(self, '_last_chunk_metadata', None)
+            
             if progress_callback:
                 progress_callback(10, 100, f"Chunked into {len(chunks)} pieces, getting embeddings...")
             
@@ -372,6 +381,18 @@ class RAGHandler:
                 chunk_metadata = {**metadata, "chunk_index": i}
                 if project_id:
                     chunk_metadata['project_id'] = project_id
+                
+                # Add enhanced metadata if available
+                if chunk_metadata_enhanced and i < len(chunk_metadata_enhanced):
+                    enhanced = chunk_metadata_enhanced[i]
+                    chunk_metadata.update({
+                        'chunk_type': enhanced.get('chunk_type', 'unknown'),
+                        'position': enhanced.get('position', f"{i+1}/{len(chunks)}"),
+                        'tokens_estimate': enhanced.get('tokens_estimate', len(chunk) // 4),
+                        'parent_section': enhanced.get('parent_section'),
+                        'has_header': enhanced.get('has_header', False),
+                        'size_category': enhanced.get('size_category', 'medium')
+                    })
                 
                 valid_chunks.append(chunk)
                 valid_embeddings.append(embedding)
