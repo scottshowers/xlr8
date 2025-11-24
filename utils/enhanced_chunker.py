@@ -512,29 +512,53 @@ class EnhancedChunker:
         logger.info(f"Using {method} method: chunk_size={chunk_size}, overlap={overlap}")
         
         # Route to appropriate chunking method
-        if method == 'table':
-            enhanced_chunks = self.chunk_table_content(text, chunk_size, overlap)
-        else:  # semantic
-            enhanced_chunks = self.chunk_semantic_content(text, chunk_size, overlap)
+        try:
+            if method == 'table':
+                enhanced_chunks = self.chunk_table_content(text, chunk_size, overlap)
+            else:  # semantic
+                enhanced_chunks = self.chunk_semantic_content(text, chunk_size, overlap)
+            
+            logger.info(f"Created {len(enhanced_chunks)} EnhancedChunk objects")
+        except Exception as e:
+            logger.error(f"Error in chunking method: {e}", exc_info=True)
+            raise
         
         # Convert to dictionaries with metadata
         result = []
-        for chunk in enhanced_chunks:
-            chunk_dict = chunk.to_dict()
-            
-            # Add any additional metadata
-            if metadata:
-                chunk_dict.update(metadata)
-            
-            # Add convenience fields
-            chunk_dict['position'] = f"{chunk.chunk_index + 1}/{chunk.total_chunks}"
-            chunk_dict['size_category'] = 'small' if len(chunk.text) < 500 else 'medium' if len(chunk.text) < 1000 else 'large'
-            
-            result.append(chunk_dict)
+        for i, chunk in enumerate(enhanced_chunks):
+            try:
+                # Ensure chunk is EnhancedChunk object
+                if not isinstance(chunk, EnhancedChunk):
+                    logger.error(f"Chunk {i} is not EnhancedChunk: {type(chunk)}")
+                    continue
+                
+                chunk_dict = chunk.to_dict()
+                
+                # Ensure chunk_dict is actually a dict
+                if not isinstance(chunk_dict, dict):
+                    logger.error(f"chunk.to_dict() returned non-dict: {type(chunk_dict)}")
+                    continue
+                
+                # Add any additional metadata
+                if metadata and isinstance(metadata, dict):
+                    chunk_dict.update(metadata)
+                
+                # Add convenience fields
+                chunk_dict['position'] = f"{chunk.chunk_index + 1}/{chunk.total_chunks}"
+                chunk_dict['size_category'] = 'small' if len(chunk.text) < 500 else 'medium' if len(chunk.text) < 1000 else 'large'
+                
+                result.append(chunk_dict)
+            except Exception as e:
+                logger.error(f"Error processing chunk {i}: {e}", exc_info=True)
+                # Skip this chunk but continue
+                continue
+        
+        if not result:
+            raise ValueError(f"No valid chunks created from {len(enhanced_chunks)} chunk objects")
         
         logger.info(f"Enhanced chunking complete: {len(result)} chunks created")
-        logger.info(f"Chunk types: {set(c['chunk_type'] for c in result)}")
-        logger.info(f"Avg chunk size: {sum(len(c['text']) for c in result) / len(result):.0f} chars")
+        logger.info(f"Chunk types: {set(c.get('chunk_type', 'unknown') for c in result)}")
+        logger.info(f"Avg chunk size: {sum(len(c.get('text', '')) for c in result) / len(result):.0f} chars")
         
         return result
 
