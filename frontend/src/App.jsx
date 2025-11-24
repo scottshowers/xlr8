@@ -165,7 +165,7 @@ function App() {
       <div style={{ minHeight: '100vh', background: '#f6f5fa' }}>
         <Navigation />
         
-        <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '3.5rem 2.5rem' }}>
+        <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '2rem 1.5rem' }}>
           <Routes>
             <Route path="/" element={<Chat projects={projects} functionalAreas={functionalAreas} />} />
             <Route path="/chat" element={<Chat projects={projects} functionalAreas={functionalAreas} />} />
