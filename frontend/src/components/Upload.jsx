@@ -1,340 +1,296 @@
-import React, { useState, useEffect } from 'react';
-import { Upload as UploadIcon, FileText, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
-import CreateProject from './CreateProject';
+import { useState, useEffect } from 'react'
+import { Upload as UploadIcon, FileText, CheckCircle, AlertCircle, Loader2, ArrowRight } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import api from '../services/api'
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://hcmpact-xlr8-production.up.railway.app';
+export default function Upload() {
+  const navigate = useNavigate()
+  const [files, setFiles] = useState([])
+  const [selectedArea, setSelectedArea] = useState('')
+  const [selectedProject, setSelectedProject] = useState('')
+  const [projects, setProjects] = useState([])
+  const [uploading, setUploading] = useState(false)
+  const [uploadResult, setUploadResult] = useState(null)
+  const [error, setError] = useState(null)
 
-function Upload({ projects = [], functionalAreas = [], onProjectCreated }) {
-  const [selectedProject, setSelectedProject] = useState('');
-  const [selectedArea, setSelectedArea] = useState('');
-  const [files, setFiles] = useState([]);
-  const [uploading, setUploading] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState(null);
-  const [showCreateProject, setShowCreateProject] = useState(false);
-  const [currentJobId, setCurrentJobId] = useState(null);
-  const [progress, setProgress] = useState({ percent: 0, step: '' });
+  const functionalAreas = [
+    'Payroll',
+    'Time & Attendance', 
+    'Benefits',
+    'HR Core',
+    'Recruiting',
+    'Onboarding',
+    'Performance',
+    'Learning',
+    'Compensation',
+    'Other'
+  ]
 
-  // Poll job status for progress updates
   useEffect(() => {
-    if (!currentJobId) return;
+    loadProjects()
+  }, [])
 
-    const pollInterval = setInterval(async () => {
-      try {
-        const response = await fetch(`${API_URL}/api/jobs/${currentJobId}`);
-        if (response.ok) {
-          const job = await response.json();
-          
-          // Update progress
-          if (job.progress) {
-            setProgress({
-              percent: job.progress.percent || 0,
-              step: job.progress.step || ''
-            });
-          }
+  const loadProjects = async () => {
+    try {
+      const response = await api.get('/projects/list')
+      setProjects(response.data || [])
+    } catch (err) {
+      console.error('Failed to load projects:', err)
+    }
+  }
 
-          // Check if completed or failed
-          if (job.status === 'completed') {
-            clearInterval(pollInterval);
-            setProgress({ percent: 100, step: 'Complete!' });
-            setUploadStatus({
-              type: 'success',
-              message: `Upload successful! File processed.`
-            });
-            setUploading(false);
-            setCurrentJobId(null);
-            setFiles([]);
-          } else if (job.status === 'failed') {
-            clearInterval(pollInterval);
-            setUploadStatus({
-              type: 'error',
-              message: job.error_message || 'Upload failed'
-            });
-            setUploading(false);
-            setCurrentJobId(null);
-          }
-        }
-      } catch (error) {
-        console.error('Error polling job status:', error);
-      }
-    }, 1000); // Poll every second
-
-    return () => clearInterval(pollInterval);
-  }, [currentJobId]);
-
-  const handleDrop = (e) => {
-    e.preventDefault();
-    const droppedFiles = Array.from(e.dataTransfer.files);
-    setFiles(droppedFiles);
-  };
-
-  const handleFileSelect = (e) => {
-    const selectedFiles = Array.from(e.target.files);
-    setFiles(selectedFiles);
-  };
+  const handleFileChange = (e) => {
+    const selectedFiles = Array.from(e.target.files)
+    setFiles(selectedFiles)
+    setError(null)
+    setUploadResult(null)
+  }
 
   const handleUpload = async () => {
     if (files.length === 0) {
-      setUploadStatus({ type: 'error', message: 'Please select a file to upload' });
-      return;
+      setError('Please select a file to upload')
+      return
     }
 
-    if (!selectedArea) {
-      setUploadStatus({ type: 'error', message: 'Please select a functional area' });
-      return;
+    if (!selectedProject) {
+      setError('Please select a project')
+      return
     }
 
-    // Get project value - use selected or default to 'global'
-    const projectValue = selectedProject || 'global';
-
-    setUploading(true);
-    setUploadStatus(null);
-    setProgress({ percent: 0, step: 'Starting upload...' });
+    setUploading(true)
+    setError(null)
+    setUploadResult(null)
 
     try {
-      // Backend only handles ONE file at a time
-      const file = files[0];
-
-      const formData = new FormData();
-      formData.append('file', file); // ✅ Singular "file"
-      formData.append('project', projectValue); // ✅ "project" not "project_id"
-      formData.append('functional_area', selectedArea);
-
-      const response = await fetch(`${API_URL}/api/upload`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        // Start polling for progress
-        setCurrentJobId(data.job_id);
-        setProgress({ percent: 5, step: 'Processing...' });
-      } else {
-        setUploadStatus({
-          type: 'error',
-          message: data.detail || 'Upload failed'
-        });
-        setUploading(false);
+      const file = files[0] // Upload first file
+      
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('project', selectedProject)
+      if (selectedArea) {
+        formData.append('functional_area', selectedArea)
       }
-    } catch (error) {
-      setUploadStatus({
-        type: 'error',
-        message: `Upload error: ${error.message}`
-      });
-      setUploading(false);
-    }
-  };
 
-  const handleProjectCreated = async (newProject) => {
-    setShowCreateProject(false);
-    
-    if (onProjectCreated) {
-      await onProjectCreated();
+      // Call async upload endpoint
+      const response = await api.post('/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 30000 // 30 second timeout for initial upload (just file save)
+      })
+
+      const { job_id, message } = response.data
+
+      // Show success and redirect to status page
+      setUploadResult({
+        success: true,
+        message: message || 'File queued for processing!',
+        job_id: job_id
+      })
+
+      // Clear form
+      setFiles([])
+      setSelectedArea('')
+      
+      // Redirect to status page after 2 seconds
+      setTimeout(() => {
+        navigate('/status')
+      }, 2000)
+
+    } catch (err) {
+      console.error('Upload error:', err)
+      setError(err.response?.data?.detail || err.message || 'Upload failed')
+    } finally {
+      setUploading(false)
     }
-    
-    if (newProject && newProject.id) {
-      setSelectedProject(newProject.id);
-    }
-  };
+  }
+
+  const formatFileSize = (bytes) => {
+    if (bytes < 1024) return bytes + ' B'
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+    return (bytes / (1024 * 1024)).toFixed(2) + ' MB'
+  }
 
   return (
-    <div className="max-w-4xl mx-auto">
-      <h1 className="text-3xl font-bold text-gray-900 mb-8">Upload Documents</h1>
-
-      {/* Project Selection */}
-      <div className="bg-white rounded-lg shadow p-6 mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <label className="block text-sm font-medium text-gray-700">
-            Select Project
-          </label>
-          <button
-            onClick={() => setShowCreateProject(true)}
-            className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
-          >
-            + New Project
-          </button>
-        </div>
-        <select
-          value={selectedProject}
-          onChange={(e) => setSelectedProject(e.target.value)}
-          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-        >
-          <option value="">Select a project...</option>
-          <option value="global">🌐 Global (All Customers)</option>
-          {projects.map((project) => (
-            <option key={project.id} value={project.name}>
-              {project.customer} - {project.name}
-            </option>
-          ))}
-        </select>
+    <div className="space-y-6">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold text-white">Upload Documents</h1>
+        <p className="text-gray-400 mt-1">
+          Upload files for analysis. Large files process in the background.
+        </p>
       </div>
 
-      {/* Functional Area Selection */}
-      <div className="bg-white rounded-lg shadow p-6 mb-6">
-        <label className="block text-sm font-medium text-gray-700 mb-4">
-          Functional Area
-        </label>
-        <select
-          value={selectedArea}
-          onChange={(e) => setSelectedArea(e.target.value)}
-          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-        >
-          <option value="">Select functional area...</option>
-          {functionalAreas.map((area) => (
-            <option key={area} value={area}>
-              {area}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* File Upload Area */}
-      <div className="bg-white rounded-lg shadow p-6 mb-6">
-        <div
-          onDrop={handleDrop}
-          onDragOver={(e) => e.preventDefault()}
-          className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center hover:border-blue-500 transition-colors"
-        >
-          <UploadIcon className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-          <p className="text-lg text-gray-600 mb-2">
-            Drag and drop a file here, or click to select
-          </p>
-          <p className="text-sm text-gray-500 mb-4">
-            Supported formats: .xlsx, .xls, .pdf, .docx, .txt
-          </p>
-          <input
-            type="file"
-            accept=".xlsx,.xls,.pdf,.docx,.txt,.md"
-            onChange={handleFileSelect}
-            className="hidden"
-            id="file-upload"
-          />
-          <label
-            htmlFor="file-upload"
-            className="inline-block px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer"
-          >
-            Select File
+      {/* Upload Form */}
+      <div className="bg-gray-800 rounded-lg p-6 space-y-6">
+        
+        {/* Project Selection */}
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-2">
+            Project <span className="text-red-400">*</span>
           </label>
+          <select
+            value={selectedProject}
+            onChange={(e) => setSelectedProject(e.target.value)}
+            className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-green-500 focus:border-transparent"
+          >
+            <option value="">Select a project...</option>
+            {projects.map(project => (
+              <option key={project.id} value={project.name}>
+                {project.name}
+              </option>
+            ))}
+          </select>
         </div>
 
-        {/* Selected File */}
-        {files.length > 0 && !uploading && (
-          <div className="mt-6">
-            <h3 className="text-sm font-medium text-gray-700 mb-3">
-              Selected File
-            </h3>
+        {/* Functional Area */}
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-2">
+            Functional Area
+          </label>
+          <select
+            value={selectedArea}
+            onChange={(e) => setSelectedArea(e.target.value)}
+            className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-green-500 focus:border-transparent"
+          >
+            <option value="">Select area (optional)...</option>
+            {functionalAreas.map(area => (
+              <option key={area} value={area}>{area}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* File Drop Zone */}
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-2">
+            File <span className="text-red-400">*</span>
+          </label>
+          <div className="border-2 border-dashed border-gray-600 rounded-lg p-8 text-center hover:border-green-500 transition-colors">
+            <input
+              type="file"
+              onChange={handleFileChange}
+              className="hidden"
+              id="file-upload"
+              accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.txt,.md"
+            />
+            <label htmlFor="file-upload" className="cursor-pointer">
+              <UploadIcon className="w-12 h-12 text-gray-500 mx-auto mb-4" />
+              <p className="text-gray-300 mb-2">
+                Click to select a file
+              </p>
+              <p className="text-gray-500 text-sm">
+                PDF, Word, Excel, CSV, or Text files
+              </p>
+            </label>
+          </div>
+        </div>
+
+        {/* Selected Files */}
+        {files.length > 0 && (
+          <div className="bg-gray-700/50 rounded-lg p-4">
+            <h3 className="text-sm font-medium text-gray-300 mb-3">Selected File:</h3>
             <div className="space-y-2">
-              {files.slice(0, 1).map((file, index) => (
-                <div
-                  key={index}
-                  className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
-                >
-                  <div className="flex items-center">
-                    <FileText className="h-5 w-5 text-blue-600 mr-3" />
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">{file.name}</p>
-                      <p className="text-xs text-gray-500">
-                        {(file.size / 1024 / 1024).toFixed(2)} MB
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => setFiles([])}
-                    className="text-red-600 hover:text-red-800 text-sm"
-                  >
-                    Remove
-                  </button>
+              {files.map((file, index) => (
+                <div key={index} className="flex items-center gap-3 text-gray-300">
+                  <FileText className="w-5 h-5 text-green-400" />
+                  <span className="flex-1 truncate">{file.name}</span>
+                  <span className="text-gray-500 text-sm">
+                    {formatFileSize(file.size)}
+                  </span>
                 </div>
               ))}
             </div>
             {files.length > 1 && (
-              <p className="text-sm text-amber-600 mt-2">
-                Note: Only the first file will be uploaded. Multiple files coming soon!
+              <p className="text-yellow-400 text-sm mt-2">
+                Note: Only the first file will be uploaded. Multiple file support coming soon!
               </p>
             )}
           </div>
         )}
 
-        {/* Progress Bar */}
-        {uploading && (
-          <div className="mt-6">
-            <div className="mb-2 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Loader2 className="h-4 w-4 text-blue-600 animate-spin" />
-                <span className="text-sm font-medium text-gray-700">
-                  {progress.step || 'Processing...'}
-                </span>
-              </div>
-              <span className="text-sm font-medium text-gray-700">
-                {progress.percent}%
-              </span>
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-3">
-              <div
-                className="bg-blue-600 h-3 rounded-full transition-all duration-300 ease-out"
-                style={{ width: `${progress.percent}%` }}
-              />
-            </div>
-            <p className="text-xs text-gray-500 mt-2">
-              Processing your file... This may take a minute for large documents.
-            </p>
-          </div>
-        )}
-
         {/* Upload Button */}
-        {!uploading && (
-          <div className="mt-6">
-            <button
-              onClick={handleUpload}
-              disabled={uploading || files.length === 0}
-              className="w-full px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
-            >
+        <button
+          onClick={handleUpload}
+          disabled={uploading || files.length === 0 || !selectedProject}
+          className={`w-full py-3 px-4 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors ${
+            uploading || files.length === 0 || !selectedProject
+              ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+              : 'bg-green-600 hover:bg-green-700 text-white'
+          }`}
+        >
+          {uploading ? (
+            <>
+              <Loader2 className="w-5 h-5 animate-spin" />
+              Uploading...
+            </>
+          ) : (
+            <>
+              <UploadIcon className="w-5 h-5" />
               Upload File
-            </button>
+            </>
+          )}
+        </button>
+
+        {/* Info Box */}
+        <div className="bg-blue-900/30 border border-blue-700 rounded-lg p-4">
+          <p className="text-blue-300 text-sm">
+            <strong>How it works:</strong> Files are queued for background processing. 
+            Large files may take several minutes. Check the Status page to monitor progress.
+          </p>
+        </div>
+
+        {/* Error Message */}
+        {error && (
+          <div className="bg-red-900/50 border border-red-700 rounded-lg p-4 flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-red-300 font-medium">Upload Error</p>
+              <p className="text-red-400 text-sm mt-1">{error}</p>
+            </div>
           </div>
         )}
 
-        {/* Upload Status */}
-        {uploadStatus && !uploading && (
-          <div
-            className={`mt-4 p-4 rounded-lg ${
-              uploadStatus.type === 'success'
-                ? 'bg-green-50 text-green-800 border border-green-200'
-                : 'bg-red-50 text-red-800 border border-red-200'
-            }`}
-          >
-            <div className="flex items-start">
-              {uploadStatus.type === 'error' ? (
-                <AlertCircle className="h-5 w-5 mr-2 flex-shrink-0 mt-0.5" />
-              ) : (
-                <CheckCircle className="h-5 w-5 mr-2 flex-shrink-0 mt-0.5" />
-              )}
-              <div>
-                <p className="font-medium">{uploadStatus.message}</p>
-                {uploadStatus.type === 'success' && (
-                  <p className="text-sm mt-2">
-                    View your document on the{' '}
-                    <a href="/status" className="underline font-medium">
-                      Status page
-                    </a>
-                  </p>
-                )}
+        {/* Success Message */}
+        {uploadResult?.success && (
+          <div className="bg-green-900/50 border border-green-700 rounded-lg p-4">
+            <div className="flex items-start gap-3">
+              <CheckCircle className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-green-300 font-medium">Upload Queued!</p>
+                <p className="text-green-400 text-sm mt-1">{uploadResult.message}</p>
+                <p className="text-green-400 text-sm mt-2">
+                  Redirecting to Status page...
+                </p>
               </div>
             </div>
+            <button
+              onClick={() => navigate('/status')}
+              className="mt-4 w-full bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors"
+            >
+              Go to Status Page
+              <ArrowRight className="w-4 h-4" />
+            </button>
           </div>
         )}
       </div>
 
-      {/* Create Project Modal */}
-      {showCreateProject && (
-        <CreateProject
-          onClose={() => setShowCreateProject(false)}
-          onProjectCreated={handleProjectCreated}
-        />
-      )}
+      {/* Supported Formats */}
+      <div className="bg-gray-800 rounded-lg p-6">
+        <h2 className="text-lg font-semibold text-white mb-4">Supported Formats</h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            { ext: 'PDF', desc: 'Documents' },
+            { ext: 'DOCX', desc: 'Word files' },
+            { ext: 'XLSX', desc: 'Excel files' },
+            { ext: 'CSV', desc: 'Data files' },
+            { ext: 'TXT', desc: 'Text files' },
+            { ext: 'MD', desc: 'Markdown' },
+          ].map(format => (
+            <div key={format.ext} className="bg-gray-700/50 rounded-lg p-3 text-center">
+              <p className="text-green-400 font-mono font-bold">.{format.ext}</p>
+              <p className="text-gray-400 text-sm">{format.desc}</p>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
-  );
+  )
 }
-
-export default Upload;
