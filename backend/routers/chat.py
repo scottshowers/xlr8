@@ -1,12 +1,13 @@
 """
-Chat Router for XLR8 - RAG + LLM Integration
-============================================
+Chat Router for XLR8 - Multi-Model Orchestration
+================================================
 
-FEATURES:
-- Searches ChromaDB for relevant chunks
-- Sends context + question to LLM (Ollama or Claude)
-- Returns response with source citations
-- Supports project filtering
+ARCHITECTURE:
+1. Search ChromaDB for relevant chunks
+2. Route to local LLM (Mistral/DeepSeek) - can see PII
+3. SANITIZE output (strip all PII)
+4. Send to Claude for synthesis - NEVER sees PII
+5. Return response with sources
 
 Author: XLR8 Team
 """
@@ -16,19 +17,20 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import sys
 import os
-import requests
-from requests.auth import HTTPBasicAuth
 import logging
-import json
 
 sys.path.insert(0, '/app')
 sys.path.insert(0, '/data')
 
 from utils.rag_handler import RAGHandler
+from utils.llm_orchestrator import LLMOrchestrator, PIISanitizer
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Initialize orchestrator
+orchestrator = LLMOrchestrator()
 
 
 class ChatRequest(BaseModel):
@@ -37,8 +39,8 @@ class ChatRequest(BaseModel):
     project: Optional[str] = None
     project_id: Optional[str] = None
     functional_area: Optional[str] = None
-    conversation_history: Optional[List[Dict[str, str]]] = None
     max_results: Optional[int] = 10
+    use_claude: Optional[bool] = True  # Use Claude for synthesis
 
 
 class ChatResponse(BaseModel):
@@ -46,157 +48,8 @@ class ChatResponse(BaseModel):
     response: str
     sources: List[Dict[str, Any]]
     chunks_found: int
-    model_used: str
-
-
-class LLMCaller:
-    """Handles LLM calls to Ollama or Claude"""
-    
-    def __init__(self):
-        # Ollama configuration
-        self.ollama_url = os.getenv("LLM_ENDPOINT", "http://178.156.190.64:11435")
-        self.ollama_username = os.getenv("LLM_USERNAME", "xlr8")
-        self.ollama_password = os.getenv("LLM_PASSWORD", "Argyle76226#")
-        self.ollama_model = os.getenv("LLM_MODEL", "llama3.1:8b")
-        
-        # Claude configuration (optional)
-        self.claude_api_key = os.getenv("ANTHROPIC_API_KEY")
-        self.use_claude = os.getenv("USE_CLAUDE", "false").lower() == "true"
-        
-        logger.info(f"LLMCaller initialized - Ollama: {self.ollama_url}, Claude enabled: {self.use_claude}")
-    
-    def call_ollama(self, prompt: str, system_prompt: str = None) -> str:
-        """Call Ollama LLM"""
-        try:
-            url = f"{self.ollama_url}/api/generate"
-            
-            full_prompt = prompt
-            if system_prompt:
-                full_prompt = f"{system_prompt}\n\n{prompt}"
-            
-            payload = {
-                "model": self.ollama_model,
-                "prompt": full_prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.3,
-                    "num_predict": 2048
-                }
-            }
-            
-            logger.info(f"Calling Ollama at {url} with model {self.ollama_model}")
-            
-            response = requests.post(
-                url,
-                json=payload,
-                auth=HTTPBasicAuth(self.ollama_username, self.ollama_password),
-                timeout=120
-            )
-            
-            if response.status_code != 200:
-                logger.error(f"Ollama returned {response.status_code}: {response.text}")
-                raise Exception(f"Ollama error: {response.status_code}")
-            
-            result = response.json()
-            return result.get("response", "")
-            
-        except requests.exceptions.Timeout:
-            logger.error("Ollama request timed out")
-            raise Exception("LLM request timed out")
-        except Exception as e:
-            logger.error(f"Ollama call failed: {e}")
-            raise
-    
-    def call_claude(self, prompt: str, system_prompt: str = None) -> str:
-        """Call Claude API"""
-        if not self.claude_api_key:
-            raise Exception("Claude API key not configured")
-        
-        try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=self.claude_api_key)
-            
-            messages = [{"role": "user", "content": prompt}]
-            
-            response = client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=2048,
-                system=system_prompt or "You are a helpful assistant.",
-                messages=messages
-            )
-            
-            return response.content[0].text
-            
-        except Exception as e:
-            logger.error(f"Claude call failed: {e}")
-            raise
-    
-    def generate(self, prompt: str, system_prompt: str = None) -> tuple[str, str]:
-        """
-        Generate response using configured LLM
-        
-        Returns: (response_text, model_name)
-        """
-        if self.use_claude and self.claude_api_key:
-            try:
-                response = self.call_claude(prompt, system_prompt)
-                return response, "claude-sonnet"
-            except Exception as e:
-                logger.warning(f"Claude failed, falling back to Ollama: {e}")
-        
-        # Default to Ollama
-        response = self.call_ollama(prompt, system_prompt)
-        return response, self.ollama_model
-
-
-def build_rag_prompt(question: str, context_chunks: List[Dict[str, Any]]) -> tuple[str, str]:
-    """
-    Build prompt for RAG query
-    
-    Returns: (user_prompt, system_prompt)
-    """
-    
-    system_prompt = """You are an expert HCM implementation consultant analyzing customer documents. 
-Your role is to provide accurate, helpful answers based ONLY on the provided context.
-
-RULES:
-1. Answer based ONLY on the provided context. If the context doesn't contain the answer, say so.
-2. Be specific and cite which document/source your information comes from.
-3. If multiple documents mention the topic, synthesize the information.
-4. Use clear, professional language appropriate for HCM consultants.
-5. If asked about configuration or data, provide specific details from the documents.
-6. Format responses clearly with bullet points or numbered lists when appropriate.
-
-Do not make up information. Do not use knowledge outside the provided context."""
-
-    # Build context section
-    context_parts = []
-    for i, chunk in enumerate(context_chunks, 1):
-        source = chunk.get('metadata', {}).get('source', chunk.get('metadata', {}).get('filename', 'Unknown'))
-        sheet = chunk.get('metadata', {}).get('parent_section', '')
-        area = chunk.get('metadata', {}).get('functional_area', '')
-        
-        header = f"[Source {i}: {source}"
-        if sheet:
-            header += f" - {sheet}"
-        if area:
-            header += f" ({area})"
-        header += "]"
-        
-        context_parts.append(f"{header}\n{chunk.get('document', chunk.get('text', ''))}\n")
-    
-    context_text = "\n---\n".join(context_parts)
-    
-    user_prompt = f"""Based on the following documents, please answer this question:
-
-QUESTION: {question}
-
-CONTEXT FROM DOCUMENTS:
-{context_text}
-
-Please provide a clear, accurate answer based on the context above. Include source citations."""
-
-    return user_prompt, system_prompt
+    models_used: List[str]
+    sanitized: bool
 
 
 def build_no_context_response(question: str) -> str:
@@ -217,13 +70,14 @@ This could mean:
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """
-    Main chat endpoint - RAG + LLM integration
+    Main chat endpoint - Multi-model orchestration with PII protection
     
-    Flow:
+    FLOW:
     1. Search ChromaDB for relevant chunks
-    2. Build prompt with context
-    3. Call LLM for response
-    4. Return response with sources
+    2. Local LLM (Mistral/DeepSeek) analyzes with FULL context (can see PII)
+    3. Response is SANITIZED (all PII removed)
+    4. Claude synthesizes final response (NEVER sees PII)
+    5. Return to user with sources
     """
     try:
         logger.info(f"Chat request: '{request.message[:100]}...' project={request.project}")
@@ -240,7 +94,8 @@ async def chat(request: ChatRequest):
                 response="No documents have been uploaded yet. Please upload some documents first.",
                 sources=[],
                 chunks_found=0,
-                model_used="none"
+                models_used=[],
+                sanitized=False
             )
         
         # Get query embedding
@@ -248,13 +103,12 @@ async def chat(request: ChatRequest):
         if query_embedding is None:
             raise HTTPException(status_code=500, detail="Failed to create query embedding")
         
-        # Build where filter - filter by "project" field (stores project name)
+        # Build where filter
         where_filter = None
         if request.project and request.project not in ['global', '__GLOBAL__', '', 'all', 'All Projects']:
             where_filter = {"project": request.project}
-            logger.info(f"Filtering by project name: {request.project}")
+            logger.info(f"Filtering by project: {request.project}")
             
-            # Add functional area filter if specified
             if request.functional_area:
                 where_filter = {
                     "$and": [
@@ -262,11 +116,9 @@ async def chat(request: ChatRequest):
                         {"functional_area": request.functional_area}
                     ]
                 }
-                logger.info(f"Also filtering by functional area: {request.functional_area}")
         
-        # Search ChromaDB directly
-        logger.info(f"Searching ChromaDB with filter: {where_filter}")
-        
+        # Search ChromaDB
+        logger.info("Searching ChromaDB for relevant chunks...")
         results = collection.query(
             query_embeddings=[query_embedding],
             n_results=request.max_results or 10,
@@ -281,7 +133,8 @@ async def chat(request: ChatRequest):
                 response=build_no_context_response(request.message),
                 sources=[],
                 chunks_found=0,
-                model_used="none"
+                models_used=[],
+                sanitized=False
             )
         
         # Extract results
@@ -292,18 +145,17 @@ async def chat(request: ChatRequest):
         chunks_found = len(documents)
         logger.info(f"Found {chunks_found} relevant chunks")
         
-        # Build context for LLM
-        context_chunks = []
+        # Build chunks for orchestrator
+        chunks = []
         sources = []
         
         for i, (doc, meta, dist) in enumerate(zip(documents, metadatas, distances)):
-            context_chunks.append({
+            chunks.append({
                 'document': doc,
                 'metadata': meta,
                 'distance': dist
             })
             
-            # Build source info for response
             sources.append({
                 'index': i + 1,
                 'filename': meta.get('filename', meta.get('source', 'Unknown')),
@@ -314,36 +166,23 @@ async def chat(request: ChatRequest):
                 'preview': doc[:200] + '...' if len(doc) > 200 else doc
             })
         
-        # Build RAG prompt
-        user_prompt, system_prompt = build_rag_prompt(request.message, context_chunks)
+        # Call orchestrator for multi-model processing
+        logger.info("Starting multi-model orchestration...")
+        result = orchestrator.process_query(
+            query=request.message,
+            chunks=chunks,
+            use_claude_synthesis=request.use_claude and bool(os.getenv("ANTHROPIC_API_KEY"))
+        )
         
-        # Call LLM
-        logger.info("Calling LLM for response generation...")
-        llm = LLMCaller()
-        
-        try:
-            response_text, model_used = llm.generate(user_prompt, system_prompt)
-            logger.info(f"LLM response generated using {model_used}")
-        except Exception as e:
-            logger.error(f"LLM call failed: {e}")
-            # Return context without LLM synthesis
-            response_text = f"""I found {chunks_found} relevant document sections, but couldn't generate a synthesis.
-
-**Relevant Sources Found:**
-"""
-            for source in sources[:5]:
-                response_text += f"\n- **{source['filename']}**"
-                if source['sheet']:
-                    response_text += f" ({source['sheet']})"
-                response_text += f": {source['preview'][:100]}..."
-            
-            model_used = "fallback"
+        if result.get("error"):
+            logger.error(f"Orchestration error: {result['error']}")
         
         return ChatResponse(
-            response=response_text,
+            response=result.get("response", "Failed to generate response"),
             sources=sources,
             chunks_found=chunks_found,
-            model_used=model_used
+            models_used=result.get("models_used", []),
+            sanitized=result.get("sanitized", False)
         )
         
     except Exception as e:
@@ -354,36 +193,26 @@ async def chat(request: ChatRequest):
 @router.post("/chat/simple")
 async def chat_simple(request: ChatRequest):
     """
-    Simple chat endpoint - just returns relevant chunks without LLM
+    Simple chat endpoint - Returns chunks without LLM processing
     
     Useful for testing RAG retrieval
     """
     try:
         rag = RAGHandler()
         
-        # Get collection
         try:
             collection = rag.client.get_collection("documents")
         except:
-            return {
-                "chunks": [],
-                "message": "No documents collection found"
-            }
+            return {"chunks": [], "message": "No documents collection found"}
         
-        # Get query embedding
         query_embedding = rag.get_embedding(request.message)
         if query_embedding is None:
-            return {
-                "chunks": [],
-                "message": "Failed to create query embedding"
-            }
+            return {"chunks": [], "message": "Failed to create query embedding"}
         
-        # Build filter
         where_filter = None
         if request.project and request.project not in ['global', '__GLOBAL__', '', 'all']:
             where_filter = {"project": request.project}
         
-        # Search
         results = collection.query(
             query_embeddings=[query_embedding],
             n_results=request.max_results or 10,
@@ -392,10 +221,7 @@ async def chat_simple(request: ChatRequest):
         )
         
         if not results or not results.get('documents') or not results['documents'][0]:
-            return {
-                "chunks": [],
-                "message": "No relevant documents found"
-            }
+            return {"chunks": [], "message": "No relevant documents found"}
         
         documents = results['documents'][0]
         metadatas = results.get('metadatas', [[]])[0]
@@ -422,33 +248,29 @@ async def chat_simple(request: ChatRequest):
 
 @router.get("/chat/health")
 async def chat_health():
-    """Health check for chat system"""
+    """Health check for chat system including all models"""
     try:
         # Check RAG
         rag = RAGHandler()
         collection = rag.client.get_or_create_collection("documents")
         chunk_count = collection.count()
         
-        # Check LLM connectivity
-        llm = LLMCaller()
-        llm_status = "unknown"
-        try:
-            # Quick test
-            test_response = requests.get(
-                f"{llm.ollama_url}/api/tags",
-                auth=HTTPBasicAuth(llm.ollama_username, llm.ollama_password),
-                timeout=5
-            )
-            llm_status = "connected" if test_response.status_code == 200 else "error"
-        except:
-            llm_status = "unreachable"
+        # Check models
+        model_status = orchestrator.check_models_available()
         
         return {
             "status": "healthy",
             "chromadb_chunks": chunk_count,
-            "llm_status": llm_status,
-            "llm_endpoint": llm.ollama_url,
-            "llm_model": llm.ollama_model
+            "models": {
+                "mistral": "available" if model_status["mistral"] else "not found",
+                "deepseek": "available" if model_status["deepseek"] else "not found",
+                "claude": "configured" if model_status["claude"] else "not configured"
+            },
+            "privacy": {
+                "pii_sanitization": "enabled",
+                "claude_receives": "sanitized data only",
+                "local_llm_receives": "full context with PII"
+            }
         }
         
     except Exception as e:
@@ -456,3 +278,43 @@ async def chat_health():
             "status": "unhealthy",
             "error": str(e)
         }
+
+
+@router.get("/chat/models")
+async def chat_models():
+    """List available models and their purposes"""
+    model_status = orchestrator.check_models_available()
+    
+    return {
+        "models": [
+            {
+                "name": "mistral",
+                "type": "local",
+                "purpose": "General HR analysis, document understanding, policy interpretation",
+                "can_see_pii": True,
+                "available": model_status["mistral"]
+            },
+            {
+                "name": "deepseek",
+                "type": "local", 
+                "purpose": "Data analysis, calculations, technical queries, spreadsheet processing",
+                "can_see_pii": True,
+                "available": model_status["deepseek"]
+            },
+            {
+                "name": "claude",
+                "type": "cloud",
+                "purpose": "Final synthesis, response formatting, best practice recommendations",
+                "can_see_pii": False,
+                "note": "Only receives SANITIZED data - never sees PII",
+                "available": model_status["claude"]
+            }
+        ],
+        "flow": [
+            "1. User query → Search documents",
+            "2. Documents → Local LLM (can see PII)",
+            "3. Local analysis → SANITIZE (remove all PII)",
+            "4. Sanitized analysis → Claude (synthesis)",
+            "5. Final response → User"
+        ]
+    }
