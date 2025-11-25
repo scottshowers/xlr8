@@ -1,22 +1,12 @@
 """
-LLM Orchestrator for XLR8
-=========================
+LLM Orchestrator for XLR8 - PRODUCTION VERSION
+===============================================
 
-MULTI-MODEL ARCHITECTURE:
-1. Local LLMs (Mistral, DeepSeek) - Can see PII, handle raw document data
-2. Claude - Synthesis only, NEVER sees PII
-
-FLOW:
-1. User query → Search ChromaDB for chunks
-2. Chunks + query → Local LLM (full context, can see PII)
-3. Local LLM output → SANITIZE (strip all PII)
-4. Sanitized output → Claude for final synthesis
-5. Return response to user
-
-PRIVACY RULES:
-- NO names, SSNs, salaries, addresses go to Claude
-- Only sanitized summaries and analysis
-- All PII stays on local Hetzner server
+ARCHITECTURE:
+- Query Classification: CONFIG vs EMPLOYEE data
+- Model Selection: Mistral (general) vs DeepSeek (data extraction)
+- PII Protection: Sanitize employee data before Claude
+- Smart Routing: Fast path for config, secure path for PII
 
 Author: XLR8 Team
 """
@@ -25,173 +15,221 @@ import os
 import re
 import requests
 from requests.auth import HTTPBasicAuth
-from typing import List, Dict, Any, Optional, Tuple
-from enum import Enum
+from typing import List, Dict, Any, Tuple, Optional
 import logging
-import json
 
 logger = logging.getLogger(__name__)
 
 
-class ModelType(Enum):
-    """Available model types"""
-    MISTRAL = "mistral"      # General analysis, HR content
-    DEEPSEEK = "deepseek"    # Data analysis, technical content
-    CLAUDE = "claude"        # Synthesis (sanitized only!)
+# =============================================================================
+# QUERY CLASSIFICATION
+# =============================================================================
 
+EMPLOYEE_DATA_KEYWORDS = [
+    # Direct employee references
+    'employee', 'employees', 'worker', 'workers', 'staff', 
+    'person', 'people', 'individual', 'individuals',
+    'who ', 'whose', 'whom', 'someone',
+    
+    # PII fields
+    'salary', 'salaries', 'pay rate', 'wage', 'wages', 'compensation',
+    'ssn', 'social security',
+    'address', 'phone', 'email', 'contact info',
+    'birth', 'dob', 'age', 'born',
+    'hire date', 'termination', 'tenure', 'years of service',
+    
+    # Census/roster queries
+    'census', 'roster', 'headcount', 'head count',
+    'how many work', 'list of people', 'employee list',
+    'department roster', 'team members',
+    
+    # Specific lookups
+    'specific person', 'particular employee', 'find employee',
+    'look up', 'search for employee'
+]
+
+CONFIG_KEYWORDS = [
+    # Earnings/Deductions
+    'earning', 'earnings', 'earning code', 'earn code', 'earning type',
+    'deduction', 'deductions', 'deduction code', 'deduction type',
+    'benefit', 'benefits', 'benefit plan',
+    
+    # Pay configuration
+    'pay code', 'pay frequency', 'pay group', 'pay rule', 'pay policy',
+    'pay period', 'payroll schedule', 'pay cycle',
+    
+    # System/GL config
+    'gl', 'general ledger', 'account code', 'account mapping', 'gl mapping',
+    'chart of accounts', 'cost center',
+    'tax', 'taxes', 'withholding', 'tax code',
+    
+    # Time/Leave config
+    'accrual', 'pto', 'leave', 'time off', 'vacation', 'sick',
+    'time code', 'attendance', 'schedule',
+    
+    # Rules/Setup
+    'rule', 'rules', 'policy', 'policies', 'business rule',
+    'configuration', 'config', 'setup', 'setting', 'settings',
+    'validation', 'mapping', 'template'
+]
+
+DATA_EXTRACTION_KEYWORDS = [
+    'list', 'list all', 'show all', 'give me all', 'what are the',
+    'how many', 'count', 'total', 'number of',
+    'table', 'spreadsheet', 'export', 'data',
+    'calculate', 'sum', 'average', 'compare',
+    'all the', 'every', 'each'
+]
+
+
+def classify_query(query: str, chunks: List[Dict] = None) -> str:
+    """
+    Classify query as 'config', 'employee', or 'mixed'
+    
+    Returns:
+        'config' - No PII, can go direct to Claude
+        'employee' - Has PII, needs local LLM + sanitization
+    """
+    query_lower = query.lower()
+    
+    # Check for employee data indicators
+    has_employee_keywords = any(kw in query_lower for kw in EMPLOYEE_DATA_KEYWORDS)
+    
+    # Check for config indicators
+    has_config_keywords = any(kw in query_lower for kw in CONFIG_KEYWORDS)
+    
+    # If clearly config-related and no employee keywords, it's config
+    if has_config_keywords and not has_employee_keywords:
+        logger.info(f"Query classified as CONFIG: '{query[:50]}...'")
+        return 'config'
+    
+    # If has employee keywords, treat as employee data
+    if has_employee_keywords:
+        logger.info(f"Query classified as EMPLOYEE: '{query[:50]}...'")
+        return 'employee'
+    
+    # Default to config (safer for speed, config data isn't PII)
+    logger.info(f"Query classified as CONFIG (default): '{query[:50]}...'")
+    return 'config'
+
+
+def select_local_model(query: str, chunks: List[Dict] = None) -> str:
+    """
+    Select local model for employee data queries
+    
+    DeepSeek: Data extraction, tables, lists, calculations
+    Mistral: General HR understanding, policy interpretation
+    """
+    query_lower = query.lower()
+    
+    # Check for data extraction patterns
+    is_data_extraction = any(kw in query_lower for kw in DATA_EXTRACTION_KEYWORDS)
+    
+    # Check if chunks are mostly tabular
+    if chunks:
+        tabular_count = sum(1 for c in chunks 
+                          if 'table' in str(c.get('metadata', {}).get('chunk_type', '')).lower())
+        mostly_tabular = tabular_count > len(chunks) * 0.3
+    else:
+        mostly_tabular = False
+    
+    if is_data_extraction or mostly_tabular:
+        logger.info("Selected model: DeepSeek (data extraction)")
+        return 'deepseek-coder:6.7b'
+    
+    logger.info("Selected model: Mistral (general)")
+    return 'mistral:7b'
+
+
+# =============================================================================
+# PII SANITIZATION
+# =============================================================================
 
 class PIISanitizer:
     """
-    Sanitizes text to remove PII before sending to Claude
-    
-    REMOVES:
-    - Names (replaces with Employee A, B, C...)
-    - SSNs (XXX-XX-XXXX pattern)
-    - Phone numbers
-    - Email addresses
-    - Specific salary/dollar amounts (replaces with ranges)
-    - Addresses
-    - Account numbers
-    - Dates of birth
+    Sanitizes PII from text before sending to Claude
     """
     
-    # Common name patterns to detect
-    NAME_INDICATORS = [
-        r'\b[A-Z][a-z]+\s+[A-Z][a-z]+\b',  # First Last
-        r'\b[A-Z][a-z]+\s+[A-Z]\.\s+[A-Z][a-z]+\b',  # First M. Last
-    ]
-    
-    # PII patterns
     SSN_PATTERN = r'\b\d{3}[-\s]?\d{2}[-\s]?\d{4}\b'
     PHONE_PATTERN = r'\b(?:\+1[-\s]?)?\(?\d{3}\)?[-\s]?\d{3}[-\s]?\d{4}\b'
     EMAIL_PATTERN = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-    DOLLAR_PATTERN = r'\$[\d,]+(?:\.\d{2})?'
-    ADDRESS_PATTERN = r'\b\d+\s+[A-Za-z\s]+(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Lane|Ln|Way|Court|Ct|Boulevard|Blvd)\b'
     DOB_PATTERN = r'\b(?:0?[1-9]|1[0-2])[/-](?:0?[1-9]|[12]\d|3[01])[/-](?:19|20)\d{2}\b'
-    ACCOUNT_PATTERN = r'\b(?:account|acct|routing)[\s#:]*\d{4,}\b'
+    SALARY_PATTERN = r'\$[\d,]+(?:\.\d{2})?'
+    
+    # Common name patterns (First Last)
+    NAME_PATTERN = r'\b[A-Z][a-z]+\s+[A-Z][a-z]+\b'
     
     def __init__(self):
         self.name_counter = 0
-        self.name_map = {}  # Track replaced names for consistency
-        
-    def _get_employee_placeholder(self, name: str) -> str:
-        """Get consistent placeholder for a name"""
+        self.name_map = {}
+    
+    def _get_placeholder(self, name: str) -> str:
         if name not in self.name_map:
             self.name_counter += 1
             letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
             idx = (self.name_counter - 1) % 26
-            suffix = "" if self.name_counter <= 26 else str(self.name_counter // 26)
-            self.name_map[name] = f"[Employee {letters[idx]}{suffix}]"
+            self.name_map[name] = f"[Employee {letters[idx]}]"
         return self.name_map[name]
     
-    def _replace_names(self, text: str) -> str:
-        """Replace potential names with placeholders"""
-        result = text
-        for pattern in self.NAME_INDICATORS:
-            matches = re.findall(pattern, result)
-            for match in matches:
-                # Skip common non-name phrases
-                if match.lower() in ['new york', 'los angeles', 'san francisco', 'united states']:
-                    continue
-                placeholder = self._get_employee_placeholder(match)
-                result = result.replace(match, placeholder)
-        return result
-    
-    def _replace_ssn(self, text: str) -> str:
-        """Replace SSNs with placeholder"""
-        return re.sub(self.SSN_PATTERN, '[SSN REDACTED]', text)
-    
-    def _replace_phone(self, text: str) -> str:
-        """Replace phone numbers with placeholder"""
-        return re.sub(self.PHONE_PATTERN, '[PHONE REDACTED]', text)
-    
-    def _replace_email(self, text: str) -> str:
-        """Replace emails with placeholder"""
-        return re.sub(self.EMAIL_PATTERN, '[EMAIL REDACTED]', text)
-    
-    def _replace_dollars(self, text: str) -> str:
-        """Replace specific dollar amounts with ranges"""
-        def dollar_to_range(match):
-            amount_str = match.group(0).replace('$', '').replace(',', '')
-            try:
-                amount = float(amount_str)
-                if amount < 1000:
-                    return "[under $1K]"
-                elif amount < 10000:
-                    return "[~$1K-10K range]"
-                elif amount < 50000:
-                    return "[~$10K-50K range]"
-                elif amount < 100000:
-                    return "[~$50K-100K range]"
-                elif amount < 250000:
-                    return "[~$100K-250K range]"
-                else:
-                    return "[~$250K+ range]"
-            except:
-                return "[AMOUNT REDACTED]"
-        
-        return re.sub(self.DOLLAR_PATTERN, dollar_to_range, text)
-    
-    def _replace_address(self, text: str) -> str:
-        """Replace addresses with placeholder"""
-        return re.sub(self.ADDRESS_PATTERN, '[ADDRESS REDACTED]', text, flags=re.IGNORECASE)
-    
-    def _replace_dob(self, text: str) -> str:
-        """Replace dates of birth with placeholder"""
-        return re.sub(self.DOB_PATTERN, '[DOB REDACTED]', text)
-    
-    def _replace_accounts(self, text: str) -> str:
-        """Replace account numbers with placeholder"""
-        return re.sub(self.ACCOUNT_PATTERN, '[ACCOUNT REDACTED]', text, flags=re.IGNORECASE)
+    def _salary_to_range(self, match) -> str:
+        try:
+            amount = float(match.group(0).replace('$', '').replace(',', ''))
+            if amount < 30000: return "[under $30K]"
+            elif amount < 50000: return "[~$30K-50K]"
+            elif amount < 75000: return "[~$50K-75K]"
+            elif amount < 100000: return "[~$75K-100K]"
+            elif amount < 150000: return "[~$100K-150K]"
+            else: return "[~$150K+]"
+        except:
+            return "[SALARY]"
     
     def sanitize(self, text: str) -> str:
-        """
-        Full sanitization pipeline
-        
-        Returns text safe to send to Claude (no PII)
-        """
+        """Remove PII from text"""
         if not text:
             return text
-            
+        
         result = text
         
-        # Order matters - do names last as they're trickiest
-        result = self._replace_ssn(result)
-        result = self._replace_phone(result)
-        result = self._replace_email(result)
-        result = self._replace_dob(result)
-        result = self._replace_accounts(result)
-        result = self._replace_address(result)
-        result = self._replace_dollars(result)
-        result = self._replace_names(result)
+        # Remove obvious PII patterns
+        result = re.sub(self.SSN_PATTERN, '[SSN]', result)
+        result = re.sub(self.PHONE_PATTERN, '[PHONE]', result)
+        result = re.sub(self.EMAIL_PATTERN, '[EMAIL]', result)
+        result = re.sub(self.DOB_PATTERN, '[DOB]', result)
+        result = re.sub(self.SALARY_PATTERN, self._salary_to_range, result)
+        
+        # Replace names (be careful - might catch non-names)
+        # Only do this for employee-focused responses
+        names = re.findall(self.NAME_PATTERN, result)
+        for name in names:
+            # Skip common non-name phrases
+            if name.lower() in ['new york', 'los angeles', 'san francisco', 'united states',
+                               'general ledger', 'human resources', 'time off']:
+                continue
+            result = result.replace(name, self._get_placeholder(name))
         
         return result
     
     def reset(self):
-        """Reset name mappings for new conversation"""
         self.name_counter = 0
         self.name_map = {}
 
 
+# =============================================================================
+# LLM ORCHESTRATOR
+# =============================================================================
+
 class LLMOrchestrator:
     """
-    Orchestrates multi-model LLM calls with privacy protection
-    
-    ARCHITECTURE:
-    - Local LLM (Ollama on Hetzner): Handles raw data with PII
-    - Claude (API): Synthesis only, sanitized data only
+    Orchestrates LLM calls with smart routing and PII protection
     """
     
     def __init__(self):
-        # Ollama configuration (Hetzner)
-        self.ollama_url = os.getenv("LLM_ENDPOINT", "http://178.156.190.64:11435")
-        self.ollama_username = os.getenv("LLM_USERNAME", "xlr8")
-        self.ollama_password = os.getenv("LLM_PASSWORD", "Argyle76226#")
+        # Ollama configuration (RunPod or Hetzner)
+        self.ollama_url = os.getenv("LLM_ENDPOINT", "").rstrip('/')
+        self.ollama_username = os.getenv("LLM_USERNAME", "")
+        self.ollama_password = os.getenv("LLM_PASSWORD", "")
         
-        # Use LLM_MODEL directly - this is mistral:7b
-        self.local_model = os.getenv("LLM_MODEL", "mistral:7b")
-        
-        # Claude configuration - check both possible env var names
+        # Claude configuration
         self.claude_api_key = os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
         self.claude_model = "claude-sonnet-4-20250514"
         
@@ -199,22 +237,19 @@ class LLMOrchestrator:
         self.sanitizer = PIISanitizer()
         
         logger.info(f"LLMOrchestrator initialized")
-        logger.info(f"  Ollama: {self.ollama_url}")
-        logger.info(f"  Local Model: {self.local_model}")
-        logger.info(f"  Claude: {'enabled' if self.claude_api_key else 'disabled'}")
+        logger.info(f"  Ollama: {self.ollama_url or 'NOT SET!'}")
+        logger.info(f"  Claude: {'configured' if self.claude_api_key else 'NOT SET!'}")
     
-    def _call_ollama(self, model: str, prompt: str, system_prompt: str = None) -> Tuple[str, bool]:
-        """
-        Call Ollama (Mistral)
+    def _call_ollama(self, model: str, prompt: str, system_prompt: str = None) -> Tuple[Optional[str], bool]:
+        """Call local Ollama instance"""
+        if not self.ollama_url:
+            logger.error("LLM_ENDPOINT not configured!")
+            return "LLM_ENDPOINT not configured", False
         
-        Returns: (response_text, success)
-        """
         try:
             url = f"{self.ollama_url}/api/generate"
             
-            full_prompt = prompt
-            if system_prompt:
-                full_prompt = f"{system_prompt}\n\n{prompt}"
+            full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
             
             payload = {
                 "model": model,
@@ -222,301 +257,267 @@ class LLMOrchestrator:
                 "stream": False,
                 "options": {
                     "temperature": 0.3,
-                    "num_predict": 1024  # Shorter responses
+                    "num_predict": 2048
                 }
             }
             
-            logger.info(f"Calling Ollama: {self.ollama_url}")
-            logger.info(f"  Model: {model}")
-            logger.info(f"  Prompt length: {len(full_prompt)} chars")
+            logger.info(f"Calling Ollama: {model} ({len(full_prompt)} chars)")
             
-            response = requests.post(
-                url,
-                json=payload,
-                auth=HTTPBasicAuth(self.ollama_username, self.ollama_password),
-                timeout=60  # 60 seconds - reduced from 90
-            )
-            
-            logger.info(f"Ollama response status: {response.status_code}")
-            
-            if response.status_code == 401:
-                logger.error("Ollama authentication failed!")
-                return "Authentication failed - check LLM_USERNAME and LLM_PASSWORD", False
+            # Use auth if configured (Hetzner), skip if not (RunPod)
+            if self.ollama_username and self.ollama_password:
+                response = requests.post(
+                    url, json=payload,
+                    auth=HTTPBasicAuth(self.ollama_username, self.ollama_password),
+                    timeout=60
+                )
+            else:
+                response = requests.post(url, json=payload, timeout=60)
             
             if response.status_code != 200:
-                logger.error(f"Ollama returned {response.status_code}: {response.text[:500]}")
-                return f"Error from {model}: HTTP {response.status_code}", False
+                logger.error(f"Ollama error {response.status_code}: {response.text[:200]}")
+                return f"Ollama error: {response.status_code}", False
             
-            result = response.json()
-            response_text = result.get("response", "")
-            logger.info(f"Ollama response length: {len(response_text)} chars")
-            return response_text, True
+            result = response.json().get("response", "")
+            logger.info(f"Ollama response: {len(result)} chars")
+            return result, True
             
         except requests.exceptions.Timeout:
-            logger.error(f"Ollama timeout after 60s for {model}")
-            return None, False  # Return None to trigger Claude fallback
-        except requests.exceptions.ConnectionError as e:
-            logger.error(f"Ollama connection error: {e}")
-            return f"Cannot connect to Ollama at {self.ollama_url}", False
+            logger.error("Ollama timeout")
+            return None, False
         except Exception as e:
-            logger.error(f"Ollama error for {model}: {e}")
-            return f"Error: {str(e)}", False
+            logger.error(f"Ollama error: {e}")
+            return str(e), False
     
-    def _call_claude(self, prompt: str, system_prompt: str = None) -> Tuple[str, bool]:
-        """
-        Call Claude API
-        
-        IMPORTANT: Only receives SANITIZED data!
-        
-        Returns: (response_text, success)
-        """
+    def _call_claude(self, prompt: str, system_prompt: str) -> Tuple[str, bool]:
+        """Call Claude API"""
         if not self.claude_api_key:
-            logger.warning("Claude API key not configured")
-            return "Claude not configured", False
+            return "Claude API key not configured", False
         
         try:
             import anthropic
             client = anthropic.Anthropic(api_key=self.claude_api_key)
             
-            messages = [{"role": "user", "content": prompt}]
+            logger.info(f"Calling Claude ({len(prompt)} chars)")
             
             response = client.messages.create(
                 model=self.claude_model,
-                max_tokens=2048,
-                system=system_prompt or "You are a helpful HCM implementation consultant.",
-                messages=messages
+                max_tokens=4096,
+                system=system_prompt,
+                messages=[{"role": "user", "content": prompt}]
             )
             
-            logger.info("Claude response received")
-            return response.content[0].text, True
+            result = response.content[0].text
+            logger.info(f"Claude response: {len(result)} chars")
+            return result, True
             
         except Exception as e:
             logger.error(f"Claude error: {e}")
-            return f"Claude error: {str(e)}", False
+            return str(e), False
     
-    def _determine_local_model(self, query: str, chunks: List[Dict]) -> str:
-        """
-        Returns the local model to use
+    def _build_context(self, chunks: List[Dict], max_chunks: int = 15) -> str:
+        """Build context string from chunks"""
+        context_parts = []
         
-        Currently just returns the configured LLM_MODEL (mistral:7b)
-        Future: Could add DeepSeek for data-heavy queries
-        """
-        return self.local_model
+        for i, chunk in enumerate(chunks[:max_chunks], 1):
+            meta = chunk.get('metadata', {})
+            filename = meta.get('filename', meta.get('source', 'Unknown'))
+            sheet = meta.get('parent_section', '')
+            text = chunk.get('document', chunk.get('text', ''))
+            
+            source = f"{filename}"
+            if sheet:
+                source = f"{filename} - {sheet}"
+            
+            context_parts.append(f"[Source {i}: {source}]\n{text}")
+        
+        return "\n\n---\n\n".join(context_parts)
     
-    def process_query(
-        self,
-        query: str,
-        chunks: List[Dict[str, Any]],
-        use_claude_synthesis: bool = True
-    ) -> Dict[str, Any]:
+    def process_query(self, query: str, chunks: List[Dict]) -> Dict[str, Any]:
         """
         Main orchestration method
         
-        FLOW:
-        1. Route to appropriate local LLM (can see full PII)
-        2. Local LLM analyzes and responds
-        3. SANITIZE the response
-        4. Send to Claude for synthesis (if enabled)
-        5. Return final response
-        
-        Args:
-            query: User's question
-            chunks: Retrieved document chunks (contain PII)
-            use_claude_synthesis: Whether to use Claude for final synthesis
-            
-        Returns:
-            Dict with response, sources, models_used, etc.
+        Flow:
+        1. Classify query (config vs employee)
+        2. Route appropriately:
+           - Config: Direct to Claude (fast)
+           - Employee: Local LLM → Sanitize → Claude
         """
-        self.sanitizer.reset()  # Fresh name mappings
+        self.sanitizer.reset()
         
         result = {
             "response": "",
             "models_used": [],
-            "local_analysis": "",
+            "query_type": "",
             "sanitized": False,
             "error": None
         }
         
-        # Step 1: Build context from chunks (CONTAINS PII)
-        # LIMIT: Use top 5 chunks, max 1000 chars each to avoid timeout
-        MAX_CHUNKS = 5
-        MAX_CHUNK_LENGTH = 1000
+        # Build context
+        context = self._build_context(chunks)
+        logger.info(f"Context: {len(chunks)} chunks, {len(context)} chars")
         
-        context_parts = []
-        for i, chunk in enumerate(chunks[:MAX_CHUNKS], 1):
-            source = chunk.get('metadata', {}).get('source', 'Unknown')
-            filename = chunk.get('metadata', {}).get('filename', source)
-            text = chunk.get('document', chunk.get('text', ''))
+        # Classify query
+        query_type = classify_query(query, chunks)
+        result["query_type"] = query_type
+        
+        # =================================================================
+        # CONFIG QUERY: Direct to Claude (fast, no PII)
+        # =================================================================
+        if query_type == 'config':
+            logger.info("CONFIG path: Direct to Claude")
             
-            # Truncate long chunks
-            if len(text) > MAX_CHUNK_LENGTH:
-                text = text[:MAX_CHUNK_LENGTH] + "..."
+            system_prompt = """You are an expert UKG/HCM implementation consultant.
+Analyze the provided document excerpts and answer the question accurately.
+
+Guidelines:
+- Be specific and thorough - list ALL items you find
+- Include codes, IDs, and values when available  
+- Organize with clear formatting (tables, lists)
+- If data seems incomplete, note what you found and suggest there may be more"""
+
+            user_prompt = f"""Question: {query}
+
+Document excerpts from customer's UKG configuration:
+
+{context}
+
+Provide a comprehensive answer. If listing items (earnings, deductions, etc.), show ALL that appear in the documents."""
+
+            response, success = self._call_claude(user_prompt, system_prompt)
+            result["models_used"].append("claude-sonnet-4")
             
-            context_parts.append(f"[Source {i}: {filename}]\n{text}")
+            if success:
+                result["response"] = response
+            else:
+                result["error"] = response
+                result["response"] = f"Error: {response}"
+            
+            return result
         
-        full_context = "\n\n---\n\n".join(context_parts)
+        # =================================================================
+        # EMPLOYEE QUERY: Local LLM → Sanitize → Claude
+        # =================================================================
+        logger.info("EMPLOYEE path: Local LLM → Sanitize → Claude")
         
-        logger.info(f"Context prepared: {len(chunks)} chunks -> {len(context_parts)} used, {len(full_context)} chars")
+        # Select local model
+        local_model = select_local_model(query, chunks)
         
-        # Step 2: Determine which local model to use
-        local_model = self._determine_local_model(query, chunks)
+        # Call local LLM
+        local_system = """You are an expert HCM analyst. Analyze the documents and answer the question.
+Include specific details, names, and values from the documents.
+Be thorough and list all relevant information you find."""
+
+        local_prompt = f"""Question: {query}
+
+Documents:
+{context}
+
+Provide a detailed answer with specific information from the documents."""
+
+        local_response, local_success = self._call_ollama(local_model, local_prompt, local_system)
+        result["models_used"].append(local_model)
         
-        # Step 3: Build prompt for local LLM (can see everything)
-        local_system_prompt = """You are an expert HCM implementation consultant analyzing customer documents.
-Answer the question based on the provided document excerpts. Be specific and concise.
-If the documents don't contain relevant information, say so."""
-
-        local_user_prompt = f"""Question: {query}
-
-Document excerpts:
-{full_context}
-
-Provide a clear, concise answer based on these documents."""
-
-        logger.info(f"Total prompt length: {len(local_system_prompt) + len(local_user_prompt)} chars")
-
-        # Step 4: Call local LLM
-        logger.info(f"Step 1: Calling local LLM ({local_model})")
-        local_response, local_success = self._call_ollama(
-            local_model, 
-            local_user_prompt, 
-            local_system_prompt
-        )
-        
-        # Check if Mistral timed out - if so, fallback to Claude with SANITIZED context
+        # Handle timeout - fallback to Claude with sanitized context
         if local_response is None:
-            logger.warning("Mistral timed out - falling back to Claude with sanitized context")
+            logger.warning("Local LLM timeout - falling back to Claude with sanitized context")
             
-            if self.claude_api_key:
-                # IMPORTANT: Sanitize the document context before Claude sees it!
-                sanitized_context = self.sanitizer.sanitize(full_context)
-                logger.info(f"Sanitized context for Claude fallback: {len(self.sanitizer.name_map)} names replaced")
-                
-                claude_system_prompt = """You are an expert HCM implementation consultant.
-Analyze the provided document excerpts and answer the user's question.
-Be specific and provide a professional response.
-Note: Personal information has been redacted with placeholders like [Employee A], [SSN REDACTED], etc."""
+            sanitized_context = self.sanitizer.sanitize(context)
+            result["sanitized"] = True
+            
+            system_prompt = """You are an expert HCM analyst. 
+The document excerpts have been sanitized to protect PII.
+Answer the question based on available information."""
 
-                claude_user_prompt = f"""Question: {query}
+            user_prompt = f"""Question: {query}
 
 Sanitized document excerpts:
 {sanitized_context}
 
-Provide a clear, professional answer based on these documents."""
+Provide an answer based on the available information. Note that personal details have been redacted."""
 
-                claude_response, claude_success = self._call_claude(
-                    claude_user_prompt,
-                    claude_system_prompt
-                )
-                
-                result["models_used"].append("claude-sonnet (direct-sanitized)")
-                result["sanitized"] = True
-                
-                if claude_success:
-                    result["response"] = claude_response
-                    return result
-                else:
-                    result["error"] = "Both Mistral and Claude failed"
-                    result["response"] = "Sorry, I couldn't process your request. Please try again in a moment."
-                    return result
+            response, success = self._call_claude(user_prompt, system_prompt)
+            result["models_used"].append("claude-sonnet-4 (fallback)")
+            
+            if success:
+                result["response"] = response
             else:
-                result["error"] = "Mistral timed out and Claude not configured"
-                result["response"] = "The local AI server timed out. Please try again with a simpler question."
-                return result
-        
-        result["models_used"].append(local_model)
-        result["local_analysis"] = local_response
-        
-        if not local_success:
-            result["error"] = f"Local LLM failed: {local_response}"
-            result["response"] = local_response
+                result["error"] = f"Both local LLM and Claude failed"
+                result["response"] = "Unable to process query. Please try again."
+            
             return result
         
-        # Step 5: SANITIZE the local response before Claude
-        logger.info("Step 2: Sanitizing response (removing PII)")
+        # Handle local LLM failure
+        if not local_success:
+            result["error"] = local_response
+            result["response"] = f"Error: {local_response}"
+            return result
+        
+        # Sanitize local response
+        logger.info("Sanitizing local LLM response")
         sanitized_response = self.sanitizer.sanitize(local_response)
         result["sanitized"] = True
         
-        # Log what was sanitized (for debugging)
-        if sanitized_response != local_response:
-            logger.info(f"PII removed: {len(self.sanitizer.name_map)} names replaced")
+        if self.sanitizer.name_map:
+            logger.info(f"Sanitized {len(self.sanitizer.name_map)} names")
         
-        # Step 6: If Claude synthesis enabled, send sanitized data
-        if use_claude_synthesis and self.claude_api_key:
-            logger.info("Step 3: Calling Claude for synthesis (sanitized data only)")
+        # Send to Claude for polish
+        if self.claude_api_key:
+            logger.info("Sending to Claude for synthesis")
             
-            claude_system_prompt = """You are an expert HCM implementation consultant.
-You are receiving a SANITIZED analysis from a local AI that has already reviewed the customer's documents.
-The analysis has had all PII (names, SSNs, salaries, etc.) removed for privacy.
+            claude_system = """You are an expert HCM consultant.
+You're receiving an analysis from a local AI. The response has been sanitized - 
+personal names appear as [Employee A], [Employee B], etc.
 
-Your job is to:
-1. Synthesize this analysis into a clear, professional response
-2. Improve the structure and clarity
-3. Add any relevant HCM best practices or insights
-4. Format the response nicely for the user
+Your job:
+1. Clean up and organize the response
+2. Keep all the sanitized placeholders as-is
+3. Make it professional and well-formatted
+4. Don't try to guess real names or values"""
 
-Do NOT ask for specific names or personal data - work with the sanitized placeholders provided."""
+            claude_prompt = f"""Original question: {query}
 
-            claude_user_prompt = f"""The user asked: "{query}"
-
-A local AI has analyzed the customer's documents and provided this SANITIZED analysis:
-
+Local AI analysis (sanitized):
 {sanitized_response}
 
-Please synthesize this into a clear, professional response for the user. 
-Maintain the sanitized placeholders (like [Employee A], [AMOUNT REDACTED], etc.) - do not try to guess the actual values."""
+Please format this into a clean, professional response. Keep all [Employee X] and [SALARY] placeholders."""
 
-            claude_response, claude_success = self._call_claude(
-                claude_user_prompt,
-                claude_system_prompt
-            )
-            
-            result["models_used"].append("claude-sonnet")
+            claude_response, claude_success = self._call_claude(claude_prompt, claude_system)
+            result["models_used"].append("claude-sonnet-4")
             
             if claude_success:
                 result["response"] = claude_response
             else:
                 # Fall back to sanitized local response
-                logger.warning("Claude failed, using sanitized local response")
                 result["response"] = sanitized_response
         else:
-            # No Claude - use sanitized local response
             result["response"] = sanitized_response
         
         return result
     
-    def check_models_available(self) -> Dict[str, bool]:
-        """Check which models are available"""
+    def check_status(self) -> Dict[str, Any]:
+        """Check system status"""
         status = {
-            "local": False,
-            "local_model": self.local_model,
-            "claude": False
+            "ollama_configured": bool(self.ollama_url),
+            "ollama_url": self.ollama_url,
+            "claude_configured": bool(self.claude_api_key),
+            "models": []
         }
         
-        # Check Ollama local model
-        try:
-            response = requests.get(
-                f"{self.ollama_url}/api/tags",
-                auth=HTTPBasicAuth(self.ollama_username, self.ollama_password),
-                timeout=10
-            )
-            if response.status_code == 200:
-                models = response.json().get("models", [])
-                model_names = [m.get("name", "") for m in models]
-                status["available_models"] = model_names
+        # Check Ollama models
+        if self.ollama_url:
+            try:
+                url = f"{self.ollama_url}/api/tags"
+                if self.ollama_username:
+                    resp = requests.get(url, auth=HTTPBasicAuth(self.ollama_username, self.ollama_password), timeout=10)
+                else:
+                    resp = requests.get(url, timeout=10)
                 
-                # Check if our configured model is available
-                if self.local_model in model_names:
-                    status["local"] = True
-                # Also check without version tag
-                elif any(self.local_model.split(':')[0] in m for m in model_names):
-                    status["local"] = True
-                        
-        except Exception as e:
-            logger.error(f"Failed to check Ollama models: {e}")
-            status["ollama_error"] = str(e)
-        
-        # Check Claude - use instance variable (already resolved from env)
-        status["claude"] = bool(self.claude_api_key)
+                if resp.status_code == 200:
+                    status["models"] = [m["name"] for m in resp.json().get("models", [])]
+                    status["ollama_status"] = "connected"
+                else:
+                    status["ollama_status"] = f"error: {resp.status_code}"
+            except Exception as e:
+                status["ollama_status"] = f"error: {e}"
         
         return status
