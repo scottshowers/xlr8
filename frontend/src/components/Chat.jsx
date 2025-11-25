@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import api from '../services/api'
+import PersonaSwitcher from './PersonaSwitcher'
+import PersonaCreator from './PersonaCreator'
 
 export default function Chat({ projects = [], functionalAreas = [] }) {
   const [messages, setMessages] = useState([])
@@ -11,6 +13,10 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
   const [expandedSources, setExpandedSources] = useState({})
   const [modelInfo, setModelInfo] = useState(null)
   const messagesEndRef = useRef(null)
+  
+  // Persona state - NEW! 🐮
+  const [currentPersona, setCurrentPersona] = useState('bessie')
+  const [showPersonaCreator, setShowPersonaCreator] = useState(false)
 
   useEffect(() => {
     if (projects.length > 0) {
@@ -24,6 +30,14 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
   useEffect(() => {
     scrollToBottom()
   }, [messages])
+
+  // Set up global function for opening persona creator from dropdown
+  useEffect(() => {
+    window.openPersonaCreator = () => setShowPersonaCreator(true)
+    return () => {
+      delete window.openPersonaCreator
+    }
+  }, [])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -85,7 +99,8 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
       const startResponse = await api.post('/chat/start', {
         message: userMessage.content,
         project: selectedProject || null,
-        max_results: 50  // Get more chunks for comprehensive answers
+        max_results: 50,  // Get more chunks for comprehensive answers
+        persona: currentPersona  // NEW: Include current persona 🐮
       })
 
       const { job_id } = startResponse.data
@@ -541,6 +556,14 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
         </div>
       </div>
 
+      {/* Persona Switcher - NEW! 🐮 */}
+      <div style={{ padding: '1rem 2rem', borderBottom: '1px solid #e5e7eb', background: '#fafafa' }}>
+        <PersonaSwitcher 
+          currentPersona={currentPersona}
+          onPersonaChange={(persona) => setCurrentPersona(persona)}
+        />
+      </div>
+
       {/* Messages Area */}
       <div style={styles.messagesArea}>
         {messages.length === 0 ? (
@@ -755,6 +778,18 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
           Press Enter to send • Shift+Enter for new line
         </p>
       </div>
+
+      {/* Persona Creator Modal - NEW! 🐮 */}
+      <PersonaCreator
+        isOpen={showPersonaCreator}
+        onClose={() => setShowPersonaCreator(false)}
+        onPersonaCreated={(persona) => {
+          // Switch to newly created persona
+          const personaId = persona.name.toLowerCase().replace(/\s+/g, '_')
+          setCurrentPersona(personaId)
+          console.log(`✅ Created and switched to: ${persona.name}`)
+        }}
+      />
     </div>
   )
 }
