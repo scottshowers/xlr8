@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import PersonaManagement from '../components/PersonaManagement'
+import AdminPage from './pages/AdminPage'
 
 /**
  * Admin Page - Main Dashboard
