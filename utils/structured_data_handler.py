@@ -185,38 +185,81 @@ class StructuredDataHandler:
     
     def _init_metadata_table(self):
         """Create metadata table to track schemas and versions"""
-        self.conn.execute("""
-            CREATE TABLE IF NOT EXISTS _schema_metadata (
-                id INTEGER PRIMARY KEY,
-                project VARCHAR NOT NULL,
-                file_name VARCHAR NOT NULL,
-                sheet_name VARCHAR NOT NULL,
-                table_name VARCHAR NOT NULL,
-                columns JSON,
-                row_count INTEGER,
-                likely_keys JSON,
-                encrypted_columns JSON,
-                version INTEGER DEFAULT 1,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                is_current BOOLEAN DEFAULT TRUE
-            )
-        """)
-        
-        # Load versions table for tracking
-        self.conn.execute("""
-            CREATE TABLE IF NOT EXISTS _load_versions (
-                id INTEGER PRIMARY KEY,
-                project VARCHAR NOT NULL,
-                file_name VARCHAR NOT NULL,
-                version INTEGER NOT NULL,
-                row_count INTEGER,
-                checksum VARCHAR,
-                loaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                notes VARCHAR
-            )
-        """)
-        
-        self.conn.commit()
+        try:
+            # Try to drop old tables if they have incompatible schema
+            # This handles upgrades from old versions
+            try:
+                # Check if old schema exists (with PRIMARY KEY constraint)
+                result = self.conn.execute("""
+                    SELECT COUNT(*) FROM information_schema.columns 
+                    WHERE table_name = '_schema_metadata'
+                """).fetchone()
+                
+                if result and result[0] > 0:
+                    # Table exists - check if it has the old schema by trying an insert
+                    # If it fails, we need to recreate
+                    logger.info("Metadata tables exist, checking compatibility...")
+            except:
+                pass
+            
+            # Create sequences for auto-increment
+            self.conn.execute("""
+                CREATE SEQUENCE IF NOT EXISTS schema_metadata_seq START 1
+            """)
+            
+            self.conn.execute("""
+                CREATE SEQUENCE IF NOT EXISTS load_versions_seq START 1
+            """)
+            
+            # Create metadata table (will be no-op if already exists with same schema)
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS _schema_metadata (
+                    id INTEGER DEFAULT nextval('schema_metadata_seq'),
+                    project VARCHAR NOT NULL,
+                    file_name VARCHAR NOT NULL,
+                    sheet_name VARCHAR NOT NULL,
+                    table_name VARCHAR NOT NULL,
+                    columns JSON,
+                    row_count INTEGER,
+                    likely_keys JSON,
+                    encrypted_columns JSON,
+                    version INTEGER DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    is_current BOOLEAN DEFAULT TRUE
+                )
+            """)
+            
+            # Load versions table for tracking
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS _load_versions (
+                    id INTEGER DEFAULT nextval('load_versions_seq'),
+                    project VARCHAR NOT NULL,
+                    file_name VARCHAR NOT NULL,
+                    version INTEGER NOT NULL,
+                    row_count INTEGER,
+                    checksum VARCHAR,
+                    loaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    notes VARCHAR
+                )
+            """)
+            
+            self.conn.commit()
+            logger.info("Metadata tables initialized successfully")
+            
+        except Exception as e:
+            logger.warning(f"Metadata table init issue: {e}, attempting to recreate...")
+            try:
+                # Drop and recreate if there's a conflict
+                self.conn.execute("DROP TABLE IF EXISTS _schema_metadata")
+                self.conn.execute("DROP TABLE IF EXISTS _load_versions")
+                self.conn.execute("DROP SEQUENCE IF EXISTS schema_metadata_seq")
+                self.conn.execute("DROP SEQUENCE IF EXISTS load_versions_seq")
+                self.conn.commit()
+                
+                # Recursive call to create fresh
+                self._init_metadata_table()
+            except Exception as e2:
+                logger.error(f"Failed to recreate metadata tables: {e2}")
     
     def _sanitize_name(self, name: str) -> str:
         """Sanitize table/column names for SQL"""
@@ -389,6 +432,14 @@ class StructuredDataHandler:
                             new_cols.append(col)
                     df.columns = new_cols
                     
+                    # FORCE ALL COLUMNS TO STRING to avoid DuckDB type inference issues
+                    # This prevents errors like "Could not convert 'Amount' to DOUBLE"
+                    for col in df.columns:
+                        # Convert to string, then replace NaN/None with empty string
+                        df[col] = df[col].fillna('').astype(str)
+                        # Replace string 'nan' and 'None' that result from conversion
+                        df[col] = df[col].replace({'nan': '', 'None': '', 'NaT': ''})
+                    
                     # ENCRYPT PII COLUMNS
                     encrypted_cols = []
                     if encrypt_pii and self.encryptor.fernet:
@@ -403,7 +454,7 @@ class StructuredDataHandler:
                     # Drop existing current table if exists
                     self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
                     
-                    # Create table from DataFrame
+                    # Create table from DataFrame - all VARCHAR columns
                     self.conn.register('temp_df', df)
                     self.conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM temp_df")
                     self.conn.unregister('temp_df')
@@ -426,8 +477,8 @@ class StructuredDataHandler:
                     
                     self.conn.execute("""
                         INSERT INTO _schema_metadata 
-                        (project, file_name, sheet_name, table_name, columns, row_count, likely_keys, encrypted_columns, version, is_current)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                        (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys, encrypted_columns, version, is_current)
+                        VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
                     """, [
                         project,
                         file_name,
@@ -483,6 +534,11 @@ class StructuredDataHandler:
             # Sanitize column names
             df.columns = [self._sanitize_name(str(c)) for c in df.columns]
             
+            # FORCE ALL COLUMNS TO STRING to avoid type inference issues
+            for col in df.columns:
+                df[col] = df[col].fillna('').astype(str)
+                df[col] = df[col].replace({'nan': '', 'None': '', 'NaT': ''})
+            
             table_name = self._generate_table_name(project, file_name, 'data')
             
             # Drop existing table
@@ -504,8 +560,8 @@ class StructuredDataHandler:
             
             self.conn.execute("""
                 INSERT INTO _schema_metadata 
-                (project, file_name, sheet_name, table_name, columns, row_count, likely_keys)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys)
+                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?)
             """, [
                 project, file_name, 'data', table_name,
                 json.dumps(columns_info), len(df), json.dumps(likely_keys)
@@ -528,12 +584,22 @@ class StructuredDataHandler:
     
     def get_schema_for_project(self, project: str) -> Dict[str, Any]:
         """Get all table schemas for a project (for Claude to use)"""
-        result = self.conn.execute("""
-            SELECT file_name, sheet_name, table_name, columns, row_count, likely_keys
-            FROM _schema_metadata
-            WHERE project = ?
-            ORDER BY file_name, sheet_name
-        """, [project]).fetchall()
+        try:
+            result = self.conn.execute("""
+                SELECT file_name, sheet_name, table_name, columns, row_count, likely_keys
+                FROM _schema_metadata
+                WHERE project = ? AND is_current = TRUE
+                ORDER BY file_name, sheet_name
+            """, [project]).fetchall()
+        except Exception as e:
+            # Handle case where is_current column doesn't exist (old schema)
+            logger.warning(f"Schema query failed, trying without is_current: {e}")
+            result = self.conn.execute("""
+                SELECT file_name, sheet_name, table_name, columns, row_count, likely_keys
+                FROM _schema_metadata
+                WHERE project = ?
+                ORDER BY file_name, sheet_name
+            """, [project]).fetchall()
         
         schema = {
             'project': project,
@@ -890,6 +956,50 @@ class StructuredDataHandler:
             for f in files
         ]
     
+    def reset_database(self) -> Dict[str, Any]:
+        """
+        Completely reset the database - drop all tables and recreate metadata.
+        USE WITH CAUTION - this deletes all data!
+        """
+        result = {
+            'tables_dropped': [],
+            'success': False
+        }
+        
+        try:
+            # Get all user tables (not metadata)
+            tables = self.conn.execute("""
+                SELECT table_name FROM information_schema.tables 
+                WHERE table_schema = 'main' 
+                AND table_name NOT LIKE '\\_%' ESCAPE '\\'
+            """).fetchall()
+            
+            for (table_name,) in tables:
+                try:
+                    self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+                    result['tables_dropped'].append(table_name)
+                except Exception as e:
+                    logger.warning(f"Could not drop {table_name}: {e}")
+            
+            # Drop metadata tables
+            self.conn.execute("DROP TABLE IF EXISTS _schema_metadata")
+            self.conn.execute("DROP TABLE IF EXISTS _load_versions")
+            self.conn.execute("DROP SEQUENCE IF EXISTS schema_metadata_seq")
+            self.conn.execute("DROP SEQUENCE IF EXISTS load_versions_seq")
+            self.conn.commit()
+            
+            # Recreate metadata tables
+            self._init_metadata_table()
+            
+            result['success'] = True
+            logger.info(f"Database reset: dropped {len(result['tables_dropped'])} tables")
+            
+        except Exception as e:
+            logger.error(f"Database reset failed: {e}")
+            result['error'] = str(e)
+        
+        return result
+    
     def close(self):
         """Close database connection"""
         if self.conn:
@@ -905,3 +1015,11 @@ def get_structured_handler() -> StructuredDataHandler:
     if _handler is None:
         _handler = StructuredDataHandler()
     return _handler
+
+
+def reset_structured_handler():
+    """Reset the singleton handler (forces reconnection)"""
+    global _handler
+    if _handler:
+        _handler.close()
+    _handler = None
