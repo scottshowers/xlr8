@@ -113,7 +113,7 @@ function Navigation() {
               <span style={{
                 fontFamily: "'Manrope', sans-serif",
                 fontSize: '0.95rem',
-                fontWeight: '500',
+                fontWeight: '600',
                 color: '#5f6c7b',
                 letterSpacing: '0.01em'
               }}>
