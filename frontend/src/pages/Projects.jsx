@@ -19,8 +19,23 @@ function Projects({ onProjectsChanged }) {
     type: 'Implementation',
     start_date: '',
     notes: '',
-    status: 'active'
+    status: 'active',
+    products: []
   });
+
+  // Default UKG Products - Admin can add more later
+  const defaultProducts = [
+    'UKG Pro Core',
+    'UKG Pro Recruiting',
+    'UKG Pro Onboarding',
+    'UKG Pro Benefits',
+    'UKG Pro Time & Attendance',
+    'UKG Pro Performance',
+    'UKG Pro Learning',
+    'WFM Standalone',
+    'UKG Pro Full Suite (w/ WFM)',
+    'UKG Dimensions'
+  ];
 
   // Load active project from localStorage
   useEffect(() => {
@@ -101,7 +116,8 @@ function Projects({ onProjectsChanged }) {
         type: 'Implementation',
         start_date: '',
         notes: '',
-        status: 'active'
+        status: 'active',
+        products: []
       });
     } catch (error) {
       console.error('Failed to save project:', error);
@@ -117,7 +133,8 @@ function Projects({ onProjectsChanged }) {
       type: project.metadata?.type || 'Implementation',
       start_date: project.start_date || '',
       notes: project.metadata?.notes || '',
-      status: project.status || 'active'
+      status: project.status || 'active',
+      products: project.metadata?.products || []
     });
     setShowForm(true);
   };
@@ -195,7 +212,8 @@ function Projects({ onProjectsChanged }) {
               type: 'Implementation',
               start_date: '',
               notes: '',
-              status: 'active'
+              status: 'active',
+              products: []
             });
           }}
           style={{
@@ -353,6 +371,63 @@ function Projects({ onProjectsChanged }) {
                     <option value="completed">Completed</option>
                     <option value="cancelled">Cancelled</option>
                   </select>
+                </div>
+
+                {/* Products Multi-Select */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Products *
+                  </label>
+                  <div className="border border-gray-300 rounded-lg p-3 max-h-48 overflow-y-auto bg-gray-50">
+                    {defaultProducts.map(product => (
+                      <label 
+                        key={product} 
+                        className="flex items-center p-2 hover:bg-white rounded cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={formData.products.includes(product)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setFormData(prev => ({
+                                ...prev,
+                                products: [...prev.products, product]
+                              }));
+                            } else {
+                              setFormData(prev => ({
+                                ...prev,
+                                products: prev.products.filter(p => p !== product)
+                              }));
+                            }
+                          }}
+                          className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        />
+                        <span className="ml-3 text-sm text-gray-700">{product}</span>
+                      </label>
+                    ))}
+                  </div>
+                  {formData.products.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {formData.products.map(product => (
+                        <span 
+                          key={product}
+                          className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800"
+                        >
+                          {product}
+                          <button
+                            type="button"
+                            onClick={() => setFormData(prev => ({
+                              ...prev,
+                              products: prev.products.filter(p => p !== product)
+                            }))}
+                            className="ml-1 text-green-600 hover:text-green-800"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div>
