@@ -119,7 +119,7 @@ async def delete_job(job_id: str):
 
 
 @router.get("/status/documents")
-async def get_documents(project: Optional[str] = None, limit: int = 1000):
+async def get_documents(project: Optional[str] = None, limit: int = 50000):
     """
     Get all documents, optionally filtered by project
     Uses ChromaDB for now - can be optimized to use DocumentModel later
@@ -128,10 +128,13 @@ async def get_documents(project: Optional[str] = None, limit: int = 1000):
         rag = RAGHandler()
         collection = rag.client.get_collection(name="documents")
         
-        # Get documents with limit to prevent slowness
+        # Get total count first
+        total_chunks = collection.count()
+        
+        # Get documents - use total count as limit to ensure we get all
         results = collection.get(
             include=["metadatas"],
-            limit=limit
+            limit=max(limit, total_chunks)  # Ensure we get ALL chunks
         )
         
         # Extract unique documents with metadata
@@ -150,10 +153,8 @@ async def get_documents(project: Optional[str] = None, limit: int = 1000):
         
         # Filter by project if specified
         doc_list = list(documents.values())
-        if project and project != "__GLOBAL__":
+        if project and project != "all":
             doc_list = [d for d in doc_list if d["project"] == project]
-        elif project == "__GLOBAL__":
-            doc_list = [d for d in doc_list if d["project"] == "__GLOBAL__"]
         
         return {
             "documents": doc_list, 
