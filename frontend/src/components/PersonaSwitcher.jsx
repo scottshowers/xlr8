@@ -39,7 +39,7 @@ export function PersonaSwitcher({ currentPersona, onPersonaChange }) {
 
   return (
     <div style={styles.container}>
-      <div style={styles.label}>Assistant:</div>
+      <div style={styles.label}>Persona:</div>
       
       {/* Current Persona Display */}
       <div 
