@@ -314,7 +314,7 @@ class EnhancedChunker:
             if not sheet['header']:
                 logger.warning(f"No header found for worksheet '{sheet['name']}'")
         
-        # Process each worksheet separately
+        # Process each worksheet separately with ADAPTIVE strategy
         chunk_index = 0
         
         for sheet_idx, sheet in enumerate(worksheets):
@@ -327,15 +327,13 @@ class EnhancedChunker:
             sheet_text = text[sheet_start:sheet_end]
             sheet_lines = sheet_text.split('\n')
             
-            # Skip worksheet header lines (WORKSHEET:/[SHEET:], separator, and header)
+            # Skip worksheet header lines
             content_start_line = 0
             for i, line in enumerate(sheet_lines):
                 if 'WORKSHEET:' in line or '[SHEET:' in line:
-                    # Skip next 2-3 lines (separator and header)
                     content_start_line = i + 3 if sheet_header else i + 2
                     break
             
-            # Also handle case where [SHEET:] is on its own line with Columns: below
             if content_start_line == 0 and sheet_lines:
                 for i, line in enumerate(sheet_lines):
                     if line.strip().startswith('Columns:'):
@@ -344,98 +342,115 @@ class EnhancedChunker:
             
             sheet_lines = sheet_lines[content_start_line:]
             
-            # Chunk this sheet's content
+            # ADAPTIVE ANALYSIS: Analyze sheet density
+            data_rows = [
+                line for line in sheet_lines
+                if line.strip() 
+                and not line.startswith('[')
+                and not line.startswith('Columns:')
+                and not line.startswith('---')
+                and not line.startswith('Section')
+                and (':' in line or '|' in line)
+            ]
+            
+            row_count = len(data_rows)
+            
+            # ADAPTIVE STRATEGY: Determine rows per chunk based on density
+            if row_count == 0:
+                logger.info(f"Sheet '{sheet_name}': No data rows, skipping")
+                continue
+            elif row_count <= 5:
+                rows_per_chunk = row_count  # Keep small sheets as single chunk
+                strategy = "single"
+            elif row_count <= 20:
+                rows_per_chunk = 5  # Medium density
+                strategy = "medium"
+            elif row_count <= 50:
+                rows_per_chunk = 4  # High density
+                strategy = "dense"
+            else:
+                rows_per_chunk = 3  # Very high density
+                strategy = "very-dense"
+            
+            logger.info(f"Sheet '{sheet_name}': {row_count} data rows → Strategy: {strategy} ({rows_per_chunk} rows/chunk)")
+            
+            # Chunk this sheet
             current_chunk = []
             current_size = 0
+            current_row_count = 0
             sheet_chunk_index = 0
             
-            logger.info(f"Processing sheet '{sheet_name}': {len(sheet_lines)} lines")
-            
-            # Count data rows (rows with content)
-            data_row_count = sum(1 for line in sheet_lines if line.strip() and not line.startswith('['))
-            logger.info(f"  Data rows: {data_row_count}")
-            
-            # AGGRESSIVE CHUNKING: For sheets with lots of rows, chunk by row count
-            # Each data row with | separator should trigger chunk consideration
-            MAX_ROWS_PER_CHUNK = 5  # VERY AGGRESSIVE: Max 5 data rows per chunk (was 10)
-            current_row_count = 0
-            
-            for line_idx, line in enumerate(sheet_lines):
+            for line in sheet_lines:
                 # Skip empty lines at start
                 if not current_chunk and not line.strip():
                     continue
                 
-                line_size = len(line) + 1  # +1 for newline
+                line_size = len(line) + 1
                 
-                # Count data rows (not headers/markers)
-                # A data row has content, doesn't start with [, and typically has |
-                is_data_row = (line.strip() and 
-                              not line.startswith('[') and 
-                              not line.startswith('Columns:') and
-                              not line.startswith('---'))
+                # Detect data rows
+                is_data_row = (
+                    line.strip() 
+                    and not line.startswith('[')
+                    and not line.startswith('Columns:')
+                    and not line.startswith('---')
+                    and not line.startswith('Section')
+                    and (':' in line or '|' in line)
+                )
                 
                 if is_data_row:
                     current_row_count += 1
                 
-                # Force chunk break if:
-                # 1. Reached max rows per chunk, OR
-                # 2. Chunk size exceeded
-                should_break = False
-                if current_row_count >= MAX_ROWS_PER_CHUNK and current_chunk:
-                    should_break = True
-                    logger.debug(f"  Breaking chunk: {current_row_count} rows reached")
-                elif current_size + line_size > chunk_size and current_chunk:
-                    should_break = True
-                    logger.debug(f"  Breaking chunk: size {current_size} + {line_size} > {chunk_size}")
+                # Break chunk if we hit the adaptive limit
+                should_break = (
+                    current_row_count >= rows_per_chunk 
+                    and len(current_chunk) > 0
+                    and is_data_row
+                )
                 
                 if should_break:
                     chunk_text = '\n'.join(current_chunk)
                     
-                    # Add header to non-first chunks of this sheet
-                    if sheet_header and sheet_chunk_index > 0:
-                        chunk_text = f"[HEADER] {sheet_header}\n{chunk_text}"
-                    
-                    # Add sheet context to first chunk
-                    if sheet_chunk_index == 0 and len(worksheets) > 1:
+                    # ALWAYS include sheet name for embedding
+                    if sheet_name and sheet_name != 'Sheet1':
                         chunk_text = f"[SHEET: {sheet_name}]\n{chunk_text}"
+                    
+                    # Add header for continuation chunks
+                    if sheet_header and sheet_chunk_index > 0 and not chunk_text.startswith('[HEADER]'):
+                        chunk_text = f"[HEADER] {sheet_header}\n{chunk_text}"
                     
                     chunks.append(EnhancedChunk(
                         text=chunk_text,
                         chunk_index=chunk_index,
-                        total_chunks=0,  # Will update later
+                        total_chunks=0,
                         chunk_type=ChunkType.TABLE_ROW,
-                        start_char=sheet_start,  # Approximate
-                        end_char=sheet_start + len(chunk_text),  # Approximate
+                        start_char=sheet_start,
+                        end_char=sheet_start + len(chunk_text),
                         tokens_estimate=self.estimate_tokens(chunk_text),
-                        parent_section=sheet_name,  # Sheet name as parent section
+                        parent_section=sheet_name,
                         has_header=sheet_header is not None,
                         header_text=sheet_header
                     ))
                     
-                    logger.debug(f"  Created chunk {chunk_index} for '{sheet_name}' ({current_row_count} rows, {current_size} chars)")
-                    
-                    # Keep overlap (last few lines)
-                    overlap_lines = max(1, int(overlap / 50))  # Rough estimate: 50 chars per line
-                    current_chunk = current_chunk[-overlap_lines:]
-                    current_size = sum(len(l) + 1 for l in current_chunk)
-                    current_row_count = 0  # Reset row count
+                    # Start new chunk with current line
+                    current_chunk = [line]
+                    current_size = line_size
+                    current_row_count = 1 if is_data_row else 0
                     chunk_index += 1
                     sheet_chunk_index += 1
-                
-                current_chunk.append(line)
-                current_size += line_size
+                else:
+                    current_chunk.append(line)
+                    current_size += line_size
             
-            logger.info(f"  Sheet '{sheet_name}': Created {sheet_chunk_index} chunks")
-            
-            # Add final chunk for this sheet
+            # Save final chunk for this sheet
             if current_chunk:
                 chunk_text = '\n'.join(current_chunk)
                 
-                if sheet_header and sheet_chunk_index > 0:
-                    chunk_text = f"[HEADER] {sheet_header}\n{chunk_text}"
-                
-                if sheet_chunk_index == 0 and len(worksheets) > 1:
+                # ALWAYS include sheet name
+                if sheet_name and sheet_name != 'Sheet1':
                     chunk_text = f"[SHEET: {sheet_name}]\n{chunk_text}"
+                
+                if sheet_header and sheet_chunk_index > 0 and not chunk_text.startswith('[HEADER]'):
+                    chunk_text = f"[HEADER] {sheet_header}\n{chunk_text}"
                 
                 chunks.append(EnhancedChunk(
                     text=chunk_text,
@@ -453,14 +468,30 @@ class EnhancedChunker:
                 chunk_index += 1
                 sheet_chunk_index += 1
             
-            logger.info(f"Sheet '{sheet_name}': Created {sheet_chunk_index} chunks")
+            logger.info(f"  ✓ Sheet '{sheet_name}': Created {sheet_chunk_index} chunks")
         
         # Update total_chunks for all
         total = len(chunks)
         for chunk in chunks:
             chunk.total_chunks = total
         
-        logger.info(f"Multi-sheet processing complete: {len(chunks)} total chunks across {len(worksheets)} sheets")
+        # Summary of adaptive chunking
+        logger.info("="*80)
+        logger.info(f"ADAPTIVE CHUNKING COMPLETE:")
+        logger.info(f"  Total: {len(chunks)} chunks across {len(worksheets)} sheets")
+        
+        # Show per-sheet breakdown
+        sheet_stats = {}
+        for chunk in chunks:
+            sheet = chunk.parent_section
+            if sheet not in sheet_stats:
+                sheet_stats[sheet] = 0
+            sheet_stats[sheet] += 1
+        
+        for sheet, count in sorted(sheet_stats.items()):
+            logger.info(f"  • {sheet}: {count} chunks")
+        logger.info("="*80)
+        
         return chunks
     
     def chunk_semantic_content(self, text: str, chunk_size: int, overlap: int) -> List[EnhancedChunk]:
