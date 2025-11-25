@@ -196,6 +196,7 @@ function App() {
             <Route path="/status" element={<Status projects={projects} />} />
             <Route path="/projects" element={<Projects onProjectsChanged={refreshProjects} />} />
             <Route path="/secure20" element={<Secure20Analysis />} />
+            <Route path="/admin" element={<AdminPage />} />
           </Routes>
         </div>
       </div>
