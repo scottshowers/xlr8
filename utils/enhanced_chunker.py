@@ -226,7 +226,7 @@ class EnhancedChunker:
         Specialized chunking for table/Excel content with MULTI-SHEET support
         
         MULTI-SHEET FEATURES:
-        - Detects all WORKSHEET: markers
+        - Detects all WORKSHEET: or [SHEET:] markers
         - Extracts sheet-specific headers
         - Tracks which sheet each chunk belongs to
         - Applies correct header per sheet
@@ -242,10 +242,12 @@ class EnhancedChunker:
         chunks = []
         
         # Detect all worksheets and their positions
+        # Support multiple marker formats
         worksheets = []
-        worksheet_pattern = re.compile(r'WORKSHEET:\s*(.+?)\s*\n={20,}', re.IGNORECASE)
         
-        for match in worksheet_pattern.finditer(text):
+        # Pattern 1: WORKSHEET: SheetName\n======
+        worksheet_pattern1 = re.compile(r'WORKSHEET:\s*(.+?)\s*\n={20,}', re.IGNORECASE)
+        for match in worksheet_pattern1.finditer(text):
             sheet_name = match.group(1).strip()
             sheet_start = match.start()
             worksheets.append({
@@ -253,6 +255,22 @@ class EnhancedChunker:
                 'start_pos': sheet_start,
                 'header': None
             })
+        
+        # Pattern 2: [SHEET: SheetName]
+        worksheet_pattern2 = re.compile(r'\[SHEET:\s*(.+?)\]', re.IGNORECASE)
+        for match in worksheet_pattern2.finditer(text):
+            sheet_name = match.group(1).strip()
+            sheet_start = match.start()
+            # Avoid duplicates if both patterns match
+            if not any(abs(w['start_pos'] - sheet_start) < 50 for w in worksheets):
+                worksheets.append({
+                    'name': sheet_name,
+                    'start_pos': sheet_start,
+                    'header': None
+                })
+        
+        # Sort by position
+        worksheets.sort(key=lambda x: x['start_pos'])
         
         # If no worksheets found, treat as single sheet
         if not worksheets:
@@ -278,15 +296,18 @@ class EnhancedChunker:
             
             # Look for header (skip worksheet name and separator lines)
             for i, line in enumerate(sheet_lines):
-                if 'WORKSHEET:' in line:
+                if 'WORKSHEET:' in line or '[SHEET:' in line:
                     # Skip separator line, grab the next non-empty line as header
-                    for j in range(i + 1, min(i + 4, len(sheet_lines))):
+                    for j in range(i + 1, min(i + 5, len(sheet_lines))):
                         potential_header = sheet_lines[j].strip()
-                        # Check if it looks like a header (has | or \t separators)
+                        # Skip separator lines
+                        if potential_header.startswith('=') or not potential_header:
+                            continue
+                        # Check if it looks like a header (has Columns: prefix, | or \t separators)
                         if potential_header and len(potential_header) < 500:
-                            if '|' in potential_header or '\t' in potential_header:
+                            if potential_header.startswith('Columns:') or '|' in potential_header or '\t' in potential_header:
                                 sheet['header'] = potential_header
-                                logger.info(f"Extracted header for '{sheet['name']}': {potential_header[:50]}...")
+                                logger.info(f"Extracted header for '{sheet['name']}': {potential_header[:80]}...")
                                 break
                     break
             
@@ -306,13 +327,20 @@ class EnhancedChunker:
             sheet_text = text[sheet_start:sheet_end]
             sheet_lines = sheet_text.split('\n')
             
-            # Skip worksheet header lines (WORKSHEET: and separator)
+            # Skip worksheet header lines (WORKSHEET:/[SHEET:], separator, and header)
             content_start_line = 0
             for i, line in enumerate(sheet_lines):
-                if 'WORKSHEET:' in line:
+                if 'WORKSHEET:' in line or '[SHEET:' in line:
                     # Skip next 2-3 lines (separator and header)
                     content_start_line = i + 3 if sheet_header else i + 2
                     break
+            
+            # Also handle case where [SHEET:] is on its own line with Columns: below
+            if content_start_line == 0 and sheet_lines:
+                for i, line in enumerate(sheet_lines):
+                    if line.strip().startswith('Columns:'):
+                        content_start_line = i + 1
+                        break
             
             sheet_lines = sheet_lines[content_start_line:]
             
