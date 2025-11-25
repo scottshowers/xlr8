@@ -583,22 +583,45 @@ class RAGHandler:
                 return []
             
             # Build where clause for filtering
+            # ALWAYS include Global/Universal docs when filtering by project
             where_clause = None
             
             if project_id and functional_areas:
-                # Both filters: project_id AND functional_area in list
-                where_clause = {
-                    "$and": [
-                        {"project_id": project_id},
-                        {"functional_area": {"$in": functional_areas}}
-                    ]
-                }
-                logger.info(f"[PROJECT] Filtering by project_id: {project_id}")
+                # Both filters: (project_id OR Global/Universal) AND functional_area in list
+                if project_id == "Global/Universal":
+                    # Only Global/Universal
+                    where_clause = {
+                        "$and": [
+                            {"project_id": "Global/Universal"},
+                            {"functional_area": {"$in": functional_areas}}
+                        ]
+                    }
+                else:
+                    # Project + Global/Universal
+                    where_clause = {
+                        "$and": [
+                            {"$or": [
+                                {"project_id": project_id},
+                                {"project_id": "Global/Universal"}
+                            ]},
+                            {"functional_area": {"$in": functional_areas}}
+                        ]
+                    }
+                logger.info(f"[PROJECT] Filtering by project_id: {project_id} + Global/Universal")
                 logger.info(f"[FUNCTIONAL AREA] Filtering by areas: {', '.join(functional_areas)}")
             elif project_id:
-                # Only project filter
-                where_clause = {"project_id": project_id}
-                logger.info(f"[PROJECT] Filtering search by project_id: {project_id}")
+                # Only project filter - include Global/Universal
+                if project_id == "Global/Universal":
+                    where_clause = {"project_id": "Global/Universal"}
+                    logger.info(f"[PROJECT] Filtering search by Global/Universal only")
+                else:
+                    where_clause = {
+                        "$or": [
+                            {"project_id": project_id},
+                            {"project_id": "Global/Universal"}
+                        ]
+                    }
+                    logger.info(f"[PROJECT] Filtering search by project_id: {project_id} + Global/Universal")
             elif functional_areas:
                 # Only functional area filter
                 where_clause = {"functional_area": {"$in": functional_areas}}
@@ -643,7 +666,10 @@ class RAGHandler:
             
             logger.info(f"Search returned {len(formatted_results)} results from '{collection_name}'")
             if project_id:
-                logger.info(f"[PROJECT] Results filtered by project_id: {project_id}")
+                if project_id == "Global/Universal":
+                    logger.info(f"[PROJECT] Results filtered by: Global/Universal only")
+                else:
+                    logger.info(f"[PROJECT] Results filtered by: {project_id} + Global/Universal")
             if formatted_results and formatted_results[0].get('distance') is not None:
                 logger.info(f"Best match distance: {formatted_results[0]['distance']:.4f}")
             
