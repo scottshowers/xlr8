@@ -1,9 +1,12 @@
 """
-Chat Router for XLR8 - With Real-Time Status Updates & Query Decomposition
-===========================================================================
+Chat Router for XLR8 - ADVANCED RAG FEATURES
+=============================================
 
-Uses job-based processing with status polling (like upload)
-NOW with compound question support (multi-sheet queries)
+Features:
+- ✅ Real-time status updates
+- ✅ Query decomposition (compound questions)
+- ✅ Smart aggregation (count/sum queries)
+- ✅ Intent classification (optimal routing)
 
 Author: XLR8 Team
 """
@@ -24,6 +27,8 @@ sys.path.insert(0, '/data')
 from utils.rag_handler import RAGHandler
 from utils.llm_orchestrator import LLMOrchestrator
 from utils.query_decomposition import DiverseRetriever
+from utils.smart_aggregation import handle_aggregation
+from utils.intent_classifier import classify_and_configure
 
 logger = logging.getLogger(__name__)
 
@@ -70,8 +75,17 @@ def update_job_status(job_id: str, status: str, step: str, progress: int, **kwar
 
 
 def process_chat_job(job_id: str, message: str, project: Optional[str], max_results: int):
-    """Background processing for chat"""
+    """Background processing for chat with ADVANCED FEATURES"""
     try:
+        # STEP 1: INTENT CLASSIFICATION
+        update_job_status(job_id, 'processing', '🧠 Understanding query...', 5)
+        
+        intent_config = classify_and_configure(message)
+        logger.info(f"[INTENT] {intent_config['intent']} - Strategy: {intent_config['strategy']}")
+        
+        # Override max_results based on intent
+        n_results = intent_config.get('n_results', max_results)
+        
         update_job_status(job_id, 'processing', '🔵 Searching documents...', 10)
         
         # Initialize RAG
@@ -88,25 +102,48 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
         if project and project not in ['', 'all', 'All Projects']:
             where_filter = {"project": project}
         
+        # STEP 2: CHECK FOR AGGREGATION QUERIES
+        if intent_config['use_aggregation']:
+            update_job_status(job_id, 'processing', '🔢 Computing aggregation...', 15)
+            
+            agg_result = handle_aggregation(rag, collection, message, where_filter)
+            
+            if agg_result and agg_result.get('needs_agg'):
+                # Aggregation handled, return formatted response
+                update_job_status(
+                    job_id, 'complete', 'Complete', 100,
+                    response=agg_result['formatted_response'],
+                    sources=[],
+                    chunks_found=agg_result.get('total_chunks', 0),
+                    models_used=['aggregation'],
+                    query_type='aggregation',
+                    sanitized=False
+                )
+                return
+        
         update_job_status(job_id, 'processing', '📊 Retrieving chunks...', 20)
         
-        # DIVERSE RETRIEVAL: Handle compound questions automatically
+        # STEP 3: DIVERSE RETRIEVAL (if compound query or intent suggests)
         # Example: "Give me deduction groups and pay groups" 
         # → Searches both sheets separately and merges results
+        
+        use_decomposition = intent_config.get('use_decomposition', False)
         
         try:
             from utils.query_decomposition import QueryDecomposer
             
             decomposer = QueryDecomposer()
             
-            # Check if compound query
-            if decomposer.is_compound_query(message):
+            # Check if compound query OR intent requires decomposition
+            is_compound = decomposer.is_compound_query(message)
+            
+            if is_compound or use_decomposition:
                 # COMPOUND QUERY: Split and search each separately
                 sub_queries = decomposer.decompose_query(message)
                 logger.info(f"[DIVERSE] Compound query detected: {len(sub_queries)} sub-queries")
                 
                 # Retrieve for each sub-query
-                results_per_query = max_results // len(sub_queries)
+                results_per_query = n_results // len(sub_queries)
                 all_documents = []
                 all_metadatas = []
                 all_distances = []
@@ -142,10 +179,10 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
                             all_metadatas.append(sub_results['metadatas'][0][j])
                             all_distances.append(sub_results['distances'][0][j])
                             
-                            if len(all_documents) >= max_results:
+                            if len(all_documents) >= n_results:
                                 break
                     
-                    if len(all_documents) >= max_results:
+                    if len(all_documents) >= n_results:
                         break
                 
                 # Format as ChromaDB result
@@ -175,7 +212,7 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
                 # Search
                 results = collection.query(
                     query_embeddings=[query_embedding],
-                    n_results=max_results,
+                    n_results=n_results,
                     where=where_filter,
                     include=["documents", "metadatas", "distances"]
                 )
@@ -191,7 +228,7 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
             
             results = collection.query(
                 query_embeddings=[query_embedding],
-                n_results=max_results,
+                n_results=n_results,
                 where=where_filter,
                 include=["documents", "metadatas", "distances"]
             )
