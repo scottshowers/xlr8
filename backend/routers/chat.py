@@ -1,12 +1,13 @@
 """
-Chat Router for XLR8 - ADVANCED RAG FEATURES
-=============================================
+Chat Router for XLR8 - ADVANCED RAG FEATURES + BESSIE! 🐮
+==========================================================
 
 Features:
 - ✅ Real-time status updates
 - ✅ Query decomposition (compound questions)
 - ✅ Smart aggregation (count/sum queries)
 - ✅ Intent classification (optimal routing)
+- ✅ Persona system (Bessie and friends!)
 
 Author: XLR8 Team
 """
@@ -29,6 +30,7 @@ from utils.llm_orchestrator import LLMOrchestrator
 from utils.query_decomposition import DiverseRetriever
 from utils.smart_aggregation import handle_aggregation
 from utils.intent_classifier import classify_and_configure
+from utils.persona_manager import get_persona_manager
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,24 @@ class ChatRequest(BaseModel):
     project: Optional[str] = None
     functional_area: Optional[str] = None
     max_results: Optional[int] = 50  # Increased from 30 to get more chunks
+    persona: Optional[str] = 'bessie'  # NEW: Default to Bessie 🐮
+
+
+class PersonaCreate(BaseModel):
+    name: str
+    icon: str
+    description: str
+    system_prompt: str
+    expertise: List[str]
+    tone: str
+
+
+class PersonaUpdate(BaseModel):
+    icon: Optional[str] = None
+    description: Optional[str] = None
+    system_prompt: Optional[str] = None
+    expertise: Optional[List[str]] = None
+    tone: Optional[str] = None
 
 
 class ChatJobStatus(BaseModel):
@@ -74,9 +94,14 @@ def update_job_status(job_id: str, status: str, step: str, progress: int, **kwar
         logger.info(f"[JOB {job_id}] {step} ({progress}%)")
 
 
-def process_chat_job(job_id: str, message: str, project: Optional[str], max_results: int):
-    """Background processing for chat with ADVANCED FEATURES"""
+def process_chat_job(job_id: str, message: str, project: Optional[str], max_results: int, persona_name: str = 'bessie'):
+    """Background processing for chat with ADVANCED FEATURES + BESSIE! 🐮"""
     try:
+        # STEP 0: LOAD PERSONA
+        pm = get_persona_manager()
+        persona = pm.get_persona(persona_name)
+        logger.info(f"[PERSONA] Using: {persona.name} {persona.icon}")
+        
         # STEP 1: INTENT CLASSIFICATION
         update_job_status(job_id, 'processing', '🧠 Understanding query...', 5)
         
@@ -331,8 +356,14 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
         
         time.sleep(0.5)  # Brief pause so user sees status
         
-        # Process with orchestrator
-        result = orchestrator.process_query(message, chunks)
+        # INJECT PERSONA: Enhance message with persona's personality
+        # NOTE: This prepends persona context to the message for the LLM
+        enhanced_message = f"""[SYSTEM: You are {persona.name}. {persona.system_prompt}]
+
+User Question: {message}"""
+        
+        # Process with orchestrator (using enhanced message with persona)
+        result = orchestrator.process_query(enhanced_message, chunks)
         
         if result.get('query_type') == 'employee' and result.get('sanitized'):
             update_job_status(job_id, 'processing', '🔒 Sanitizing PII...', 70)
@@ -374,7 +405,7 @@ async def chat_start(request: ChatRequest):
     # Start background processing
     thread = threading.Thread(
         target=process_chat_job,
-        args=(job_id, request.message, request.project, request.max_results or 30)
+        args=(job_id, request.message, request.project, request.max_results or 30, request.persona or 'bessie')
     )
     thread.daemon = True
     thread.start()
@@ -407,7 +438,7 @@ async def chat_legacy(request: ChatRequest):
     chat_jobs[job_id] = {'job_id': job_id, 'status': 'processing', 'current_step': 'Processing...', 'progress': 0}
     
     # Process synchronously
-    process_chat_job(job_id, request.message, request.project, request.max_results or 30)
+    process_chat_job(job_id, request.message, request.project, request.max_results or 30, request.persona or 'bessie')
     
     # Wait for completion
     result = chat_jobs[job_id]
@@ -495,3 +526,110 @@ async def debug_chunks(
         
     except Exception as e:
         return {"error": str(e)}
+
+
+# ============================================================================
+# PERSONA MANAGEMENT ENDPOINTS - Meet Bessie! 🐮
+# ============================================================================
+
+@router.get("/chat/personas")
+async def list_personas():
+    """Get all available personas"""
+    try:
+        pm = get_persona_manager()
+        personas = pm.list_personas()
+        
+        return {
+            "personas": personas,
+            "count": len(personas),
+            "default": "bessie"
+        }
+    except Exception as e:
+        logger.error(f"Error listing personas: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.get("/chat/personas/{name}")
+async def get_persona(name: str):
+    """Get specific persona details"""
+    try:
+        pm = get_persona_manager()
+        persona = pm.get_persona(name)
+        
+        return persona.to_dict()
+    except Exception as e:
+        logger.error(f"Error getting persona: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.post("/chat/personas")
+async def create_persona(persona: PersonaCreate):
+    """Create a new custom persona"""
+    try:
+        pm = get_persona_manager()
+        new_persona = pm.create_persona(
+            name=persona.name,
+            icon=persona.icon,
+            description=persona.description,
+            system_prompt=persona.system_prompt,
+            expertise=persona.expertise,
+            tone=persona.tone
+        )
+        
+        logger.info(f"[PERSONA] Created custom persona: {persona.name}")
+        
+        return {
+            "status": "created",
+            "persona": new_persona.to_dict()
+        }
+    except Exception as e:
+        logger.error(f"Error creating persona: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.put("/chat/personas/{name}")
+async def update_persona(name: str, updates: PersonaUpdate):
+    """Update a custom persona"""
+    try:
+        pm = get_persona_manager()
+        
+        # Filter out None values
+        update_dict = {k: v for k, v in updates.dict().items() if v is not None}
+        
+        persona = pm.update_persona(name, **update_dict)
+        
+        if not persona:
+            raise HTTPException(404, f"Persona '{name}' not found or cannot be updated (built-in personas cannot be modified)")
+        
+        logger.info(f"[PERSONA] Updated custom persona: {name}")
+        
+        return {
+            "status": "updated",
+            "persona": persona.to_dict()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating persona: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.delete("/chat/personas/{name}")
+async def delete_persona(name: str):
+    """Delete a custom persona (cannot delete built-in personas)"""
+    try:
+        pm = get_persona_manager()
+        
+        success = pm.delete_persona(name)
+        
+        if not success:
+            raise HTTPException(404, f"Persona '{name}' not found or cannot be deleted (built-in personas cannot be deleted)")
+        
+        logger.info(f"[PERSONA] Deleted custom persona: {name}")
+        
+        return {"status": "deleted", "name": name}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting persona: {e}")
+        raise HTTPException(500, str(e))
