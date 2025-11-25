@@ -351,6 +351,15 @@ class EnhancedChunker:
             
             logger.info(f"Processing sheet '{sheet_name}': {len(sheet_lines)} lines")
             
+            # Count data rows (rows with content)
+            data_row_count = sum(1 for line in sheet_lines if line.strip() and not line.startswith('['))
+            logger.info(f"  Data rows: {data_row_count}")
+            
+            # AGGRESSIVE CHUNKING: For sheets with lots of rows, chunk by row count
+            # This ensures each chunk has a reasonable number of rows (better for retrieval)
+            MAX_ROWS_PER_CHUNK = 10  # Max 10 data rows per chunk
+            current_row_count = 0
+            
             for line in sheet_lines:
                 # Skip empty lines at start
                 if not current_chunk and not line.strip():
@@ -358,8 +367,18 @@ class EnhancedChunker:
                 
                 line_size = len(line) + 1  # +1 for newline
                 
-                # If adding this line exceeds chunk size and we have content, save chunk
-                if current_size + line_size > chunk_size and current_chunk:
+                # Count data rows (not headers/markers)
+                is_data_row = line.strip() and not line.startswith('[') and '|' in line
+                if is_data_row:
+                    current_row_count += 1
+                
+                # Force chunk break if:
+                # 1. Reached max rows per chunk, OR
+                # 2. Chunk size exceeded
+                should_break = (current_row_count >= MAX_ROWS_PER_CHUNK) or \
+                              (current_size + line_size > chunk_size and current_chunk)
+                
+                if should_break:
                     chunk_text = '\n'.join(current_chunk)
                     
                     # Add header to non-first chunks of this sheet
@@ -387,6 +406,7 @@ class EnhancedChunker:
                     overlap_lines = max(1, int(overlap / 50))  # Rough estimate: 50 chars per line
                     current_chunk = current_chunk[-overlap_lines:]
                     current_size = sum(len(l) + 1 for l in current_chunk)
+                    current_row_count = 0  # Reset row count
                     chunk_index += 1
                     sheet_chunk_index += 1
                 
