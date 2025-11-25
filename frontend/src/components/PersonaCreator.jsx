@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import api from '../services/api';  // FIXED: Import api service
 
 /**
  * Custom Persona Creator
@@ -42,27 +43,16 @@ export function PersonaCreator({ isOpen, onClose, onPersonaCreated }) {
         .filter(e => e);
 
       // Create persona
-      const response = await fetch('/api/chat/personas', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          name: formData.name,
-          icon: formData.icon,
-          description: formData.description,
-          system_prompt: formData.system_prompt,
-          expertise: expertiseArray,
-          tone: formData.tone || 'Professional'
-        })
+      const response = await api.post('/chat/personas', {
+        name: formData.name,
+        icon: formData.icon,
+        description: formData.description,
+        system_prompt: formData.system_prompt,
+        expertise: expertiseArray,
+        tone: formData.tone || 'Professional'
       });
 
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.detail || 'Failed to create persona');
-      }
-
-      const result = await response.json();
+      const result = response.data;
       
       // Success!
       if (onPersonaCreated) {
