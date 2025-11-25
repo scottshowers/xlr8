@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import api from '../services/api'
 
 /**
- * Persona Management Component - repush
+ * Persona Management Component
  * 
  * Full CRUD interface for managing AI personas
  */
@@ -198,19 +198,13 @@ function PersonaDetails({ persona, onEdit, onDelete }) {
       </div>
 
       <div style={styles.detailsActions}>
-        {persona.custom ? (
-          <>
-            <button style={styles.editButton} onClick={onEdit}>
-              ✏️ Edit Persona
-            </button>
-            <button style={styles.deleteButton} onClick={() => onDelete(persona.id)}>
-              🗑️ Delete Persona
-            </button>
-          </>
-        ) : (
-          <div style={styles.builtInNote}>
-            ℹ️ Built-in personas cannot be edited or deleted
-          </div>
+        <button style={styles.editButton} onClick={onEdit}>
+          ✏️ Edit Persona
+        </button>
+        {persona.custom && (
+          <button style={styles.deleteButton} onClick={() => onDelete(persona.id)}>
+            🗑️ Delete Persona
+          </button>
         )}
       </div>
     </div>
