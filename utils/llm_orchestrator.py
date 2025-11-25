@@ -332,6 +332,14 @@ class LLMOrchestrator:
         
         return "\n\n---\n\n".join(context_parts)
     
+    def _determine_query_type(self, query: str, chunks: List[Dict]) -> str:
+        """
+        Public method to classify query type
+        Used by chat router for status updates
+        """
+        from utils.llm_orchestrator import classify_query
+        return classify_query(query, chunks)
+    
     def process_query(self, query: str, chunks: List[Dict]) -> Dict[str, Any]:
         """
         Main orchestration method
