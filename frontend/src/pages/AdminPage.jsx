@@ -8,70 +8,14 @@ import PersonaManagement from '../components/PersonaManagement'
  */
 export default function AdminPage() {
   const [currentSection, setCurrentSection] = useState('dashboard')
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
 
-  // Simple password authentication (upgrade to role-based later)
-  const handleLogin = (e) => {
-    e.preventDefault()
-    // TODO: Replace with secure backend check
-    if (password === 'admin123') {  // Temporary - make this secure!
-      setIsAuthenticated(true)
-      setError('')
-    } else {
-      setError('Invalid password')
-    }
-  }
-
-  // Login screen
-  if (!isAuthenticated) {
-    return (
-      <div style={styles.loginContainer}>
-        <div style={styles.loginBox}>
-          <h1 style={styles.loginTitle}>🔒 Admin Access</h1>
-          <p style={styles.loginSubtitle}>Enter admin password to continue</p>
-          
-          <form onSubmit={handleLogin} style={styles.loginForm}>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Admin password"
-              style={styles.loginInput}
-              autoFocus
-            />
-            
-            {error && (
-              <div style={styles.loginError}>{error}</div>
-            )}
-            
-            <button type="submit" style={styles.loginButton}>
-              Login
-            </button>
-          </form>
-          
-          <p style={styles.loginHint}>
-            💡 Default password: admin123 (change this in production!)
-          </p>
-        </div>
-      </div>
-    )
-  }
-
-  // Admin dashboard
+  // Admin dashboard (no login required)
   return (
     <div style={styles.container}>
       {/* Sidebar Navigation */}
       <div style={styles.sidebar}>
         <div style={styles.sidebarHeader}>
           <h2 style={styles.sidebarTitle}>⚙️ Admin</h2>
-          <button 
-            onClick={() => setIsAuthenticated(false)}
-            style={styles.logoutButton}
-          >
-            Logout
-          </button>
         </div>
 
         <nav style={styles.nav}>
@@ -349,7 +293,7 @@ const styles = {
   },
   sidebar: {
     width: '280px',
-    background: '#2a3441',
+    background: '#7a8896',
     color: 'white',
     display: 'flex',
     flexDirection: 'column'
