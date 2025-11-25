@@ -126,7 +126,7 @@ function Navigation() {
             <li><Link to="/projects" style={navLinkStyle('/projects')}>Projects</Link></li>
             <li><Link to="/chat" style={navLinkStyle('/chat')}>Chat</Link></li>
             <li><Link to="/upload" style={navLinkStyle('/upload')}>Upload</Link></li>
-            <li><Link to="/status" style={navLinkStyle('/status')}>Status</Link></li>
+            <li><Link to="/status" style={navLinkStyle('/status')}>File Status</Link></li>
             <li><Link to="/secure20" style={navLinkStyle('/secure20')}>Featured Analysis Templates</Link></li>
           </ul>
         </div>
