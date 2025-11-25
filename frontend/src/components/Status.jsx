@@ -166,7 +166,7 @@ export default function Status() {
       <div className="bg-white rounded-lg shadow p-6">
         <div className="flex items-center gap-2 mb-4">
           <Database className="w-6 h-6 text-blue-600" />
-          <h2 className="text-2xl font-bold">System Status</h2>
+          <h2 className="text-2xl font-bold">File Status</h2>
         </div>
 
         <div className="grid grid-cols-3 gap-4">
