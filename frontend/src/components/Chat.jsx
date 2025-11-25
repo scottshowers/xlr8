@@ -85,7 +85,7 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
       const startResponse = await api.post('/chat/start', {
         message: userMessage.content,
         project: selectedProject || null,
-        max_results: 30
+        max_results: 50  // Get more chunks for comprehensive answers
       })
 
       const { job_id } = startResponse.data
