@@ -453,8 +453,12 @@ class RAGHandler:
                 # Create unique ID
                 doc_id = f"{metadata.get('source', 'unknown')}_{i}"
                 
+                # CRITICAL: Filter None values from base metadata BEFORE spreading
+                # ChromaDB rejects None values in metadata
+                base_metadata = {k: v for k, v in metadata.items() if v is not None}
+                
                 # CHANGE: Preserve project_id in chunk metadata
-                chunk_metadata = {**metadata, "chunk_index": i}
+                chunk_metadata = {**base_metadata, "chunk_index": i}
                 if project_id:
                     chunk_metadata['project_id'] = project_id
                 
@@ -465,15 +469,17 @@ class RAGHandler:
                     # Universal chunker provides metadata in nested structure
                     if 'metadata' in chunk_dict:
                         enhanced = chunk_dict['metadata']
-                        chunk_metadata.update({
+                        
+                        # Build metadata dict with potential None values
+                        enhanced_metadata = {
                             # Core universal chunker metadata
                             'structure': enhanced.get('structure', 'unknown'),
                             'strategy': enhanced.get('strategy', 'unknown'),
                             'chunk_type': enhanced.get('chunk_type', 'unknown'),
-                            'parent_section': enhanced.get('parent_section'),
+                            'parent_section': enhanced.get('parent_section', 'unknown'),
                             'has_header': enhanced.get('has_header', False),
                             
-                            # Additional metadata
+                            # Additional metadata (may be None)
                             'row_start': enhanced.get('row_start'),
                             'row_end': enhanced.get('row_end'),
                             'line_start': enhanced.get('line_start'),
@@ -483,16 +489,27 @@ class RAGHandler:
                             # Computed metadata
                             'tokens_estimate': len(chunk) // 4,
                             'position': f"{i+1}/{len(chunks)}"
-                        })
+                        }
+                        
+                        # CRITICAL: ChromaDB doesn't accept None values - filter them out
+                        enhanced_metadata = {k: v for k, v in enhanced_metadata.items() if v is not None}
+                        chunk_metadata.update(enhanced_metadata)
                     else:
                         # Fallback for older metadata structure
-                        chunk_metadata.update({
+                        fallback_metadata = {
                             'chunk_type': chunk_dict.get('chunk_type', 'unknown'),
-                            'parent_section': chunk_dict.get('parent_section'),
+                            'parent_section': chunk_dict.get('parent_section', 'unknown'),
                             'has_header': chunk_dict.get('has_header', False),
                             'tokens_estimate': len(chunk) // 4,
                             'position': f"{i+1}/{len(chunks)}"
-                        })
+                        }
+                        # Filter None values
+                        fallback_metadata = {k: v for k, v in fallback_metadata.items() if v is not None}
+                        chunk_metadata.update(fallback_metadata)
+                
+                # FINAL SAFETY CHECK: Remove ALL None values from chunk_metadata
+                # ChromaDB will reject the entire batch if ANY metadata has None
+                chunk_metadata = {k: v for k, v in chunk_metadata.items() if v is not None}
                 
                 valid_chunks.append(chunk)
                 valid_embeddings.append(embedding)
