@@ -1,10 +1,8 @@
 """
-Chat Router for XLR8 - PRODUCTION VERSION
-=========================================
+Chat Router for XLR8 - With Real-Time Status Updates
+====================================================
 
-Smart routing:
-- CONFIG queries → Claude direct (fast)
-- EMPLOYEE queries → Local LLM → Sanitize → Claude
+Uses job-based processing with status polling (like upload)
 
 Author: XLR8 Team
 """
@@ -15,6 +13,9 @@ from typing import Optional, List, Dict, Any
 import sys
 import os
 import logging
+import uuid
+import threading
+import time
 
 sys.path.insert(0, '/app')
 sys.path.insert(0, '/data')
@@ -29,90 +30,90 @@ router = APIRouter()
 # Initialize orchestrator
 orchestrator = LLMOrchestrator()
 
+# In-memory job storage (for status tracking)
+chat_jobs = {}
+
 
 class ChatRequest(BaseModel):
     message: str
     project: Optional[str] = None
     functional_area: Optional[str] = None
-    max_results: Optional[int] = 30  # Increased from 15 for better coverage
+    max_results: Optional[int] = 30
 
 
-class ChatResponse(BaseModel):
-    response: str
-    sources: List[Dict[str, Any]]
-    chunks_found: int
-    models_used: List[str]
-    query_type: str
-    sanitized: bool
+class ChatJobStatus(BaseModel):
+    job_id: str
+    status: str  # 'processing', 'complete', 'error'
+    current_step: str
+    progress: int  # 0-100
+    response: Optional[str] = None
+    sources: Optional[List[Dict]] = None
+    chunks_found: Optional[int] = None
+    models_used: Optional[List[str]] = None
+    query_type: Optional[str] = None
+    sanitized: Optional[bool] = None
+    error: Optional[str] = None
 
 
-@router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
-    """
-    Smart chat endpoint with query classification
-    """
+def update_job_status(job_id: str, status: str, step: str, progress: int, **kwargs):
+    """Update job status"""
+    if job_id in chat_jobs:
+        chat_jobs[job_id].update({
+            'status': status,
+            'current_step': step,
+            'progress': progress,
+            **kwargs
+        })
+        logger.info(f"[JOB {job_id}] {step} ({progress}%)")
+
+
+def process_chat_job(job_id: str, message: str, project: Optional[str], max_results: int):
+    """Background processing for chat"""
     try:
-        logger.info(f"Chat: '{request.message[:80]}...' project={request.project}")
+        update_job_status(job_id, 'processing', '🔵 Searching documents...', 10)
         
         # Initialize RAG
         rag = RAGHandler()
         
-        # Get collection
         try:
             collection = rag.client.get_collection("documents")
         except:
-            return ChatResponse(
-                response="No documents uploaded yet. Please upload documents first.",
-                sources=[],
-                chunks_found=0,
-                models_used=[],
-                query_type="none",
-                sanitized=False
-            )
+            update_job_status(job_id, 'error', 'Error', 100, error='No documents uploaded')
+            return
         
         # Get embedding
-        query_embedding = rag.get_embedding(request.message)
+        query_embedding = rag.get_embedding(message)
         if not query_embedding:
-            raise HTTPException(500, "Failed to create embedding")
+            update_job_status(job_id, 'error', 'Error', 100, error='Failed to create embedding')
+            return
         
         # Build filter
         where_filter = None
-        if request.project and request.project not in ['', 'all', 'All Projects']:
-            where_filter = {"project": request.project}
+        if project and project not in ['', 'all', 'All Projects']:
+            where_filter = {"project": project}
         
-        # SMART RETRIEVAL: Get more chunks for comprehensive answers
-        n_results = request.max_results or 30
+        update_job_status(job_id, 'processing', '📊 Retrieving chunks...', 20)
         
         # Search
         results = collection.query(
             query_embeddings=[query_embedding],
-            n_results=n_results,
+            n_results=max_results,
             where=where_filter,
             include=["documents", "metadatas", "distances"]
         )
         
-        # Check results
         if not results or not results.get('documents') or not results['documents'][0]:
-            return ChatResponse(
-                response=f"No relevant documents found for: '{request.message}'",
-                sources=[],
-                chunks_found=0,
-                models_used=[],
-                query_type="none",
-                sanitized=False
-            )
+            update_job_status(job_id, 'error', 'Error', 100, error='No relevant documents found')
+            return
         
-        # Extract results
         documents = results['documents'][0]
         metadatas = results['metadatas'][0] if results.get('metadatas') else [{}] * len(documents)
         distances = results['distances'][0] if results.get('distances') else [0] * len(documents)
         
         logger.info(f"Found {len(documents)} chunks")
         
-        # SMART FILTERING: Prioritize chunks from relevant sheets
-        query_lower = request.message.lower()
-        
-        # Map keywords to expected sheet names
+        # Smart sheet filtering
+        query_lower = message.lower()
         sheet_keywords = {
             'earning': ['earnings', 'earning'],
             'deduction': ['deductions', 'deduction'],
@@ -123,22 +124,16 @@ async def chat(request: ChatRequest):
             'pay code': ['pay codes', 'pay code'],
         }
         
-        # Find which sheets to prioritize
         priority_sheets = []
         for keyword, sheets in sheet_keywords.items():
             if keyword in query_lower:
                 priority_sheets.extend(sheets)
         
-        # Sort chunks: priority sheets first, then by relevance
         if priority_sheets:
-            logger.info(f"Prioritizing sheets containing: {priority_sheets}")
-            
             def chunk_priority(item):
                 doc, meta, dist = item
                 sheet = str(meta.get('parent_section', '')).lower()
-                # Check if sheet name contains any priority keyword
                 is_priority = any(ps in sheet for ps in priority_sheets)
-                # Priority chunks get distance bonus (lower = better)
                 return (0 if is_priority else 1, dist)
             
             combined = list(zip(documents, metadatas, distances))
@@ -146,20 +141,15 @@ async def chat(request: ChatRequest):
             documents, metadatas, distances = zip(*combined) if combined else ([], [], [])
             documents, metadatas, distances = list(documents), list(metadatas), list(distances)
         
-        # Build chunks for orchestrator
+        # Build chunks
         chunks = []
         for doc, meta, dist in zip(documents, metadatas, distances):
-            chunks.append({
-                'document': doc,
-                'metadata': meta,
-                'distance': dist
-            })
+            chunks.append({'document': doc, 'metadata': meta, 'distance': dist})
         
-        # Build sources (grouped by file)
+        # Build sources
         source_map = {}
         for doc, meta, dist in zip(documents, metadatas, distances):
             filename = meta.get('filename', meta.get('source', 'Unknown'))
-            
             if filename not in source_map:
                 source_map[filename] = {
                     'filename': filename,
@@ -168,11 +158,9 @@ async def chat(request: ChatRequest):
                     'chunk_count': 0,
                     'max_relevance': 0
                 }
-            
             source_map[filename]['chunk_count'] += 1
             relevance = round((1 - dist) * 100, 1) if dist else 0
             source_map[filename]['max_relevance'] = max(source_map[filename]['max_relevance'], relevance)
-            
             sheet = meta.get('parent_section', '')
             if sheet:
                 source_map[filename]['sheets'].add(sheet)
@@ -188,10 +176,30 @@ async def chat(request: ChatRequest):
             })
         sources.sort(key=lambda x: x['relevance'], reverse=True)
         
-        # Process with orchestrator
-        result = orchestrator.process_query(request.message, chunks)
+        # Classify query
+        from utils.llm_orchestrator import classify_query
+        query_type = classify_query(message, chunks)
         
-        return ChatResponse(
+        if query_type == 'config':
+            update_job_status(job_id, 'processing', '⚡ Calling Claude (config)...', 40)
+        else:
+            update_job_status(job_id, 'processing', '🔵 Calling local LLM...', 40)
+        
+        time.sleep(0.5)  # Brief pause so user sees status
+        
+        # Process with orchestrator
+        result = orchestrator.process_query(message, chunks)
+        
+        if result.get('query_type') == 'employee' and result.get('sanitized'):
+            update_job_status(job_id, 'processing', '🔒 Sanitizing PII...', 70)
+            time.sleep(0.3)
+        
+        update_job_status(job_id, 'processing', '✅ Finalizing response...', 90)
+        time.sleep(0.2)
+        
+        # Complete
+        update_job_status(
+            job_id, 'complete', 'Complete', 100,
             response=result.get("response", "No response generated"),
             sources=sources,
             chunks_found=len(documents),
@@ -201,8 +209,77 @@ async def chat(request: ChatRequest):
         )
         
     except Exception as e:
-        logger.error(f"Chat error: {e}", exc_info=True)
-        raise HTTPException(500, str(e))
+        logger.error(f"Chat job error: {e}", exc_info=True)
+        update_job_status(job_id, 'error', 'Error', 100, error=str(e))
+
+
+@router.post("/chat/start")
+async def chat_start(request: ChatRequest):
+    """Start a chat job and return job_id for polling"""
+    job_id = str(uuid.uuid4())
+    
+    # Initialize job
+    chat_jobs[job_id] = {
+        'job_id': job_id,
+        'status': 'processing',
+        'current_step': 'Starting...',
+        'progress': 0,
+        'created_at': time.time()
+    }
+    
+    # Start background processing
+    thread = threading.Thread(
+        target=process_chat_job,
+        args=(job_id, request.message, request.project, request.max_results or 30)
+    )
+    thread.daemon = True
+    thread.start()
+    
+    return {"job_id": job_id}
+
+
+@router.get("/chat/status/{job_id}")
+async def chat_status(job_id: str):
+    """Get status of a chat job"""
+    if job_id not in chat_jobs:
+        raise HTTPException(404, "Job not found")
+    
+    return chat_jobs[job_id]
+
+
+@router.delete("/chat/job/{job_id}")
+async def delete_chat_job(job_id: str):
+    """Clean up completed job"""
+    if job_id in chat_jobs:
+        del chat_jobs[job_id]
+    return {"status": "deleted"}
+
+
+# Keep the old endpoint for backward compatibility (non-streaming)
+@router.post("/chat")
+async def chat_legacy(request: ChatRequest):
+    """Legacy chat endpoint - processes synchronously"""
+    job_id = str(uuid.uuid4())
+    chat_jobs[job_id] = {'job_id': job_id, 'status': 'processing', 'current_step': 'Processing...', 'progress': 0}
+    
+    # Process synchronously
+    process_chat_job(job_id, request.message, request.project, request.max_results or 30)
+    
+    # Wait for completion
+    result = chat_jobs[job_id]
+    del chat_jobs[job_id]
+    
+    if result['status'] == 'error':
+        raise HTTPException(500, result.get('error', 'Unknown error'))
+    
+    return {
+        "response": result.get('response'),
+        "sources": result.get('sources', []),
+        "chunks_found": result.get('chunks_found', 0),
+        "models_used": result.get('models_used', []),
+        "query_type": result.get('query_type', 'unknown'),
+        "sanitized": result.get('sanitized', False)
+    }
 
 
 @router.get("/chat/health")
@@ -224,19 +301,6 @@ async def health():
         return {"status": "error", "error": str(e)}
 
 
-@router.get("/chat/test-ollama")
-async def test_ollama():
-    """Test Ollama connectivity"""
-    status = orchestrator.check_status()
-    
-    return {
-        "endpoint": os.getenv("LLM_ENDPOINT", "NOT SET"),
-        "status": status.get("ollama_status", "unknown"),
-        "models": status.get("models", []),
-        "claude_configured": status.get("claude_configured", False)
-    }
-
-
 @router.get("/chat/debug-chunks")
 async def debug_chunks(
     search: str = "earnings",
@@ -248,13 +312,9 @@ async def debug_chunks(
         rag = RAGHandler()
         collection = rag.client.get_collection("documents")
         
-        # Get embedding for search
         query_embedding = rag.get_embedding(search)
-        
-        # Build filter
         where_filter = {"project": project} if project else None
         
-        # Search
         results = collection.query(
             query_embeddings=[query_embedding],
             n_results=n,
@@ -270,11 +330,7 @@ async def debug_chunks(
         for doc, meta, dist in zip(results['documents'][0], results['metadatas'][0], results['distances'][0]):
             sheet = meta.get('parent_section', 'Unknown')
             if sheet not in sheets:
-                sheets[sheet] = {
-                    "count": 0,
-                    "samples": [],
-                    "avg_distance": 0
-                }
+                sheets[sheet] = {"count": 0, "samples": [], "avg_distance": 0}
             sheets[sheet]["count"] += 1
             sheets[sheet]["avg_distance"] += dist
             if len(sheets[sheet]["samples"]) < 2:
@@ -283,7 +339,6 @@ async def debug_chunks(
                     "distance": round(dist, 3)
                 })
         
-        # Calculate averages
         for sheet in sheets:
             sheets[sheet]["avg_distance"] = round(sheets[sheet]["avg_distance"] / sheets[sheet]["count"], 3)
         
