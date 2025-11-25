@@ -356,6 +356,7 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
       color: '#83b16d'
     },
     messageBubble: {
+      minWidth: '120px',             // Fix: Prevent super narrow bubbles
       maxWidth: '75%',
       borderRadius: '12px',
       padding: '1rem 1.25rem',
