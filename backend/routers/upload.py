@@ -7,6 +7,7 @@ FEATURES:
 - Processes in background thread
 - Real-time status updates via job polling
 - Handles large files gracefully
+- Smart Excel parsing (detects blue/colored headers)
 
 Author: XLR8 Team
 """
@@ -21,6 +22,15 @@ import PyPDF2
 import docx
 import pandas as pd
 import logging
+
+# Try to import openpyxl for smart Excel parsing
+try:
+    from openpyxl import load_workbook
+    OPENPYXL_AVAILABLE = True
+except ImportError:
+    OPENPYXL_AVAILABLE = False
+    logger_temp = logging.getLogger(__name__)
+    logger_temp.warning("openpyxl not available - Excel color detection disabled")
 
 sys.path.insert(0, '/app')
 sys.path.insert(0, '/data')
@@ -48,12 +58,165 @@ def extract_text(file_path: str) -> str:
             return "\n".join([p.text for p in doc.paragraphs])
         
         elif ext in ['xlsx', 'xls']:
-            excel = pd.ExcelFile(file_path)
+            # SMART EXCEL READER
+            # - Detects blue/colored header rows (by cell formatting)
+            # - Handles multiple data sections per sheet
+            # - Properly structures each table
+            
             texts = []
-            for sheet in excel.sheet_names:
-                df = pd.read_excel(file_path, sheet_name=sheet)
-                # Format for enhanced chunker (WORKSHEET: marker)
-                texts.append(f"WORKSHEET: {sheet}\n{'=' * 40}\n{df.to_string()}")
+            
+            if not OPENPYXL_AVAILABLE:
+                # Fallback to simple pandas if openpyxl not available
+                logger.info("[EXCEL] Using pandas fallback (openpyxl not available)")
+                excel = pd.ExcelFile(file_path)
+                for sheet in excel.sheet_names:
+                    df = pd.read_excel(file_path, sheet_name=sheet, header=1)
+                    df = df.dropna(how='all')
+                    texts.append(f"[SHEET: {sheet}]\n{df.to_string()}")
+                return "\n\n".join(texts)
+            
+            try:
+                # Load with openpyxl to access formatting
+                wb = load_workbook(file_path, data_only=True)
+                
+                for sheet_name in wb.sheetnames:
+                    ws = wb[sheet_name]
+                    logger.info(f"[EXCEL] Processing sheet: {sheet_name}")
+                    
+                    sheet_texts = [f"[SHEET: {sheet_name}]"]
+                    
+                    # Find all header rows (blue/colored background)
+                    header_rows = []
+                    
+                    for row_idx, row in enumerate(ws.iter_rows(min_row=1, max_row=min(ws.max_row, 500)), start=1):
+                        # Check first cells for colored fill
+                        colored_cell_count = 0
+                        non_empty_count = 0
+                        
+                        for cell in row[:20]:  # Check first 20 columns
+                            if cell.value is not None and str(cell.value).strip():
+                                non_empty_count += 1
+                            
+                            # Check for fill color (any non-white/non-empty fill)
+                            try:
+                                if cell.fill and cell.fill.fgColor and cell.fill.patternType and cell.fill.patternType != 'none':
+                                    color = cell.fill.fgColor
+                                    
+                                    # RGB color
+                                    if color.type == 'rgb' and color.rgb:
+                                        rgb = str(color.rgb).upper()
+                                        # Skip white/near-white colors
+                                        if rgb not in ['FFFFFFFF', '00FFFFFF', 'FFFFFF', '00000000']:
+                                            colored_cell_count += 1
+                                    
+                                    # Theme color (typically headers use theme colors)
+                                    elif color.type == 'theme' and color.theme is not None:
+                                        colored_cell_count += 1
+                                    
+                                    # Indexed color
+                                    elif color.type == 'indexed' and color.indexed is not None:
+                                        if color.indexed not in [0, 64]:  # Not black or white
+                                            colored_cell_count += 1
+                            except:
+                                pass
+                        
+                        # If multiple cells have color fill and row has content, it's likely a header
+                        if colored_cell_count >= 2 and non_empty_count >= 2:
+                            header_rows.append(row_idx)
+                            logger.info(f"[EXCEL] Found header row at {row_idx} ({colored_cell_count} colored cells, {non_empty_count} with data)")
+                    
+                    # If no colored headers found, fall back to first row with substantial data
+                    if not header_rows:
+                        logger.info(f"[EXCEL] No colored headers in '{sheet_name}', detecting by content")
+                        for row_idx, row in enumerate(ws.iter_rows(min_row=1, max_row=10), start=1):
+                            non_empty = sum(1 for cell in row[:20] if cell.value and str(cell.value).strip())
+                            if non_empty >= 3:  # At least 3 non-empty cells
+                                header_rows.append(row_idx)
+                                break
+                    
+                    if not header_rows:
+                        texts.append(f"[SHEET: {sheet_name}]\nNo Data Available\n")
+                        continue
+                    
+                    # Process each data section (header + data until next header or end)
+                    for section_idx, header_row in enumerate(header_rows):
+                        # Determine where this section ends
+                        if section_idx + 1 < len(header_rows):
+                            end_row = header_rows[section_idx + 1] - 1
+                        else:
+                            end_row = ws.max_row
+                        
+                        # Get header values
+                        headers = []
+                        for cell in ws[header_row]:
+                            val = str(cell.value).strip() if cell.value else ''
+                            if val and val.lower() not in ['none', 'nan']:
+                                headers.append(val)
+                            elif cell.column <= 20:  # Only add placeholder for first 20 cols
+                                headers.append(f"Col{cell.column}")
+                        
+                        # Clean up trailing empty headers
+                        while headers and (headers[-1].startswith('Col') or not headers[-1]):
+                            headers.pop()
+                        
+                        if not headers:
+                            continue
+                        
+                        # Add section marker if multiple sections
+                        if len(header_rows) > 1:
+                            sheet_texts.append(f"\n--- Section {section_idx + 1} ---")
+                        
+                        sheet_texts.append(f"Columns: {' | '.join(headers)}")
+                        
+                        # Get data rows
+                        data_row_count = 0
+                        for row_idx in range(header_row + 1, min(end_row + 1, header_row + 1000)):  # Limit rows
+                            row_data = []
+                            has_data = False
+                            
+                            for col_idx, header in enumerate(headers, start=1):
+                                cell = ws.cell(row=row_idx, column=col_idx)
+                                val = cell.value
+                                
+                                if val is not None:
+                                    val_str = str(val).strip()
+                                    if val_str and val_str.lower() not in ['none', 'nan', '']:
+                                        has_data = True
+                                        if header.startswith('Col'):
+                                            row_data.append(val_str)
+                                        else:
+                                            row_data.append(f"{header}: {val_str}")
+                            
+                            if has_data and row_data:
+                                sheet_texts.append(" | ".join(row_data))
+                                data_row_count += 1
+                        
+                        logger.info(f"[EXCEL] Sheet '{sheet_name}' Section {section_idx + 1}: {data_row_count} data rows")
+                    
+                    # Only add sheet if it has content beyond just the header
+                    if len(sheet_texts) > 2:  # More than just [SHEET:] and Columns:
+                        texts.append("\n".join(sheet_texts))
+                    else:
+                        texts.append(f"[SHEET: {sheet_name}]\nNo Data Available\n")
+                
+                wb.close()
+                
+            except Exception as e:
+                logger.error(f"[EXCEL] openpyxl error: {e}, falling back to pandas")
+                import traceback
+                logger.error(traceback.format_exc())
+                
+                # Fallback to pandas
+                excel = pd.ExcelFile(file_path)
+                texts = []
+                for sheet in excel.sheet_names:
+                    try:
+                        df = pd.read_excel(file_path, sheet_name=sheet, header=1)
+                        df = df.dropna(how='all')
+                        texts.append(f"[SHEET: {sheet}]\n{df.to_string()}")
+                    except:
+                        texts.append(f"[SHEET: {sheet}]\nError reading sheet\n")
+            
             return "\n\n".join(texts)
         
         elif ext == 'csv':
