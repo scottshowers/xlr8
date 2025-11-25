@@ -314,7 +314,7 @@ class LLMOrchestrator:
             logger.error(f"Claude error: {e}")
             return str(e), False
     
-    def _build_context(self, chunks: List[Dict], max_chunks: int = 15) -> str:
+    def _build_context(self, chunks: List[Dict], max_chunks: int = 30) -> str:
         """Build context string from chunks"""
         context_parts = []
         
