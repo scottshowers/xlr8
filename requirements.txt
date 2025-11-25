@@ -23,3 +23,5 @@ nltk==3.8.1
 pymupdf4llm>=0.0.7
 pymupdf>=1.23.0
 pypdfium2>=4.26.0
+duckdb>=0.9.0
+cryptography>=41.0.0
