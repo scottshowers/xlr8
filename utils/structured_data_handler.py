@@ -172,8 +172,11 @@ class StructuredDataHandler:
     """
     
     def __init__(self, db_path: str = DUCKDB_PATH):
-        """Initialize DuckDB connection"""
+        """Initialize DuckDB connection and create required directories"""
+        # Create all required directories
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        os.makedirs("/data/exports", exist_ok=True)
+        
         self.db_path = db_path
         self.conn = duckdb.connect(db_path)
         self.encryptor = FieldEncryptor()
