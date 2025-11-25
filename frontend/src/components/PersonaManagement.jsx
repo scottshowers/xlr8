@@ -69,7 +69,7 @@ export default function PersonaManagement() {
           style={styles.createButton}
           onClick={() => setIsCreating(true)}
         >
-          ➕ Create New Persona
+          + Create New Persona
         </button>
       </div>
 
@@ -271,7 +271,7 @@ function PersonaEditor({ persona, onSave, onCancel }) {
   return (
     <div style={styles.editor}>
       <h2 style={styles.editorTitle}>
-        {persona ? '✏️ Edit Persona' : '➕ Create New Persona'}
+        {persona ? '✏️ Edit Persona' : '+ Create New Persona'}
       </h2>
 
       <form onSubmit={handleSubmit} style={styles.form}>
