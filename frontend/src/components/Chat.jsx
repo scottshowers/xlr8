@@ -17,6 +17,7 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
   // Persona state - NEW! 🐮
   const [currentPersona, setCurrentPersona] = useState('bessie')
   const [showPersonaCreator, setShowPersonaCreator] = useState(false)
+  const [personaData, setPersonaData] = useState(null) // Store persona details
 
   useEffect(() => {
     if (projects.length > 0) {
@@ -25,7 +26,12 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
       loadProjects()
     }
     loadModelInfo()
+    loadPersonaData() // Load persona details for icon
   }, [projects])
+
+  useEffect(() => {
+    loadPersonaData() // Reload when persona changes
+  }, [currentPersona])
 
   useEffect(() => {
     scrollToBottom()
@@ -57,7 +63,19 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
       const response = await api.get('/chat/models')
       setModelInfo(response.data)
     } catch (err) {
-      console.error('Failed to load model info:', err)
+      // Silently fail - models endpoint is optional
+      console.log('Model info not available (this is okay)')
+    }
+  }
+
+  const loadPersonaData = async () => {
+    try {
+      const response = await api.get(`/chat/personas/${currentPersona}`)
+      setPersonaData(response.data)
+    } catch (err) {
+      console.error('Failed to load persona data:', err)
+      // Fallback to default
+      setPersonaData({ icon: '🤖', name: 'Assistant' })
     }
   }
 
@@ -341,8 +359,8 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
       maxWidth: '75%',
       borderRadius: '12px',
       padding: '1rem 1.25rem',
-      wordBreak: 'break-word',  // Fix: Prevent text overflow
-      overflowWrap: 'break-word'  // Fix: Break long words
+      wordBreak: 'break-word',      // Fix: Prevent text overflow
+      overflowWrap: 'break-word'    // Fix: Break long words
     },
     messageBubbleUser: {
       background: 'linear-gradient(135deg, #83b16d, #6b9956)',
@@ -518,18 +536,12 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
     <div style={styles.container}>
       {/* Header */}
       <div style={styles.header}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '2rem', flex: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2rem' }}>
           {/* Persona Switcher - MOVED HERE! 🐮 */}
           <PersonaSwitcher 
             currentPersona={currentPersona}
             onPersonaChange={(persona) => setCurrentPersona(persona)}
           />
-          
-          <div>
-            <p style={{ ...styles.headerSubtitle, margin: 0, fontSize: '0.85rem' }}>
-              Ask Bessie anything - from your documents to general payroll questions
-            </p>
-          </div>
         </div>
         
         <div style={styles.headerControls}>
@@ -591,7 +603,7 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
                 ...styles.avatar,
                 ...(message.role === 'user' ? styles.avatarUser : styles.avatarAssistant)
               }}>
-                {message.role === 'user' ? '👤' : '🤖'}
+                {message.role === 'user' ? '👤' : (personaData?.icon || '🤖')}
               </div>
               
               <div>
