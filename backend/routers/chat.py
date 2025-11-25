@@ -1,13 +1,10 @@
 """
-Chat Router for XLR8 - Multi-Model Orchestration
-================================================
+Chat Router for XLR8 - PRODUCTION VERSION
+=========================================
 
-ARCHITECTURE:
-1. Search ChromaDB for relevant chunks
-2. Route to local LLM (Mistral/DeepSeek) - can see PII
-3. SANITIZE output (strip all PII)
-4. Send to Claude for synthesis - NEVER sees PII
-5. Return response with sources
+Smart routing:
+- CONFIG queries → Claude direct (fast)
+- EMPLOYEE queries → Local LLM → Sanitize → Claude
 
 Author: XLR8 Team
 """
@@ -23,7 +20,7 @@ sys.path.insert(0, '/app')
 sys.path.insert(0, '/data')
 
 from utils.rag_handler import RAGHandler
-from utils.llm_orchestrator import LLMOrchestrator, PIISanitizer
+from utils.llm_orchestrator import LLMOrchestrator
 
 logger = logging.getLogger(__name__)
 
@@ -34,340 +31,167 @@ orchestrator = LLMOrchestrator()
 
 
 class ChatRequest(BaseModel):
-    """Chat request model"""
     message: str
     project: Optional[str] = None
-    project_id: Optional[str] = None
     functional_area: Optional[str] = None
-    max_results: Optional[int] = 10
-    use_claude: Optional[bool] = True  # Use Claude for synthesis
+    max_results: Optional[int] = 15
 
 
 class ChatResponse(BaseModel):
-    """Chat response model"""
     response: str
     sources: List[Dict[str, Any]]
     chunks_found: int
     models_used: List[str]
+    query_type: str
     sanitized: bool
-
-
-def build_no_context_response(question: str) -> str:
-    """Build response when no relevant documents are found"""
-    return f"""I couldn't find any relevant documents to answer your question: "{question}"
-
-This could mean:
-1. No documents have been uploaded yet for this project
-2. The uploaded documents don't contain information about this topic
-3. Try rephrasing your question with different keywords
-
-**Suggestions:**
-- Check the Status page to see uploaded documents
-- Upload relevant documents via the Upload page
-- Try a more general search term"""
 
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """
-    Main chat endpoint - Multi-model orchestration with PII protection
-    
-    FLOW:
-    1. Search ChromaDB for relevant chunks
-    2. Local LLM (Mistral/DeepSeek) analyzes with FULL context (can see PII)
-    3. Response is SANITIZED (all PII removed)
-    4. Claude synthesizes final response (NEVER sees PII)
-    5. Return to user with sources
+    Smart chat endpoint with query classification
     """
     try:
-        logger.info(f"Chat request: '{request.message[:100]}...' project={request.project}")
+        logger.info(f"Chat: '{request.message[:80]}...' project={request.project}")
         
-        # Initialize RAG handler
+        # Initialize RAG
         rag = RAGHandler()
         
         # Get collection
         try:
             collection = rag.client.get_collection("documents")
-        except Exception as e:
-            logger.error(f"Failed to get collection: {e}")
+        except:
             return ChatResponse(
-                response="No documents have been uploaded yet. Please upload some documents first.",
+                response="No documents uploaded yet. Please upload documents first.",
                 sources=[],
                 chunks_found=0,
                 models_used=[],
+                query_type="none",
                 sanitized=False
             )
         
-        # Get query embedding
+        # Get embedding
         query_embedding = rag.get_embedding(request.message)
-        if query_embedding is None:
-            raise HTTPException(status_code=500, detail="Failed to create query embedding")
+        if not query_embedding:
+            raise HTTPException(500, "Failed to create embedding")
         
-        # Build where filter
+        # Build filter
         where_filter = None
-        if request.project and request.project not in ['global', '__GLOBAL__', '', 'all', 'All Projects']:
+        if request.project and request.project not in ['', 'all', 'All Projects']:
             where_filter = {"project": request.project}
-            logger.info(f"Filtering by project: {request.project}")
-            
-            if request.functional_area:
-                where_filter = {
-                    "$and": [
-                        {"project": request.project},
-                        {"functional_area": request.functional_area}
-                    ]
-                }
         
-        # Search ChromaDB
-        logger.info("Searching ChromaDB for relevant chunks...")
+        # Search
         results = collection.query(
             query_embeddings=[query_embedding],
-            n_results=request.max_results or 10,
+            n_results=request.max_results or 15,
             where=where_filter,
             include=["documents", "metadatas", "distances"]
         )
         
-        # Check for results
+        # Check results
         if not results or not results.get('documents') or not results['documents'][0]:
-            logger.warning("No relevant documents found")
             return ChatResponse(
-                response=build_no_context_response(request.message),
+                response=f"No relevant documents found for: '{request.message}'",
                 sources=[],
                 chunks_found=0,
                 models_used=[],
+                query_type="none",
                 sanitized=False
             )
         
         # Extract results
         documents = results['documents'][0]
-        metadatas = results.get('metadatas', [[]])[0]
-        distances = results.get('distances', [[]])[0]
+        metadatas = results['metadatas'][0] if results.get('metadatas') else [{}] * len(documents)
+        distances = results['distances'][0] if results.get('distances') else [0] * len(documents)
         
-        chunks_found = len(documents)
-        logger.info(f"Found {chunks_found} relevant chunks")
+        logger.info(f"Found {len(documents)} chunks")
         
         # Build chunks for orchestrator
         chunks = []
-        sources = []
-        
-        for i, (doc, meta, dist) in enumerate(zip(documents, metadatas, distances)):
+        for doc, meta, dist in zip(documents, metadatas, distances):
             chunks.append({
                 'document': doc,
                 'metadata': meta,
                 'distance': dist
             })
+        
+        # Build sources (grouped by file)
+        source_map = {}
+        for doc, meta, dist in zip(documents, metadatas, distances):
+            filename = meta.get('filename', meta.get('source', 'Unknown'))
             
+            if filename not in source_map:
+                source_map[filename] = {
+                    'filename': filename,
+                    'functional_area': meta.get('functional_area', ''),
+                    'sheets': set(),
+                    'chunk_count': 0,
+                    'max_relevance': 0
+                }
+            
+            source_map[filename]['chunk_count'] += 1
+            relevance = round((1 - dist) * 100, 1) if dist else 0
+            source_map[filename]['max_relevance'] = max(source_map[filename]['max_relevance'], relevance)
+            
+            sheet = meta.get('parent_section', '')
+            if sheet:
+                source_map[filename]['sheets'].add(sheet)
+        
+        sources = []
+        for fname, info in source_map.items():
             sources.append({
-                'index': i + 1,
-                'filename': meta.get('filename', meta.get('source', 'Unknown')),
-                'functional_area': meta.get('functional_area', ''),
-                'sheet': meta.get('parent_section', ''),
-                'chunk_type': meta.get('chunk_type', 'unknown'),
-                'relevance': round((1 - dist) * 100, 1) if dist else 0,
-                'preview': doc[:200] + '...' if len(doc) > 200 else doc
+                'filename': fname,
+                'functional_area': info['functional_area'],
+                'sheets': list(info['sheets']),
+                'chunk_count': info['chunk_count'],
+                'relevance': info['max_relevance']
             })
+        sources.sort(key=lambda x: x['relevance'], reverse=True)
         
-        # Call orchestrator for multi-model processing
-        logger.info("Starting multi-model orchestration...")
-        result = orchestrator.process_query(
-            query=request.message,
-            chunks=chunks,
-            use_claude_synthesis=request.use_claude and bool(os.getenv("ANTHROPIC_API_KEY"))
-        )
-        
-        if result.get("error"):
-            logger.error(f"Orchestration error: {result['error']}")
+        # Process with orchestrator
+        result = orchestrator.process_query(request.message, chunks)
         
         return ChatResponse(
-            response=result.get("response", "Failed to generate response"),
+            response=result.get("response", "No response generated"),
             sources=sources,
-            chunks_found=chunks_found,
+            chunks_found=len(documents),
             models_used=result.get("models_used", []),
+            query_type=result.get("query_type", "unknown"),
             sanitized=result.get("sanitized", False)
         )
         
     except Exception as e:
         logger.error(f"Chat error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/chat/simple")
-async def chat_simple(request: ChatRequest):
-    """
-    Simple chat endpoint - Returns chunks without LLM processing
-    
-    Useful for testing RAG retrieval
-    """
-    try:
-        rag = RAGHandler()
-        
-        try:
-            collection = rag.client.get_collection("documents")
-        except:
-            return {"chunks": [], "message": "No documents collection found"}
-        
-        query_embedding = rag.get_embedding(request.message)
-        if query_embedding is None:
-            return {"chunks": [], "message": "Failed to create query embedding"}
-        
-        where_filter = None
-        if request.project and request.project not in ['global', '__GLOBAL__', '', 'all']:
-            where_filter = {"project": request.project}
-        
-        results = collection.query(
-            query_embeddings=[query_embedding],
-            n_results=request.max_results or 10,
-            where=where_filter,
-            include=["documents", "metadatas", "distances"]
-        )
-        
-        if not results or not results.get('documents') or not results['documents'][0]:
-            return {"chunks": [], "message": "No relevant documents found"}
-        
-        documents = results['documents'][0]
-        metadatas = results.get('metadatas', [[]])[0]
-        distances = results.get('distances', [[]])[0]
-        
-        chunks = []
-        for doc, meta, dist in zip(documents, metadatas, distances):
-            chunks.append({
-                'text': doc,
-                'metadata': meta,
-                'relevance': round((1 - dist) * 100, 1) if dist else 0
-            })
-        
-        return {
-            "chunks": chunks,
-            "count": len(chunks),
-            "message": f"Found {len(chunks)} relevant chunks"
-        }
-        
-    except Exception as e:
-        logger.error(f"Simple chat error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
 
 
 @router.get("/chat/health")
-async def chat_health():
-    """Health check for chat system including all models"""
+async def health():
+    """Health check"""
     try:
-        # Check RAG
         rag = RAGHandler()
         collection = rag.client.get_or_create_collection("documents")
         chunk_count = collection.count()
         
-        # Check models
-        model_status = orchestrator.check_models_available()
+        llm_status = orchestrator.check_status()
         
         return {
             "status": "healthy",
             "chromadb_chunks": chunk_count,
-            "models": {
-                "local": {
-                    "available": model_status.get("local", False),
-                    "model": model_status.get("local_model", "unknown"),
-                    "all_models": model_status.get("available_models", [])
-                },
-                "claude": "configured" if model_status.get("claude") else "not configured"
-            },
-            "privacy": {
-                "pii_sanitization": "enabled",
-                "claude_receives": "sanitized data only",
-                "local_llm_receives": "full context with PII"
-            }
+            "llm": llm_status
         }
-        
     except Exception as e:
-        return {
-            "status": "unhealthy",
-            "error": str(e)
-        }
-
-
-@router.get("/chat/models")
-async def chat_models():
-    """List available models and their purposes"""
-    model_status = orchestrator.check_models_available()
-    
-    return {
-        "models": [
-            {
-                "name": model_status.get("local_model", "mistral:7b"),
-                "type": "local",
-                "purpose": "Document analysis, data extraction, HR queries",
-                "can_see_pii": True,
-                "available": model_status.get("local", False),
-                "location": "Hetzner (your server)"
-            },
-            {
-                "name": "claude-sonnet",
-                "type": "cloud",
-                "purpose": "Final synthesis, response formatting, best practice recommendations",
-                "can_see_pii": False,
-                "note": "Only receives SANITIZED data - never sees PII",
-                "available": model_status.get("claude", False),
-                "location": "Anthropic API"
-            }
-        ],
-        "available_ollama_models": model_status.get("available_models", []),
-        "ollama_error": model_status.get("ollama_error"),
-        "flow": [
-            "1. User query → Search documents in ChromaDB",
-            "2. Documents → Local LLM (can see PII)",
-            "3. Local analysis → SANITIZE (remove all PII)",
-            "4. Sanitized analysis → Claude (synthesis)",
-            "5. Final response → User"
-        ]
-    }
+        return {"status": "error", "error": str(e)}
 
 
 @router.get("/chat/test-ollama")
 async def test_ollama():
-    """Test Ollama connectivity directly"""
-    import os
-    
-    config = {
-        "LLM_ENDPOINT": os.getenv("LLM_ENDPOINT", "NOT SET"),
-        "LLM_MODEL": os.getenv("LLM_MODEL", "NOT SET"),
-        "LLM_USERNAME": os.getenv("LLM_USERNAME", "NOT SET"),
-        "LLM_PASSWORD": "***" if os.getenv("LLM_PASSWORD") else "NOT SET",
-        "CLAUDE_API_KEY": "***" if os.getenv("CLAUDE_API_KEY") else "NOT SET"
-    }
-    
-    # Test Ollama connection
-    ollama_test = {"status": "unknown"}
-    try:
-        import requests
-        from requests.auth import HTTPBasicAuth
-        
-        url = os.getenv("LLM_ENDPOINT", "") + "/api/tags"
-        response = requests.get(
-            url,
-            auth=HTTPBasicAuth(
-                os.getenv("LLM_USERNAME", ""),
-                os.getenv("LLM_PASSWORD", "")
-            ),
-            timeout=10
-        )
-        
-        ollama_test["status_code"] = response.status_code
-        if response.status_code == 200:
-            ollama_test["status"] = "connected"
-            ollama_test["models"] = [m.get("name") for m in response.json().get("models", [])]
-        elif response.status_code == 401:
-            ollama_test["status"] = "auth_failed"
-        else:
-            ollama_test["status"] = f"error_{response.status_code}"
-            
-    except requests.exceptions.Timeout:
-        ollama_test["status"] = "timeout"
-    except requests.exceptions.ConnectionError as e:
-        ollama_test["status"] = "connection_failed"
-        ollama_test["error"] = str(e)
-    except Exception as e:
-        ollama_test["status"] = "error"
-        ollama_test["error"] = str(e)
+    """Test Ollama connectivity"""
+    status = orchestrator.check_status()
     
     return {
-        "config": config,
-        "ollama_test": ollama_test
+        "endpoint": os.getenv("LLM_ENDPOINT", "NOT SET"),
+        "status": status.get("ollama_status", "unknown"),
+        "models": status.get("models", []),
+        "claude_configured": status.get("claude_configured", False)
     }
