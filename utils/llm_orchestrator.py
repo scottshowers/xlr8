@@ -529,3 +529,107 @@ Please format this into a clean, professional response. Keep all [Employee X] an
                 status["ollama_status"] = f"error: {e}"
         
         return status
+    
+    def generate_sql(self, prompt: str) -> Dict[str, Any]:
+        """
+        Generate SQL query from natural language using Claude.
+        
+        Used by structured data handler to convert user questions
+        into DuckDB SQL queries.
+        
+        Args:
+            prompt: Natural language query with schema context
+            
+        Returns:
+            {'sql': 'SELECT ...', 'model': '...', 'success': True/False}
+        """
+        if not self.claude_api_key:
+            # Try local LLM as fallback
+            return self._generate_sql_local(prompt)
+        
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=self.claude_api_key)
+            
+            system_prompt = """You are a SQL expert. Generate valid DuckDB SQL queries.
+
+RULES:
+1. Return ONLY the SQL query, no explanations or markdown
+2. Use the exact table and column names provided
+3. For text searches, use ILIKE for case-insensitive matching
+4. Limit results to 1000 rows unless it's a COUNT query
+5. Use proper JOIN syntax when combining tables
+6. Handle NULL values appropriately
+7. Column and table names are case-sensitive - use exactly as provided
+
+Output ONLY the SQL query, nothing else."""
+
+            logger.info(f"Generating SQL from prompt ({len(prompt)} chars)")
+            
+            response = client.messages.create(
+                model=self.claude_model,
+                max_tokens=1024,
+                system=system_prompt,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            
+            sql = response.content[0].text.strip()
+            
+            # Clean up markdown if present
+            if sql.startswith("```sql"):
+                sql = sql[6:]
+            if sql.startswith("```"):
+                sql = sql[3:]
+            if sql.endswith("```"):
+                sql = sql[:-3]
+            sql = sql.strip()
+            
+            logger.info(f"Generated SQL: {sql[:100]}...")
+            
+            return {
+                "sql": sql,
+                "model": self.claude_model,
+                "success": True
+            }
+            
+        except Exception as e:
+            logger.error(f"SQL generation error: {e}")
+            return {
+                "sql": None,
+                "error": str(e),
+                "success": False
+            }
+    
+    def _generate_sql_local(self, prompt: str) -> Dict[str, Any]:
+        """
+        Generate SQL using local Ollama LLM (fallback if no Claude API key)
+        """
+        if not self.ollama_url:
+            return {"sql": None, "error": "No LLM configured", "success": False}
+        
+        try:
+            local_prompt = f"""Generate a SQL query for this question. Return ONLY the SQL, no explanation.
+
+{prompt}
+
+SQL:"""
+            
+            response, success = self._call_ollama('mistral:7b', local_prompt)
+            
+            if success and response:
+                sql = response.strip()
+                
+                # Clean up markdown
+                if sql.startswith("```"):
+                    sql = sql.split("```")[1]
+                    if sql.startswith("sql"):
+                        sql = sql[3:]
+                sql = sql.strip()
+                
+                return {"sql": sql, "model": "mistral:7b", "success": True}
+            else:
+                return {"sql": None, "error": "Local LLM failed", "success": False}
+                
+        except Exception as e:
+            logger.error(f"Local SQL generation error: {e}")
+            return {"sql": None, "error": str(e), "success": False}
