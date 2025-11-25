@@ -38,7 +38,7 @@ class ChatRequest(BaseModel):
     message: str
     project: Optional[str] = None
     functional_area: Optional[str] = None
-    max_results: Optional[int] = 30
+    max_results: Optional[int] = 50  # Increased from 30 to get more chunks
 
 
 class ChatJobStatus(BaseModel):
@@ -159,7 +159,20 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
                     'max_relevance': 0
                 }
             source_map[filename]['chunk_count'] += 1
+            
+            # Calculate relevance with keyword boost
             relevance = round((1 - dist) * 100, 1) if dist else 0
+            
+            # BOOST: If query keyword matches sheet name, boost relevance to ~100%
+            sheet_name = str(meta.get('parent_section', '')).lower()
+            query_keywords = message.lower().split()
+            for keyword in query_keywords:
+                if len(keyword) > 3 and keyword in sheet_name:
+                    # Major boost for exact sheet name match (boost by 30 points, cap at 99)
+                    relevance = min(99, relevance + 30)
+                    logger.info(f"Boosted relevance for '{keyword}' → '{sheet_name}': {relevance}%")
+                    break
+            
             source_map[filename]['max_relevance'] = max(source_map[filename]['max_relevance'], relevance)
             sheet = meta.get('parent_section', '')
             if sheet:
