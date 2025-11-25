@@ -122,11 +122,12 @@ function Navigation() {
             </div>
           </Link>
           <ul style={{ display: 'flex', gap: '0.25rem', listStyle: 'none', margin: 0, padding: 0 }}>
+            <li><Link to="/admin" style={navLinkStyle('/admin')}>Admin</Link></li>
+            <li><Link to="/projects" style={navLinkStyle('/projects')}>Projects</Link></li>
             <li><Link to="/chat" style={navLinkStyle('/chat')}>Chat</Link></li>
             <li><Link to="/upload" style={navLinkStyle('/upload')}>Upload</Link></li>
             <li><Link to="/status" style={navLinkStyle('/status')}>Status</Link></li>
-            <li><Link to="/projects" style={navLinkStyle('/projects')}>Projects</Link></li>
-            <li><Link to="/secure20" style={navLinkStyle('/secure20')}>SECURE 2.0</Link></li>
+            <li><Link to="/secure20" style={navLinkStyle('/secure20')}>Featured Analysis Templates</Link></li>
           </ul>
         </div>
       </div>
@@ -182,6 +183,8 @@ function App() {
         <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '2rem 1.5rem' }}>
           <Routes>
             <Route path="/" element={<Landing />} />
+            <Route path="/admin" element={<AdminPage />} />
+            <Route path="/projects" element={<Projects onProjectsChanged={refreshProjects} />} />
             <Route path="/chat" element={<Chat projects={projects} functionalAreas={functionalAreas} />} />
             <Route 
               path="/upload" 
@@ -194,9 +197,7 @@ function App() {
               } 
             />
             <Route path="/status" element={<Status projects={projects} />} />
-            <Route path="/projects" element={<Projects onProjectsChanged={refreshProjects} />} />
             <Route path="/secure20" element={<Secure20Analysis />} />
-            <Route path="/admin" element={<AdminPage />} />
           </Routes>
         </div>
       </div>
