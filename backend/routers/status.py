@@ -9,6 +9,13 @@ sys.path.insert(0, '/data')
 from utils.rag_handler import RAGHandler
 from utils.database.models import ProcessingJobModel, DocumentModel
 
+# Import structured data handler
+try:
+    from utils.structured_data_handler import get_structured_handler
+    STRUCTURED_AVAILABLE = True
+except ImportError:
+    STRUCTURED_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -25,6 +32,181 @@ async def get_chromadb_stats():
         logger.error(f"ChromaDB stats error: {e}")
         return {"total_chunks": 0, "error": str(e)}
 
+
+# ============================================================================
+# STRUCTURED DATA ENDPOINTS (DuckDB)
+# ============================================================================
+
+@router.get("/status/structured")
+async def get_structured_data_status(project: Optional[str] = None):
+    """
+    Get all structured data tables (Excel/CSV files stored in DuckDB)
+    
+    Returns list of files with their sheets/tables and row counts.
+    """
+    if not STRUCTURED_AVAILABLE:
+        return {
+            "available": False,
+            "files": [],
+            "total_files": 0,
+            "total_tables": 0,
+            "total_rows": 0,
+            "message": "Structured data handler not available"
+        }
+    
+    try:
+        handler = get_structured_handler()
+        
+        # Query metadata for all files
+        if project and project not in ['all', 'All Projects', '']:
+            result = handler.conn.execute("""
+                SELECT project, file_name, sheet_name, table_name, row_count, 
+                       columns, encrypted_columns, version, created_at
+                FROM _schema_metadata
+                WHERE project = ? AND is_current = TRUE
+                ORDER BY project, file_name, sheet_name
+            """, [project]).fetchall()
+        else:
+            result = handler.conn.execute("""
+                SELECT project, file_name, sheet_name, table_name, row_count,
+                       columns, encrypted_columns, version, created_at
+                FROM _schema_metadata
+                WHERE is_current = TRUE
+                ORDER BY project, file_name, sheet_name
+            """).fetchall()
+        
+        # Group by file
+        files = {}
+        for row in result:
+            project_name, file_name, sheet_name, table_name, row_count, columns, encrypted_cols, version, created_at = row
+            
+            file_key = f"{project_name}::{file_name}"
+            if file_key not in files:
+                files[file_key] = {
+                    "filename": file_name,
+                    "project": project_name,
+                    "version": version,
+                    "created_at": str(created_at) if created_at else None,
+                    "sheets": [],
+                    "total_rows": 0,
+                    "has_encrypted": False
+                }
+            
+            # Parse columns and encrypted columns
+            import json
+            try:
+                cols = json.loads(columns) if columns else []
+                enc_cols = json.loads(encrypted_cols) if encrypted_cols else []
+            except:
+                cols = []
+                enc_cols = []
+            
+            files[file_key]["sheets"].append({
+                "sheet_name": sheet_name,
+                "table_name": table_name,
+                "row_count": row_count or 0,
+                "column_count": len(cols),
+                "encrypted_columns": enc_cols
+            })
+            files[file_key]["total_rows"] += row_count or 0
+            if enc_cols:
+                files[file_key]["has_encrypted"] = True
+        
+        file_list = list(files.values())
+        total_tables = sum(len(f["sheets"]) for f in file_list)
+        total_rows = sum(f["total_rows"] for f in file_list)
+        
+        return {
+            "available": True,
+            "files": file_list,
+            "total_files": len(file_list),
+            "total_tables": total_tables,
+            "total_rows": total_rows
+        }
+        
+    except Exception as e:
+        logger.error(f"Structured data status error: {e}")
+        return {
+            "available": True,
+            "files": [],
+            "total_files": 0,
+            "total_tables": 0,
+            "total_rows": 0,
+            "error": str(e)
+        }
+
+
+@router.delete("/status/structured/{project}/{filename:path}")
+async def delete_structured_file(project: str, filename: str, all_versions: bool = True):
+    """
+    Delete a structured data file from DuckDB.
+    
+    Use this to refresh data - delete then re-upload.
+    """
+    if not STRUCTURED_AVAILABLE:
+        raise HTTPException(501, "Structured data handler not available")
+    
+    try:
+        handler = get_structured_handler()
+        result = handler.delete_file(project, filename, delete_all_versions=all_versions)
+        
+        logger.info(f"Deleted structured data: {project}/{filename} - {len(result['tables_deleted'])} tables")
+        
+        return {
+            "success": True,
+            "project": project,
+            "filename": filename,
+            "tables_deleted": result['tables_deleted'],
+            "message": f"Deleted {len(result['tables_deleted'])} tables"
+        }
+    except Exception as e:
+        logger.error(f"Failed to delete structured file: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.post("/status/structured/reset")
+async def reset_structured_data():
+    """Reset all structured data (WARNING: Deletes all DuckDB tables!)"""
+    if not STRUCTURED_AVAILABLE:
+        raise HTTPException(501, "Structured data handler not available")
+    
+    try:
+        handler = get_structured_handler()
+        
+        # Get all tables
+        tables = handler.conn.execute("""
+            SELECT table_name FROM _schema_metadata
+        """).fetchall()
+        
+        # Drop all data tables
+        count = 0
+        for (table_name,) in tables:
+            try:
+                handler.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+                count += 1
+            except:
+                pass
+        
+        # Clear metadata
+        handler.conn.execute("DELETE FROM _schema_metadata")
+        handler.conn.execute("DELETE FROM _load_versions")
+        handler.conn.commit()
+        
+        logger.warning(f"⚠️ Structured data RESET - {count} tables deleted!")
+        
+        return {
+            "status": "reset_complete",
+            "tables_deleted": count,
+            "message": "All structured data deleted from DuckDB"
+        }
+    except Exception as e:
+        logger.error(f"Failed to reset structured data: {e}")
+        raise HTTPException(500, str(e))
+
+
+# ============================================================================
+# PROCESSING JOBS
+# ============================================================================
 
 @router.get("/jobs")
 async def get_processing_jobs(limit: int = 50, status: Optional[str] = None):
@@ -117,6 +299,10 @@ async def delete_job(job_id: str):
         logger.error(f"Failed to delete job {job_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ============================================================================
+# DOCUMENTS (ChromaDB - PDFs, Word docs)
+# ============================================================================
 
 @router.get("/status/documents")
 async def get_documents(project: Optional[str] = None, limit: int = 50000):
@@ -255,12 +441,19 @@ async def reset_chromadb():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ============================================================================
+# SYSTEM STATUS
+# ============================================================================
+
 @router.get("/status/system")
 async def get_system_status():
-    """Get overall system health"""
+    """Get overall system health including structured data"""
     try:
         # Get ChromaDB stats
         chromadb_stats = await get_chromadb_stats()
+        
+        # Get structured data stats
+        structured_stats = await get_structured_data_status()
         
         # Get recent jobs
         jobs_response = await get_processing_jobs(limit=10)
@@ -276,6 +469,12 @@ async def get_system_status():
         
         return {
             "chromadb": chromadb_stats,
+            "structured_data": {
+                "available": structured_stats.get("available", False),
+                "total_files": structured_stats.get("total_files", 0),
+                "total_tables": structured_stats.get("total_tables", 0),
+                "total_rows": structured_stats.get("total_rows", 0)
+            },
             "jobs": {
                 "recent": len(recent_jobs),
                 "counts": job_counts
