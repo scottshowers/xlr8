@@ -293,14 +293,14 @@ const styles = {
   },
   sidebar: {
     width: '280px',
-    background: '#7a8896',
-    color: 'white',
+    background: '#c9d3d4',
+    color: '#2a3441',
     display: 'flex',
     flexDirection: 'column'
   },
   sidebarHeader: {
     padding: '1.5rem',
-    borderBottom: '1px solid rgba(255,255,255,0.1)',
+    borderBottom: '1px solid rgba(42, 52, 65, 0.15)',
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center'
@@ -330,7 +330,7 @@ const styles = {
     padding: '0.75rem 1rem',
     fontSize: '0.95rem',
     background: 'transparent',
-    color: 'rgba(255,255,255,0.7)',
+    color: 'rgba(42, 52, 65, 0.7)',
     border: 'none',
     borderRadius: '8px',
     cursor: 'pointer',
@@ -338,19 +338,19 @@ const styles = {
     transition: 'all 0.2s'
   },
   navItemActive: {
-    background: 'rgba(131, 177, 109, 0.2)',
-    color: '#83b16d',
+    background: 'rgba(131, 177, 109, 0.3)',
+    color: '#2a3441',
     fontWeight: '600'
   },
   navDivider: {
     height: '1px',
-    background: 'rgba(255,255,255,0.1)',
+    background: 'rgba(42, 52, 65, 0.15)',
     margin: '1rem 0'
   },
   navPlaceholder: {
     padding: '0.75rem 1rem',
     fontSize: '0.85rem',
-    color: 'rgba(255,255,255,0.4)',
+    color: 'rgba(42, 52, 65, 0.4)',
     fontStyle: 'italic'
   },
 
