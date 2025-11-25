@@ -198,7 +198,19 @@ function Projects({ onProjectsChanged }) {
               status: 'active'
             });
           }}
-          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            padding: '0.75rem 1.5rem',
+            fontSize: '1rem',
+            fontWeight: '600',
+            background: '#2a3441',
+            color: 'white',
+            border: 'none',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            transition: 'background 0.2s'
+          }}
         >
           <Plus className="mr-2 h-5 w-5" />
           New Project
