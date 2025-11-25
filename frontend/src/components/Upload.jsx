@@ -331,6 +331,10 @@ export default function Upload({ projects = [], functionalAreas = [], onProjectC
             style={styles.select}
           >
             <option value="">Select a project...</option>
+            <option value="Global/Universal" style={{ fontWeight: '600', backgroundColor: '#f0f7ed' }}>
+              🌐 Global/Universal (All Projects)
+            </option>
+            <option disabled>──────────────</option>
             {projectList.map(project => (
               <option key={project.id} value={project.name}>
                 {project.name}
