@@ -32,6 +32,16 @@ from utils.smart_aggregation import handle_aggregation
 from utils.intent_classifier import classify_and_configure
 from utils.persona_manager import get_persona_manager
 
+# Import structured data handling (DuckDB for Excel/CSV queries)
+try:
+    from utils.structured_data_handler import get_structured_handler
+    from utils.query_router import get_query_router, QueryType
+    STRUCTURED_QUERIES_AVAILABLE = True
+except ImportError as e:
+    STRUCTURED_QUERIES_AVAILABLE = False
+    logger_temp = logging.getLogger(__name__)
+    logger_temp.warning(f"Structured queries not available: {e}")
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -94,13 +104,317 @@ def update_job_status(job_id: str, status: str, step: str, progress: int, **kwar
         logger.info(f"[JOB {job_id}] {step} ({progress}%)")
 
 
+def handle_structured_query(job_id: str, message: str, project: Optional[str], persona, routing_meta: dict) -> bool:
+    """
+    Handle structured data queries via DuckDB SQL.
+    Returns True if handled, False to fall through to RAG.
+    """
+    try:
+        update_job_status(job_id, 'processing', '📊 Detected data query - checking tables...', 10)
+        
+        handler = get_structured_handler()
+        router = get_query_router()
+        
+        # Get schema for this project
+        schema = handler.get_schema_for_project(project) if project else {'tables': []}
+        
+        if not schema.get('tables'):
+            logger.info(f"[STRUCTURED] No tables found for project '{project}', falling back to RAG")
+            return False
+        
+        update_job_status(job_id, 'processing', '🔧 Generating SQL query...', 20)
+        
+        # Build SQL prompt with schema
+        sql_prompt = router.build_sql_prompt(message, schema)
+        
+        # Use orchestrator to generate SQL
+        orchestrator_instance = LLMOrchestrator()
+        sql_result = orchestrator_instance.generate_sql(sql_prompt)
+        
+        if not sql_result or not sql_result.get('sql'):
+            logger.warning("[STRUCTURED] Failed to generate SQL")
+            return False
+        
+        sql_query = sql_result['sql'].strip()
+        logger.info(f"[STRUCTURED] Generated SQL: {sql_query[:200]}...")
+        
+        update_job_status(job_id, 'processing', '⚡ Executing query...', 40)
+        
+        # Execute query
+        try:
+            rows, columns = handler.execute_query(sql_query)
+        except Exception as e:
+            logger.error(f"[STRUCTURED] SQL execution error: {e}")
+            # Return error but don't fall through - tell user the query failed
+            update_job_status(
+                job_id, 'complete', 'Complete', 100,
+                response=f"I tried to query your data but encountered an error: {str(e)}\n\nGenerated SQL:\n```sql\n{sql_query}\n```\n\nThis might mean the data doesn't have the columns I expected. Could you rephrase your question?",
+                sources=[],
+                chunks_found=0,
+                models_used=['sql_generation', 'duckdb'],
+                query_type='structured_error',
+                sanitized=False
+            )
+            return True
+        
+        update_job_status(job_id, 'processing', '📝 Formatting results...', 70)
+        
+        # Check if export requested
+        needs_export = router.needs_export(message)
+        export_path = None
+        
+        if needs_export and rows:
+            update_job_status(job_id, 'processing', '📥 Creating export file...', 80)
+            import os
+            from datetime import datetime
+            
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            export_dir = '/data/exports'
+            os.makedirs(export_dir, exist_ok=True)
+            
+            if 'csv' in message.lower():
+                export_path = f"{export_dir}/query_result_{timestamp}.csv"
+                handler.export_to_csv(sql_query, export_path)
+            else:
+                export_path = f"{export_dir}/query_result_{timestamp}.xlsx"
+                handler.export_to_excel(sql_query, export_path)
+            
+            logger.info(f"[STRUCTURED] Exported to {export_path}")
+        
+        # Format response
+        update_job_status(job_id, 'processing', '✨ Generating response...', 90)
+        
+        response = format_structured_response(message, rows, columns, persona, sql_query, export_path)
+        
+        # Build source info
+        sources = [{
+            'filename': 'DuckDB Query',
+            'type': 'structured_data',
+            'tables_queried': [t['table_name'] for t in schema.get('tables', [])[:5]],
+            'rows_returned': len(rows),
+            'relevance': 100
+        }]
+        
+        update_job_status(
+            job_id, 'complete', 'Complete', 100,
+            response=response,
+            sources=sources,
+            chunks_found=len(rows),
+            models_used=['sql_generation', 'duckdb'],
+            query_type='structured',
+            sanitized=False,
+            export_path=export_path
+        )
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"[STRUCTURED] Error: {e}", exc_info=True)
+        return False
+
+
+def format_structured_response(message: str, rows: list, columns: list, persona, sql_query: str, export_path: str = None) -> str:
+    """Format SQL query results into a nice response"""
+    
+    if not rows:
+        return f"I searched your data but didn't find any matching records. The query I used was:\n\n```sql\n{sql_query}\n```\n\nTry rephrasing your question or check if the data has been uploaded."
+    
+    # Count query
+    if len(rows) == 1 and len(columns) == 1 and columns[0].lower() in ['count', 'total', 'cnt']:
+        count = list(rows[0].values())[0]
+        return f"**{count}** records match your criteria."
+    
+    # List query - format as table
+    response_parts = []
+    
+    # Summary
+    response_parts.append(f"Found **{len(rows)}** records:\n")
+    
+    # Table header
+    if len(columns) <= 6:  # Narrow enough for markdown table
+        header = "| " + " | ".join(str(c) for c in columns) + " |"
+        separator = "| " + " | ".join("---" for _ in columns) + " |"
+        response_parts.append(header)
+        response_parts.append(separator)
+        
+        # Rows (limit to 50 for display)
+        for row in rows[:50]:
+            row_str = "| " + " | ".join(str(row.get(c, '')) for c in columns) + " |"
+            response_parts.append(row_str)
+        
+        if len(rows) > 50:
+            response_parts.append(f"\n*...and {len(rows) - 50} more rows*")
+    else:
+        # Too many columns - show as list
+        for i, row in enumerate(rows[:20], 1):
+            items = [f"**{k}**: {v}" for k, v in row.items() if v is not None]
+            response_parts.append(f"{i}. " + " | ".join(items[:6]))
+        
+        if len(rows) > 20:
+            response_parts.append(f"\n*...and {len(rows) - 20} more rows*")
+    
+    # Export link
+    if export_path:
+        filename = export_path.split('/')[-1]
+        response_parts.append(f"\n\n📥 **[Download {filename}]({export_path})**")
+    
+    return "\n".join(response_parts)
+
+
+def handle_hybrid_query(job_id: str, message: str, project: Optional[str], persona, routing_meta: dict, max_results: int) -> bool:
+    """
+    Handle hybrid queries that need both structured data AND explanations.
+    Example: "List employees in REG earning group and explain what REG means"
+    """
+    try:
+        update_job_status(job_id, 'processing', '🔀 Hybrid query - getting data + context...', 10)
+        
+        # Part 1: Try structured query for the data part
+        structured_result = None
+        try:
+            handler = get_structured_handler()
+            schema = handler.get_schema_for_project(project) if project else {'tables': []}
+            
+            if schema.get('tables'):
+                router = get_query_router()
+                sql_prompt = router.build_sql_prompt(message, schema)
+                
+                orchestrator_instance = LLMOrchestrator()
+                sql_result = orchestrator_instance.generate_sql(sql_prompt)
+                
+                if sql_result and sql_result.get('sql'):
+                    rows, columns = handler.execute_query(sql_result['sql'])
+                    structured_result = {
+                        'rows': rows,
+                        'columns': columns,
+                        'sql': sql_result['sql']
+                    }
+                    logger.info(f"[HYBRID] Got {len(rows)} rows from structured query")
+        except Exception as e:
+            logger.warning(f"[HYBRID] Structured part failed: {e}")
+        
+        update_job_status(job_id, 'processing', '📚 Searching knowledge base...', 40)
+        
+        # Part 2: RAG search for explanations/context
+        rag = RAGHandler()
+        try:
+            collection = rag.client.get_collection("documents")
+        except:
+            collection = None
+        
+        rag_context = ""
+        if collection:
+            where_filter = None
+            if project and project not in ['', 'all', 'All Projects']:
+                where_filter = {
+                    "$or": [
+                        {"project": project},
+                        {"project": "Global/Universal"}
+                    ]
+                }
+            
+            query_embedding = rag.get_embedding(message)
+            if query_embedding:
+                results = collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=10,
+                    where=where_filter,
+                    include=["documents", "metadatas"]
+                )
+                
+                if results and results.get('documents') and results['documents'][0]:
+                    rag_context = "\n\n".join(results['documents'][0][:5])
+        
+        update_job_status(job_id, 'processing', '✨ Generating response...', 70)
+        
+        # Combine results
+        combined_prompt = f"""[SYSTEM: You are {persona.name}. {persona.system_prompt}]
+
+User Question: {message}
+
+"""
+        
+        if structured_result and structured_result['rows']:
+            combined_prompt += f"""DATA FROM DATABASE ({len(structured_result['rows'])} rows):
+{format_structured_response(message, structured_result['rows'][:20], structured_result['columns'], persona, structured_result['sql'])}
+
+"""
+        
+        if rag_context:
+            combined_prompt += f"""RELEVANT DOCUMENTATION:
+{rag_context[:3000]}
+
+"""
+        
+        combined_prompt += "Please provide a comprehensive answer combining the data and any relevant explanations."
+        
+        # Generate combined response
+        orchestrator_instance = LLMOrchestrator()
+        result = orchestrator_instance.process_query(combined_prompt, [])
+        
+        response = result.get('response', 'Could not generate response')
+        
+        # Add data summary if we have structured results
+        if structured_result and structured_result['rows']:
+            if len(structured_result['rows']) > 20:
+                response += f"\n\n*Note: Showing first 20 of {len(structured_result['rows'])} total rows.*"
+        
+        update_job_status(
+            job_id, 'complete', 'Complete', 100,
+            response=response,
+            sources=[{'filename': 'Hybrid Query', 'type': 'hybrid'}],
+            chunks_found=len(structured_result['rows']) if structured_result else 0,
+            models_used=['sql_generation', 'duckdb', 'rag', result.get('models_used', ['claude'])[-1]],
+            query_type='hybrid',
+            sanitized=False
+        )
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"[HYBRID] Error: {e}", exc_info=True)
+        return False
+
+
 def process_chat_job(job_id: str, message: str, project: Optional[str], max_results: int, persona_name: str = 'bessie'):
-    """Background processing for chat with ADVANCED FEATURES + BESSIE! 🐮"""
+    """Background processing for chat with ADVANCED FEATURES + BESSIE! 🐮
+    
+    NOW WITH SMART ROUTING:
+    - Structured queries (count, list, filter) → DuckDB SQL
+    - Unstructured queries (explain, how-to) → RAG + LLM
+    - Hybrid queries → Both!
+    """
     try:
         # STEP 0: LOAD PERSONA
         pm = get_persona_manager()
         persona = pm.get_persona(persona_name)
         logger.info(f"[PERSONA] Using: {persona.name} {persona.icon}")
+        
+        # STEP 0.5: QUERY ROUTING (Structured vs Unstructured)
+        if STRUCTURED_QUERIES_AVAILABLE:
+            update_job_status(job_id, 'processing', '🧠 Analyzing query type...', 3)
+            
+            router = get_query_router()
+            query_type, routing_meta = router.detect_query_type(message)
+            
+            logger.info(f"[ROUTING] Query type: {query_type.value} | Scores: structured={routing_meta['structured_score']}, unstructured={routing_meta['unstructured_score']}")
+            
+            # STRUCTURED QUERY PATH (SQL)
+            if query_type == QueryType.STRUCTURED:
+                result = handle_structured_query(job_id, message, project, persona, routing_meta)
+                if result:
+                    return  # Structured query handled successfully
+                # If structured failed, fall through to RAG
+                logger.warning("[ROUTING] Structured query failed, falling back to RAG")
+            
+            # HYBRID QUERY PATH (SQL + RAG)
+            elif query_type == QueryType.HYBRID:
+                result = handle_hybrid_query(job_id, message, project, persona, routing_meta, max_results)
+                if result:
+                    return
+                logger.warning("[ROUTING] Hybrid query failed, falling back to RAG")
+        
+        # UNSTRUCTURED/GENERAL PATH continues below (existing RAG flow)
         
         # STEP 1: INTENT CLASSIFICATION
         update_job_status(job_id, 'processing', '🧠 Understanding query...', 5)
@@ -632,4 +946,270 @@ async def delete_persona(name: str):
         raise
     except Exception as e:
         logger.error(f"Error deleting persona: {e}")
+        raise HTTPException(500, str(e))
+
+
+# ============================================================================
+# STRUCTURED DATA ENDPOINTS - SQL Queries for Excel/CSV
+# ============================================================================
+
+@router.get("/chat/schema/{project}")
+async def get_project_schema(project: str):
+    """Get the data schema for a project (tables, columns, row counts)"""
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        raise HTTPException(501, "Structured queries not available")
+    
+    try:
+        handler = get_structured_handler()
+        schema = handler.get_schema_for_project(project)
+        
+        return {
+            "project": project,
+            "tables": schema.get('tables', []),
+            "table_count": len(schema.get('tables', []))
+        }
+    except Exception as e:
+        logger.error(f"Error getting schema: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.get("/chat/tables")
+async def list_all_tables():
+    """List all tables across all projects"""
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        raise HTTPException(501, "Structured queries not available")
+    
+    try:
+        handler = get_structured_handler()
+        
+        # Query metadata table
+        result = handler.conn.execute("""
+            SELECT project, file_name, sheet_name, table_name, row_count
+            FROM _schema_metadata
+            ORDER BY project, file_name, sheet_name
+        """).fetchall()
+        
+        tables = []
+        for row in result:
+            tables.append({
+                'project': row[0],
+                'file': row[1],
+                'sheet': row[2],
+                'table_name': row[3],
+                'row_count': row[4]
+            })
+        
+        return {
+            "tables": tables,
+            "total": len(tables)
+        }
+    except Exception as e:
+        logger.error(f"Error listing tables: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.post("/chat/sql")
+async def execute_sql_query(sql: str, project: Optional[str] = None):
+    """Execute a raw SQL query (admin/debug use)"""
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        raise HTTPException(501, "Structured queries not available")
+    
+    try:
+        handler = get_structured_handler()
+        rows, columns = handler.execute_query(sql)
+        
+        return {
+            "columns": columns,
+            "rows": rows[:1000],  # Limit results
+            "total_rows": len(rows),
+            "truncated": len(rows) > 1000
+        }
+    except Exception as e:
+        logger.error(f"SQL execution error: {e}")
+        raise HTTPException(400, f"SQL Error: {str(e)}")
+
+
+@router.get("/chat/export/{filename}")
+async def download_export(filename: str):
+    """Download an exported file"""
+    from fastapi.responses import FileResponse
+    import os
+    
+    export_path = f"/data/exports/{filename}"
+    
+    if not os.path.exists(export_path):
+        raise HTTPException(404, "Export file not found")
+    
+    return FileResponse(
+        path=export_path,
+        filename=filename,
+        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+            if filename.endswith('.xlsx') else 'text/csv'
+    )
+
+
+@router.get("/chat/table-sample/{table_name}")
+async def get_table_sample(table_name: str, limit: int = 10):
+    """Get sample rows from a table"""
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        raise HTTPException(501, "Structured queries not available")
+    
+    try:
+        handler = get_structured_handler()
+        rows = handler.get_table_sample(table_name, limit)
+        
+        return {
+            "table_name": table_name,
+            "sample": rows,
+            "count": len(rows)
+        }
+    except Exception as e:
+        logger.error(f"Error getting sample: {e}")
+        raise HTTPException(500, str(e))
+
+
+# ============================================================================
+# DATA MANAGEMENT ENDPOINTS - Delete, Refresh, Compare
+# ============================================================================
+
+@router.delete("/chat/data/{project}/{file_name}")
+async def delete_file_data(project: str, file_name: str, all_versions: bool = True):
+    """
+    Delete all data for a specific file.
+    
+    Use this to:
+    - Remove outdated data
+    - Refresh by deleting then re-uploading
+    - Clean up test data
+    """
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        raise HTTPException(501, "Structured queries not available")
+    
+    try:
+        handler = get_structured_handler()
+        result = handler.delete_file(project, file_name, delete_all_versions=all_versions)
+        
+        logger.info(f"[DELETE] Removed {len(result['tables_deleted'])} tables for {project}/{file_name}")
+        
+        return {
+            "status": "deleted",
+            "project": project,
+            "file_name": file_name,
+            "tables_deleted": result['tables_deleted'],
+            "versions_deleted": result['versions_deleted']
+        }
+    except Exception as e:
+        logger.error(f"Error deleting file data: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.get("/chat/data/{project}/files")
+async def list_project_files(project: str):
+    """List all files in a project with version info"""
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        raise HTTPException(501, "Structured queries not available")
+    
+    try:
+        handler = get_structured_handler()
+        files = handler.list_files(project)
+        
+        return {
+            "project": project,
+            "files": files,
+            "count": len(files)
+        }
+    except Exception as e:
+        logger.error(f"Error listing files: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.get("/chat/data/{project}/{file_name}/versions")
+async def get_file_versions(project: str, file_name: str):
+    """Get all versions of a file"""
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        raise HTTPException(501, "Structured queries not available")
+    
+    try:
+        handler = get_structured_handler()
+        versions = handler.get_file_versions(project, file_name)
+        
+        return {
+            "project": project,
+            "file_name": file_name,
+            "versions": versions,
+            "count": len(versions)
+        }
+    except Exception as e:
+        logger.error(f"Error getting versions: {e}")
+        raise HTTPException(500, str(e))
+
+
+class CompareRequest(BaseModel):
+    sheet_name: str
+    key_column: str
+    version1: Optional[int] = None
+    version2: Optional[int] = None
+
+
+@router.post("/chat/data/{project}/{file_name}/compare")
+async def compare_file_versions(project: str, file_name: str, request: CompareRequest):
+    """
+    Compare two versions of a file to find changes.
+    
+    Returns:
+    - added: Records in new version but not old
+    - removed: Records in old version but not new  
+    - changed: Records that exist in both but have different values
+    
+    Use cases:
+    - "Show me new hires since last load"
+    - "Who was terminated?"
+    - "What earning codes changed?"
+    """
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        raise HTTPException(501, "Structured queries not available")
+    
+    try:
+        handler = get_structured_handler()
+        result = handler.compare_versions(
+            project=project,
+            file_name=file_name,
+            sheet_name=request.sheet_name,
+            key_column=request.key_column,
+            version1=request.version1,
+            version2=request.version2
+        )
+        
+        if 'error' in result:
+            raise HTTPException(400, result['error'])
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error comparing versions: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.get("/chat/data/encryption-status")
+async def get_encryption_status():
+    """Check if PII encryption is enabled"""
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        raise HTTPException(501, "Structured queries not available")
+    
+    try:
+        handler = get_structured_handler()
+        
+        return {
+            "encryption_available": handler.encryptor.fernet is not None,
+            "pii_patterns": [
+                "ssn", "social_security", "tax_id", 
+                "bank_account", "routing_number",
+                "salary", "pay_rate", "dob", "birthdate"
+            ],
+            "note": "PII columns matching these patterns are automatically encrypted at rest"
+        }
+    except Exception as e:
+        logger.error(f"Error checking encryption: {e}")
         raise HTTPException(500, str(e))
