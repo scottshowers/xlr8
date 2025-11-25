@@ -11,6 +11,7 @@ import Status from './components/Status';
 import Landing from './pages/Landing';
 import Projects from './pages/Projects';
 import Secure20Analysis from './pages/Secure20Analysis';
+import AdminPage from './pages/AdminPage'
 
 // H Logo SVG Component
 const HLogo = () => (
