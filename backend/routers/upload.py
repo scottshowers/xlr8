@@ -16,6 +16,7 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Background
 from typing import Optional
 import sys
 import os
+import json
 import threading
 import traceback
 import PyPDF2
@@ -37,6 +38,15 @@ sys.path.insert(0, '/data')
 
 from utils.rag_handler import RAGHandler
 from utils.database.models import ProcessingJobModel, DocumentModel, ProjectModel
+
+# Import structured data handler for Excel/CSV
+try:
+    from utils.structured_data_handler import get_structured_handler
+    STRUCTURED_HANDLER_AVAILABLE = True
+except ImportError:
+    STRUCTURED_HANDLER_AVAILABLE = False
+    logger_temp = logging.getLogger(__name__)
+    logger_temp.warning("Structured data handler not available - Excel/CSV will use RAG only")
 
 logger = logging.getLogger(__name__)
 
@@ -250,16 +260,88 @@ def process_file_background(
     Background processing function - runs in separate thread
     
     This is where all the heavy lifting happens:
-    1. Extract text
-    2. Chunk document
-    3. Create embeddings
-    4. Store in ChromaDB
-    5. Update job status throughout
+    1. For Excel/CSV: Store in DuckDB (structured queries)
+    2. For PDFs/Docs: Extract text, chunk, embed in ChromaDB
+    3. Update job status throughout
     """
     try:
         logger.info(f"[BACKGROUND] Starting processing for job {job_id}")
         
-        # Step 1: Extract text
+        file_ext = filename.split('.')[-1].lower()
+        
+        # ROUTE 1: STRUCTURED DATA (Excel/CSV) → DuckDB
+        if file_ext in ['xlsx', 'xls', 'csv'] and STRUCTURED_HANDLER_AVAILABLE:
+            ProcessingJobModel.update_progress(job_id, 10, "Detected tabular data - storing for SQL queries...")
+            
+            try:
+                handler = get_structured_handler()
+                
+                ProcessingJobModel.update_progress(job_id, 20, "Parsing spreadsheet structure...")
+                
+                if file_ext == 'csv':
+                    result = handler.store_csv(file_path, project, filename)
+                    tables_created = 1
+                    total_rows = result.get('row_count', 0)
+                else:
+                    result = handler.store_excel(file_path, project, filename)
+                    tables_created = len(result.get('tables_created', []))
+                    total_rows = result.get('total_rows', 0)
+                
+                ProcessingJobModel.update_progress(
+                    job_id, 70, 
+                    f"Created {tables_created} table(s) with {total_rows:,} rows"
+                )
+                
+                # Store schema summary in documents table for reference
+                if project_id:
+                    try:
+                        schema_summary = json.dumps(result, indent=2)
+                        DocumentModel.create(
+                            project_id=project_id,
+                            name=filename,
+                            category=functional_area or 'Structured Data',
+                            file_type=file_ext,
+                            file_size=file_size,
+                            content=f"STRUCTURED DATA FILE\n\nSchema:\n{schema_summary[:4000]}",
+                            metadata={
+                                'type': 'structured',
+                                'storage': 'duckdb',
+                                'tables': result.get('tables_created', []),
+                                'total_rows': total_rows,
+                                'project': project,
+                                'functional_area': functional_area
+                            }
+                        )
+                        logger.info(f"[BACKGROUND] Saved structured data metadata to database")
+                    except Exception as e:
+                        logger.warning(f"[BACKGROUND] Could not save metadata: {e}")
+                
+                # Cleanup
+                ProcessingJobModel.update_progress(job_id, 90, "Cleaning up...")
+                if file_path and os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                    except:
+                        pass
+                
+                # Complete!
+                ProcessingJobModel.complete(job_id, {
+                    'filename': filename,
+                    'type': 'structured',
+                    'tables_created': tables_created,
+                    'total_rows': total_rows,
+                    'project': project,
+                    'functional_area': functional_area
+                })
+                
+                logger.info(f"[BACKGROUND] Structured data job {job_id} completed!")
+                return
+                
+            except Exception as e:
+                logger.error(f"[BACKGROUND] Structured storage failed: {e}, falling back to RAG")
+                # Fall through to RAG processing
+        
+        # ROUTE 2: UNSTRUCTURED DATA (PDF/Word/Text) → ChromaDB
         ProcessingJobModel.update_progress(job_id, 5, "Extracting text from file...")
         text = extract_text(file_path)
         
