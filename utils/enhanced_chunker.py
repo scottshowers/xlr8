@@ -67,9 +67,9 @@ class EnhancedChunker:
     
     # File-type specific configurations
     CHUNK_CONFIGS = {
-        'xlsx': {'size': 2000, 'overlap': 200, 'method': 'table'},
-        'xls': {'size': 2000, 'overlap': 200, 'method': 'table'},
-        'csv': {'size': 2000, 'overlap': 200, 'method': 'table'},
+        'xlsx': {'size': 500, 'overlap': 100, 'method': 'table'},  # AGGRESSIVE: ~5 rows per chunk
+        'xls': {'size': 500, 'overlap': 100, 'method': 'table'},
+        'csv': {'size': 500, 'overlap': 100, 'method': 'table'},
         'pdf': {'size': 1000, 'overlap': 150, 'method': 'semantic'},
         'docx': {'size': 1000, 'overlap': 150, 'method': 'semantic'},
         'doc': {'size': 1000, 'overlap': 150, 'method': 'semantic'},
@@ -356,11 +356,11 @@ class EnhancedChunker:
             logger.info(f"  Data rows: {data_row_count}")
             
             # AGGRESSIVE CHUNKING: For sheets with lots of rows, chunk by row count
-            # This ensures each chunk has a reasonable number of rows (better for retrieval)
-            MAX_ROWS_PER_CHUNK = 10  # Max 10 data rows per chunk
+            # Each data row with | separator should trigger chunk consideration
+            MAX_ROWS_PER_CHUNK = 5  # VERY AGGRESSIVE: Max 5 data rows per chunk (was 10)
             current_row_count = 0
             
-            for line in sheet_lines:
+            for line_idx, line in enumerate(sheet_lines):
                 # Skip empty lines at start
                 if not current_chunk and not line.strip():
                     continue
@@ -368,15 +368,25 @@ class EnhancedChunker:
                 line_size = len(line) + 1  # +1 for newline
                 
                 # Count data rows (not headers/markers)
-                is_data_row = line.strip() and not line.startswith('[') and '|' in line
+                # A data row has content, doesn't start with [, and typically has |
+                is_data_row = (line.strip() and 
+                              not line.startswith('[') and 
+                              not line.startswith('Columns:') and
+                              not line.startswith('---'))
+                
                 if is_data_row:
                     current_row_count += 1
                 
                 # Force chunk break if:
                 # 1. Reached max rows per chunk, OR
                 # 2. Chunk size exceeded
-                should_break = (current_row_count >= MAX_ROWS_PER_CHUNK) or \
-                              (current_size + line_size > chunk_size and current_chunk)
+                should_break = False
+                if current_row_count >= MAX_ROWS_PER_CHUNK and current_chunk:
+                    should_break = True
+                    logger.debug(f"  Breaking chunk: {current_row_count} rows reached")
+                elif current_size + line_size > chunk_size and current_chunk:
+                    should_break = True
+                    logger.debug(f"  Breaking chunk: size {current_size} + {line_size} > {chunk_size}")
                 
                 if should_break:
                     chunk_text = '\n'.join(current_chunk)
@@ -402,6 +412,8 @@ class EnhancedChunker:
                         header_text=sheet_header
                     ))
                     
+                    logger.debug(f"  Created chunk {chunk_index} for '{sheet_name}' ({current_row_count} rows, {current_size} chars)")
+                    
                     # Keep overlap (last few lines)
                     overlap_lines = max(1, int(overlap / 50))  # Rough estimate: 50 chars per line
                     current_chunk = current_chunk[-overlap_lines:]
@@ -412,6 +424,8 @@ class EnhancedChunker:
                 
                 current_chunk.append(line)
                 current_size += line_size
+            
+            logger.info(f"  Sheet '{sheet_name}': Created {sheet_chunk_index} chunks")
             
             # Add final chunk for this sheet
             if current_chunk:
