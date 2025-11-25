@@ -68,40 +68,112 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
     setLoading(true)
     setError(null)
 
+    // Add placeholder message for status updates
+    const tempId = `temp-${Date.now()}`
+    const statusMessage = {
+      role: 'assistant',
+      content: '🔵 Starting...',
+      isStatus: true,
+      progress: 0,
+      timestamp: new Date().toISOString(),
+      tempId
+    }
+    setMessages(prev => [...prev, statusMessage])
+
     try {
-      const response = await api.post('/chat', {
+      // Start the chat job
+      const startResponse = await api.post('/chat/start', {
         message: userMessage.content,
         project: selectedProject || null,
-        max_results: 10,
-        use_claude: true
+        max_results: 30
       })
 
-      const { response: llmResponse, sources, chunks_found, models_used, query_type, sanitized } = response.data
+      const { job_id } = startResponse.data
 
-      const assistantMessage = {
-        role: 'assistant',
-        content: llmResponse,
-        sources: sources || [],
-        chunks_found: chunks_found || 0,
-        models_used: models_used || [],
-        query_type: query_type || 'unknown',
-        sanitized: sanitized || false,
-        timestamp: new Date().toISOString()
-      }
+      // Poll for status updates
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusResponse = await api.get(`/chat/status/${job_id}`)
+          const jobStatus = statusResponse.data
 
-      setMessages(prev => [...prev, assistantMessage])
+          // Update status message
+          setMessages(prev => prev.map(msg =>
+            msg.tempId === tempId
+              ? {
+                  ...msg,
+                  content: jobStatus.current_step,
+                  progress: jobStatus.progress
+                }
+              : msg
+          ))
+
+          // Check if complete
+          if (jobStatus.status === 'complete') {
+            clearInterval(pollInterval)
+
+            // Replace status message with final response
+            const finalMessage = {
+              role: 'assistant',
+              content: jobStatus.response,
+              sources: jobStatus.sources || [],
+              chunks_found: jobStatus.chunks_found || 0,
+              models_used: jobStatus.models_used || [],
+              query_type: jobStatus.query_type || 'unknown',
+              sanitized: jobStatus.sanitized || false,
+              timestamp: new Date().toISOString()
+            }
+
+            setMessages(prev => prev.map(msg =>
+              msg.tempId === tempId ? finalMessage : msg
+            ))
+
+            setLoading(false)
+
+            // Clean up job
+            api.delete(`/chat/job/${job_id}`).catch(() => {})
+          } else if (jobStatus.status === 'error') {
+            clearInterval(pollInterval)
+            setError(jobStatus.error || 'Unknown error')
+            setMessages(prev => prev.map(msg =>
+              msg.tempId === tempId
+                ? {
+                    ...msg,
+                    content: `Error: ${jobStatus.error}`,
+                    error: true
+                  }
+                : msg
+            ))
+            setLoading(false)
+          }
+        } catch (pollError) {
+          console.error('Polling error:', pollError)
+          clearInterval(pollInterval)
+          setLoading(false)
+        }
+      }, 500) // Poll every 500ms
+
+      // Timeout after 2 minutes
+      setTimeout(() => {
+        clearInterval(pollInterval)
+        if (loading) {
+          setError('Request timed out')
+          setLoading(false)
+        }
+      }, 120000)
 
     } catch (err) {
       console.error('Chat error:', err)
       setError(err.response?.data?.detail || err.message || 'Failed to get response')
       
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: `Sorry, I encountered an error: ${err.response?.data?.detail || err.message}`,
-        error: true,
-        timestamp: new Date().toISOString()
-      }])
-    } finally {
+      setMessages(prev => prev.map(msg =>
+        msg.tempId === tempId
+          ? {
+              ...msg,
+              content: `Sorry, I encountered an error: ${err.response?.data?.detail || err.message}`,
+              error: true
+            }
+          : msg
+      ))
       setLoading(false)
     }
   }
@@ -505,7 +577,28 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
                       ? styles.messageBubbleError 
                       : styles.messageBubbleAssistant)
                 }}>
-                  <div style={styles.messageContent}>{message.content}</div>
+                  <div style={styles.messageContent}>
+                    {message.content}
+                    
+                    {/* Progress bar for status messages */}
+                    {message.isStatus && message.progress !== undefined && (
+                      <div style={{
+                        marginTop: '0.5rem',
+                        width: '100%',
+                        height: '4px',
+                        background: 'rgba(131, 177, 109, 0.2)',
+                        borderRadius: '2px',
+                        overflow: 'hidden'
+                      }}>
+                        <div style={{
+                          width: `${message.progress}%`,
+                          height: '100%',
+                          background: 'linear-gradient(90deg, #83b16d, #6a9456)',
+                          transition: 'width 0.3s ease'
+                        }} />
+                      </div>
+                    )}
+                  </div>
                   
                   {/* Sources Section - GROUPED BY DOCUMENT */}
                   {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
