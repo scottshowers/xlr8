@@ -14,7 +14,7 @@ Example:
 Author: XLR8 Team
 """
 
-from typing import List, Dict, Any, Set, Tuple
+from typing import List, Dict, Any, Set, Tuple, Optional
 import re
 import logging
 
