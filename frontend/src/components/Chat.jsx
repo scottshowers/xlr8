@@ -76,7 +76,7 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
         use_claude: true
       })
 
-      const { response: llmResponse, sources, chunks_found, models_used, sanitized } = response.data
+      const { response: llmResponse, sources, chunks_found, models_used, query_type, sanitized } = response.data
 
       const assistantMessage = {
         role: 'assistant',
@@ -84,6 +84,7 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
         sources: sources || [],
         chunks_found: chunks_found || 0,
         models_used: models_used || [],
+        query_type: query_type || 'unknown',
         sanitized: sanitized || false,
         timestamp: new Date().toISOString()
       }
@@ -441,14 +442,12 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
             padding: '0.25rem 0.75rem',
             background: 'rgba(131, 177, 109, 0.1)',
             borderRadius: '6px',
-            fontSize: '0.75rem',
+            fontSize: '0.7rem',
             color: '#5f6c7b'
           }}>
-            <span title="Local Mistral (sees all data)">🔵 Mistral</span>
-            <span>→</span>
-            <span title="PII Sanitized">🔒</span>
-            <span>→</span>
-            <span title="Claude (synthesis only)">🟠 Claude</span>
+            <span title="Config queries go direct to Claude">⚡ Config→Claude</span>
+            <span style={{ color: '#d1d5db' }}>|</span>
+            <span title="Employee queries use local LLM then Claude">🔒 PII→Local→Claude</span>
           </div>
 
           <select
@@ -572,6 +571,18 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
                   textAlign: message.role === 'user' ? 'right' : 'left'
                 }}>
                   {formatTimestamp(message.timestamp)}
+                  {message.query_type && (
+                    <span style={{ 
+                      marginLeft: '0.5rem',
+                      padding: '0.125rem 0.5rem',
+                      borderRadius: '4px',
+                      fontSize: '0.7rem',
+                      background: message.query_type === 'config' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(168, 85, 247, 0.1)',
+                      color: message.query_type === 'config' ? '#3b82f6' : '#a855f7'
+                    }}>
+                      {message.query_type === 'config' ? '⚡ CONFIG' : '🔒 EMPLOYEE'}
+                    </span>
+                  )}
                   {message.models_used && message.models_used.length > 0 && (
                     <span style={{ marginLeft: '0.5rem' }}>
                       {message.models_used.map((model, idx) => {
