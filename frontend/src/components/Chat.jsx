@@ -340,7 +340,9 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
     messageBubble: {
       maxWidth: '75%',
       borderRadius: '12px',
-      padding: '1rem 1.25rem'
+      padding: '1rem 1.25rem',
+      wordBreak: 'break-word',  // Fix: Prevent text overflow
+      overflowWrap: 'break-word'  // Fix: Break long words
     },
     messageBubbleUser: {
       background: 'linear-gradient(135deg, #83b16d, #6b9956)',
@@ -516,9 +518,18 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
     <div style={styles.container}>
       {/* Header */}
       <div style={styles.header}>
-        <div>
-          <h1 style={styles.headerTitle}>Chat with Documents</h1>
-          <p style={styles.headerSubtitle}>Ask questions about your uploaded files</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2rem', flex: 1 }}>
+          {/* Persona Switcher - MOVED HERE! 🐮 */}
+          <PersonaSwitcher 
+            currentPersona={currentPersona}
+            onPersonaChange={(persona) => setCurrentPersona(persona)}
+          />
+          
+          <div>
+            <p style={{ ...styles.headerSubtitle, margin: 0, fontSize: '0.85rem' }}>
+              Ask Bessie anything - from your documents to general payroll questions
+            </p>
+          </div>
         </div>
         
         <div style={styles.headerControls}>
@@ -554,14 +565,6 @@ export default function Chat({ projects = [], functionalAreas = [] }) {
             🔄 Clear
           </button>
         </div>
-      </div>
-
-      {/* Persona Switcher - NEW! 🐮 */}
-      <div style={{ padding: '1rem 2rem', borderBottom: '1px solid #e5e7eb', background: '#fafafa' }}>
-        <PersonaSwitcher 
-          currentPersona={currentPersona}
-          onPersonaChange={(persona) => setCurrentPersona(persona)}
-        />
       </div>
 
       {/* Messages Area */}
