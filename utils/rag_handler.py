@@ -8,13 +8,15 @@ import requests
 from requests.auth import HTTPBasicAuth
 import logging
 
-# Import enhanced chunker
+# Import universal document intelligence system
 try:
-    from utils.enhanced_chunker import EnhancedChunker
-    ENHANCED_CHUNKING_AVAILABLE = True
-except ImportError:
-    ENHANCED_CHUNKING_AVAILABLE = False
-    logging.warning("Enhanced chunker not available, falling back to basic chunking")
+    from utils.universal_chunker import chunk_intelligently
+    from utils.document_analyzer import DocumentAnalyzer
+    UNIVERSAL_CHUNKING_AVAILABLE = True
+    logging.info("✅ Universal Document Intelligence System loaded")
+except ImportError as e:
+    UNIVERSAL_CHUNKING_AVAILABLE = False
+    logging.warning(f"Universal chunker not available ({e}), falling back to basic chunking")
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +25,15 @@ class RAGHandler:
     """
     Handles all RAG operations including document processing, embedding, and retrieval.
     
-    CHANGES FOR PROJECT ISOLATION:
-    - Line 208: Preserves project_id in chunk metadata
-    - Line 232-238: Filters search by project_id (optional)
-    - All existing functionality preserved
+    NOW USES UNIVERSAL DOCUMENT INTELLIGENCE SYSTEM:
+    - Automatic document structure detection (tabular, code, hierarchical, linear, mixed)
+    - Adaptive chunking strategy per document type
+    - Rich metadata preservation (structure, strategy, parent_section, etc.)
+    - Optimized for Excel, PDF, Word, Code, CSV, Markdown, and more
+    
+    PROJECT ISOLATION:
+    - Preserves project_id in chunk metadata
+    - Filters search by project_id (optional)
     """
     
     def __init__(
@@ -102,12 +109,14 @@ class RAGHandler:
             self.chunk_size = 800
             self.chunk_overlap = 100
             
-            # Initialize enhanced chunker
-            if ENHANCED_CHUNKING_AVAILABLE:
-                self.chunker = EnhancedChunker()
-                logger.info("Enhanced chunker initialized")
+            # Initialize universal chunker system
+            if UNIVERSAL_CHUNKING_AVAILABLE:
+                self.analyzer = DocumentAnalyzer()
+                logger.info("✅ Universal Document Intelligence System initialized")
+                self.use_universal_chunking = True
             else:
-                self.chunker = None
+                self.analyzer = None
+                self.use_universal_chunking = False
                 logger.warning("Using fallback basic chunking")
             
             logger.info("RAGHandler initialized successfully")
@@ -263,37 +272,45 @@ class RAGHandler:
         
         return embeddings
 
-    def chunk_text(self, text: str, file_type: str = 'txt') -> List[str]:
+    def chunk_text(self, text: str, file_type: str = 'txt', filename: str = 'unknown') -> List[str]:
         """
-        Chunk text using enhanced chunker with smart boundaries
+        Chunk text using UNIVERSAL DOCUMENT INTELLIGENCE
         
-        This method now uses the EnhancedChunker for:
-        1. Smart sentence/paragraph boundary detection
-        2. Adaptive chunk sizing based on file type
-        3. Enhanced metadata tracking
-        4. File-type specific optimization
+        This method now uses the Universal Chunker for:
+        1. Automatic document structure detection (tabular, code, hierarchical, linear, mixed)
+        2. Adaptive chunking strategy based on document type and density
+        3. Type-specific optimization (Excel, PDF, Code, Word, etc.)
+        4. Rich metadata preservation for better retrieval
         
         Args:
             text: Text to chunk
-            file_type: File type (xlsx, xls, csv, pdf, docx, txt, md)
+            file_type: File type (xlsx, xls, csv, pdf, docx, txt, md, py, js, etc.)
+            filename: Original filename for context
             
         Returns:
             List of text chunks (strings)
         """
         logger.info(f"[CHUNK] Starting, text length: {len(text)}, file_type: {file_type}")
         
-        if self.chunker:
-            # Use enhanced chunker
+        if self.use_universal_chunking:
+            # Use universal document intelligence system
             try:
-                logger.info(f"[CHUNK] Calling enhanced chunker...")
-                chunk_dicts = self.chunker.chunk_text(text, file_type)
+                logger.info(f"[CHUNK] Using Universal Document Intelligence...")
+                
+                # Call universal chunker with full metadata support
+                chunk_dicts = chunk_intelligently(
+                    text=text,
+                    filename=filename,
+                    file_type=file_type,
+                    metadata=None  # Will be enriched in add_document
+                )
                 
                 # Validate result
                 if not isinstance(chunk_dicts, list):
-                    raise TypeError(f"Enhanced chunker returned {type(chunk_dicts)}, expected list")
+                    raise TypeError(f"Universal chunker returned {type(chunk_dicts)}, expected list")
                 
                 if not chunk_dicts:
-                    raise ValueError("Enhanced chunker returned empty list")
+                    raise ValueError("Universal chunker returned empty list")
                 
                 # Extract text strings from dicts
                 chunks = []
@@ -311,18 +328,23 @@ class RAGHandler:
                 # Store enhanced metadata for later retrieval
                 self._last_chunk_metadata = chunk_dicts
                 
-                logger.info(f"[CHUNK] Enhanced chunking: {len(chunks)} chunks created")
-                logger.info(f"[CHUNK] Chunk types: {set(c.get('chunk_type', 'unknown') for c in chunk_dicts)}")
-                logger.info(f"[CHUNK] Avg size: {sum(len(c['text']) for c in chunk_dicts) / len(chunk_dicts):.0f} chars")
+                logger.info(f"[CHUNK] Universal chunking complete: {len(chunks)} chunks created")
+                
+                # Log analysis results if available
+                if chunk_dicts and 'metadata' in chunk_dicts[0]:
+                    first_meta = chunk_dicts[0]['metadata']
+                    logger.info(f"[CHUNK] Document structure: {first_meta.get('structure', 'unknown')}")
+                    logger.info(f"[CHUNK] Strategy used: {first_meta.get('strategy', 'unknown')}")
+                    logger.info(f"[CHUNK] Avg chunk size: {sum(len(c['text']) for c in chunk_dicts) / len(chunk_dicts):.0f} chars")
                 
                 return chunks
                 
             except Exception as e:
-                logger.error(f"[CHUNK] Enhanced chunking failed: {e}", exc_info=True)
+                logger.error(f"[CHUNK] Universal chunking failed: {e}", exc_info=True)
                 logger.warning("[CHUNK] Falling back to basic chunking")
                 # Fall through to basic chunking
         else:
-            logger.info("[CHUNK] Enhanced chunker not available")
+            logger.info("[CHUNK] Universal chunker not available")
         
         # Fallback: Basic chunking (original logic)
         logger.warning("[CHUNK] Using basic chunking (enhanced chunker not available or failed)")
@@ -390,14 +412,15 @@ class RAGHandler:
             if project_id:
                 logger.info(f"[PROJECT] Document tagged with project_id: {project_id}")
             
-            # Extract file type for adaptive chunking
+            # Extract file info for intelligent chunking
             file_type = metadata.get('file_type', 'txt')
+            filename = metadata.get('filename', metadata.get('source', 'unknown'))
             
-            # Chunk the text with file-type-specific strategy
+            # Chunk the text with UNIVERSAL DOCUMENT INTELLIGENCE
             if progress_callback:
-                progress_callback(0, 100, "Chunking document...")
+                progress_callback(0, 100, "Analyzing document structure...")
             
-            chunks = self.chunk_text(text, file_type=file_type)
+            chunks = self.chunk_text(text, file_type=file_type, filename=filename)
             
             # Get enhanced metadata if available
             chunk_metadata_enhanced = getattr(self, '_last_chunk_metadata', None)
@@ -435,17 +458,41 @@ class RAGHandler:
                 if project_id:
                     chunk_metadata['project_id'] = project_id
                 
-                # Add enhanced metadata if available
+                # UNIVERSAL CHUNKER: Extract rich metadata
                 if chunk_metadata_enhanced and i < len(chunk_metadata_enhanced):
-                    enhanced = chunk_metadata_enhanced[i]
-                    chunk_metadata.update({
-                        'chunk_type': enhanced.get('chunk_type', 'unknown'),
-                        'position': enhanced.get('position', f"{i+1}/{len(chunks)}"),
-                        'tokens_estimate': enhanced.get('tokens_estimate', len(chunk) // 4),
-                        'parent_section': enhanced.get('parent_section'),
-                        'has_header': enhanced.get('has_header', False),
-                        'size_category': enhanced.get('size_category', 'medium')
-                    })
+                    chunk_dict = chunk_metadata_enhanced[i]
+                    
+                    # Universal chunker provides metadata in nested structure
+                    if 'metadata' in chunk_dict:
+                        enhanced = chunk_dict['metadata']
+                        chunk_metadata.update({
+                            # Core universal chunker metadata
+                            'structure': enhanced.get('structure', 'unknown'),
+                            'strategy': enhanced.get('strategy', 'unknown'),
+                            'chunk_type': enhanced.get('chunk_type', 'unknown'),
+                            'parent_section': enhanced.get('parent_section'),
+                            'has_header': enhanced.get('has_header', False),
+                            
+                            # Additional metadata
+                            'row_start': enhanced.get('row_start'),
+                            'row_end': enhanced.get('row_end'),
+                            'line_start': enhanced.get('line_start'),
+                            'line_end': enhanced.get('line_end'),
+                            'hierarchy_level': enhanced.get('hierarchy_level'),
+                            
+                            # Computed metadata
+                            'tokens_estimate': len(chunk) // 4,
+                            'position': f"{i+1}/{len(chunks)}"
+                        })
+                    else:
+                        # Fallback for older metadata structure
+                        chunk_metadata.update({
+                            'chunk_type': chunk_dict.get('chunk_type', 'unknown'),
+                            'parent_section': chunk_dict.get('parent_section'),
+                            'has_header': chunk_dict.get('has_header', False),
+                            'tokens_estimate': len(chunk) // 4,
+                            'position': f"{i+1}/{len(chunks)}"
+                        })
                 
                 valid_chunks.append(chunk)
                 valid_embeddings.append(embedding)
