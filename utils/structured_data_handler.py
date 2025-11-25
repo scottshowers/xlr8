@@ -392,20 +392,87 @@ class StructuredDataHandler:
             
             for sheet_name in excel_file.sheet_names:
                 try:
-                    # Read sheet - try different header rows
+                    # Read sheet - SMART HEADER DETECTION
+                    # Strategy: Look for colored (blue) header rows first, then fall back to text analysis
                     df = None
-                    for header_row in [0, 1, 2]:
+                    best_header_row = 0
+                    
+                    # Try to detect colored header row using openpyxl
+                    if OPENPYXL_AVAILABLE:
                         try:
-                            df = pd.read_excel(
-                                file_path, 
-                                sheet_name=sheet_name, 
-                                header=header_row
-                            )
-                            # Check if we got reasonable column names
-                            if not all(str(c).startswith('Unnamed') for c in df.columns[:3]):
-                                break
-                        except:
-                            continue
+                            wb = load_workbook(file_path, read_only=True, data_only=True)
+                            if sheet_name in wb.sheetnames:
+                                ws = wb[sheet_name]
+                                
+                                # Check first 15 rows for colored cells (headers are usually colored)
+                                for row_idx in range(1, 16):
+                                    colored_cells = 0
+                                    total_cells = 0
+                                    
+                                    for col_idx in range(1, min(20, ws.max_column + 1)):
+                                        try:
+                                            cell = ws.cell(row=row_idx, column=col_idx)
+                                            if cell.value is not None:
+                                                total_cells += 1
+                                                # Check if cell has fill color (not white/no fill)
+                                                if cell.fill and cell.fill.fgColor and cell.fill.fgColor.rgb:
+                                                    color = str(cell.fill.fgColor.rgb)
+                                                    # Skip white, no fill, or default
+                                                    if color not in ['00000000', 'FFFFFFFF', '00FFFFFF', None, 'None']:
+                                                        colored_cells += 1
+                                        except:
+                                            continue
+                                    
+                                    # If most cells in this row are colored, it's likely the header
+                                    if total_cells >= 3 and colored_cells >= total_cells * 0.5:
+                                        best_header_row = row_idx - 1  # pandas uses 0-based indexing
+                                        logger.info(f"Sheet '{sheet_name}': Detected colored header at row {row_idx}")
+                                        break
+                                
+                                wb.close()
+                        except Exception as e:
+                            logger.warning(f"Color detection failed for '{sheet_name}': {e}")
+                    
+                    # If no colored header found, try text-based detection
+                    if best_header_row == 0:
+                        min_unnamed = float('inf')
+                        for header_row in range(11):  # Try rows 0-10
+                            try:
+                                test_df = pd.read_excel(
+                                    file_path, 
+                                    sheet_name=sheet_name, 
+                                    header=header_row,
+                                    nrows=5
+                                )
+                                
+                                # Count unnamed columns
+                                unnamed_count = sum(1 for c in test_df.columns if str(c).startswith('Unnamed'))
+                                total_cols = len([c for c in test_df.columns if not str(c).startswith('Unnamed')])
+                                
+                                if total_cols < 2:
+                                    continue
+                                
+                                if unnamed_count < min_unnamed:
+                                    min_unnamed = unnamed_count
+                                    best_header_row = header_row
+                                    
+                                if unnamed_count == 0:
+                                    break
+                                    
+                            except:
+                                continue
+                    
+                    # Read with detected header row
+                    try:
+                        df = pd.read_excel(
+                            file_path, 
+                            sheet_name=sheet_name, 
+                            header=best_header_row
+                        )
+                        logger.info(f"Sheet '{sheet_name}': Using header row {best_header_row}")
+                    except Exception as e:
+                        logger.error(f"Failed to read sheet '{sheet_name}': {e}")
+                        continue
                     
                     if df is None or df.empty:
                         logger.warning(f"Sheet '{sheet_name}' is empty, skipping")
