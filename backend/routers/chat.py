@@ -1,8 +1,9 @@
 """
-Chat Router for XLR8 - With Real-Time Status Updates
-====================================================
+Chat Router for XLR8 - With Real-Time Status Updates & Query Decomposition
+===========================================================================
 
 Uses job-based processing with status polling (like upload)
+NOW with compound question support (multi-sheet queries)
 
 Author: XLR8 Team
 """
@@ -22,6 +23,7 @@ sys.path.insert(0, '/data')
 
 from utils.rag_handler import RAGHandler
 from utils.llm_orchestrator import LLMOrchestrator
+from utils.query_decomposition import DiverseRetriever
 
 logger = logging.getLogger(__name__)
 
@@ -81,12 +83,6 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
             update_job_status(job_id, 'error', 'Error', 100, error='No documents uploaded')
             return
         
-        # Get embedding
-        query_embedding = rag.get_embedding(message)
-        if not query_embedding:
-            update_job_status(job_id, 'error', 'Error', 100, error='Failed to create embedding')
-            return
-        
         # Build filter
         where_filter = None
         if project and project not in ['', 'all', 'All Projects']:
@@ -94,13 +90,111 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
         
         update_job_status(job_id, 'processing', '📊 Retrieving chunks...', 20)
         
-        # Search
-        results = collection.query(
-            query_embeddings=[query_embedding],
-            n_results=max_results,
-            where=where_filter,
-            include=["documents", "metadatas", "distances"]
-        )
+        # DIVERSE RETRIEVAL: Handle compound questions automatically
+        # Example: "Give me deduction groups and pay groups" 
+        # → Searches both sheets separately and merges results
+        
+        try:
+            from utils.query_decomposition import QueryDecomposer
+            
+            decomposer = QueryDecomposer()
+            
+            # Check if compound query
+            if decomposer.is_compound_query(message):
+                # COMPOUND QUERY: Split and search each separately
+                sub_queries = decomposer.decompose_query(message)
+                logger.info(f"[DIVERSE] Compound query detected: {len(sub_queries)} sub-queries")
+                
+                # Retrieve for each sub-query
+                results_per_query = max_results // len(sub_queries)
+                all_documents = []
+                all_metadatas = []
+                all_distances = []
+                seen_ids = set()
+                
+                for i, sub_query in enumerate(sub_queries):
+                    logger.info(f"[DIVERSE] Sub-query {i+1}: {sub_query}")
+                    
+                    # Get embedding for sub-query
+                    sub_embedding = rag.get_embedding(sub_query)
+                    if not sub_embedding:
+                        continue
+                    
+                    # Search for this sub-query
+                    sub_results = collection.query(
+                        query_embeddings=[sub_embedding],
+                        n_results=results_per_query + 10,  # Extra for deduplication
+                        where=where_filter,
+                        include=["documents", "metadatas", "distances"]
+                    )
+                    
+                    # Add results, deduplicating by content hash
+                    if sub_results and sub_results.get('documents') and sub_results['documents'][0]:
+                        for j in range(len(sub_results['documents'][0])):
+                            doc = sub_results['documents'][0][j]
+                            doc_hash = hash(doc[:100])  # Simple deduplication
+                            
+                            if doc_hash in seen_ids:
+                                continue
+                            
+                            seen_ids.add(doc_hash)
+                            all_documents.append(doc)
+                            all_metadatas.append(sub_results['metadatas'][0][j])
+                            all_distances.append(sub_results['distances'][0][j])
+                            
+                            if len(all_documents) >= max_results:
+                                break
+                    
+                    if len(all_documents) >= max_results:
+                        break
+                
+                # Format as ChromaDB result
+                results = {
+                    'documents': [all_documents],
+                    'metadatas': [all_metadatas],
+                    'distances': [all_distances]
+                }
+                
+                # Log diversity
+                sheets_found = set()
+                for meta in all_metadatas:
+                    if 'parent_section' in meta:
+                        sheets_found.add(meta['parent_section'])
+                logger.info(f"[DIVERSE] Retrieved {len(all_documents)} chunks from {len(sheets_found)} sheets: {', '.join(sorted(sheets_found))}")
+                
+            else:
+                # SIMPLE QUERY: Use normal search
+                logger.info(f"[SIMPLE] Single-topic query, using standard search")
+                
+                # Get embedding
+                query_embedding = rag.get_embedding(message)
+                if not query_embedding:
+                    update_job_status(job_id, 'error', 'Error', 100, error='Failed to create embedding')
+                    return
+                
+                # Search
+                results = collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=max_results,
+                    where=where_filter,
+                    include=["documents", "metadatas", "distances"]
+                )
+        
+        except Exception as e:
+            # Fallback to standard search if decomposition fails
+            logger.warning(f"[DIVERSE] Decomposition failed, using standard search: {e}")
+            
+            query_embedding = rag.get_embedding(message)
+            if not query_embedding:
+                update_job_status(job_id, 'error', 'Error', 100, error='Failed to create embedding')
+                return
+            
+            results = collection.query(
+                query_embeddings=[query_embedding],
+                n_results=max_results,
+                where=where_filter,
+                include=["documents", "metadatas", "distances"]
+            )
         
         if not results or not results.get('documents') or not results['documents'][0]:
             update_job_status(job_id, 'error', 'Error', 100, error='No relevant documents found')
