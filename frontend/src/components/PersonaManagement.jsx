@@ -23,7 +23,12 @@ export default function PersonaManagement() {
     try {
       setLoading(true)
       const response = await api.get('/chat/personas')
-      setPersonas(response.data.personas || [])
+      // Map personas to ensure they have an id field
+      const mappedPersonas = (response.data.personas || []).map(p => ({
+        ...p,
+        id: p.id || p.name?.toLowerCase().replace(/\s+/g, '_') || p.name
+      }))
+      setPersonas(mappedPersonas)
     } catch (err) {
       setError('Failed to load personas')
       console.error(err)
@@ -38,7 +43,10 @@ export default function PersonaManagement() {
     }
 
     try {
-      await api.delete(`/chat/personas/${personaId}`)
+      // Use persona name for API call (backend expects name, not id)
+      const persona = personas.find(p => p.id === personaId)
+      const nameForApi = persona?.name || personaId
+      await api.delete(`/chat/personas/${nameForApi}`)
       setSuccess('Persona deleted successfully')
       loadPersonas()
       setSelectedPersona(null)
@@ -255,7 +263,8 @@ function PersonaEditor({ persona, onSave, onCancel }) {
       }
 
       if (persona) {
-        await api.put(`/chat/personas/${persona.id}`, payload)
+        // Use persona.name for API call (backend expects name, not id)
+        await api.put(`/chat/personas/${persona.name}`, payload)
       } else {
         await api.post('/chat/personas', payload)
       }
