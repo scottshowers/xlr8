@@ -45,14 +45,26 @@ except ImportError as e:
 try:
     from utils.query_router_intelligent import get_query_router, QueryType, detect_query_type
     INTELLIGENT_ROUTING = True
+    logger_temp = logging.getLogger(__name__)
+    logger_temp.info("Intelligent query routing enabled")
 except ImportError:
-    try:
-        from utils.query_router import get_query_router, QueryType
-        INTELLIGENT_ROUTING = False
-    except ImportError:
-        INTELLIGENT_ROUTING = False
-        logger_temp = logging.getLogger(__name__)
-        logger_temp.warning("Query router not available")
+    INTELLIGENT_ROUTING = False
+    # Define QueryType enum for fallback
+    from enum import Enum
+    class QueryType(Enum):
+        STRUCTURED = "structured"
+        UNSTRUCTURED = "unstructured"
+        HYBRID = "hybrid"
+        GENERAL = "general"
+    
+    def detect_query_type(*args, **kwargs):
+        return {'route': QueryType.GENERAL, 'reasoning': ['Fallback mode']}
+    
+    def get_query_router():
+        return None
+    
+    logger_temp = logging.getLogger(__name__)
+    logger_temp.warning("Intelligent routing not available, using fallback")
 
 logger = logging.getLogger(__name__)
 
@@ -435,10 +447,16 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
                 query_type = routing_result['route']
                 logger.info(f"[ROUTING] {query_type.value} | Reasoning: {', '.join(routing_result['reasoning'])}")
             else:
-                # Fallback to old router
-                router = get_query_router()
-                query_type, routing_meta = router.detect_query_type(message)
-                logger.info(f"[ROUTING] {query_type.value} (legacy router)")
+                # Simple fallback - if structured data exists, try SQL first
+                if has_structured:
+                    query_type = QueryType.STRUCTURED
+                    logger.info(f"[ROUTING] STRUCTURED (fallback - structured data exists)")
+                elif has_rag:
+                    query_type = QueryType.UNSTRUCTURED
+                    logger.info(f"[ROUTING] UNSTRUCTURED (fallback - RAG data exists)")
+                else:
+                    query_type = QueryType.GENERAL
+                    logger.info(f"[ROUTING] GENERAL (fallback - no data)")
             
             # STRUCTURED QUERY PATH (SQL) - TRY FIRST IF DATA EXISTS
             if query_type == QueryType.STRUCTURED or (has_structured and query_type != QueryType.UNSTRUCTURED):
