@@ -526,15 +526,14 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
         persona = pm.get_persona(persona_name)
         logger.info(f"[PERSONA] Using: {persona.name} {persona.icon}")
         
-        # STEP 0.5: SELF-HEALING QUERY - TRY EVERYTHING, COMBINE RESULTS
-        # Philosophy: Don't guess. Run SQL AND RAG. Let Claude pick the best answer.
+        # STEP 0.5: INTELLIGENT QUERY - GATHER DATA, LET CLAUDE REASON
+        # Philosophy: Get ALL relevant data. Send to Claude. Let Claude think.
         
-        sql_results = None
-        sql_query = None
-        sql_error = None
-        rag_results = None
+        all_data_context = []
+        sql_results_list = []
+        rag_chunks = []
         
-        # TRY SQL if structured data available
+        # TRY SQL - query ALL potentially relevant tables
         if STRUCTURED_QUERIES_AVAILABLE:
             try:
                 handler = get_structured_handler()
@@ -542,30 +541,50 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
                 tables_list = schema.get('tables', [])
                 
                 if tables_list:
-                    update_job_status(job_id, 'processing', '📊 Querying structured data...', 10)
-                    sql_prompt = _build_sql_prompt(message, schema)
+                    update_job_status(job_id, 'processing', '📊 Searching structured data...', 10)
                     
-                    orchestrator_instance = LLMOrchestrator()
-                    sql_gen = orchestrator_instance.generate_sql(sql_prompt)
+                    # Find tables that might be relevant to the query
+                    query_lower = message.lower()
                     
-                    if sql_gen and sql_gen.get('sql'):
-                        sql_query = sql_gen['sql'].strip()
-                        logger.info(f"[SQL] Generated: {sql_query[:100]}...")
+                    for table_info in tables_list:
+                        table_name = table_info.get('table_name', '')
+                        sheet_name = table_info.get('sheet', '')
+                        file_name = table_info.get('file', '')
+                        columns = table_info.get('columns', [])
                         
-                        try:
-                            rows, columns = handler.execute_query(sql_query)
-                            if rows:
-                                decrypted = _decrypt_results(rows, handler)
-                                sql_results = {
-                                    'rows': decrypted,
-                                    'columns': columns,
-                                    'count': len(rows),
-                                    'query': sql_query
-                                }
-                                logger.info(f"[SQL] Got {len(rows)} results")
-                        except Exception as e:
-                            sql_error = str(e)
-                            logger.warning(f"[SQL] Query failed: {e}")
+                        # Check if table/sheet name relates to query
+                        sheet_lower = sheet_name.lower().replace(' ', '').replace('_', '')
+                        
+                        # Extract key terms from query
+                        query_terms = [w for w in query_lower.split() if len(w) > 3]
+                        
+                        # Check for matches
+                        is_relevant = any(term in sheet_lower or sheet_lower in term for term in query_terms)
+                        
+                        # Also check column names
+                        col_names_lower = ' '.join(str(c).lower() for c in columns[:20])
+                        is_relevant = is_relevant or any(term in col_names_lower for term in query_terms)
+                        
+                        if is_relevant:
+                            try:
+                                # Query this table
+                                sql = f'SELECT DISTINCT * FROM "{table_name}" LIMIT 200'
+                                rows, cols = handler.execute_query(sql)
+                                
+                                if rows:
+                                    decrypted = _decrypt_results(rows, handler)
+                                    sql_results_list.append({
+                                        'source_file': file_name,
+                                        'sheet': sheet_name,
+                                        'table': table_name,
+                                        'columns': cols,
+                                        'data': decrypted[:100],  # Limit for context
+                                        'total_rows': len(rows)
+                                    })
+                                    logger.info(f"[SQL] Found {len(rows)} rows in {sheet_name}")
+                            except Exception as e:
+                                logger.warning(f"[SQL] Failed to query {table_name}: {e}")
+                    
             except Exception as e:
                 logger.warning(f"[SQL] Handler error: {e}")
         
@@ -581,78 +600,105 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
             
             rag_response = collection.query(
                 query_texts=[message],
-                n_results=min(max_results, 20),
+                n_results=min(max_results, 10),
                 where=where_filter
             )
             
             if rag_response and rag_response.get('documents') and rag_response['documents'][0]:
-                rag_results = {
-                    'documents': rag_response['documents'][0],
-                    'metadatas': rag_response.get('metadatas', [[]])[0],
-                    'count': len(rag_response['documents'][0])
-                }
-                logger.info(f"[RAG] Got {rag_results['count']} chunks")
+                rag_chunks = rag_response['documents'][0]
+                logger.info(f"[RAG] Got {len(rag_chunks)} chunks")
         except Exception as e:
             logger.warning(f"[RAG] Search failed: {e}")
         
-        # DECIDE: Use what we got
-        update_job_status(job_id, 'processing', '🧠 Analyzing results...', 60)
+        # BUILD CONTEXT FOR CLAUDE
+        update_job_status(job_id, 'processing', '🧠 Analyzing all data...', 50)
         
-        # If we have SQL results, prioritize them for data questions
-        if sql_results and sql_results['count'] > 0:
-            # Format SQL response
-            response = format_structured_response(
-                message, 
-                sql_results['rows'], 
-                sql_results['columns'], 
-                persona, 
-                sql_results['query']
-            )
+        data_context_parts = []
+        
+        if sql_results_list:
+            data_context_parts.append("=== STRUCTURED DATA FROM UPLOADED FILES ===\n")
+            for result in sql_results_list:
+                data_context_parts.append(f"\n📄 Source: {result['source_file']} → Sheet: {result['sheet']}")
+                data_context_parts.append(f"   Total rows in table: {result['total_rows']}")
+                data_context_parts.append(f"   Columns: {', '.join(result['columns'][:10])}")
+                data_context_parts.append(f"   Sample data:")
+                
+                # Format sample data
+                for i, row in enumerate(result['data'][:20]):
+                    row_str = " | ".join(f"{k}: {v}" for k, v in list(row.items())[:5])
+                    data_context_parts.append(f"   {i+1}. {row_str}")
+                
+                if result['total_rows'] > 20:
+                    data_context_parts.append(f"   ... and {result['total_rows'] - 20} more rows")
+                data_context_parts.append("")
+        
+        if rag_chunks:
+            data_context_parts.append("\n=== DOCUMENT CONTENT ===\n")
+            for i, chunk in enumerate(rag_chunks[:5]):
+                data_context_parts.append(f"[Document {i+1}]: {chunk[:500]}...")
+        
+        data_context = "\n".join(data_context_parts)
+        
+        # If we have data, let Claude answer
+        if sql_results_list or rag_chunks:
+            update_job_status(job_id, 'processing', '✨ Generating response...', 70)
             
-            # Add RAG context if available
-            if rag_results and rag_results['count'] > 0:
-                response += "\n\n---\n*Additional context from documents available.*"
+            # Build prompt for Claude to reason about the data
+            reasoning_prompt = f"""You are an expert data analyst. The user asked a question and I've gathered relevant data from their uploaded files.
+
+USER QUESTION: {message}
+
+{data_context}
+
+INSTRUCTIONS:
+1. Analyze ALL the data provided above
+2. Cross-reference between different sources if multiple exist
+3. Provide a clear, accurate answer based on what the data shows
+4. If there's conflicting data between sources, explain both and which is likely the "master" source
+5. Be specific - give actual counts, list actual values, reference actual data
+6. If the user asked for a list, provide the actual list (not just a count)
+7. Format nicely with markdown if helpful
+
+YOUR ANALYSIS AND ANSWER:"""
             
-            sources = [{
-                'filename': 'Structured Data Query',
-                'type': 'sql',
-                'sql': sql_query,
-                'rows_returned': sql_results['count'],
-                'relevance': 100
-            }]
+            # Use Claude to reason
+            orchestrator_instance = LLMOrchestrator()
+            response = orchestrator_instance.generate_response(reasoning_prompt, persona)
+            
+            if not response:
+                response = "I found data but had trouble analyzing it. Please try rephrasing your question."
+            
+            # Build sources
+            sources = []
+            for result in sql_results_list:
+                sources.append({
+                    'filename': result['source_file'],
+                    'sheet': result['sheet'],
+                    'type': 'structured_data',
+                    'rows': result['total_rows'],
+                    'relevance': 95
+                })
+            
+            if rag_chunks:
+                sources.append({
+                    'filename': 'Document Search',
+                    'type': 'rag',
+                    'chunks': len(rag_chunks),
+                    'relevance': 80
+                })
             
             update_job_status(
                 job_id, 'complete', 'Complete', 100,
                 response=response,
                 sources=sources,
-                chunks_found=sql_results['count'],
-                models_used=['sql_generation', 'duckdb'],
-                query_type='structured',
+                chunks_found=len(sql_results_list) + len(rag_chunks),
+                models_used=['claude', 'duckdb'] if sql_results_list else ['claude', 'rag'],
+                query_type='intelligent',
                 sanitized=False
             )
             return
         
-        # If SQL failed but RAG has results, use RAG
-        if rag_results and rag_results['count'] > 0:
-            # Continue to normal RAG flow below
-            logger.info("[ROUTING] Using RAG results")
-            pass
-        
-        # If nothing worked
-        elif not sql_results and not rag_results:
-            if sql_error:
-                update_job_status(
-                    job_id, 'complete', 'Complete', 100,
-                    response=f"I tried to query your data but encountered an issue: {sql_error}\n\nTry rephrasing your question.",
-                    sources=[],
-                    chunks_found=0,
-                    models_used=['sql_generation'],
-                    query_type='error',
-                    sanitized=False
-                )
-                return
-        
-        # Continue to RAG processing below...
+        # No data found - continue to fallback RAG flow
         
         # STEP 1: INTENT CLASSIFICATION
         update_job_status(job_id, 'processing', '🧠 Understanding query...', 5)
