@@ -41,6 +41,7 @@ class Persona:
     
     def to_dict(self):
         return {
+            'id': self.name.lower().replace(' ', '_'),  # Generate id from name
             'name': self.name,
             'icon': self.icon,
             'description': self.description,
@@ -63,7 +64,6 @@ class PersonaManager:
         self.personas_file = personas_file
         self.personas = {}
         self._load_default_personas()
-        self._load_builtin_overrides()  # Load any edited built-in personas
         self._load_custom_personas()
     
     def _load_default_personas(self):
@@ -243,47 +243,6 @@ Your style:
         except Exception as e:
             logger.error(f"Error saving custom personas: {e}")
     
-    def _save_builtin_overrides(self):
-        """Save edited built-in personas as overrides"""
-        overrides_file = self.personas_file.replace('personas.json', 'persona_overrides.json')
-        builtin_ids = ['bessie', 'analyst', 'consultant', 'trainer', 'quick']
-        
-        overrides = {}
-        for pid in builtin_ids:
-            if pid in self.personas:
-                # Save full persona data as override
-                overrides[pid] = self.personas[pid].to_dict()
-        
-        try:
-            os.makedirs(os.path.dirname(overrides_file), exist_ok=True)
-            with open(overrides_file, 'w') as f:
-                json.dump({'overrides': overrides}, f, indent=2)
-            logger.info(f"Saved {len(overrides)} persona overrides")
-        except Exception as e:
-            logger.error(f"Error saving persona overrides: {e}")
-    
-    def _load_builtin_overrides(self):
-        """Load edited built-in personas from overrides file"""
-        overrides_file = self.personas_file.replace('personas.json', 'persona_overrides.json')
-        
-        if not os.path.exists(overrides_file):
-            return
-        
-        try:
-            with open(overrides_file, 'r') as f:
-                data = json.load(f)
-            
-            for pid, persona_data in data.get('overrides', {}).items():
-                if pid in self.personas:
-                    # Update existing persona with override data
-                    persona = Persona.from_dict(persona_data)
-                    self.personas[pid] = persona
-                    logger.info(f"Applied override for persona: {pid}")
-            
-            logger.info(f"Loaded {len(data.get('overrides', {}))} persona overrides")
-        except Exception as e:
-            logger.error(f"Error loading persona overrides: {e}")
-    
     def get_persona(self, name: str = 'bessie') -> Persona:
         """Get persona by name"""
         persona_id = name.lower().replace(' ', '_')
@@ -349,7 +308,7 @@ Your style:
         return True
     
     def update_persona(self, name: str, **updates) -> Optional[Persona]:
-        """Update any persona (built-in or custom)"""
+        """Update a custom persona"""
         persona_id = name.lower().replace(' ', '_')
         
         if persona_id not in self.personas:
@@ -357,18 +316,17 @@ Your style:
         
         persona = self.personas[persona_id]
         
-        # Allow updating all personas (built-in and custom)
-        # Built-in persona edits are saved as overrides
+        if not persona.custom:
+            logger.warning(f"Cannot update default persona: {name}")
+            return None
         
         # Update fields
         for key, value in updates.items():
             if hasattr(persona, key):
                 setattr(persona, key, value)
         
-        # Save changes (custom personas to personas.json, built-in overrides to persona_overrides.json)
         self._save_custom_personas()
-        self._save_builtin_overrides()
-        logger.info(f"Updated persona: {name}")
+        logger.info(f"Updated custom persona: {name}")
         
         return persona
 
