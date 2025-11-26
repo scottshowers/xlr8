@@ -9,9 +9,124 @@ sys.path.insert(0, '/data')
 from utils.rag_handler import RAGHandler
 from utils.database.models import ProcessingJobModel, DocumentModel
 
+# Import structured data handler
+try:
+    from utils.structured_data_handler import get_structured_handler
+    STRUCTURED_AVAILABLE = True
+except ImportError:
+    STRUCTURED_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+# ==================== STRUCTURED DATA STATUS ====================
+
+@router.get("/status/structured")
+async def get_structured_data_status(project: Optional[str] = None):
+    """Get structured data (DuckDB) statistics"""
+    if not STRUCTURED_AVAILABLE:
+        return {
+            "available": False,
+            "error": "Structured data handler not available",
+            "files": [],
+            "total_files": 0,
+            "total_tables": 0,
+            "total_rows": 0
+        }
+    
+    try:
+        handler = get_structured_handler()
+        
+        # Get schema for all projects or specific project
+        if project:
+            schema = handler.get_schema_for_project(project)
+        else:
+            # Get all tables
+            schema = handler.get_schema_for_project(None)
+        
+        tables = schema.get('tables', [])
+        
+        # Group by file
+        files_dict = {}
+        total_rows = 0
+        
+        for table in tables:
+            file_name = table.get('file', 'Unknown')
+            project_name = table.get('project', 'Unknown')
+            
+            key = f"{project_name}:{file_name}"
+            if key not in files_dict:
+                files_dict[key] = {
+                    'filename': file_name,
+                    'project': project_name,
+                    'tables': [],
+                    'total_rows': 0
+                }
+            
+            row_count = table.get('row_count', 0)
+            files_dict[key]['tables'].append({
+                'name': table.get('table_name'),
+                'sheet': table.get('sheet', ''),
+                'columns': table.get('columns', []),
+                'row_count': row_count
+            })
+            files_dict[key]['total_rows'] += row_count
+            total_rows += row_count
+        
+        files_list = list(files_dict.values())
+        
+        return {
+            "available": True,
+            "files": files_list,
+            "total_files": len(files_list),
+            "total_tables": len(tables),
+            "total_rows": total_rows
+        }
+        
+    except Exception as e:
+        logger.error(f"Structured data status error: {e}")
+        return {
+            "available": False,
+            "error": str(e),
+            "files": [],
+            "total_files": 0,
+            "total_tables": 0,
+            "total_rows": 0
+        }
+
+
+@router.delete("/status/structured/{project}/{filename}")
+async def delete_structured_file(project: str, filename: str):
+    """Delete a structured data file from DuckDB"""
+    if not STRUCTURED_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Structured data not available")
+    
+    try:
+        handler = get_structured_handler()
+        result = handler.delete_file(project, filename)
+        return {"success": True, "message": f"Deleted {filename}", "details": result}
+    except Exception as e:
+        logger.error(f"Failed to delete structured file: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/status/structured/reset")
+async def reset_structured_data():
+    """Reset all structured data (DuckDB)"""
+    if not STRUCTURED_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Structured data not available")
+    
+    try:
+        handler = get_structured_handler()
+        result = handler.reset_database()
+        logger.warning("⚠️ Structured data (DuckDB) was RESET - all data deleted!")
+        return {"success": True, "message": "All structured data deleted", "details": result}
+    except Exception as e:
+        logger.error(f"Failed to reset structured data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/status/chromadb")
 async def get_chromadb_stats():
