@@ -23,6 +23,7 @@ class ProjectCreate(BaseModel):
     """Schema for creating a project"""
     name: str
     customer: str
+    product: Optional[str] = None  # UKG Pro, WFM Dimensions, UKG Ready
     type: str  # Frontend sends 'type'
     start_date: Optional[str] = None
     notes: Optional[str] = None
@@ -32,6 +33,7 @@ class ProjectUpdate(BaseModel):
     """Schema for updating a project"""
     name: Optional[str] = None
     customer: Optional[str] = None
+    product: Optional[str] = None
     type: Optional[str] = None
     start_date: Optional[str] = None
     notes: Optional[str] = None
@@ -55,6 +57,7 @@ async def list_projects():
                 'id': proj.get('id'),
                 'name': proj.get('name'),
                 'customer': proj.get('customer'),  # ✅ Column is 'customer' not 'client_name'
+                'product': metadata.get('product', ''),
                 'type': metadata.get('type', 'Implementation'),
                 'start_date': proj.get('start_date'),
                 'status': proj.get('status', 'active'),
@@ -85,7 +88,8 @@ async def create_project(project: ProjectCreate):
             name=project.name,
             client_name=project.customer,      # Maps to 'customer' column
             project_type=project.type,         # Stored in metadata.type
-            notes=project.notes or ""          # Stored in metadata.notes
+            notes=project.notes or "",         # Stored in metadata.notes
+            product=project.product or ""      # Stored in metadata.product
         )
         
         if not new_project:
@@ -100,6 +104,7 @@ async def create_project(project: ProjectCreate):
                 'id': new_project.get('id'),
                 'name': new_project.get('name'),
                 'customer': new_project.get('customer'),
+                'product': metadata.get('product', ''),
                 'type': metadata.get('type', 'Implementation'),
                 'notes': metadata.get('notes', ''),
                 'status': new_project.get('status', 'active'),
@@ -135,8 +140,8 @@ async def update_project(project_id: str, updates: ProjectUpdate):
         if updates.start_date is not None:
             update_dict['start_date'] = updates.start_date
         
-        # Metadata updates (type and notes go in metadata JSON)
-        if updates.type is not None or updates.notes is not None:
+        # Metadata updates (type, product, and notes go in metadata JSON)
+        if updates.type is not None or updates.notes is not None or updates.product is not None:
             # Get existing project to merge metadata
             existing = ProjectModel.get_by_id(project_id)
             if existing:
@@ -147,6 +152,9 @@ async def update_project(project_id: str, updates: ProjectUpdate):
                 
                 if updates.notes is not None:
                     existing_metadata['notes'] = updates.notes
+                
+                if updates.product is not None:
+                    existing_metadata['product'] = updates.product
                 
                 update_dict['metadata'] = existing_metadata
         
@@ -165,6 +173,7 @@ async def update_project(project_id: str, updates: ProjectUpdate):
                 'id': updated.get('id'),
                 'name': updated.get('name'),
                 'customer': updated.get('customer'),
+                'product': metadata.get('product', ''),
                 'type': metadata.get('type', 'Implementation'),
                 'notes': metadata.get('notes', ''),
                 'status': updated.get('status', 'active'),
@@ -220,6 +229,7 @@ async def get_project(project_id: str):
             'id': project.get('id'),
             'name': project.get('name'),
             'customer': project.get('customer'),
+            'product': metadata.get('product', ''),
             'type': metadata.get('type', 'Implementation'),
             'notes': metadata.get('notes', ''),
             'status': project.get('status', 'active'),
