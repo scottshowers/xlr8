@@ -427,8 +427,18 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
                 handler = get_structured_handler()
                 logger.info(f"[DEBUG] Got structured handler, checking project: {project}")
                 schema = handler.get_schema_for_project(project) if project else {}
-                has_structured = bool(schema.get('tables'))
-                table_names = list(schema.get('tables', {}).keys())
+                
+                # Handle both dict and list schema formats
+                if isinstance(schema, dict):
+                    has_structured = bool(schema.get('tables'))
+                    table_names = list(schema.get('tables', {}).keys())
+                elif isinstance(schema, list) and len(schema) > 0:
+                    has_structured = True
+                    table_names = schema  # It's already a list of table names
+                else:
+                    has_structured = False
+                    table_names = []
+                    
                 logger.info(f"[DEBUG] has_structured={has_structured}, tables={len(table_names)}")
             except Exception as e:
                 logger.error(f"[DEBUG] Structured handler error: {e}")
