@@ -550,7 +550,29 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
         persona = pm.get_persona(persona_name)
         logger.info(f"[PERSONA] Using: {persona.name} {persona.icon}")
         
-        # STEP 0.5: INTELLIGENT QUERY - GATHER DATA, LET CLAUDE REASON
+        # STEP 1: DETECT STRUCTURED QUERIES - Route to proper SQL generation
+        # Keywords that indicate we should generate intelligent SQL
+        message_lower = message.lower()
+        structured_keywords = [
+            'how many', 'count', 'total', 'number of', 
+            'list all', 'show all', 'give me all', 'get all',
+            'sum of', 'average', 'avg', 'min', 'max',
+            'filter', 'where', 'employees with', 'employees who',
+            'active employees', 'inactive employees', 'terminated',
+            'by department', 'by location', 'group by', 'grouped by'
+        ]
+        
+        is_structured_query = any(kw in message_lower for kw in structured_keywords)
+        
+        if is_structured_query and STRUCTURED_QUERIES_AVAILABLE:
+            logger.info(f"[ROUTING] Detected structured query, using SQL generation")
+            # Use the proper handle_structured_query function
+            routing_meta = {'route': 'structured', 'keywords_matched': True}
+            if handle_structured_query(job_id, message, project, persona, routing_meta):
+                return  # Successfully handled by structured query
+            logger.info("[ROUTING] Structured query fell through, continuing with hybrid approach")
+        
+        # STEP 2: HYBRID APPROACH - Gather data and let Claude reason
         # Philosophy: Get ALL relevant data. Send to Claude. Let Claude think.
         
         all_data_context = []
