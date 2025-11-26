@@ -101,7 +101,7 @@ function DataManagementSection() {
   const [expandedFile, setExpandedFile] = useState(null)
   const [message, setMessage] = useState(null)
 
-  const API_BASE = import.meta.env.VITE_API_URL || ''
+  const API_BASE = import.meta.env.VITE_API_URL || 'https://hcmpact-xlr8-production.up.railway.app'
 
   const fetchData = async () => {
     setLoading(true)
@@ -479,7 +479,7 @@ function DashboardSection({ setCurrentSection }) {
     documents: { files: '--', chunks: '--' }
   })
 
-  const API_BASE = import.meta.env.VITE_API_URL || ''
+  const API_BASE = import.meta.env.VITE_API_URL || 'https://hcmpact-xlr8-production.up.railway.app'
 
   useEffect(() => {
     // Fetch quick stats
