@@ -91,7 +91,7 @@ function UploadSection() {
   const [project, setProject] = useState('')
   const fileInputRef = useRef(null)
 
-  const API_BASE = import.meta.env.VITE_API_URL || ''
+  const API_BASE = import.meta.env.VITE_API_URL || 'https://hcmpact-xlr8-production.up.railway.app'
 
   const handleDrop = async (e) => {
     e.preventDefault()
@@ -295,7 +295,7 @@ function ExploreSection() {
   const [selectedExtract, setSelectedExtract] = useState(null)
   const [extractDetail, setExtractDetail] = useState(null)
 
-  const API_BASE = import.meta.env.VITE_API_URL || ''
+  const API_BASE = import.meta.env.VITE_API_URL || 'https://hcmpact-xlr8-production.up.railway.app'
 
   useEffect(() => {
     fetchFiles()
