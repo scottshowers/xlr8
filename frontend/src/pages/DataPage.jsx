@@ -178,7 +178,7 @@ function VacuumTab() {
       alignItems: 'center',
       gap: '0.5rem',
       padding: '0.875rem 1.75rem',
-      background: 'linear-gradient(135deg, #83b16d 0%, #93abd9 100%)',
+      background: '#83b16d',
       border: 'none',
       borderRadius: '10px',
       color: 'white',
