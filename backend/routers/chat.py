@@ -581,7 +581,7 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
                                         'data': decrypted[:100],  # Limit for context
                                         'total_rows': len(rows)
                                     })
-                                    logger.info(f"[SQL] Found {len(rows)} rows in {sheet_name}")
+                                    logger.info(f"[SQL] Found {len(rows)} rows in {sheet_name}, columns: {cols[:5]}")
                             except Exception as e:
                                 logger.warning(f"[SQL] Failed to query {table_name}: {e}")
                     
@@ -615,6 +615,10 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
         
         # If we have data, let Claude answer
         if sql_results_list or rag_chunks:
+            logger.info(f"[INTELLIGENT] Found {len(sql_results_list)} SQL tables, {len(rag_chunks)} RAG chunks")
+            for r in sql_results_list:
+                logger.info(f"[INTELLIGENT] Table: {r['sheet']} with {r['total_rows']} rows")
+            
             update_job_status(job_id, 'processing', '✨ Generating response...', 70)
             
             # Build context as "chunks" for the orchestrator
@@ -630,18 +634,25 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
                     row_str = " | ".join(f"{k}: {v}" for k, v in row.items())
                     data_text += f"  {row_str}\n"
                 
+                # Debug: also log first row
+                if result['data']:
+                    first_row = result['data'][0]
+                    logger.info(f"[INTELLIGENT] First row of {result['sheet']}: {first_row}")
+                
+                logger.info(f"[INTELLIGENT] Built data_text for {result['sheet']}: {len(data_text)} chars")
+                
                 context_chunks.append({
-                    'content': data_text,
+                    'document': data_text,  # Changed from 'content' to 'document'
                     'metadata': {
                         'filename': result['source_file'],
-                        'sheet': result['sheet'],
+                        'parent_section': result['sheet'],
                         'type': 'structured_data'
                     }
                 })
             
             for i, chunk in enumerate(rag_chunks[:5]):
                 context_chunks.append({
-                    'content': chunk,
+                    'document': chunk,  # Changed from 'content' to 'document'
                     'metadata': {
                         'filename': f'Document chunk {i+1}',
                         'type': 'rag'
@@ -650,6 +661,13 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
             
             # Use orchestrator to process
             orchestrator_instance = LLMOrchestrator()
+            
+            # DEBUG: Log what we're passing
+            logger.info(f"[INTELLIGENT] Passing {len(context_chunks)} chunks to orchestrator")
+            for i, c in enumerate(context_chunks[:3]):
+                doc_preview = c.get('document', '')[:200] if c.get('document') else 'EMPTY'
+                logger.info(f"[INTELLIGENT] Chunk {i}: {doc_preview}...")
+            
             result = orchestrator_instance.process_query(message, context_chunks)
             
             response = result.get('response', 'I found data but had trouble analyzing it.')
