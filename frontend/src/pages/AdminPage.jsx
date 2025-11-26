@@ -70,7 +70,7 @@ function ProjectsTab() {
   const styles = {
     header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' },
     title: { fontSize: '1.1rem', fontWeight: '700', color: '#2a3441' },
-    button: { padding: '0.6rem 1.2rem', background: 'linear-gradient(135deg, #83b16d 0%, #93abd9 100%)', border: 'none', borderRadius: '8px', color: 'white', fontWeight: '600', cursor: 'pointer' },
+    button: { padding: '0.6rem 1.2rem', background: '#83b16d', border: 'none', borderRadius: '8px', color: 'white', fontWeight: '600', cursor: 'pointer' },
     table: { width: '100%', borderCollapse: 'collapse' },
     th: { textAlign: 'left', padding: '0.75rem 1rem', background: '#f8fafc', fontWeight: '600', fontSize: '0.8rem', color: '#5f6c7b', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid #e1e8ed' },
     td: { padding: '0.75rem 1rem', borderBottom: '1px solid #e1e8ed' },
@@ -424,7 +424,7 @@ function GlobalDataTab() {
     header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' },
     title: { fontSize: '1.1rem', fontWeight: '700', color: '#2a3441' },
     description: { color: '#5f6c7b', fontSize: '0.9rem', marginBottom: '1.5rem' },
-    button: { padding: '0.6rem 1.2rem', background: 'linear-gradient(135deg, #83b16d 0%, #93abd9 100%)', border: 'none', borderRadius: '8px', color: 'white', fontWeight: '600', cursor: 'pointer' },
+    button: { padding: '0.6rem 1.2rem', background: '#83b16d', border: 'none', borderRadius: '8px', color: 'white', fontWeight: '600', cursor: 'pointer' },
     card: { background: '#f8fafc', borderRadius: '8px', padding: '1rem', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
   };
 
@@ -466,7 +466,7 @@ function ConnectionsTab() {
     productIcon: { fontSize: '2.5rem', marginBottom: '0.75rem' },
     productName: { fontWeight: '700', color: '#2a3441', marginBottom: '0.5rem' },
     productStatus: (connected) => ({ fontSize: '0.8rem', color: connected ? '#166534' : '#5f6c7b', marginBottom: '1rem' }),
-    connectBtn: (connected) => ({ padding: '0.5rem 1rem', background: connected ? '#f0f4f7' : 'linear-gradient(135deg, #83b16d 0%, #93abd9 100%)', border: connected ? '1px solid #e1e8ed' : 'none', borderRadius: '6px', color: connected ? '#5f6c7b' : 'white', fontWeight: '600', cursor: 'pointer' }),
+    connectBtn: (connected) => ({ padding: '0.5rem 1rem', background: connected ? '#f0f4f7' : '#83b16d', border: connected ? '1px solid #e1e8ed' : 'none', borderRadius: '6px', color: connected ? '#5f6c7b' : 'white', fontWeight: '600', cursor: 'pointer' }),
     warning: { marginTop: '1.5rem', padding: '1rem', background: '#fef3c7', borderRadius: '8px', color: '#92400e', fontSize: '0.9rem' },
   };
 
