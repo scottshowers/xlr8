@@ -69,7 +69,7 @@ export default function PersonaManagement() {
           style={styles.createButton}
           onClick={() => setIsCreating(true)}
         >
-          + Create New Persona
+          ➕ Create New Persona
         </button>
       </div>
 
@@ -271,7 +271,7 @@ function PersonaEditor({ persona, onSave, onCancel }) {
   return (
     <div style={styles.editor}>
       <h2 style={styles.editorTitle}>
-        {persona ? '✏️ Edit Persona' : '+ Create New Persona'}
+        {persona ? '✏️ Edit Persona' : '➕ Create New Persona'}
       </h2>
 
       <form onSubmit={handleSubmit} style={styles.form}>
@@ -389,7 +389,7 @@ const styles = {
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem' },
   title: { margin: '0 0 0.5rem 0', fontSize: '2rem', color: '#2a3441' },
   subtitle: { margin: 0, fontSize: '1rem', color: '#666', lineHeight: 1.5 },
-  createButton: { padding: '0.75rem 1.5rem', fontSize: '1rem', fontWeight: '600', background: '#2a3441', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', transition: 'background 0.2s' },
+  createButton: { padding: '0.75rem 1.5rem', fontSize: '1rem', fontWeight: '600', background: '#83b16d', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' },
   errorBanner: { background: '#fee', border: '1px solid #fcc', borderRadius: '8px', padding: '1rem 1.5rem', marginBottom: '1.5rem', color: '#c33', display: 'flex', justifyContent: 'space-between' },
   successBanner: { background: '#e8f5e0', border: '1px solid #83b16d', borderRadius: '8px', padding: '1rem 1.5rem', marginBottom: '1.5rem', color: '#2a3441', display: 'flex', justifyContent: 'space-between' },
   closeBanner: { background: 'none', border: 'none', fontSize: '1.2rem', cursor: 'pointer', color: 'inherit' },
