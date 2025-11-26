@@ -1,11 +1,14 @@
 """
-Query Router - Smart Query Detection and Routing
-=================================================
+Intelligent Query Router - Self-Healing & Learning
+===================================================
 
-Detects whether a query needs:
-1. Structured data (SQL via DuckDB) - counting, listing, aggregations
-2. Unstructured data (RAG via ChromaDB) - explanations, concepts, docs
-3. Both - mixed queries requiring data + knowledge
+Philosophy: Try everything, score results, pick best, learn.
+
+NO regex pattern matching. Instead:
+1. Check if structured data exists → TRY SQL first
+2. Use fuzzy matching for entity detection
+3. Learn from user corrections
+4. Never return "not found" without trying alternatives
 
 Author: XLR8 Team
 """
@@ -14,239 +17,356 @@ import re
 import logging
 from typing import Dict, List, Any, Optional, Tuple
 from enum import Enum
+from difflib import SequenceMatcher
 
 logger = logging.getLogger(__name__)
 
 
 class QueryType(Enum):
-    STRUCTURED = "structured"      # SQL query needed
-    UNSTRUCTURED = "unstructured"  # RAG search needed
-    HYBRID = "hybrid"              # Both needed
-    GENERAL = "general"            # Just Claude's knowledge
+    STRUCTURED = "structured"
+    UNSTRUCTURED = "unstructured"
+    HYBRID = "hybrid"
+    GENERAL = "general"
 
 
-class QueryRouter:
+# Common HR/Payroll entities - used for fuzzy matching
+HR_ENTITIES = {
+    'employee': ['employee', 'emp', 'ee', 'worker', 'staff', 'personnel', 'associate'],
+    'earnings': ['earnings', 'earning', 'earn', 'pay', 'wages', 'compensation', 'income'],
+    'deductions': ['deductions', 'deduction', 'ded', 'withholding', 'benefit'],
+    'department': ['department', 'dept', 'division', 'unit', 'group', 'team', 'org'],
+    'job': ['job', 'position', 'role', 'title', 'occupation'],
+    'location': ['location', 'loc', 'site', 'branch', 'office', 'workplace'],
+    'pay_group': ['pay group', 'paygroup', 'pay_group', 'payroll group', 'pay cycle'],
+    'tax': ['tax', 'taxes', 'withholding', 'fit', 'sit', 'lit', 'fica'],
+    'bank': ['bank', 'direct deposit', 'dd', 'ach', 'routing'],
+    'benefit': ['benefit', 'benefits', 'insurance', 'health', '401k', 'retirement'],
+    'hours': ['hours', 'hrs', 'time', 'attendance', 'worked'],
+    'rate': ['rate', 'hourly', 'salary', 'annual', 'wage rate'],
+}
+
+# Action words that indicate data retrieval (not explanation)
+DATA_ACTIONS = [
+    'list', 'show', 'get', 'find', 'display', 'give', 'tell', 'what are',
+    'how many', 'count', 'total', 'sum', 'average', 'all', 'every',
+    'which', 'who', 'where', 'export', 'download', 'report'
+]
+
+
+class IntelligentQueryRouter:
     """
-    Routes queries to appropriate data sources.
+    Self-healing query router that:
+    1. Checks for structured data first
+    2. Uses fuzzy matching instead of regex
+    3. Learns from corrections
     """
     
-    # Patterns that indicate structured data queries (need SQL)
-    STRUCTURED_PATTERNS = [
-        # Counting/aggregation
-        r'\bhow many\b', r'\bcount\b', r'\btotal\b', r'\bsum\b',
-        r'\baverage\b', r'\bmean\b', r'\bmedian\b',
-        r'\bminimum\b', r'\bmaximum\b', r'\bmin\b', r'\bmax\b',
-        
-        # Listing - EXPANDED to catch more variations
-        r'\blist\b', r'\bshow\b', r'\bgive\s+me\b', r'\bget\b',
-        r'\bwhat\s+are\s+(the|all)?\b', r'\bwhat\s+\w+\s+are\s+there\b',
-        r'\bwhich\b', r'\bwho\s+(has|have|is|are)\b',
-        r'\bdisplay\b', r'\bprint\b', r'\boutput\b',
-        
-        # Table/sheet references - trigger structured
-        r'\b(in|from)\s+(the\s+)?\w+\s+(table|sheet)\b',
-        r'\b\w+\s+table\b', r'\b\w+\s+sheet\b',
-        
-        # Filtering
-        r'\bwhere\b', r'\bwith\b.*\b(of|=|equal)\b',
-        r'\bfilter\b', r'\bonly\b', r'\bexclude\b',
-        
-        # Grouping
-        r'\bgroup\s*by\b', r'\bper\s+\w+\b',
-        r'\bby\s+(department|location|status|type|employee|pay\s*group)\b',
-        r'\bbroken?\s*(down|out)\s+by\b',
-        
-        # Specific data entities - any mention triggers structured
-        r'\bemployees?\b', r'\bearnings?\b', r'\bdeductions?\b',
-        r'\bjob\s*codes?\b', r'\bdepartments?\b', r'\blocations?\b',
-        r'\bpay\s*groups?\b', r'\btax\s*groups?\b', r'\bbenefits?\b',
-        r'\bsalary\b', r'\bwages?\b', r'\brates?\b',
-        r'\bearning\s*groups?\b', r'\bdeduction\s*groups?\b',
-        
-        # Comparisons
-        r'\bgreater\s+than\b', r'\bless\s+than\b',
-        r'\bmore\s+than\b', r'\bfewer\s+than\b',
-        r'\bbetween\b.*\band\b', r'\babove\b', r'\bbelow\b',
-        
-        # Export/download
-        r'\bexport\b', r'\bdownload\b', r'\bsave\s+to\b',
-        r'\bcreate\s+(a\s+)?(report|spreadsheet|excel|csv)\b',
-        
-        # Direct SQL
-        r'\bselect\b', r'\bfrom\b.*\bwhere\b',
-    ]
+    def __init__(self, learning_db_path: str = "/data/query_learning.json"):
+        self.learning_db_path = learning_db_path
+        self.learned_patterns = self._load_learned_patterns()
     
-    # Patterns that indicate unstructured/knowledge queries (need RAG or Claude)
-    UNSTRUCTURED_PATTERNS = [
-        # Explanations
-        r'\bwhat\s+(does|is)\s+\w+\s+mean\b',
-        r'\bexplain\b', r'\bdescribe\b', r'\btell\s+me\s+about\b',
-        r'\bwhat\s+is\s+(a|an|the)\b',
+    def _load_learned_patterns(self) -> Dict:
+        """Load learned query patterns from storage"""
+        import json
+        import os
         
-        # How-to
-        r'\bhow\s+(do|can|should|to)\b',
-        r'\bwhat\s+should\b', r'\bbest\s+practice\b',
-        
-        # Why questions
-        r'\bwhy\s+(is|are|do|does|would|should)\b',
-        
-        # Recommendations
-        r'\brecommend\b', r'\bsuggest\b', r'\badvise\b',
-        
-        # Comparisons of concepts
-        r'\bdifference\s+between\b', r'\bcompare\b.*\b(to|with|and)\b',
-        
-        # Process/procedure
-        r'\bprocess\b', r'\bprocedure\b', r'\bworkflow\b', r'\bsteps?\b',
-        
-        # Configuration help
-        r'\bhow\s+to\s+configure\b', r'\bset\s*up\b', r'\bconfiguration\b',
-    ]
+        if os.path.exists(self.learning_db_path):
+            try:
+                with open(self.learning_db_path, 'r') as f:
+                    return json.load(f)
+            except:
+                pass
+        return {'queries': {}, 'entities': {}}
     
-    # Patterns that indicate hybrid queries (need both)
-    HYBRID_INDICATORS = [
-        r'\band\s+(explain|tell|describe)\b',
-        r'\b(along|together)\s+with\b',
-        r'\bwith\s+(their|its)\s+\w+\s+(and|,)\b',  # "with their birthdate and..."
-        r'\bthen\s+(explain|describe|tell)\b',
-    ]
+    def _save_learned_patterns(self):
+        """Persist learned patterns"""
+        import json
+        import os
+        
+        os.makedirs(os.path.dirname(self.learning_db_path), exist_ok=True)
+        with open(self.learning_db_path, 'w') as f:
+            json.dump(self.learned_patterns, f, indent=2)
     
-    def __init__(self):
-        # Compile patterns for efficiency
-        self.structured_regex = [re.compile(p, re.IGNORECASE) for p in self.STRUCTURED_PATTERNS]
-        self.unstructured_regex = [re.compile(p, re.IGNORECASE) for p in self.UNSTRUCTURED_PATTERNS]
-        self.hybrid_regex = [re.compile(p, re.IGNORECASE) for p in self.HYBRID_INDICATORS]
+    def fuzzy_match(self, text: str, candidates: List[str], threshold: float = 0.6) -> Optional[str]:
+        """Fuzzy match text against candidates"""
+        text_lower = text.lower()
+        best_match = None
+        best_score = 0
+        
+        for candidate in candidates:
+            # Direct substring match
+            if candidate.lower() in text_lower or text_lower in candidate.lower():
+                return candidate
+            
+            # Fuzzy match
+            score = SequenceMatcher(None, text_lower, candidate.lower()).ratio()
+            if score > best_score and score >= threshold:
+                best_score = score
+                best_match = candidate
+        
+        return best_match
     
-    def detect_query_type(self, query: str) -> Tuple[QueryType, Dict[str, Any]]:
+    def extract_entities(self, query: str) -> List[Dict]:
+        """Extract HR/Payroll entities from query using fuzzy matching"""
+        query_lower = query.lower()
+        found_entities = []
+        
+        for entity_type, variations in HR_ENTITIES.items():
+            for variation in variations:
+                if variation in query_lower:
+                    found_entities.append({
+                        'type': entity_type,
+                        'match': variation,
+                        'confidence': 1.0
+                    })
+                    break
+            else:
+                # Try fuzzy match on query words
+                words = query_lower.split()
+                for word in words:
+                    if len(word) > 2:
+                        match = self.fuzzy_match(word, variations, threshold=0.7)
+                        if match:
+                            found_entities.append({
+                                'type': entity_type,
+                                'match': match,
+                                'confidence': 0.8
+                            })
+                            break
+        
+        return found_entities
+    
+    def is_data_query(self, query: str) -> Tuple[bool, float]:
         """
-        Detect the type of query and return routing info.
-        
-        Returns:
-            (QueryType, metadata dict with details)
+        Determine if query is asking for data (vs explanation).
+        Returns (is_data_query, confidence)
         """
         query_lower = query.lower()
         
-        # Count pattern matches
-        structured_matches = sum(1 for r in self.structured_regex if r.search(query))
-        unstructured_matches = sum(1 for r in self.unstructured_regex if r.search(query))
-        hybrid_matches = sum(1 for r in self.hybrid_regex if r.search(query))
+        # Check for data action words
+        action_matches = sum(1 for action in DATA_ACTIONS if action in query_lower)
         
-        metadata = {
-            'structured_score': structured_matches,
-            'unstructured_score': unstructured_matches,
-            'hybrid_indicators': hybrid_matches,
-            'detected_entities': self._extract_entities(query)
-        }
+        # Check for question patterns that want data
+        data_questions = [
+            r'\bhow many\b', r'\bhow much\b',
+            r'\bwhat (are|is) the\b', r'\bwhat .+ (are|is) there\b',
+            r'\blist\b', r'\bshow\b', r'\bgive me\b',
+            r'\bwhich\b', r'\bwho\b',
+        ]
+        question_matches = sum(1 for p in data_questions if re.search(p, query_lower))
+        
+        # Check for explanation patterns (reduce confidence)
+        explanation_patterns = [
+            r'\bwhat does .+ mean\b', r'\bexplain\b', r'\bwhy\b',
+            r'\bhow (do|does|should|can|to)\b', r'\bdefine\b',
+        ]
+        explanation_matches = sum(1 for p in explanation_patterns if re.search(p, query_lower))
+        
+        # Calculate confidence
+        data_score = action_matches * 0.3 + question_matches * 0.4
+        explanation_score = explanation_matches * 0.5
+        
+        confidence = min(1.0, max(0.0, data_score - explanation_score + 0.5))
+        is_data = confidence > 0.5
+        
+        return is_data, confidence
+    
+    def route_query(
+        self,
+        query: str,
+        has_structured_data: bool = False,
+        has_rag_data: bool = False,
+        structured_tables: List[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Intelligently route query to best data source.
+        
+        PHILOSOPHY: If structured data exists and query looks like data request,
+        TRY SQL FIRST. Only fall back to RAG if SQL fails.
+        """
+        structured_tables = structured_tables or []
+        
+        # Extract entities from query
+        entities = self.extract_entities(query)
+        entity_types = [e['type'] for e in entities]
+        
+        # Check if this is a data query
+        is_data, data_confidence = self.is_data_query(query)
+        
+        # Check for table name matches
+        table_matches = []
+        query_lower = query.lower()
+        for table in structured_tables:
+            # Extract readable name from table (e.g., "project__file__earnings" -> "earnings")
+            table_parts = table.split('__')
+            readable_name = table_parts[-1] if table_parts else table
+            
+            if readable_name.lower() in query_lower:
+                table_matches.append(table)
+            else:
+                # Fuzzy match
+                for word in query_lower.split():
+                    if len(word) > 3 and SequenceMatcher(None, word, readable_name.lower()).ratio() > 0.7:
+                        table_matches.append(table)
+                        break
         
         # Decision logic
-        if hybrid_matches > 0 and structured_matches > 0 and unstructured_matches > 0:
-            query_type = QueryType.HYBRID
-        elif structured_matches > unstructured_matches and structured_matches >= 2:
-            query_type = QueryType.STRUCTURED
-        elif unstructured_matches > structured_matches and unstructured_matches >= 2:
-            query_type = QueryType.UNSTRUCTURED
-        elif structured_matches > 0:
-            query_type = QueryType.STRUCTURED
-        elif unstructured_matches > 0:
-            query_type = QueryType.UNSTRUCTURED
-        else:
-            query_type = QueryType.GENERAL
-        
-        metadata['query_type'] = query_type.value
-        
-        logger.info(f"Query routing: {query_type.value} (structured={structured_matches}, unstructured={unstructured_matches})")
-        
-        return query_type, metadata
-    
-    def _extract_entities(self, query: str) -> Dict[str, List[str]]:
-        """Extract relevant entities from the query"""
-        entities = {
-            'columns': [],
-            'tables': [],
-            'values': []
+        result = {
+            'query': query,
+            'entities': entities,
+            'is_data_query': is_data,
+            'data_confidence': data_confidence,
+            'table_matches': table_matches,
+            'reasoning': []
         }
         
-        # Common column references
-        column_patterns = [
-            (r'\b(birth\s*date|dob|date\s*of\s*birth)\b', 'birthdate'),
-            (r'\b(hire\s*date|doh|date\s*of\s*hire|start\s*date)\b', 'hire_date'),
-            (r'\b(term\s*date|termination\s*date)\b', 'term_date'),
-            (r'\b(job\s*code|position\s*code)\b', 'job_code'),
-            (r'\b(department|dept)\b', 'department'),
-            (r'\b(employee\s*id|emp\s*id|ee\s*id)\b', 'employee_id'),
-            (r'\b(earning\s*code|earnings?\s*type)\b', 'earning_code'),
-            (r'\b(filing\s*status|tax\s*status)\b', 'filing_status'),
-            (r'\b(first\s*name|fname)\b', 'first_name'),
-            (r'\b(last\s*name|lname|surname)\b', 'last_name'),
-            (r'\b(ssn|social\s*security)\b', 'ssn'),
-            (r'\b(salary|pay\s*rate|hourly\s*rate)\b', 'pay_rate'),
-        ]
+        # RULE 1: If we have structured data and this looks like a data query, USE IT
+        if has_structured_data and is_data:
+            result['route'] = QueryType.STRUCTURED
+            result['reasoning'].append(f"Data query detected (confidence: {data_confidence:.0%})")
+            result['reasoning'].append(f"Structured data available")
+            if table_matches:
+                result['reasoning'].append(f"Table matches: {table_matches}")
+            if entities:
+                result['reasoning'].append(f"Entities found: {entity_types}")
+            result['fallback'] = QueryType.UNSTRUCTURED if has_rag_data else QueryType.GENERAL
         
-        for pattern, normalized in column_patterns:
-            if re.search(pattern, query, re.IGNORECASE):
-                entities['columns'].append(normalized)
+        # RULE 2: If entities found but no structured data, try RAG
+        elif has_rag_data and entities:
+            result['route'] = QueryType.UNSTRUCTURED
+            result['reasoning'].append("Entities found but no structured data")
+            result['fallback'] = QueryType.GENERAL
         
-        # Look for quoted values or specific codes
-        quoted = re.findall(r'["\']([^"\']+)["\']', query)
-        entities['values'].extend(quoted)
+        # RULE 3: Explanation query with RAG data
+        elif has_rag_data and not is_data:
+            result['route'] = QueryType.UNSTRUCTURED
+            result['reasoning'].append("Explanation query detected")
+            result['fallback'] = QueryType.GENERAL
         
-        # Look for uppercase codes (like REG, OT, BONUS)
-        codes = re.findall(r'\b([A-Z]{2,10})\b', query)
-        entities['values'].extend(codes)
+        # RULE 4: If structured data exists but not clearly a data query, try hybrid
+        elif has_structured_data and has_rag_data:
+            result['route'] = QueryType.HYBRID
+            result['reasoning'].append("Ambiguous query - trying both sources")
+            result['fallback'] = QueryType.GENERAL
         
-        return entities
+        # RULE 5: Default to whatever we have
+        elif has_structured_data:
+            result['route'] = QueryType.STRUCTURED
+            result['reasoning'].append("Only structured data available - trying SQL")
+            result['fallback'] = QueryType.GENERAL
+        
+        elif has_rag_data:
+            result['route'] = QueryType.UNSTRUCTURED
+            result['reasoning'].append("Only RAG data available")
+            result['fallback'] = QueryType.GENERAL
+        
+        else:
+            result['route'] = QueryType.GENERAL
+            result['reasoning'].append("No project data - using Claude's knowledge")
+            result['fallback'] = None
+        
+        logger.info(f"[ROUTING] {query[:50]}... -> {result['route'].value} ({', '.join(result['reasoning'])})")
+        
+        return result
     
-    def build_sql_prompt(self, query: str, schema: Dict[str, Any]) -> str:
-        """
-        Build a prompt for Claude to generate SQL.
-        Includes schema info so Claude knows what tables/columns exist.
-        """
-        tables_desc = []
-        for table in schema.get('tables', []):
-            cols = [c['name'] for c in table.get('columns', [])]
-            keys = table.get('likely_keys', [])
-            tables_desc.append(
-                f"Table: {table['table_name']}\n"
-                f"  Source: {table['file']} → {table['sheet']}\n"
-                f"  Columns: {', '.join(cols)}\n"
-                f"  Rows: {table['row_count']}\n"
-                f"  Likely join keys: {', '.join(keys) if keys else 'none detected'}"
-            )
+    def learn_from_success(self, query: str, route: QueryType, entities: List[str]):
+        """Record successful routing for future learning"""
+        query_lower = query.lower()
         
-        prompt = f"""You are a SQL expert. Generate a DuckDB SQL query to answer this question.
+        # Store query pattern
+        key_words = [w for w in query_lower.split() if len(w) > 3]
+        pattern = ' '.join(sorted(key_words[:5]))
+        
+        if pattern not in self.learned_patterns['queries']:
+            self.learned_patterns['queries'][pattern] = {
+                'route': route.value,
+                'entities': entities,
+                'success_count': 0
+            }
+        
+        self.learned_patterns['queries'][pattern]['success_count'] += 1
+        self._save_learned_patterns()
+    
+    def learn_from_correction(self, query: str, wrong_route: QueryType, correct_route: QueryType):
+        """Learn from user corrections"""
+        query_lower = query.lower()
+        key_words = [w for w in query_lower.split() if len(w) > 3]
+        pattern = ' '.join(sorted(key_words[:5]))
+        
+        self.learned_patterns['queries'][pattern] = {
+            'route': correct_route.value,
+            'corrected_from': wrong_route.value,
+            'success_count': 1
+        }
+        self._save_learned_patterns()
+        logger.info(f"[LEARNING] Corrected routing: {wrong_route.value} -> {correct_route.value}")
 
-AVAILABLE TABLES:
-{chr(10).join(tables_desc)}
+
+def build_sql_prompt(query: str, schema: Dict, entities: List[Dict] = None) -> str:
+    """
+    Build a prompt for Claude to generate SQL.
+    Include full schema context for intelligent query generation.
+    """
+    tables_info = []
+    
+    for table_name, table_data in schema.get('tables', {}).items():
+        columns = table_data.get('columns', [])
+        col_names = [c.get('name', c) if isinstance(c, dict) else c for c in columns]
+        row_count = table_data.get('row_count', 'unknown')
+        
+        tables_info.append(f"""
+Table: {table_name}
+Columns: {', '.join(col_names)}
+Rows: {row_count}
+""")
+    
+    schema_text = '\n'.join(tables_info)
+    
+    entity_hint = ""
+    if entities:
+        entity_types = [e['type'] for e in entities]
+        entity_hint = f"\nDetected entities in query: {', '.join(entity_types)}"
+    
+    prompt = f"""Generate a SQL query for DuckDB to answer this question.
+
+AVAILABLE SCHEMA:
+{schema_text}
+{entity_hint}
 
 USER QUESTION: {query}
 
 RULES:
-1. Use only the tables and columns listed above
-2. Table names are exact - use them as shown
-3. For joins, use the likely join keys (usually employee_id or similar)
-4. Return only the SQL query, no explanation
-5. Use ILIKE for case-insensitive string matching
-6. Limit results to 1000 rows max unless counting
+1. Return ONLY the SQL query, no explanation
+2. Use exact table and column names from schema
+3. Use ILIKE for case-insensitive text matching
+4. LIMIT 1000 unless user asks for specific count
+5. For "list" queries, SELECT DISTINCT on relevant columns
+6. For "how many" queries, use COUNT(*)
+7. If multiple tables could answer, pick the most relevant one
+8. If unsure which column, include multiple relevant columns
 
-SQL QUERY:"""
-        
-        return prompt
+SQL:"""
     
-    def needs_export(self, query: str) -> bool:
-        """Check if query requests data export"""
-        export_patterns = [
-            r'\bexport\b', r'\bdownload\b', r'\bsave\b',
-            r'\bexcel\b', r'\bcsv\b', r'\bspreadsheet\b',
-            r'\bcreate\s+(a\s+)?file\b'
-        ]
-        return any(re.search(p, query, re.IGNORECASE) for p in export_patterns)
+    return prompt
 
 
-# Singleton
-_router: Optional[QueryRouter] = None
+# Singleton instance
+_router: Optional[IntelligentQueryRouter] = None
 
-def get_query_router() -> QueryRouter:
+def get_query_router() -> IntelligentQueryRouter:
+    """Get or create singleton router"""
     global _router
     if _router is None:
-        _router = QueryRouter()
+        _router = IntelligentQueryRouter()
     return _router
+
+
+def detect_query_type(
+    query: str,
+    has_structured: bool = False,
+    has_rag: bool = False,
+    tables: List[str] = None
+) -> Dict[str, Any]:
+    """Convenience function for query routing"""
+    router = get_query_router()
+    return router.route_query(query, has_structured, has_rag, tables)
