@@ -546,6 +546,16 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
                     # Find tables that might be relevant to the query
                     query_lower = message.lower()
                     
+                    # Smart term extraction - get stems/prefixes for better matching
+                    query_terms = [w for w in query_lower.split() if len(w) > 3]
+                    # Add stems (first 5 chars) for plural/singular matching
+                    query_stems = set()
+                    for term in query_terms:
+                        query_stems.add(term)
+                        if len(term) > 5:
+                            query_stems.add(term[:5])  # "employees" -> "emplo"
+                            query_stems.add(term[:6])  # "employees" -> "employ"
+                    
                     for table_info in tables_list:
                         table_name = table_info.get('table_name', '')
                         sheet_name = table_info.get('sheet', '')
@@ -554,16 +564,27 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
                         
                         # Check if table/sheet name relates to query
                         sheet_lower = sheet_name.lower().replace(' ', '').replace('_', '')
+                        table_lower = table_name.lower()
+                        file_lower = file_name.lower() if file_name else ''
                         
-                        # Extract key terms from query
-                        query_terms = [w for w in query_lower.split() if len(w) > 3]
-                        
-                        # Check for matches
-                        is_relevant = any(term in sheet_lower or sheet_lower in term for term in query_terms)
+                        # Check for matches using stems for better plural/singular handling
+                        is_relevant = False
+                        for stem in query_stems:
+                            if stem in sheet_lower or stem in table_lower:
+                                is_relevant = True
+                                break
+                            # IMPORTANT: Also check file name for matching
+                            if stem in file_lower:
+                                is_relevant = True
+                                break
                         
                         # Also check column names
-                        col_names_lower = ' '.join(str(c).lower() for c in columns[:20])
-                        is_relevant = is_relevant or any(term in col_names_lower for term in query_terms)
+                        if not is_relevant:
+                            col_names_lower = ' '.join(str(c).lower() for c in columns[:30])
+                            for stem in query_stems:
+                                if stem in col_names_lower:
+                                    is_relevant = True
+                                    break
                         
                         if is_relevant:
                             try:
@@ -578,10 +599,10 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
                                         'sheet': sheet_name,
                                         'table': table_name,
                                         'columns': cols,
-                                        'data': decrypted[:100],  # Limit for context
+                                        'data': decrypted[:100],
                                         'total_rows': len(rows)
                                     })
-                                    logger.info(f"[SQL] Found {len(rows)} rows in {sheet_name}, columns: {cols[:5]}")
+                                    logger.info(f"[SQL] {sheet_name}: {len(rows)} rows")
                             except Exception as e:
                                 logger.warning(f"[SQL] Failed to query {table_name}: {e}")
                     
@@ -615,9 +636,7 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
         
         # If we have data, let Claude answer
         if sql_results_list or rag_chunks:
-            logger.info(f"[INTELLIGENT] Found {len(sql_results_list)} SQL tables, {len(rag_chunks)} RAG chunks")
-            for r in sql_results_list:
-                logger.info(f"[INTELLIGENT] Table: {r['sheet']} with {r['total_rows']} rows")
+            logger.info(f"[QUERY] Found {len(sql_results_list)} tables, {len(rag_chunks)} RAG chunks")
             
             update_job_status(job_id, 'processing', '✨ Generating response...', 70)
             
@@ -634,15 +653,8 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
                     row_str = " | ".join(f"{k}: {v}" for k, v in row.items())
                     data_text += f"  {row_str}\n"
                 
-                # Debug: also log first row
-                if result['data']:
-                    first_row = result['data'][0]
-                    logger.info(f"[INTELLIGENT] First row of {result['sheet']}: {first_row}")
-                
-                logger.info(f"[INTELLIGENT] Built data_text for {result['sheet']}: {len(data_text)} chars")
-                
                 context_chunks.append({
-                    'document': data_text,  # Changed from 'content' to 'document'
+                    'document': data_text,
                     'metadata': {
                         'filename': result['source_file'],
                         'parent_section': result['sheet'],
@@ -661,13 +673,6 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
             
             # Use orchestrator to process
             orchestrator_instance = LLMOrchestrator()
-            
-            # DEBUG: Log what we're passing
-            logger.info(f"[INTELLIGENT] Passing {len(context_chunks)} chunks to orchestrator")
-            for i, c in enumerate(context_chunks[:3]):
-                doc_preview = c.get('document', '')[:200] if c.get('document') else 'EMPTY'
-                logger.info(f"[INTELLIGENT] Chunk {i}: {doc_preview}...")
-            
             result = orchestrator_instance.process_query(message, context_chunks)
             
             response = result.get('response', 'I found data but had trouble analyzing it.')
