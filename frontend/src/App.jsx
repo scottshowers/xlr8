@@ -11,7 +11,8 @@ import Status from './components/Status';
 import Landing from './pages/Landing';
 import Projects from './pages/Projects';
 import Secure20Analysis from './pages/Secure20Analysis';
-import AdminPage from './pages/AdminPage'
+import AdminPage from './pages/AdminPage';
+import VacuumUploadPage from './pages/VacuumUploadPage';
 
 // H Logo SVG Component
 const HLogo = () => (
@@ -50,7 +51,7 @@ const HLogo = () => (
       <rect fill="#a8ca99" x="320.19" y="233.17" width="64.39" height="11.87"/>
     </g>
     <path fill="#84b26d" d="M426.59,95.27h13.7v-19.18h-173.52v19.18h11.42c19.18,0,22.83,3.65,22.83,22.83V248.24h-82.65V118.1c0-19.18,3.65-22.83,22.83-22.83h11.42v-19.18H79.09v19.18h13.7c19.18,0,22.83,3.65,22.83,22.83V406.24c0,19.18-3.65,22.83-22.83,22.83h-13.7v19.18H252.61v-19.18h-11.42c-19.18,0-22.83-3.65-22.83-22.83v-138.82h82.65v138.82c0,19.18-3.65,22.83-22.83,22.83h-11.42v19.18h173.52v-19.18h-13.7c-19.18,0-22.83-3.65-22.83-22.83V118.1c0-19.18,3.65-22.83,22.83-22.83Z"/>
-    <path fill="#9cc28a" d="M426.59,101.36h19.79v-31.36h-183.7v31.36h15.5c15.8,0,16.74,.94,16.74,16.74v124.05h-70.47V118.1c0-15.8,.94-16.74,16.74-16.74h15.5v-31.36H73v31.36h19.79c15.8,0,16.74,.94,16.74,16.74V406.24c0,15.8-.94,16.74-16.74,16.74h-19.79v31.35h183.7v-31.35h-15.5c-15.8,0-16.74-.94-16.74-16.74v-132.73h70.47v132.73c0,15.8-.94,16.74-16.74,16.74h-15.5v31.35h183.7v-31.35h-19.79c-15.8,0-16.74-.94-16.74-16.74V118.1c0-15.8,.94-16.74,16.74-16.74Z"/>
+    <path fill="#9cc28a" d="M426.59,101.36h19.79v-31.36h-183.7v31.36h15.5c15.8,0,16.74,.94,16.74,16.74v124.05h-70.47V118.1c0-15.8,.94-16.74,16.74-16.74h15.5v-31.36H73v31.36h19.79c15.8,0,16.74,.94,16.74,16.74V406.24c0,15.8-.94,16.74-16.74,16.74h-19.79v31.35h183.7v-31.35h-15.5c-15.8,0-16.74-.94-16.74-16.74v-132.73h70.47v132.73c0,15.8,.94,16.74-16.74,16.74h-15.5v31.35h183.7v-31.35h-19.79c-15.8,0-16.74-.94-16.74-16.74V118.1c0-15.8,.94-16.74,16.74-16.74Z"/>
   </svg>
 );
 
@@ -126,6 +127,7 @@ function Navigation() {
             <li><Link to="/projects" style={navLinkStyle('/projects')}>Projects</Link></li>
             <li><Link to="/chat" style={navLinkStyle('/chat')}>Chat</Link></li>
             <li><Link to="/upload" style={navLinkStyle('/upload')}>Upload</Link></li>
+            <li><Link to="/vacuum" style={navLinkStyle('/vacuum')}>Vacuum Extract</Link></li>
             <li><Link to="/status" style={navLinkStyle('/status')}>File Status</Link></li>
             <li><Link to="/secure20" style={navLinkStyle('/secure20')}>Featured Analysis Templates</Link></li>
           </ul>
@@ -196,6 +198,7 @@ function App() {
                 />
               } 
             />
+            <Route path="/vacuum" element={<VacuumUploadPage />} />
             <Route path="/status" element={<Status projects={projects} />} />
             <Route path="/secure20" element={<Secure20Analysis />} />
           </Routes>
