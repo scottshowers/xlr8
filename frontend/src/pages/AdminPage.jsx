@@ -3,6 +3,7 @@
  * 
  * Tabs:
  * - Projects: Create, edit, delete projects
+ * - Personas: Manage AI personas
  * - Data Management: Structured data (DuckDB) + Documents (ChromaDB)
  * - Global Data: Shared reference data
  * - UKG Connections: API connections for PRO/WFM/READY
@@ -11,11 +12,13 @@
 
 import React, { useState, useEffect } from 'react';
 import { useProject } from '../context/ProjectContext';
+import PersonaManagement from '../components/PersonaManagement';
 import api from '../services/api';
 
 // Tab definitions
 const TABS = [
   { id: 'projects', label: 'Projects', icon: '🏢' },
+  { id: 'personas', label: 'Personas', icon: '🎭' },
   { id: 'data', label: 'Data Management', icon: '📊' },
   { id: 'global', label: 'Global Data', icon: '🌐' },
   { id: 'connections', label: 'UKG Connections', icon: '🔌' },
@@ -533,6 +536,7 @@ export default function AdminPage() {
   const renderTabContent = () => {
     switch (activeTab) {
       case 'projects': return <ProjectsTab />;
+      case 'personas': return <PersonaManagement />;
       case 'data': return <DataManagementTab />;
       case 'global': return <GlobalDataTab />;
       case 'connections': return <ConnectionsTab />;
