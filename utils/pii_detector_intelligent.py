@@ -186,7 +186,37 @@ class IntelligentPIIDetector:
         column_lower = column_name.lower()
         column_normalized = re.sub(r'[^a-z0-9]', '', column_lower)
         
-        # Check learned patterns first
+        # EXCLUSION PATTERNS - these are metadata/classification fields, NOT PII
+        # Even if they contain words like "earning", they're just category names
+        safe_suffixes = ['_code', '_group', '_type', '_category', '_status', '_flag', 
+                         '_id', '_key', '_name', '_desc', '_description', '_label']
+        safe_words = ['code', 'group', 'type', 'category', 'status', 'flag', 'level',
+                      'step', 'grade', 'class', 'tier', 'plan', 'model', 'template',
+                      'frequency', 'period', 'schedule', 'rule', 'method', 'option']
+        
+        # Check if column is clearly a metadata/classification field
+        for suffix in safe_suffixes:
+            if column_lower.endswith(suffix):
+                return {
+                    'is_pii': False,
+                    'pii_type': None,
+                    'confidence': 0.95,
+                    'reasoning': f'Metadata field (ends with {suffix})',
+                    'sensitivity': 'none'
+                }
+        
+        # Check if column contains safe classification words
+        for word in safe_words:
+            if word in column_lower and not any(pii in column_lower for pii in ['ssn', 'salary', 'wage', 'bank', 'account', 'birth', 'dob']):
+                return {
+                    'is_pii': False,
+                    'pii_type': None,
+                    'confidence': 0.9,
+                    'reasoning': f'Classification field (contains "{word}")',
+                    'sensitivity': 'none'
+                }
+        
+        # Check learned patterns
         if column_lower in self.learned['confirmed_pii']:
             return {
                 'is_pii': True,
