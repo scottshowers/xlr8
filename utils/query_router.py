@@ -37,34 +37,43 @@ class QueryRouter:
         r'\baverage\b', r'\bmean\b', r'\bmedian\b',
         r'\bminimum\b', r'\bmaximum\b', r'\bmin\b', r'\bmax\b',
         
-        # Listing
-        r'\blist\s+(all|every|each)\b', r'\bshow\s+(all|every|me)\b',
-        r'\bgive\s+me\s+(a\s+)?list\b', r'\bwhat\s+are\s+all\b',
-        r'\bwhich\s+employees\b', r'\bwho\s+(has|have|is|are)\b',
+        # Listing - EXPANDED to catch more variations
+        r'\blist\b', r'\bshow\b', r'\bgive\s+me\b', r'\bget\b',
+        r'\bwhat\s+are\s+(the|all)?\b', r'\bwhat\s+\w+\s+are\s+there\b',
+        r'\bwhich\b', r'\bwho\s+(has|have|is|are)\b',
+        r'\bdisplay\b', r'\bprint\b', r'\boutput\b',
+        
+        # Table/sheet references - trigger structured
+        r'\b(in|from)\s+(the\s+)?\w+\s+(table|sheet)\b',
+        r'\b\w+\s+table\b', r'\b\w+\s+sheet\b',
         
         # Filtering
-        r'\bwhere\b.*\b(is|are|equals?|=)\b',
-        r'\bwith\s+(the|a)?\s*\w+\s*(of|=|equal)', 
-        r'\bfilter\b', r'\bonly\b.*\bwith\b',
+        r'\bwhere\b', r'\bwith\b.*\b(of|=|equal)\b',
+        r'\bfilter\b', r'\bonly\b', r'\bexclude\b',
         
         # Grouping
-        r'\bgroup\s*by\b', r'\bper\s+(employee|department|earning)\b',
-        r'\bby\s+(department|location|status|type)\b',
+        r'\bgroup\s*by\b', r'\bper\s+\w+\b',
+        r'\bby\s+(department|location|status|type|employee|pay\s*group)\b',
+        r'\bbroken?\s*(down|out)\s+by\b',
         
-        # Specific data requests
-        r'\bemployees?\s+(in|with|who|that)\b',
-        r'\bearnings?\s+(code|type|group)\b',
-        r'\bdeductions?\s+(code|type)\b',
-        r'\bjob\s*codes?\b', r'\bdepartments?\b',
+        # Specific data entities - any mention triggers structured
+        r'\bemployees?\b', r'\bearnings?\b', r'\bdeductions?\b',
+        r'\bjob\s*codes?\b', r'\bdepartments?\b', r'\blocations?\b',
+        r'\bpay\s*groups?\b', r'\btax\s*groups?\b', r'\bbenefits?\b',
+        r'\bsalary\b', r'\bwages?\b', r'\brates?\b',
+        r'\bearning\s*groups?\b', r'\bdeduction\s*groups?\b',
         
         # Comparisons
         r'\bgreater\s+than\b', r'\bless\s+than\b',
         r'\bmore\s+than\b', r'\bfewer\s+than\b',
-        r'\bbetween\b.*\band\b',
+        r'\bbetween\b.*\band\b', r'\babove\b', r'\bbelow\b',
         
         # Export/download
         r'\bexport\b', r'\bdownload\b', r'\bsave\s+to\b',
         r'\bcreate\s+(a\s+)?(report|spreadsheet|excel|csv)\b',
+        
+        # Direct SQL
+        r'\bselect\b', r'\bfrom\b.*\bwhere\b',
     ]
     
     # Patterns that indicate unstructured/knowledge queries (need RAG or Claude)
