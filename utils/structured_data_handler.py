@@ -49,15 +49,29 @@ logger = logging.getLogger(__name__)
 DUCKDB_PATH = "/data/structured_data.duckdb"
 ENCRYPTION_KEY_PATH = "/data/.encryption_key"
 
-# PII field patterns to encrypt
+# PII field patterns to encrypt - EXPANDED for variations
 PII_PATTERNS = [
-    r'ssn', r'social.*sec', r'social_security',
-    r'tax.*id', r'tin',
-    r'bank.*account', r'routing.*number', r'account.*number',
-    r'credit.*card', r'card.*number',
-    r'passport', r'license.*number', r'driver.*lic',
-    r'salary', r'pay.*rate', r'wage', r'compensation',
-    r'dob', r'date.*birth', r'birth.*date', r'birthdate',
+    # SSN variations
+    r'ssn', r'ss_n', r'ss#', r'soc.*sec', r'social.*sec', r'social_security',
+    r'emp.*ssn', r'employee.*ssn', r'ssn.*num', r'ssnumber',
+    # Tax ID
+    r'tax.*id', r'tin', r'fein', r'ein', r'fed.*id', r'federal.*id',
+    # Bank info
+    r'bank.*acct', r'bank.*account', r'acct.*num', r'account.*num',
+    r'routing', r'aba', r'ach', r'direct.*dep',
+    # Credit/payment
+    r'credit.*card', r'card.*num', r'cc.*num', r'payment.*acct',
+    # Identity docs
+    r'passport', r'license.*num', r'driver.*lic', r'dl.*num', r'id.*num',
+    r'visa.*num', r'green.*card', r'work.*permit', r'i-9', r'i9',
+    # Compensation - be aggressive here
+    r'salary', r'pay.*rate', r'hourly.*rate', r'annual.*sal', r'base.*pay',
+    r'wage', r'compensation', r'comp.*rate', r'rate.*pay', r'pay.*amt',
+    r'gross.*pay', r'net.*pay', r'ytd.*earn', r'ytd.*gross', r'ytd.*net',
+    # Dates - birth
+    r'dob', r'date.*birth', r'birth.*date', r'birthdate', r'bday', r'born',
+    # Contact that could be sensitive
+    r'home.*phone', r'cell', r'mobile', r'personal.*email',
 ]
 
 
