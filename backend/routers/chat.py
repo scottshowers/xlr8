@@ -428,16 +428,10 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
                 logger.info(f"[DEBUG] Got structured handler, checking project: {project}")
                 schema = handler.get_schema_for_project(project) if project else {}
                 
-                # Handle both dict and list schema formats
-                if isinstance(schema, dict):
-                    has_structured = bool(schema.get('tables'))
-                    table_names = list(schema.get('tables', {}).keys())
-                elif isinstance(schema, list) and len(schema) > 0:
-                    has_structured = True
-                    table_names = schema  # It's already a list of table names
-                else:
-                    has_structured = False
-                    table_names = []
+                # schema['tables'] is a LIST of table info dicts
+                tables_list = schema.get('tables', [])
+                has_structured = len(tables_list) > 0
+                table_names = [t['table_name'] for t in tables_list if 'table_name' in t]
                     
                 logger.info(f"[DEBUG] has_structured={has_structured}, tables={len(table_names)}")
             except Exception as e:
