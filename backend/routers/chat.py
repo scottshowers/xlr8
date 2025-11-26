@@ -379,10 +379,13 @@ def format_structured_response(message: str, rows: list, columns: list, persona,
     if not rows:
         return f"I searched your data but didn't find any matching records. The query I used was:\n\n```sql\n{sql_query}\n```\n\nTry rephrasing your question or check if the data has been uploaded."
     
-    # Count query
-    if len(rows) == 1 and len(columns) == 1 and columns[0].lower() in ['count', 'total', 'cnt']:
-        count = list(rows[0].values())[0]
-        return f"**{count}** records match your criteria."
+    # Count query - detect various count column formats
+    if len(rows) == 1 and len(columns) == 1:
+        col_lower = columns[0].lower()
+        is_count = any(x in col_lower for x in ['count', 'total', 'cnt', 'sum', 'avg', 'min', 'max'])
+        if is_count:
+            count = list(rows[0].values())[0]
+            return f"**{count}** records match your criteria."
     
     # List query - format as table
     response_parts = []
@@ -539,10 +542,12 @@ User Question: {message}
 def process_chat_job(job_id: str, message: str, project: Optional[str], max_results: int, persona_name: str = 'bessie'):
     """Background processing for chat with ADVANCED FEATURES + BESSIE! 🐮
     
-    NOW WITH SMART ROUTING:
-    - Structured queries (count, list, filter) → DuckDB SQL
-    - Unstructured queries (explain, how-to) → RAG + LLM
-    - Hybrid queries → Both!
+    INTELLIGENT SELF-HEALING APPROACH:
+    1. Gather ALL relevant data (SQL tables + RAG documents)
+    2. Send everything to Claude
+    3. Let Claude synthesize an intelligent response
+    
+    NO premature routing - Claude gets ALL the context and decides what's relevant.
     """
     try:
         # STEP 0: LOAD PERSONA
@@ -550,29 +555,7 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
         persona = pm.get_persona(persona_name)
         logger.info(f"[PERSONA] Using: {persona.name} {persona.icon}")
         
-        # STEP 1: DETECT STRUCTURED QUERIES - Route to proper SQL generation
-        # Keywords that indicate we should generate intelligent SQL
-        message_lower = message.lower()
-        structured_keywords = [
-            'how many', 'count', 'total', 'number of', 
-            'list all', 'show all', 'give me all', 'get all',
-            'sum of', 'average', 'avg', 'min', 'max',
-            'filter', 'where', 'employees with', 'employees who',
-            'active employees', 'inactive employees', 'terminated',
-            'by department', 'by location', 'group by', 'grouped by'
-        ]
-        
-        is_structured_query = any(kw in message_lower for kw in structured_keywords)
-        
-        if is_structured_query and STRUCTURED_QUERIES_AVAILABLE:
-            logger.info(f"[ROUTING] Detected structured query, using SQL generation")
-            # Use the proper handle_structured_query function
-            routing_meta = {'route': 'structured', 'keywords_matched': True}
-            if handle_structured_query(job_id, message, project, persona, routing_meta):
-                return  # Successfully handled by structured query
-            logger.info("[ROUTING] Structured query fell through, continuing with hybrid approach")
-        
-        # STEP 2: HYBRID APPROACH - Gather data and let Claude reason
+        # STEP 1: GATHER ALL DATA - Let Claude reason over everything
         # Philosophy: Get ALL relevant data. Send to Claude. Let Claude think.
         
         all_data_context = []
