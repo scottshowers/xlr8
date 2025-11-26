@@ -182,6 +182,38 @@ SQL:"""
     return prompt
 
 
+def _decrypt_results(rows: list, handler) -> list:
+    """
+    Decrypt any encrypted values in query results for display.
+    Encrypted values start with 'ENC:'.
+    """
+    if not rows:
+        return rows
+    
+    try:
+        encryptor = handler.encryptor
+        if not encryptor or not encryptor.fernet:
+            return rows
+        
+        decrypted_rows = []
+        for row in rows:
+            decrypted_row = {}
+            for key, value in row.items():
+                if isinstance(value, str) and value.startswith('ENC:'):
+                    try:
+                        decrypted_row[key] = encryptor.decrypt(value)
+                    except Exception:
+                        decrypted_row[key] = '[encrypted]'
+                else:
+                    decrypted_row[key] = value
+            decrypted_rows.append(decrypted_row)
+        
+        return decrypted_rows
+    except Exception as e:
+        logger.warning(f"Failed to decrypt results: {e}")
+        return rows
+
+
 def handle_structured_query(job_id: str, message: str, project: Optional[str], persona, routing_meta: dict) -> bool:
     """
     Handle structured data queries via DuckDB SQL.
@@ -261,7 +293,10 @@ def handle_structured_query(job_id: str, message: str, project: Optional[str], p
         # Format response
         update_job_status(job_id, 'processing', '✨ Generating response...', 90)
         
-        response = format_structured_response(message, rows, columns, persona, sql_query, export_path)
+        # Auto-decrypt any encrypted values for display
+        decrypted_rows = _decrypt_results(rows, handler)
+        
+        response = format_structured_response(message, decrypted_rows, columns, persona, sql_query, export_path)
         
         # Build source info
         sources = [{
