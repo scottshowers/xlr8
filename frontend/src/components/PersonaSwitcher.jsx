@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import api from '../services/api';  // FIXED: Import api service
 
 /**
  * Persona Switcher Component
@@ -17,8 +16,9 @@ export function PersonaSwitcher({ currentPersona, onPersonaChange }) {
 
   const fetchPersonas = async () => {
     try {
-      const response = await api.get('/chat/personas');  // FIXED: Use api service
-      setPersonas(response.data.personas || []);
+      const response = await fetch('/api/chat/personas');
+      const data = await response.json();
+      setPersonas(data.personas || []);
     } catch (error) {
       console.error('Error fetching personas:', error);
     } finally {
@@ -39,9 +39,7 @@ export function PersonaSwitcher({ currentPersona, onPersonaChange }) {
 
   return (
     <div style={styles.container}>
-      <div style={styles.label}>Persona:</div>
-      
-      {/* Current Persona Display */}
+      {/* Current Persona Display - No label needed */}
       <div 
         style={styles.current}
         onClick={() => setIsOpen(!isOpen)}
