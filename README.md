@@ -331,7 +331,7 @@ xlr8-hcmpact/
 ├── README.md              # This file
 ├── QUICKSTART.md          # Quick deployment guide
 ├── utils/
-│   └── pdf_parser.py      # Advanced PDF parsing engine
+│   └── pdf_parser.py      # Advanced PDF parsing engine.
 ├── .streamlit/
 │   └── config.toml        # Streamlit configuration
 └── assets/
