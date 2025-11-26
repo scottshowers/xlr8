@@ -11,12 +11,19 @@ sys.path.insert(0, '/data')
 
 from backend.routers import chat, upload, status, projects, jobs
 
+# Import vacuum router
+try:
+    from backend.routers import vacuum
+    VACUUM_AVAILABLE = True
+except ImportError:
+    VACUUM_AVAILABLE = False
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="XLR8", version="2.0")
 
-# CORS Configuration - Fixed for Vercel force
+# CORS Configuration - Fixed for Vercel
 # NOTE: allow_credentials=True requires explicit origins (no "*")
 app.add_middleware(
     CORSMiddleware,
@@ -38,6 +45,13 @@ app.include_router(status.router, prefix="/api")
 app.include_router(projects.router, prefix="/api/projects")
 app.include_router(jobs.router, prefix="/api")
 
+# Register vacuum router if available
+if VACUUM_AVAILABLE:
+    app.include_router(vacuum.router, prefix="/api", tags=["vacuum"])
+    logger.info("Vacuum router registered")
+else:
+    logger.warning("Vacuum router not available")
+
 @app.get("/api/health")
 async def health():
     try:
@@ -46,7 +60,8 @@ async def health():
         
         return {
             "status": "healthy",
-            "chromadb": "connected"
+            "chromadb": "connected",
+            "vacuum_available": VACUUM_AVAILABLE
         }
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}
