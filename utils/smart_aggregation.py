@@ -155,6 +155,7 @@ class SmartAggregator:
             return {
                 'needs_agg': True,
                 'agg_type': agg_info['agg_type'],
+                'entity': agg_info['entity'],
                 'count': 0,
                 'items': []
             }
@@ -237,8 +238,8 @@ class SmartAggregator:
         if not agg_result.get('needs_agg'):
             return None
         
-        count = agg_result['count']
-        entity = agg_result['entity']
+        count = agg_result.get('count', 0)
+        entity = agg_result.get('entity', 'items')
         items = agg_result.get('items', [])
         
         # Build response
