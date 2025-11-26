@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import api from '../services/api';
 
 /**
  * Persona Switcher Component
@@ -16,10 +17,9 @@ export function PersonaSwitcher({ currentPersona, onPersonaChange }) {
 
   const fetchPersonas = async () => {
     try {
-      const response = await fetch('/api/chat/personas');
-      const data = await response.json();
+      const response = await api.get('/chat/personas');
       // Map personas to ensure they have an id field
-      const mappedPersonas = (data.personas || []).map(p => ({
+      const mappedPersonas = (response.data.personas || []).map(p => ({
         ...p,
         id: p.id || p.name?.toLowerCase().replace(/\s+/g, '_') || p.name
       }));
