@@ -31,17 +31,17 @@ const SpeedLinesStyles = () => (
     @keyframes speedLine {
       0% { opacity: 0; transform: translateX(-20px); }
       50% { opacity: 1; }
-      100% { opacity: 0; transform: translateX(35px); }
+      100% { opacity: 0; transform: translateX(40px); }
     }
     .speed-line {
-      height: 4px;
+      height: 5px;
       background: linear-gradient(90deg, transparent, rgba(255,255,255,0.6), transparent);
       animation: speedLine 1.8s ease-out infinite;
       border-radius: 2px;
     }
-    .speed-line:nth-child(1) { width: 35px; animation-delay: 0s; }
-    .speed-line:nth-child(2) { width: 55px; animation-delay: 0.25s; }
-    .speed-line:nth-child(3) { width: 28px; animation-delay: 0.5s; }
+    .speed-line:nth-child(1) { width: 40px; animation-delay: 0s; }
+    .speed-line:nth-child(2) { width: 60px; animation-delay: 0.25s; }
+    .speed-line:nth-child(3) { width: 32px; animation-delay: 0.5s; }
   `}</style>
 )
 
@@ -49,12 +49,12 @@ const SpeedLinesStyles = () => (
 const SpeedLines = () => (
   <div style={{
     position: 'absolute',
-    left: '-30px',
+    left: '-35px',
     top: '50%',
     transform: 'translateY(-50%)',
     display: 'flex',
     flexDirection: 'column',
-    gap: '12px',
+    gap: '14px',
     zIndex: 0
   }}>
     <div className="speed-line" />
@@ -117,10 +117,10 @@ export default function Landing() {
       <div style={{
         background: COLORS.grassGreen,
         color: 'white',
-        padding: '1.75rem 2rem'
+        padding: '1.5rem 2rem'
       }}>
         <div style={{ 
-          maxWidth: '900px', 
+          maxWidth: '1000px', 
           margin: '0 auto',
           display: 'flex',
           alignItems: 'center',
@@ -128,39 +128,38 @@ export default function Landing() {
           flexWrap: 'wrap',
           gap: '1.5rem'
         }}>
-          {/* Left side - H Logo with speed lines + XLR8 */}
+          {/* Left side - H Logo with speed lines + XLR8 🚀 Analysis Platform */}
           <div style={{ 
             display: 'flex', 
             alignItems: 'center', 
             gap: '1rem'
           }}>
-            {/* H Logo container with speed lines BEHIND */}
+            {/* H Logo container with speed lines BEHIND - BIGGER */}
             <div style={{ position: 'relative' }}>
               <SpeedLines />
-              <HLogoWhiteFull size={80} />
+              <HLogoWhiteFull size={100} />
             </div>
             
-            {/* XLR8 + Rocket */}
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span style={{ 
-                  fontFamily: "'Ubuntu Mono', monospace",
-                  fontSize: '2rem',
-                  fontWeight: '700',
-                  letterSpacing: '0.05em'
-                }}>
-                  XLR8
-                </span>
-                <Rocket style={{ width: 24, height: 24 }} />
-              </div>
-              <p style={{
-                fontFamily: "'Manrope', sans-serif",
-                fontSize: '0.85rem',
-                opacity: 0.9,
-                margin: 0
+            {/* XLR8 🚀 Analysis Platform - all inline */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span style={{ 
+                fontFamily: "'Ubuntu Mono', monospace",
+                fontSize: '2rem',
+                fontWeight: '700',
+                letterSpacing: '0.05em'
+              }}>
+                XLR8
+              </span>
+              <Rocket style={{ width: 24, height: 24 }} />
+              <span style={{ 
+                fontFamily: "'Ubuntu Mono', monospace",
+                fontSize: '2rem',
+                fontWeight: '700',
+                letterSpacing: '0.05em',
+                color: '#c5c4cc'
               }}>
                 Analysis Platform
-              </p>
+              </span>
             </div>
           </div>
           
