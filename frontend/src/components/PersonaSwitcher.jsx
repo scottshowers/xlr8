@@ -18,9 +18,22 @@ export function PersonaSwitcher({ currentPersona, onPersonaChange }) {
     try {
       const response = await fetch('/api/chat/personas');
       const data = await response.json();
-      setPersonas(data.personas || []);
+      // Map personas to ensure they have an id field
+      const mappedPersonas = (data.personas || []).map(p => ({
+        ...p,
+        id: p.id || p.name?.toLowerCase().replace(/\s+/g, '_') || p.name
+      }));
+      setPersonas(mappedPersonas);
     } catch (error) {
       console.error('Error fetching personas:', error);
+      // Set default Bessie if fetch fails
+      setPersonas([{
+        id: 'bessie',
+        name: 'Bessie',
+        icon: '🐮',
+        description: 'Your friendly UKG payroll expert',
+        expertise: ['Payroll', 'UKG Pro', 'Compliance']
+      }]);
     } finally {
       setLoading(false);
     }
@@ -33,9 +46,18 @@ export function PersonaSwitcher({ currentPersona, onPersonaChange }) {
 
   const currentP = personas.find(p => p.id === currentPersona) || personas[0];
 
-  if (loading || !currentP) {
+  // Show loading only while actually loading
+  if (loading) {
     return <div style={styles.loading}>Loading personas...</div>;
   }
+
+  // If no personas at all, show error state
+  if (!personas.length) {
+    return <div style={styles.loading}>No personas available</div>;
+  }
+
+  // If currentP not found, default to first persona
+  const displayPersona = currentP || personas[0];
 
   return (
     <div style={styles.container}>
@@ -44,8 +66,8 @@ export function PersonaSwitcher({ currentPersona, onPersonaChange }) {
         style={styles.current}
         onClick={() => setIsOpen(!isOpen)}
       >
-        <span style={styles.icon}>{currentP.icon}</span>
-        <span style={styles.name}>{currentP.name}</span>
+        <span style={styles.icon}>{displayPersona.icon}</span>
+        <span style={styles.name}>{displayPersona.name}</span>
         <span style={styles.arrow}>{isOpen ? '▲' : '▼'}</span>
       </div>
 
