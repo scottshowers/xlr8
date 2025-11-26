@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="XLR8", version="2.0")
 
-# CORS Configuration - Fixed for Vercel
+# CORS Configuration - Fixed for Vercel force
 # NOTE: allow_credentials=True requires explicit origins (no "*")
 app.add_middleware(
     CORSMiddleware,
