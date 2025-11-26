@@ -1,19 +1,13 @@
 /**
  * Layout - Main App Wrapper
- * 
- * Contains:
- * - ContextBar (project selector)
- * - Navigation (4 items)
- * - Page content
- * 
- * Used by all app pages except Landing
+ * Vertical logo, no Analysis Engine subtitle, fixed scroll
  */
 
-import React, { useState } from 'react';
+import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { Rocket } from 'lucide-react';
 import ContextBar from './ContextBar';
 
-// Brand Colors
 const COLORS = {
   grassGreen: '#83b16d',
   skyBlue: '#93abd9',
@@ -23,74 +17,28 @@ const COLORS = {
   textLight: '#5f6c7b',
 };
 
-// Speed Lines Animation Styles
-const SpeedLinesStyles = () => (
-  <style>{`
-    @keyframes speedLineGreen {
-      0% { opacity: 0; transform: translateX(-15px); }
-      50% { opacity: 1; }
-      100% { opacity: 0; transform: translateX(30px); }
-    }
-    .nav-logo-wrapper:hover .speed-line-green {
-      animation: speedLineGreen 1s ease-out infinite;
-    }
-    .speed-line-green {
-      height: 2px;
-      background: linear-gradient(90deg, transparent, #83b16d, transparent);
-      border-radius: 2px;
-      opacity: 0;
-    }
-    .speed-line-green:nth-child(1) { width: 20px; animation-delay: 0s; }
-    .speed-line-green:nth-child(2) { width: 30px; animation-delay: 0.15s; }
-    .speed-line-green:nth-child(3) { width: 18px; animation-delay: 0.3s; }
-  `}</style>
-)
+const NAV_ITEMS = [
+  { path: '/workspace', label: 'Workspace', icon: '💬' },
+  { path: '/data', label: 'Data', icon: '📁' },
+  { path: '/playbooks', label: 'Playbooks', icon: '📋' },
+  { path: '/admin', label: 'Admin', icon: '⚙️' },
+];
 
-// Speed Lines for Nav (green, smaller)
-const SpeedLinesNav = () => (
-  <div style={{
-    position: 'absolute',
-    left: '-18px',
-    top: '50%',
-    transform: 'translateY(-50%)',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '5px'
-  }}>
-    <div className="speed-line-green" />
-    <div className="speed-line-green" />
-    <div className="speed-line-green" />
-  </div>
-)
-
-// Brand Colors
-const COLORS = {
-  grassGreen: '#83b16d',
-  skyBlue: '#93abd9',
-  iceFlow: '#c9d3d4',
-  white: '#f6f5fa',
-  text: '#2a3441',
-  textLight: '#5f6c7b',
-};
-
-// Green H Logo SVG Component (for navigation)
+// Full Detail Green H Logo
 const HLogoGreen = () => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 570 570" style={{ width: '100%', height: '100%' }}>
-    <path fill="#698f57" d="M492.04,500v-31.35l-36.53-35.01V163.76c0-15.8,.94-16.74,16.74-16.74h19.79v-31.36l-45.66-45.66H73v31.36l36.53,36.53V406.24c0,15.8-.94,16.74-16.74,16.74h-19.79v31.35l45.66,45.66H492.04Zm-197.11-93.76c0,15.8-.94,16.74-16.74,16.74h-8.07v-103.81h24.81v87.07Zm-24.81-242.48c0-15.8,.94-16.74,16.74-16.74h8.07v95.13h-24.81v-78.39Z"/>
+    <path fill="#698f57" d="M492.04,500v-31.35l-36.53-35.01V163.76c0-15.8,.94-16.74,16.74-16.74h19.79v-31.36l-45.66-45.66H73v31.36l36.53,36.53V406.24c0,15.8-.94,16.74-16.74,16.74h-19.79v31.35l45.66,45.66H492.04Z"/>
     <g fill="#a8ca99">
       <rect x="134.8" y="348.24" width="64.39" height="11.87"/>
       <rect x="134.8" y="324.95" width="64.39" height="11.87"/>
       <rect x="134.8" y="302.12" width="64.39" height="11.87"/>
       <rect x="134.8" y="279.29" width="64.39" height="11.87"/>
-      <path d="M134.34,107.14h65.76c.46-4.57,1.37-8.68,2.74-11.87h-71.69c1.37,3.2,2.74,7.31,3.2,11.87Z"/>
-      <path d="M319.74,417.19c-.46,4.57-1.83,8.22-3.2,11.87h71.69c-1.37-3.65-2.28-7.31-2.74-11.87h-65.75Z"/>
       <rect x="134.8" y="371.08" width="64.39" height="11.87"/>
       <rect x="134.8" y="393.91" width="64.39" height="11.87"/>
       <rect x="134.8" y="118.1" width="64.39" height="11.87"/>
       <rect x="134.8" y="164.22" width="64.39" height="11.87"/>
       <rect x="320.19" y="140.93" width="64.39" height="11.87"/>
       <rect x="134.8" y="256" width="64.39" height="11.87"/>
-      <path d="M134.34,417.19c-.46,4.57-1.83,8.22-3.2,11.87h71.69c-1.37-3.65-2.28-7.31-2.74-11.87h-65.76Z"/>
       <rect x="134.8" y="140.93" width="64.39" height="11.87"/>
       <rect x="134.8" y="233.17" width="64.39" height="11.87"/>
       <rect x="134.8" y="187.05" width="64.39" height="11.87"/>
@@ -101,7 +49,6 @@ const HLogoGreen = () => (
       <rect x="320.19" y="279.29" width="64.39" height="11.87"/>
       <rect x="320.19" y="302.12" width="64.39" height="11.87"/>
       <rect x="320.19" y="393.91" width="64.39" height="11.87"/>
-      <path d="M319.74,107.14h65.75c.46-4.57,1.37-8.68,2.74-11.87h-71.69c1.37,3.2,2.74,7.31,3.2,11.87Z"/>
       <rect x="320.19" y="164.22" width="64.39" height="11.87"/>
       <rect x="320.19" y="118.1" width="64.39" height="11.87"/>
       <rect x="320.19" y="187.05" width="64.39" height="11.87"/>
@@ -114,14 +61,6 @@ const HLogoGreen = () => (
   </svg>
 );
 
-// Navigation items
-const NAV_ITEMS = [
-  { path: '/workspace', label: 'Workspace', icon: '💬' },
-  { path: '/data', label: 'Data', icon: '📁' },
-  { path: '/playbooks', label: 'Playbooks', icon: '📋' },
-  { path: '/admin', label: 'Admin', icon: '⚙️' },
-];
-
 function Navigation() {
   const location = useLocation();
 
@@ -132,91 +71,61 @@ function Navigation() {
     return location.pathname.startsWith(path);
   };
 
-  const styles = {
-    nav: {
+  return (
+    <nav style={{
       background: 'white',
       borderBottom: '1px solid #e1e8ed',
       padding: '0 1.5rem',
-    },
-    container: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '2rem',
-      maxWidth: '1400px',
-      margin: '0 auto',
-    },
-    logo: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.5rem',
-      padding: '0.75rem 0',
-      textDecoration: 'none',
-    },
-    logoMark: {
-      width: '36px',
-      height: '36px',
-    },
-    logoText: {
-      display: 'flex',
-      flexDirection: 'column',
-    },
-    logoMain: {
-      fontFamily: "'Sora', sans-serif",
-      fontWeight: '700',
-      fontSize: '1.1rem',
-      color: COLORS.text,
-      lineHeight: 1,
-    },
-    logoSub: {
-      fontFamily: "'Manrope', sans-serif",
-      fontSize: '0.65rem',
-      color: COLORS.textLight,
-      marginTop: '2px',
-    },
-    navItems: {
-      display: 'flex',
-      gap: '0.5rem',
-    },
-    navItem: (active) => ({
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.5rem',
-      padding: '1rem 1.25rem',
-      textDecoration: 'none',
-      fontSize: '0.9rem',
-      fontWeight: '600',
-      color: active ? COLORS.grassGreen : COLORS.textLight,
-      borderBottom: active ? `2px solid ${COLORS.grassGreen}` : '2px solid transparent',
-      marginBottom: '-1px',
-      transition: 'all 0.2s ease',
-    }),
-    navIcon: {
-      fontSize: '1rem',
-    },
-  };
-
-  return (
-    <nav style={styles.nav}>
-      <div style={styles.container}>
-        <Link to="/" style={styles.logo} className="nav-logo-wrapper">
-          <div style={{ ...styles.logoMark, position: 'relative' }}>
-            <SpeedLinesNav />
+    }}>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '1.5rem',
+        maxWidth: '1400px',
+        margin: '0 auto',
+      }}>
+        {/* Vertical Logo */}
+        <Link to="/" style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          padding: '0.5rem 0',
+          textDecoration: 'none',
+        }}>
+          <div style={{ width: '32px', height: '32px' }}>
             <HLogoGreen />
           </div>
-          <div style={styles.logoText}>
-            <span style={styles.logoMain}>XLR8</span>
-            <span style={styles.logoSub}>Analysis Engine</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+            <span style={{
+              fontFamily: "'Ubuntu Mono', monospace",
+              fontWeight: '700',
+              fontSize: '1.1rem',
+              color: COLORS.text,
+            }}>XLR8</span>
+            <Rocket style={{ width: 14, height: 14, color: COLORS.grassGreen }} />
           </div>
         </Link>
 
-        <div style={styles.navItems}>
+        {/* Nav Items */}
+        <div style={{ display: 'flex', gap: '0.25rem' }}>
           {NAV_ITEMS.map((item) => (
             <Link
               key={item.path}
               to={item.path}
-              style={styles.navItem(isActive(item.path))}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                padding: '0.875rem 1rem',
+                textDecoration: 'none',
+                fontSize: '0.875rem',
+                fontWeight: '600',
+                color: isActive(item.path) ? COLORS.grassGreen : COLORS.textLight,
+                borderBottom: isActive(item.path) ? `2px solid ${COLORS.grassGreen}` : '2px solid transparent',
+                marginBottom: '-1px',
+              }}
             >
-              <span style={styles.navIcon}>{item.icon}</span>
+              <span>{item.icon}</span>
               {item.label}
             </Link>
           ))}
@@ -234,7 +143,6 @@ export default function Layout({ children }) {
       display: 'flex', 
       flexDirection: 'column' 
     }}>
-      <SpeedLinesStyles />
       <ContextBar />
       <Navigation />
       <main style={{ 
@@ -242,7 +150,7 @@ export default function Layout({ children }) {
         maxWidth: '1400px', 
         width: '100%',
         margin: '0 auto', 
-        padding: '1.5rem',
+        padding: '1rem 1.5rem',
       }}>
         {children}
       </main>
