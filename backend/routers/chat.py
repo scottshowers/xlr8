@@ -45,7 +45,7 @@ except ImportError as e:
 
 # Import intelligent query router
 try:
-    from utils.query_router_intelligent import get_query_router, QueryType, detect_query_type
+    from utils.query_router import get_query_router, QueryType, detect_query_type
     INTELLIGENT_ROUTING = True
     logger_temp = logging.getLogger(__name__)
     logger_temp.info("Intelligent query routing enabled")
