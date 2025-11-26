@@ -512,11 +512,14 @@ export default function Chat({
 
   return (
     <div style={styles.container}>
-      {/* Header */}
+      {/* Header - Persona + Controls */}
       <div style={styles.header}>
-        <div>
-          <h1 style={styles.headerTitle}>Chat with Documents</h1>
-          <p style={styles.headerSubtitle}>Ask questions about your uploaded files</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          {/* Persona Switcher - Moved to header */}
+          <PersonaSwitcher 
+            currentPersona={currentPersona}
+            onPersonaChange={(persona) => setCurrentPersona(persona)}
+          />
         </div>
         
         <div style={styles.headerControls}>
@@ -557,14 +560,6 @@ export default function Chat({
         </div>
       </div>
 
-      {/* Persona Switcher */}
-      <div style={{ padding: '1rem 2rem', borderBottom: '1px solid #e5e7eb', background: '#fafafa' }}>
-        <PersonaSwitcher 
-          currentPersona={currentPersona}
-          onPersonaChange={(persona) => setCurrentPersona(persona)}
-        />
-      </div>
-
       {/* Messages Area */}
       <div style={styles.messagesArea}>
         {messages.length === 0 ? (
@@ -572,8 +567,7 @@ export default function Chat({
             <div style={styles.emptyIcon}>💬</div>
             <p style={styles.emptyTitle}>Start a conversation</p>
             <p style={styles.emptyText}>
-              Ask questions about your uploaded documents.
-              {selectedProject ? ` Searching in: ${selectedProject}` : ' Select a project to filter results.'}
+              {selectedProject ? `Searching in: ${selectedProject}` : 'Select a project to get started.'}
             </p>
           </div>
         ) : (
