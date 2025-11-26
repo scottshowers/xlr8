@@ -613,69 +613,55 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
         # BUILD CONTEXT FOR CLAUDE
         update_job_status(job_id, 'processing', '🧠 Analyzing all data...', 50)
         
-        data_context_parts = []
-        
-        if sql_results_list:
-            data_context_parts.append("=== STRUCTURED DATA FROM UPLOADED FILES ===\n")
-            for result in sql_results_list:
-                data_context_parts.append(f"\n📄 Source: {result['source_file']} → Sheet: {result['sheet']}")
-                data_context_parts.append(f"   Total rows in table: {result['total_rows']}")
-                data_context_parts.append(f"   Columns: {', '.join(result['columns'][:10])}")
-                data_context_parts.append(f"   Sample data:")
-                
-                # Format sample data
-                for i, row in enumerate(result['data'][:20]):
-                    row_str = " | ".join(f"{k}: {v}" for k, v in list(row.items())[:5])
-                    data_context_parts.append(f"   {i+1}. {row_str}")
-                
-                if result['total_rows'] > 20:
-                    data_context_parts.append(f"   ... and {result['total_rows'] - 20} more rows")
-                data_context_parts.append("")
-        
-        if rag_chunks:
-            data_context_parts.append("\n=== DOCUMENT CONTENT ===\n")
-            for i, chunk in enumerate(rag_chunks[:5]):
-                data_context_parts.append(f"[Document {i+1}]: {chunk[:500]}...")
-        
-        data_context = "\n".join(data_context_parts)
-        
         # If we have data, let Claude answer
         if sql_results_list or rag_chunks:
             update_job_status(job_id, 'processing', '✨ Generating response...', 70)
             
-            # Build prompt for Claude to reason about the data
-            reasoning_prompt = f"""You are an expert data analyst. The user asked a question and I've gathered relevant data from their uploaded files.
-
-USER QUESTION: {message}
-
-{data_context}
-
-INSTRUCTIONS:
-1. Analyze ALL the data provided above
-2. Cross-reference between different sources if multiple exist
-3. Provide a clear, accurate answer based on what the data shows
-4. If there's conflicting data between sources, explain both and which is likely the "master" source
-5. Be specific - give actual counts, list actual values, reference actual data
-6. If the user asked for a list, provide the actual list (not just a count)
-7. Format nicely with markdown if helpful
-
-YOUR ANALYSIS AND ANSWER:"""
+            # Build context as "chunks" for the orchestrator
+            context_chunks = []
             
-            # Use Claude to reason
+            for result in sql_results_list:
+                # Format SQL data as a chunk
+                data_text = f"Source: {result['source_file']} → {result['sheet']}\n"
+                data_text += f"Columns: {', '.join(result['columns'])}\n"
+                data_text += f"Total rows: {result['total_rows']}\n\nData:\n"
+                
+                for row in result['data'][:50]:
+                    row_str = " | ".join(f"{k}: {v}" for k, v in row.items())
+                    data_text += f"  {row_str}\n"
+                
+                context_chunks.append({
+                    'content': data_text,
+                    'metadata': {
+                        'filename': result['source_file'],
+                        'sheet': result['sheet'],
+                        'type': 'structured_data'
+                    }
+                })
+            
+            for i, chunk in enumerate(rag_chunks[:5]):
+                context_chunks.append({
+                    'content': chunk,
+                    'metadata': {
+                        'filename': f'Document chunk {i+1}',
+                        'type': 'rag'
+                    }
+                })
+            
+            # Use orchestrator to process
             orchestrator_instance = LLMOrchestrator()
-            response = orchestrator_instance.generate_response(reasoning_prompt, persona)
+            result = orchestrator_instance.process_query(message, context_chunks)
             
-            if not response:
-                response = "I found data but had trouble analyzing it. Please try rephrasing your question."
+            response = result.get('response', 'I found data but had trouble analyzing it.')
             
             # Build sources
             sources = []
-            for result in sql_results_list:
+            for res in sql_results_list:
                 sources.append({
-                    'filename': result['source_file'],
-                    'sheet': result['sheet'],
+                    'filename': res['source_file'],
+                    'sheet': res['sheet'],
                     'type': 'structured_data',
-                    'rows': result['total_rows'],
+                    'rows': res['total_rows'],
                     'relevance': 95
                 })
             
