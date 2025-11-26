@@ -15,6 +15,16 @@ import React, { useState } from 'react';
 import { useProject } from '../context/ProjectContext';
 import { useNavigate } from 'react-router-dom';
 
+// Brand Colors
+const COLORS = {
+  grassGreen: '#83b16d',
+  skyBlue: '#93abd9',
+  iceFlow: '#c9d3d4',
+  white: '#f6f5fa',
+  text: '#2a3441',
+  textLight: '#5f6c7b',
+};
+
 // Sample Playbooks (will come from backend later)
 const PLAYBOOKS = [
   {
@@ -88,25 +98,25 @@ function PlaybookCard({ playbook, onRun }) {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background: 'linear-gradient(135deg, rgba(131, 177, 109, 0.1), rgba(147, 171, 217, 0.08))',
+      background: COLORS.iceFlow,
       borderRadius: '10px',
     },
     title: {
       fontFamily: "'Sora', sans-serif",
       fontSize: '1.1rem',
       fontWeight: '700',
-      color: '#2a3441',
+      color: COLORS.text,
       marginBottom: '0.25rem',
     },
     category: {
       fontSize: '0.75rem',
-      color: '#83b16d',
+      color: COLORS.grassGreen,
       fontWeight: '600',
       textTransform: 'uppercase',
       letterSpacing: '0.05em',
     },
     description: {
-      color: '#5f6c7b',
+      color: COLORS.textLight,
       fontSize: '0.9rem',
       lineHeight: '1.5',
       marginBottom: '1rem',
@@ -122,7 +132,7 @@ function PlaybookCard({ playbook, onRun }) {
       padding: '0.25rem 0.5rem',
       background: '#f0f4f7',
       borderRadius: '4px',
-      color: '#5f6c7b',
+      color: COLORS.textLight,
     },
     footer: {
       display: 'flex',
@@ -133,11 +143,11 @@ function PlaybookCard({ playbook, onRun }) {
     },
     time: {
       fontSize: '0.8rem',
-      color: '#5f6c7b',
+      color: COLORS.textLight,
     },
     button: {
       padding: '0.5rem 1rem',
-      background: 'linear-gradient(135deg, #83b16d 0%, #93abd9 100%)',
+      background: COLORS.grassGreen,
       border: 'none',
       borderRadius: '6px',
       color: 'white',
@@ -214,13 +224,13 @@ function CreatePlaybookPrompt({ onClose }) {
       marginBottom: '1rem',
     },
     text: {
-      color: '#5f6c7b',
+      color: COLORS.textLight,
       lineHeight: '1.6',
       marginBottom: '1.5rem',
     },
     button: {
       padding: '0.75rem 1.5rem',
-      background: '#5f6c7b',
+      background: COLORS.textLight,
       border: 'none',
       borderRadius: '8px',
       color: 'white',
@@ -261,11 +271,11 @@ function SelectProjectPrompt() {
         fontFamily: "'Sora', sans-serif",
         fontSize: '1.5rem',
         fontWeight: '700',
-        color: '#2a3441',
+        color: COLORS.text,
         marginBottom: '0.75rem',
       }}>Select a Project First</h2>
       <p style={{
-        color: '#5f6c7b',
+        color: COLORS.textLight,
         fontSize: '1rem',
         maxWidth: '400px',
         lineHeight: '1.6',
@@ -313,7 +323,7 @@ export default function PlaybooksPage() {
       alignItems: 'center',
       gap: '0.5rem',
       fontSize: '0.85rem',
-      color: '#5f6c7b',
+      color: COLORS.textLight,
       marginBottom: '0.5rem',
     },
     titleRow: {
@@ -325,19 +335,19 @@ export default function PlaybooksPage() {
       fontFamily: "'Sora', sans-serif",
       fontSize: '1.75rem',
       fontWeight: '700',
-      color: '#2a3441',
+      color: COLORS.text,
       margin: 0,
     },
     subtitle: {
-      color: '#5f6c7b',
+      color: COLORS.textLight,
       marginTop: '0.25rem',
     },
     createButton: {
       padding: '0.75rem 1.25rem',
       background: 'white',
-      border: '2px solid #83b16d',
+      border: `2px solid ${COLORS.grassGreen}`,
       borderRadius: '8px',
-      color: '#83b16d',
+      color: COLORS.grassGreen,
       fontWeight: '600',
       cursor: 'pointer',
       display: 'flex',
@@ -351,10 +361,10 @@ export default function PlaybooksPage() {
     },
     filterButton: (active) => ({
       padding: '0.5rem 1rem',
-      background: active ? 'linear-gradient(135deg, #83b16d 0%, #93abd9 100%)' : '#f0f4f7',
+      background: active ? COLORS.grassGreen : '#f0f4f7',
       border: 'none',
       borderRadius: '20px',
-      color: active ? 'white' : '#5f6c7b',
+      color: active ? 'white' : COLORS.textLight,
       fontWeight: '600',
       fontSize: '0.85rem',
       cursor: 'pointer',
@@ -373,7 +383,7 @@ export default function PlaybooksPage() {
         <div style={styles.breadcrumb}>
           <span>{customerName}</span>
           <span>→</span>
-          <span style={{ color: '#83b16d', fontWeight: '600' }}>{projectName}</span>
+          <span style={{ color: COLORS.grassGreen, fontWeight: '600' }}>{projectName}</span>
         </div>
         <div style={styles.titleRow}>
           <div>
