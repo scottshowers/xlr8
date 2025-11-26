@@ -19,6 +19,43 @@ import {
   ArrowRight
 } from 'lucide-react'
 
+// Speed Lines Animation Styles (injected once)
+const SpeedLinesStyles = () => (
+  <style>{`
+    @keyframes speedLine {
+      0% { opacity: 0; transform: translateX(-20px); }
+      50% { opacity: 1; }
+      100% { opacity: 0; transform: translateX(40px); }
+    }
+    .speed-line {
+      height: 3px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.9), transparent);
+      animation: speedLine 1.5s ease-out infinite;
+      border-radius: 2px;
+    }
+    .speed-line:nth-child(1) { width: 30px; animation-delay: 0s; }
+    .speed-line:nth-child(2) { width: 45px; animation-delay: 0.2s; }
+    .speed-line:nth-child(3) { width: 25px; animation-delay: 0.4s; }
+  `}</style>
+)
+
+// Speed Lines Component
+const SpeedLines = () => (
+  <div style={{
+    position: 'absolute',
+    left: '-25px',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px'
+  }}>
+    <div className="speed-line" />
+    <div className="speed-line" />
+    <div className="speed-line" />
+  </div>
+)
+
 // White H Logo SVG Component (for hero on green background)
 const HLogoWhite = () => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 570 570" style={{ width: '100%', height: '100%' }}>
@@ -76,6 +113,7 @@ const COLORS = {
 export default function Landing() {
   return (
     <div style={{ minHeight: '100vh', background: COLORS.white }}>
+      <SpeedLinesStyles />
       
       {/* HERO - Compact, clean */}
       <div style={{
@@ -85,7 +123,7 @@ export default function Landing() {
         textAlign: 'center'
       }}>
         <div style={{ maxWidth: '900px', margin: '0 auto' }}>
-          {/* Logo + Name */}
+          {/* Logo + Name with Speed Lines */}
           <div style={{ 
             display: 'flex', 
             justifyContent: 'center', 
@@ -93,7 +131,12 @@ export default function Landing() {
             gap: '1rem',
             marginBottom: '0.5rem'
           }}>
-            <div style={{ width: '50px', height: '50px' }}>
+            <div style={{ 
+              position: 'relative',
+              width: '55px', 
+              height: '55px' 
+            }}>
+              <SpeedLines />
               <HLogoWhite />
             </div>
             <h1 style={{ 
