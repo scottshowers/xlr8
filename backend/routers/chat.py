@@ -130,6 +130,58 @@ def update_job_status(job_id: str, status: str, step: str, progress: int, **kwar
         logger.info(f"[JOB {job_id}] {step} ({progress}%)")
 
 
+def _build_sql_prompt(query: str, schema: dict) -> str:
+    """
+    Build a prompt for Claude to generate SQL.
+    Include full schema context for intelligent query generation.
+    """
+    tables_info = []
+    
+    for table in schema.get('tables', []):
+        table_name = table.get('table_name', 'unknown')
+        columns = table.get('columns', [])
+        row_count = table.get('row_count', 'unknown')
+        sheet = table.get('sheet', '')
+        
+        # Handle columns - might be list of strings or list of dicts
+        if columns and isinstance(columns[0], dict):
+            col_names = [c.get('name', str(c)) for c in columns]
+        else:
+            col_names = [str(c) for c in columns]
+        
+        tables_info.append(f"""
+Table: {table_name}
+Sheet: {sheet}
+Columns: {', '.join(col_names[:30])}{'...' if len(col_names) > 30 else ''}
+Rows: {row_count}
+""")
+    
+    schema_text = '\n'.join(tables_info)
+    
+    prompt = f"""Generate a SQL query for DuckDB to answer this question.
+
+AVAILABLE SCHEMA:
+{schema_text}
+
+USER QUESTION: {query}
+
+RULES:
+1. Return ONLY the SQL query, no explanation
+2. Use exact table and column names from schema
+3. Use ILIKE for case-insensitive text matching
+4. LIMIT 100 unless user asks for specific count or "all"
+5. For "list" queries, SELECT DISTINCT on relevant columns
+6. For "how many" queries, use COUNT(*)
+7. If multiple tables could answer, pick the most relevant one
+8. If unsure which column, include multiple relevant columns
+9. Table names are lowercase with underscores
+10. Column names may have spaces - wrap in double quotes if needed
+
+SQL:"""
+    
+    return prompt
+
+
 def handle_structured_query(job_id: str, message: str, project: Optional[str], persona, routing_meta: dict) -> bool:
     """
     Handle structured data queries via DuckDB SQL.
@@ -139,7 +191,6 @@ def handle_structured_query(job_id: str, message: str, project: Optional[str], p
         update_job_status(job_id, 'processing', '📊 Detected data query - checking tables...', 10)
         
         handler = get_structured_handler()
-        router = get_query_router()
         
         # Get schema for this project
         schema = handler.get_schema_for_project(project) if project else {'tables': []}
@@ -150,8 +201,8 @@ def handle_structured_query(job_id: str, message: str, project: Optional[str], p
         
         update_job_status(job_id, 'processing', '🔧 Generating SQL query...', 20)
         
-        # Build SQL prompt with schema
-        sql_prompt = router.build_sql_prompt(message, schema)
+        # Build SQL prompt with schema (inline, not dependent on router)
+        sql_prompt = _build_sql_prompt(message, schema)
         
         # Use orchestrator to generate SQL
         orchestrator_instance = LLMOrchestrator()
@@ -186,7 +237,7 @@ def handle_structured_query(job_id: str, message: str, project: Optional[str], p
         update_job_status(job_id, 'processing', '📝 Formatting results...', 70)
         
         # Check if export requested
-        needs_export = router.needs_export(message)
+        needs_export = any(word in message.lower() for word in ['export', 'download', 'csv', 'excel', 'save'])
         export_path = None
         
         if needs_export and rows:
