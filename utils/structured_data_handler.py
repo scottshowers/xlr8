@@ -74,6 +74,14 @@ PII_PATTERNS = [
     r'home.*phone', r'cell', r'mobile', r'personal.*email',
 ]
 
+# Import intelligent PII detector
+try:
+    from utils.pii_detector_intelligent import get_pii_detector, is_pii_column as intelligent_is_pii
+    INTELLIGENT_PII_AVAILABLE = True
+except ImportError:
+    INTELLIGENT_PII_AVAILABLE = False
+    logger.warning("Intelligent PII detector not available, using regex fallback")
+
 
 class FieldEncryptor:
     """Handles field-level encryption for PII data"""
@@ -81,9 +89,18 @@ class FieldEncryptor:
     def __init__(self, key_path: str = ENCRYPTION_KEY_PATH):
         self.key_path = key_path
         self.fernet = None
+        self.pii_detector = None
         
         if ENCRYPTION_AVAILABLE:
             self._init_encryption()
+        
+        # Use intelligent detector if available
+        if INTELLIGENT_PII_AVAILABLE:
+            try:
+                self.pii_detector = get_pii_detector()
+                logger.info("Using intelligent PII detector")
+            except:
+                pass
     
     def _init_encryption(self):
         """Initialize or load encryption key"""
@@ -106,8 +123,20 @@ class FieldEncryptor:
             logger.error(f"Encryption initialization failed: {e}")
             self.fernet = None
     
-    def is_pii_column(self, column_name: str) -> bool:
-        """Check if column likely contains PII"""
+    def is_pii_column(self, column_name: str, sample_data: list = None) -> bool:
+        """
+        Check if column likely contains PII.
+        Uses intelligent detector if available, falls back to regex.
+        """
+        # Try intelligent detector first
+        if self.pii_detector:
+            try:
+                result = self.pii_detector.detect_pii_type(column_name, sample_data)
+                return result['is_pii']
+            except Exception as e:
+                logger.warning(f"Intelligent PII detection failed, using regex: {e}")
+        
+        # Fallback to regex patterns
         col_lower = column_name.lower()
         for pattern in PII_PATTERNS:
             if re.search(pattern, col_lower):
@@ -147,12 +176,18 @@ class FieldEncryptor:
             return value
     
     def encrypt_dataframe(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
-        """Encrypt PII columns in a DataFrame"""
+        """
+        Encrypt PII columns in a DataFrame.
+        Uses intelligent detection with sample data analysis.
+        """
         encrypted_cols = []
         df = df.copy()
         
         for col in df.columns:
-            if self.is_pii_column(col):
+            # Get sample data for intelligent analysis
+            sample_data = df[col].dropna().head(20).tolist()
+            
+            if self.is_pii_column(col, sample_data):
                 df[col] = df[col].apply(self.encrypt)
                 encrypted_cols.append(col)
                 logger.info(f"Encrypted PII column: {col}")
