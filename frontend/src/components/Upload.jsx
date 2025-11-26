@@ -9,7 +9,7 @@ export default function Upload({ projects = [], functionalAreas = [], onProjectC
   const [selectedProject, setSelectedProject] = useState('')
   const [projectList, setProjectList] = useState(projects)
   const [uploading, setUploading] = useState(false)
-  const [uploadResult, setUploadResult] = useState(null)
+  const [uploadProgress, setUploadProgress] = useState([]) // Track each file's status
   const [error, setError] = useState(null)
 
   const defaultAreas = [
@@ -46,14 +46,18 @@ export default function Upload({ projects = [], functionalAreas = [], onProjectC
 
   const handleFileChange = (e) => {
     const selectedFiles = Array.from(e.target.files)
-    setFiles(selectedFiles)
+    setFiles(prev => [...prev, ...selectedFiles])
     setError(null)
-    setUploadResult(null)
+    setUploadProgress([])
+  }
+
+  const removeFile = (index) => {
+    setFiles(prev => prev.filter((_, i) => i !== index))
   }
 
   const handleUpload = async () => {
     if (files.length === 0) {
-      setError('Please select a file to upload')
+      setError('Please select at least one file to upload')
       return
     }
 
@@ -64,45 +68,69 @@ export default function Upload({ projects = [], functionalAreas = [], onProjectC
 
     setUploading(true)
     setError(null)
-    setUploadResult(null)
+    
+    // Initialize progress for all files
+    setUploadProgress(files.map(f => ({ 
+      name: f.name, 
+      status: 'pending', 
+      message: 'Waiting...' 
+    })))
 
-    try {
-      const file = files[0]
+    // Upload files sequentially
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
       
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('project', selectedProject)
-      if (selectedArea) {
-        formData.append('functional_area', selectedArea)
+      // Update status to uploading
+      setUploadProgress(prev => prev.map((p, idx) => 
+        idx === i ? { ...p, status: 'uploading', message: 'Uploading...' } : p
+      ))
+
+      try {
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('project', selectedProject)
+        if (selectedArea) {
+          formData.append('functional_area', selectedArea)
+        }
+
+        const response = await api.post('/upload', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+          timeout: 60000
+        })
+
+        const { job_id, message } = response.data
+
+        // Update status to success
+        setUploadProgress(prev => prev.map((p, idx) => 
+          idx === i ? { 
+            ...p, 
+            status: 'success', 
+            message: message || 'Queued for processing',
+            job_id 
+          } : p
+        ))
+
+      } catch (err) {
+        console.error(`Upload error for ${file.name}:`, err)
+        
+        // Update status to error
+        setUploadProgress(prev => prev.map((p, idx) => 
+          idx === i ? { 
+            ...p, 
+            status: 'error', 
+            message: err.response?.data?.detail || err.message || 'Upload failed'
+          } : p
+        ))
       }
-
-      const response = await api.post('/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 30000
-      })
-
-      const { job_id, message } = response.data
-
-      setUploadResult({
-        success: true,
-        message: message || 'File queued for processing!',
-        job_id: job_id
-      })
-
-      setFiles([])
-      setSelectedArea('')
-      
-      // Redirect to status page after 2 seconds
-      setTimeout(() => {
-        navigate('/status')
-      }, 2000)
-
-    } catch (err) {
-      console.error('Upload error:', err)
-      setError(err.response?.data?.detail || err.message || 'Upload failed')
-    } finally {
-      setUploading(false)
     }
+
+    setUploading(false)
+    setFiles([])
+    
+    // Redirect to status page after brief delay
+    setTimeout(() => {
+      navigate('/status')
+    }, 2000)
   }
 
   const formatFileSize = (bytes) => {
@@ -111,7 +139,6 @@ export default function Upload({ projects = [], functionalAreas = [], onProjectC
     return (bytes / (1024 * 1024)).toFixed(2) + ' MB'
   }
 
-  // Styles matching your app's design
   const styles = {
     container: {
       maxWidth: '800px',
@@ -178,33 +205,48 @@ export default function Upload({ projects = [], functionalAreas = [], onProjectC
     dropzoneText: {
       fontSize: '1rem',
       color: '#2a3441',
+      fontWeight: '500',
       marginBottom: '0.5rem'
     },
     dropzoneSubtext: {
       fontSize: '0.875rem',
       color: '#5f6c7b'
     },
-    filePreview: {
-      background: '#f0fdf4',
-      border: '1px solid #86efac',
-      borderRadius: '8px',
-      padding: '1rem',
-      marginBottom: '1.5rem',
+    fileList: {
+      marginBottom: '1.5rem'
+    },
+    fileItem: {
       display: 'flex',
       alignItems: 'center',
+      padding: '0.75rem 1rem',
+      background: '#f8fafc',
+      borderRadius: '8px',
+      marginBottom: '0.5rem',
       gap: '0.75rem'
     },
     fileIcon: {
-      fontSize: '1.5rem'
+      fontSize: '1.25rem'
     },
     fileName: {
       flex: 1,
+      fontWeight: '500',
       color: '#2a3441',
-      fontWeight: '500'
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap'
     },
     fileSize: {
       color: '#5f6c7b',
       fontSize: '0.875rem'
+    },
+    removeBtn: {
+      background: 'none',
+      border: 'none',
+      color: '#e53e3e',
+      cursor: 'pointer',
+      fontSize: '1.25rem',
+      padding: '0.25rem',
+      lineHeight: 1
     },
     button: {
       width: '100%',
@@ -212,75 +254,74 @@ export default function Upload({ projects = [], functionalAreas = [], onProjectC
       fontSize: '1rem',
       fontWeight: '600',
       color: 'white',
-      background: 'linear-gradient(135deg, #83b16d, #6b9956)',
+      background: 'linear-gradient(135deg, #83b16d 0%, #93abd9 100%)',
       border: 'none',
-      borderRadius: '10px',
+      borderRadius: '8px',
       cursor: 'pointer',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: '0.5rem',
       transition: 'all 0.2s ease',
-      boxShadow: '0 2px 8px rgba(131, 177, 109, 0.3)'
+      marginBottom: '1rem'
     },
     buttonDisabled: {
-      background: '#d1d9e0',
-      cursor: 'not-allowed',
-      boxShadow: 'none'
+      opacity: 0.5,
+      cursor: 'not-allowed'
     },
     infoBox: {
-      background: 'linear-gradient(135deg, rgba(131, 177, 109, 0.1), rgba(147, 171, 217, 0.08))',
-      border: '1px solid rgba(131, 177, 109, 0.3)',
-      borderRadius: '10px',
-      padding: '1rem 1.25rem',
-      marginTop: '1.5rem'
+      background: '#f0f7ed',
+      borderRadius: '8px',
+      padding: '1rem',
+      marginBottom: '1rem'
     },
     infoText: {
-      fontSize: '0.9rem',
+      fontSize: '0.875rem',
       color: '#2a3441',
-      lineHeight: '1.5'
+      lineHeight: '1.5',
+      margin: 0
     },
     infoLabel: {
-      fontWeight: '600',
-      color: '#83b16d'
+      fontWeight: '600'
     },
     errorBox: {
       background: '#fef2f2',
-      border: '1px solid #fecaca',
-      borderRadius: '10px',
-      padding: '1rem 1.25rem',
-      marginTop: '1rem',
+      borderRadius: '8px',
+      padding: '1rem',
+      marginBottom: '1rem',
       display: 'flex',
-      alignItems: 'flex-start',
+      alignItems: 'center',
       gap: '0.75rem'
     },
     errorIcon: {
-      color: '#dc2626',
       fontSize: '1.25rem'
     },
     errorText: {
       color: '#dc2626',
       fontSize: '0.9rem'
     },
-    successBox: {
-      background: '#f0fdf4',
-      border: '1px solid #86efac',
-      borderRadius: '10px',
-      padding: '1.25rem',
-      marginTop: '1rem'
+    progressList: {
+      marginBottom: '1rem'
     },
-    successTitle: {
-      color: '#166534',
-      fontWeight: '600',
-      fontSize: '1rem',
-      marginBottom: '0.5rem',
+    progressItem: {
       display: 'flex',
       alignItems: 'center',
-      gap: '0.5rem'
+      padding: '0.75rem 1rem',
+      borderRadius: '8px',
+      marginBottom: '0.5rem',
+      gap: '0.75rem'
     },
-    successText: {
-      color: '#15803d',
-      fontSize: '0.9rem'
+    progressPending: {
+      background: '#f8fafc'
+    },
+    progressUploading: {
+      background: '#eff6ff'
+    },
+    progressSuccess: {
+      background: '#f0fdf4'
+    },
+    progressError: {
+      background: '#fef2f2'
+    },
+    progressMessage: {
+      fontSize: '0.875rem',
+      color: '#5f6c7b'
     },
     formatsGrid: {
       display: 'grid',
@@ -303,6 +344,14 @@ export default function Upload({ projects = [], functionalAreas = [], onProjectC
       color: '#5f6c7b',
       fontSize: '0.75rem',
       marginTop: '0.25rem'
+    },
+    fileCount: {
+      background: 'linear-gradient(135deg, #83b16d 0%, #93abd9 100%)',
+      color: 'white',
+      borderRadius: '12px',
+      padding: '0.25rem 0.75rem',
+      fontSize: '0.8rem',
+      fontWeight: '600'
     }
   }
 
@@ -314,7 +363,7 @@ export default function Upload({ projects = [], functionalAreas = [], onProjectC
       <div style={styles.header}>
         <h1 style={styles.title}>Upload Documents</h1>
         <p style={styles.subtitle}>
-          Upload files for analysis. Large files process in the background.
+          Upload multiple files for analysis. Files process in the background.
         </p>
       </div>
 
@@ -331,10 +380,6 @@ export default function Upload({ projects = [], functionalAreas = [], onProjectC
             style={styles.select}
           >
             <option value="">Select a project...</option>
-            <option value="Global/Universal" style={{ fontWeight: '600', backgroundColor: '#f0f7ed' }}>
-              🌐 Global/Universal (All Projects)
-            </option>
-            <option disabled>──────────────</option>
             {projectList.map(project => (
               <option key={project.id} value={project.name}>
                 {project.name}
@@ -363,7 +408,12 @@ export default function Upload({ projects = [], functionalAreas = [], onProjectC
         {/* File Drop Zone */}
         <div>
           <label style={styles.label}>
-            File <span style={styles.required}>*</span>
+            Files <span style={styles.required}>*</span>
+            {files.length > 0 && (
+              <span style={{ ...styles.fileCount, marginLeft: '0.75rem' }}>
+                {files.length} selected
+              </span>
+            )}
           </label>
           <div 
             style={styles.dropzone}
@@ -375,23 +425,62 @@ export default function Upload({ projects = [], functionalAreas = [], onProjectC
               style={{ display: 'none' }}
               id="file-upload"
               accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.txt,.md"
+              multiple
             />
             <div style={styles.dropzoneIcon}>📄</div>
             <p style={styles.dropzoneText}>
-              Click to select a file
+              Click to select files
             </p>
             <p style={styles.dropzoneSubtext}>
-              PDF, Word, Excel, CSV, or Text files
+              Select multiple files at once • PDF, Word, Excel, CSV, or Text
             </p>
           </div>
         </div>
 
-        {/* Selected Files */}
-        {files.length > 0 && (
-          <div style={styles.filePreview}>
-            <span style={styles.fileIcon}>✅</span>
-            <span style={styles.fileName}>{files[0].name}</span>
-            <span style={styles.fileSize}>{formatFileSize(files[0].size)}</span>
+        {/* Selected Files List */}
+        {files.length > 0 && !uploading && (
+          <div style={styles.fileList}>
+            {files.map((file, index) => (
+              <div key={index} style={styles.fileItem}>
+                <span style={styles.fileIcon}>📄</span>
+                <span style={styles.fileName}>{file.name}</span>
+                <span style={styles.fileSize}>{formatFileSize(file.size)}</span>
+                <button 
+                  style={styles.removeBtn}
+                  onClick={() => removeFile(index)}
+                  title="Remove file"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Upload Progress */}
+        {uploadProgress.length > 0 && (
+          <div style={styles.progressList}>
+            {uploadProgress.map((item, index) => (
+              <div 
+                key={index} 
+                style={{
+                  ...styles.progressItem,
+                  ...(item.status === 'pending' ? styles.progressPending : {}),
+                  ...(item.status === 'uploading' ? styles.progressUploading : {}),
+                  ...(item.status === 'success' ? styles.progressSuccess : {}),
+                  ...(item.status === 'error' ? styles.progressError : {})
+                }}
+              >
+                <span style={styles.fileIcon}>
+                  {item.status === 'pending' && '⏳'}
+                  {item.status === 'uploading' && '⬆️'}
+                  {item.status === 'success' && '✅'}
+                  {item.status === 'error' && '❌'}
+                </span>
+                <span style={styles.fileName}>{item.name}</span>
+                <span style={styles.progressMessage}>{item.message}</span>
+              </div>
+            ))}
           </div>
         )}
 
@@ -405,9 +494,9 @@ export default function Upload({ projects = [], functionalAreas = [], onProjectC
           }}
         >
           {uploading ? (
-            <>⏳ Uploading...</>
+            <>⏳ Uploading {uploadProgress.filter(p => p.status === 'success').length}/{uploadProgress.length}...</>
           ) : (
-            <>📤 Upload File</>
+            <>📤 Upload {files.length > 1 ? `${files.length} Files` : 'File'}</>
           )}
         </button>
 
@@ -415,7 +504,7 @@ export default function Upload({ projects = [], functionalAreas = [], onProjectC
         <div style={styles.infoBox}>
           <p style={styles.infoText}>
             <span style={styles.infoLabel}>How it works: </span>
-            Files are queued for background processing. Large files may take several minutes. 
+            Files are uploaded sequentially and queued for background processing. 
             Check the Status page to monitor progress.
           </p>
         </div>
@@ -425,21 +514,6 @@ export default function Upload({ projects = [], functionalAreas = [], onProjectC
           <div style={styles.errorBox}>
             <span style={styles.errorIcon}>⚠️</span>
             <span style={styles.errorText}>{error}</span>
-          </div>
-        )}
-
-        {/* Success Message */}
-        {uploadResult?.success && (
-          <div style={styles.successBox}>
-            <div style={styles.successTitle}>
-              ✅ Upload Queued!
-            </div>
-            <p style={styles.successText}>
-              {uploadResult.message}
-            </p>
-            <p style={{ ...styles.successText, marginTop: '0.5rem' }}>
-              Redirecting to Status page...
-            </p>
           </div>
         )}
       </div>
