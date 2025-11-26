@@ -24,15 +24,16 @@ class ProjectModel:
     
     @staticmethod
     def create(name: str, client_name: str = None, project_type: str = 'Implementation', 
-              notes: str = None) -> Optional[Dict[str, Any]]:
+              notes: str = None, product: str = None) -> Optional[Dict[str, Any]]:
         """
         Create a new project
         
         Args:
-            name: Project name
-            client_name: Client name (maps to 'customer' column)
+            name: Project name (Customer AR#)
+            client_name: Client name (Company Name, maps to 'customer' column)
             project_type: 'Implementation', 'Post Launch Support', or 'Assessment/Analysis' (stored in metadata)
             notes: Optional notes (stored in metadata)
+            product: 'UKG Pro', 'WFM Dimensions', or 'UKG Ready' (stored in metadata)
         
         Returns:
             Created project dict or None if failed
@@ -47,9 +48,10 @@ class ProjectModel:
                 'name': name,
                 'customer': client_name or '',  # ✅ Column is 'customer' not 'client_name'
                 'status': 'active',
-                'metadata': {                    # ✅ type & notes go in metadata JSON
+                'metadata': {                    # ✅ type, notes & product go in metadata JSON
                     'type': project_type,
-                    'notes': notes
+                    'notes': notes,
+                    'product': product
                 }
             }
             
