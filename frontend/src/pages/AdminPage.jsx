@@ -30,6 +30,7 @@ function ProjectsTab() {
   const [formData, setFormData] = useState({
     name: '',
     customer: '',
+    product: '',
     type: 'Implementation',
     notes: '',
   });
@@ -96,12 +97,21 @@ function ProjectsTab() {
         <form style={styles.form} onSubmit={handleSubmit}>
           <div style={styles.formGrid}>
             <div style={styles.formGroup}>
-              <label style={styles.label}>Project Name *</label>
+              <label style={styles.label}>Customer AR# *</label>
               <input style={styles.input} value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} placeholder="e.g., MEY1000" required />
             </div>
             <div style={styles.formGroup}>
-              <label style={styles.label}>Customer *</label>
+              <label style={styles.label}>Company Name *</label>
               <input style={styles.input} value={formData.customer} onChange={(e) => setFormData({ ...formData, customer: e.target.value })} placeholder="e.g., Meyer Corporation" required />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Product *</label>
+              <select style={styles.input} value={formData.product || ''} onChange={(e) => setFormData({ ...formData, product: e.target.value })} required>
+                <option value="">Select Product...</option>
+                <option value="UKG Pro">UKG Pro</option>
+                <option value="WFM Dimensions">WFM Dimensions</option>
+                <option value="UKG Ready">UKG Ready</option>
+              </select>
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Type</label>
@@ -118,7 +128,7 @@ function ProjectsTab() {
           </div>
           <div style={styles.formActions}>
             <button type="submit" style={styles.button}>{editingProject ? 'Update Project' : 'Create Project'}</button>
-            <button type="button" style={styles.cancelBtn} onClick={() => { setShowForm(false); setEditingProject(null); setFormData({ name: '', customer: '', type: 'Implementation', notes: '' }); }}>Cancel</button>
+            <button type="button" style={styles.cancelBtn} onClick={() => { setShowForm(false); setEditingProject(null); setFormData({ name: '', customer: '', product: '', type: 'Implementation', notes: '' }); }}>Cancel</button>
           </div>
         </form>
       )}
@@ -126,8 +136,9 @@ function ProjectsTab() {
       <table style={styles.table}>
         <thead>
           <tr>
-            <th style={styles.th}>Project</th>
-            <th style={styles.th}>Customer</th>
+            <th style={styles.th}>Customer AR#</th>
+            <th style={styles.th}>Company Name</th>
+            <th style={styles.th}>Product</th>
             <th style={styles.th}>Type</th>
             <th style={styles.th}>Status</th>
             <th style={styles.th}>Actions</th>
@@ -138,6 +149,7 @@ function ProjectsTab() {
             <tr key={project.id}>
               <td style={styles.td}><strong>{project.name}</strong></td>
               <td style={styles.td}>{project.customer}</td>
+              <td style={styles.td}>{project.product || '-'}</td>
               <td style={styles.td}>{project.type || 'Implementation'}</td>
               <td style={styles.td}>
                 <span style={{ padding: '0.25rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: '600', background: project.status === 'active' ? '#f0fdf4' : '#f8fafc', color: project.status === 'active' ? '#166534' : '#5f6c7b' }}>
