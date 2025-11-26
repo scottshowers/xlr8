@@ -1,980 +1,554 @@
-import { useState, useEffect } from 'react'
-import PersonaManagement from '../components/PersonaManagement'
-
 /**
- * Admin Page - Main Dashboard
+ * AdminPage - System Administration
  * 
- * Central hub for system administration
- * Includes: Dashboard, Personas, Data Management, Security, Settings
+ * Tabs:
+ * - Projects: Create, edit, delete projects
+ * - Data Management: Structured data (DuckDB) + Documents (ChromaDB)
+ * - Global Data: Shared reference data
+ * - UKG Connections: API connections for PRO/WFM/READY
+ * - Settings: System configuration
  */
-export default function AdminPage() {
-  const [currentSection, setCurrentSection] = useState('dashboard')
+
+import React, { useState, useEffect } from 'react';
+import { useProject } from '../context/ProjectContext';
+import api from '../services/api';
+
+// Tab definitions
+const TABS = [
+  { id: 'projects', label: 'Projects', icon: '🏢' },
+  { id: 'data', label: 'Data Management', icon: '📊' },
+  { id: 'global', label: 'Global Data', icon: '🌐' },
+  { id: 'connections', label: 'UKG Connections', icon: '🔌' },
+  { id: 'settings', label: 'Settings', icon: '⚙️' },
+];
+
+// ==================== PROJECTS TAB ====================
+function ProjectsTab() {
+  const { projects, createProject, updateProject, deleteProject, selectProject } = useProject();
+  const [showForm, setShowForm] = useState(false);
+  const [editingProject, setEditingProject] = useState(null);
+  const [formData, setFormData] = useState({
+    name: '',
+    customer: '',
+    type: 'Implementation',
+    notes: '',
+  });
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      if (editingProject) {
+        await updateProject(editingProject.id, formData);
+      } else {
+        await createProject(formData);
+      }
+      setShowForm(false);
+      setEditingProject(null);
+      setFormData({ name: '', customer: '', type: 'Implementation', notes: '' });
+    } catch (err) {
+      alert('Failed to save project: ' + err.message);
+    }
+  };
+
+  const handleEdit = (project) => {
+    setEditingProject(project);
+    setFormData({
+      name: project.name || '',
+      customer: project.customer || '',
+      type: project.type || 'Implementation',
+      notes: project.notes || '',
+    });
+    setShowForm(true);
+  };
+
+  const handleDelete = async (project) => {
+    if (window.confirm(`Delete project "${project.name}"? This cannot be undone.`)) {
+      await deleteProject(project.id);
+    }
+  };
+
+  const styles = {
+    header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' },
+    title: { fontSize: '1.1rem', fontWeight: '700', color: '#2a3441' },
+    button: { padding: '0.6rem 1.2rem', background: 'linear-gradient(135deg, #83b16d 0%, #93abd9 100%)', border: 'none', borderRadius: '8px', color: 'white', fontWeight: '600', cursor: 'pointer' },
+    table: { width: '100%', borderCollapse: 'collapse' },
+    th: { textAlign: 'left', padding: '0.75rem 1rem', background: '#f8fafc', fontWeight: '600', fontSize: '0.8rem', color: '#5f6c7b', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid #e1e8ed' },
+    td: { padding: '0.75rem 1rem', borderBottom: '1px solid #e1e8ed' },
+    actions: { display: 'flex', gap: '0.5rem' },
+    actionBtn: (color) => ({ padding: '0.35rem 0.75rem', background: 'transparent', border: `1px solid ${color}`, borderRadius: '4px', color: color, fontSize: '0.8rem', cursor: 'pointer' }),
+    form: { background: '#f8fafc', borderRadius: '12px', padding: '1.5rem', marginBottom: '1.5rem' },
+    formGrid: { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' },
+    formGroup: { marginBottom: '1rem' },
+    label: { display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem', fontWeight: '600', color: '#2a3441' },
+    input: { width: '100%', padding: '0.65rem', border: '1px solid #e1e8ed', borderRadius: '6px', fontSize: '0.9rem' },
+    formActions: { display: 'flex', gap: '0.75rem', marginTop: '1rem' },
+    cancelBtn: { padding: '0.6rem 1.2rem', background: '#f0f4f7', border: 'none', borderRadius: '8px', color: '#5f6c7b', fontWeight: '600', cursor: 'pointer' },
+  };
 
   return (
-    <div style={styles.container}>
-      {/* Sidebar Navigation */}
-      <div style={styles.sidebar}>
-        <div style={styles.sidebarHeader}>
-          <h2 style={styles.sidebarTitle}>⚙️ Admin</h2>
-        </div>
+    <div>
+      <div style={styles.header}>
+        <h3 style={styles.title}>Manage Projects</h3>
+        <button style={styles.button} onClick={() => setShowForm(true)}>➕ New Project</button>
+      </div>
 
-        <nav style={styles.nav}>
-          <button
-            onClick={() => setCurrentSection('dashboard')}
-            style={{
-              ...styles.navItem,
-              ...(currentSection === 'dashboard' ? styles.navItemActive : {})
-            }}
-          >
-            📊 Dashboard
-          </button>
-
-          <button
-            onClick={() => setCurrentSection('personas')}
-            style={{
-              ...styles.navItem,
-              ...(currentSection === 'personas' ? styles.navItemActive : {})
-            }}
-          >
-            🎭 Persona Management
-          </button>
-
-          <button
-            onClick={() => setCurrentSection('data')}
-            style={{
-              ...styles.navItem,
-              ...(currentSection === 'data' ? styles.navItemActive : {})
-            }}
-          >
-            📊 Data Management
-          </button>
-
-          <button
-            onClick={() => setCurrentSection('security')}
-            style={{
-              ...styles.navItem,
-              ...(currentSection === 'security' ? styles.navItemActive : {})
-            }}
-          >
-            🔒 Security
-          </button>
-
-          <button
-            onClick={() => setCurrentSection('settings')}
-            style={{
-              ...styles.navItem,
-              ...(currentSection === 'settings' ? styles.navItemActive : {})
-            }}
-          >
-            ⚙️ Settings
-          </button>
-
-          {/* Placeholder for future features */}
-          <div style={styles.navDivider} />
-          
-          <div style={styles.navPlaceholder}>
-            🚀 More features coming...
+      {showForm && (
+        <form style={styles.form} onSubmit={handleSubmit}>
+          <div style={styles.formGrid}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Project Name *</label>
+              <input style={styles.input} value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} placeholder="e.g., MEY1000" required />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Customer *</label>
+              <input style={styles.input} value={formData.customer} onChange={(e) => setFormData({ ...formData, customer: e.target.value })} placeholder="e.g., Meyer Corporation" required />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Type</label>
+              <select style={styles.input} value={formData.type} onChange={(e) => setFormData({ ...formData, type: e.target.value })}>
+                <option value="Implementation">Implementation</option>
+                <option value="Support">Support</option>
+                <option value="Analysis">Analysis</option>
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Notes</label>
+              <input style={styles.input} value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} placeholder="Optional notes..." />
+            </div>
           </div>
-        </nav>
-      </div>
+          <div style={styles.formActions}>
+            <button type="submit" style={styles.button}>{editingProject ? 'Update Project' : 'Create Project'}</button>
+            <button type="button" style={styles.cancelBtn} onClick={() => { setShowForm(false); setEditingProject(null); setFormData({ name: '', customer: '', type: 'Implementation', notes: '' }); }}>Cancel</button>
+          </div>
+        </form>
+      )}
 
-      {/* Main Content Area */}
-      <div style={styles.mainContent}>
-        {currentSection === 'dashboard' && <DashboardSection setCurrentSection={setCurrentSection} />}
-        {currentSection === 'personas' && <PersonaManagement />}
-        {currentSection === 'data' && <DataManagementSection />}
-        {currentSection === 'security' && <SecuritySection />}
-        {currentSection === 'settings' && <SettingsSection />}
-      </div>
+      <table style={styles.table}>
+        <thead>
+          <tr>
+            <th style={styles.th}>Project</th>
+            <th style={styles.th}>Customer</th>
+            <th style={styles.th}>Type</th>
+            <th style={styles.th}>Status</th>
+            <th style={styles.th}>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {projects.map((project) => (
+            <tr key={project.id}>
+              <td style={styles.td}><strong>{project.name}</strong></td>
+              <td style={styles.td}>{project.customer}</td>
+              <td style={styles.td}>{project.type || 'Implementation'}</td>
+              <td style={styles.td}>
+                <span style={{ padding: '0.25rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: '600', background: project.status === 'active' ? '#f0fdf4' : '#f8fafc', color: project.status === 'active' ? '#166534' : '#5f6c7b' }}>
+                  {project.status || 'active'}
+                </span>
+              </td>
+              <td style={styles.td}>
+                <div style={styles.actions}>
+                  <button style={styles.actionBtn('#83b16d')} onClick={() => selectProject(project)}>Select</button>
+                  <button style={styles.actionBtn('#93abd9')} onClick={() => handleEdit(project)}>Edit</button>
+                  <button style={styles.actionBtn('#e53e3e')} onClick={() => handleDelete(project)}>Delete</button>
+                </div>
+              </td>
+            </tr>
+          ))}
+          {projects.length === 0 && (
+            <tr>
+              <td style={styles.td} colSpan={5}>
+                <div style={{ textAlign: 'center', padding: '2rem', color: '#5f6c7b' }}>No projects yet. Create one to get started.</div>
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
     </div>
-  )
+  );
 }
 
-// ============================================================================
-// DATA MANAGEMENT SECTION - Structured Data (DuckDB) + Documents (ChromaDB)
-// ============================================================================
-function DataManagementSection() {
-  const [structuredData, setStructuredData] = useState(null)
-  const [documents, setDocuments] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [deleting, setDeleting] = useState(null)
-  const [expandedFile, setExpandedFile] = useState(null)
-  const [message, setMessage] = useState(null)
+// ==================== DATA MANAGEMENT TAB ====================
+function DataManagementTab() {
+  const [structuredData, setStructuredData] = useState(null);
+  const [documents, setDocuments] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(null);
+  const [expandedFile, setExpandedFile] = useState(null);
+  const [message, setMessage] = useState(null);
 
-  const API_BASE = import.meta.env.VITE_API_URL || 'https://hcmpact-xlr8-production.up.railway.app'
+  const API_BASE = import.meta.env.VITE_API_URL || '';
 
   const fetchData = async () => {
-    setLoading(true)
+    setLoading(true);
     try {
-      // Fetch structured data (Excel/CSV in DuckDB)
-      const structuredRes = await fetch(`${API_BASE}/api/status/structured`)
-      const structuredJson = await structuredRes.json()
-      setStructuredData(structuredJson)
+      const structuredRes = await fetch(`${API_BASE}/api/status/structured`);
+      const structuredJson = await structuredRes.json();
+      setStructuredData(structuredJson);
 
-      // Fetch documents (PDFs/Word in ChromaDB)
-      const docsRes = await fetch(`${API_BASE}/api/status/documents`)
-      const docsJson = await docsRes.json()
-      setDocuments(docsJson)
+      const docsRes = await fetch(`${API_BASE}/api/status/documents`);
+      const docsJson = await docsRes.json();
+      setDocuments(docsJson);
     } catch (err) {
-      console.error('Failed to fetch data:', err)
+      console.error('Failed to fetch data:', err);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
-  useEffect(() => {
-    fetchData()
-  }, [])
+  useEffect(() => { fetchData(); }, []);
 
   const showMessage = (text, type = 'success') => {
-    setMessage({ text, type })
-    setTimeout(() => setMessage(null), 4000)
-  }
+    setMessage({ text, type });
+    setTimeout(() => setMessage(null), 4000);
+  };
 
-  // Delete structured file (Excel/CSV from DuckDB)
   const deleteStructuredFile = async (project, filename) => {
-    if (!confirm(`Delete all data for "${filename}"?\n\nThis will remove all tables and data. You can re-upload to restore.`)) {
-      return
-    }
-
-    setDeleting(`structured:${project}:${filename}`)
+    if (!confirm(`Delete all data for "${filename}"?`)) return;
+    setDeleting(`structured:${project}:${filename}`);
     try {
-      const res = await fetch(
-        `${API_BASE}/api/status/structured/${encodeURIComponent(project)}/${encodeURIComponent(filename)}`,
-        { method: 'DELETE' }
-      )
-      
-      if (res.ok) {
-        showMessage(`Deleted "${filename}" successfully`)
-        fetchData()
-      } else {
-        const err = await res.json()
-        showMessage(`Failed: ${err.detail || 'Unknown error'}`, 'error')
-      }
-    } catch (err) {
-      showMessage('Failed to delete file', 'error')
-    } finally {
-      setDeleting(null)
-    }
-  }
+      const res = await fetch(`${API_BASE}/api/status/structured/${encodeURIComponent(project)}/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+      if (res.ok) { showMessage(`Deleted "${filename}"`); fetchData(); }
+      else { showMessage('Failed to delete', 'error'); }
+    } catch { showMessage('Failed to delete', 'error'); }
+    finally { setDeleting(null); }
+  };
 
-  // Delete document (PDF/Word from ChromaDB)
   const deleteDocument = async (filename) => {
-    if (!confirm(`Delete "${filename}" from vector store?\n\nThis removes all chunks. You can re-upload to restore.`)) {
-      return
-    }
-
-    setDeleting(`doc:${filename}`)
+    if (!confirm(`Delete "${filename}" from vector store?`)) return;
+    setDeleting(`doc:${filename}`);
     try {
-      const res = await fetch(
-        `${API_BASE}/api/status/documents/${encodeURIComponent(filename)}`,
-        { method: 'DELETE' }
-      )
-      
-      if (res.ok) {
-        showMessage(`Deleted "${filename}" successfully`)
-        fetchData()
-      } else {
-        const err = await res.json()
-        showMessage(`Failed: ${err.detail || 'Unknown error'}`, 'error')
-      }
-    } catch (err) {
-      showMessage('Failed to delete document', 'error')
-    } finally {
-      setDeleting(null)
-    }
-  }
+      const res = await fetch(`${API_BASE}/api/status/documents/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+      if (res.ok) { showMessage(`Deleted "${filename}"`); fetchData(); }
+      else { showMessage('Failed to delete', 'error'); }
+    } catch { showMessage('Failed to delete', 'error'); }
+    finally { setDeleting(null); }
+  };
 
-  // Reset all structured data
   const resetStructuredData = async () => {
-    if (!confirm('⚠️ DELETE ALL STRUCTURED DATA?\n\nThis will remove ALL Excel/CSV data from DuckDB.\nThis cannot be undone!')) {
-      return
-    }
-    if (!confirm('Are you REALLY sure? Type "yes" mentally and click OK.')) {
-      return
-    }
-
-    setDeleting('reset-structured')
+    if (!confirm('⚠️ DELETE ALL STRUCTURED DATA? This cannot be undone!')) return;
+    setDeleting('reset-structured');
     try {
-      const res = await fetch(`${API_BASE}/api/status/structured/reset`, { method: 'POST' })
-      if (res.ok) {
-        showMessage('All structured data deleted')
-        fetchData()
-      } else {
-        showMessage('Failed to reset', 'error')
-      }
-    } catch (err) {
-      showMessage('Failed to reset', 'error')
-    } finally {
-      setDeleting(null)
-    }
-  }
+      const res = await fetch(`${API_BASE}/api/status/structured/reset`, { method: 'POST' });
+      if (res.ok) { showMessage('All structured data deleted'); fetchData(); }
+    } catch { showMessage('Failed to reset', 'error'); }
+    finally { setDeleting(null); }
+  };
 
-  // Reset ChromaDB
   const resetChromaDB = async () => {
-    if (!confirm('⚠️ DELETE ALL DOCUMENTS?\n\nThis will remove ALL PDFs/Word docs from ChromaDB.\nThis cannot be undone!')) {
-      return
-    }
-    if (!confirm('Are you REALLY sure?')) {
-      return
-    }
-
-    setDeleting('reset-chromadb')
+    if (!confirm('⚠️ DELETE ALL DOCUMENTS? This cannot be undone!')) return;
+    setDeleting('reset-chromadb');
     try {
-      const res = await fetch(`${API_BASE}/api/status/chromadb/reset`, { method: 'POST' })
-      if (res.ok) {
-        showMessage('All documents deleted')
-        fetchData()
-      } else {
-        showMessage('Failed to reset', 'error')
-      }
-    } catch (err) {
-      showMessage('Failed to reset', 'error')
-    } finally {
-      setDeleting(null)
-    }
+      const res = await fetch(`${API_BASE}/api/status/chromadb/reset`, { method: 'POST' });
+      if (res.ok) { showMessage('All documents deleted'); fetchData(); }
+    } catch { showMessage('Failed to reset', 'error'); }
+    finally { setDeleting(null); }
+  };
+
+  const styles = {
+    title: { fontSize: '1.1rem', fontWeight: '700', color: '#2a3441', marginBottom: '0.5rem' },
+    subtitle: { color: '#5f6c7b', marginBottom: '1.5rem' },
+    toast: { padding: '1rem', borderRadius: '8px', marginBottom: '1rem', border: '1px solid', fontWeight: '500' },
+    card: { background: '#f8fafc', borderRadius: '12px', padding: '1.5rem', marginBottom: '1.5rem' },
+    cardHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', paddingBottom: '1rem', borderBottom: '1px solid #e1e8ed' },
+    cardTitle: { fontSize: '1rem', fontWeight: '600', color: '#2a3441' },
+    cardStats: { fontSize: '0.85rem', color: '#5f6c7b' },
+    table: { width: '100%', borderCollapse: 'collapse', background: 'white', borderRadius: '8px', overflow: 'hidden' },
+    th: { textAlign: 'left', padding: '0.75rem 1rem', fontSize: '0.75rem', fontWeight: '600', color: '#5f6c7b', textTransform: 'uppercase', background: '#f1f5f9', borderBottom: '1px solid #e1e8ed' },
+    td: { padding: '0.75rem 1rem', borderBottom: '1px solid #e1e8ed', fontSize: '0.9rem' },
+    deleteBtn: { padding: '0.35rem 0.6rem', background: 'transparent', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '1rem' },
+    dangerBtn: { padding: '0.5rem 1rem', fontSize: '0.85rem', background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: '6px', cursor: 'pointer' },
+    emptyState: { textAlign: 'center', padding: '2rem', color: '#5f6c7b' },
+    projectBadge: { display: 'inline-block', padding: '0.2rem 0.6rem', fontSize: '0.75rem', background: '#dbeafe', color: '#1e40af', borderRadius: '999px' },
+    expandedTd: { padding: '1rem', background: '#f9fafb' },
+    sheetRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0.75rem', background: 'white', borderRadius: '6px', border: '1px solid #e5e7eb', marginBottom: '0.5rem', fontSize: '0.85rem' },
+  };
+
+  if (loading) {
+    return <div style={{ textAlign: 'center', padding: '3rem', color: '#5f6c7b' }}>Loading data...</div>;
   }
 
   return (
-    <div style={styles.section}>
-      <h1 style={styles.sectionTitle}>📊 Data Management</h1>
-      <p style={styles.sectionSubtitle}>Manage uploaded files and data stores</p>
+    <div>
+      <h3 style={styles.title}>Data Management</h3>
+      <p style={styles.subtitle}>Manage structured data and documents</p>
 
-      {/* Message Toast */}
       {message && (
-        <div style={{
-          ...styles.toast,
-          background: message.type === 'error' ? '#fee2e2' : '#dcfce7',
-          color: message.type === 'error' ? '#b91c1c' : '#166534',
-          borderColor: message.type === 'error' ? '#fca5a5' : '#86efac'
-        }}>
+        <div style={{ ...styles.toast, background: message.type === 'error' ? '#fee2e2' : '#dcfce7', color: message.type === 'error' ? '#b91c1c' : '#166534', borderColor: message.type === 'error' ? '#fca5a5' : '#86efac' }}>
           {message.text}
         </div>
       )}
 
-      {loading ? (
-        <div style={styles.loadingBox}>
-          <div style={styles.spinner}></div>
-          <p>Loading data...</p>
+      {/* Structured Data Section */}
+      <div style={styles.card}>
+        <div style={styles.cardHeader}>
+          <h4 style={styles.cardTitle}>📊 Structured Data (DuckDB)</h4>
+          <span style={styles.cardStats}>
+            {structuredData?.available ? `${structuredData.total_files || 0} files • ${structuredData.total_tables || 0} tables • ${structuredData.total_rows?.toLocaleString() || 0} rows` : 'Not available'}
+          </span>
         </div>
-      ) : (
-        <>
-          {/* ============================================================ */}
-          {/* STRUCTURED DATA SECTION (Excel/CSV → DuckDB) */}
-          {/* ============================================================ */}
-          <div style={styles.card}>
-            <div style={styles.cardHeader}>
-              <h3 style={styles.cardTitle}>📊 Structured Data (SQL Queries)</h3>
-              <div style={styles.cardStats}>
-                {structuredData?.available ? (
-                  <span>{structuredData.total_files} files • {structuredData.total_tables} tables • {structuredData.total_rows?.toLocaleString()} rows</span>
-                ) : (
-                  <span style={{color: '#ef4444'}}>Not available</span>
-                )}
-              </div>
-            </div>
 
-            {!structuredData?.available ? (
-              <p style={styles.notAvailable}>
-                Structured data queries not available. Ensure duckdb and cryptography packages are installed.
-              </p>
-            ) : structuredData.files?.length === 0 ? (
-              <div style={styles.emptyState}>
-                <span style={{fontSize: '3rem'}}>📁</span>
-                <p>No Excel/CSV files uploaded yet</p>
-                <p style={{fontSize: '0.85rem', color: '#999'}}>Upload Excel or CSV files to enable SQL queries</p>
-              </div>
-            ) : (
-              <div style={styles.tableWrapper}>
-                <table style={styles.table}>
-                  <thead>
+        {!structuredData?.files?.length ? (
+          <div style={styles.emptyState}>
+            <span style={{ fontSize: '2rem' }}>📁</span>
+            <p>No Excel/CSV files uploaded yet</p>
+          </div>
+        ) : (
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                <th style={styles.th}>File</th>
+                <th style={styles.th}>Project</th>
+                <th style={{ ...styles.th, textAlign: 'center' }}>Sheets</th>
+                <th style={{ ...styles.th, textAlign: 'center' }}>Rows</th>
+                <th style={{ ...styles.th, textAlign: 'center' }}>🔒</th>
+                <th style={{ ...styles.th, textAlign: 'center' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {structuredData.files.map((file) => (
+                <React.Fragment key={`${file.project}::${file.filename}`}>
+                  <tr style={{ cursor: 'pointer' }} onClick={() => setExpandedFile(expandedFile === file.filename ? null : file.filename)}>
+                    <td style={styles.td}>
+                      <span>{file.filename.endsWith('.csv') ? '📄' : '📊'} </span>
+                      <strong>{file.filename}</strong>
+                      <span style={{ color: '#999', marginLeft: '8px', fontSize: '0.75rem' }}>{expandedFile === file.filename ? '▼' : '▶'}</span>
+                    </td>
+                    <td style={styles.td}><span style={styles.projectBadge}>{file.project}</span></td>
+                    <td style={{ ...styles.td, textAlign: 'center' }}>{file.sheets?.length || 0}</td>
+                    <td style={{ ...styles.td, textAlign: 'center' }}>{file.total_rows?.toLocaleString()}</td>
+                    <td style={{ ...styles.td, textAlign: 'center' }}>{file.has_encrypted ? '🔒' : '-'}</td>
+                    <td style={{ ...styles.td, textAlign: 'center' }}>
+                      <button onClick={(e) => { e.stopPropagation(); deleteStructuredFile(file.project, file.filename); }} disabled={deleting === `structured:${file.project}:${file.filename}`} style={styles.deleteBtn}>
+                        {deleting === `structured:${file.project}:${file.filename}` ? '⏳' : '🗑️'}
+                      </button>
+                    </td>
+                  </tr>
+                  {expandedFile === file.filename && (
                     <tr>
-                      <th style={styles.th}>File</th>
-                      <th style={styles.th}>Project</th>
-                      <th style={{...styles.th, textAlign: 'center'}}>Sheets</th>
-                      <th style={{...styles.th, textAlign: 'center'}}>Rows</th>
-                      <th style={{...styles.th, textAlign: 'center'}}>🔒</th>
-                      <th style={{...styles.th, textAlign: 'center'}}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {structuredData.files.map((file) => (
-                      <>
-                        <tr 
-                          key={`${file.project}::${file.filename}`}
-                          style={styles.tr}
-                          onClick={() => setExpandedFile(expandedFile === file.filename ? null : file.filename)}
-                        >
-                          <td style={styles.td}>
-                            <div style={{display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer'}}>
-                              <span>{file.filename.endsWith('.csv') ? '📄' : '📊'}</span>
-                              <span style={{fontWeight: 500}}>{file.filename}</span>
-                              <span style={{color: '#999', fontSize: '0.75rem'}}>
-                                {expandedFile === file.filename ? '▼' : '▶'}
-                              </span>
+                      <td colSpan={6} style={styles.expandedTd}>
+                        <p style={{ fontSize: '0.7rem', fontWeight: '600', color: '#999', marginBottom: '0.5rem', letterSpacing: '0.05em' }}>SHEETS / TABLES:</p>
+                        {file.sheets?.map((sheet) => (
+                          <div key={sheet.table_name} style={styles.sheetRow}>
+                            <div>
+                              <strong>{sheet.sheet_name}</strong>
+                              <span style={{ color: '#999', marginLeft: '8px', fontSize: '0.8rem' }}>({sheet.column_count} columns)</span>
                             </div>
-                          </td>
-                          <td style={styles.td}>
-                            <span style={styles.projectBadge}>{file.project}</span>
-                          </td>
-                          <td style={{...styles.td, textAlign: 'center'}}>{file.sheets?.length || 0}</td>
-                          <td style={{...styles.td, textAlign: 'center'}}>{file.total_rows?.toLocaleString()}</td>
-                          <td style={{...styles.td, textAlign: 'center'}}>
-                            {file.has_encrypted ? <span title="Contains encrypted PII">🔒</span> : '-'}
-                          </td>
-                          <td style={{...styles.td, textAlign: 'center'}}>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                deleteStructuredFile(file.project, file.filename)
-                              }}
-                              disabled={deleting === `structured:${file.project}:${file.filename}`}
-                              style={styles.deleteBtn}
-                              title="Delete file data"
-                            >
-                              {deleting === `structured:${file.project}:${file.filename}` ? '⏳' : '🗑️'}
-                            </button>
-                          </td>
-                        </tr>
-                        
-                        {/* Expanded row showing sheets */}
-                        {expandedFile === file.filename && (
-                          <tr key={`${file.filename}-expanded`}>
-                            <td colSpan={6} style={styles.expandedTd}>
-                              <div style={styles.sheetsContainer}>
-                                <p style={styles.sheetsLabel}>SHEETS / TABLES:</p>
-                                {file.sheets?.map((sheet) => (
-                                  <div key={sheet.table_name} style={styles.sheetRow}>
-                                    <div>
-                                      <strong>{sheet.sheet_name}</strong>
-                                      <span style={{color: '#999', marginLeft: '8px', fontSize: '0.8rem'}}>
-                                        ({sheet.column_count} columns)
-                                      </span>
-                                    </div>
-                                    <div style={{display: 'flex', alignItems: 'center', gap: '12px'}}>
-                                      <span>{sheet.row_count?.toLocaleString()} rows</span>
-                                      {sheet.encrypted_columns?.length > 0 && (
-                                        <span style={{color: '#22c55e', fontSize: '0.8rem'}}>
-                                          🔒 {sheet.encrypted_columns.length} encrypted
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {structuredData?.available && structuredData.files?.length > 0 && (
-              <div style={styles.dangerZone}>
-                <button
-                  onClick={resetStructuredData}
-                  disabled={deleting === 'reset-structured'}
-                  style={styles.dangerBtn}
-                >
-                  {deleting === 'reset-structured' ? '⏳ Deleting...' : '⚠️ Reset All Structured Data'}
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* ============================================================ */}
-          {/* DOCUMENTS SECTION (PDF/Word → ChromaDB) */}
-          {/* ============================================================ */}
-          <div style={{...styles.card, marginTop: '2rem'}}>
-            <div style={styles.cardHeader}>
-              <h3 style={styles.cardTitle}>📄 Documents (RAG/Vector Store)</h3>
-              <div style={styles.cardStats}>
-                <span>{documents?.total || 0} files • {documents?.total_chunks?.toLocaleString() || 0} chunks</span>
-              </div>
-            </div>
-
-            {!documents?.documents?.length ? (
-              <div style={styles.emptyState}>
-                <span style={{fontSize: '3rem'}}>📄</span>
-                <p>No documents in vector store</p>
-                <p style={{fontSize: '0.85rem', color: '#999'}}>Upload PDFs or Word docs for RAG queries</p>
-              </div>
-            ) : (
-              <div style={styles.tableWrapper}>
-                <table style={styles.table}>
-                  <thead>
-                    <tr>
-                      <th style={styles.th}>File</th>
-                      <th style={styles.th}>Project</th>
-                      <th style={styles.th}>Area</th>
-                      <th style={{...styles.th, textAlign: 'center'}}>Chunks</th>
-                      <th style={{...styles.th, textAlign: 'center'}}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {documents.documents.map((doc) => (
-                      <tr key={doc.filename} style={styles.tr}>
-                        <td style={styles.td}>
-                          <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
-                            <span>📄</span>
-                            <span style={{fontWeight: 500}}>{doc.filename}</span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                              <span>{sheet.row_count?.toLocaleString()} rows</span>
+                              {sheet.encrypted_columns?.length > 0 && (
+                                <span style={{ color: '#22c55e', fontSize: '0.8rem' }}>🔒 {sheet.encrypted_columns.length} encrypted</span>
+                              )}
+                            </div>
                           </div>
-                        </td>
-                        <td style={styles.td}>
-                          <span style={styles.projectBadge}>{doc.project}</span>
-                        </td>
-                        <td style={styles.td}>{doc.functional_area || '-'}</td>
-                        <td style={{...styles.td, textAlign: 'center'}}>{doc.chunks}</td>
-                        <td style={{...styles.td, textAlign: 'center'}}>
-                          <button
-                            onClick={() => deleteDocument(doc.filename)}
-                            disabled={deleting === `doc:${doc.filename}`}
-                            style={styles.deleteBtn}
-                            title="Delete document"
-                          >
-                            {deleting === `doc:${doc.filename}` ? '⏳' : '🗑️'}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                        ))}
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+        )}
 
-            {documents?.documents?.length > 0 && (
-              <div style={styles.dangerZone}>
-                <button
-                  onClick={resetChromaDB}
-                  disabled={deleting === 'reset-chromadb'}
-                  style={styles.dangerBtn}
-                >
-                  {deleting === 'reset-chromadb' ? '⏳ Deleting...' : '⚠️ Reset All Documents'}
-                </button>
-              </div>
-            )}
+        {structuredData?.files?.length > 0 && (
+          <div style={{ marginTop: '1rem', textAlign: 'right' }}>
+            <button onClick={resetStructuredData} disabled={deleting === 'reset-structured'} style={styles.dangerBtn}>
+              {deleting === 'reset-structured' ? '⏳ Deleting...' : '⚠️ Reset All Structured Data'}
+            </button>
           </div>
+        )}
+      </div>
 
-          {/* Info Box */}
-          <div style={styles.infoBox}>
-            <strong>💡 How it works:</strong>
-            <ul style={{margin: '0.5rem 0 0 1.5rem', padding: 0}}>
-              <li><strong>Structured Data (Excel/CSV)</strong> → Stored in DuckDB for fast SQL queries like "How many employees have REG earning?"</li>
-              <li><strong>Documents (PDF/Word)</strong> → Stored in ChromaDB for semantic search and RAG queries</li>
-            </ul>
+      {/* Documents Section */}
+      <div style={styles.card}>
+        <div style={styles.cardHeader}>
+          <h4 style={styles.cardTitle}>📄 Documents (ChromaDB)</h4>
+          <span style={styles.cardStats}>{documents?.total || 0} files • {documents?.total_chunks?.toLocaleString() || 0} chunks</span>
+        </div>
+
+        {!documents?.documents?.length ? (
+          <div style={styles.emptyState}>
+            <span style={{ fontSize: '2rem' }}>📄</span>
+            <p>No PDF/Word documents uploaded yet</p>
           </div>
-        </>
+        ) : (
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                <th style={styles.th}>Document</th>
+                <th style={styles.th}>Project</th>
+                <th style={{ ...styles.th, textAlign: 'center' }}>Chunks</th>
+                <th style={{ ...styles.th, textAlign: 'center' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {documents.documents.map((doc) => (
+                <tr key={doc.filename}>
+                  <td style={styles.td}>
+                    <span>{doc.filename?.endsWith('.pdf') ? '📕' : '📘'} </span>
+                    <strong>{doc.filename}</strong>
+                  </td>
+                  <td style={styles.td}><span style={styles.projectBadge}>{doc.project || 'Unknown'}</span></td>
+                  <td style={{ ...styles.td, textAlign: 'center' }}>{doc.chunks}</td>
+                  <td style={{ ...styles.td, textAlign: 'center' }}>
+                    <button onClick={() => deleteDocument(doc.filename)} disabled={deleting === `doc:${doc.filename}`} style={styles.deleteBtn}>
+                      {deleting === `doc:${doc.filename}` ? '⏳' : '🗑️'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        {documents?.documents?.length > 0 && (
+          <div style={{ marginTop: '1rem', textAlign: 'right' }}>
+            <button onClick={resetChromaDB} disabled={deleting === 'reset-chromadb'} style={styles.dangerBtn}>
+              {deleting === 'reset-chromadb' ? '⏳ Deleting...' : '⚠️ Reset All Documents'}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ==================== GLOBAL DATA TAB ====================
+function GlobalDataTab() {
+  const [globalData] = useState([
+    { id: 1, name: 'UKG Pro Configuration Guide', type: 'Documentation', updated: '2024-01-15' },
+    { id: 2, name: 'IRS Publication 15', type: 'Compliance', updated: '2024-01-01' },
+    { id: 3, name: 'State Tax Tables 2024', type: 'Reference', updated: '2024-01-10' },
+  ]);
+
+  const styles = {
+    header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' },
+    title: { fontSize: '1.1rem', fontWeight: '700', color: '#2a3441' },
+    description: { color: '#5f6c7b', fontSize: '0.9rem', marginBottom: '1.5rem' },
+    button: { padding: '0.6rem 1.2rem', background: 'linear-gradient(135deg, #83b16d 0%, #93abd9 100%)', border: 'none', borderRadius: '8px', color: 'white', fontWeight: '600', cursor: 'pointer' },
+    card: { background: '#f8fafc', borderRadius: '8px', padding: '1rem', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  };
+
+  return (
+    <div>
+      <div style={styles.header}>
+        <h3 style={styles.title}>Global Reference Data</h3>
+        <button style={styles.button}>➕ Add Data</button>
+      </div>
+      <p style={styles.description}>Shared knowledge base available across all projects. UKG documentation, IRS rules, compliance guides, and firm best practices.</p>
+
+      {globalData.map((item) => (
+        <div key={item.id} style={styles.card}>
+          <div>
+            <strong>{item.name}</strong>
+            <div style={{ fontSize: '0.8rem', color: '#5f6c7b' }}>{item.type} • Updated {item.updated}</div>
+          </div>
+          <button style={{ ...styles.button, padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}>View</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ==================== UKG CONNECTIONS TAB ====================
+function ConnectionsTab() {
+  const { activeProject } = useProject();
+  const products = [
+    { id: 'pro', name: 'UKG Pro', icon: '🏢', connected: false },
+    { id: 'wfm', name: 'UKG WFM', icon: '⏰', connected: false },
+    { id: 'ready', name: 'UKG Ready', icon: '🚀', connected: false },
+  ];
+
+  const styles = {
+    title: { fontSize: '1.1rem', fontWeight: '700', color: '#2a3441', marginBottom: '0.5rem' },
+    description: { color: '#5f6c7b', fontSize: '0.9rem' },
+    products: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginTop: '1.5rem' },
+    productCard: (connected) => ({ background: connected ? '#f0fdf4' : '#f8fafc', border: `2px solid ${connected ? '#86efac' : '#e1e8ed'}`, borderRadius: '12px', padding: '1.5rem', textAlign: 'center' }),
+    productIcon: { fontSize: '2.5rem', marginBottom: '0.75rem' },
+    productName: { fontWeight: '700', color: '#2a3441', marginBottom: '0.5rem' },
+    productStatus: (connected) => ({ fontSize: '0.8rem', color: connected ? '#166534' : '#5f6c7b', marginBottom: '1rem' }),
+    connectBtn: (connected) => ({ padding: '0.5rem 1rem', background: connected ? '#f0f4f7' : 'linear-gradient(135deg, #83b16d 0%, #93abd9 100%)', border: connected ? '1px solid #e1e8ed' : 'none', borderRadius: '6px', color: connected ? '#5f6c7b' : 'white', fontWeight: '600', cursor: 'pointer' }),
+    warning: { marginTop: '1.5rem', padding: '1rem', background: '#fef3c7', borderRadius: '8px', color: '#92400e', fontSize: '0.9rem' },
+  };
+
+  return (
+    <div>
+      <h3 style={styles.title}>UKG API Connections</h3>
+      <p style={styles.description}>Connect to customer UKG instances to pull configuration and employee data directly.{!activeProject && ' Select a project first to configure connections.'}</p>
+
+      <div style={styles.products}>
+        {products.map((product) => (
+          <div key={product.id} style={styles.productCard(product.connected)}>
+            <div style={styles.productIcon}>{product.icon}</div>
+            <div style={styles.productName}>{product.name}</div>
+            <div style={styles.productStatus(product.connected)}>{product.connected ? '✓ Connected' : 'Not connected'}</div>
+            <button style={styles.connectBtn(product.connected)} disabled={!activeProject}>{product.connected ? 'Configure' : 'Connect'}</button>
+          </div>
+        ))}
+      </div>
+
+      {!activeProject && (
+        <div style={styles.warning}>⚠️ Select a project from the top bar to configure UKG connections.</div>
       )}
     </div>
-  )
+  );
 }
 
-// Dashboard Section
-function DashboardSection({ setCurrentSection }) {
-  const [stats, setStats] = useState({
-    structured: { files: '--', rows: '--' },
-    documents: { files: '--', chunks: '--' }
-  })
+// ==================== SETTINGS TAB ====================
+function SettingsTab() {
+  return (
+    <div style={{ color: '#5f6c7b', textAlign: 'center', padding: '3rem' }}>
+      <div style={{ fontSize: '3rem', marginBottom: '1rem', opacity: 0.5 }}>⚙️</div>
+      <h3>System Settings Coming Soon</h3>
+      <p>User preferences, notification settings, and system configuration.</p>
+    </div>
+  );
+}
 
-  const API_BASE = import.meta.env.VITE_API_URL || 'https://hcmpact-xlr8-production.up.railway.app'
+// ==================== MAIN COMPONENT ====================
+export default function AdminPage() {
+  const [activeTab, setActiveTab] = useState('projects');
 
-  useEffect(() => {
-    // Fetch quick stats
-    Promise.all([
-      fetch(`${API_BASE}/api/status/structured`).then(r => r.json()).catch(() => null),
-      fetch(`${API_BASE}/api/status/documents`).then(r => r.json()).catch(() => null)
-    ]).then(([structured, docs]) => {
-      setStats({
-        structured: {
-          files: structured?.total_files || 0,
-          rows: structured?.total_rows?.toLocaleString() || 0
-        },
-        documents: {
-          files: docs?.total || 0,
-          chunks: docs?.total_chunks?.toLocaleString() || 0
-        }
-      })
-    })
-  }, [])
+  const styles = {
+    header: { marginBottom: '1.5rem' },
+    title: { fontFamily: "'Sora', sans-serif", fontSize: '1.75rem', fontWeight: '700', color: '#2a3441', margin: 0 },
+    subtitle: { color: '#5f6c7b', marginTop: '0.25rem' },
+    card: { background: 'white', borderRadius: '16px', boxShadow: '0 1px 3px rgba(42, 52, 65, 0.08)', overflow: 'hidden' },
+    tabs: { display: 'flex', borderBottom: '1px solid #e1e8ed', background: '#fafbfc', overflowX: 'auto' },
+    tab: (active) => ({ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '1rem 1.5rem', border: 'none', background: active ? 'white' : 'transparent', color: active ? '#83b16d' : '#5f6c7b', fontWeight: '600', fontSize: '0.9rem', cursor: 'pointer', borderBottom: active ? '2px solid #83b16d' : '2px solid transparent', marginBottom: '-1px', transition: 'all 0.2s ease', whiteSpace: 'nowrap' }),
+    tabContent: { padding: '1.5rem' },
+  };
+
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'projects': return <ProjectsTab />;
+      case 'data': return <DataManagementTab />;
+      case 'global': return <GlobalDataTab />;
+      case 'connections': return <ConnectionsTab />;
+      case 'settings': return <SettingsTab />;
+      default: return null;
+    }
+  };
 
   return (
-    <div style={styles.section}>
-      <h1 style={styles.sectionTitle}>📊 Admin Dashboard</h1>
-      <p style={styles.sectionSubtitle}>System overview and quick stats</p>
-
-      <div style={styles.statsGrid}>
-        <StatCard
-          icon="🎭"
-          title="Active Personas"
-          value="5"
-          subtitle="Built-in personas"
-        />
-        <StatCard
-          icon="📊"
-          title="Structured Data"
-          value={stats.structured.files}
-          subtitle={`${stats.structured.rows} total rows`}
-        />
-        <StatCard
-          icon="📄"
-          title="Documents"
-          value={stats.documents.files}
-          subtitle={`${stats.documents.chunks} chunks`}
-        />
-        <StatCard
-          icon="👥"
-          title="Users"
-          value="--"
-          subtitle="Coming soon"
-        />
+    <div>
+      <div style={styles.header}>
+        <h1 style={styles.title}>Administration</h1>
+        <p style={styles.subtitle}>Manage projects, data, and system configuration.</p>
       </div>
 
-      <div style={styles.quickActions}>
-        <h3 style={styles.quickActionsTitle}>Quick Actions</h3>
-        <div style={styles.actionGrid}>
-          <button
-            style={styles.actionButton}
-            onClick={() => setCurrentSection('personas')}
-          >
-            <div style={styles.actionIcon}>🎭</div>
-            <div style={styles.actionContent}>
-              <div style={styles.actionTitle}>Manage Personas</div>
-              <div style={styles.actionDescription}>Create, edit, or delete personas</div>
-            </div>
-          </button>
-
-          <button
-            style={styles.actionButton}
-            onClick={() => setCurrentSection('data')}
-          >
-            <div style={styles.actionIcon}>📊</div>
-            <div style={styles.actionContent}>
-              <div style={styles.actionTitle}>Data Management</div>
-              <div style={styles.actionDescription}>Manage uploaded files and data</div>
-            </div>
-          </button>
-
-          <button
-            style={styles.actionButton}
-            onClick={() => setCurrentSection('security')}
-          >
-            <div style={styles.actionIcon}>🔒</div>
-            <div style={styles.actionContent}>
-              <div style={styles.actionTitle}>Security Settings</div>
-              <div style={styles.actionDescription}>Configure access and permissions</div>
-            </div>
-          </button>
+      <div style={styles.card}>
+        <div style={styles.tabs}>
+          {TABS.map(tab => (
+            <button key={tab.id} style={styles.tab(activeTab === tab.id)} onClick={() => setActiveTab(tab.id)}>
+              <span>{tab.icon}</span>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        <div style={styles.tabContent}>
+          {renderTabContent()}
         </div>
       </div>
     </div>
-  )
-}
-
-// Security Section (Placeholder)
-function SecuritySection() {
-  return (
-    <div style={styles.section}>
-      <h1 style={styles.sectionTitle}>🔒 Security Settings</h1>
-      <p style={styles.sectionSubtitle}>Manage access controls and authentication</p>
-
-      <div style={styles.card}>
-        <h3 style={styles.cardTitle}>🚧 Coming Soon</h3>
-        <p style={styles.cardText}>
-          This section will include:
-        </p>
-        <ul style={styles.featureList}>
-          <li>Role-based access control (RBAC)</li>
-          <li>User management</li>
-          <li>Password policies</li>
-          <li>Session management</li>
-          <li>Audit logs</li>
-          <li>API key management</li>
-        </ul>
-      </div>
-    </div>
-  )
-}
-
-// Settings Section (Placeholder)
-function SettingsSection() {
-  return (
-    <div style={styles.section}>
-      <h1 style={styles.sectionTitle}>⚙️ System Settings</h1>
-      <p style={styles.sectionSubtitle}>Configure system behavior and preferences</p>
-
-      <div style={styles.card}>
-        <h3 style={styles.cardTitle}>🚧 Coming Soon</h3>
-        <p style={styles.cardText}>
-          This section will include:
-        </p>
-        <ul style={styles.featureList}>
-          <li>Default persona settings</li>
-          <li>Chat history retention</li>
-          <li>Document upload limits</li>
-          <li>LLM configuration</li>
-          <li>Notification settings</li>
-          <li>System maintenance</li>
-        </ul>
-      </div>
-    </div>
-  )
-}
-
-// Stat Card Component
-function StatCard({ icon, title, value, subtitle }) {
-  return (
-    <div style={styles.statCard}>
-      <div style={styles.statIcon}>{icon}</div>
-      <div style={styles.statContent}>
-        <div style={styles.statValue}>{value}</div>
-        <div style={styles.statTitle}>{title}</div>
-        <div style={styles.statSubtitle}>{subtitle}</div>
-      </div>
-    </div>
-  )
-}
-
-const styles = {
-  // Main Layout
-  container: {
-    display: 'flex',
-    minHeight: '100vh',
-    background: '#f5f7fa'
-  },
-  sidebar: {
-    width: '280px',
-    background: '#c9d3d4',
-    color: '#2a3441',
-    display: 'flex',
-    flexDirection: 'column'
-  },
-  sidebarHeader: {
-    padding: '1.5rem',
-    borderBottom: '1px solid rgba(42, 52, 65, 0.15)',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center'
-  },
-  sidebarTitle: {
-    margin: 0,
-    fontSize: '1.5rem',
-    fontWeight: '600'
-  },
-  nav: {
-    padding: '1rem',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '0.5rem'
-  },
-  navItem: {
-    padding: '0.75rem 1rem',
-    fontSize: '0.95rem',
-    background: 'transparent',
-    color: 'rgba(42, 52, 65, 0.7)',
-    border: 'none',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    textAlign: 'left',
-    transition: 'all 0.2s'
-  },
-  navItemActive: {
-    background: 'rgba(131, 177, 109, 0.3)',
-    color: '#2a3441',
-    fontWeight: '600'
-  },
-  navDivider: {
-    height: '1px',
-    background: 'rgba(42, 52, 65, 0.15)',
-    margin: '1rem 0'
-  },
-  navPlaceholder: {
-    padding: '0.75rem 1rem',
-    fontSize: '0.85rem',
-    color: 'rgba(42, 52, 65, 0.4)',
-    fontStyle: 'italic'
-  },
-
-  // Main Content
-  mainContent: {
-    flex: 1,
-    overflow: 'auto'
-  },
-  section: {
-    padding: '2rem',
-    maxWidth: '1400px',
-    margin: '0 auto'
-  },
-  sectionTitle: {
-    margin: '0 0 0.5rem 0',
-    fontSize: '2rem',
-    color: '#2a3441'
-  },
-  sectionSubtitle: {
-    margin: '0 0 2rem 0',
-    fontSize: '1rem',
-    color: '#666'
-  },
-
-  // Stats Grid
-  statsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-    gap: '1.5rem',
-    marginBottom: '3rem'
-  },
-  statCard: {
-    background: 'white',
-    borderRadius: '12px',
-    padding: '1.5rem',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '1rem'
-  },
-  statIcon: {
-    fontSize: '3rem',
-    lineHeight: 1
-  },
-  statContent: {
-    flex: 1
-  },
-  statValue: {
-    fontSize: '2rem',
-    fontWeight: '700',
-    color: '#2a3441',
-    marginBottom: '0.25rem'
-  },
-  statTitle: {
-    fontSize: '0.9rem',
-    color: '#666',
-    marginBottom: '0.25rem'
-  },
-  statSubtitle: {
-    fontSize: '0.8rem',
-    color: '#999'
-  },
-
-  // Quick Actions
-  quickActions: {
-    background: 'white',
-    borderRadius: '12px',
-    padding: '2rem',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
-  },
-  quickActionsTitle: {
-    margin: '0 0 1.5rem 0',
-    fontSize: '1.25rem',
-    color: '#2a3441'
-  },
-  actionGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-    gap: '1rem'
-  },
-  actionButton: {
-    background: '#f8f9fa',
-    border: '2px solid #e0e0e0',
-    borderRadius: '12px',
-    padding: '1.5rem',
-    cursor: 'pointer',
-    transition: 'all 0.2s',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '1rem',
-    textAlign: 'left'
-  },
-  actionIcon: {
-    fontSize: '2.5rem',
-    lineHeight: 1
-  },
-  actionContent: {
-    flex: 1
-  },
-  actionTitle: {
-    fontSize: '1rem',
-    fontWeight: '600',
-    color: '#2a3441',
-    marginBottom: '0.25rem'
-  },
-  actionDescription: {
-    fontSize: '0.85rem',
-    color: '#666'
-  },
-
-  // Card Styles
-  card: {
-    background: 'white',
-    borderRadius: '12px',
-    padding: '1.5rem',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
-  },
-  cardHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '1rem',
-    paddingBottom: '1rem',
-    borderBottom: '1px solid #eee'
-  },
-  cardTitle: {
-    margin: 0,
-    fontSize: '1.25rem',
-    color: '#2a3441'
-  },
-  cardStats: {
-    fontSize: '0.9rem',
-    color: '#666'
-  },
-  cardText: {
-    margin: '0 0 1rem 0',
-    color: '#666',
-    lineHeight: 1.6
-  },
-  featureList: {
-    margin: 0,
-    paddingLeft: '1.5rem',
-    color: '#666',
-    lineHeight: 2
-  },
-
-  // Table Styles
-  tableWrapper: {
-    overflowX: 'auto'
-  },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse'
-  },
-  th: {
-    textAlign: 'left',
-    padding: '0.75rem 1rem',
-    fontSize: '0.75rem',
-    fontWeight: '600',
-    color: '#666',
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-    borderBottom: '2px solid #eee'
-  },
-  tr: {
-    borderBottom: '1px solid #f0f0f0',
-    transition: 'background 0.15s'
-  },
-  td: {
-    padding: '0.75rem 1rem',
-    fontSize: '0.9rem',
-    color: '#333'
-  },
-  expandedTd: {
-    padding: '1rem',
-    background: '#f9fafb'
-  },
-  projectBadge: {
-    display: 'inline-block',
-    padding: '0.25rem 0.75rem',
-    fontSize: '0.75rem',
-    fontWeight: '500',
-    background: '#dbeafe',
-    color: '#1e40af',
-    borderRadius: '999px'
-  },
-  deleteBtn: {
-    padding: '0.4rem 0.6rem',
-    background: 'transparent',
-    border: 'none',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontSize: '1rem',
-    transition: 'background 0.15s'
-  },
-
-  // Sheets expanded view
-  sheetsContainer: {
-    marginLeft: '1.5rem'
-  },
-  sheetsLabel: {
-    fontSize: '0.7rem',
-    fontWeight: '600',
-    color: '#999',
-    marginBottom: '0.5rem',
-    letterSpacing: '0.05em'
-  },
-  sheetRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '0.5rem 0.75rem',
-    background: 'white',
-    borderRadius: '6px',
-    border: '1px solid #e5e7eb',
-    marginBottom: '0.5rem',
-    fontSize: '0.85rem'
-  },
-
-  // States
-  loadingBox: {
-    textAlign: 'center',
-    padding: '3rem',
-    color: '#666'
-  },
-  spinner: {
-    width: '40px',
-    height: '40px',
-    border: '3px solid #e5e7eb',
-    borderTop: '3px solid #3b82f6',
-    borderRadius: '50%',
-    animation: 'spin 1s linear infinite',
-    margin: '0 auto 1rem'
-  },
-  emptyState: {
-    textAlign: 'center',
-    padding: '2rem',
-    color: '#666'
-  },
-  notAvailable: {
-    color: '#ef4444',
-    padding: '1rem',
-    background: '#fef2f2',
-    borderRadius: '8px'
-  },
-
-  // Danger zone
-  dangerZone: {
-    marginTop: '1rem',
-    paddingTop: '1rem',
-    borderTop: '1px solid #fee2e2',
-    textAlign: 'right'
-  },
-  dangerBtn: {
-    padding: '0.5rem 1rem',
-    fontSize: '0.85rem',
-    background: '#fef2f2',
-    color: '#b91c1c',
-    border: '1px solid #fecaca',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    transition: 'background 0.15s'
-  },
-
-  // Toast message
-  toast: {
-    padding: '1rem',
-    borderRadius: '8px',
-    marginBottom: '1rem',
-    border: '1px solid',
-    fontWeight: '500'
-  },
-
-  // Info box
-  infoBox: {
-    marginTop: '2rem',
-    padding: '1rem',
-    background: '#f0f9ff',
-    borderRadius: '8px',
-    border: '1px solid #bae6fd',
-    fontSize: '0.9rem',
-    color: '#0c4a6e'
-  }
+  );
 }
