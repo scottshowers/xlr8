@@ -1,35 +1,51 @@
 /**
- * ContextBar - Sticky Project Context Selector
+ * ContextBar - Sticky Project Selector
  * 
- * Always visible at top. Shows active project.
- * Quick switch between projects without leaving current page.
+ * Sits at top of all app pages (not Landing)
+ * Shows current project, allows quick switch
+ * 
+ * Colors: Grass Green (#83b16d) solid background
+ * Icons: Solid colors (Sky Blue, Aquamarine, Clearwater)
  */
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useProject } from '../context/ProjectContext';
 
+// Brand Colors
+const COLORS = {
+  grassGreen: '#83b16d',
+  skyBlue: '#93abd9',
+  iceFlow: '#c9d3d4',
+  clearwater: '#b2d6de',
+  aquamarine: '#a1c3d4',
+  white: '#f6f5fa',
+  text: '#2a3441',
+  textLight: '#5f6c7b',
+};
+
+// Color palette for project icons (solid colors, rotating)
+const PROJECT_COLORS = [
+  COLORS.skyBlue,
+  COLORS.aquamarine,
+  COLORS.clearwater,
+  '#93abd9',  // sky blue variant
+  '#a1c3d4',  // aquamarine variant
+];
+
 export default function ContextBar() {
-  const { 
-    activeProject, 
-    projects, 
-    selectProject, 
-    loading,
-    customerName,
-    projectName 
-  } = useProject();
-  
-  const [isOpen, setIsOpen] = useState(false);
+  const { activeProject, projects, selectProject, loading } = useProject();
+  const [dropdownOpen, setDropdownOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const dropdownRef = useRef(null);
 
   // Close dropdown when clicking outside
   useEffect(() => {
-    function handleClickOutside(event) {
+    const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-        setIsOpen(false);
+        setDropdownOpen(false);
         setSearchTerm('');
       }
-    }
+    };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
@@ -40,23 +56,34 @@ export default function ContextBar() {
     p.customer?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const handleSelect = (project) => {
+  // Get initials for project icon
+  const getInitials = (name) => {
+    if (!name) return '??';
+    return name.slice(0, 2).toUpperCase();
+  };
+
+  // Get consistent color for project (based on index)
+  const getProjectColor = (projectId) => {
+    const index = projects.findIndex(p => p.id === projectId);
+    return PROJECT_COLORS[index % PROJECT_COLORS.length];
+  };
+
+  const handleSelectProject = (project) => {
     selectProject(project);
-    setIsOpen(false);
+    setDropdownOpen(false);
     setSearchTerm('');
   };
 
   const styles = {
     bar: {
-      background: 'linear-gradient(135deg, #2a3441 0%, #3d4f5f 100%)',
-      padding: '0.625rem 1.5rem',
+      background: COLORS.grassGreen,
+      padding: '0.75rem 1.5rem',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
       position: 'sticky',
       top: 0,
-      zIndex: 200,
-      boxShadow: '0 2px 8px rgba(42, 52, 65, 0.15)',
+      zIndex: 100,
     },
     left: {
       display: 'flex',
@@ -64,11 +91,10 @@ export default function ContextBar() {
       gap: '1rem',
     },
     label: {
-      color: 'rgba(255, 255, 255, 0.6)',
-      fontSize: '0.75rem',
-      fontWeight: '600',
-      textTransform: 'uppercase',
-      letterSpacing: '0.05em',
+      color: 'white',
+      fontSize: '0.85rem',
+      opacity: 0.9,
+      fontWeight: '500',
     },
     selectorWrapper: {
       position: 'relative',
@@ -77,195 +103,152 @@ export default function ContextBar() {
       display: 'flex',
       alignItems: 'center',
       gap: '0.75rem',
-      background: 'rgba(255, 255, 255, 0.1)',
-      border: '1px solid rgba(255, 255, 255, 0.15)',
-      borderRadius: '8px',
       padding: '0.5rem 1rem',
+      background: 'rgba(255,255,255,0.15)',
+      border: '1px solid rgba(255,255,255,0.3)',
+      borderRadius: '8px',
+      color: 'white',
       cursor: 'pointer',
-      transition: 'all 0.2s ease',
-      minWidth: '280px',
+      minWidth: '240px',
+      transition: 'background 0.2s ease',
     },
     selectorHover: {
-      background: 'rgba(255, 255, 255, 0.15)',
-      borderColor: 'rgba(131, 177, 109, 0.5)',
+      background: 'rgba(255,255,255,0.25)',
     },
-    projectIcon: {
+    projectIcon: (color) => ({
       width: '32px',
       height: '32px',
-      background: 'linear-gradient(135deg, #83b16d 0%, #93abd9 100%)',
+      background: color,
       borderRadius: '6px',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      fontSize: '0.875rem',
       fontWeight: '700',
+      fontSize: '0.8rem',
       color: 'white',
-    },
+      flexShrink: 0,
+    }),
     projectInfo: {
+      textAlign: 'left',
       flex: 1,
+      minWidth: 0,
     },
     projectName: {
-      color: 'white',
       fontWeight: '600',
-      fontSize: '0.95rem',
+      fontSize: '0.9rem',
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
     },
-    customerName: {
-      color: 'rgba(255, 255, 255, 0.6)',
-      fontSize: '0.8rem',
-    },
-    placeholder: {
-      color: 'rgba(255, 255, 255, 0.5)',
-      fontStyle: 'italic',
-    },
-    chevron: {
-      color: 'rgba(255, 255, 255, 0.6)',
+    projectCustomer: {
       fontSize: '0.75rem',
-      transition: 'transform 0.2s ease',
+      opacity: 0.8,
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
     },
-    chevronOpen: {
-      transform: 'rotate(180deg)',
+    arrow: {
+      fontSize: '0.7rem',
+      opacity: 0.8,
+      transition: 'transform 0.2s ease',
     },
     dropdown: {
       position: 'absolute',
-      top: 'calc(100% + 8px)',
+      top: '100%',
       left: 0,
       right: 0,
+      marginTop: '4px',
       background: 'white',
       borderRadius: '10px',
-      boxShadow: '0 8px 24px rgba(42, 52, 65, 0.2)',
+      boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
       overflow: 'hidden',
-      zIndex: 300,
-      minWidth: '320px',
-    },
-    searchWrapper: {
-      padding: '0.75rem',
-      borderBottom: '1px solid #e1e8ed',
+      zIndex: 200,
     },
     searchInput: {
       width: '100%',
-      padding: '0.625rem 0.875rem',
-      border: '1px solid #e1e8ed',
-      borderRadius: '6px',
-      fontSize: '0.875rem',
+      padding: '0.75rem 1rem',
+      border: 'none',
+      borderBottom: '1px solid #e1e8ed',
+      fontSize: '0.9rem',
       outline: 'none',
     },
     projectList: {
-      maxHeight: '300px',
+      maxHeight: '280px',
       overflowY: 'auto',
     },
-    projectItem: {
+    projectItem: (isActive) => ({
       display: 'flex',
       alignItems: 'center',
       gap: '0.75rem',
       padding: '0.75rem 1rem',
       cursor: 'pointer',
+      background: isActive ? COLORS.iceFlow : 'white',
+      borderBottom: '1px solid #f0f0f0',
       transition: 'background 0.15s ease',
-      borderBottom: '1px solid #f0f4f7',
-    },
-    projectItemHover: {
-      background: '#f8fafc',
-    },
-    projectItemActive: {
-      background: 'linear-gradient(135deg, rgba(131, 177, 109, 0.1), rgba(147, 171, 217, 0.08))',
-      borderLeft: '3px solid #83b16d',
-    },
-    itemIcon: {
-      width: '36px',
-      height: '36px',
-      background: 'linear-gradient(135deg, #83b16d 0%, #93abd9 100%)',
-      borderRadius: '6px',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      fontSize: '0.8rem',
-      fontWeight: '700',
-      color: 'white',
-    },
-    itemInfo: {
-      flex: 1,
-    },
-    itemName: {
+    }),
+    projectItemName: {
       fontWeight: '600',
-      color: '#2a3441',
+      color: COLORS.text,
       fontSize: '0.9rem',
     },
-    itemCustomer: {
-      color: '#5f6c7b',
-      fontSize: '0.8rem',
+    projectItemCustomer: {
+      fontSize: '0.75rem',
+      color: COLORS.textLight,
     },
-    emptyState: {
-      padding: '2rem',
+    noProjects: {
+      padding: '1.5rem',
       textAlign: 'center',
-      color: '#5f6c7b',
+      color: COLORS.textLight,
+      fontSize: '0.9rem',
     },
-    right: {
+    status: {
       display: 'flex',
       alignItems: 'center',
-      gap: '1rem',
+      gap: '0.5rem',
+      color: 'white',
+      fontSize: '0.85rem',
     },
     statusDot: {
       width: '8px',
       height: '8px',
+      background: '#90EE90',
       borderRadius: '50%',
-      background: activeProject ? '#83b16d' : '#a2a1a0',
     },
-    statusText: {
-      color: 'rgba(255, 255, 255, 0.7)',
-      fontSize: '0.8rem',
+    placeholder: {
+      color: 'rgba(255,255,255,0.7)',
+      fontStyle: 'italic',
     },
-  };
-
-  // Get initials for project icon
-  const getInitials = (project) => {
-    if (!project) return '?';
-    const name = project.name || '';
-    return name.substring(0, 2).toUpperCase();
   };
 
   return (
     <div style={styles.bar}>
       <div style={styles.left}>
-        <span style={styles.label}>Working on</span>
+        <span style={styles.label}>Project:</span>
         
         <div style={styles.selectorWrapper} ref={dropdownRef}>
           <div 
             style={styles.selector}
-            onClick={() => !loading && setIsOpen(!isOpen)}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.15)';
-              e.currentTarget.style.borderColor = 'rgba(131, 177, 109, 0.5)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
-              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.15)';
-            }}
+            onClick={() => setDropdownOpen(!dropdownOpen)}
           >
             {activeProject ? (
               <>
-                <div style={styles.projectIcon}>
-                  {getInitials(activeProject)}
+                <div style={styles.projectIcon(getProjectColor(activeProject.id))}>
+                  {getInitials(activeProject.name)}
                 </div>
                 <div style={styles.projectInfo}>
-                  <div style={styles.projectName}>{projectName}</div>
-                  <div style={styles.customerName}>{customerName}</div>
+                  <div style={styles.projectName}>{activeProject.name}</div>
+                  <div style={styles.projectCustomer}>{activeProject.customer}</div>
                 </div>
               </>
             ) : (
-              <div style={styles.placeholder}>
-                {loading ? 'Loading...' : 'Select a project to begin'}
-              </div>
+              <span style={styles.placeholder}>Select a project...</span>
             )}
-            <span style={{
-              ...styles.chevron,
-              ...(isOpen ? styles.chevronOpen : {})
-            }}>
-              ▼
-            </span>
+            <span style={{ ...styles.arrow, transform: dropdownOpen ? 'rotate(180deg)' : 'rotate(0)' }}>▼</span>
           </div>
 
-          {isOpen && (
+          {dropdownOpen && (
             <div style={styles.dropdown}>
-              <div style={styles.searchWrapper}>
+              {projects.length > 3 && (
                 <input
                   type="text"
                   placeholder="Search projects..."
@@ -274,43 +257,37 @@ export default function ContextBar() {
                   style={styles.searchInput}
                   autoFocus
                 />
-              </div>
+              )}
               
               <div style={styles.projectList}>
-                {filteredProjects.length === 0 ? (
-                  <div style={styles.emptyState}>
+                {loading ? (
+                  <div style={styles.noProjects}>Loading...</div>
+                ) : filteredProjects.length === 0 ? (
+                  <div style={styles.noProjects}>
                     {searchTerm ? 'No matching projects' : 'No projects yet'}
                   </div>
                 ) : (
-                  filteredProjects.map(project => (
+                  filteredProjects.map((project) => (
                     <div
                       key={project.id}
-                      style={{
-                        ...styles.projectItem,
-                        ...(activeProject?.id === project.id ? styles.projectItemActive : {})
-                      }}
-                      onClick={() => handleSelect(project)}
+                      style={styles.projectItem(activeProject?.id === project.id)}
+                      onClick={() => handleSelectProject(project)}
                       onMouseEnter={(e) => {
                         if (activeProject?.id !== project.id) {
                           e.currentTarget.style.background = '#f8fafc';
                         }
                       }}
                       onMouseLeave={(e) => {
-                        if (activeProject?.id !== project.id) {
-                          e.currentTarget.style.background = 'transparent';
-                        }
+                        e.currentTarget.style.background = activeProject?.id === project.id ? COLORS.iceFlow : 'white';
                       }}
                     >
-                      <div style={styles.itemIcon}>
-                        {getInitials(project)}
+                      <div style={styles.projectIcon(getProjectColor(project.id))}>
+                        {getInitials(project.name)}
                       </div>
-                      <div style={styles.itemInfo}>
-                        <div style={styles.itemName}>{project.name}</div>
-                        <div style={styles.itemCustomer}>{project.customer}</div>
+                      <div>
+                        <div style={styles.projectItemName}>{project.name}</div>
+                        <div style={styles.projectItemCustomer}>{project.customer}</div>
                       </div>
-                      {activeProject?.id === project.id && (
-                        <span style={{ color: '#83b16d' }}>✓</span>
-                      )}
                     </div>
                   ))
                 )}
@@ -320,12 +297,13 @@ export default function ContextBar() {
         </div>
       </div>
 
-      <div style={styles.right}>
-        <div style={styles.statusDot} />
-        <span style={styles.statusText}>
-          {activeProject ? 'Project Active' : 'No Project Selected'}
-        </span>
-      </div>
+      {/* Status indicator */}
+      {activeProject && (
+        <div style={styles.status}>
+          <div style={styles.statusDot} />
+          Active
+        </div>
+      )}
     </div>
   );
 }
