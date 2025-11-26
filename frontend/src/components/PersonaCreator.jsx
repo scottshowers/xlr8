@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import api from '../services/api';
 
 /**
  * Custom Persona Creator
@@ -41,33 +42,18 @@ export function PersonaCreator({ isOpen, onClose, onPersonaCreated }) {
         .map(e => e.trim())
         .filter(e => e);
 
-      // Create persona
-      const response = await fetch('/api/chat/personas', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          name: formData.name,
-          icon: formData.icon,
-          description: formData.description,
-          system_prompt: formData.system_prompt,
-          expertise: expertiseArray,
-          tone: formData.tone || 'Professional'
-        })
+      // Create persona using api service
+      const response = await api.post('/chat/personas', {
+        name: formData.name,
+        icon: formData.icon,
+        description: formData.description,
+        system_prompt: formData.system_prompt,
+        expertise: expertiseArray,
+        tone: formData.tone || 'Professional'
       });
 
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.detail || 'Failed to create persona');
-      }
-
-      const result = await response.json();
-      
-      // Success!
-      if (onPersonaCreated) {
-        onPersonaCreated(result.persona);
-      }
+      // Success - notify parent
+      onPersonaCreated(response.data);
       
       // Reset form
       setFormData({
@@ -81,7 +67,7 @@ export function PersonaCreator({ isOpen, onClose, onPersonaCreated }) {
       
       onClose();
     } catch (err) {
-      setError(err.message);
+      setError(err.response?.data?.detail || err.message || 'Failed to create persona');
     } finally {
       setSaving(false);
     }
