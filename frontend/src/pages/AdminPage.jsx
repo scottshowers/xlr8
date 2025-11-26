@@ -190,20 +190,19 @@ function DataManagementTab() {
   const [expandedFile, setExpandedFile] = useState(null);
   const [message, setMessage] = useState(null);
 
-  const API_BASE = import.meta.env.VITE_API_URL || '';
-
   const fetchData = async () => {
     setLoading(true);
     try {
-      const structuredRes = await fetch(`${API_BASE}/api/status/structured`);
-      const structuredJson = await structuredRes.json();
-      setStructuredData(structuredJson);
+      const structuredRes = await api.get('/status/structured');
+      setStructuredData(structuredRes.data);
 
-      const docsRes = await fetch(`${API_BASE}/api/status/documents`);
-      const docsJson = await docsRes.json();
-      setDocuments(docsJson);
+      const docsRes = await api.get('/status/documents');
+      setDocuments(docsRes.data);
     } catch (err) {
       console.error('Failed to fetch data:', err);
+      // Set empty defaults so UI doesn't break
+      setStructuredData({ available: false, files: [] });
+      setDocuments({ documents: [], total: 0, total_chunks: 0 });
     } finally {
       setLoading(false);
     }
@@ -220,9 +219,9 @@ function DataManagementTab() {
     if (!confirm(`Delete all data for "${filename}"?`)) return;
     setDeleting(`structured:${project}:${filename}`);
     try {
-      const res = await fetch(`${API_BASE}/api/status/structured/${encodeURIComponent(project)}/${encodeURIComponent(filename)}`, { method: 'DELETE' });
-      if (res.ok) { showMessage(`Deleted "${filename}"`); fetchData(); }
-      else { showMessage('Failed to delete', 'error'); }
+      await api.delete(`/status/structured/${encodeURIComponent(project)}/${encodeURIComponent(filename)}`);
+      showMessage(`Deleted "${filename}"`); 
+      fetchData();
     } catch { showMessage('Failed to delete', 'error'); }
     finally { setDeleting(null); }
   };
@@ -231,9 +230,9 @@ function DataManagementTab() {
     if (!confirm(`Delete "${filename}" from vector store?`)) return;
     setDeleting(`doc:${filename}`);
     try {
-      const res = await fetch(`${API_BASE}/api/status/documents/${encodeURIComponent(filename)}`, { method: 'DELETE' });
-      if (res.ok) { showMessage(`Deleted "${filename}"`); fetchData(); }
-      else { showMessage('Failed to delete', 'error'); }
+      await api.delete(`/status/documents/${encodeURIComponent(filename)}`);
+      showMessage(`Deleted "${filename}"`); 
+      fetchData();
     } catch { showMessage('Failed to delete', 'error'); }
     finally { setDeleting(null); }
   };
@@ -242,8 +241,9 @@ function DataManagementTab() {
     if (!confirm('⚠️ DELETE ALL STRUCTURED DATA? This cannot be undone!')) return;
     setDeleting('reset-structured');
     try {
-      const res = await fetch(`${API_BASE}/api/status/structured/reset`, { method: 'POST' });
-      if (res.ok) { showMessage('All structured data deleted'); fetchData(); }
+      await api.post('/status/structured/reset');
+      showMessage('All structured data deleted'); 
+      fetchData();
     } catch { showMessage('Failed to reset', 'error'); }
     finally { setDeleting(null); }
   };
@@ -252,8 +252,9 @@ function DataManagementTab() {
     if (!confirm('⚠️ DELETE ALL DOCUMENTS? This cannot be undone!')) return;
     setDeleting('reset-chromadb');
     try {
-      const res = await fetch(`${API_BASE}/api/status/chromadb/reset`, { method: 'POST' });
-      if (res.ok) { showMessage('All documents deleted'); fetchData(); }
+      await api.post('/status/chromadb/reset');
+      showMessage('All documents deleted'); 
+      fetchData();
     } catch { showMessage('Failed to reset', 'error'); }
     finally { setDeleting(null); }
   };
