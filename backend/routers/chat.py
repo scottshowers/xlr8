@@ -142,6 +142,7 @@ def _build_sql_prompt(query: str, schema: dict) -> str:
         columns = table.get('columns', [])
         row_count = table.get('row_count', 'unknown')
         sheet = table.get('sheet', '')
+        file_name = table.get('file', '')
         
         # Handle columns - might be list of strings or list of dicts
         if columns and isinstance(columns[0], dict):
@@ -151,31 +152,36 @@ def _build_sql_prompt(query: str, schema: dict) -> str:
         
         tables_info.append(f"""
 Table: {table_name}
+Source File: {file_name}
 Sheet: {sheet}
-Columns: {', '.join(col_names[:30])}{'...' if len(col_names) > 30 else ''}
-Rows: {row_count}
+Row Count: {row_count}
+Columns: {', '.join(col_names[:40])}{'...' if len(col_names) > 40 else ''}
 """)
     
     schema_text = '\n'.join(tables_info)
     
     prompt = f"""Generate a SQL query for DuckDB to answer this question.
 
-AVAILABLE SCHEMA:
+AVAILABLE TABLES:
 {schema_text}
 
 USER QUESTION: {query}
 
-RULES:
+TABLE SELECTION RULES:
+- For configuration/setup questions (earnings groups, deduction plans, pay groups, job codes, locations), use tables from "Configuration" or "Validation" files
+- For employee data questions (employee counts, who has what, individual records), use tables from "Employee" or "Conversion" files  
+- Pick the table with the MOST SPECIFIC match to the question
+- If a sheet name matches the question topic exactly (e.g., "Earnings Groups" sheet for earnings groups question), use that table
+- Check the row count - configuration tables typically have fewer rows, employee tables have more
+
+SQL RULES:
 1. Return ONLY the SQL query, no explanation
 2. Use exact table and column names from schema
 3. Use ILIKE for case-insensitive text matching
 4. LIMIT 100 unless user asks for specific count or "all"
 5. For "list" queries, SELECT DISTINCT on relevant columns
 6. For "how many" queries, use COUNT(*)
-7. If multiple tables could answer, pick the most relevant one
-8. If unsure which column, include multiple relevant columns
-9. Table names are lowercase with underscores
-10. Column names may have spaces - wrap in double quotes if needed
+7. Column names may have spaces - wrap in double quotes if needed
 
 SQL:"""
     
@@ -298,14 +304,32 @@ def handle_structured_query(job_id: str, message: str, project: Optional[str], p
         
         response = format_structured_response(message, decrypted_rows, columns, persona, sql_query, export_path)
         
-        # Build source info
+        # Extract actual table name from SQL for better source info
+        import re
+        table_match = re.search(r'FROM\s+([^\s,;]+)', sql_query, re.IGNORECASE)
+        queried_table = table_match.group(1) if table_match else 'unknown'
+        
+        # Find the source file/sheet for this table
+        source_file = 'Unknown'
+        source_sheet = 'Unknown'
+        for t in schema.get('tables', []):
+            if t.get('table_name', '').lower() == queried_table.lower():
+                source_file = t.get('file', 'Unknown')
+                source_sheet = t.get('sheet', 'Unknown')
+                break
+        
+        # Build source info with actual table details
         sources = [{
-            'filename': 'DuckDB Query',
+            'filename': source_file,
+            'sheet': source_sheet,
+            'table': queried_table,
             'type': 'structured_data',
-            'tables_queried': [t['table_name'] for t in schema.get('tables', [])[:5]],
+            'sql_executed': sql_query,
             'rows_returned': len(rows),
             'relevance': 100
         }]
+        
+        logger.info(f"[STRUCTURED] Query complete - Table: {queried_table}, File: {source_file}, Rows: {len(rows)}")
         
         update_job_status(
             job_id, 'complete', 'Complete', 100,
