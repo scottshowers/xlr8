@@ -35,12 +35,24 @@ from utils.persona_manager import get_persona_manager
 # Import structured data handling (DuckDB for Excel/CSV queries)
 try:
     from utils.structured_data_handler import get_structured_handler
-    from utils.query_router import get_query_router, QueryType
     STRUCTURED_QUERIES_AVAILABLE = True
 except ImportError as e:
     STRUCTURED_QUERIES_AVAILABLE = False
     logger_temp = logging.getLogger(__name__)
     logger_temp.warning(f"Structured queries not available: {e}")
+
+# Import intelligent query router
+try:
+    from utils.query_router_intelligent import get_query_router, QueryType, detect_query_type
+    INTELLIGENT_ROUTING = True
+except ImportError:
+    try:
+        from utils.query_router import get_query_router, QueryType
+        INTELLIGENT_ROUTING = False
+    except ImportError:
+        INTELLIGENT_ROUTING = False
+        logger_temp = logging.getLogger(__name__)
+        logger_temp.warning("Query router not available")
 
 logger = logging.getLogger(__name__)
 
@@ -390,18 +402,47 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
         persona = pm.get_persona(persona_name)
         logger.info(f"[PERSONA] Using: {persona.name} {persona.icon}")
         
-        # STEP 0.5: QUERY ROUTING (Structured vs Unstructured)
+        # STEP 0.5: INTELLIGENT QUERY ROUTING
         if STRUCTURED_QUERIES_AVAILABLE:
             update_job_status(job_id, 'processing', '🧠 Analyzing query type...', 3)
             
-            router = get_query_router()
-            query_type, routing_meta = router.detect_query_type(message)
+            # Check what data is available for this project
+            try:
+                handler = get_structured_handler()
+                schema = handler.get_schema_for_project(project) if project else {}
+                has_structured = bool(schema.get('tables'))
+                table_names = list(schema.get('tables', {}).keys())
+            except:
+                has_structured = False
+                table_names = []
             
-            logger.info(f"[ROUTING] Query type: {query_type.value} | Scores: structured={routing_meta['structured_score']}, unstructured={routing_meta['unstructured_score']}")
+            # Check if RAG has data
+            try:
+                rag_check = RAGHandler()
+                rag_collection = rag_check.client.get_collection("documents")
+                has_rag = rag_collection.count() > 0
+            except:
+                has_rag = False
             
-            # STRUCTURED QUERY PATH (SQL)
-            if query_type == QueryType.STRUCTURED:
-                result = handle_structured_query(job_id, message, project, persona, routing_meta)
+            # Use intelligent routing
+            if INTELLIGENT_ROUTING:
+                routing_result = detect_query_type(
+                    message, 
+                    has_structured=has_structured, 
+                    has_rag=has_rag,
+                    tables=table_names
+                )
+                query_type = routing_result['route']
+                logger.info(f"[ROUTING] {query_type.value} | Reasoning: {', '.join(routing_result['reasoning'])}")
+            else:
+                # Fallback to old router
+                router = get_query_router()
+                query_type, routing_meta = router.detect_query_type(message)
+                logger.info(f"[ROUTING] {query_type.value} (legacy router)")
+            
+            # STRUCTURED QUERY PATH (SQL) - TRY FIRST IF DATA EXISTS
+            if query_type == QueryType.STRUCTURED or (has_structured and query_type != QueryType.UNSTRUCTURED):
+                result = handle_structured_query(job_id, message, project, persona, {'tables': table_names})
                 if result:
                     return  # Structured query handled successfully
                 # If structured failed, fall through to RAG
@@ -409,7 +450,7 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
             
             # HYBRID QUERY PATH (SQL + RAG)
             elif query_type == QueryType.HYBRID:
-                result = handle_hybrid_query(job_id, message, project, persona, routing_meta, max_results)
+                result = handle_hybrid_query(job_id, message, project, persona, {}, max_results)
                 if result:
                     return
                 logger.warning("[ROUTING] Hybrid query failed, falling back to RAG")
@@ -1212,4 +1253,43 @@ async def get_encryption_status():
         }
     except Exception as e:
         logger.error(f"Error checking encryption: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.post("/chat/data/reset-database")
+async def reset_structured_database(confirm: bool = False):
+    """
+    Reset the entire structured data database.
+    WARNING: This deletes ALL uploaded Excel/CSV data!
+    
+    Must pass confirm=true to execute.
+    """
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        raise HTTPException(501, "Structured queries not available")
+    
+    if not confirm:
+        return {
+            "warning": "This will DELETE ALL structured data (Excel/CSV uploads)!",
+            "action_required": "Pass ?confirm=true to proceed",
+            "example": "POST /api/chat/data/reset-database?confirm=true"
+        }
+    
+    try:
+        handler = get_structured_handler()
+        result = handler.reset_database()
+        
+        if result.get('success'):
+            logger.info(f"[RESET] Database reset complete - {len(result.get('tables_dropped', []))} tables dropped")
+            return {
+                "status": "reset_complete",
+                "tables_dropped": result.get('tables_dropped', []),
+                "message": "Database reset. You can now re-upload your files."
+            }
+        else:
+            raise HTTPException(500, result.get('error', 'Reset failed'))
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error resetting database: {e}")
         raise HTTPException(500, str(e))
