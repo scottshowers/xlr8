@@ -526,78 +526,133 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
         persona = pm.get_persona(persona_name)
         logger.info(f"[PERSONA] Using: {persona.name} {persona.icon}")
         
-        # STEP 0.5: INTELLIGENT QUERY ROUTING
-        logger.info(f"[DEBUG] STRUCTURED_QUERIES_AVAILABLE = {STRUCTURED_QUERIES_AVAILABLE}")
+        # STEP 0.5: SELF-HEALING QUERY - TRY EVERYTHING, COMBINE RESULTS
+        # Philosophy: Don't guess. Run SQL AND RAG. Let Claude pick the best answer.
         
+        sql_results = None
+        sql_query = None
+        sql_error = None
+        rag_results = None
+        
+        # TRY SQL if structured data available
         if STRUCTURED_QUERIES_AVAILABLE:
-            update_job_status(job_id, 'processing', '🧠 Analyzing query type...', 3)
-            
-            # Check what data is available for this project
             try:
                 handler = get_structured_handler()
-                logger.info(f"[DEBUG] Got structured handler, checking project: {project}")
                 schema = handler.get_schema_for_project(project) if project else {}
-                
-                # schema['tables'] is a LIST of table info dicts
                 tables_list = schema.get('tables', [])
-                has_structured = len(tables_list) > 0
-                table_names = [t['table_name'] for t in tables_list if 'table_name' in t]
+                
+                if tables_list:
+                    update_job_status(job_id, 'processing', '📊 Querying structured data...', 10)
+                    sql_prompt = _build_sql_prompt(message, schema)
                     
-                logger.info(f"[DEBUG] has_structured={has_structured}, tables={len(table_names)}")
+                    orchestrator_instance = LLMOrchestrator()
+                    sql_gen = orchestrator_instance.generate_sql(sql_prompt)
+                    
+                    if sql_gen and sql_gen.get('sql'):
+                        sql_query = sql_gen['sql'].strip()
+                        logger.info(f"[SQL] Generated: {sql_query[:100]}...")
+                        
+                        try:
+                            rows, columns = handler.execute_query(sql_query)
+                            if rows:
+                                decrypted = _decrypt_results(rows, handler)
+                                sql_results = {
+                                    'rows': decrypted,
+                                    'columns': columns,
+                                    'count': len(rows),
+                                    'query': sql_query
+                                }
+                                logger.info(f"[SQL] Got {len(rows)} results")
+                        except Exception as e:
+                            sql_error = str(e)
+                            logger.warning(f"[SQL] Query failed: {e}")
             except Exception as e:
-                logger.error(f"[DEBUG] Structured handler error: {e}")
-                has_structured = False
-                table_names = []
-            
-            # Check if RAG has data
-            try:
-                rag_check = RAGHandler()
-                rag_collection = rag_check.client.get_collection("documents")
-                has_rag = rag_collection.count() > 0
-                logger.info(f"[DEBUG] has_rag={has_rag}")
-            except Exception as e:
-                logger.error(f"[DEBUG] RAG check error: {e}")
-                has_rag = False
-            
-            # Use intelligent routing
-            if INTELLIGENT_ROUTING:
-                routing_result = detect_query_type(
-                    message, 
-                    has_structured=has_structured, 
-                    has_rag=has_rag,
-                    tables=table_names
-                )
-                query_type = routing_result['route']
-                logger.info(f"[ROUTING] {query_type.value} | Reasoning: {', '.join(routing_result['reasoning'])}")
-            else:
-                # Simple fallback - if structured data exists, try SQL first
-                if has_structured:
-                    query_type = QueryType.STRUCTURED
-                    logger.info(f"[ROUTING] STRUCTURED (fallback - structured data exists)")
-                elif has_rag:
-                    query_type = QueryType.UNSTRUCTURED
-                    logger.info(f"[ROUTING] UNSTRUCTURED (fallback - RAG data exists)")
-                else:
-                    query_type = QueryType.GENERAL
-                    logger.info(f"[ROUTING] GENERAL (fallback - no data)")
-            
-            # STRUCTURED QUERY PATH (SQL) - TRY FIRST IF DATA EXISTS
-            if query_type == QueryType.STRUCTURED or (has_structured and query_type != QueryType.UNSTRUCTURED):
-                logger.info(f"[DEBUG] Calling handle_structured_query")
-                result = handle_structured_query(job_id, message, project, persona, {'tables': table_names})
-                if result:
-                    return  # Structured query handled successfully
-                # If structured failed, fall through to RAG
-                logger.warning("[ROUTING] Structured query failed, falling back to RAG")
-            
-            # HYBRID QUERY PATH (SQL + RAG)
-            elif query_type == QueryType.HYBRID:
-                result = handle_hybrid_query(job_id, message, project, persona, {}, max_results)
-                if result:
-                    return
-                logger.warning("[ROUTING] Hybrid query failed, falling back to RAG")
+                logger.warning(f"[SQL] Handler error: {e}")
         
-        # UNSTRUCTURED/GENERAL PATH continues below (existing RAG flow)
+        # TRY RAG
+        update_job_status(job_id, 'processing', '🔍 Searching documents...', 30)
+        try:
+            rag = RAGHandler()
+            collection = rag.client.get_collection("documents")
+            
+            where_filter = None
+            if project and project not in ['', 'all', 'All Projects']:
+                where_filter = {"project": project}
+            
+            rag_response = collection.query(
+                query_texts=[message],
+                n_results=min(max_results, 20),
+                where=where_filter
+            )
+            
+            if rag_response and rag_response.get('documents') and rag_response['documents'][0]:
+                rag_results = {
+                    'documents': rag_response['documents'][0],
+                    'metadatas': rag_response.get('metadatas', [[]])[0],
+                    'count': len(rag_response['documents'][0])
+                }
+                logger.info(f"[RAG] Got {rag_results['count']} chunks")
+        except Exception as e:
+            logger.warning(f"[RAG] Search failed: {e}")
+        
+        # DECIDE: Use what we got
+        update_job_status(job_id, 'processing', '🧠 Analyzing results...', 60)
+        
+        # If we have SQL results, prioritize them for data questions
+        if sql_results and sql_results['count'] > 0:
+            # Format SQL response
+            response = format_structured_response(
+                message, 
+                sql_results['rows'], 
+                sql_results['columns'], 
+                persona, 
+                sql_results['query']
+            )
+            
+            # Add RAG context if available
+            if rag_results and rag_results['count'] > 0:
+                response += "\n\n---\n*Additional context from documents available.*"
+            
+            sources = [{
+                'filename': 'Structured Data Query',
+                'type': 'sql',
+                'sql': sql_query,
+                'rows_returned': sql_results['count'],
+                'relevance': 100
+            }]
+            
+            update_job_status(
+                job_id, 'complete', 'Complete', 100,
+                response=response,
+                sources=sources,
+                chunks_found=sql_results['count'],
+                models_used=['sql_generation', 'duckdb'],
+                query_type='structured',
+                sanitized=False
+            )
+            return
+        
+        # If SQL failed but RAG has results, use RAG
+        if rag_results and rag_results['count'] > 0:
+            # Continue to normal RAG flow below
+            logger.info("[ROUTING] Using RAG results")
+            pass
+        
+        # If nothing worked
+        elif not sql_results and not rag_results:
+            if sql_error:
+                update_job_status(
+                    job_id, 'complete', 'Complete', 100,
+                    response=f"I tried to query your data but encountered an issue: {sql_error}\n\nTry rephrasing your question.",
+                    sources=[],
+                    chunks_found=0,
+                    models_used=['sql_generation'],
+                    query_type='error',
+                    sanitized=False
+                )
+                return
+        
+        # Continue to RAG processing below...
         
         # STEP 1: INTENT CLASSIFICATION
         update_job_status(job_id, 'processing', '🧠 Understanding query...', 5)
