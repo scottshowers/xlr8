@@ -9,9 +9,59 @@
  * Used by all app pages except Landing
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import ContextBar from './ContextBar';
+
+// Brand Colors
+const COLORS = {
+  grassGreen: '#83b16d',
+  skyBlue: '#93abd9',
+  iceFlow: '#c9d3d4',
+  white: '#f6f5fa',
+  text: '#2a3441',
+  textLight: '#5f6c7b',
+};
+
+// Speed Lines Animation Styles
+const SpeedLinesStyles = () => (
+  <style>{`
+    @keyframes speedLineGreen {
+      0% { opacity: 0; transform: translateX(-15px); }
+      50% { opacity: 1; }
+      100% { opacity: 0; transform: translateX(30px); }
+    }
+    .nav-logo-wrapper:hover .speed-line-green {
+      animation: speedLineGreen 1s ease-out infinite;
+    }
+    .speed-line-green {
+      height: 2px;
+      background: linear-gradient(90deg, transparent, #83b16d, transparent);
+      border-radius: 2px;
+      opacity: 0;
+    }
+    .speed-line-green:nth-child(1) { width: 20px; animation-delay: 0s; }
+    .speed-line-green:nth-child(2) { width: 30px; animation-delay: 0.15s; }
+    .speed-line-green:nth-child(3) { width: 18px; animation-delay: 0.3s; }
+  `}</style>
+)
+
+// Speed Lines for Nav (green, smaller)
+const SpeedLinesNav = () => (
+  <div style={{
+    position: 'absolute',
+    left: '-18px',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '5px'
+  }}>
+    <div className="speed-line-green" />
+    <div className="speed-line-green" />
+    <div className="speed-line-green" />
+  </div>
+)
 
 // Brand Colors
 const COLORS = {
@@ -148,8 +198,9 @@ function Navigation() {
   return (
     <nav style={styles.nav}>
       <div style={styles.container}>
-        <Link to="/" style={styles.logo}>
-          <div style={styles.logoMark}>
+        <Link to="/" style={styles.logo} className="nav-logo-wrapper">
+          <div style={{ ...styles.logoMark, position: 'relative' }}>
+            <SpeedLinesNav />
             <HLogoGreen />
           </div>
           <div style={styles.logoText}>
@@ -183,6 +234,7 @@ export default function Layout({ children }) {
       display: 'flex', 
       flexDirection: 'column' 
     }}>
+      <SpeedLinesStyles />
       <ContextBar />
       <Navigation />
       <main style={{ 
