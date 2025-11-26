@@ -36,6 +36,8 @@ from utils.persona_manager import get_persona_manager
 try:
     from utils.structured_data_handler import get_structured_handler
     STRUCTURED_QUERIES_AVAILABLE = True
+    logger_temp = logging.getLogger(__name__)
+    logger_temp.info("Structured queries available (DuckDB handler loaded)")
 except ImportError as e:
     STRUCTURED_QUERIES_AVAILABLE = False
     logger_temp = logging.getLogger(__name__)
@@ -415,16 +417,21 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
         logger.info(f"[PERSONA] Using: {persona.name} {persona.icon}")
         
         # STEP 0.5: INTELLIGENT QUERY ROUTING
+        logger.info(f"[DEBUG] STRUCTURED_QUERIES_AVAILABLE = {STRUCTURED_QUERIES_AVAILABLE}")
+        
         if STRUCTURED_QUERIES_AVAILABLE:
             update_job_status(job_id, 'processing', '🧠 Analyzing query type...', 3)
             
             # Check what data is available for this project
             try:
                 handler = get_structured_handler()
+                logger.info(f"[DEBUG] Got structured handler, checking project: {project}")
                 schema = handler.get_schema_for_project(project) if project else {}
                 has_structured = bool(schema.get('tables'))
                 table_names = list(schema.get('tables', {}).keys())
-            except:
+                logger.info(f"[DEBUG] has_structured={has_structured}, tables={len(table_names)}")
+            except Exception as e:
+                logger.error(f"[DEBUG] Structured handler error: {e}")
                 has_structured = False
                 table_names = []
             
@@ -433,7 +440,9 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
                 rag_check = RAGHandler()
                 rag_collection = rag_check.client.get_collection("documents")
                 has_rag = rag_collection.count() > 0
-            except:
+                logger.info(f"[DEBUG] has_rag={has_rag}")
+            except Exception as e:
+                logger.error(f"[DEBUG] RAG check error: {e}")
                 has_rag = False
             
             # Use intelligent routing
@@ -460,6 +469,7 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
             
             # STRUCTURED QUERY PATH (SQL) - TRY FIRST IF DATA EXISTS
             if query_type == QueryType.STRUCTURED or (has_structured and query_type != QueryType.UNSTRUCTURED):
+                logger.info(f"[DEBUG] Calling handle_structured_query")
                 result = handle_structured_query(job_id, message, project, persona, {'tables': table_names})
                 if result:
                     return  # Structured query handled successfully
