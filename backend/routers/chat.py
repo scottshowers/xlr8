@@ -118,6 +118,30 @@ class ChatJobStatus(BaseModel):
     error: Optional[str] = None
 
 
+# ============================================================================
+# MODELS ENDPOINT - Available AI Models
+# ============================================================================
+
+@router.get("/chat/models")
+async def get_available_models():
+    """Get available AI models"""
+    return {
+        "models": [
+            {
+                "id": "claude-3-sonnet",
+                "name": "Claude 3 Sonnet",
+                "description": "Fast, balanced model for most tasks"
+            },
+            {
+                "id": "claude-3-opus",
+                "name": "Claude 3 Opus",
+                "description": "Most capable model for complex analysis"
+            }
+        ],
+        "default": "claude-3-sonnet"
+    }
+
+
 def update_job_status(job_id: str, status: str, step: str, progress: int, **kwargs):
     """Update job status"""
     if job_id in chat_jobs:
