@@ -281,30 +281,44 @@ class LLMOrchestrator:
             return str(e), False
     
     def _call_claude(self, prompt: str, system_prompt: str) -> Tuple[str, bool]:
-        """Call Claude API"""
+        """Call Claude API with retry for rate limits"""
         if not self.claude_api_key:
             return "Claude API key not configured", False
         
-        try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=self.claude_api_key)
-            
-            logger.info(f"Calling Claude ({len(prompt)} chars)")
-            
-            response = client.messages.create(
-                model=self.claude_model,
-                max_tokens=4096,
-                system=system_prompt,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            
-            result = response.content[0].text
-            logger.info(f"Claude response: {len(result)} chars")
-            return result, True
-            
-        except Exception as e:
-            logger.error(f"Claude error: {e}")
-            return str(e), False
+        import time
+        max_retries = 3
+        
+        for attempt in range(max_retries):
+            try:
+                import anthropic
+                client = anthropic.Anthropic(api_key=self.claude_api_key)
+                
+                logger.info(f"Calling Claude ({len(prompt)} chars), attempt {attempt + 1}")
+                
+                response = client.messages.create(
+                    model=self.claude_model,
+                    max_tokens=4096,
+                    system=system_prompt,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                
+                result = response.content[0].text
+                logger.info(f"Claude response: {len(result)} chars")
+                return result, True
+                
+            except anthropic.RateLimitError as e:
+                wait_time = (attempt + 1) * 30  # 30s, 60s, 90s
+                logger.warning(f"Rate limit hit, waiting {wait_time}s before retry {attempt + 1}/{max_retries}")
+                if attempt < max_retries - 1:
+                    time.sleep(wait_time)
+                else:
+                    return f"Rate limit exceeded after {max_retries} retries. Please wait a minute and try again.", False
+                    
+            except Exception as e:
+                logger.error(f"Claude error: {e}")
+                return str(e), False
+        
+        return "Unknown error in Claude call", False
     
     def _build_context(self, chunks: List[Dict], max_chunks: int = 30) -> str:
         """Build context string from chunks"""
