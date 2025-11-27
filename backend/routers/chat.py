@@ -354,11 +354,18 @@ Table number(s):"""
                             value_summary = ""
                             cols_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
                             all_cols = [col[1] for col in cols_result]
-                            status_cols = [c for c in all_cols if any(s in c.lower() for s in ['status', 'active', 'type', 'term'])]
+                            
+                            logger.warning(f"[STEP 4] Table {idx} has {len(all_cols)} columns: {all_cols[:15]}")
+                            
+                            # Wider pattern to catch employment_status_code, status, active, terminated, etc.
+                            status_cols = [c for c in all_cols if any(s in c.lower() for s in 
+                                          ['status', 'active', 'type', 'term', 'employed'])]
+                            
+                            logger.warning(f"[STEP 4] Status-like columns found: {status_cols}")
                             
                             if status_cols:
                                 value_summary = "\n** ACTUAL VALUE COUNTS (from full table, not sample): **\n"
-                                for col in status_cols[:3]:
+                                for col in status_cols[:5]:  # Up to 5 status columns
                                     try:
                                         dist_sql = f'SELECT "{col}", COUNT(*) as cnt FROM "{table_name}" GROUP BY "{col}" ORDER BY cnt DESC'
                                         dist_result = handler.conn.execute(dist_sql).fetchall()
@@ -367,7 +374,7 @@ Table number(s):"""
                                             value_summary += f"  {col}: {dist_str}\n"
                                     except Exception as de:
                                         logger.warning(f"[STEP 4] Distribution query failed for {col}: {de}")
-                                logger.warning(f"[STEP 4] Got value distributions: {value_summary.strip()}")
+                                logger.warning(f"[STEP 4] Value distributions: {value_summary.strip()}")
                             
                             # Get total row count
                             total_count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
