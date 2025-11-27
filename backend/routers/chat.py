@@ -1,1485 +1,1269 @@
 """
-Structured Data Handler - DuckDB Storage for Excel/CSV
-=======================================================
+Chat Router - SELF-HEALING with FULL INSTRUMENTATION
+=====================================================
 
-Stores tabular data in DuckDB for fast SQL queries.
-Each project gets isolated tables. Cross-sheet joins supported.
-
-SECURITY FEATURES:
-- Field-level encryption for PII (SSN, DOB, etc.)
-- Encryption at rest using Fernet (AES-128)
-
-VERSIONING FEATURES:
-- Load versioning for comparison
-- Diff detection (new, changed, deleted records)
+Every step logged. No silent failures. Production ready.
 
 Author: XLR8 Team
 """
 
-import os
-import re
-import json
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from typing import Optional, Dict, Any, List
+import threading
+import uuid
 import logging
-import pandas as pd
-import duckdb
-from typing import Dict, List, Any, Optional, Tuple
-from datetime import datetime
-import hashlib
-import base64
+import sys
+import time
+import re
+import traceback
+import io
 
-# Encryption imports
+sys.path.insert(0, '/app')
+sys.path.insert(0, '/data')
+
+from utils.rag_handler import RAGHandler
+from utils.llm_orchestrator import LLMOrchestrator
+from utils.persona_manager import get_persona_manager
+
+# Import structured data handling
 try:
-    from cryptography.fernet import Fernet
-    ENCRYPTION_AVAILABLE = True
-except ImportError:
-    ENCRYPTION_AVAILABLE = False
-    logging.warning("cryptography not installed - PII encryption disabled. Run: pip install cryptography")
+    from utils.structured_data_handler import get_structured_handler
+    STRUCTURED_QUERIES_AVAILABLE = True
+    logging.getLogger(__name__).info("✅ Structured data handler loaded")
+except ImportError as e:
+    STRUCTURED_QUERIES_AVAILABLE = False
+    logging.getLogger(__name__).warning(f"❌ Structured data handler NOT available: {e}")
 
 logger = logging.getLogger(__name__)
 
-# DuckDB storage location
-DUCKDB_PATH = "/data/structured_data.duckdb"
-ENCRYPTION_KEY_PATH = "/data/.encryption_key"
+router = APIRouter()
 
-# PII field patterns to encrypt
-PII_PATTERNS = [
-    r'ssn', r'social.*sec', r'social_security',
-    r'tax.*id', r'tin',
-    r'bank.*account', r'routing.*number', r'account.*number',
-    r'credit.*card', r'card.*number',
-    r'passport', r'license.*number', r'driver.*lic',
-    r'salary', r'pay.*rate', r'wage', r'compensation',
-    r'dob', r'date.*birth', r'birth.*date', r'birthdate',
+chat_jobs: Dict[str, Dict[str, Any]] = {}
+
+
+# =============================================================================
+# PII DETECTION & SANITIZATION
+# =============================================================================
+
+PII_COLUMN_PATTERNS = [
+    r'ssn', r'social.*security', r'tax.*id',
+    r'salary', r'pay.*rate', r'wage', r'compensation', r'hourly.*rate', r'annual.*pay',
+    r'bank.*account', r'routing', r'account.*num',
+    r'dob', r'birth.*date', r'date.*birth',
+    r'email', r'phone', r'address', r'street', r'city', r'zip',
+    r'first.*name', r'last.*name', r'full.*name', r'employee.*name'
 ]
 
 
-class FieldEncryptor:
-    """Handles field-level encryption for PII data"""
+def detect_pii_in_data(data: str, columns: List[str] = None) -> Dict[str, Any]:
+    """Scan DATA content for PII patterns."""
+    detected = {'has_pii': False, 'pii_types': [], 'column_flags': []}
     
-    def __init__(self, key_path: str = ENCRYPTION_KEY_PATH):
-        self.key_path = key_path
-        self.fernet = None
-        
-        if ENCRYPTION_AVAILABLE:
-            self._init_encryption()
+    if not data:
+        return detected
     
-    def _init_encryption(self):
-        """Initialize or load encryption key"""
-        try:
-            if os.path.exists(self.key_path):
-                with open(self.key_path, 'rb') as f:
-                    key = f.read()
-            else:
-                # Generate new key
-                key = Fernet.generate_key()
-                os.makedirs(os.path.dirname(self.key_path), exist_ok=True)
-                with open(self.key_path, 'wb') as f:
-                    f.write(key)
-                os.chmod(self.key_path, 0o600)  # Restrict permissions
-                logger.info("Generated new encryption key")
-            
-            self.fernet = Fernet(key)
-            logger.info("Encryption initialized successfully")
-        except Exception as e:
-            logger.error(f"Encryption initialization failed: {e}")
-            self.fernet = None
-    
-    def is_pii_column(self, column_name: str) -> bool:
-        """Check if column likely contains PII"""
-        col_lower = column_name.lower()
-        for pattern in PII_PATTERNS:
-            if re.search(pattern, col_lower):
-                return True
-        return False
-    
-    def encrypt(self, value: Any) -> str:
-        """Encrypt a value"""
-        if not self.fernet or value is None or pd.isna(value):
-            return value
-        
-        try:
-            # Convert to string and encrypt
-            val_str = str(value)
-            encrypted = self.fernet.encrypt(val_str.encode())
-            # Prefix with 'ENC:' to identify encrypted values
-            return f"ENC:{encrypted.decode()}"
-        except Exception as e:
-            logger.warning(f"Encryption failed for value: {e}")
-            return value
-    
-    def decrypt(self, value: Any) -> str:
-        """Decrypt a value"""
-        if not self.fernet or value is None or pd.isna(value):
-            return value
-        
-        try:
-            val_str = str(value)
-            if not val_str.startswith("ENC:"):
-                return value
-            
-            encrypted_data = val_str[4:].encode()
-            decrypted = self.fernet.decrypt(encrypted_data)
-            return decrypted.decode()
-        except Exception as e:
-            logger.warning(f"Decryption failed: {e}")
-            return value
-    
-    def encrypt_dataframe(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
-        """Encrypt PII columns in a DataFrame"""
-        encrypted_cols = []
-        df = df.copy()
-        
-        for col in df.columns:
-            if self.is_pii_column(col):
-                df[col] = df[col].apply(self.encrypt)
-                encrypted_cols.append(col)
-                logger.info(f"Encrypted PII column: {col}")
-        
-        return df, encrypted_cols
-    
-    def decrypt_dataframe(self, df: pd.DataFrame, encrypted_cols: List[str] = None) -> pd.DataFrame:
-        """Decrypt PII columns in a DataFrame"""
-        df = df.copy()
-        
-        # If no encrypted_cols specified, check all columns for ENC: prefix
-        if encrypted_cols is None:
-            encrypted_cols = []
-            for col in df.columns:
-                if df[col].dtype == object:
-                    sample = df[col].dropna().head(1)
-                    if len(sample) > 0 and str(sample.iloc[0]).startswith("ENC:"):
-                        encrypted_cols.append(col)
-        
-        for col in encrypted_cols:
-            if col in df.columns:
-                df[col] = df[col].apply(self.decrypt)
-        
-        return df
-
-
-class StructuredDataHandler:
-    """
-    Handles structured data storage and querying via DuckDB.
-    
-    Features:
-    - Auto-detect schema from Excel/CSV
-    - Project isolation (table prefixes)
-    - Cross-sheet joins via common keys (Employee ID, etc.)
-    - Natural language to SQL translation
-    - Export results to Excel/CSV
-    - PII encryption at rest
-    - Load versioning and comparison
-    """
-    
-    def __init__(self, db_path: str = DUCKDB_PATH):
-        """Initialize DuckDB connection and create required directories"""
-        # Create all required directories
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
-        os.makedirs("/data/exports", exist_ok=True)
-        
-        self.db_path = db_path
-        self.conn = duckdb.connect(db_path)
-        self.encryptor = FieldEncryptor()
-        self._init_metadata_table()
-        logger.info(f"StructuredDataHandler initialized with {db_path}")
-    
-    def _init_metadata_table(self):
-        """Create metadata table to track schemas and versions"""
-        try:
-            # Try to drop old tables if they have incompatible schema
-            # This handles upgrades from old versions
-            try:
-                # Check if old schema exists (with PRIMARY KEY constraint)
-                result = self.conn.execute("""
-                    SELECT COUNT(*) FROM information_schema.columns 
-                    WHERE table_name = '_schema_metadata'
-                """).fetchone()
-                
-                if result and result[0] > 0:
-                    # Table exists - check if it has the old schema by trying an insert
-                    # If it fails, we need to recreate
-                    logger.info("Metadata tables exist, checking compatibility...")
-            except:
-                pass
-            
-            # Create sequences for auto-increment
-            self.conn.execute("""
-                CREATE SEQUENCE IF NOT EXISTS schema_metadata_seq START 1
-            """)
-            
-            self.conn.execute("""
-                CREATE SEQUENCE IF NOT EXISTS load_versions_seq START 1
-            """)
-            
-            # Create metadata table (will be no-op if already exists with same schema)
-            self.conn.execute("""
-                CREATE TABLE IF NOT EXISTS _schema_metadata (
-                    id INTEGER DEFAULT nextval('schema_metadata_seq'),
-                    project VARCHAR NOT NULL,
-                    file_name VARCHAR NOT NULL,
-                    sheet_name VARCHAR NOT NULL,
-                    table_name VARCHAR NOT NULL,
-                    columns JSON,
-                    row_count INTEGER,
-                    likely_keys JSON,
-                    encrypted_columns JSON,
-                    version INTEGER DEFAULT 1,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    is_current BOOLEAN DEFAULT TRUE
-                )
-            """)
-            
-            # Load versions table for tracking
-            self.conn.execute("""
-                CREATE TABLE IF NOT EXISTS _load_versions (
-                    id INTEGER DEFAULT nextval('load_versions_seq'),
-                    project VARCHAR NOT NULL,
-                    file_name VARCHAR NOT NULL,
-                    version INTEGER NOT NULL,
-                    row_count INTEGER,
-                    checksum VARCHAR,
-                    loaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    notes VARCHAR
-                )
-            """)
-            
-            # Table relationships for JOINs
-            self.conn.execute("""
-                CREATE TABLE IF NOT EXISTS _table_relationships (
-                    id INTEGER,
-                    project VARCHAR NOT NULL,
-                    source_table VARCHAR NOT NULL,
-                    source_columns JSON NOT NULL,
-                    target_table VARCHAR NOT NULL,
-                    target_columns JSON NOT NULL,
-                    relationship_type VARCHAR DEFAULT 'foreign_key',
-                    confidence FLOAT DEFAULT 1.0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            self.conn.commit()
-            logger.info("Metadata tables initialized successfully")
-            
-        except Exception as e:
-            logger.warning(f"Metadata table init issue: {e}, attempting to recreate...")
-            try:
-                # Drop and recreate if there's a conflict
-                self.conn.execute("DROP TABLE IF EXISTS _schema_metadata")
-                self.conn.execute("DROP TABLE IF EXISTS _load_versions")
-                self.conn.execute("DROP SEQUENCE IF EXISTS schema_metadata_seq")
-                self.conn.execute("DROP SEQUENCE IF EXISTS load_versions_seq")
-                self.conn.commit()
-                
-                # Recursive call to create fresh
-                self._init_metadata_table()
-            except Exception as e2:
-                logger.error(f"Failed to recreate metadata tables: {e2}")
-    
-    def _sanitize_name(self, name: str) -> str:
-        """Sanitize table/column names for SQL"""
-        # Remove special chars, replace spaces with underscores
-        sanitized = re.sub(r'[^\w\s]', '', str(name))
-        sanitized = re.sub(r'\s+', '_', sanitized.strip())
-        sanitized = sanitized.lower()
-        # Ensure it doesn't start with a number
-        if sanitized and sanitized[0].isdigit():
-            sanitized = 'col_' + sanitized
-        return sanitized or 'unnamed'
-    
-    def _split_horizontal_tables(self, file_path: str, sheet_name: str) -> List[Tuple[str, pd.DataFrame]]:
-        """
-        Detect and split horizontally arranged tables within a single sheet.
-        Tables are separated by blank columns.
-        
-        Returns: List of (sub_table_name, dataframe) tuples
-        """
-        try:
-            # Read raw sheet without header to detect structure
-            raw_df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
-            
-            if raw_df.empty:
-                return []
-            
-            # Find blank columns (all cells are NaN or empty)
-            blank_cols = []
-            for col_idx in range(len(raw_df.columns)):
-                col_data = raw_df.iloc[:, col_idx]
-                # Check if column is entirely blank
-                is_blank = col_data.isna().all() or (col_data.astype(str).str.strip() == '').all()
-                if is_blank:
-                    blank_cols.append(col_idx)
-            
-            # If no blank columns or less than 2 column groups, no split needed
-            if not blank_cols:
-                return []
-            
-            # Find column groups (consecutive non-blank columns)
-            all_cols = set(range(len(raw_df.columns)))
-            non_blank_cols = sorted(all_cols - set(blank_cols))
-            
-            if not non_blank_cols:
-                return []
-            
-            # Group consecutive columns
-            groups = []
-            current_group = [non_blank_cols[0]]
-            
-            for col_idx in non_blank_cols[1:]:
-                if col_idx == current_group[-1] + 1:
-                    current_group.append(col_idx)
-                else:
-                    if len(current_group) >= 2:  # Need at least 2 columns for a valid table
-                        groups.append(current_group)
-                    current_group = [col_idx]
-            
-            if len(current_group) >= 2:
-                groups.append(current_group)
-            
-            # If only one group, no horizontal split needed
-            if len(groups) <= 1:
-                return []
-            
-            logger.info(f"Sheet '{sheet_name}': Found {len(groups)} horizontal tables")
-            
-            # Extract each table group
-            result = []
-            for group_cols in groups:
-                try:
-                    # Extract columns for this group
-                    sub_df = raw_df.iloc[:, group_cols].copy()
-                    
-                    # Use first row as header
-                    sub_df.columns = sub_df.iloc[0].fillna('').astype(str).tolist()
-                    sub_df = sub_df.iloc[1:]  # Remove header row from data
-                    
-                    # Drop empty rows
-                    sub_df = sub_df.dropna(how='all')
-                    
-                    if sub_df.empty or len(sub_df.columns) < 2:
-                        continue
-                    
-                    # Get table name from first column header (e.g., "Benefit Change Reasons")
-                    first_header = str(sub_df.columns[0]).strip()
-                    if first_header and first_header.lower() not in ['unnamed', '', 'nan']:
-                        # Try to extract a meaningful name
-                        sub_table_name = first_header.split('\n')[0][:50]  # First 50 chars, first line
-                    else:
-                        sub_table_name = f"section_{len(result) + 1}"
-                    
-                    result.append((sub_table_name, sub_df))
-                    logger.info(f"  - Extracted: '{sub_table_name}' ({len(sub_df)} rows, {len(sub_df.columns)} cols)")
-                    
-                except Exception as e:
-                    logger.warning(f"Failed to extract column group: {e}")
-                    continue
-            
-            return result
-            
-        except Exception as e:
-            logger.warning(f"Horizontal table detection failed for '{sheet_name}': {e}")
-            return []
-    
-    def _generate_table_name(self, project: str, file_name: str, sheet_name: str) -> str:
-        """Generate unique table name for a sheet"""
-        project_clean = self._sanitize_name(project)
-        file_clean = self._sanitize_name(file_name.rsplit('.', 1)[0])  # Remove extension
-        sheet_clean = self._sanitize_name(sheet_name)
-        return f"{project_clean}__{file_clean}__{sheet_clean}"
-    
-    def _detect_column_types(self, df: pd.DataFrame) -> Dict[str, str]:
-        """Detect SQL types for DataFrame columns"""
-        type_map = {}
-        for col in df.columns:
-            sample = df[col].dropna()
-            if len(sample) == 0:
-                type_map[col] = 'VARCHAR'
-                continue
-            
-            # Check if it's numeric
-            if pd.api.types.is_numeric_dtype(sample):
-                if pd.api.types.is_integer_dtype(sample):
-                    type_map[col] = 'INTEGER'
-                else:
-                    type_map[col] = 'DOUBLE'
-            # Check if it's datetime
-            elif pd.api.types.is_datetime64_any_dtype(sample):
-                type_map[col] = 'TIMESTAMP'
-            else:
-                # Try to detect dates in string format
-                try:
-                    pd.to_datetime(sample.head(10), errors='raise')
-                    type_map[col] = 'DATE'
-                except:
-                    type_map[col] = 'VARCHAR'
-        
-        return type_map
-    
-    def _detect_key_columns(self, df: pd.DataFrame) -> List[str]:
-        """Detect likely key/join columns (Employee ID, SSN, etc.)"""
-        key_patterns = [
-            r'emp.*id', r'employee.*id', r'ee.*id', r'worker.*id',
-            r'ssn', r'social.*sec',
-            r'badge', r'payroll.*id', r'person.*id',
-            r'^id$', r'.*_id$'
-        ]
-        
-        likely_keys = []
-        for col in df.columns:
-            col_lower = col.lower()
-            for pattern in key_patterns:
+    # Check column names
+    if columns:
+        for col in columns:
+            col_lower = str(col).lower()
+            for pattern in PII_COLUMN_PATTERNS:
                 if re.search(pattern, col_lower):
-                    # Verify it has mostly unique values
-                    unique_ratio = df[col].nunique() / len(df) if len(df) > 0 else 0
-                    if unique_ratio > 0.5:  # At least 50% unique
-                        likely_keys.append(col)
-                    break
-        
-        return likely_keys
+                    detected['column_flags'].append(col)
+                    detected['has_pii'] = True
     
-    def detect_relationships(self, project: str) -> List[Dict[str, Any]]:
-        """
-        Detect relationships between tables in a project.
-        
-        UKG KEY CONCEPT: Composite key of company_code + employee_number
-        (Same employee number can exist in different companies)
-        
-        Returns list of detected relationships.
-        """
-        relationships = []
-        
-        try:
-            # Get all tables for this project
-            tables_result = self.conn.execute("""
-                SELECT table_name, sheet_name, columns
-                FROM _schema_metadata
-                WHERE project = ? AND is_current = TRUE
-            """, [project]).fetchall()
-            
-            if not tables_result:
-                return relationships
-            
-            # Build column map: table_name -> set of columns
-            table_columns = {}
-            for table_name, sheet_name, columns_json in tables_result:
-                try:
-                    columns = json.loads(columns_json) if columns_json else []
-                    col_names = [c.get('name', c) if isinstance(c, dict) else c for c in columns]
-                    table_columns[table_name] = {
-                        'sheet': sheet_name,
-                        'columns': set(col_names),
-                        'column_list': col_names
-                    }
-                except:
-                    continue
-            
-            # UKG Composite Key Patterns (priority order)
-            ukg_key_patterns = [
-                # Composite: company + employee (most important for UKG)
-                (['company_code', 'employee_number'], 'ukg_composite'),
-                (['company', 'employee_number'], 'ukg_composite'),
-                (['co_code', 'ee_number'], 'ukg_composite'),
-                
-                # Single key fallbacks
-                (['employee_number'], 'employee_key'),
-                (['employee_id'], 'employee_key'),
-                (['ee_number'], 'employee_key'),
-            ]
-            
-            # Find tables with employee data (not config tables)
-            employee_tables = []
-            for table_name, info in table_columns.items():
-                cols_lower = {c.lower() for c in info['columns']}
-                
-                # Must have employee-related columns
-                has_employee_col = any(
-                    'employee' in c or 'ee_' in c or 'emp_' in c 
-                    for c in cols_lower
-                )
-                
-                if has_employee_col:
-                    employee_tables.append(table_name)
-            
-            logger.info(f"[RELATIONSHIPS] Found {len(employee_tables)} employee data tables")
-            
-            # For each pair of employee tables, find matching key columns
-            processed_pairs = set()
-            
-            for source_table in employee_tables:
-                source_info = table_columns[source_table]
-                source_cols_lower = {c.lower(): c for c in source_info['columns']}
-                
-                for target_table in employee_tables:
-                    if source_table == target_table:
-                        continue
-                    
-                    # Avoid duplicate pairs
-                    pair_key = tuple(sorted([source_table, target_table]))
-                    if pair_key in processed_pairs:
-                        continue
-                    processed_pairs.add(pair_key)
-                    
-                    target_info = table_columns[target_table]
-                    target_cols_lower = {c.lower(): c for c in target_info['columns']}
-                    
-                    # Try each key pattern
-                    for key_cols, key_type in ukg_key_patterns:
-                        # Check if both tables have all key columns
-                        source_matches = []
-                        target_matches = []
-                        
-                        for key_col in key_cols:
-                            # Find matching column in source (fuzzy match)
-                            source_match = None
-                            for col_lower, col_orig in source_cols_lower.items():
-                                if key_col in col_lower or col_lower in key_col:
-                                    source_match = col_orig
-                                    break
-                            
-                            # Find matching column in target
-                            target_match = None
-                            for col_lower, col_orig in target_cols_lower.items():
-                                if key_col in col_lower or col_lower in key_col:
-                                    target_match = col_orig
-                                    break
-                            
-                            if source_match and target_match:
-                                source_matches.append(source_match)
-                                target_matches.append(target_match)
-                        
-                        # If all key columns found in both tables, we have a relationship
-                        if len(source_matches) == len(key_cols) and len(target_matches) == len(key_cols):
-                            relationship = {
-                                'source_table': source_table,
-                                'source_sheet': source_info['sheet'],
-                                'source_columns': source_matches,
-                                'target_table': target_table,
-                                'target_sheet': target_info['sheet'],
-                                'target_columns': target_matches,
-                                'key_type': key_type,
-                                'confidence': 1.0 if key_type == 'ukg_composite' else 0.8
-                            }
-                            relationships.append(relationship)
-                            
-                            logger.info(f"[RELATIONSHIPS] Found: {source_info['sheet']}.{source_matches} -> {target_info['sheet']}.{target_matches} ({key_type})")
-                            break  # Use first matching pattern (highest priority)
-            
-            # Store relationships in database
-            if relationships:
-                # Clear old relationships for this project
-                self.conn.execute("""
-                    DELETE FROM _table_relationships WHERE project = ?
-                """, [project])
-                
-                # Insert new relationships
-                for rel in relationships:
-                    self.conn.execute("""
-                        INSERT INTO _table_relationships 
-                        (id, project, source_table, source_columns, target_table, target_columns, relationship_type, confidence)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, [
-                        len(relationships),
-                        project,
-                        rel['source_table'],
-                        json.dumps(rel['source_columns']),
-                        rel['target_table'],
-                        json.dumps(rel['target_columns']),
-                        rel['key_type'],
-                        rel['confidence']
-                    ])
-                
-                self.conn.commit()
-                logger.info(f"[RELATIONSHIPS] Stored {len(relationships)} relationships for project {project}")
-            
-            return relationships
-            
-        except Exception as e:
-            logger.error(f"[RELATIONSHIPS] Detection failed: {e}")
-            return []
+    # Check data patterns
+    if re.search(r'\b\d{3}-\d{2}-\d{4}\b', data):
+        detected['pii_types'].append('ssn')
+        detected['has_pii'] = True
+    if re.search(r'\$\s*\d{2,3},?\d{3}', data):
+        detected['pii_types'].append('compensation')
+        detected['has_pii'] = True
+    if re.search(r'\b[\w\.-]+@[\w\.-]+\.\w{2,}\b', data):
+        detected['pii_types'].append('email')
+        detected['has_pii'] = True
+    if re.search(r'\b\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b', data):
+        detected['pii_types'].append('phone')
+        detected['has_pii'] = True
     
-    def get_relationships(self, project: str) -> List[Dict[str, Any]]:
-        """Get stored relationships for a project"""
-        try:
-            result = self.conn.execute("""
-                SELECT source_table, source_columns, target_table, target_columns, 
-                       relationship_type, confidence
-                FROM _table_relationships
-                WHERE project = ?
-            """, [project]).fetchall()
-            
-            relationships = []
-            for row in result:
-                relationships.append({
-                    'source_table': row[0],
-                    'source_columns': json.loads(row[1]) if row[1] else [],
-                    'target_table': row[2],
-                    'target_columns': json.loads(row[3]) if row[3] else [],
-                    'relationship_type': row[4],
-                    'confidence': row[5]
-                })
-            
-            return relationships
-        except Exception as e:
-            logger.warning(f"Failed to get relationships: {e}")
-            return []
-    
-    def _get_next_version(self, project: str, file_name: str) -> int:
-        """Get next version number for a file"""
-        result = self.conn.execute("""
-            SELECT COALESCE(MAX(version), 0) + 1 
-            FROM _load_versions 
-            WHERE project = ? AND file_name = ?
-        """, [project, file_name]).fetchone()
-        return result[0] if result else 1
-    
-    def _compute_checksum(self, df: pd.DataFrame) -> str:
-        """Compute checksum of DataFrame for change detection"""
-        # Use first 1000 rows for checksum (performance)
-        sample = df.head(1000)
-        data_str = sample.to_json()
-        return hashlib.md5(data_str.encode()).hexdigest()
-    
-    def store_excel(
-        self,
-        file_path: str,
-        project: str,
-        file_name: str,
-        encrypt_pii: bool = True,
-        keep_previous_version: bool = True
-    ) -> Dict[str, Any]:
-        """
-        Store Excel file in DuckDB with encryption and versioning.
-        Each sheet becomes a table.
-        
-        Args:
-            file_path: Path to Excel file
-            project: Project name
-            file_name: Original filename
-            encrypt_pii: Whether to encrypt PII columns
-            keep_previous_version: Whether to keep previous version for comparison
-        
-        Returns schema info for Claude to use in queries.
-        """
-        results = {
-            'project': project,
-            'file_name': file_name,
-            'sheets': [],
-            'total_rows': 0,
-            'tables_created': [],
-            'encrypted_columns': [],
-            'version': 1
-        }
-        
-        try:
-            # Get version number
-            version = self._get_next_version(project, file_name)
-            results['version'] = version
-            
-            # If keeping previous version, rename old tables
-            if keep_previous_version and version > 1:
-                self._archive_previous_version(project, file_name, version - 1)
-            
-            # Read all sheets
-            excel_file = pd.ExcelFile(file_path)
-            
-            all_encrypted_cols = []
-            
-            for sheet_name in excel_file.sheet_names:
-                try:
-                    # =====================================================
-                    # CHECK FOR HORIZONTAL TABLES (tables side-by-side)
-                    # =====================================================
-                    horizontal_tables = self._split_horizontal_tables(file_path, sheet_name)
-                    
-                    if horizontal_tables:
-                        # Process each horizontal sub-table separately
-                        for sub_table_name, sub_df in horizontal_tables:
-                            try:
-                                # Sanitize column names
-                                sub_df.columns = [self._sanitize_name(str(c)) for c in sub_df.columns]
-                                
-                                # Handle duplicate column names
-                                seen = {}
-                                new_cols = []
-                                for col in sub_df.columns:
-                                    if col in seen:
-                                        seen[col] += 1
-                                        new_cols.append(f"{col}_{seen[col]}")
-                                    else:
-                                        seen[col] = 0
-                                        new_cols.append(col)
-                                sub_df.columns = new_cols
-                                
-                                # Force all columns to string
-                                for col in sub_df.columns:
-                                    sub_df[col] = sub_df[col].fillna('').astype(str)
-                                    sub_df[col] = sub_df[col].replace({'nan': '', 'None': '', 'NaT': ''})
-                                
-                                # Generate combined sheet name: "Change Reasons - Benefit Change Reasons"
-                                combined_sheet = f"{sheet_name} - {sub_table_name}"
-                                
-                                # Encrypt PII if needed
-                                encrypted_cols = []
-                                if encrypt_pii and self.encryptor.fernet:
-                                    sub_df, encrypted_cols = self.encryptor.encrypt_dataframe(sub_df)
-                                    all_encrypted_cols.extend(encrypted_cols)
-                                
-                                # Generate table name
-                                table_name = self._generate_table_name(project, file_name, combined_sheet)
-                                
-                                # Drop existing and create table
-                                self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
-                                self.conn.register('temp_df', sub_df)
-                                self.conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM temp_df")
-                                self.conn.unregister('temp_df')
-                                
-                                # Store metadata
-                                columns_info = [
-                                    {'name': col, 'type': 'VARCHAR', 'encrypted': col in encrypted_cols}
-                                    for col in sub_df.columns
-                                ]
-                                
-                                self.conn.execute("""
-                                    INSERT INTO _schema_metadata 
-                                    (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys, encrypted_columns, version, is_current)
-                                    VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
-                                """, [
-                                    project,
-                                    file_name,
-                                    combined_sheet,
-                                    table_name,
-                                    json.dumps(columns_info),
-                                    len(sub_df),
-                                    json.dumps([]),
-                                    json.dumps(encrypted_cols),
-                                    version
-                                ])
-                                
-                                results['sheets'].append({
-                                    'name': combined_sheet,
-                                    'table_name': table_name,
-                                    'rows': len(sub_df),
-                                    'columns': list(sub_df.columns),
-                                    'encrypted_columns': encrypted_cols
-                                })
-                                results['total_rows'] += len(sub_df)
-                                results['tables_created'].append(table_name)
-                                
-                                logger.info(f"Created horizontal sub-table: {table_name} ({len(sub_df)} rows)")
-                                
-                            except Exception as sub_e:
-                                logger.error(f"Failed to process horizontal sub-table '{sub_table_name}': {sub_e}")
-                        
-                        # Skip normal processing for this sheet - we handled it horizontally
-                        continue
-                    
-                    # =====================================================
-                    # NORMAL SHEET PROCESSING (no horizontal split)
-                    # =====================================================
-                    # Read sheet - SMART HEADER DETECTION
-                    # Strategy: Look for colored (blue) header rows first, then fall back to text analysis
-                    df = None
-                    best_header_row = 0
-                    
-                    # Try to detect colored header row using openpyxl
-                    if OPENPYXL_AVAILABLE:
-                        try:
-                            wb = load_workbook(file_path, read_only=True, data_only=True)
-                            if sheet_name in wb.sheetnames:
-                                ws = wb[sheet_name]
-                                
-                                # Check first 15 rows for colored cells (headers are usually colored)
-                                for row_idx in range(1, 16):
-                                    colored_cells = 0
-                                    total_cells = 0
-                                    
-                                    for col_idx in range(1, min(20, ws.max_column + 1)):
-                                        try:
-                                            cell = ws.cell(row=row_idx, column=col_idx)
-                                            if cell.value is not None:
-                                                total_cells += 1
-                                                # Check if cell has fill color (not white/no fill)
-                                                if cell.fill and cell.fill.fgColor and cell.fill.fgColor.rgb:
-                                                    color = str(cell.fill.fgColor.rgb)
-                                                    # Skip white, no fill, or default
-                                                    if color not in ['00000000', 'FFFFFFFF', '00FFFFFF', None, 'None']:
-                                                        colored_cells += 1
-                                        except:
-                                            continue
-                                    
-                                    # If most cells in this row are colored, it's likely the header
-                                    if total_cells >= 3 and colored_cells >= total_cells * 0.5:
-                                        best_header_row = row_idx - 1  # pandas uses 0-based indexing
-                                        logger.info(f"Sheet '{sheet_name}': Detected colored header at row {row_idx}")
-                                        break
-                                
-                                wb.close()
-                        except Exception as e:
-                            logger.warning(f"Color detection failed for '{sheet_name}': {e}")
-                    
-                    # If no colored header found, try text-based detection
-                    if best_header_row == 0:
-                        min_unnamed = float('inf')
-                        for header_row in range(11):  # Try rows 0-10
-                            try:
-                                test_df = pd.read_excel(
-                                    file_path, 
-                                    sheet_name=sheet_name, 
-                                    header=header_row,
-                                    nrows=5
-                                )
-                                
-                                # Count unnamed columns
-                                unnamed_count = sum(1 for c in test_df.columns if str(c).startswith('Unnamed'))
-                                total_cols = len([c for c in test_df.columns if not str(c).startswith('Unnamed')])
-                                
-                                if total_cols < 2:
-                                    continue
-                                
-                                if unnamed_count < min_unnamed:
-                                    min_unnamed = unnamed_count
-                                    best_header_row = header_row
-                                    
-                                if unnamed_count == 0:
-                                    break
-                                    
-                            except:
-                                continue
-                    
-                    # Read with detected header row
+    detected['pii_types'] = list(set(detected['pii_types']))
+    return detected
+
+
+def sanitize_pii(context: str) -> str:
+    """Sanitize PII from context."""
+    sanitized = context
+    sanitized = re.sub(r'\b\d{3}-\d{2}-\d{4}\b', '[SSN-REDACTED]', sanitized)
+    sanitized = re.sub(r'\$\s*\d{1,3}(?:,\d{3})*(?:\.\d{2})?', '[SALARY-REDACTED]', sanitized)
+    sanitized = re.sub(r'\b\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b', '[PHONE-REDACTED]', sanitized)
+    sanitized = re.sub(r'\b[\w\.-]+@[\w\.-]+\.\w{2,}\b', '[EMAIL-REDACTED]', sanitized)
+    return sanitized
+
+
+# =============================================================================
+# REQUEST/RESPONSE MODELS
+# =============================================================================
+
+class ChatRequest(BaseModel):
+    message: str
+    project: Optional[str] = None
+    max_results: Optional[int] = 30
+    persona: Optional[str] = 'bessie'
+
+
+class ChatStartRequest(BaseModel):
+    message: str
+    project: Optional[str] = None
+    max_results: Optional[int] = 50
+    persona: Optional[str] = 'bessie'
+
+
+def update_job_status(job_id: str, status: str, step: str, progress: int, **kwargs):
+    if job_id in chat_jobs:
+        chat_jobs[job_id].update({'status': status, 'current_step': step, 'progress': progress, **kwargs})
+        logger.info(f"[JOB {job_id[:8]}] {step} ({progress}%)")
+
+
+def decrypt_results(rows: list, handler) -> list:
+    if not rows:
+        return rows
+    try:
+        encryptor = handler.encryptor
+        if not encryptor or not encryptor.fernet:
+            return rows
+        decrypted_rows = []
+        for row in rows:
+            decrypted_row = {}
+            for key, value in row.items():
+                if isinstance(value, str) and value.startswith('ENC:'):
                     try:
-                        df = pd.read_excel(
-                            file_path, 
-                            sheet_name=sheet_name, 
-                            header=best_header_row
-                        )
-                        logger.info(f"Sheet '{sheet_name}': Using header row {best_header_row}")
-                    except Exception as e:
-                        logger.error(f"Failed to read sheet '{sheet_name}': {e}")
-                        continue
-                    
-                    if df is None or df.empty:
-                        logger.warning(f"Sheet '{sheet_name}' is empty, skipping")
-                        continue
-                    
-                    # Drop completely empty rows/columns
-                    df = df.dropna(how='all').dropna(axis=1, how='all')
-                    
-                    if df.empty:
-                        continue
-                    
-                    # Sanitize column names
-                    df.columns = [self._sanitize_name(str(c)) for c in df.columns]
-                    
-                    # Handle duplicate column names
-                    seen = {}
-                    new_cols = []
-                    for col in df.columns:
-                        if col in seen:
-                            seen[col] += 1
-                            new_cols.append(f"{col}_{seen[col]}")
-                        else:
-                            seen[col] = 0
-                            new_cols.append(col)
-                    df.columns = new_cols
-                    
-                    # FORCE ALL COLUMNS TO STRING to avoid DuckDB type inference issues
-                    # This prevents errors like "Could not convert 'Amount' to DOUBLE"
-                    for col in df.columns:
-                        # Convert to string, then replace NaN/None with empty string
-                        df[col] = df[col].fillna('').astype(str)
-                        # Replace string 'nan' and 'None' that result from conversion
-                        df[col] = df[col].replace({'nan': '', 'None': '', 'NaT': ''})
-                    
-                    # ENCRYPT PII COLUMNS
-                    encrypted_cols = []
-                    if encrypt_pii and self.encryptor.fernet:
-                        df, encrypted_cols = self.encryptor.encrypt_dataframe(df)
-                        all_encrypted_cols.extend(encrypted_cols)
-                        if encrypted_cols:
-                            logger.info(f"Encrypted {len(encrypted_cols)} PII columns in '{sheet_name}'")
-                    
-                    # Generate table name
-                    table_name = self._generate_table_name(project, file_name, sheet_name)
-                    
-                    # Drop existing current table if exists
-                    self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
-                    
-                    # Create table from DataFrame - all VARCHAR columns
-                    self.conn.register('temp_df', df)
-                    self.conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM temp_df")
-                    self.conn.unregister('temp_df')
-                    
-                    # Detect key columns
-                    likely_keys = self._detect_key_columns(df)
-                    
-                    # Store metadata
-                    columns_info = [
-                        {'name': col, 'type': str(df[col].dtype), 'encrypted': col in encrypted_cols}
-                        for col in df.columns
-                    ]
-                    
-                    # Mark previous metadata as not current
-                    self.conn.execute("""
-                        UPDATE _schema_metadata 
-                        SET is_current = FALSE 
-                        WHERE project = ? AND file_name = ? AND sheet_name = ?
-                    """, [project, file_name, sheet_name])
-                    
-                    self.conn.execute("""
-                        INSERT INTO _schema_metadata 
-                        (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys, encrypted_columns, version, is_current)
-                        VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
-                    """, [
-                        project,
-                        file_name,
-                        sheet_name,
-                        table_name,
-                        json.dumps(columns_info),
-                        len(df),
-                        json.dumps(likely_keys),
-                        json.dumps(encrypted_cols),
-                        version
-                    ])
-                    
-                    sheet_info = {
-                        'sheet_name': sheet_name,
-                        'table_name': table_name,
-                        'columns': list(df.columns),
-                        'row_count': len(df),
-                        'likely_keys': likely_keys,
-                        'encrypted_columns': encrypted_cols,
-                        'sample_data': df.head(3).to_dict('records')
-                    }
-                    
-                    results['sheets'].append(sheet_info)
-                    results['total_rows'] += len(df)
-                    results['tables_created'].append(table_name)
-                    
-                    logger.info(f"Created table '{table_name}' with {len(df)} rows, {len(df.columns)} columns")
-                    
-                except Exception as e:
-                    logger.error(f"Error processing sheet '{sheet_name}': {e}")
-                    continue
+                        decrypted_row[key] = encryptor.decrypt(value)
+                    except:
+                        decrypted_row[key] = '[encrypted]'
+                else:
+                    decrypted_row[key] = value
+            decrypted_rows.append(decrypted_row)
+        return decrypted_rows
+    except Exception as e:
+        logger.warning(f"[DECRYPT] Error: {e}")
+        return rows
+
+
+# =============================================================================
+# MAIN PROCESSING - SELF-HEALING WITH FULL LOGGING
+# =============================================================================
+
+def process_chat_job(job_id: str, message: str, project: Optional[str], max_results: int, persona_name: str = 'bessie'):
+    """
+    Self-Healing Chat Pipeline - FULLY INSTRUMENTED
+    ================================================
+    
+    Flow:
+    1. Get schema, build table summaries
+    2. Ask Claude to pick best table(s)  
+    3. Query selected tables
+    4. Detect & sanitize PII
+    5. Send to Claude for answer
+    
+    Every step logged. No silent failures.
+    """
+    logger.warning(f"{'='*60}")
+    logger.warning(f"[START] Job {job_id[:8]} | Query: {message[:50]}...")
+    logger.warning(f"[START] Project: {project} | Persona: {persona_name}")
+    logger.warning(f"{'='*60}")
+    
+    try:
+        # =====================================================================
+        # STEP 1: INITIALIZE
+        # =====================================================================
+        logger.warning("[STEP 1] Initializing...")
+        
+        pm = get_persona_manager()
+        persona = pm.get_persona(persona_name)
+        logger.warning(f"[STEP 1] Persona loaded: {persona.name} {persona.icon}")
+        
+        sql_results_list = []
+        rag_chunks = []
+        all_columns = []
+        
+        # =====================================================================
+        # STEP 2: GET SCHEMA & BUILD TABLE SUMMARIES
+        # =====================================================================
+        logger.warning(f"[STEP 2] STRUCTURED_QUERIES_AVAILABLE = {STRUCTURED_QUERIES_AVAILABLE}")
+        
+        if STRUCTURED_QUERIES_AVAILABLE:
+            update_job_status(job_id, 'processing', '📊 Loading schema...', 10)
             
-            self.conn.commit()
-            logger.info(f"Stored {len(results['tables_created'])} tables from {file_name}")
-            
-            # Detect relationships after loading
             try:
-                relationships = self.detect_relationships(project)
-                results['relationships'] = relationships
-                logger.info(f"Detected {len(relationships)} table relationships")
-            except Exception as rel_e:
-                logger.warning(f"Relationship detection failed: {rel_e}")
-                results['relationships'] = []
-            
-        except Exception as e:
-            logger.error(f"Error storing Excel file: {e}")
-            raise
+                logger.warning("[STEP 2] Getting structured handler...")
+                handler = get_structured_handler()
+                logger.warning("[STEP 2] Handler obtained, getting schema...")
+                
+                schema = handler.get_schema_for_project(project) if project else handler.get_schema_for_project(None)
+                tables_list = schema.get('tables', [])
+                
+                logger.warning(f"[STEP 2] Schema returned {len(tables_list)} tables")
+                
+                if not tables_list:
+                    logger.warning("[STEP 2] ⚠️ NO TABLES IN SCHEMA!")
+                    try:
+                        direct_result = handler.conn.execute("""
+                            SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'
+                        """).fetchall()
+                        logger.warning(f"[STEP 2] Direct DuckDB found {len(direct_result)} tables: {[r[0] for r in direct_result[:5]]}")
+                    except Exception as ddb_e:
+                        logger.error(f"[STEP 2] Direct DuckDB query failed: {ddb_e}")
+                
+                if tables_list:
+                    logger.warning("[STEP 2] Building table summaries...")
+                    table_summaries = []
+                    table_lookup = {}
+                    
+                    for idx, table_info in enumerate(tables_list):
+                        table_name = table_info.get('table_name', '')
+                        sheet_name = table_info.get('sheet', '')
+                        file_name = table_info.get('file', '')
+                        columns = table_info.get('columns', [])
+                        row_count = table_info.get('row_count', 0)
+                        
+                        logger.warning(f"[STEP 2] Table {idx}: {file_name} → {sheet_name} ({row_count} rows)")
+                        
+                        if columns and isinstance(columns[0], dict):
+                            col_names = [c.get('name', str(c)) for c in columns]
+                        else:
+                            col_names = [str(c) for c in columns]
+                        
+                        sample_preview = ""
+                        try:
+                            sample_sql = f'SELECT * FROM "{table_name}" LIMIT 2'
+                            sample_rows, _ = handler.execute_query(sample_sql)
+                            if sample_rows:
+                                for row in sample_rows[:2]:
+                                    preview = {k: str(v)[:20] for k, v in list(row.items())[:5]}
+                                    sample_preview += f"    {preview}\n"
+                        except Exception as sample_e:
+                            logger.warning(f"[STEP 2] Sample query failed for {table_name}: {sample_e}")
+                        
+                        summary = f"[{idx}] {file_name} → {sheet_name}\n  Rows: {row_count}, Cols: {', '.join(col_names[:8])}{'...' if len(col_names) > 8 else ''}\n{sample_preview}"
+                        table_summaries.append(summary)
+                        table_lookup[idx] = table_info
+                    
+                    logger.warning(f"[STEP 2] Built {len(table_summaries)} summaries")
+                    
+                    # =========================================================
+                    # STEP 3: ASK CLAUDE TO PICK TABLES
+                    # =========================================================
+                    update_job_status(job_id, 'processing', '🧠 Selecting best data source...', 20)
+                    logger.warning("[STEP 3] Preparing Claude table selection...")
+                    
+                    selection_prompt = f"""Question: "{message}"
+
+TASK: Pick the table number(s) that contain data to answer this question.
+
+KEY DISTINCTION:
+- Tables with "Configuration", "Validation", "Reasons", "Setup", "Plans" = CODE DEFINITIONS (not employee records)
+- Tables with "Company", "Personal", "Conversion", "Employee" in Employee Conversion file = ACTUAL EMPLOYEE DATA
+
+For questions about ACTUAL PEOPLE (list employees, count active, who is on leave):
+→ Pick tables from "Employee Conversion" file (Company, Personal)
+
+For questions about CODE MEANINGS (what does code X mean):
+→ Pick Configuration/Validation tables
+
+Available tables:
+{chr(10).join(table_summaries)}
+
+RESPOND WITH ONLY THE TABLE NUMBERS. NO EXPLANATION. NO REASONING.
+Just the number(s) like: 47,53
+
+Table numbers:"""
+                    
+                    logger.warning(f"[STEP 3] Selection prompt length: {len(selection_prompt)} chars")
+                    
+                    selected_indices = []
+                    
+                    try:
+                        logger.warning("[STEP 3] Creating Anthropic client...")
+                        import anthropic
+                        
+                        orchestrator = LLMOrchestrator()
+                        if not orchestrator.claude_api_key:
+                            raise ValueError("No Claude API key available")
+                        
+                        client = anthropic.Anthropic(api_key=orchestrator.claude_api_key)
+                        
+                        logger.warning("[STEP 3] Calling Claude for table selection...")
+                        selection_response = client.messages.create(
+                            model="claude-sonnet-4-20250514",
+                            max_tokens=50,
+                            messages=[{"role": "user", "content": selection_prompt}]
+                        )
+                        
+                        selection_text = selection_response.content[0].text.strip()
+                        logger.warning(f"[STEP 3] ✅ Claude responded: '{selection_text[:200]}'")
+                        
+                        # Try simple comma-split first
+                        for part in selection_text.replace(' ', '').split(','):
+                            try:
+                                idx = int(part.strip('[]()'))
+                                if idx in table_lookup:
+                                    selected_indices.append(idx)
+                                    logger.warning(f"[STEP 3] Selected table index: {idx}")
+                            except ValueError:
+                                pass
+                        
+                        # If simple parsing failed, try to extract any numbers from the response
+                        if not selected_indices:
+                            numbers = re.findall(r'\b(\d{1,2})\b', selection_text)
+                            for num_str in numbers:
+                                idx = int(num_str)
+                                if idx in table_lookup:
+                                    selected_indices.append(idx)
+                                    logger.warning(f"[STEP 3] Extracted table index: {idx}")
+                        
+                        # If still nothing, use smart fallback for employee questions
+                        if not selected_indices:
+                            logger.warning(f"[STEP 3] Could not parse numbers, checking for employee query...")
+                            query_lower = message.lower()
+                            
+                            # For employee-related questions, find employee data tables
+                            if any(kw in query_lower for kw in ['employee', 'active', 'leave', 'terminated', 'staff', 'worker', 'list', 'count', 'how many', 'who']):
+                                for idx, table_info in table_lookup.items():
+                                    file_lower = table_info.get('file', '').lower()
+                                    sheet_lower = table_info.get('sheet', '').lower()
+                                    
+                                    # Prioritize Employee Conversion Company/Personal tables
+                                    if 'employee_conversion' in file_lower or 'conversion' in file_lower:
+                                        if 'company' in sheet_lower or 'personal' in sheet_lower:
+                                            selected_indices.append(idx)
+                                            logger.warning(f"[STEP 3] Smart fallback selected: {idx} ({sheet_lower})")
+                            
+                            if not selected_indices:
+                                selected_indices = [0]
+                                logger.warning(f"[STEP 3] Final fallback to table 0")
+                            
+                    except Exception as claude_e:
+                        logger.error(f"[STEP 3] ❌ Claude selection FAILED: {claude_e}")
+                        logger.error(f"[STEP 3] Traceback: {traceback.format_exc()}")
+                        
+                        logger.warning("[STEP 3] Using keyword fallback...")
+                        query_lower = message.lower()
+                        
+                        for idx, table_info in table_lookup.items():
+                            file_lower = table_info.get('file', '').lower()
+                            sheet_lower = table_info.get('sheet', '').lower()
+                            
+                            if any(kw in query_lower for kw in ['employee', 'active', 'list', 'count', 'how many']):
+                                if 'employee' in file_lower or 'conversion' in file_lower:
+                                    selected_indices.append(idx)
+                                    logger.warning(f"[STEP 3] Fallback selected: {idx} (employee file)")
+                            else:
+                                for term in query_lower.split():
+                                    if len(term) > 3 and (term in file_lower or term in sheet_lower):
+                                        selected_indices.append(idx)
+                                        logger.warning(f"[STEP 3] Fallback selected: {idx} (keyword match)")
+                                        break
+                        
+                        if not selected_indices:
+                            selected_indices = list(table_lookup.keys())[:2]
+                            logger.warning(f"[STEP 3] No matches, using first 2 tables: {selected_indices}")
+                    
+                    # =========================================================
+                    # STEP 4: QUERY SELECTED TABLES
+                    # =========================================================
+                    update_job_status(job_id, 'processing', '📊 Retrieving data...', 35)
+                    logger.warning(f"[STEP 4] Querying {len(selected_indices)} selected tables: {selected_indices}")
+                    
+                    # Check query type
+                    query_lower = message.lower()
+                    is_count_query = any(kw in query_lower for kw in ['how many', 'count', 'total', 'number of'])
+                    is_list_query = any(kw in query_lower for kw in ['list', 'show', 'give me', 'who', 'active', 'employee'])
+                    row_limit = 2000 if is_count_query else 500
+                    
+                    for idx in selected_indices[:3]:
+                        table_info = table_lookup[idx]
+                        table_name = table_info.get('table_name', '')
+                        sheet_name = table_info.get('sheet', '')
+                        file_name = table_info.get('file', '')
+                        
+                        logger.warning(f"[STEP 4] Querying table {idx}: {table_name} (limit {row_limit})")
+                        
+                        try:
+                            # ALWAYS get value distributions for status-like columns
+                            value_summary = ""
+                            cols_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
+                            all_cols = [col[1] for col in cols_result]
+                            
+                            logger.warning(f"[STEP 4] Table {idx} has {len(all_cols)} columns: {all_cols[:15]}")
+                            
+                            # Wider pattern to catch employment_status_code, status, active, terminated, etc.
+                            status_cols = [c for c in all_cols if any(s in c.lower() for s in 
+                                          ['status', 'active', 'type', 'term', 'employed'])]
+                            
+                            logger.warning(f"[STEP 4] Status-like columns found: {status_cols}")
+                            
+                            if status_cols:
+                                value_summary = "\n** ACTUAL VALUE COUNTS (from full table, not sample): **\n"
+                                for col in status_cols[:5]:  # Up to 5 status columns
+                                    try:
+                                        dist_sql = f'SELECT "{col}", COUNT(*) as cnt FROM "{table_name}" GROUP BY "{col}" ORDER BY cnt DESC'
+                                        dist_result = handler.conn.execute(dist_sql).fetchall()
+                                        if dist_result:
+                                            dist_str = ", ".join([f"'{row[0]}'={row[1]}" for row in dist_result[:10]])
+                                            value_summary += f"  {col}: {dist_str}\n"
+                                    except Exception as de:
+                                        logger.warning(f"[STEP 4] Distribution query failed for {col}: {de}")
+                                logger.warning(f"[STEP 4] Value distributions: {value_summary.strip()}")
+                            
+                            # Get total row count
+                            total_count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
+                            total_row_count = total_count_result[0] if total_count_result else 0
+                            
+                            # Get sample data
+                            sql = f'SELECT * FROM "{table_name}" LIMIT {row_limit}'
+                            rows, cols = handler.execute_query(sql)
+                            all_columns.extend(cols)
+                            
+                            logger.warning(f"[STEP 4] ✅ Got {len(rows)} sample rows, {total_row_count} total rows, {len(cols)} columns")
+                            
+                            if rows:
+                                decrypted = decrypt_results(rows, handler)
+                                sql_results_list.append({
+                                    'source_file': file_name,
+                                    'sheet': sheet_name,
+                                    'table': table_name,
+                                    'columns': cols,
+                                    'data': decrypted,
+                                    'total_rows': total_row_count,
+                                    'sample_size': len(rows),
+                                    'value_summary': value_summary
+                                })
+                        except Exception as query_e:
+                            logger.error(f"[STEP 4] ❌ Query failed for {table_name}: {query_e}")
+                    
+                    logger.warning(f"[STEP 4] Total results collected: {len(sql_results_list)}")
+                    
+            except Exception as handler_e:
+                logger.error(f"[STEP 2-4] ❌ Handler error: {handler_e}")
+                logger.error(f"[STEP 2-4] Traceback: {traceback.format_exc()}")
+        else:
+            logger.warning("[STEP 2] Structured queries NOT available, skipping to RAG")
         
-        return results
-    
-    def store_csv(
-        self,
-        file_path: str,
-        project: str,
-        file_name: str
-    ) -> Dict[str, Any]:
-        """Store CSV file in DuckDB"""
+        # =====================================================================
+        # STEP 5: RAG SEARCH
+        # =====================================================================
+        update_job_status(job_id, 'processing', '🔍 Searching documents...', 45)
+        logger.warning("[STEP 5] Starting RAG search...")
+        
         try:
-            df = pd.read_csv(file_path)
-            df = df.dropna(how='all').dropna(axis=1, how='all')
+            rag = RAGHandler()
+            collection = rag.client.get_or_create_collection(name="documents")
             
-            # Sanitize column names
-            df.columns = [self._sanitize_name(str(c)) for c in df.columns]
+            where_filter = None
+            if project and project not in ['', 'all', 'All Projects']:
+                where_filter = {"project": project}
             
-            # FORCE ALL COLUMNS TO STRING to avoid type inference issues
-            for col in df.columns:
-                df[col] = df[col].fillna('').astype(str)
-                df[col] = df[col].replace({'nan': '', 'None': '', 'NaT': ''})
+            rag_response = collection.query(
+                query_texts=[message],
+                n_results=min(max_results, 10),
+                where=where_filter
+            )
             
-            table_name = self._generate_table_name(project, file_name, 'data')
-            
-            # Drop existing table
-            self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
-            
-            # Create table
-            self.conn.register('temp_df', df)
-            self.conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM temp_df")
-            self.conn.unregister('temp_df')
-            
-            # Detect keys
-            likely_keys = self._detect_key_columns(df)
-            
-            # Store metadata
-            columns_info = [
-                {'name': col, 'type': str(df[col].dtype)}
-                for col in df.columns
-            ]
-            
-            self.conn.execute("""
-                INSERT INTO _schema_metadata 
-                (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys)
-                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?)
-            """, [
-                project, file_name, 'data', table_name,
-                json.dumps(columns_info), len(df), json.dumps(likely_keys)
-            ])
-            
-            self.conn.commit()
-            
-            return {
-                'project': project,
-                'file_name': file_name,
-                'table_name': table_name,
-                'columns': list(df.columns),
-                'row_count': len(df),
-                'likely_keys': likely_keys
-            }
-            
-        except Exception as e:
-            logger.error(f"Error storing CSV: {e}")
-            raise
-    
-    def get_schema_for_project(self, project: str) -> Dict[str, Any]:
-        """Get all table schemas for a project (for Claude to use)"""
+            if rag_response and rag_response.get('documents') and rag_response['documents'][0]:
+                rag_chunks = rag_response['documents'][0]
+                logger.warning(f"[STEP 5] ✅ RAG found {len(rag_chunks)} chunks")
+            else:
+                logger.warning("[STEP 5] RAG returned no results")
+                
+        except Exception as rag_e:
+            logger.error(f"[STEP 5] ❌ RAG error: {rag_e}")
+        
+        # =====================================================================
+        # STEP 6: BUILD CONTEXT
+        # =====================================================================
+        update_job_status(job_id, 'processing', '🧠 Building context...', 55)
+        logger.warning(f"[STEP 6] Building context from {len(sql_results_list)} SQL results, {len(rag_chunks)} RAG chunks")
+        
+        context_parts = []
+        sources = []
+        
+        # Add UKG Reference Data (standard codes)
+        ukg_reference = """
+** UKG STANDARD REFERENCE CODES **
+Employment Status Codes:
+  A = Active
+  L = Leave of Absence
+  T = Terminated
+  S = Suspended
+
+Use these codes to interpret employment_status_code or similar fields.
+"""
+        context_parts.append(ukg_reference)
+        
+        # Add Table Relationships (for JOIN queries)
         try:
-            result = self.conn.execute("""
-                SELECT file_name, sheet_name, table_name, columns, row_count, likely_keys
-                FROM _schema_metadata
-                WHERE project = ? AND is_current = TRUE
-                ORDER BY file_name, sheet_name
-            """, [project]).fetchall()
-        except Exception as e:
-            # Handle case where is_current column doesn't exist (old schema)
-            logger.warning(f"Schema query failed, trying without is_current: {e}")
-            result = self.conn.execute("""
-                SELECT file_name, sheet_name, table_name, columns, row_count, likely_keys
-                FROM _schema_metadata
-                WHERE project = ?
-                ORDER BY file_name, sheet_name
-            """, [project]).fetchall()
+            if STRUCTURED_QUERIES_AVAILABLE and project:
+                handler = get_structured_handler()
+                relationships = handler.get_relationships(project)
+                
+                if relationships:
+                    rel_text = "\n** TABLE RELATIONSHIPS (for cross-table queries) **\n"
+                    rel_text += "These tables can be JOINed using matching key columns:\n\n"
+                    
+                    for rel in relationships:
+                        source_sheet = rel.get('source_table', '').split('__')[-1]
+                        target_sheet = rel.get('target_table', '').split('__')[-1]
+                        source_cols = rel.get('source_columns', [])
+                        target_cols = rel.get('target_columns', [])
+                        
+                        rel_text += f"  • {source_sheet} ↔ {target_sheet}\n"
+                        rel_text += f"    JOIN ON: {' + '.join(source_cols)} = {' + '.join(target_cols)}\n"
+                    
+                    rel_text += "\nFor questions spanning multiple tables (e.g., 'deductions for active employees'),\n"
+                    rel_text += "use these relationships to connect the data.\n"
+                    
+                    context_parts.append(rel_text)
+                    logger.warning(f"[STEP 6] Added {len(relationships)} table relationships to context")
+        except Exception as rel_e:
+            logger.warning(f"[STEP 6] Could not add relationships: {rel_e}")
         
-        schema = {
-            'project': project,
-            'tables': []
-        }
-        
-        for row in result:
-            file_name, sheet_name, table_name, columns, row_count, likely_keys = row
-            schema['tables'].append({
-                'file': file_name,
-                'sheet': sheet_name,
-                'table_name': table_name,
-                'columns': json.loads(columns) if columns else [],
-                'row_count': row_count,
-                'likely_keys': json.loads(likely_keys) if likely_keys else []
+        for result in sql_results_list:
+            data_text = f"Source: {result['source_file']} → {result['sheet']}\n"
+            data_text += f"Columns: {', '.join(result['columns'])}\n"
+            data_text += f"Total rows in table: {result['total_rows']}\n"
+            data_text += f"Sample rows shown below: {result.get('sample_size', len(result['data']))}\n"
+            
+            # Include ACTUAL value distributions from full table (not sample)
+            if result.get('value_summary'):
+                data_text += result['value_summary']
+            
+            data_text += "\nSample Data:\n"
+            
+            # Show sample rows with key columns - limit to 50 to manage token count
+            row_limit_for_context = 50
+            for row in result['data'][:row_limit_for_context]:
+                key_cols = [c for c in result['columns'] if any(s in c.lower() for s in 
+                           ['employee', 'status', 'name', 'number', 'id', 'type', 'active', 'term', 'department', 'job', 'title'])]
+                if not key_cols:
+                    key_cols = result['columns'][:8]  # Fewer columns too
+                
+                row_str = " | ".join(f"{k}: {row.get(k, '')}" for k in key_cols if k in row)
+                data_text += f"  {row_str}\n"
+            
+            if len(result['data']) > 50:
+                data_text += f"  ... and {len(result['data']) - 50} more rows in sample\n"
+            
+            context_parts.append(data_text)
+            sources.append({
+                'filename': result['source_file'],
+                'sheet': result['sheet'],
+                'type': 'structured',
+                'rows': result['total_rows'],
+                'relevance': 95
             })
         
-        return schema
-    
-    def execute_query(self, sql: str) -> Tuple[List[Dict], List[str]]:
-        """
-        Execute SQL query and return results.
-        Returns (rows as dicts, column names)
-        """
-        try:
-            result = self.conn.execute(sql)
-            columns = [desc[0] for desc in result.description]
-            rows = [dict(zip(columns, row)) for row in result.fetchall()]
-            return rows, columns
-        except Exception as e:
-            logger.error(f"Query execution error: {e}")
-            raise
-    
-    def query_to_dataframe(self, sql: str) -> pd.DataFrame:
-        """Execute query and return as DataFrame (for Excel export)"""
-        return self.conn.execute(sql).fetchdf()
-    
-    def export_to_excel(self, sql: str, output_path: str) -> str:
-        """Execute query and export results to Excel"""
-        df = self.query_to_dataframe(sql)
-        df.to_excel(output_path, index=False)
-        return output_path
-    
-    def export_to_csv(self, sql: str, output_path: str) -> str:
-        """Execute query and export results to CSV"""
-        df = self.query_to_dataframe(sql)
-        df.to_csv(output_path, index=False)
-        return output_path
-    
-    def delete_project_data(self, project: str) -> int:
-        """Delete all tables for a project"""
-        # Get table names
-        tables = self.conn.execute("""
-            SELECT table_name FROM _schema_metadata WHERE project = ?
-        """, [project]).fetchall()
+        for i, chunk in enumerate(rag_chunks[:5]):
+            context_parts.append(f"Document {i+1}:\n{chunk}")
         
-        count = 0
-        for (table_name,) in tables:
+        if rag_chunks:
+            sources.append({'filename': 'Documents', 'type': 'rag', 'chunks': len(rag_chunks), 'relevance': 80})
+        
+        logger.warning(f"[STEP 6] Context parts: {len(context_parts)}, Total sources: {len(sources)}")
+        
+        # =====================================================================
+        # STEP 7: PII DETECTION & SANITIZATION
+        # =====================================================================
+        full_context = '\n\n'.join(context_parts)
+        logger.warning(f"[STEP 7] Context length: {len(full_context)} chars")
+        
+        pii_detection = detect_pii_in_data(full_context, all_columns)
+        
+        if pii_detection['has_pii']:
+            logger.warning(f"[STEP 7] PII detected: {pii_detection['pii_types']}, columns: {pii_detection['column_flags']}")
+            update_job_status(job_id, 'processing', '🔒 Securing data...', 65)
+            full_context = sanitize_pii(full_context)
+            sanitized = True
+        else:
+            logger.warning("[STEP 7] No PII detected")
+            sanitized = False
+        
+        # =====================================================================
+        # STEP 8: SEND TO CLAUDE FOR ANSWER
+        # =====================================================================
+        logger.warning(f"[STEP 8] context_parts count: {len(context_parts)}")
+        
+        if context_parts:
+            update_job_status(job_id, 'processing', '✨ Generating response...', 75)
+            logger.warning("[STEP 8] Sending to orchestrator...")
+            logger.warning(f"[STEP 8] Context to send: {len(full_context)} chars")
+            
+            orchestrator_chunks = [{
+                'document': full_context,
+                'metadata': {'filename': 'Query Results', 'type': 'combined', 'pii_sanitized': sanitized}
+            }]
+            
             try:
-                self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
-                count += 1
-            except Exception as e:
-                logger.warning(f"Could not drop table {table_name}: {e}")
+                orchestrator = LLMOrchestrator()
+                logger.warning("[STEP 8] Calling orchestrator.process_query...")
+                result = orchestrator.process_query(message, orchestrator_chunks)
+                logger.warning(f"[STEP 8] Orchestrator returned: {list(result.keys())}")
+                
+                response = result.get('response', 'I found data but had trouble analyzing it.')
+                logger.warning(f"[STEP 8] ✅ Got response: {len(response)} chars, first 100: {response[:100]}")
+                
+                if sanitized:
+                    response += "\n\n*Note: Some sensitive values have been protected.*"
+                
+                update_job_status(
+                    job_id, 'complete', 'Complete', 100,
+                    response=response,
+                    sources=sources,
+                    chunks_found=len(sql_results_list) + len(rag_chunks),
+                    models_used=result.get('models_used', ['claude']),
+                    query_type='self_healing',
+                    sanitized=sanitized,
+                    pii_detected=pii_detection['pii_types'] if pii_detection['has_pii'] else []
+                )
+                logger.warning(f"[COMPLETE] Job {job_id[:8]} finished successfully")
+                return
+                
+            except Exception as orch_e:
+                logger.error(f"[STEP 8] ❌ Orchestrator FAILED: {orch_e}")
+                logger.error(f"[STEP 8] Traceback: {traceback.format_exc()}")
+        else:
+            logger.warning("[STEP 8] ⚠️ NO CONTEXT PARTS - skipping to fallback")
         
-        # Remove metadata
-        self.conn.execute("DELETE FROM _schema_metadata WHERE project = ?", [project])
-        self.conn.commit()
+        # =====================================================================
+        # STEP 9: FALLBACK - No data found
+        # =====================================================================
+        logger.warning("[STEP 9] No context built, attempting fallback...")
+        update_job_status(job_id, 'processing', '🔍 Broader search...', 80)
         
-        logger.info(f"Deleted {count} tables for project '{project}'")
-        return count
-    
-    def get_table_sample(self, table_name: str, limit: int = 5, decrypt: bool = True) -> List[Dict]:
-        """Get sample rows from a table"""
         try:
-            rows, cols = self.execute_query(f"SELECT * FROM {table_name} LIMIT {limit}")
+            rag = RAGHandler()
+            collection = rag.client.get_or_create_collection(name="documents")
+            rag_response = collection.query(query_texts=[message], n_results=20, where=None)
             
-            # Decrypt if needed
-            if decrypt and rows:
-                df = pd.DataFrame(rows)
-                df = self.encryptor.decrypt_dataframe(df)
-                rows = df.to_dict('records')
-            
-            return rows
-        except:
-            return []
-    
-    def _archive_previous_version(self, project: str, file_name: str, version: int):
-        """Archive tables from previous version"""
-        tables = self.conn.execute("""
-            SELECT table_name, sheet_name FROM _schema_metadata 
-            WHERE project = ? AND file_name = ? AND version = ?
-        """, [project, file_name, version]).fetchall()
+            if rag_response and rag_response.get('documents') and rag_response['documents'][0]:
+                chunks = rag_response['documents'][0]
+                fallback_context = '\n\n'.join(chunks[:10])
+                
+                fallback_pii = detect_pii_in_data(fallback_context, [])
+                if fallback_pii['has_pii']:
+                    fallback_context = sanitize_pii(fallback_context)
+                
+                orchestrator = LLMOrchestrator()
+                result = orchestrator.process_query(message, [{'document': fallback_context, 'metadata': {'type': 'fallback'}}])
+                
+                update_job_status(
+                    job_id, 'complete', 'Complete', 100,
+                    response=result.get('response', 'Could not find relevant information.'),
+                    sources=[{'filename': 'Fallback Search', 'type': 'rag', 'chunks': len(chunks)}],
+                    chunks_found=len(chunks),
+                    models_used=['claude'],
+                    query_type='fallback',
+                    sanitized=fallback_pii['has_pii']
+                )
+                logger.warning(f"[COMPLETE] Job {job_id[:8]} finished via fallback")
+                return
+                
+        except Exception as fallback_e:
+            logger.error(f"[STEP 9] Fallback error: {fallback_e}")
         
-        for table_name, sheet_name in tables:
-            archive_name = f"{table_name}_v{version}"
-            try:
-                # Rename table to archive name
-                self.conn.execute(f"ALTER TABLE {table_name} RENAME TO {archive_name}")
-                logger.info(f"Archived {table_name} → {archive_name}")
-            except Exception as e:
-                logger.warning(f"Could not archive {table_name}: {e}")
-    
-    def delete_file(self, project: str, file_name: str, delete_all_versions: bool = True) -> Dict[str, Any]:
-        """
-        Delete all data for a specific file from a project.
+        # No data at all
+        logger.error(f"[FAIL] Job {job_id[:8]} - no data found anywhere")
+        update_job_status(
+            job_id, 'complete', 'Complete', 100,
+            response="I couldn't find relevant data. Please ensure data has been uploaded for this project.",
+            sources=[],
+            chunks_found=0,
+            models_used=['none'],
+            query_type='no_data',
+            sanitized=False
+        )
         
-        Args:
-            project: Project name
-            file_name: Name of file to delete
-            delete_all_versions: If True, delete archived versions too
-            
-        Returns:
-            Summary of deleted tables
-        """
-        result = {
-            'project': project,
-            'file_name': file_name,
-            'tables_deleted': [],
-            'versions_deleted': []
+    except Exception as e:
+        logger.error(f"[FATAL] Job {job_id[:8]} crashed: {e}")
+        logger.error(f"[FATAL] Traceback: {traceback.format_exc()}")
+        update_job_status(job_id, 'error', 'Error', 100, error=str(e), response=f"An error occurred: {str(e)}")
+
+
+# =============================================================================
+# API ENDPOINTS
+# =============================================================================
+
+@router.get("/chat/models")
+async def get_available_models():
+    return {"models": [{"id": "claude-3-sonnet", "name": "Claude 3 Sonnet"}], "default": "claude-3-sonnet"}
+
+
+@router.post("/chat/start")
+async def start_chat(request: ChatStartRequest):
+    job_id = str(uuid.uuid4())
+    chat_jobs[job_id] = {'status': 'starting', 'current_step': '🚀 Starting...', 'progress': 0, 'created_at': time.time()}
+    thread = threading.Thread(target=process_chat_job, args=(job_id, request.message, request.project, request.max_results or 50, request.persona or 'bessie'))
+    thread.daemon = True
+    thread.start()
+    return {"job_id": job_id, "status": "starting"}
+
+
+@router.get("/chat/status/{job_id}")
+async def get_chat_status(job_id: str):
+    if job_id not in chat_jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return chat_jobs[job_id]
+
+
+@router.delete("/chat/job/{job_id}")
+async def cancel_chat_job(job_id: str):
+    if job_id in chat_jobs:
+        del chat_jobs[job_id]
+        return {"status": "cancelled"}
+    raise HTTPException(status_code=404, detail="Job not found")
+
+
+@router.post("/chat")
+async def chat_sync(request: ChatRequest):
+    job_id = str(uuid.uuid4())
+    chat_jobs[job_id] = {'status': 'processing', 'progress': 0}
+    process_chat_job(job_id, request.message, request.project, request.max_results or 30, request.persona or 'bessie')
+    return chat_jobs.get(job_id, {'error': 'Job failed'})
+
+
+@router.get("/chat/health")
+async def chat_health():
+    return {"status": "healthy", "structured": STRUCTURED_QUERIES_AVAILABLE, "pii": "enabled", "jobs": len(chat_jobs)}
+
+
+# =============================================================================
+# PERSONA ENDPOINTS
+# =============================================================================
+
+@router.get("/chat/personas")
+async def list_personas():
+    try:
+        pm = get_persona_manager()
+        return {"personas": pm.list_personas(), "default": "bessie"}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@router.get("/chat/personas/{name}")
+async def get_persona(name: str):
+    try:
+        pm = get_persona_manager()
+        persona = pm.get_persona(name)
+        return persona.to_dict() if persona else None
+    except:
+        raise HTTPException(404, f"Persona '{name}' not found")
+
+@router.post("/chat/personas")
+async def create_persona(request: Request):
+    try:
+        data = await request.json()
+        pm = get_persona_manager()
+        persona = pm.create_persona(name=data['name'], icon=data.get('icon', '🤖'), description=data.get('description', ''), system_prompt=data.get('system_prompt', ''), expertise=data.get('expertise', []), tone=data.get('tone', 'Professional'))
+        return {"success": True, "persona": persona.to_dict()}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@router.put("/chat/personas/{name}")
+async def update_persona(name: str, request: Request):
+    try:
+        data = await request.json()
+        pm = get_persona_manager()
+        persona = pm.update_persona(name, **data)
+        if persona:
+            return {"success": True, "persona": persona.to_dict()}
+        raise HTTPException(404, f"Persona '{name}' not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@router.delete("/chat/personas/{name}")
+async def delete_persona(name: str):
+    try:
+        pm = get_persona_manager()
+        if name.lower() in ['bessie', 'analyst', 'consultant']:
+            raise HTTPException(400, "Cannot delete default personas")
+        if pm.delete_persona(name):
+            return {"success": True}
+        raise HTTPException(404, f"Persona '{name}' not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# =============================================================================
+# DATA ENDPOINTS
+# =============================================================================
+
+@router.get("/chat/schema/{project}")
+async def get_project_schema(project: str):
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        return {"tables": []}
+    try:
+        handler = get_structured_handler()
+        return handler.get_schema_for_project(project)
+    except Exception as e:
+        return {"tables": [], "error": str(e)}
+
+@router.get("/chat/tables")
+async def list_all_tables():
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        return {"tables": []}
+    try:
+        handler = get_structured_handler()
+        result = handler.conn.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'").fetchall()
+        return {"tables": [r[0] for r in result]}
+    except Exception as e:
+        return {"tables": [], "error": str(e)}
+
+@router.post("/chat/sql")
+async def execute_sql(request: Request):
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        raise HTTPException(503, "Not available")
+    try:
+        data = await request.json()
+        handler = get_structured_handler()
+        rows, cols = handler.execute_query(data.get('sql', ''))
+        return {"columns": cols, "rows": decrypt_results(rows, handler)[:1000], "total": len(rows)}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@router.get("/chat/table-sample/{table_name}")
+async def get_table_sample(table_name: str, limit: int = 100):
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        raise HTTPException(503, "Not available")
+    try:
+        handler = get_structured_handler()
+        return {"rows": handler.get_table_sample(table_name, limit)}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@router.delete("/chat/data/{project}/{file_name}")
+async def delete_data_file(project: str, file_name: str):
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        raise HTTPException(503, "Not available")
+    try:
+        handler = get_structured_handler()
+        return {"success": True, "result": handler.delete_file(project, file_name)}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@router.get("/chat/data/{project}/files")
+async def list_project_files(project: str):
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        return {"files": []}
+    try:
+        handler = get_structured_handler()
+        return {"files": handler.list_files(project)}
+    except Exception as e:
+        return {"files": [], "error": str(e)}
+
+@router.post("/chat/data/reset-database")
+async def reset_database():
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        raise HTTPException(503, "Not available")
+    try:
+        handler = get_structured_handler()
+        return {"success": True, "result": handler.reset_database()}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@router.get("/chat/debug-chunks")
+async def debug_chunks(search: str = "test", project: Optional[str] = None):
+    try:
+        rag = RAGHandler()
+        collection = rag.client.get_or_create_collection(name="documents")
+        results = collection.query(query_texts=[search], n_results=10, where={"project": project} if project else None)
+        return {"chunks": len(results.get('documents', [[]])[0]) if results else 0}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.post("/chat/debug")
+async def debug_query(request: Request):
+    """
+    Debug endpoint - shows exactly what happens at each step WITHOUT calling Claude.
+    Returns raw data so we can see what's broken.
+    """
+    try:
+        data = await request.json()
+        message = data.get('message', 'list active employees')
+        project = data.get('project', None)
+        
+        debug_output = {
+            "query": message,
+            "project": project,
+            "steps": {}
         }
         
-        # Get all tables for this file
-        if delete_all_versions:
-            tables = self.conn.execute("""
-                SELECT table_name, version FROM _schema_metadata 
-                WHERE project = ? AND file_name = ?
-            """, [project, file_name]).fetchall()
-        else:
-            tables = self.conn.execute("""
-                SELECT table_name, version FROM _schema_metadata 
-                WHERE project = ? AND file_name = ? AND is_current = TRUE
-            """, [project, file_name]).fetchall()
+        # STEP 1: Query Classification
+        from utils.llm_orchestrator import classify_query
+        query_type = classify_query(message, [])
+        debug_output["steps"]["1_classification"] = {
+            "query_type": query_type,
+            "note": "employee = sanitizer path, config = direct to Claude"
+        }
         
-        versions_deleted = set()
-        
-        for table_name, version in tables:
-            try:
-                self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
-                result['tables_deleted'].append(table_name)
-                versions_deleted.add(version)
-                logger.info(f"Deleted table: {table_name}")
-            except Exception as e:
-                logger.warning(f"Could not delete table {table_name}: {e}")
-        
-        # Also try to drop archived tables (naming convention: tablename_v1, _v2, etc.)
-        if delete_all_versions:
-            for table_name, version in tables:
-                for v in range(1, 100):  # Check up to 100 versions
-                    archive_name = f"{table_name}_v{v}"
-                    try:
-                        self.conn.execute(f"DROP TABLE IF EXISTS {archive_name}")
-                    except:
-                        break
-        
-        # Delete metadata
-        if delete_all_versions:
-            self.conn.execute("""
-                DELETE FROM _schema_metadata WHERE project = ? AND file_name = ?
-            """, [project, file_name])
-            self.conn.execute("""
-                DELETE FROM _load_versions WHERE project = ? AND file_name = ?
-            """, [project, file_name])
-        else:
-            self.conn.execute("""
-                DELETE FROM _schema_metadata WHERE project = ? AND file_name = ? AND is_current = TRUE
-            """, [project, file_name])
-        
-        self.conn.commit()
-        
-        result['versions_deleted'] = list(versions_deleted)
-        logger.info(f"Deleted {len(result['tables_deleted'])} tables for {file_name}")
-        
-        return result
-    
-    def compare_versions(
-        self, 
-        project: str, 
-        file_name: str, 
-        sheet_name: str,
-        key_column: str,
-        version1: int = None,
-        version2: int = None
-    ) -> Dict[str, Any]:
-        """
-        Compare two versions of a file to find changes.
-        
-        Args:
-            project: Project name
-            file_name: File name
-            sheet_name: Sheet to compare
-            key_column: Column to use as unique key (e.g., 'employee_id')
-            version1: First version (default: previous version)
-            version2: Second version (default: current version)
+        # STEP 2: Get Schema
+        if STRUCTURED_QUERIES_AVAILABLE:
+            handler = get_structured_handler()
+            schema = handler.get_schema_for_project(project) if project else handler.get_schema_for_project(None)
+            tables_list = schema.get('tables', [])
             
-        Returns:
-            Dict with added, removed, and changed records
-        """
-        # Get current and previous version numbers
-        versions = self.conn.execute("""
-            SELECT DISTINCT version FROM _schema_metadata 
-            WHERE project = ? AND file_name = ? AND sheet_name = ?
-            ORDER BY version DESC
-        """, [project, file_name, sheet_name]).fetchall()
-        
-        if len(versions) < 2:
-            return {
-                'error': 'Need at least 2 versions to compare',
-                'available_versions': [v[0] for v in versions]
+            debug_output["steps"]["2_schema"] = {
+                "tables_found": len(tables_list),
+                "table_names": [t.get('sheet', t.get('table_name', ''))[:50] for t in tables_list[:10]]
             }
-        
-        v2 = version2 or versions[0][0]  # Latest
-        v1 = version1 or versions[1][0]  # Previous
-        
-        # Get table names
-        table1_result = self.conn.execute("""
-            SELECT table_name FROM _schema_metadata 
-            WHERE project = ? AND file_name = ? AND sheet_name = ? AND version = ?
-        """, [project, file_name, sheet_name, v1]).fetchone()
-        
-        table2_result = self.conn.execute("""
-            SELECT table_name FROM _schema_metadata 
-            WHERE project = ? AND file_name = ? AND sheet_name = ? AND version = ?
-        """, [project, file_name, sheet_name, v2]).fetchone()
-        
-        if not table1_result or not table2_result:
-            # Try archived table names
-            base_table = self._generate_table_name(project, file_name, sheet_name)
-            table1 = f"{base_table}_v{v1}"
-            table2 = base_table  # Current is without version suffix
-        else:
-            table1 = table1_result[0] if v1 != versions[0][0] else f"{table1_result[0]}_v{v1}"
-            table2 = table2_result[0]
-        
-        result = {
-            'project': project,
-            'file_name': file_name,
-            'sheet_name': sheet_name,
-            'version1': v1,
-            'version2': v2,
-            'key_column': key_column,
-            'added': [],
-            'removed': [],
-            'changed': [],
-            'unchanged_count': 0
-        }
-        
-        try:
-            # Get data from both versions
-            df1 = self.query_to_dataframe(f"SELECT * FROM {table1}")
-            df2 = self.query_to_dataframe(f"SELECT * FROM {table2}")
             
-            # Decrypt for comparison
-            df1 = self.encryptor.decrypt_dataframe(df1)
-            df2 = self.encryptor.decrypt_dataframe(df2)
+            # STEP 3: Build summaries (what Claude sees for table selection)
+            table_summaries = []
+            table_lookup = {}
             
-            # Ensure key column exists
-            if key_column not in df1.columns or key_column not in df2.columns:
-                return {'error': f"Key column '{key_column}' not found in both versions"}
-            
-            # Set key as index
-            df1 = df1.set_index(key_column)
-            df2 = df2.set_index(key_column)
-            
-            # Find added (in v2 but not v1)
-            added_keys = set(df2.index) - set(df1.index)
-            result['added'] = df2.loc[list(added_keys)].reset_index().to_dict('records')
-            
-            # Find removed (in v1 but not v2)
-            removed_keys = set(df1.index) - set(df2.index)
-            result['removed'] = df1.loc[list(removed_keys)].reset_index().to_dict('records')
-            
-            # Find changed (in both but different)
-            common_keys = set(df1.index) & set(df2.index)
-            changed = []
-            unchanged = 0
-            
-            for key in common_keys:
-                row1 = df1.loc[key]
-                row2 = df2.loc[key]
+            for idx, table_info in enumerate(tables_list):
+                table_name = table_info.get('table_name', '')
+                sheet_name = table_info.get('sheet', '')
+                file_name = table_info.get('file', '')
+                row_count = table_info.get('row_count', 0)
+                columns = table_info.get('columns', [])
                 
-                # Compare each column
-                differences = {}
-                for col in df1.columns:
-                    if col in df2.columns:
-                        val1 = row1[col] if not pd.isna(row1[col]) else None
-                        val2 = row2[col] if not pd.isna(row2[col]) else None
-                        
-                        if str(val1) != str(val2):
-                            differences[col] = {'old': val1, 'new': val2}
-                
-                if differences:
-                    changed.append({
-                        key_column: key,
-                        'changes': differences
-                    })
+                if columns and isinstance(columns[0], dict):
+                    col_names = [c.get('name', str(c)) for c in columns[:10]]
                 else:
-                    unchanged += 1
+                    col_names = [str(c) for c in columns[:10]]
+                
+                summary = f"[{idx}] {file_name} → {sheet_name} ({row_count} rows) | Cols: {', '.join(col_names)}"
+                table_summaries.append(summary)
+                table_lookup[idx] = table_info
             
-            result['changed'] = changed
-            result['unchanged_count'] = unchanged
+            debug_output["steps"]["3_table_summaries"] = table_summaries[:15]
             
-            # Summary
-            result['summary'] = {
-                'total_v1': len(df1),
-                'total_v2': len(df2),
-                'added_count': len(result['added']),
-                'removed_count': len(result['removed']),
-                'changed_count': len(result['changed']),
-                'unchanged_count': unchanged
+            # STEP 4: Simulate table selection (keyword-based, not Claude)
+            query_lower = message.lower()
+            selected = []
+            for idx, info in table_lookup.items():
+                file_lower = info.get('file', '').lower()
+                if 'employee' in query_lower and ('employee' in file_lower or 'conversion' in file_lower):
+                    selected.append(idx)
+            
+            if not selected:
+                selected = list(table_lookup.keys())[:2]
+            
+            debug_output["steps"]["4_selected_tables"] = {
+                "indices": selected[:3],
+                "names": [table_lookup[i].get('sheet', '') for i in selected[:3]]
             }
             
-            logger.info(f"Compared {file_name}/{sheet_name}: +{len(result['added'])} -{len(result['removed'])} ~{len(result['changed'])}")
+            # STEP 5: Query actual data
+            raw_data_samples = []
+            all_columns = []
             
-        except Exception as e:
-            logger.error(f"Comparison error: {e}")
-            result['error'] = str(e)
-        
-        return result
-    
-    def get_file_versions(self, project: str, file_name: str) -> List[Dict]:
-        """Get all versions of a file"""
-        versions = self.conn.execute("""
-            SELECT DISTINCT version, created_at, row_count
-            FROM _schema_metadata 
-            WHERE project = ? AND file_name = ?
-            ORDER BY version DESC
-        """, [project, file_name]).fetchall()
-        
-        return [
-            {'version': v[0], 'created_at': v[1], 'row_count': v[2]}
-            for v in versions
-        ]
-    
-    def list_files(self, project: str) -> List[Dict]:
-        """List all files in a project with version info"""
-        files = self.conn.execute("""
-            SELECT DISTINCT file_name, 
-                   MAX(version) as latest_version,
-                   SUM(row_count) as total_rows,
-                   MAX(created_at) as last_updated
-            FROM _schema_metadata 
-            WHERE project = ? AND is_current = TRUE
-            GROUP BY file_name
-            ORDER BY file_name
-        """, [project]).fetchall()
-        
-        return [
-            {
-                'file_name': f[0],
-                'latest_version': f[1],
-                'total_rows': f[2],
-                'last_updated': f[3]
-            }
-            for f in files
-        ]
-    
-    def reset_database(self) -> Dict[str, Any]:
-        """
-        Completely reset the database - drop all tables and recreate metadata.
-        USE WITH CAUTION - this deletes all data!
-        """
-        result = {
-            'tables_dropped': [],
-            'success': False
-        }
-        
-        try:
-            # Get all user tables (not metadata)
-            tables = self.conn.execute("""
-                SELECT table_name FROM information_schema.tables 
-                WHERE table_schema = 'main' 
-                AND table_name NOT LIKE '\\_%' ESCAPE '\\'
-            """).fetchall()
-            
-            for (table_name,) in tables:
+            for idx in selected[:2]:
+                table_info = table_lookup[idx]
+                table_name = table_info.get('table_name', '')
+                
                 try:
-                    self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
-                    result['tables_dropped'].append(table_name)
+                    sql = f'SELECT * FROM "{table_name}" LIMIT 5'
+                    rows, cols = handler.execute_query(sql)
+                    all_columns.extend(cols)
+                    
+                    # Decrypt if needed
+                    decrypted = decrypt_results(rows, handler)
+                    
+                    raw_data_samples.append({
+                        "table": table_info.get('sheet', ''),
+                        "columns": cols,
+                        "row_count": len(rows),
+                        "sample_rows": decrypted[:3]  # First 3 rows
+                    })
                 except Exception as e:
-                    logger.warning(f"Could not drop {table_name}: {e}")
+                    raw_data_samples.append({"table": table_name, "error": str(e)})
             
-            # Drop metadata tables
-            self.conn.execute("DROP TABLE IF EXISTS _schema_metadata")
-            self.conn.execute("DROP TABLE IF EXISTS _load_versions")
-            self.conn.execute("DROP SEQUENCE IF EXISTS schema_metadata_seq")
-            self.conn.execute("DROP SEQUENCE IF EXISTS load_versions_seq")
-            self.conn.commit()
+            debug_output["steps"]["5_raw_data"] = raw_data_samples
             
-            # Recreate metadata tables
-            self._init_metadata_table()
+            # STEP 6: Build context (what would be sent to LLM)
+            context_parts = []
+            for sample in raw_data_samples:
+                if "error" not in sample:
+                    data_text = f"Table: {sample['table']}\nColumns: {', '.join(sample['columns'])}\n"
+                    for row in sample.get('sample_rows', []):
+                        row_str = " | ".join(f"{k}: {v}" for k, v in list(row.items())[:8])
+                        data_text += f"  {row_str}\n"
+                    context_parts.append(data_text)
             
-            result['success'] = True
-            logger.info(f"Database reset: dropped {len(result['tables_dropped'])} tables")
+            full_context = '\n\n'.join(context_parts)
+            debug_output["steps"]["6_context_preview"] = full_context[:2000]
             
-        except Exception as e:
-            logger.error(f"Database reset failed: {e}")
-            result['error'] = str(e)
+            # STEP 7: PII Detection
+            pii_result = detect_pii_in_data(full_context, all_columns)
+            debug_output["steps"]["7_pii_detection"] = pii_result
+            
+            # STEP 8: Sanitization preview (if employee path)
+            if query_type == 'employee':
+                sanitized_preview = sanitize_pii(full_context[:1000])
+                debug_output["steps"]["8_sanitized_preview"] = sanitized_preview[:1000]
+            else:
+                debug_output["steps"]["8_sanitized_preview"] = "N/A - config path, no sanitization"
         
+        else:
+            debug_output["steps"]["error"] = "STRUCTURED_QUERIES_AVAILABLE = False"
+        
+        return debug_output
+        
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "traceback": traceback.format_exc()}
+
+@router.get("/chat/export/{filename}")
+async def download_export(filename: str):
+    from fastapi.responses import FileResponse
+    import os
+    path = f"/data/exports/{filename}"
+    if not os.path.exists(path):
+        raise HTTPException(404, "Not found")
+    return FileResponse(path=path, filename=filename)
+
+
+# =============================================================================
+# EXCEL EXPORT ENDPOINT
+# =============================================================================
+
+class ExportRequest(BaseModel):
+    query: str
+    project: Optional[str] = None
+    tables: Optional[List[str]] = None  # Optional: specific tables to export
+
+@router.post("/chat/export-excel")
+async def export_to_excel(request: ExportRequest):
+    """
+    Export query results to Excel with 2 tabs:
+    - Results: The actual data
+    - Sources: Files/sheets referenced
+    """
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+        
+        if not STRUCTURED_QUERIES_AVAILABLE:
+            raise HTTPException(503, "Structured data not available")
+        
+        handler = get_structured_handler()
+        query = request.query.lower()
+        project = request.project
+        
+        logger.warning(f"[EXPORT] Starting export for query: {query[:50]}...")
+        
+        # Get schema and find relevant tables (same logic as chat)
+        schema = handler.get_schema_for_project(project)
+        tables_list = schema.get('tables', [])
+        
+        if not tables_list:
+            raise HTTPException(404, "No tables found for project")
+        
+        # Use provided tables or find relevant ones
+        tables_to_query = []
+        if request.tables:
+            for t in tables_list:
+                if t.get('table_name') in request.tables:
+                    tables_to_query.append(t)
+        else:
+            # Simple keyword matching for table selection
+            keywords = ['employee', 'company', 'personal', 'conversion']
+            if any(kw in query for kw in ['active', 'employee', 'staff', 'worker']):
+                for t in tables_list:
+                    table_name = t.get('table_name', '').lower()
+                    if any(kw in table_name for kw in keywords):
+                        tables_to_query.append(t)
+            
+            # Fallback to first 3 tables if nothing matched
+            if not tables_to_query:
+                tables_to_query = tables_list[:3]
+        
+        # Create workbook
+        wb = Workbook()
+        
+        # ========== RESULTS TAB ==========
+        ws_results = wb.active
+        ws_results.title = "Results"
+        
+        # Styling
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        thin_border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+        
+        current_row = 1
+        sources_info = []
+        
+        for table_info in tables_to_query[:5]:  # Limit to 5 tables
+            table_name = table_info.get('table_name', '')
+            sheet_name = table_info.get('sheet', '')
+            file_name = table_info.get('file', '')
+            
+            try:
+                # Get all data (no limit for export)
+                sql = f'SELECT * FROM "{table_name}"'
+                rows, cols = handler.execute_query(sql)
+                
+                if not rows:
+                    continue
+                
+                # Decrypt if needed
+                decrypted = decrypt_results(rows, handler)
+                
+                # Add section header
+                ws_results.cell(row=current_row, column=1, value=f"📊 {file_name} → {sheet_name}")
+                ws_results.cell(row=current_row, column=1).font = Font(bold=True, size=12)
+                ws_results.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=min(len(cols), 10))
+                current_row += 1
+                
+                # Add column headers
+                for col_idx, col_name in enumerate(cols, 1):
+                    cell = ws_results.cell(row=current_row, column=col_idx, value=col_name)
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.border = thin_border
+                    cell.alignment = Alignment(horizontal='center')
+                current_row += 1
+                
+                # Add data rows
+                for row_data in decrypted:
+                    for col_idx, col_name in enumerate(cols, 1):
+                        cell = ws_results.cell(row=current_row, column=col_idx, value=row_data.get(col_name, ''))
+                        cell.border = thin_border
+                    current_row += 1
+                
+                # Track sources
+                sources_info.append({
+                    'file': file_name,
+                    'sheet': sheet_name,
+                    'table': table_name,
+                    'rows': len(decrypted),
+                    'columns': len(cols)
+                })
+                
+                current_row += 2  # Gap between tables
+                
+            except Exception as te:
+                logger.error(f"[EXPORT] Error querying {table_name}: {te}")
+                continue
+        
+        # Auto-adjust column widths (Results tab)
+        for col_idx in range(1, ws_results.max_column + 1):
+            max_length = 0
+            column_letter = get_column_letter(col_idx)
+            for row_idx in range(1, min(ws_results.max_row + 1, 100)):  # Check first 100 rows
+                cell = ws_results.cell(row=row_idx, column=col_idx)
+                if cell.value:
+                    max_length = max(max_length, len(str(cell.value)))
+            ws_results.column_dimensions[column_letter].width = min(max_length + 2, 50)
+        
+        # ========== SOURCES TAB ==========
+        ws_sources = wb.create_sheet(title="Sources")
+        
+        # Headers
+        source_headers = ["File", "Sheet", "Table Name", "Rows", "Columns"]
+        for col_idx, header in enumerate(source_headers, 1):
+            cell = ws_sources.cell(row=1, column=col_idx, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.border = thin_border
+        
+        # Source data
+        for row_idx, source in enumerate(sources_info, 2):
+            ws_sources.cell(row=row_idx, column=1, value=source['file']).border = thin_border
+            ws_sources.cell(row=row_idx, column=2, value=source['sheet']).border = thin_border
+            ws_sources.cell(row=row_idx, column=3, value=source['table']).border = thin_border
+            ws_sources.cell(row=row_idx, column=4, value=source['rows']).border = thin_border
+            ws_sources.cell(row=row_idx, column=5, value=source['columns']).border = thin_border
+        
+        # Auto-adjust source columns
+        for col_idx in range(1, 6):
+            ws_sources.column_dimensions[get_column_letter(col_idx)].width = 25
+        
+        # Add metadata row
+        metadata_row = len(sources_info) + 3
+        ws_sources.cell(row=metadata_row, column=1, value="Export Info:")
+        ws_sources.cell(row=metadata_row, column=1).font = Font(bold=True)
+        ws_sources.cell(row=metadata_row + 1, column=1, value="Query:")
+        ws_sources.cell(row=metadata_row + 1, column=2, value=request.query)
+        ws_sources.cell(row=metadata_row + 2, column=1, value="Project:")
+        ws_sources.cell(row=metadata_row + 2, column=2, value=project or "All")
+        ws_sources.cell(row=metadata_row + 3, column=1, value="Generated:")
+        ws_sources.cell(row=metadata_row + 3, column=2, value=time.strftime("%Y-%m-%d %H:%M:%S"))
+        
+        # Save to memory buffer
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        
+        # Generate filename
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        safe_query = re.sub(r'[^\w\s]', '', request.query[:30]).strip().replace(' ', '_')
+        filename = f"export_{safe_query}_{timestamp}.xlsx"
+        
+        logger.warning(f"[EXPORT] Generated {filename} with {len(sources_info)} tables, {sum(s['rows'] for s in sources_info)} total rows")
+        
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[EXPORT] Error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(500, f"Export failed: {str(e)}")
+
+@router.get("/chat/data/{project}/{file_name}/versions")
+async def get_file_versions(project: str, file_name: str):
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        raise HTTPException(503, "Not available")
+    try:
+        handler = get_structured_handler()
+        return {"versions": handler.get_file_versions(project, file_name)}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+class CompareRequest(BaseModel):
+    sheet_name: str
+    key_column: str
+    version1: Optional[int] = None
+    version2: Optional[int] = None
+
+@router.post("/chat/data/{project}/{file_name}/compare")
+async def compare_versions(project: str, file_name: str, request: CompareRequest):
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        raise HTTPException(503, "Not available")
+    try:
+        handler = get_structured_handler()
+        result = handler.compare_versions(project=project, file_name=file_name, sheet_name=request.sheet_name, key_column=request.key_column, version1=request.version1, version2=request.version2)
+        if 'error' in result:
+            raise HTTPException(400, result['error'])
         return result
-    
-    def close(self):
-        """Close database connection"""
-        if self.conn:
-            self.conn.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
-
-# Singleton instance
-_handler: Optional[StructuredDataHandler] = None
-
-def get_structured_handler() -> StructuredDataHandler:
-    """Get or create singleton handler"""
-    global _handler
-    if _handler is None:
-        _handler = StructuredDataHandler()
-    return _handler
-
-
-def reset_structured_handler():
-    """Reset the singleton handler (forces reconnection)"""
-    global _handler
-    if _handler:
-        _handler.close()
-    _handler = None
+@router.get("/chat/data/encryption-status")
+async def encryption_status():
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        raise HTTPException(503, "Not available")
+    try:
+        handler = get_structured_handler()
+        return {"encryption": handler.encryptor.fernet is not None, "pii": "enabled"}
+    except Exception as e:
+        raise HTTPException(500, str(e))
