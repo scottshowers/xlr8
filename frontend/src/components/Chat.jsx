@@ -679,6 +679,61 @@ export default function Chat({
                       </div>
                     </div>
                   )}
+                  
+                  {/* Download Button - Show when we have structured data sources */}
+                  {message.role === 'assistant' && message.sources && message.sources.some(s => s.type === 'structured') && (
+                    <button
+                      onClick={async () => {
+                        try {
+                          // Find the user's original query (previous message)
+                          const userQuery = messages[index - 1]?.content || 'data export';
+                          
+                          const response = await fetch(`${API_BASE}/api/chat/export-excel`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              query: userQuery,
+                              project: selectedProject
+                            })
+                          });
+                          
+                          if (!response.ok) throw new Error('Export failed');
+                          
+                          const blob = await response.blob();
+                          const url = window.URL.createObjectURL(blob);
+                          const a = document.createElement('a');
+                          a.href = url;
+                          a.download = `export_${new Date().toISOString().slice(0,10)}.xlsx`;
+                          document.body.appendChild(a);
+                          a.click();
+                          window.URL.revokeObjectURL(url);
+                          a.remove();
+                        } catch (err) {
+                          console.error('Export error:', err);
+                          alert('Export failed. Please try again.');
+                        }
+                      }}
+                      style={{
+                        marginTop: '0.75rem',
+                        padding: '0.5rem 1rem',
+                        background: 'linear-gradient(135deg, #16a34a 0%, #22c55e 100%)',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontSize: '0.85rem',
+                        fontWeight: '500',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        transition: 'all 0.2s ease'
+                      }}
+                      onMouseOver={(e) => e.target.style.transform = 'scale(1.02)'}
+                      onMouseOut={(e) => e.target.style.transform = 'scale(1)'}
+                    >
+                      📥 Download as Excel
+                    </button>
+                  )}
                 </div>
                 
                 <div style={{
