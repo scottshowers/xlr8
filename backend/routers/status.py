@@ -507,3 +507,131 @@ async def get_system_status():
     except Exception as e:
         logger.error(f"System status check failed: {e}")
         return {"status": "degraded", "error": str(e)}
+
+
+# ==================== COLUMN MAPPING ENDPOINTS ====================
+
+@router.get("/status/mappings/{project}")
+async def get_project_mappings(project: str, file_name: str = None):
+    """Get all column mappings for a project"""
+    if not STRUCTURED_AVAILABLE:
+        raise HTTPException(503, "Structured data not available")
+    
+    try:
+        handler = get_structured_handler()
+        mappings = handler.get_column_mappings(project, file_name=file_name)
+        needs_review = handler.get_mappings_needing_review(project)
+        
+        return {
+            "project": project,
+            "mappings": mappings,
+            "total_mappings": len(mappings),
+            "needs_review_count": len(needs_review),
+            "needs_review": needs_review
+        }
+    except Exception as e:
+        logger.error(f"Failed to get mappings: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.get("/status/mappings/{project}/{file_name}/summary")
+async def get_file_mapping_summary(project: str, file_name: str):
+    """Get mapping summary for a specific file (for badge display)"""
+    if not STRUCTURED_AVAILABLE:
+        raise HTTPException(503, "Structured data not available")
+    
+    try:
+        handler = get_structured_handler()
+        summary = handler.get_file_mapping_summary(project, file_name)
+        return summary
+    except Exception as e:
+        logger.error(f"Failed to get mapping summary: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.get("/status/mapping-job/{job_id}")
+async def get_mapping_job_status(job_id: str):
+    """Get status of a column inference job"""
+    if not STRUCTURED_AVAILABLE:
+        raise HTTPException(503, "Structured data not available")
+    
+    try:
+        handler = get_structured_handler()
+        status = handler.get_mapping_job_status(job_id=job_id)
+        if not status:
+            raise HTTPException(404, "Job not found")
+        return status
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get job status: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.get("/status/mapping-jobs/{project}")
+async def get_project_mapping_jobs(project: str):
+    """Get all mapping jobs for a project"""
+    if not STRUCTURED_AVAILABLE:
+        raise HTTPException(503, "Structured data not available")
+    
+    try:
+        handler = get_structured_handler()
+        status = handler.get_mapping_job_status(project=project)
+        return {"project": project, "jobs": status if isinstance(status, list) else [status] if status else []}
+    except Exception as e:
+        logger.error(f"Failed to get project jobs: {e}")
+        raise HTTPException(500, str(e))
+
+
+from pydantic import BaseModel
+
+class MappingUpdate(BaseModel):
+    semantic_type: str
+
+@router.put("/status/mappings/{project}/{table_name}/{column_name}")
+async def update_column_mapping(project: str, table_name: str, column_name: str, update: MappingUpdate):
+    """Update a column mapping (human override)"""
+    if not STRUCTURED_AVAILABLE:
+        raise HTTPException(503, "Structured data not available")
+    
+    try:
+        handler = get_structured_handler()
+        success = handler.update_column_mapping(
+            project=project,
+            table_name=table_name,
+            original_column=column_name,
+            semantic_type=update.semantic_type
+        )
+        
+        if success:
+            return {"status": "updated", "column": column_name, "semantic_type": update.semantic_type}
+        else:
+            raise HTTPException(500, "Failed to update mapping")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update mapping: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.get("/status/semantic-types")
+async def get_semantic_types():
+    """Get list of available semantic types for mapping"""
+    return {
+        "types": [
+            {"id": "employee_number", "label": "Employee Number", "category": "keys"},
+            {"id": "company_code", "label": "Company Code", "category": "keys"},
+            {"id": "employment_status_code", "label": "Employment Status", "category": "status"},
+            {"id": "earning_code", "label": "Earning Code", "category": "codes"},
+            {"id": "deduction_code", "label": "Deduction Code", "category": "codes"},
+            {"id": "job_code", "label": "Job Code", "category": "codes"},
+            {"id": "department_code", "label": "Department Code", "category": "codes"},
+            {"id": "amount", "label": "Amount", "category": "values"},
+            {"id": "rate", "label": "Rate", "category": "values"},
+            {"id": "effective_date", "label": "Effective Date", "category": "dates"},
+            {"id": "start_date", "label": "Start Date", "category": "dates"},
+            {"id": "end_date", "label": "End Date", "category": "dates"},
+            {"id": "employee_name", "label": "Employee Name", "category": "other"},
+            {"id": "NONE", "label": "Not Mapped", "category": "none"}
+        ]
+    }
