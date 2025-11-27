@@ -374,38 +374,44 @@ class LLMOrchestrator:
         if query_type == 'config':
             logger.info("CONFIG path: Direct to Claude")
             
-            system_prompt = """You are an expert UKG/HCM implementation consultant helping analyze customer data.
+            system_prompt = """You are an expert UKG/HCM data analyst. Your job is to ANALYZE the data and ANSWER questions directly.
 
 CRITICAL RULES:
-1. DIRECTLY ANSWER the question using the data provided
-2. NEVER give code examples, Python snippets, or "how to analyze" suggestions
-3. NEVER say "you could use pandas" or "here's how to count" - just DO the counting/analysis
-4. If asked "how many", COUNT the items in the data and give a NUMBER
-5. If asked to "list", LIST the actual items from the data
-6. Be concise and direct - the user wants an ANSWER, not instructions
+1. LOOK at the actual column names and values in the data
+2. FIND relevant fields (status, active, employee_type, terminated, etc.)
+3. ANALYZE the data to answer the question
+4. Give a DIRECT answer with specific numbers or lists
+5. NEVER ask clarifying questions - figure it out from the data
+6. NEVER give code examples or "how to" instructions
 
-For counts/aggregates:
-- Count the actual records in the data
-- Give a specific number as the answer
-- Don't explain how to count - just count and respond
+For "active employees" questions:
+- Look for columns like: status, employee_status, active, terminated, termination_date, emp_status
+- Active typically means: status='Active', status='A', terminated=No/False/blank, no termination date
+- COUNT or LIST based on what you find
+
+For "list" questions:
+- Show actual data from the records
+- Include key identifiers (employee_number, name, etc.)
+- Limit to first 20-30 if many records
 
 Example:
-- User asks: "How many employees are active?"
-- WRONG: "To count active employees, you could use Python..."
-- RIGHT: "There are 349 active employees in the data."
+- Question: "How many active employees?"
+- Data has column "status" with values "Active", "Terminated", "Leave"
+- CORRECT: "There are 349 active employees (where status = 'Active')."
+- WRONG: "I need clarification on how you define active..."
 
-Formatting:
-- Keep responses focused and concise
-- Use tables/lists only when listing multiple items
-- Lead with the direct answer, then add context if helpful"""
+ANALYZE the data. FIND the answer. RESPOND directly."""
 
             user_prompt = f"""Question: {query}
 
 DATA FROM CUSTOMER'S SYSTEM:
-
 {context}
 
-IMPORTANT: Analyze the above data and directly answer the question. Do NOT provide code or instructions - provide the actual answer based on the data."""
+INSTRUCTIONS: 
+1. Look at the column names to find status/active indicators
+2. Analyze the data values to identify active vs inactive records
+3. Answer the question directly with specific numbers or lists
+4. Do NOT ask for clarification - use the data to determine the answer"""
 
             response, success = self._call_claude(user_prompt, system_prompt)
             result["models_used"].append("claude-sonnet-4")
@@ -427,20 +433,21 @@ IMPORTANT: Analyze the above data and directly answer the question. Do NOT provi
         local_model = select_local_model(query, chunks)
         
         # Call local LLM
-        local_system = """You are an expert HCM analyst. DIRECTLY answer the question using the data.
+        local_system = """You are an expert HCM data analyst. ANALYZE the data and ANSWER directly.
 
-CRITICAL RULES:
-1. NEVER give code examples or "how to" instructions
-2. If asked "how many", COUNT the records and give a NUMBER
-3. If asked to "list", LIST the actual items
-4. Be concise and direct - give the ANSWER, not instructions"""
+RULES:
+1. LOOK at column names to find status/active indicators
+2. FIND: status, employee_status, active, terminated, termination_date, emp_status columns
+3. ANALYZE values: Active, Terminated, A, T, Yes, No, dates
+4. COUNT or LIST based on what the data shows
+5. NEVER ask clarifying questions - use the data"""
 
         local_prompt = f"""Question: {query}
 
 DATA:
 {context}
 
-Directly answer using the data above. If counting, give the actual count. No code examples."""
+Look at the columns. Find status fields. Count or list active records. Give direct answer."""
 
         local_response, local_success = self._call_ollama(local_model, local_prompt, local_system)
         result["models_used"].append(local_model)
@@ -452,20 +459,22 @@ Directly answer using the data above. If counting, give the actual count. No cod
             sanitized_context = self.sanitizer.sanitize(context)
             result["sanitized"] = True
             
-            system_prompt = """You are an expert HCM analyst. DIRECTLY answer using the data provided.
+            system_prompt = """You are an expert HCM data analyst. ANALYZE the data and ANSWER directly.
 
-CRITICAL: 
-- Do NOT give code examples or Python snippets
-- If asked "how many", count and give a NUMBER
-- If asked to "list", list the actual items
-- Be concise - answer first, then add context if needed"""
+CRITICAL:
+1. LOOK at column names to find status/active indicators
+2. Common status columns: status, employee_status, active, terminated, termination_date
+3. Active means: status='Active'/'A', terminated=No/False/blank, no termination_date
+4. NEVER ask clarifying questions - ANALYZE the data and answer
+5. For lists, show actual records (limit to 20-30)
+6. No code examples ever"""
 
             user_prompt = f"""Question: {query}
 
 DATA (sanitized for privacy):
 {sanitized_context}
 
-Give a direct answer. Count records if asked "how many". No code examples."""
+Find the status column in the data. Determine which records are active. Answer directly."""
 
             response, success = self._call_claude(user_prompt, system_prompt)
             result["models_used"].append("claude-sonnet-4 (fallback)")
@@ -499,18 +508,18 @@ Give a direct answer. Count records if asked "how many". No code examples."""
             claude_system = """You are an expert HCM consultant polishing a response.
 
 RULES:
-1. Keep the ANSWER - don't add code examples or "how to" instructions
-2. Clean up formatting but keep all facts/numbers intact
-3. Keep sanitized placeholders like [Employee A] as-is
-4. Be concise - if there's a count, lead with the number
-5. Never suggest Python/pandas/code approaches"""
+1. Keep the ANSWER and all numbers/counts intact
+2. Keep sanitized placeholders like [Employee A] as-is
+3. If the answer says "I need clarification", REWRITE it - look at the original data context and answer properly
+4. Be concise - lead with the count or list
+5. Never suggest code or ask clarifying questions"""
 
-            claude_prompt = f"""Question: {query}
+            claude_prompt = f"""Original question: {query}
 
 Analysis to polish:
 {sanitized_response}
 
-Clean up this response. Keep the direct answer. No code examples. Keep [Employee X] placeholders."""
+If this asks for clarification, rewrite to give a direct answer. Keep [Employee X] placeholders. Keep all numbers."""
 
             claude_response, claude_success = self._call_claude(claude_prompt, claude_system)
             result["models_used"].append("claude-sonnet-4")
