@@ -27,8 +27,13 @@ export default function Chat({
   const [modelInfo, setModelInfo] = useState(null)
   const messagesEndRef = useRef(null)
   
-  // Persona state
-  const [currentPersona, setCurrentPersona] = useState('bessie')
+  // Persona state - store full persona object
+  const [currentPersona, setCurrentPersona] = useState({
+    id: 'bessie',
+    name: 'Bessie',
+    icon: '🐮',
+    description: 'Your friendly UKG payroll expert'
+  })
   const [showPersonaCreator, setShowPersonaCreator] = useState(false)
 
   // Sync external project when it changes
@@ -120,7 +125,7 @@ export default function Chat({
         message: userMessage.content,
         project: selectedProject || null,
         max_results: 50,
-        persona: currentPersona
+        persona: currentPersona?.id || 'bessie'
       })
 
       const { job_id } = startResponse.data
@@ -517,7 +522,7 @@ export default function Chat({
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
           {/* Persona Switcher - Moved to header */}
           <PersonaSwitcher 
-            currentPersona={currentPersona}
+            currentPersona={currentPersona?.id || 'bessie'}
             onPersonaChange={(persona) => setCurrentPersona(persona)}
           />
         </div>
@@ -583,7 +588,7 @@ export default function Chat({
                 ...styles.avatar,
                 ...(message.role === 'user' ? styles.avatarUser : styles.avatarAssistant)
               }}>
-                {message.role === 'user' ? '👤' : '🤖'}
+                {message.role === 'user' ? '👤' : (currentPersona?.icon || '🐮')}
               </div>
               
               <div>
@@ -719,7 +724,7 @@ export default function Chat({
         {/* Loading Indicator */}
         {loading && (
           <div style={styles.messageRow}>
-            <div style={{ ...styles.avatar, ...styles.avatarAssistant }}>🤖</div>
+            <div style={{ ...styles.avatar, ...styles.avatarAssistant }}>{currentPersona?.icon || '🐮'}</div>
             <div style={styles.loadingBubble}>
               ⏳ Searching documents and generating response...
             </div>
@@ -778,8 +783,13 @@ export default function Chat({
         isOpen={showPersonaCreator}
         onClose={() => setShowPersonaCreator(false)}
         onPersonaCreated={(persona) => {
-          const personaId = persona.name.toLowerCase().replace(/\s+/g, '_')
-          setCurrentPersona(personaId)
+          // Set full persona object with generated ID
+          setCurrentPersona({
+            id: persona.name.toLowerCase().replace(/\s+/g, '_'),
+            name: persona.name,
+            icon: persona.icon || '🤖',
+            description: persona.description
+          })
           console.log(`✅ Created and switched to: ${persona.name}`)
         }}
       />
