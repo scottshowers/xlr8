@@ -281,10 +281,18 @@ KEY RULES:
 2. EMPLOYEE DATA tables (Company, Personal from Employee Conversion) = Actual employee records
 3. TRANSACTION tables (Deductions, Earnings, etc.) = Employee transaction data
 
+CRITICAL - WHICH TABLE HAS WHAT:
+→ Personal table has: employment_status_code (A=Active, T=Terminated, L=Leave)
+→ Company table has: employee names, job titles, departments, org levels
+→ Deductions/Earnings tables have: amounts, codes, dates
+
 CRITICAL - CROSS-TABLE QUERIES:
-If the question combines employee attributes (active, terminated, department) with transaction data (deductions, earnings):
-→ You MUST select BOTH the employee table (Company) AND the transaction table (Deductions/Earnings)
-→ Example: "deductions for active employees" needs BOTH Company (has employment_status) AND Deductions (has amounts)
+If the question asks about "active employees", "terminated employees", or filters by employment status:
+→ You MUST include the Personal table (it has employment_status_code)
+→ Also include Company if you need employee details (names, jobs, departments)
+
+If the question combines employee status with transaction data (deductions, earnings):
+→ You MUST select Personal (has status) AND the transaction table
 {relationship_hint}
 Available tables:
 {chr(10).join(table_summaries)}
