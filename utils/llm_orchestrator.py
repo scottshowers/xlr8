@@ -374,44 +374,21 @@ class LLMOrchestrator:
         if query_type == 'config':
             logger.info("CONFIG path: Direct to Claude")
             
-            system_prompt = """You are an expert UKG/HCM data analyst. Your job is to ANALYZE the data and ANSWER questions directly.
+            system_prompt = """You are a data analyst. Analyze the data provided and answer the question.
 
-CRITICAL RULES:
-1. LOOK at the actual column names and values in the data
-2. FIND relevant fields (status, active, employee_type, terminated, etc.)
-3. ANALYZE the data to answer the question
-4. Give a DIRECT answer with specific numbers or lists
-5. NEVER ask clarifying questions - figure it out from the data
-6. NEVER give code examples or "how to" instructions
-
-For "active employees" questions:
-- Look for columns like: status, employee_status, active, terminated, termination_date, emp_status
-- Active typically means: status='Active', status='A', terminated=No/False/blank, no termination date
-- COUNT or LIST based on what you find
-
-For "list" questions:
-- Show actual data from the records
-- Include key identifiers (employee_number, name, etc.)
-- Limit to first 20-30 if many records
-
-Example:
-- Question: "How many active employees?"
-- Data has column "status" with values "Active", "Terminated", "Leave"
-- CORRECT: "There are 349 active employees (where status = 'Active')."
-- WRONG: "I need clarification on how you define active..."
-
-ANALYZE the data. FIND the answer. RESPOND directly."""
+RULES:
+1. Look at the actual column names and data values
+2. Figure out what the columns mean from context and values
+3. Give actual counts and real data - never placeholders like [Number] or [Employee A]
+4. If listing, show real values from the data (limit to 25 if many)
+5. Never describe what to do - just do it and give the answer"""
 
             user_prompt = f"""Question: {query}
 
-DATA FROM CUSTOMER'S SYSTEM:
+DATA:
 {context}
 
-INSTRUCTIONS: 
-1. Look at the column names to find status/active indicators
-2. Analyze the data values to identify active vs inactive records
-3. Answer the question directly with specific numbers or lists
-4. Do NOT ask for clarification - use the data to determine the answer"""
+Analyze the data. Answer the question with real numbers and real values from the data."""
 
             response, success = self._call_claude(user_prompt, system_prompt)
             result["models_used"].append("claude-sonnet-4")
@@ -433,21 +410,15 @@ INSTRUCTIONS:
         local_model = select_local_model(query, chunks)
         
         # Call local LLM
-        local_system = """You are an expert HCM data analyst. ANALYZE the data and ANSWER directly.
-
-RULES:
-1. LOOK at column names to find status/active indicators
-2. FIND: status, employee_status, active, terminated, termination_date, emp_status columns
-3. ANALYZE values: Active, Terminated, A, T, Yes, No, dates
-4. COUNT or LIST based on what the data shows
-5. NEVER ask clarifying questions - use the data"""
+        local_system = """You are a data analyst. Analyze the data and answer the question directly.
+Give real numbers and real values from the data. Never use placeholders."""
 
         local_prompt = f"""Question: {query}
 
 DATA:
 {context}
 
-Look at the columns. Find status fields. Count or list active records. Give direct answer."""
+Analyze the data and answer with real values."""
 
         local_response, local_success = self._call_ollama(local_model, local_prompt, local_system)
         result["models_used"].append(local_model)
@@ -459,22 +430,15 @@ Look at the columns. Find status fields. Count or list active records. Give dire
             sanitized_context = self.sanitizer.sanitize(context)
             result["sanitized"] = True
             
-            system_prompt = """You are an expert HCM data analyst. ANALYZE the data and ANSWER directly.
-
-CRITICAL:
-1. LOOK at column names to find status/active indicators
-2. Common status columns: status, employee_status, active, terminated, termination_date
-3. Active means: status='Active'/'A', terminated=No/False/blank, no termination_date
-4. NEVER ask clarifying questions - ANALYZE the data and answer
-5. For lists, show actual records (limit to 20-30)
-6. No code examples ever"""
+            system_prompt = """You are a data analyst. Analyze the data and answer the question.
+Give real numbers and real values. Never use placeholders like [Number] or [Employee A]."""
 
             user_prompt = f"""Question: {query}
 
-DATA (sanitized for privacy):
+DATA:
 {sanitized_context}
 
-Find the status column in the data. Determine which records are active. Answer directly."""
+Analyze and answer with real values from the data."""
 
             response, success = self._call_claude(user_prompt, system_prompt)
             result["models_used"].append("claude-sonnet-4 (fallback)")
@@ -505,21 +469,14 @@ Find the status column in the data. Determine which records are active. Answer d
         if self.claude_api_key:
             logger.info("Sending to Claude for synthesis")
             
-            claude_system = """You are an expert HCM consultant polishing a response.
+            claude_system = """Polish this response. Keep all numbers and facts. Keep any [Redacted] placeholders as-is."""
 
-RULES:
-1. Keep the ANSWER and all numbers/counts intact
-2. Keep sanitized placeholders like [Employee A] as-is
-3. If the answer says "I need clarification", REWRITE it - look at the original data context and answer properly
-4. Be concise - lead with the count or list
-5. Never suggest code or ask clarifying questions"""
+            claude_prompt = f"""Question: {query}
 
-            claude_prompt = f"""Original question: {query}
-
-Analysis to polish:
+Response to polish:
 {sanitized_response}
 
-If this asks for clarification, rewrite to give a direct answer. Keep [Employee X] placeholders. Keep all numbers."""
+Keep all facts and numbers. Clean up formatting."""
 
             claude_response, claude_success = self._call_claude(claude_prompt, claude_system)
             result["models_used"].append("claude-sonnet-4")
@@ -527,7 +484,6 @@ If this asks for clarification, rewrite to give a direct answer. Keep [Employee 
             if claude_success:
                 result["response"] = claude_response
             else:
-                # Fall back to sanitized local response
                 result["response"] = sanitized_response
         else:
             result["response"] = sanitized_response
