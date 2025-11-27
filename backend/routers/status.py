@@ -105,12 +105,12 @@ async def get_structured_data_status(project: Optional[str] = None):
                 files_dict[key] = {
                     'filename': file_name,
                     'project': project_name,
-                    'tables': [],
+                    'sheets': [],  # Frontend expects 'sheets' not 'tables'
                     'total_rows': 0
                 }
             
             row_count = table.get('row_count', 0)
-            files_dict[key]['tables'].append({
+            files_dict[key]['sheets'].append({
                 'name': table.get('table_name'),
                 'sheet': table.get('sheet', ''),
                 'columns': table.get('columns', []),
