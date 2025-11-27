@@ -1256,9 +1256,14 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                                 tables_info: List[Dict]):
         """
         Run column inference for all tables in a file.
-        Called in background thread.
+        Called in background thread - uses separate DB connection for thread safety.
         """
+        # Create separate connection for this thread
+        thread_conn = None
         try:
+            thread_conn = duckdb.connect(self.db_path)
+            logger.info(f"[MAPPING_JOB] Started background inference with separate connection")
+            
             total_mappings = 0
             total_needs_review = 0
             
@@ -1269,8 +1274,9 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 
                 logger.info(f"[MAPPING_JOB] Inferring {table_name} ({i+1}/{len(tables_info)})")
                 
-                # Run inference
-                mappings = self.infer_column_mappings(
+                # Run inference (uses thread connection)
+                mappings = self._infer_column_mappings_threaded(
+                    thread_conn=thread_conn,
                     project=project,
                     file_name=file_name,
                     table_name=table_name,
@@ -1282,8 +1288,9 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 total_mappings += len(mappings)
                 total_needs_review += sum(1 for m in mappings if m.get('needs_review'))
                 
-                # Update progress
-                self.update_mapping_job(
+                # Update progress (uses thread connection)
+                self._update_mapping_job_threaded(
+                    thread_conn,
                     job_id,
                     completed_tables=i + 1,
                     mappings_found=total_mappings,
@@ -1291,12 +1298,246 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 )
             
             # Mark complete
-            self.update_mapping_job(job_id, status='complete')
+            self._update_mapping_job_threaded(thread_conn, job_id, status='complete')
             logger.info(f"[MAPPING_JOB] Complete: {total_mappings} mappings, {total_needs_review} need review")
             
         except Exception as e:
             logger.error(f"[MAPPING_JOB] Inference failed: {e}")
-            self.update_mapping_job(job_id, status='error', error_message=str(e))
+            if thread_conn:
+                try:
+                    self._update_mapping_job_threaded(thread_conn, job_id, status='error', error_message=str(e))
+                except:
+                    pass
+        finally:
+            if thread_conn:
+                try:
+                    thread_conn.close()
+                    logger.info("[MAPPING_JOB] Closed background thread connection")
+                except:
+                    pass
+    
+    def _infer_column_mappings_threaded(self, thread_conn, project: str, file_name: str, 
+                                         table_name: str, columns: List[str], 
+                                         sample_data: List[Dict]) -> List[Dict]:
+        """Thread-safe version of infer_column_mappings using provided connection"""
+        mappings = []
+        
+        try:
+            # Prepare sample data string
+            sample_str = ""
+            for i, row in enumerate(sample_data[:5]):
+                sample_str += f"Row {i+1}: {row}\n"
+            
+            # Build prompt for Claude
+            prompt = f"""Analyze these column names and sample data to identify semantic types.
+
+COLUMN NAMES:
+{columns}
+
+SAMPLE DATA:
+{sample_str}
+
+For each column, identify if it matches one of these semantic types:
+- employee_number: Employee ID/number (unique identifier for employees)
+- company_code: Company/organization code
+- employment_status_code: Employment status (A=Active, T=Terminated, L=Leave, etc.)
+- earning_code: Earning type codes
+- deduction_code: Deduction/benefit codes
+- job_code: Job/position codes
+- department_code: Department/org unit codes
+- amount: Monetary amounts (pay, deductions, etc.)
+- rate: Pay rates (hourly, salary)
+- effective_date: Date fields for effective dates
+- start_date: Start dates
+- end_date: End dates
+- employee_name: Employee name field
+- NONE: Does not match any semantic type
+
+Respond with JSON array only, no explanation:
+[
+  {{"column": "column_name", "semantic_type": "type_or_NONE", "confidence": 0.0-1.0}},
+  ...
+]
+
+Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely matches, below 0.7 for uncertain."""
+
+            # Call Claude for inference
+            import anthropic
+            
+            api_key = os.environ.get('ANTHROPIC_API_KEY') or os.environ.get('CLAUDE_API_KEY')
+            if not api_key:
+                logger.warning("[MAPPINGS] No API key available for inference")
+                return self._fallback_column_inference_threaded(thread_conn, columns, project, file_name, table_name)
+            
+            client = anthropic.Anthropic(api_key=api_key)
+            response = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=2000,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            
+            response_text = response.content[0].text.strip()
+            
+            # Parse JSON response
+            if "```json" in response_text:
+                response_text = response_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in response_text:
+                response_text = response_text.split("```")[1].split("```")[0].strip()
+            
+            inferred = json.loads(response_text)
+            
+            # Store mappings using thread connection
+            for item in inferred:
+                col = item.get('column', '')
+                sem_type = item.get('semantic_type', 'NONE')
+                confidence = item.get('confidence', 0.5)
+                
+                if sem_type and sem_type != 'NONE':
+                    needs_review = confidence < 0.85
+                    
+                    mapping = {
+                        'project': project,
+                        'file_name': file_name,
+                        'table_name': table_name,
+                        'original_column': col,
+                        'semantic_type': sem_type,
+                        'confidence': confidence,
+                        'is_override': False,
+                        'needs_review': needs_review
+                    }
+                    mappings.append(mapping)
+                    
+                    # Store using thread connection
+                    self._store_column_mapping_threaded(thread_conn, mapping)
+            
+            logger.info(f"[MAPPINGS] Inferred {len(mappings)} semantic mappings for {table_name}")
+            return mappings
+            
+        except Exception as e:
+            logger.warning(f"[MAPPINGS] Claude inference failed: {e}, using fallback")
+            return self._fallback_column_inference_threaded(thread_conn, columns, project, file_name, table_name)
+    
+    def _fallback_column_inference_threaded(self, thread_conn, columns: List[str], 
+                                             project: str, file_name: str, table_name: str) -> List[Dict]:
+        """Thread-safe pattern-based fallback"""
+        mappings = []
+        
+        patterns = {
+            'employee_number': [r'employee.*num', r'emp.*num', r'ee.*num', r'emp.*id', r'employee.*id', r'^emp_no$', r'^ee_id$'],
+            'company_code': [r'company.*code', r'co.*code', r'comp.*code', r'home.*company'],
+            'employment_status_code': [r'employment.*status', r'emp.*status', r'status.*code'],
+            'earning_code': [r'earning.*code', r'earn.*code'],
+            'deduction_code': [r'deduction.*code', r'ded.*code', r'benefit.*code'],
+            'job_code': [r'job.*code', r'position.*code'],
+            'department_code': [r'dept.*code', r'department.*code', r'org.*level'],
+            'amount': [r'amount', r'amt$', r'_amt$'],
+            'rate': [r'rate$', r'pay.*rate', r'hourly.*rate', r'salary'],
+            'effective_date': [r'effective.*date', r'eff.*date'],
+            'employee_name': [r'^name$', r'employee.*name', r'emp.*name', r'full.*name']
+        }
+        
+        for col in columns:
+            col_lower = col.lower()
+            for sem_type, pattern_list in patterns.items():
+                for pattern in pattern_list:
+                    if re.search(pattern, col_lower):
+                        mapping = {
+                            'project': project,
+                            'file_name': file_name,
+                            'table_name': table_name,
+                            'original_column': col,
+                            'semantic_type': sem_type,
+                            'confidence': 0.7,
+                            'is_override': False,
+                            'needs_review': True
+                        }
+                        mappings.append(mapping)
+                        self._store_column_mapping_threaded(thread_conn, mapping)
+                        break
+                else:
+                    continue
+                break
+        
+        return mappings
+    
+    def _store_column_mapping_threaded(self, thread_conn, mapping: Dict):
+        """Thread-safe mapping storage"""
+        try:
+            # Check if mapping already exists
+            existing = thread_conn.execute("""
+                SELECT id FROM _column_mappings 
+                WHERE project = ? AND table_name = ? AND original_column = ?
+            """, [mapping['project'], mapping['table_name'], mapping['original_column']]).fetchone()
+            
+            if existing:
+                thread_conn.execute("""
+                    UPDATE _column_mappings 
+                    SET semantic_type = ?, confidence = ?, needs_review = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE project = ? AND table_name = ? AND original_column = ? AND is_override = FALSE
+                """, [
+                    mapping['semantic_type'],
+                    mapping['confidence'],
+                    mapping['needs_review'],
+                    mapping['project'],
+                    mapping['table_name'],
+                    mapping['original_column']
+                ])
+            else:
+                thread_conn.execute("""
+                    INSERT INTO _column_mappings 
+                    (id, project, file_name, table_name, original_column, semantic_type, 
+                     confidence, is_override, needs_review)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    hash(f"{mapping['project']}_{mapping['table_name']}_{mapping['original_column']}") % 2147483647,
+                    mapping['project'],
+                    mapping['file_name'],
+                    mapping['table_name'],
+                    mapping['original_column'],
+                    mapping['semantic_type'],
+                    mapping['confidence'],
+                    mapping['is_override'],
+                    mapping['needs_review']
+                ])
+            
+            thread_conn.commit()
+        except Exception as e:
+            logger.warning(f"[MAPPINGS] Failed to store mapping: {e}")
+    
+    def _update_mapping_job_threaded(self, thread_conn, job_id: str, completed_tables: int = None,
+                                      mappings_found: int = None, needs_review_count: int = None,
+                                      status: str = None, error_message: str = None):
+        """Thread-safe job update"""
+        try:
+            updates = ["updated_at = CURRENT_TIMESTAMP"]
+            params = []
+            
+            if completed_tables is not None:
+                updates.append("completed_tables = ?")
+                params.append(completed_tables)
+            if mappings_found is not None:
+                updates.append("mappings_found = ?")
+                params.append(mappings_found)
+            if needs_review_count is not None:
+                updates.append("needs_review_count = ?")
+                params.append(needs_review_count)
+            if status is not None:
+                updates.append("status = ?")
+                params.append(status)
+            if error_message is not None:
+                updates.append("error_message = ?")
+                params.append(error_message)
+            
+            params.append(job_id)
+            
+            thread_conn.execute(f"""
+                UPDATE _mapping_jobs 
+                SET {', '.join(updates)}
+                WHERE id = ?
+            """, params)
+            thread_conn.commit()
+        except Exception as e:
+            logger.warning(f"[MAPPING_JOB] Failed to update job: {e}")
     
     def _get_next_version(self, project: str, file_name: str) -> int:
         """Get next version number for a file"""
