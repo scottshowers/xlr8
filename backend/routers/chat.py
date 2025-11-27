@@ -259,26 +259,25 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
                     
                     selection_prompt = f"""Question: "{message}"
 
-Which table(s) contain the data to answer this question?
+TASK: Pick the table number(s) that contain data to answer this question.
 
-IMPORTANT - Understand the difference:
-- CONFIG/LOOKUP tables (like "Change Reasons", "LOA Reasons", "Earnings", "Deductions Plans"): Define codes and settings, NOT actual employee data
-- EMPLOYEE DATA tables (like "Company", "Personal", "Employee Conversion"): Contain actual employee records with statuses, names, IDs
+KEY DISTINCTION:
+- Tables with "Configuration", "Validation", "Reasons", "Setup", "Plans" = CODE DEFINITIONS (not employee records)
+- Tables with "Company", "Personal", "Conversion", "Employee" in Employee Conversion file = ACTUAL EMPLOYEE DATA
 
-If the question is about ACTUAL EMPLOYEES (list them, count them, who is on leave, active employees, etc.):
-→ Pick EMPLOYEE DATA tables (Company, Personal, Employee Conversion)
-→ DO NOT pick config/lookup tables even if they have matching keywords
+For questions about ACTUAL PEOPLE (list employees, count active, who is on leave):
+→ Pick tables from "Employee Conversion" file (Company, Personal)
 
-If the question is about CODE DEFINITIONS (what does code X mean, list all earning types, etc.):
-→ Pick CONFIG/LOOKUP tables
+For questions about CODE MEANINGS (what does code X mean):
+→ Pick Configuration/Validation tables
 
 Available tables:
-
 {chr(10).join(table_summaries)}
 
-Reply with ONLY the table number(s), comma-separated (e.g., "0" or "1,2").
+RESPOND WITH ONLY THE TABLE NUMBERS. NO EXPLANATION. NO REASONING.
+Just the number(s) like: 47,53
 
-Table number(s):"""
+Table numbers:"""
                     
                     logger.warning(f"[STEP 3] Selection prompt length: {len(selection_prompt)} chars")
                     
@@ -302,8 +301,9 @@ Table number(s):"""
                         )
                         
                         selection_text = selection_response.content[0].text.strip()
-                        logger.warning(f"[STEP 3] ✅ Claude responded: '{selection_text}'")
+                        logger.warning(f"[STEP 3] ✅ Claude responded: '{selection_text[:200]}'")
                         
+                        # Try simple comma-split first
                         for part in selection_text.replace(' ', '').split(','):
                             try:
                                 idx = int(part.strip('[]()'))
@@ -313,9 +313,35 @@ Table number(s):"""
                             except ValueError:
                                 pass
                         
+                        # If simple parsing failed, try to extract any numbers from the response
                         if not selected_indices:
-                            logger.warning(f"[STEP 3] Could not parse '{selection_text}', using fallback")
-                            selected_indices = [0]
+                            numbers = re.findall(r'\b(\d{1,2})\b', selection_text)
+                            for num_str in numbers:
+                                idx = int(num_str)
+                                if idx in table_lookup:
+                                    selected_indices.append(idx)
+                                    logger.warning(f"[STEP 3] Extracted table index: {idx}")
+                        
+                        # If still nothing, use smart fallback for employee questions
+                        if not selected_indices:
+                            logger.warning(f"[STEP 3] Could not parse numbers, checking for employee query...")
+                            query_lower = message.lower()
+                            
+                            # For employee-related questions, find employee data tables
+                            if any(kw in query_lower for kw in ['employee', 'active', 'leave', 'terminated', 'staff', 'worker', 'list', 'count', 'how many', 'who']):
+                                for idx, table_info in table_lookup.items():
+                                    file_lower = table_info.get('file', '').lower()
+                                    sheet_lower = table_info.get('sheet', '').lower()
+                                    
+                                    # Prioritize Employee Conversion Company/Personal tables
+                                    if 'employee_conversion' in file_lower or 'conversion' in file_lower:
+                                        if 'company' in sheet_lower or 'personal' in sheet_lower:
+                                            selected_indices.append(idx)
+                                            logger.warning(f"[STEP 3] Smart fallback selected: {idx} ({sheet_lower})")
+                            
+                            if not selected_indices:
+                                selected_indices = [0]
+                                logger.warning(f"[STEP 3] Final fallback to table 0")
                             
                     except Exception as claude_e:
                         logger.error(f"[STEP 3] ❌ Claude selection FAILED: {claude_e}")
