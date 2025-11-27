@@ -224,10 +224,10 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
         all_columns = []
         
         # =====================================================================
-        # STEP 2: GATHER DATA - Simple SELECT * approach
+        # STEP 2: GATHER DATA - Self-Healing Table Selection
         # =====================================================================
         if STRUCTURED_QUERIES_AVAILABLE:
-            update_job_status(job_id, 'processing', '📊 Searching structured data...', 10)
+            update_job_status(job_id, 'processing', '📊 Analyzing available data...', 10)
             
             try:
                 handler = get_structured_handler()
@@ -235,63 +235,131 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
                 tables_list = schema.get('tables', [])
                 
                 if tables_list:
-                    # Find relevant tables using keyword matching
-                    query_lower = message.lower()
-                    query_terms = [w for w in query_lower.split() if len(w) > 3]
+                    # SELF-HEALING: Build table summaries for Claude to choose from
+                    table_summaries = []
+                    table_lookup = {}  # Map index to table info
                     
-                    # Add stems for plural/singular matching
-                    query_stems = set()
-                    for term in query_terms:
-                        query_stems.add(term)
-                        if len(term) > 5:
-                            query_stems.add(term[:5])
-                            query_stems.add(term[:6])
-                    
-                    for table_info in tables_list:
+                    for idx, table_info in enumerate(tables_list):
                         table_name = table_info.get('table_name', '')
                         sheet_name = table_info.get('sheet', '')
                         file_name = table_info.get('file', '')
                         columns = table_info.get('columns', [])
+                        row_count = table_info.get('row_count', 0)
                         
-                        sheet_lower = sheet_name.lower().replace(' ', '').replace('_', '')
-                        table_lower = table_name.lower()
-                        file_lower = file_name.lower() if file_name else ''
+                        # Get column names
+                        if columns and isinstance(columns[0], dict):
+                            col_names = [c.get('name', str(c)) for c in columns]
+                        else:
+                            col_names = [str(c) for c in columns]
                         
-                        # Check if table is relevant
-                        is_relevant = False
-                        for stem in query_stems:
-                            if stem in sheet_lower or stem in table_lower or stem in file_lower:
-                                is_relevant = True
-                                break
+                        # Get 2 sample rows to show data structure
+                        sample_preview = ""
+                        try:
+                            sample_sql = f'SELECT * FROM "{table_name}" LIMIT 2'
+                            sample_rows, _ = handler.execute_query(sample_sql)
+                            if sample_rows:
+                                # Show just key-value pairs, truncated
+                                for row in sample_rows[:2]:
+                                    preview = {k: str(v)[:25] for k, v in list(row.items())[:6]}
+                                    sample_preview += f"    {preview}\n"
+                        except:
+                            pass
                         
-                        # Check column names
-                        if not is_relevant:
-                            col_names_lower = ' '.join(str(c).lower() for c in columns[:30])
-                            for stem in query_stems:
-                                if stem in col_names_lower:
-                                    is_relevant = True
-                                    break
+                        summary = f"""[{idx}] {file_name} → {sheet_name}
+  Rows: {row_count}, Columns: {', '.join(col_names[:10])}{'...' if len(col_names) > 10 else ''}
+{sample_preview}"""
                         
-                        if is_relevant:
+                        table_summaries.append(summary)
+                        table_lookup[idx] = table_info
+                    
+                    # SELF-HEALING: Ask Claude which table(s) to use
+                    update_job_status(job_id, 'processing', '🧠 Identifying best data source...', 20)
+                    
+                    selection_prompt = f"""Given this question: "{message}"
+
+Which table(s) should I query? Here are the available tables with sample data:
+
+{chr(10).join(table_summaries)}
+
+Reply with ONLY the table number(s) that best answer the question, comma-separated.
+For example: "0" or "0,2" or "3"
+
+If asking about employees/people/headcount, pick tables with actual employee records (not config/validation).
+If asking about earnings/deductions/codes, pick configuration tables.
+
+Table number(s):"""
+
+                    orchestrator = LLMOrchestrator()
+                    
+                    try:
+                        # Quick Claude call to pick tables
+                        import anthropic
+                        client = anthropic.Anthropic(api_key=orchestrator.claude_api_key)
+                        
+                        selection_response = client.messages.create(
+                            model="claude-sonnet-4-20250514",
+                            max_tokens=50,
+                            messages=[{"role": "user", "content": selection_prompt}]
+                        )
+                        
+                        selection_text = selection_response.content[0].text.strip()
+                        logger.info(f"[TABLE-SELECT] Claude chose: {selection_text}")
+                        
+                        # Parse selected indices
+                        selected_indices = []
+                        for part in selection_text.replace(' ', '').split(','):
                             try:
-                                # SIMPLE: Just get the data
-                                sql = f'SELECT * FROM "{table_name}" LIMIT 200'
-                                rows, cols = handler.execute_query(sql)
-                                all_columns.extend(cols)
-                                
-                                if rows:
-                                    decrypted = decrypt_results(rows, handler)
-                                    sql_results_list.append({
-                                        'source_file': file_name,
-                                        'sheet': sheet_name,
-                                        'table': table_name,
-                                        'columns': cols,
-                                        'data': decrypted[:100],  # Limit rows for context
-                                        'total_rows': len(rows)
-                                    })
-                                    logger.info(f"[SQL] {sheet_name}: {len(rows)} rows, {len(cols)} columns")
-                            except Exception as e:
-                                logger.warning(f"[SQL] Failed to query {table_name}: {e}")
+                                idx = int(part.strip('[]()'))
+                                if idx in table_lookup:
+                                    selected_indices.append(idx)
+                            except:
+                                pass
+                        
+                        # Fallback: if no valid selection, use first table
+                        if not selected_indices and table_lookup:
+                            selected_indices = [0]
+                            logger.warning("[TABLE-SELECT] No valid selection, using first table")
+                        
+                    except Exception as e:
+                        logger.warning(f"[TABLE-SELECT] Claude selection failed: {e}, using keyword fallback")
+                        # Fallback to keyword matching
+                        query_lower = message.lower()
+                        selected_indices = []
+                        for idx, table_info in table_lookup.items():
+                            file_lower = table_info.get('file', '').lower()
+                            sheet_lower = table_info.get('sheet', '').lower()
+                            if any(term in file_lower or term in sheet_lower for term in query_lower.split() if len(term) > 3):
+                                selected_indices.append(idx)
+                        if not selected_indices:
+                            selected_indices = list(table_lookup.keys())[:2]
+                    
+                    # Query selected tables
+                    update_job_status(job_id, 'processing', '📊 Retrieving data...', 35)
+                    
+                    for idx in selected_indices[:3]:  # Max 3 tables
+                        table_info = table_lookup[idx]
+                        table_name = table_info.get('table_name', '')
+                        sheet_name = table_info.get('sheet', '')
+                        file_name = table_info.get('file', '')
+                        
+                        try:
+                            sql = f'SELECT * FROM "{table_name}" LIMIT 200'
+                            rows, cols = handler.execute_query(sql)
+                            all_columns.extend(cols)
+                            
+                            if rows:
+                                decrypted = decrypt_results(rows, handler)
+                                sql_results_list.append({
+                                    'source_file': file_name,
+                                    'sheet': sheet_name,
+                                    'table': table_name,
+                                    'columns': cols,
+                                    'data': decrypted[:100],
+                                    'total_rows': len(rows)
+                                })
+                                logger.info(f"[SQL] Selected table {idx}: {sheet_name} - {len(rows)} rows")
+                        except Exception as e:
+                            logger.warning(f"[SQL] Failed to query {table_name}: {e}")
                     
             except Exception as e:
                 logger.warning(f"[SQL] Handler error: {e}")
