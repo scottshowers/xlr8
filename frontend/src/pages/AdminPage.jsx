@@ -189,6 +189,9 @@ function DataManagementTab() {
   const [deleting, setDeleting] = useState(null);
   const [expandedFile, setExpandedFile] = useState(null);
   const [message, setMessage] = useState(null);
+  const [mappingSummaries, setMappingSummaries] = useState({});
+  const [semanticTypes, setSemanticTypes] = useState([]);
+  const [expandedMappings, setExpandedMappings] = useState(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -198,6 +201,26 @@ function DataManagementTab() {
 
       const docsRes = await api.get('/status/documents');
       setDocuments(docsRes.data);
+      
+      // Fetch semantic types for dropdowns
+      try {
+        const typesRes = await api.get('/status/semantic-types');
+        setSemanticTypes(typesRes.data.types || []);
+      } catch (e) { console.warn('Failed to fetch semantic types'); }
+      
+      // Fetch mapping summaries for each file
+      if (structuredRes.data?.files) {
+        const summaries = {};
+        for (const file of structuredRes.data.files) {
+          try {
+            const sumRes = await api.get(`/status/mappings/${encodeURIComponent(file.project)}/${encodeURIComponent(file.filename)}/summary`);
+            summaries[`${file.project}:${file.filename}`] = sumRes.data;
+          } catch (e) {
+            summaries[`${file.project}:${file.filename}`] = { status: 'none' };
+          }
+        }
+        setMappingSummaries(summaries);
+      }
     } catch (err) {
       console.error('Failed to fetch data:', err);
       // Set empty defaults so UI doesn't break
@@ -209,6 +232,46 @@ function DataManagementTab() {
   };
 
   useEffect(() => { fetchData(); }, []);
+  
+  // Poll for mapping job status
+  useEffect(() => {
+    const interval = setInterval(() => {
+      // Check for any in-progress jobs
+      const inProgress = Object.values(mappingSummaries).some(s => s.status === 'processing');
+      if (inProgress) {
+        fetchData();
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [mappingSummaries]);
+
+  const getMappingBadge = (file) => {
+    const key = `${file.project}:${file.filename}`;
+    const summary = mappingSummaries[key];
+    if (!summary) return null;
+    
+    if (summary.status === 'processing') {
+      return <span style={{ color: '#3b82f6', fontSize: '0.7rem', marginLeft: '8px' }}>🔄 Analyzing...</span>;
+    }
+    if (summary.needs_review_count > 0) {
+      return <span style={{ color: '#f59e0b', fontSize: '0.7rem', marginLeft: '8px' }}>⚠️ {summary.needs_review_count} need review</span>;
+    }
+    if (summary.total_mappings > 0) {
+      return <span style={{ color: '#22c55e', fontSize: '0.7rem', marginLeft: '8px' }}>✅ {summary.total_mappings} mapped</span>;
+    }
+    return null;
+  };
+  
+  const updateMapping = async (project, tableName, columnName, newType) => {
+    try {
+      await api.put(`/status/mappings/${encodeURIComponent(project)}/${encodeURIComponent(tableName)}/${encodeURIComponent(columnName)}`, 
+        { semantic_type: newType });
+      showMessage(`Updated ${columnName} → ${newType}`);
+      fetchData(); // Refresh
+    } catch (e) {
+      showMessage('Failed to update mapping', 'error');
+    }
+  };
 
   const showMessage = (text, type = 'success') => {
     setMessage({ text, type });
@@ -327,6 +390,7 @@ function DataManagementTab() {
                     <td style={styles.td}>
                       <span>{file.filename.endsWith('.csv') ? '📄' : '📊'} </span>
                       <strong>{file.filename}</strong>
+                      {getMappingBadge(file)}
                       <span style={{ color: '#999', marginLeft: '8px', fontSize: '0.75rem' }}>{expandedFile === file.filename ? '▼' : '▶'}</span>
                     </td>
                     <td style={styles.td}><span style={styles.projectBadge}>{file.project}</span></td>
@@ -346,20 +410,74 @@ function DataManagementTab() {
                     <tr>
                       <td colSpan={7} style={styles.expandedTd}>
                         <p style={{ fontSize: '0.7rem', fontWeight: '600', color: '#999', marginBottom: '0.5rem', letterSpacing: '0.05em' }}>SHEETS / TABLES:</p>
-                        {file.sheets?.map((sheet) => (
-                          <div key={sheet.table_name} style={styles.sheetRow}>
-                            <div>
-                              <strong>{sheet.sheet_name}</strong>
-                              <span style={{ color: '#999', marginLeft: '8px', fontSize: '0.8rem' }}>({sheet.column_count} columns)</span>
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                              <span>{sheet.row_count?.toLocaleString()} rows</span>
-                              {sheet.encrypted_columns?.length > 0 && (
-                                <span style={{ color: '#22c55e', fontSize: '0.8rem' }}>🔒 {sheet.encrypted_columns.length} encrypted</span>
+                        {file.sheets?.map((sheet) => {
+                          const key = `${file.project}:${file.filename}`;
+                          const summary = mappingSummaries[key];
+                          const sheetMappings = summary?.mappings?.filter(m => m.table_name === sheet.table_name) || [];
+                          const needsReview = sheetMappings.filter(m => m.needs_review);
+                          const isExpanded = expandedMappings === sheet.table_name;
+                          
+                          return (
+                            <div key={sheet.table_name} style={{ marginBottom: '8px' }}>
+                              <div style={styles.sheetRow}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <strong>{sheet.sheet_name}</strong>
+                                  <span style={{ color: '#999', fontSize: '0.8rem' }}>({sheet.column_count} columns)</span>
+                                  {sheetMappings.length > 0 && (
+                                    <button 
+                                      onClick={(e) => { e.stopPropagation(); setExpandedMappings(isExpanded ? null : sheet.table_name); }}
+                                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.75rem', color: needsReview.length > 0 ? '#f59e0b' : '#3b82f6' }}
+                                    >
+                                      {needsReview.length > 0 ? `⚠️ ${needsReview.length} need review` : `🔗 ${sheetMappings.length} mappings`}
+                                      <span style={{ marginLeft: '4px' }}>{isExpanded ? '▼' : '▶'}</span>
+                                    </button>
+                                  )}
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                  <span>{sheet.row_count?.toLocaleString()} rows</span>
+                                  {sheet.encrypted_columns?.length > 0 && (
+                                    <span style={{ color: '#22c55e', fontSize: '0.8rem' }}>🔒 {sheet.encrypted_columns.length} encrypted</span>
+                                  )}
+                                </div>
+                              </div>
+                              
+                              {isExpanded && sheetMappings.length > 0 && (
+                                <div style={{ marginLeft: '20px', marginTop: '8px', padding: '8px', background: '#f8fafc', borderRadius: '4px', fontSize: '0.8rem' }}>
+                                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '4px 12px', alignItems: 'center' }}>
+                                    <span style={{ fontWeight: '600', color: '#666', fontSize: '0.7rem' }}>COLUMN</span>
+                                    <span style={{ fontWeight: '600', color: '#666', fontSize: '0.7rem' }}>MAPPED TO</span>
+                                    <span style={{ fontWeight: '600', color: '#666', fontSize: '0.7rem' }}>CONF</span>
+                                    {sheetMappings.map((mapping) => (
+                                      <React.Fragment key={mapping.original_column}>
+                                        <span style={{ color: mapping.needs_review ? '#f59e0b' : '#333' }}>
+                                          {mapping.needs_review && '⚠️ '}{mapping.original_column}
+                                        </span>
+                                        <select
+                                          value={mapping.semantic_type}
+                                          onChange={(e) => updateMapping(file.project, sheet.table_name, mapping.original_column, e.target.value)}
+                                          style={{ 
+                                            padding: '2px 4px', 
+                                            fontSize: '0.75rem', 
+                                            border: mapping.needs_review ? '1px solid #f59e0b' : '1px solid #ddd',
+                                            borderRadius: '3px',
+                                            background: mapping.is_override ? '#e0f2fe' : '#fff'
+                                          }}
+                                        >
+                                          {semanticTypes.map(t => (
+                                            <option key={t.id} value={t.id}>{t.label}</option>
+                                          ))}
+                                        </select>
+                                        <span style={{ color: '#999', fontSize: '0.7rem' }}>
+                                          {mapping.is_override ? '✓' : `${Math.round(mapping.confidence * 100)}%`}
+                                        </span>
+                                      </React.Fragment>
+                                    ))}
+                                  </div>
+                                </div>
                               )}
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </td>
                     </tr>
                   )}
