@@ -289,21 +289,52 @@ def detect_query_type(message: str) -> str:
 
 
 # =============================================================================
-# INTELLIGENT SQL GENERATION - Actually Intelligent
+# INTELLIGENT SQL GENERATION - Actually Intelligent AND Token-Efficient
 # =============================================================================
 
 def generate_intelligent_sql(message: str, schema: dict, orchestrator: LLMOrchestrator, handler=None) -> Optional[str]:
     """
     Generate intelligent SQL query using Claude.
     
-    KEY: We send Claude the ACTUAL column names AND sample values
-    so it can generate SQL that matches the real data structure.
+    TOKEN EFFICIENT: Only send relevant tables + minimal sample data
     """
     if not schema.get('tables'):
         return None
     
-    tables_info = []
+    # STEP 1: Filter to relevant tables only (don't send ALL tables)
+    message_lower = message.lower()
+    query_terms = [w for w in message_lower.split() if len(w) > 3]
+    
+    relevant_tables = []
     for table in schema.get('tables', []):
+        table_name = table.get('table_name', '').lower()
+        sheet = table.get('sheet', '').lower()
+        file_name = table.get('file', '').lower()
+        
+        # Check if table is relevant to query
+        is_relevant = False
+        for term in query_terms:
+            if term in table_name or term in sheet or term in file_name:
+                is_relevant = True
+                break
+        
+        # Also check for common employee-related terms
+        if any(kw in table_name or kw in sheet for kw in ['employee', 'emp', 'worker', 'staff', 'person', 'conversion']):
+            if any(kw in message_lower for kw in ['employee', 'active', 'how many', 'count', 'list']):
+                is_relevant = True
+        
+        if is_relevant:
+            relevant_tables.append(table)
+    
+    # If no relevant tables found, use first 2 tables as fallback
+    if not relevant_tables:
+        relevant_tables = schema.get('tables', [])[:2]
+    
+    # Limit to max 3 relevant tables
+    relevant_tables = relevant_tables[:3]
+    
+    tables_info = []
+    for table in relevant_tables:
         table_name = table.get('table_name', 'unknown')
         columns = table.get('columns', [])
         row_count = table.get('row_count', 'unknown')
@@ -315,45 +346,49 @@ def generate_intelligent_sql(message: str, schema: dict, orchestrator: LLMOrches
         else:
             col_names = [str(c) for c in columns]
         
-        # GET SAMPLE VALUES - This is the key to being actually intelligent
+        # GET SAMPLE VALUES - just 2 rows, key columns only
         sample_info = ""
         if handler:
             try:
-                sample_sql = f'SELECT * FROM "{table_name}" LIMIT 3'
+                sample_sql = f'SELECT * FROM "{table_name}" LIMIT 2'
                 sample_rows, _ = handler.execute_query(sample_sql)
                 if sample_rows:
-                    sample_info = "\nSample data (first 3 rows):\n"
-                    for row in sample_rows[:3]:
-                        row_preview = {k: str(v)[:50] for k, v in list(row.items())[:10]}
+                    sample_info = "\nSample values:\n"
+                    for row in sample_rows[:2]:
+                        # Only show first 8 columns, truncate values
+                        row_preview = {k: str(v)[:30] for k, v in list(row.items())[:8]}
                         sample_info += f"  {row_preview}\n"
             except:
                 pass
+        
+        # Only include first 30 column names
+        col_list = ', '.join(col_names[:30])
+        if len(col_names) > 30:
+            col_list += f"... (+{len(col_names)-30} more)"
         
         tables_info.append(f"""
 Table: "{table_name}"
 Source: {file_name} → {sheet}
 Rows: {row_count}
-Columns: {', '.join(col_names[:50])}
+Columns: {col_list}
 {sample_info}
 """)
     
     schema_text = '\n'.join(tables_info)
     
-    sql_prompt = f"""Generate a SQL query for DuckDB to answer this question.
+    sql_prompt = f"""Generate SQL for DuckDB.
 
-AVAILABLE TABLES WITH SAMPLE DATA:
+TABLES:
 {schema_text}
 
-USER QUESTION: {message}
+QUESTION: {message}
 
-CRITICAL RULES:
-1. Use the EXACT column names shown above - they may have spaces, mixed case, etc.
-2. Look at the SAMPLE DATA to understand what values exist (e.g., "Active", "A", "Y", "Terminated", etc.)
-3. For status queries, find the column that indicates employee status (could be "Status", "Employment Status", "Emp Status", "Active", etc.)
-4. For "how many active" - find rows where status indicates active (not terminated/inactive)
-5. Column names with spaces MUST be wrapped in double quotes: "Column Name"
-6. Use ILIKE for case-insensitive matching
-7. Return ONLY the SQL query, no explanation
+RULES:
+1. Use EXACT column names from above (with quotes if spaces)
+2. Look at sample values for status columns (e.g., "Active", "A", "Terminated")
+3. For "how many active" → COUNT where status indicates active
+4. Use ILIKE for text matching
+5. Return ONLY SQL, no explanation
 
 SQL:"""
 
