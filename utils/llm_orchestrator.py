@@ -374,22 +374,38 @@ class LLMOrchestrator:
         if query_type == 'config':
             logger.info("CONFIG path: Direct to Claude")
             
-            system_prompt = """You are an expert UKG/HCM implementation consultant.
-Analyze the provided document excerpts and answer the question accurately.
+            system_prompt = """You are an expert UKG/HCM implementation consultant helping analyze customer data.
 
-Guidelines:
-- Be specific and thorough - list ALL items you find
-- Include codes, IDs, and values when available  
-- Organize with clear formatting (tables, lists)
-- If data seems incomplete, note what you found and suggest there may be more"""
+CRITICAL RULES:
+1. DIRECTLY ANSWER the question using the data provided
+2. NEVER give code examples, Python snippets, or "how to analyze" suggestions
+3. NEVER say "you could use pandas" or "here's how to count" - just DO the counting/analysis
+4. If asked "how many", COUNT the items in the data and give a NUMBER
+5. If asked to "list", LIST the actual items from the data
+6. Be concise and direct - the user wants an ANSWER, not instructions
+
+For counts/aggregates:
+- Count the actual records in the data
+- Give a specific number as the answer
+- Don't explain how to count - just count and respond
+
+Example:
+- User asks: "How many employees are active?"
+- WRONG: "To count active employees, you could use Python..."
+- RIGHT: "There are 349 active employees in the data."
+
+Formatting:
+- Keep responses focused and concise
+- Use tables/lists only when listing multiple items
+- Lead with the direct answer, then add context if helpful"""
 
             user_prompt = f"""Question: {query}
 
-Document excerpts from customer's UKG configuration:
+DATA FROM CUSTOMER'S SYSTEM:
 
 {context}
 
-Provide a comprehensive answer. If listing items (earnings, deductions, etc.), show ALL that appear in the documents."""
+IMPORTANT: Analyze the above data and directly answer the question. Do NOT provide code or instructions - provide the actual answer based on the data."""
 
             response, success = self._call_claude(user_prompt, system_prompt)
             result["models_used"].append("claude-sonnet-4")
@@ -411,16 +427,20 @@ Provide a comprehensive answer. If listing items (earnings, deductions, etc.), s
         local_model = select_local_model(query, chunks)
         
         # Call local LLM
-        local_system = """You are an expert HCM analyst. Analyze the documents and answer the question.
-Include specific details, names, and values from the documents.
-Be thorough and list all relevant information you find."""
+        local_system = """You are an expert HCM analyst. DIRECTLY answer the question using the data.
+
+CRITICAL RULES:
+1. NEVER give code examples or "how to" instructions
+2. If asked "how many", COUNT the records and give a NUMBER
+3. If asked to "list", LIST the actual items
+4. Be concise and direct - give the ANSWER, not instructions"""
 
         local_prompt = f"""Question: {query}
 
-Documents:
+DATA:
 {context}
 
-Provide a detailed answer with specific information from the documents."""
+Directly answer using the data above. If counting, give the actual count. No code examples."""
 
         local_response, local_success = self._call_ollama(local_model, local_prompt, local_system)
         result["models_used"].append(local_model)
@@ -432,16 +452,20 @@ Provide a detailed answer with specific information from the documents."""
             sanitized_context = self.sanitizer.sanitize(context)
             result["sanitized"] = True
             
-            system_prompt = """You are an expert HCM analyst. 
-The document excerpts have been sanitized to protect PII.
-Answer the question based on available information."""
+            system_prompt = """You are an expert HCM analyst. DIRECTLY answer using the data provided.
+
+CRITICAL: 
+- Do NOT give code examples or Python snippets
+- If asked "how many", count and give a NUMBER
+- If asked to "list", list the actual items
+- Be concise - answer first, then add context if needed"""
 
             user_prompt = f"""Question: {query}
 
-Sanitized document excerpts:
+DATA (sanitized for privacy):
 {sanitized_context}
 
-Provide an answer based on the available information. Note that personal details have been redacted."""
+Give a direct answer. Count records if asked "how many". No code examples."""
 
             response, success = self._call_claude(user_prompt, system_prompt)
             result["models_used"].append("claude-sonnet-4 (fallback)")
@@ -472,22 +496,21 @@ Provide an answer based on the available information. Note that personal details
         if self.claude_api_key:
             logger.info("Sending to Claude for synthesis")
             
-            claude_system = """You are an expert HCM consultant.
-You're receiving an analysis from a local AI. The response has been sanitized - 
-personal names appear as [Employee A], [Employee B], etc.
+            claude_system = """You are an expert HCM consultant polishing a response.
 
-Your job:
-1. Clean up and organize the response
-2. Keep all the sanitized placeholders as-is
-3. Make it professional and well-formatted
-4. Don't try to guess real names or values"""
+RULES:
+1. Keep the ANSWER - don't add code examples or "how to" instructions
+2. Clean up formatting but keep all facts/numbers intact
+3. Keep sanitized placeholders like [Employee A] as-is
+4. Be concise - if there's a count, lead with the number
+5. Never suggest Python/pandas/code approaches"""
 
-            claude_prompt = f"""Original question: {query}
+            claude_prompt = f"""Question: {query}
 
-Local AI analysis (sanitized):
+Analysis to polish:
 {sanitized_response}
 
-Please format this into a clean, professional response. Keep all [Employee X] and [SALARY] placeholders."""
+Clean up this response. Keep the direct answer. No code examples. Keep [Employee X] placeholders."""
 
             claude_response, claude_success = self._call_claude(claude_prompt, claude_system)
             result["models_used"].append("claude-sonnet-4")
