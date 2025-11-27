@@ -192,6 +192,7 @@ function DataManagementTab() {
   const [mappingSummaries, setMappingSummaries] = useState({});
   const [semanticTypes, setSemanticTypes] = useState([]);
   const [expandedMappings, setExpandedMappings] = useState(null);
+  const [pendingChanges, setPendingChanges] = useState({});  // { "table:column": newType }
 
   const fetchData = async () => {
     setLoading(true);
@@ -262,15 +263,64 @@ function DataManagementTab() {
     return null;
   };
   
+  const getMappingPercentage = (file) => {
+    const key = `${file.project}:${file.filename}`;
+    const summary = mappingSummaries[key];
+    
+    // Calculate total columns across all sheets
+    const totalColumns = file.sheets?.reduce((sum, sheet) => sum + (sheet.column_count || 0), 0) || 0;
+    const mappedColumns = summary?.total_mappings || 0;
+    
+    if (totalColumns === 0) return null;
+    if (summary?.status === 'processing') return { pct: null, status: 'processing' };
+    
+    const pct = Math.round((mappedColumns / totalColumns) * 100);
+    return { pct, mappedColumns, totalColumns };
+  };
+  
   const updateMapping = async (project, tableName, columnName, newType) => {
-    try {
-      await api.put(`/status/mappings/${encodeURIComponent(project)}/${encodeURIComponent(tableName)}/${encodeURIComponent(columnName)}`, 
-        { semantic_type: newType });
-      showMessage(`Updated ${columnName} → ${newType}`);
-      fetchData(); // Refresh
-    } catch (e) {
-      showMessage('Failed to update mapping', 'error');
+    // Queue the change locally instead of immediate API call
+    const key = `${project}:${tableName}:${columnName}`;
+    setPendingChanges(prev => ({ ...prev, [key]: { project, tableName, columnName, newType } }));
+  };
+  
+  const savePendingChanges = async () => {
+    const changes = Object.values(pendingChanges);
+    if (changes.length === 0) return;
+    
+    setDeleting('saving-mappings'); // Reuse deleting state for loading indicator
+    let successCount = 0;
+    
+    for (const change of changes) {
+      try {
+        await api.put(
+          `/status/mappings/${encodeURIComponent(change.project)}/${encodeURIComponent(change.tableName)}/${encodeURIComponent(change.columnName)}`,
+          { semantic_type: change.newType }
+        );
+        successCount++;
+      } catch (e) {
+        console.error(`Failed to update ${change.columnName}:`, e);
+      }
     }
+    
+    setPendingChanges({});
+    setDeleting(null);
+    showMessage(`Saved ${successCount} mapping${successCount !== 1 ? 's' : ''}`);
+    fetchData();
+  };
+  
+  const discardPendingChanges = () => {
+    setPendingChanges({});
+  };
+  
+  const getPendingValue = (project, tableName, columnName, currentValue) => {
+    const key = `${project}:${tableName}:${columnName}`;
+    return pendingChanges[key]?.newType || currentValue;
+  };
+  
+  const hasPendingChange = (project, tableName, columnName) => {
+    const key = `${project}:${tableName}:${columnName}`;
+    return !!pendingChanges[key];
   };
 
   const showMessage = (text, type = 'success') => {
@@ -397,7 +447,14 @@ function DataManagementTab() {
                     <td style={{ ...styles.td, textAlign: 'center' }}>{file.sheets?.length || 0}</td>
                     <td style={{ ...styles.td, textAlign: 'center' }}>{file.total_rows?.toLocaleString()}</td>
                     <td style={{ ...styles.td, textAlign: 'center', fontSize: '0.75rem', color: '#666' }}>
-                      {file.loaded_at ? new Date(file.loaded_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}
+                      <div>{file.loaded_at ? new Date(file.loaded_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}</div>
+                      {(() => {
+                        const mapInfo = getMappingPercentage(file);
+                        if (!mapInfo) return null;
+                        if (mapInfo.status === 'processing') return <div style={{ color: '#3b82f6', fontSize: '0.65rem' }}>🔄 mapping...</div>;
+                        const color = mapInfo.pct >= 80 ? '#22c55e' : mapInfo.pct >= 50 ? '#f59e0b' : '#ef4444';
+                        return <div style={{ color, fontSize: '0.65rem', fontWeight: '600' }}>{mapInfo.pct}% mapped</div>;
+                      })()}
                     </td>
                     <td style={{ ...styles.td, textAlign: 'center' }}>{file.has_encrypted ? '🔒' : '-'}</td>
                     <td style={{ ...styles.td, textAlign: 'center' }}>
@@ -447,32 +504,56 @@ function DataManagementTab() {
                                     <span style={{ fontWeight: '600', color: '#666', fontSize: '0.7rem' }}>COLUMN</span>
                                     <span style={{ fontWeight: '600', color: '#666', fontSize: '0.7rem' }}>MAPPED TO</span>
                                     <span style={{ fontWeight: '600', color: '#666', fontSize: '0.7rem' }}>CONF</span>
-                                    {sheetMappings.map((mapping) => (
-                                      <React.Fragment key={mapping.original_column}>
-                                        <span style={{ color: mapping.needs_review ? '#f59e0b' : '#333' }}>
-                                          {mapping.needs_review && '⚠️ '}{mapping.original_column}
-                                        </span>
-                                        <select
-                                          value={mapping.semantic_type}
-                                          onChange={(e) => updateMapping(file.project, sheet.table_name, mapping.original_column, e.target.value)}
-                                          style={{ 
-                                            padding: '2px 4px', 
-                                            fontSize: '0.75rem', 
-                                            border: mapping.needs_review ? '1px solid #f59e0b' : '1px solid #ddd',
-                                            borderRadius: '3px',
-                                            background: mapping.is_override ? '#e0f2fe' : '#fff'
-                                          }}
-                                        >
-                                          {semanticTypes.map(t => (
-                                            <option key={t.id} value={t.id}>{t.label}</option>
-                                          ))}
-                                        </select>
-                                        <span style={{ color: '#999', fontSize: '0.7rem' }}>
-                                          {mapping.is_override ? '✓' : `${Math.round(mapping.confidence * 100)}%`}
-                                        </span>
-                                      </React.Fragment>
-                                    ))}
+                                    {sheetMappings.map((mapping) => {
+                                      const isPending = hasPendingChange(file.project, sheet.table_name, mapping.original_column);
+                                      const displayValue = getPendingValue(file.project, sheet.table_name, mapping.original_column, mapping.semantic_type);
+                                      
+                                      return (
+                                        <React.Fragment key={mapping.original_column}>
+                                          <span style={{ color: mapping.needs_review ? '#f59e0b' : '#333' }}>
+                                            {mapping.needs_review && '⚠️ '}{mapping.original_column}
+                                          </span>
+                                          <select
+                                            value={displayValue}
+                                            onChange={(e) => updateMapping(file.project, sheet.table_name, mapping.original_column, e.target.value)}
+                                            style={{ 
+                                              padding: '2px 4px', 
+                                              fontSize: '0.75rem', 
+                                              border: isPending ? '2px solid #3b82f6' : mapping.needs_review ? '1px solid #f59e0b' : '1px solid #ddd',
+                                              borderRadius: '3px',
+                                              background: isPending ? '#dbeafe' : mapping.is_override ? '#e0f2fe' : '#fff'
+                                            }}
+                                          >
+                                            {semanticTypes.map(t => (
+                                              <option key={t.id} value={t.id}>{t.label}</option>
+                                            ))}
+                                          </select>
+                                          <span style={{ color: '#999', fontSize: '0.7rem' }}>
+                                            {isPending ? '✏️' : mapping.is_override ? '✓' : `${Math.round(mapping.confidence * 100)}%`}
+                                          </span>
+                                        </React.Fragment>
+                                      );
+                                    })}
                                   </div>
+                                  
+                                  {/* Save/Discard buttons when there are pending changes */}
+                                  {Object.keys(pendingChanges).length > 0 && (
+                                    <div style={{ marginTop: '12px', paddingTop: '8px', borderTop: '1px solid #e5e7eb', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                                      <button
+                                        onClick={discardPendingChanges}
+                                        style={{ padding: '4px 12px', fontSize: '0.75rem', background: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer' }}
+                                      >
+                                        Discard ({Object.keys(pendingChanges).length})
+                                      </button>
+                                      <button
+                                        onClick={savePendingChanges}
+                                        disabled={deleting === 'saving-mappings'}
+                                        style={{ padding: '4px 12px', fontSize: '0.75rem', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: '600' }}
+                                      >
+                                        {deleting === 'saving-mappings' ? '⏳ Saving...' : `💾 Save Changes (${Object.keys(pendingChanges).length})`}
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </div>
