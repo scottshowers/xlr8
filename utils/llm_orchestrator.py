@@ -402,91 +402,40 @@ Analyze the data. Answer the question with real numbers and real values from the
             return result
         
         # =================================================================
-        # EMPLOYEE QUERY: Local LLM → Sanitize → Claude
+        # EMPLOYEE QUERY: Direct to Claude with sanitized data
+        # (Local LLM disabled - was returning garbage)
         # =================================================================
-        logger.info("EMPLOYEE path: Local LLM → Sanitize → Claude")
+        logger.info("EMPLOYEE path: Direct to Claude (local LLM disabled)")
         
-        # Select local model
-        local_model = select_local_model(query, chunks)
+        # Sanitize context before sending to Claude
+        sanitized_context = self.sanitizer.sanitize(context)
+        result["sanitized"] = True
         
-        # Call local LLM
-        local_system = """You are a data analyst. Analyze the data and answer the question directly.
-Give real numbers and real values from the data. Never use placeholders."""
+        system_prompt = """You are a data analyst. Analyze the data provided and answer the question.
 
-        local_prompt = f"""Question: {query}
+RULES:
+1. Look at the actual column names and data values
+2. Figure out what the columns mean from context and values
+3. Give actual counts and real data - never placeholders like [Number] or [Employee A]
+4. If listing, show real values from the data (limit to 25 if many)
+5. Never describe what to do - just do it and give the answer
+6. Keep any [REDACTED] or sanitized placeholders as-is - those are for privacy"""
 
-DATA:
-{context}
-
-Analyze the data and answer with real values."""
-
-        local_response, local_success = self._call_ollama(local_model, local_prompt, local_system)
-        result["models_used"].append(local_model)
-        
-        # Handle timeout - fallback to Claude with sanitized context
-        if local_response is None:
-            logger.warning("Local LLM timeout - falling back to Claude with sanitized context")
-            
-            sanitized_context = self.sanitizer.sanitize(context)
-            result["sanitized"] = True
-            
-            system_prompt = """You are a data analyst. Analyze the data and answer the question.
-Give real numbers and real values. Never use placeholders like [Number] or [Employee A]."""
-
-            user_prompt = f"""Question: {query}
+        user_prompt = f"""Question: {query}
 
 DATA:
 {sanitized_context}
 
-Analyze and answer with real values from the data."""
+Analyze the data. Answer the question with real numbers and real values from the data."""
 
-            response, success = self._call_claude(user_prompt, system_prompt)
-            result["models_used"].append("claude-sonnet-4 (fallback)")
-            
-            if success:
-                result["response"] = response
-            else:
-                result["error"] = f"Both local LLM and Claude failed"
-                result["response"] = "Unable to process query. Please try again."
-            
-            return result
+        response, success = self._call_claude(user_prompt, system_prompt)
+        result["models_used"].append("claude-sonnet-4")
         
-        # Handle local LLM failure
-        if not local_success:
-            result["error"] = local_response
-            result["response"] = f"Error: {local_response}"
-            return result
-        
-        # Sanitize local response
-        logger.info("Sanitizing local LLM response")
-        sanitized_response = self.sanitizer.sanitize(local_response)
-        result["sanitized"] = True
-        
-        if self.sanitizer.name_map:
-            logger.info(f"Sanitized {len(self.sanitizer.name_map)} names")
-        
-        # Send to Claude for polish
-        if self.claude_api_key:
-            logger.info("Sending to Claude for synthesis")
-            
-            claude_system = """Polish this response. Keep all numbers and facts. Keep any [Redacted] placeholders as-is."""
-
-            claude_prompt = f"""Question: {query}
-
-Response to polish:
-{sanitized_response}
-
-Keep all facts and numbers. Clean up formatting."""
-
-            claude_response, claude_success = self._call_claude(claude_prompt, claude_system)
-            result["models_used"].append("claude-sonnet-4")
-            
-            if claude_success:
-                result["response"] = claude_response
-            else:
-                result["response"] = sanitized_response
+        if success:
+            result["response"] = response
         else:
-            result["response"] = sanitized_response
+            result["error"] = response
+            result["response"] = f"Error: {response}"
         
         return result
     
