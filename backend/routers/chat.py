@@ -186,6 +186,7 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
         sql_results_list = []
         rag_chunks = []
         all_columns = []
+        joined_data = None  # For cross-table JOIN results
         
         # =====================================================================
         # STEP 2: GET SCHEMA & BUILD TABLE SUMMARIES
@@ -257,25 +258,39 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
                     update_job_status(job_id, 'processing', '🧠 Selecting best data source...', 20)
                     logger.warning("[STEP 3] Preparing Claude table selection...")
                     
+                    # Get relationships to help with table selection
+                    relationship_hint = ""
+                    try:
+                        relationships = handler.get_relationships(project)
+                        if relationships:
+                            relationship_hint = "\n\nTABLE RELATIONSHIPS (tables that can be joined):\n"
+                            for rel in relationships[:5]:  # Limit to top 5
+                                src = rel.get('source_table', '').split('__')[-1]
+                                tgt = rel.get('target_table', '').split('__')[-1]
+                                relationship_hint += f"  • {src} ↔ {tgt} (join on employee_number + company_code)\n"
+                            relationship_hint += "\nFor questions spanning multiple data types (e.g., 'deductions for active employees'), select BOTH tables.\n"
+                    except Exception as rel_e:
+                        logger.warning(f"[STEP 3] Could not get relationships: {rel_e}")
+                    
                     selection_prompt = f"""Question: "{message}"
 
 TASK: Pick the table number(s) that contain data to answer this question.
 
-KEY DISTINCTION:
-- Tables with "Configuration", "Validation", "Reasons", "Setup", "Plans" = CODE DEFINITIONS (not employee records)
-- Tables with "Company", "Personal", "Conversion", "Employee" in Employee Conversion file = ACTUAL EMPLOYEE DATA
+KEY RULES:
+1. CONFIG tables (Configuration, Validation, Reasons, Setup) = CODE DEFINITIONS only
+2. EMPLOYEE DATA tables (Company, Personal from Employee Conversion) = Actual employee records
+3. TRANSACTION tables (Deductions, Earnings, etc.) = Employee transaction data
 
-For questions about ACTUAL PEOPLE (list employees, count active, who is on leave):
-→ Pick tables from "Employee Conversion" file (Company, Personal)
-
-For questions about CODE MEANINGS (what does code X mean):
-→ Pick Configuration/Validation tables
-
+CRITICAL - CROSS-TABLE QUERIES:
+If the question combines employee attributes (active, terminated, department) with transaction data (deductions, earnings):
+→ You MUST select BOTH the employee table (Company) AND the transaction table (Deductions/Earnings)
+→ Example: "deductions for active employees" needs BOTH Company (has employment_status) AND Deductions (has amounts)
+{relationship_hint}
 Available tables:
 {chr(10).join(table_summaries)}
 
-RESPOND WITH ONLY THE TABLE NUMBERS. NO EXPLANATION. NO REASONING.
-Just the number(s) like: 47,53
+RESPOND WITH ONLY THE TABLE NUMBERS. NO EXPLANATION.
+For cross-table queries, include multiple numbers like: 47,52
 
 Table numbers:"""
                     
@@ -370,7 +385,7 @@ Table numbers:"""
                             logger.warning(f"[STEP 3] No matches, using first 2 tables: {selected_indices}")
                     
                     # =========================================================
-                    # STEP 4: QUERY SELECTED TABLES
+                    # STEP 4: QUERY SELECTED TABLES (with JOIN support)
                     # =========================================================
                     update_job_status(job_id, 'processing', '📊 Retrieving data...', 35)
                     logger.warning(f"[STEP 4] Querying {len(selected_indices)} selected tables: {selected_indices}")
@@ -379,8 +394,128 @@ Table numbers:"""
                     query_lower = message.lower()
                     is_count_query = any(kw in query_lower for kw in ['how many', 'count', 'total', 'number of'])
                     is_list_query = any(kw in query_lower for kw in ['list', 'show', 'give me', 'who', 'active', 'employee'])
+                    is_aggregation = any(kw in query_lower for kw in ['total', 'sum', 'average', 'avg'])
                     row_limit = 2000 if is_count_query else 500
                     
+                    # =========================================================
+                    # STEP 4a: Check for JOIN opportunity
+                    # =========================================================
+                    joined_data = None
+                    if len(selected_indices) >= 2:
+                        try:
+                            relationships = handler.get_relationships(project)
+                            selected_tables = [table_lookup[idx].get('table_name', '') for idx in selected_indices[:2]]
+                            
+                            # Find if there's a relationship between selected tables
+                            for rel in relationships:
+                                src_table = rel.get('source_table', '')
+                                tgt_table = rel.get('target_table', '')
+                                src_cols = rel.get('source_columns', [])
+                                tgt_cols = rel.get('target_columns', [])
+                                
+                                # Check if both selected tables are in this relationship
+                                if (src_table in selected_tables and tgt_table in selected_tables) or \
+                                   (any(src_table in t for t in selected_tables) and any(tgt_table in t for t in selected_tables)):
+                                    
+                                    logger.warning(f"[STEP 4a] Found JOIN relationship: {src_table} <-> {tgt_table}")
+                                    
+                                    # Find the employee table (has employment_status_code) and transaction table
+                                    emp_table = None
+                                    trans_table = None
+                                    
+                                    for t in selected_tables:
+                                        cols_result = handler.conn.execute(f'PRAGMA table_info("{t}")').fetchall()
+                                        cols = [c[1].lower() for c in cols_result]
+                                        if 'employment_status_code' in cols or 'employment_status' in cols:
+                                            emp_table = t
+                                        else:
+                                            trans_table = t
+                                    
+                                    if emp_table and trans_table:
+                                        # Build JOIN query
+                                        join_conditions = []
+                                        for sc, tc in zip(src_cols, tgt_cols):
+                                            if emp_table == src_table:
+                                                join_conditions.append(f'e."{sc}" = t."{tc}"')
+                                            else:
+                                                join_conditions.append(f'e."{tc}" = t."{sc}"')
+                                        
+                                        join_on = " AND ".join(join_conditions)
+                                        
+                                        # Get column info for both tables
+                                        emp_cols_result = handler.conn.execute(f'PRAGMA table_info("{emp_table}")').fetchall()
+                                        emp_cols = [c[1] for c in emp_cols_result]
+                                        trans_cols_result = handler.conn.execute(f'PRAGMA table_info("{trans_table}")').fetchall()
+                                        trans_cols = [c[1] for c in trans_cols_result]
+                                        
+                                        # For aggregation queries on active employees
+                                        if is_aggregation and 'deduction' in query_lower:
+                                            # Find amount column
+                                            amount_col = next((c for c in trans_cols if 'amount' in c.lower()), None)
+                                            if amount_col:
+                                                agg_sql = f'''
+                                                    SELECT 
+                                                        e.employment_status_code,
+                                                        COUNT(DISTINCT e.employee_number) as employee_count,
+                                                        COUNT(*) as deduction_count,
+                                                        SUM(CAST(NULLIF(t."{amount_col}", '') AS DOUBLE)) as total_amount
+                                                    FROM "{emp_table}" e
+                                                    JOIN "{trans_table}" t ON {join_on}
+                                                    WHERE e.employment_status_code = 'A'
+                                                    GROUP BY e.employment_status_code
+                                                '''
+                                                logger.warning(f"[STEP 4a] Executing aggregation JOIN: {agg_sql[:200]}...")
+                                                
+                                                try:
+                                                    agg_result = handler.conn.execute(agg_sql).fetchall()
+                                                    if agg_result:
+                                                        joined_data = {
+                                                            'type': 'aggregation',
+                                                            'query': 'Total deductions for active employees',
+                                                            'result': agg_result,
+                                                            'columns': ['employment_status_code', 'employee_count', 'deduction_count', 'total_amount'],
+                                                            'emp_table': emp_table.split('__')[-1],
+                                                            'trans_table': trans_table.split('__')[-1]
+                                                        }
+                                                        logger.warning(f"[STEP 4a] ✅ JOIN aggregation result: {agg_result}")
+                                                except Exception as agg_e:
+                                                    logger.warning(f"[STEP 4a] Aggregation query failed: {agg_e}")
+                                        
+                                        # For sample joined data (non-aggregation)
+                                        if not joined_data:
+                                            sample_sql = f'''
+                                                SELECT e.employee_number, e.employment_status_code, 
+                                                       t.*
+                                                FROM "{emp_table}" e
+                                                JOIN "{trans_table}" t ON {join_on}
+                                                WHERE e.employment_status_code = 'A'
+                                                LIMIT 100
+                                            '''
+                                            logger.warning(f"[STEP 4a] Executing sample JOIN: {sample_sql[:200]}...")
+                                            
+                                            try:
+                                                sample_rows = handler.conn.execute(sample_sql).fetchall()
+                                                sample_cols = ['employee_number', 'employment_status_code'] + trans_cols
+                                                if sample_rows:
+                                                    joined_data = {
+                                                        'type': 'sample',
+                                                        'rows': [dict(zip(sample_cols, row)) for row in sample_rows[:50]],
+                                                        'total_joined': len(sample_rows),
+                                                        'emp_table': emp_table.split('__')[-1],
+                                                        'trans_table': trans_table.split('__')[-1]
+                                                    }
+                                                    logger.warning(f"[STEP 4a] ✅ JOIN sample: {len(sample_rows)} rows")
+                                            except Exception as sample_e:
+                                                logger.warning(f"[STEP 4a] Sample JOIN failed: {sample_e}")
+                                        
+                                        break  # Found and processed relationship
+                                        
+                        except Exception as join_e:
+                            logger.warning(f"[STEP 4a] JOIN detection failed: {join_e}")
+                    
+                    # =========================================================
+                    # STEP 4b: Query individual tables (as before)
+                    # =========================================================
                     for idx in selected_indices[:3]:
                         table_info = table_lookup[idx]
                         table_name = table_info.get('table_name', '')
@@ -527,6 +662,33 @@ Use these codes to interpret employment_status_code or similar fields.
                     logger.warning(f"[STEP 6] Added {len(relationships)} table relationships to context")
         except Exception as rel_e:
             logger.warning(f"[STEP 6] Could not add relationships: {rel_e}")
+        
+        # Add JOIN results if we executed a cross-table query
+        if joined_data:
+            join_text = "\n** CROSS-TABLE JOIN RESULTS **\n"
+            join_text += f"(Joined {joined_data.get('emp_table', 'employee')} with {joined_data.get('trans_table', 'transaction')} on employee_number + company_code)\n\n"
+            
+            if joined_data.get('type') == 'aggregation':
+                join_text += "AGGREGATION RESULTS:\n"
+                for row in joined_data.get('result', []):
+                    cols = joined_data.get('columns', [])
+                    join_text += f"  Status: {row[0]}, Employees: {row[1]}, Deduction Records: {row[2]}, Total Amount: ${float(row[3] or 0):,.2f}\n"
+                join_text += "\nThis is the ACTUAL TOTAL from joining the tables.\n"
+            elif joined_data.get('type') == 'sample':
+                join_text += f"Sample of {joined_data.get('total_joined', 0)} joined records (active employees only):\n"
+                for row in joined_data.get('rows', [])[:20]:
+                    emp_num = row.get('employee_number', '')
+                    status = row.get('employment_status_code', '')
+                    # Get a few key fields
+                    amount = row.get('amount_employee', row.get('amount', ''))
+                    join_text += f"  Employee {emp_num} (Status: {status}): Amount = {amount}\n"
+            
+            context_parts.append(join_text)
+            sources.append({
+                'type': 'joined_query',
+                'description': f"JOIN: {joined_data.get('emp_table')} + {joined_data.get('trans_table')}"
+            })
+            logger.warning(f"[STEP 6] Added JOIN results to context")
         
         for result in sql_results_list:
             data_text = f"Source: {result['source_file']} → {result['sheet']}\n"
