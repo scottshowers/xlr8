@@ -688,18 +688,16 @@ export default function Chat({
                           // Find the user's original query (previous message)
                           const userQuery = messages[index - 1]?.content || 'data export';
                           
-                          const response = await fetch(`${API_BASE}/api/chat/export-excel`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              query: userQuery,
-                              project: selectedProject
-                            })
+                          const response = await api.post('/chat/export-excel', {
+                            query: userQuery,
+                            project: selectedProject
+                          }, {
+                            responseType: 'blob'
                           });
                           
-                          if (!response.ok) throw new Error('Export failed');
-                          
-                          const blob = await response.blob();
+                          const blob = new Blob([response.data], { 
+                            type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+                          });
                           const url = window.URL.createObjectURL(blob);
                           const a = document.createElement('a');
                           a.href = url;
