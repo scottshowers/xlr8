@@ -267,15 +267,19 @@ function DataManagementTab() {
     const key = `${file.project}:${file.filename}`;
     const summary = mappingSummaries[key];
     
-    // Calculate total columns across all sheets
-    const totalColumns = file.sheets?.reduce((sum, sheet) => sum + (sheet.column_count || 0), 0) || 0;
-    const mappedColumns = summary?.total_mappings || 0;
+    if (!summary) return null;
+    if (summary.status === 'processing') return { status: 'processing' };
     
-    if (totalColumns === 0) return null;
-    if (summary?.status === 'processing') return { pct: null, status: 'processing' };
+    const needsReview = summary.needs_review_count || 0;
+    const totalMappings = summary.total_mappings || 0;
     
-    const pct = Math.round((mappedColumns / totalColumns) * 100);
-    return { pct, mappedColumns, totalColumns };
+    if (totalMappings === 0 && summary.status !== 'complete') return null;
+    
+    if (needsReview > 0) {
+      return { status: 'review', count: needsReview };
+    }
+    
+    return { status: 'ready', count: totalMappings };
   };
   
   const updateMapping = async (project, tableName, columnName, newType) => {
@@ -451,9 +455,10 @@ function DataManagementTab() {
                       {(() => {
                         const mapInfo = getMappingPercentage(file);
                         if (!mapInfo) return null;
-                        if (mapInfo.status === 'processing') return <div style={{ color: '#3b82f6', fontSize: '0.65rem' }}>🔄 mapping...</div>;
-                        const color = mapInfo.pct >= 80 ? '#22c55e' : mapInfo.pct >= 50 ? '#f59e0b' : '#ef4444';
-                        return <div style={{ color, fontSize: '0.65rem', fontWeight: '600' }}>{mapInfo.pct}% mapped</div>;
+                        if (mapInfo.status === 'processing') return <div style={{ color: '#3b82f6', fontSize: '0.65rem' }}>🔄 Analyzing...</div>;
+                        if (mapInfo.status === 'review') return <div style={{ color: '#f59e0b', fontSize: '0.65rem', fontWeight: '600' }}>⚠️ {mapInfo.count} to review</div>;
+                        if (mapInfo.status === 'ready') return <div style={{ color: '#22c55e', fontSize: '0.65rem', fontWeight: '600' }}>✅ Ready</div>;
+                        return null;
                       })()}
                     </td>
                     <td style={{ ...styles.td, textAlign: 'center' }}>{file.has_encrypted ? '🔒' : '-'}</td>
@@ -513,21 +518,40 @@ function DataManagementTab() {
                                           <span style={{ color: mapping.needs_review ? '#f59e0b' : '#333' }}>
                                             {mapping.needs_review && '⚠️ '}{mapping.original_column}
                                           </span>
-                                          <select
-                                            value={displayValue}
-                                            onChange={(e) => updateMapping(file.project, sheet.table_name, mapping.original_column, e.target.value)}
-                                            style={{ 
-                                              padding: '2px 4px', 
-                                              fontSize: '0.75rem', 
-                                              border: isPending ? '2px solid #3b82f6' : mapping.needs_review ? '1px solid #f59e0b' : '1px solid #ddd',
-                                              borderRadius: '3px',
-                                              background: isPending ? '#dbeafe' : mapping.is_override ? '#e0f2fe' : '#fff'
-                                            }}
-                                          >
-                                            {semanticTypes.map(t => (
-                                              <option key={t.id} value={t.id}>{t.label}</option>
-                                            ))}
-                                          </select>
+                                          <div style={{ position: 'relative' }}>
+                                            <input
+                                              type="text"
+                                              list={`semantic-types-${mapping.original_column}`}
+                                              value={semanticTypes.find(t => t.id === displayValue)?.label || displayValue}
+                                              onChange={(e) => {
+                                                // Check if it matches a known type label, if so use the ID
+                                                const matchedType = semanticTypes.find(t => t.label.toLowerCase() === e.target.value.toLowerCase());
+                                                const newValue = matchedType ? matchedType.id : e.target.value;
+                                                updateMapping(file.project, sheet.table_name, mapping.original_column, newValue);
+                                              }}
+                                              onBlur={(e) => {
+                                                // On blur, if it matches a known type, convert to ID
+                                                const matchedType = semanticTypes.find(t => t.label.toLowerCase() === e.target.value.toLowerCase());
+                                                if (matchedType) {
+                                                  updateMapping(file.project, sheet.table_name, mapping.original_column, matchedType.id);
+                                                }
+                                              }}
+                                              placeholder="Select or type..."
+                                              style={{ 
+                                                padding: '2px 4px', 
+                                                fontSize: '0.75rem', 
+                                                width: '140px',
+                                                border: isPending ? '2px solid #3b82f6' : mapping.needs_review ? '1px solid #f59e0b' : '1px solid #ddd',
+                                                borderRadius: '3px',
+                                                background: isPending ? '#dbeafe' : mapping.is_override ? '#e0f2fe' : '#fff'
+                                              }}
+                                            />
+                                            <datalist id={`semantic-types-${mapping.original_column}`}>
+                                              {semanticTypes.map(t => (
+                                                <option key={t.id} value={t.label} />
+                                              ))}
+                                            </datalist>
+                                          </div>
                                           <span style={{ color: '#999', fontSize: '0.7rem' }}>
                                             {isPending ? '✏️' : mapping.is_override ? '✓' : `${Math.round(mapping.confidence * 100)}%`}
                                           </span>
