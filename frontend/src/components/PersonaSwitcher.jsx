@@ -40,7 +40,8 @@ export function PersonaSwitcher({ currentPersona, onPersonaChange }) {
   };
 
   const handleSelect = (personaId) => {
-    onPersonaChange(personaId);
+    const selectedPersona = personas.find(p => p.id === personaId) || personas[0];
+    onPersonaChange(selectedPersona);  // Pass full object, not just ID
     setIsOpen(false);
   };
 
