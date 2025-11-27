@@ -460,19 +460,19 @@ Table number(s):"""
             
             data_text += "\nSample Data:\n"
             
-            # Show sample rows with key columns
-            row_limit_for_context = 100
+            # Show sample rows with key columns - limit to 50 to manage token count
+            row_limit_for_context = 50
             for row in result['data'][:row_limit_for_context]:
                 key_cols = [c for c in result['columns'] if any(s in c.lower() for s in 
                            ['employee', 'status', 'name', 'number', 'id', 'type', 'active', 'term', 'department', 'job', 'title'])]
                 if not key_cols:
-                    key_cols = result['columns'][:10]
+                    key_cols = result['columns'][:8]  # Fewer columns too
                 
                 row_str = " | ".join(f"{k}: {row.get(k, '')}" for k in key_cols if k in row)
                 data_text += f"  {row_str}\n"
             
-            if len(result['data']) > 100:
-                data_text += f"  ... and {len(result['data']) - 100} more rows in sample\n"
+            if len(result['data']) > 50:
+                data_text += f"  ... and {len(result['data']) - 50} more rows in sample\n"
             
             context_parts.append(data_text)
             sources.append({
