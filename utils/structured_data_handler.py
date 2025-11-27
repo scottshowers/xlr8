@@ -35,6 +35,14 @@ except ImportError:
     ENCRYPTION_AVAILABLE = False
     logging.warning("cryptography not installed - PII encryption disabled. Run: pip install cryptography")
 
+# Openpyxl for colored header detection
+try:
+    from openpyxl import load_workbook
+    OPENPYXL_AVAILABLE = True
+except ImportError:
+    OPENPYXL_AVAILABLE = False
+    logging.warning("openpyxl not installed - colored header detection disabled")
+
 logger = logging.getLogger(__name__)
 
 # DuckDB storage location
