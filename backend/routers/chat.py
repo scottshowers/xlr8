@@ -335,10 +335,11 @@ Table number(s):"""
                     update_job_status(job_id, 'processing', '📊 Retrieving data...', 35)
                     logger.warning(f"[STEP 4] Querying {len(selected_indices)} selected tables: {selected_indices}")
                     
-                    # For count/how many queries, get more rows
+                    # Check query type
                     query_lower = message.lower()
                     is_count_query = any(kw in query_lower for kw in ['how many', 'count', 'total', 'number of'])
-                    row_limit = 2000 if is_count_query else 500  # More rows for counts
+                    is_list_query = any(kw in query_lower for kw in ['list', 'show', 'give me', 'who', 'active', 'employee'])
+                    row_limit = 2000 if is_count_query else 500
                     
                     for idx in selected_indices[:3]:
                         table_info = table_lookup[idx]
@@ -349,11 +350,35 @@ Table number(s):"""
                         logger.warning(f"[STEP 4] Querying table {idx}: {table_name} (limit {row_limit})")
                         
                         try:
+                            # ALWAYS get value distributions for status-like columns
+                            value_summary = ""
+                            cols_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
+                            all_cols = [col[1] for col in cols_result]
+                            status_cols = [c for c in all_cols if any(s in c.lower() for s in ['status', 'active', 'type', 'term'])]
+                            
+                            if status_cols:
+                                value_summary = "\n** ACTUAL VALUE COUNTS (from full table, not sample): **\n"
+                                for col in status_cols[:3]:
+                                    try:
+                                        dist_sql = f'SELECT "{col}", COUNT(*) as cnt FROM "{table_name}" GROUP BY "{col}" ORDER BY cnt DESC'
+                                        dist_result = handler.conn.execute(dist_sql).fetchall()
+                                        if dist_result:
+                                            dist_str = ", ".join([f"'{row[0]}'={row[1]}" for row in dist_result[:10]])
+                                            value_summary += f"  {col}: {dist_str}\n"
+                                    except Exception as de:
+                                        logger.warning(f"[STEP 4] Distribution query failed for {col}: {de}")
+                                logger.warning(f"[STEP 4] Got value distributions: {value_summary.strip()}")
+                            
+                            # Get total row count
+                            total_count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
+                            total_row_count = total_count_result[0] if total_count_result else 0
+                            
+                            # Get sample data
                             sql = f'SELECT * FROM "{table_name}" LIMIT {row_limit}'
                             rows, cols = handler.execute_query(sql)
                             all_columns.extend(cols)
                             
-                            logger.warning(f"[STEP 4] ✅ Got {len(rows)} rows, {len(cols)} columns")
+                            logger.warning(f"[STEP 4] ✅ Got {len(rows)} sample rows, {total_row_count} total rows, {len(cols)} columns")
                             
                             if rows:
                                 decrypted = decrypt_results(rows, handler)
@@ -362,8 +387,10 @@ Table number(s):"""
                                     'sheet': sheet_name,
                                     'table': table_name,
                                     'columns': cols,
-                                    'data': decrypted,  # All rows, limit in context building
-                                    'total_rows': len(rows)
+                                    'data': decrypted,
+                                    'total_rows': total_row_count,
+                                    'sample_size': len(rows),
+                                    'value_summary': value_summary
                                 })
                         except Exception as query_e:
                             logger.error(f"[STEP 4] ❌ Query failed for {table_name}: {query_e}")
@@ -414,36 +441,21 @@ Table number(s):"""
         context_parts = []
         sources = []
         
-        # Check if this is a count query
-        query_lower = message.lower()
-        is_count_query = any(kw in query_lower for kw in ['how many', 'count', 'total', 'number of'])
-        is_list_query = any(kw in query_lower for kw in ['list', 'show', 'give me'])
-        
         for result in sql_results_list:
             data_text = f"Source: {result['source_file']} → {result['sheet']}\n"
             data_text += f"Columns: {', '.join(result['columns'])}\n"
-            data_text += f"Total rows in query result: {result['total_rows']}\n\n"
+            data_text += f"Total rows in table: {result['total_rows']}\n"
+            data_text += f"Sample rows shown below: {result.get('sample_size', len(result['data']))}\n"
             
-            # For count queries, include summary statistics
-            if is_count_query and result['data']:
-                # Find status-like columns and count values
-                status_cols = [c for c in result['columns'] if any(s in c.lower() for s in ['status', 'active', 'term', 'type'])]
-                if status_cols:
-                    data_text += "VALUE COUNTS:\n"
-                    for col in status_cols[:3]:
-                        values = {}
-                        for row in result['data']:
-                            val = str(row.get(col, 'None'))
-                            values[val] = values.get(val, 0) + 1
-                        data_text += f"  {col}: {dict(sorted(values.items(), key=lambda x: -x[1]))}\n"
-                    data_text += "\n"
+            # Include ACTUAL value distributions from full table (not sample)
+            if result.get('value_summary'):
+                data_text += result['value_summary']
             
-            # Include more rows for count queries
-            row_limit_for_context = 200 if is_count_query else 75
+            data_text += "\nSample Data:\n"
             
-            data_text += "Data:\n"
+            # Show sample rows with key columns
+            row_limit_for_context = 100
             for row in result['data'][:row_limit_for_context]:
-                # Only include key columns to save space
                 key_cols = [c for c in result['columns'] if any(s in c.lower() for s in 
                            ['employee', 'status', 'name', 'number', 'id', 'type', 'active', 'term', 'department', 'job', 'title'])]
                 if not key_cols:
@@ -452,8 +464,8 @@ Table number(s):"""
                 row_str = " | ".join(f"{k}: {row.get(k, '')}" for k in key_cols if k in row)
                 data_text += f"  {row_str}\n"
             
-            if len(result['data']) > row_limit_for_context:
-                data_text += f"  ... and {len(result['data']) - row_limit_for_context} more rows\n"
+            if len(result['data']) > 100:
+                data_text += f"  ... and {len(result['data']) - 100} more rows in sample\n"
             
             context_parts.append(data_text)
             sources.append({
