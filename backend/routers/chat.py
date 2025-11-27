@@ -747,6 +747,141 @@ async def debug_chunks(search: str = "test", project: Optional[str] = None):
     except Exception as e:
         return {"error": str(e)}
 
+
+@router.post("/chat/debug")
+async def debug_query(request: Request):
+    """
+    Debug endpoint - shows exactly what happens at each step WITHOUT calling Claude.
+    Returns raw data so we can see what's broken.
+    """
+    try:
+        data = await request.json()
+        message = data.get('message', 'list active employees')
+        project = data.get('project', None)
+        
+        debug_output = {
+            "query": message,
+            "project": project,
+            "steps": {}
+        }
+        
+        # STEP 1: Query Classification
+        from utils.llm_orchestrator import classify_query
+        query_type = classify_query(message, [])
+        debug_output["steps"]["1_classification"] = {
+            "query_type": query_type,
+            "note": "employee = sanitizer path, config = direct to Claude"
+        }
+        
+        # STEP 2: Get Schema
+        if STRUCTURED_QUERIES_AVAILABLE:
+            handler = get_structured_handler()
+            schema = handler.get_schema_for_project(project) if project else handler.get_schema_for_project(None)
+            tables_list = schema.get('tables', [])
+            
+            debug_output["steps"]["2_schema"] = {
+                "tables_found": len(tables_list),
+                "table_names": [t.get('sheet', t.get('table_name', ''))[:50] for t in tables_list[:10]]
+            }
+            
+            # STEP 3: Build summaries (what Claude sees for table selection)
+            table_summaries = []
+            table_lookup = {}
+            
+            for idx, table_info in enumerate(tables_list):
+                table_name = table_info.get('table_name', '')
+                sheet_name = table_info.get('sheet', '')
+                file_name = table_info.get('file', '')
+                row_count = table_info.get('row_count', 0)
+                columns = table_info.get('columns', [])
+                
+                if columns and isinstance(columns[0], dict):
+                    col_names = [c.get('name', str(c)) for c in columns[:10]]
+                else:
+                    col_names = [str(c) for c in columns[:10]]
+                
+                summary = f"[{idx}] {file_name} → {sheet_name} ({row_count} rows) | Cols: {', '.join(col_names)}"
+                table_summaries.append(summary)
+                table_lookup[idx] = table_info
+            
+            debug_output["steps"]["3_table_summaries"] = table_summaries[:15]
+            
+            # STEP 4: Simulate table selection (keyword-based, not Claude)
+            query_lower = message.lower()
+            selected = []
+            for idx, info in table_lookup.items():
+                file_lower = info.get('file', '').lower()
+                if 'employee' in query_lower and ('employee' in file_lower or 'conversion' in file_lower):
+                    selected.append(idx)
+            
+            if not selected:
+                selected = list(table_lookup.keys())[:2]
+            
+            debug_output["steps"]["4_selected_tables"] = {
+                "indices": selected[:3],
+                "names": [table_lookup[i].get('sheet', '') for i in selected[:3]]
+            }
+            
+            # STEP 5: Query actual data
+            raw_data_samples = []
+            all_columns = []
+            
+            for idx in selected[:2]:
+                table_info = table_lookup[idx]
+                table_name = table_info.get('table_name', '')
+                
+                try:
+                    sql = f'SELECT * FROM "{table_name}" LIMIT 5'
+                    rows, cols = handler.execute_query(sql)
+                    all_columns.extend(cols)
+                    
+                    # Decrypt if needed
+                    decrypted = decrypt_results(rows, handler)
+                    
+                    raw_data_samples.append({
+                        "table": table_info.get('sheet', ''),
+                        "columns": cols,
+                        "row_count": len(rows),
+                        "sample_rows": decrypted[:3]  # First 3 rows
+                    })
+                except Exception as e:
+                    raw_data_samples.append({"table": table_name, "error": str(e)})
+            
+            debug_output["steps"]["5_raw_data"] = raw_data_samples
+            
+            # STEP 6: Build context (what would be sent to LLM)
+            context_parts = []
+            for sample in raw_data_samples:
+                if "error" not in sample:
+                    data_text = f"Table: {sample['table']}\nColumns: {', '.join(sample['columns'])}\n"
+                    for row in sample.get('sample_rows', []):
+                        row_str = " | ".join(f"{k}: {v}" for k, v in list(row.items())[:8])
+                        data_text += f"  {row_str}\n"
+                    context_parts.append(data_text)
+            
+            full_context = '\n\n'.join(context_parts)
+            debug_output["steps"]["6_context_preview"] = full_context[:2000]
+            
+            # STEP 7: PII Detection
+            pii_result = detect_pii_in_data(full_context, all_columns)
+            debug_output["steps"]["7_pii_detection"] = pii_result
+            
+            # STEP 8: Sanitization preview (if employee path)
+            if query_type == 'employee':
+                sanitized_preview = sanitize_pii(full_context[:1000])
+                debug_output["steps"]["8_sanitized_preview"] = sanitized_preview[:1000]
+            else:
+                debug_output["steps"]["8_sanitized_preview"] = "N/A - config path, no sanitization"
+        
+        else:
+            debug_output["steps"]["error"] = "STRUCTURED_QUERIES_AVAILABLE = False"
+        
+        return debug_output
+        
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "traceback": traceback.format_exc()}
+
 @router.get("/chat/export/{filename}")
 async def download_export(filename: str):
     from fastapi.responses import FileResponse
