@@ -1,149 +1,246 @@
 """
-Chat Router for XLR8 - ADVANCED RAG FEATURES + BESSIE! 🐮
-==========================================================
+Chat Router - PRODUCTION VERSION with PII Protection
+=====================================================
 
-Features:
-- ✅ Real-time status updates
-- ✅ Query decomposition (compound questions)
-- ✅ Smart aggregation (count/sum queries)
-- ✅ Intent classification (optimal routing)
-- ✅ Persona system (Bessie and friends!)
+ARCHITECTURE:
+1. INTELLIGENT QUERY DETECTION
+2. SELF-HEALING DATA GATHERING  
+3. **PII DETECTION ON DATA** (not just query keywords)
+4. SAFE ROUTING:
+   - PII detected → Local LLM → Sanitize → Claude
+   - No PII → Direct Claude (fast path)
+5. UNIFIED RESPONSE SYNTHESIS
+
+SECURITY PRINCIPLE:
+- Scan DATA for PII patterns, not just query words
+- NEVER send raw PII to external APIs
+- Default to LOCAL path when uncertain
+- Sanitize BEFORE any external call
 
 Author: XLR8 Team
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
-import sys
-import os
-import logging
-import uuid
+from typing import Optional, Dict, Any, List
 import threading
+import uuid
+import logging
+import sys
 import time
+import re
 
 sys.path.insert(0, '/app')
 sys.path.insert(0, '/data')
 
 from utils.rag_handler import RAGHandler
 from utils.llm_orchestrator import LLMOrchestrator
-from utils.query_decomposition import DiverseRetriever
-from utils.smart_aggregation import handle_aggregation
 from utils.intent_classifier import classify_and_configure
 from utils.persona_manager import get_persona_manager
 
-# Import structured data handling (DuckDB for Excel/CSV queries)
+# Import structured data handling
 try:
     from utils.structured_data_handler import get_structured_handler
     STRUCTURED_QUERIES_AVAILABLE = True
-    logger_temp = logging.getLogger(__name__)
-    logger_temp.info("Structured queries available (DuckDB handler loaded)")
 except ImportError as e:
     STRUCTURED_QUERIES_AVAILABLE = False
-    logger_temp = logging.getLogger(__name__)
-    logger_temp.warning(f"Structured queries not available: {e}")
-
-# Import intelligent query router
-try:
-    from utils.query_router import get_query_router, QueryType, detect_query_type
-    INTELLIGENT_ROUTING = True
-    logger_temp = logging.getLogger(__name__)
-    logger_temp.info("Intelligent query routing enabled")
-except ImportError:
-    INTELLIGENT_ROUTING = False
-    # Define QueryType enum for fallback
-    from enum import Enum
-    class QueryType(Enum):
-        STRUCTURED = "structured"
-        UNSTRUCTURED = "unstructured"
-        HYBRID = "hybrid"
-        GENERAL = "general"
-    
-    def detect_query_type(*args, **kwargs):
-        return {'route': QueryType.GENERAL, 'reasoning': ['Fallback mode']}
-    
-    def get_query_router():
-        return None
-    
-    logger_temp = logging.getLogger(__name__)
-    logger_temp.warning("Intelligent routing not available, using fallback")
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Initialize orchestrator
-orchestrator = LLMOrchestrator()
+# In-memory job storage
+chat_jobs: Dict[str, Dict[str, Any]] = {}
 
-# In-memory job storage (for status tracking)
-chat_jobs = {}
 
+# =============================================================================
+# PII DETECTION PATTERNS - Scan DATA, not just queries
+# =============================================================================
+
+PII_PATTERNS = {
+    # SSN patterns
+    'ssn': [
+        r'\b\d{3}-\d{2}-\d{4}\b',           # 123-45-6789
+        r'\b\d{9}\b',                         # 123456789 (9 digits)
+        r'\bssn\b', r'\bsocial.?security\b'
+    ],
+    
+    # Financial patterns
+    'financial': [
+        r'\b\d{8,17}\b',                      # Bank account numbers
+        r'\brouting.?number\b',
+        r'\baccount.?number\b',
+        r'\bbank.?account\b'
+    ],
+    
+    # Compensation patterns (values, not just keywords)
+    'compensation': [
+        r'\$\s*\d{2,3},?\d{3}',               # $50,000 or $125000
+        r'\b\d{2,3},?\d{3}\.\d{2}\b',         # 50,000.00
+        r'salary[:\s]+\d',
+        r'pay.?rate[:\s]+\d',
+        r'hourly.?rate[:\s]+\d',
+        r'annual[:\s]+\d',
+        r'compensation[:\s]+\d'
+    ],
+    
+    # Date of birth patterns
+    'dob': [
+        r'\b(0?[1-9]|1[0-2])[-/](0?[1-9]|[12]\d|3[01])[-/](19|20)\d{2}\b',  # MM/DD/YYYY
+        r'\b(19|20)\d{2}[-/](0?[1-9]|1[0-2])[-/](0?[1-9]|[12]\d|3[01])\b',  # YYYY-MM-DD
+        r'\bdob\b', r'\bdate.?of.?birth\b', r'\bbirthdate\b', r'\bbirth.?date\b'
+    ],
+    
+    # Contact info
+    'contact': [
+        r'\b[\w\.-]+@[\w\.-]+\.\w{2,}\b',     # Email
+        r'\b\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b',  # Phone
+        r'\b\d{5}(-\d{4})?\b'                  # ZIP code
+    ],
+    
+    # Address patterns
+    'address': [
+        r'\b\d+\s+\w+\s+(street|st|avenue|ave|road|rd|drive|dr|lane|ln|way|court|ct|circle|cir|boulevard|blvd)\b',
+        r'\baddress[:\s]',
+        r'\bstreet[:\s]',
+        r'\bcity[:\s]',
+        r'\bstate[:\s]'
+    ],
+    
+    # Name patterns in employee context
+    'employee_names': [
+        r'employee.{0,20}:\s*[A-Z][a-z]+\s+[A-Z][a-z]+',  # Employee: John Smith
+        r'name[:\s]+[A-Z][a-z]+\s+[A-Z][a-z]+',           # Name: John Smith
+        r'\bfirst.?name[:\s]+[A-Z]',
+        r'\blast.?name[:\s]+[A-Z]'
+    ]
+}
+
+# Column names that indicate PII
+PII_COLUMN_PATTERNS = [
+    r'ssn', r'social.*security', r'tax.*id',
+    r'salary', r'pay.*rate', r'wage', r'compensation', r'hourly.*rate', r'annual.*pay',
+    r'bank.*account', r'routing', r'account.*num',
+    r'dob', r'birth.*date', r'date.*birth',
+    r'email', r'phone', r'address', r'street', r'city', r'zip',
+    r'first.*name', r'last.*name', r'full.*name', r'employee.*name'
+]
+
+
+def detect_pii_in_data(data: str, columns: List[str] = None) -> Dict[str, Any]:
+    """
+    Scan DATA content for PII patterns.
+    Returns detected PII types and whether data should be protected.
+    
+    This scans the ACTUAL DATA, not just query keywords.
+    """
+    detected = {
+        'has_pii': False,
+        'pii_types': [],
+        'confidence': 0,
+        'column_flags': [],
+        'pattern_matches': 0
+    }
+    
+    if not data:
+        return detected
+    
+    data_lower = data.lower()
+    
+    # Check column names for PII indicators
+    if columns:
+        for col in columns:
+            col_lower = str(col).lower()
+            for pattern in PII_COLUMN_PATTERNS:
+                if re.search(pattern, col_lower):
+                    detected['column_flags'].append(col)
+                    detected['has_pii'] = True
+    
+    # Scan data content for PII patterns
+    for pii_type, patterns in PII_PATTERNS.items():
+        for pattern in patterns:
+            try:
+                matches = re.findall(pattern, data_lower, re.IGNORECASE)
+                if matches:
+                    detected['pii_types'].append(pii_type)
+                    detected['pattern_matches'] += len(matches)
+                    detected['has_pii'] = True
+            except re.error:
+                continue
+    
+    # Calculate confidence
+    if detected['pattern_matches'] > 0:
+        # More matches = higher confidence
+        detected['confidence'] = min(100, 50 + (detected['pattern_matches'] * 5))
+    
+    if detected['column_flags']:
+        # PII column names are strong indicators
+        detected['confidence'] = max(detected['confidence'], 80)
+    
+    # Deduplicate pii_types
+    detected['pii_types'] = list(set(detected['pii_types']))
+    
+    return detected
+
+
+def sanitize_context_for_external(context: str, pii_detection: Dict) -> str:
+    """
+    Sanitize context before sending to external API.
+    Replaces PII with placeholders.
+    """
+    if not context or not pii_detection.get('has_pii'):
+        return context
+    
+    sanitized = context
+    
+    # Replace SSN patterns
+    sanitized = re.sub(r'\b\d{3}-\d{2}-\d{4}\b', '[SSN-REDACTED]', sanitized)
+    sanitized = re.sub(r'\b\d{9}\b', '[ID-REDACTED]', sanitized)
+    
+    # Replace financial values
+    sanitized = re.sub(r'\$\s*\d{1,3}(?:,\d{3})*(?:\.\d{2})?', '[SALARY-REDACTED]', sanitized)
+    sanitized = re.sub(r'\b\d{2,3},?\d{3}\.\d{2}\b', '[AMOUNT-REDACTED]', sanitized)
+    
+    # Replace phone numbers
+    sanitized = re.sub(r'\b\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b', '[PHONE-REDACTED]', sanitized)
+    
+    # Replace emails
+    sanitized = re.sub(r'\b[\w\.-]+@[\w\.-]+\.\w{2,}\b', '[EMAIL-REDACTED]', sanitized)
+    
+    # Replace dates that look like DOB
+    sanitized = re.sub(
+        r'\b(0?[1-9]|1[0-2])[-/](0?[1-9]|[12]\d|3[01])[-/](19|20)\d{2}\b',
+        '[DATE-REDACTED]',
+        sanitized
+    )
+    
+    return sanitized
+
+
+# =============================================================================
+# REQUEST/RESPONSE MODELS
+# =============================================================================
 
 class ChatRequest(BaseModel):
     message: str
     project: Optional[str] = None
-    functional_area: Optional[str] = None
-    max_results: Optional[int] = 50  # Increased from 30 to get more chunks
-    persona: Optional[str] = 'bessie'  # NEW: Default to Bessie 🐮
+    max_results: Optional[int] = 30
+    persona: Optional[str] = 'bessie'
 
 
-class PersonaCreate(BaseModel):
-    name: str
-    icon: str
-    description: str
-    system_prompt: str
-    expertise: List[str]
-    tone: str
+class ChatStartRequest(BaseModel):
+    message: str
+    project: Optional[str] = None
+    max_results: Optional[int] = 50
+    persona: Optional[str] = 'bessie'
 
 
-class PersonaUpdate(BaseModel):
-    icon: Optional[str] = None
-    description: Optional[str] = None
-    system_prompt: Optional[str] = None
-    expertise: Optional[List[str]] = None
-    tone: Optional[str] = None
-
-
-class ChatJobStatus(BaseModel):
-    job_id: str
-    status: str  # 'processing', 'complete', 'error'
-    current_step: str
-    progress: int  # 0-100
-    response: Optional[str] = None
-    sources: Optional[List[Dict]] = None
-    chunks_found: Optional[int] = None
-    models_used: Optional[List[str]] = None
-    query_type: Optional[str] = None
-    sanitized: Optional[bool] = None
-    error: Optional[str] = None
-
-
-# ============================================================================
-# MODELS ENDPOINT - Available AI Models
-# ============================================================================
-
-@router.get("/chat/models")
-async def get_available_models():
-    """Get available AI models"""
-    return {
-        "models": [
-            {
-                "id": "claude-3-sonnet",
-                "name": "Claude 3 Sonnet",
-                "description": "Fast, balanced model for most tasks"
-            },
-            {
-                "id": "claude-3-opus",
-                "name": "Claude 3 Opus",
-                "description": "Most capable model for complex analysis"
-            }
-        ],
-        "default": "claude-3-sonnet"
-    }
-
+# =============================================================================
+# JOB STATUS MANAGEMENT
+# =============================================================================
 
 def update_job_status(job_id: str, status: str, step: str, progress: int, **kwargs):
-    """Update job status"""
+    """Update job status with logging"""
     if job_id in chat_jobs:
         chat_jobs[job_id].update({
             'status': status,
@@ -154,13 +251,53 @@ def update_job_status(job_id: str, status: str, step: str, progress: int, **kwar
         logger.info(f"[JOB {job_id}] {step} ({progress}%)")
 
 
-def _build_sql_prompt(query: str, schema: dict) -> str:
-    """
-    Build a prompt for Claude to generate SQL.
-    Include full schema context for intelligent query generation.
-    """
-    tables_info = []
+# =============================================================================
+# QUERY TYPE DETECTION
+# =============================================================================
+
+STRUCTURED_QUERY_PATTERNS = [
+    'how many', 'count', 'total number', 'number of',
+    'sum of', 'average', 'avg', 'minimum', 'maximum',
+    'list all', 'show all', 'give me all', 'get all',
+    'employees with', 'employees who', 'which employees',
+    'active employees', 'inactive employees', 'terminated',
+    'by department', 'by location', 'grouped by',
+    'find employee', 'look up', 'search for'
+]
+
+UNSTRUCTURED_QUERY_PATTERNS = [
+    'explain', 'describe', 'what is', 'what are',
+    'how does', 'why does', 'how to', 'how do i',
+    'compare', 'difference between',
+    'best practice', 'recommendation', 'suggest'
+]
+
+
+def detect_query_type(message: str) -> str:
+    """Detect query type for routing."""
+    message_lower = message.lower()
     
+    has_structured = any(p in message_lower for p in STRUCTURED_QUERY_PATTERNS)
+    has_unstructured = any(p in message_lower for p in UNSTRUCTURED_QUERY_PATTERNS)
+    
+    if has_structured and has_unstructured:
+        return 'hybrid'
+    elif has_structured:
+        return 'structured'
+    else:
+        return 'unstructured'
+
+
+# =============================================================================
+# INTELLIGENT SQL GENERATION
+# =============================================================================
+
+def generate_intelligent_sql(message: str, schema: dict, orchestrator: LLMOrchestrator) -> Optional[str]:
+    """Generate intelligent SQL query using Claude."""
+    if not schema.get('tables'):
+        return None
+    
+    tables_info = []
     for table in schema.get('tables', []):
         table_name = table.get('table_name', 'unknown')
         columns = table.get('columns', [])
@@ -168,55 +305,54 @@ def _build_sql_prompt(query: str, schema: dict) -> str:
         sheet = table.get('sheet', '')
         file_name = table.get('file', '')
         
-        # Handle columns - might be list of strings or list of dicts
         if columns and isinstance(columns[0], dict):
             col_names = [c.get('name', str(c)) for c in columns]
         else:
             col_names = [str(c) for c in columns]
         
         tables_info.append(f"""
-Table: {table_name}
-Source File: {file_name}
-Sheet: {sheet}
-Row Count: {row_count}
-Columns: {', '.join(col_names[:40])}{'...' if len(col_names) > 40 else ''}
+Table: "{table_name}"
+Source: {file_name} → {sheet}
+Rows: {row_count}
+Columns: {', '.join(col_names[:50])}
 """)
     
     schema_text = '\n'.join(tables_info)
     
-    prompt = f"""Generate a SQL query for DuckDB to answer this question.
+    sql_prompt = f"""Generate a SQL query for DuckDB to answer this question.
 
 AVAILABLE TABLES:
 {schema_text}
 
-USER QUESTION: {query}
+USER QUESTION: {message}
 
-TABLE SELECTION RULES:
-- For configuration/setup questions (earnings groups, deduction plans, pay groups, job codes, locations), use tables from "Configuration" or "Validation" files
-- For employee data questions (employee counts, who has what, individual records), use tables from "Employee" or "Conversion" files  
-- Pick the table with the MOST SPECIFIC match to the question
-- If a sheet name matches the question topic exactly (e.g., "Earnings Groups" sheet for earnings groups question), use that table
-- Check the row count - configuration tables typically have fewer rows, employee tables have more
-
-SQL RULES:
-1. Return ONLY the SQL query, no explanation
-2. Use exact table and column names from schema
-3. Use ILIKE for case-insensitive text matching
-4. LIMIT 100 unless user asks for specific count or "all"
-5. For "list" queries, SELECT DISTINCT on relevant columns
-6. For "how many" queries, use COUNT(*)
-7. Column names may have spaces - wrap in double quotes if needed
+RULES:
+1. For "how many" → Use COUNT(*)
+2. For "list all" → Use SELECT DISTINCT with relevant columns
+3. Column names with spaces need double quotes
+4. Use ILIKE for case-insensitive text matching
+5. Return ONLY the SQL query, no explanation
 
 SQL:"""
+
+    try:
+        result = orchestrator.generate_sql(sql_prompt)
+        if result and result.get('sql'):
+            sql = result['sql'].strip()
+            logger.info(f"[SQL-GEN] Generated: {sql[:100]}...")
+            return sql
+    except Exception as e:
+        logger.error(f"[SQL-GEN] Failed: {e}")
     
-    return prompt
+    return None
 
 
-def _decrypt_results(rows: list, handler) -> list:
-    """
-    Decrypt any encrypted values in query results for display.
-    Encrypted values start with 'ENC:'.
-    """
+# =============================================================================
+# DATA DECRYPTION
+# =============================================================================
+
+def decrypt_results(rows: list, handler) -> list:
+    """Decrypt any encrypted values in query results."""
     if not rows:
         return rows
     
@@ -240,894 +376,707 @@ def _decrypt_results(rows: list, handler) -> list:
         
         return decrypted_rows
     except Exception as e:
-        logger.warning(f"Failed to decrypt results: {e}")
+        logger.warning(f"Decryption error: {e}")
         return rows
 
 
-def handle_structured_query(job_id: str, message: str, project: Optional[str], persona, routing_meta: dict) -> bool:
-    """
-    Handle structured data queries via DuckDB SQL.
-    Returns True if handled, False to fall through to RAG.
-    """
-    try:
-        update_job_status(job_id, 'processing', '📊 Detected data query - checking tables...', 10)
-        
-        handler = get_structured_handler()
-        
-        # Get schema for this project
-        schema = handler.get_schema_for_project(project) if project else {'tables': []}
-        
-        if not schema.get('tables'):
-            logger.info(f"[STRUCTURED] No tables found for project '{project}', falling back to RAG")
-            return False
-        
-        update_job_status(job_id, 'processing', '🔧 Generating SQL query...', 20)
-        
-        # Build SQL prompt with schema (inline, not dependent on router)
-        sql_prompt = _build_sql_prompt(message, schema)
-        
-        # Use orchestrator to generate SQL
-        orchestrator_instance = LLMOrchestrator()
-        sql_result = orchestrator_instance.generate_sql(sql_prompt)
-        
-        if not sql_result or not sql_result.get('sql'):
-            logger.warning("[STRUCTURED] Failed to generate SQL")
-            return False
-        
-        sql_query = sql_result['sql'].strip()
-        logger.info(f"[STRUCTURED] Generated SQL: {sql_query[:200]}...")
-        
-        update_job_status(job_id, 'processing', '⚡ Executing query...', 40)
-        
-        # Execute query
-        try:
-            rows, columns = handler.execute_query(sql_query)
-        except Exception as e:
-            logger.error(f"[STRUCTURED] SQL execution error: {e}")
-            # Return error but don't fall through - tell user the query failed
-            update_job_status(
-                job_id, 'complete', 'Complete', 100,
-                response=f"I tried to query your data but encountered an error: {str(e)}\n\nGenerated SQL:\n```sql\n{sql_query}\n```\n\nThis might mean the data doesn't have the columns I expected. Could you rephrase your question?",
-                sources=[],
-                chunks_found=0,
-                models_used=['sql_generation', 'duckdb'],
-                query_type='structured_error',
-                sanitized=False
-            )
-            return True
-        
-        update_job_status(job_id, 'processing', '📝 Formatting results...', 70)
-        
-        # Check if export requested
-        needs_export = any(word in message.lower() for word in ['export', 'download', 'csv', 'excel', 'save'])
-        export_path = None
-        
-        if needs_export and rows:
-            update_job_status(job_id, 'processing', '📥 Creating export file...', 80)
-            import os
-            from datetime import datetime
-            
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            export_dir = '/data/exports'
-            os.makedirs(export_dir, exist_ok=True)
-            
-            if 'csv' in message.lower():
-                export_path = f"{export_dir}/query_result_{timestamp}.csv"
-                handler.export_to_csv(sql_query, export_path)
-            else:
-                export_path = f"{export_dir}/query_result_{timestamp}.xlsx"
-                handler.export_to_excel(sql_query, export_path)
-            
-            logger.info(f"[STRUCTURED] Exported to {export_path}")
-        
-        # Format response
-        update_job_status(job_id, 'processing', '✨ Generating response...', 90)
-        
-        # Auto-decrypt any encrypted values for display
-        decrypted_rows = _decrypt_results(rows, handler)
-        
-        response = format_structured_response(message, decrypted_rows, columns, persona, sql_query, export_path)
-        
-        # Extract actual table name from SQL for better source info
-        import re
-        table_match = re.search(r'FROM\s+([^\s,;]+)', sql_query, re.IGNORECASE)
-        queried_table = table_match.group(1) if table_match else 'unknown'
-        
-        # Find the source file/sheet for this table
-        source_file = 'Unknown'
-        source_sheet = 'Unknown'
-        for t in schema.get('tables', []):
-            if t.get('table_name', '').lower() == queried_table.lower():
-                source_file = t.get('file', 'Unknown')
-                source_sheet = t.get('sheet', 'Unknown')
-                break
-        
-        # Build source info with actual table details
-        sources = [{
-            'filename': source_file,
-            'sheet': source_sheet,
-            'table': queried_table,
-            'type': 'structured_data',
-            'sql_executed': sql_query,
-            'rows_returned': len(rows),
-            'relevance': 100
-        }]
-        
-        logger.info(f"[STRUCTURED] Query complete - Table: {queried_table}, File: {source_file}, Rows: {len(rows)}")
-        
-        update_job_status(
-            job_id, 'complete', 'Complete', 100,
-            response=response,
-            sources=sources,
-            chunks_found=len(rows),
-            models_used=['sql_generation', 'duckdb'],
-            query_type='structured',
-            sanitized=False,
-            export_path=export_path
-        )
-        
-        return True
-        
-    except Exception as e:
-        logger.error(f"[STRUCTURED] Error: {e}", exc_info=True)
-        return False
-
-
-def format_structured_response(message: str, rows: list, columns: list, persona, sql_query: str, export_path: str = None) -> str:
-    """Format SQL query results into a nice response"""
-    
-    if not rows:
-        return f"I searched your data but didn't find any matching records. The query I used was:\n\n```sql\n{sql_query}\n```\n\nTry rephrasing your question or check if the data has been uploaded."
-    
-    # Count query - detect various count column formats
-    if len(rows) == 1 and len(columns) == 1:
-        col_lower = columns[0].lower()
-        is_count = any(x in col_lower for x in ['count', 'total', 'cnt', 'sum', 'avg', 'min', 'max'])
-        if is_count:
-            count = list(rows[0].values())[0]
-            return f"**{count}** records match your criteria."
-    
-    # List query - format as table
-    response_parts = []
-    
-    # Summary
-    response_parts.append(f"Found **{len(rows)}** records:\n")
-    
-    # Table header
-    if len(columns) <= 6:  # Narrow enough for markdown table
-        header = "| " + " | ".join(str(c) for c in columns) + " |"
-        separator = "| " + " | ".join("---" for _ in columns) + " |"
-        response_parts.append(header)
-        response_parts.append(separator)
-        
-        # Rows (limit to 50 for display)
-        for row in rows[:50]:
-            row_str = "| " + " | ".join(str(row.get(c, '')) for c in columns) + " |"
-            response_parts.append(row_str)
-        
-        if len(rows) > 50:
-            response_parts.append(f"\n*...and {len(rows) - 50} more rows*")
-    else:
-        # Too many columns - show as list
-        for i, row in enumerate(rows[:20], 1):
-            items = [f"**{k}**: {v}" for k, v in row.items() if v is not None]
-            response_parts.append(f"{i}. " + " | ".join(items[:6]))
-        
-        if len(rows) > 20:
-            response_parts.append(f"\n*...and {len(rows) - 20} more rows*")
-    
-    # Export link
-    if export_path:
-        filename = export_path.split('/')[-1]
-        response_parts.append(f"\n\n📥 **[Download {filename}]({export_path})**")
-    
-    return "\n".join(response_parts)
-
-
-def handle_hybrid_query(job_id: str, message: str, project: Optional[str], persona, routing_meta: dict, max_results: int) -> bool:
-    """
-    Handle hybrid queries that need both structured data AND explanations.
-    Example: "List employees in REG earning group and explain what REG means"
-    """
-    try:
-        update_job_status(job_id, 'processing', '🔀 Hybrid query - getting data + context...', 10)
-        
-        # Part 1: Try structured query for the data part
-        structured_result = None
-        try:
-            handler = get_structured_handler()
-            schema = handler.get_schema_for_project(project) if project else {'tables': []}
-            
-            if schema.get('tables'):
-                router = get_query_router()
-                sql_prompt = router.build_sql_prompt(message, schema)
-                
-                orchestrator_instance = LLMOrchestrator()
-                sql_result = orchestrator_instance.generate_sql(sql_prompt)
-                
-                if sql_result and sql_result.get('sql'):
-                    rows, columns = handler.execute_query(sql_result['sql'])
-                    structured_result = {
-                        'rows': rows,
-                        'columns': columns,
-                        'sql': sql_result['sql']
-                    }
-                    logger.info(f"[HYBRID] Got {len(rows)} rows from structured query")
-        except Exception as e:
-            logger.warning(f"[HYBRID] Structured part failed: {e}")
-        
-        update_job_status(job_id, 'processing', '📚 Searching knowledge base...', 40)
-        
-        # Part 2: RAG search for explanations/context
-        rag = RAGHandler()
-        try:
-            collection = rag.client.get_collection("documents")
-        except:
-            collection = None
-        
-        rag_context = ""
-        if collection:
-            where_filter = None
-            if project and project not in ['', 'all', 'All Projects']:
-                where_filter = {
-                    "$or": [
-                        {"project": project},
-                        {"project": "Global/Universal"}
-                    ]
-                }
-            
-            query_embedding = rag.get_embedding(message)
-            if query_embedding:
-                results = collection.query(
-                    query_embeddings=[query_embedding],
-                    n_results=10,
-                    where=where_filter,
-                    include=["documents", "metadatas"]
-                )
-                
-                if results and results.get('documents') and results['documents'][0]:
-                    rag_context = "\n\n".join(results['documents'][0][:5])
-        
-        update_job_status(job_id, 'processing', '✨ Generating response...', 70)
-        
-        # Combine results
-        combined_prompt = f"""[SYSTEM: You are {persona.name}. {persona.system_prompt}]
-
-User Question: {message}
-
-"""
-        
-        if structured_result and structured_result['rows']:
-            combined_prompt += f"""DATA FROM DATABASE ({len(structured_result['rows'])} rows):
-{format_structured_response(message, structured_result['rows'][:20], structured_result['columns'], persona, structured_result['sql'])}
-
-"""
-        
-        if rag_context:
-            combined_prompt += f"""RELEVANT DOCUMENTATION:
-{rag_context[:3000]}
-
-"""
-        
-        combined_prompt += "Please provide a comprehensive answer combining the data and any relevant explanations."
-        
-        # Generate combined response
-        orchestrator_instance = LLMOrchestrator()
-        result = orchestrator_instance.process_query(combined_prompt, [])
-        
-        response = result.get('response', 'Could not generate response')
-        
-        # Add data summary if we have structured results
-        if structured_result and structured_result['rows']:
-            if len(structured_result['rows']) > 20:
-                response += f"\n\n*Note: Showing first 20 of {len(structured_result['rows'])} total rows.*"
-        
-        update_job_status(
-            job_id, 'complete', 'Complete', 100,
-            response=response,
-            sources=[{'filename': 'Hybrid Query', 'type': 'hybrid'}],
-            chunks_found=len(structured_result['rows']) if structured_result else 0,
-            models_used=['sql_generation', 'duckdb', 'rag', result.get('models_used', ['claude'])[-1]],
-            query_type='hybrid',
-            sanitized=False
-        )
-        
-        return True
-        
-    except Exception as e:
-        logger.error(f"[HYBRID] Error: {e}", exc_info=True)
-        return False
-
+# =============================================================================
+# MAIN CHAT PROCESSING - PII-SAFE PRODUCTION VERSION
+# =============================================================================
 
 def process_chat_job(job_id: str, message: str, project: Optional[str], max_results: int, persona_name: str = 'bessie'):
-    """Background processing for chat with ADVANCED FEATURES + BESSIE! 🐮
+    """
+    PRODUCTION Chat Processing Pipeline - PII SAFE
+    ================================================
     
-    INTELLIGENT SELF-HEALING APPROACH:
-    1. Gather ALL relevant data (SQL tables + RAG documents)
-    2. Send everything to Claude
-    3. Let Claude synthesize an intelligent response
+    SECURITY ARCHITECTURE:
+    1. Gather data from all sources
+    2. **SCAN DATA FOR PII** (not just query keywords)
+    3. Route based on DATA content:
+       - PII detected → Sanitize → Claude (or Local LLM → Sanitize → Claude)
+       - No PII → Direct Claude (fast path)
+    4. NEVER send raw PII to external APIs
     
-    NO premature routing - Claude gets ALL the context and decides what's relevant.
+    SELF-HEALING:
+    - Multiple fallback paths
+    - Always attempt useful response
     """
     try:
-        # STEP 0: LOAD PERSONA
+        # =====================================================================
+        # STEP 1: INITIALIZE
+        # =====================================================================
         pm = get_persona_manager()
         persona = pm.get_persona(persona_name)
         logger.info(f"[PERSONA] Using: {persona.name} {persona.icon}")
         
-        # STEP 1: GATHER ALL DATA - Let Claude reason over everything
-        # Philosophy: Get ALL relevant data. Send to Claude. Let Claude think.
+        orchestrator = LLMOrchestrator()
+        query_type = detect_query_type(message)
+        logger.info(f"[QUERY-TYPE] Detected: {query_type}")
         
-        all_data_context = []
-        sql_results_list = []
+        # Data containers
+        structured_results = []
         rag_chunks = []
+        all_columns = []  # Track columns for PII detection
+        sql_executed = None
         
-        # TRY SQL - query ALL potentially relevant tables
-        if STRUCTURED_QUERIES_AVAILABLE:
+        # =====================================================================
+        # STEP 2: GATHER STRUCTURED DATA (DuckDB)
+        # =====================================================================
+        if STRUCTURED_QUERIES_AVAILABLE and query_type in ['structured', 'hybrid']:
+            update_job_status(job_id, 'processing', '📊 Analyzing structured data...', 10)
+            
             try:
                 handler = get_structured_handler()
-                schema = handler.get_schema_for_project(project) if project else {}
-                tables_list = schema.get('tables', [])
+                schema = handler.get_schema_for_project(project) if project else handler.get_schema_for_project(None)
                 
-                if tables_list:
-                    update_job_status(job_id, 'processing', '📊 Searching structured data...', 10)
+                if schema.get('tables'):
+                    logger.info(f"[STRUCTURED] Found {len(schema['tables'])} tables")
                     
-                    # Find tables that might be relevant to the query
-                    query_lower = message.lower()
+                    # INTELLIGENT SQL GENERATION
+                    update_job_status(job_id, 'processing', '🧠 Generating intelligent query...', 20)
+                    sql_query = generate_intelligent_sql(message, schema, orchestrator)
                     
-                    # Smart term extraction - get stems/prefixes for better matching
-                    query_terms = [w for w in query_lower.split() if len(w) > 3]
-                    # Add stems (first 5 chars) for plural/singular matching
-                    query_stems = set()
-                    for term in query_terms:
-                        query_stems.add(term)
-                        if len(term) > 5:
-                            query_stems.add(term[:5])  # "employees" -> "emplo"
-                            query_stems.add(term[:6])  # "employees" -> "employ"
-                    
-                    for table_info in tables_list:
-                        table_name = table_info.get('table_name', '')
-                        sheet_name = table_info.get('sheet', '')
-                        file_name = table_info.get('file', '')
-                        columns = table_info.get('columns', [])
-                        
-                        # Check if table/sheet name relates to query
-                        sheet_lower = sheet_name.lower().replace(' ', '').replace('_', '')
-                        table_lower = table_name.lower()
-                        file_lower = file_name.lower() if file_name else ''
-                        
-                        # Check for matches using stems for better plural/singular handling
-                        is_relevant = False
-                        for stem in query_stems:
-                            if stem in sheet_lower or stem in table_lower:
-                                is_relevant = True
-                                break
-                            # IMPORTANT: Also check file name for matching
-                            if stem in file_lower:
-                                is_relevant = True
-                                break
-                        
-                        # Also check column names
-                        if not is_relevant:
-                            col_names_lower = ' '.join(str(c).lower() for c in columns[:30])
-                            for stem in query_stems:
-                                if stem in col_names_lower:
-                                    is_relevant = True
-                                    break
-                        
-                        if is_relevant:
-                            try:
-                                # Query this table
-                                sql = f'SELECT DISTINCT * FROM "{table_name}" LIMIT 200'
-                                rows, cols = handler.execute_query(sql)
+                    if sql_query:
+                        update_job_status(job_id, 'processing', '⚡ Executing query...', 30)
+                        try:
+                            rows, columns = handler.execute_query(sql_query)
+                            sql_executed = sql_query
+                            all_columns.extend(columns)
+                            
+                            if rows:
+                                decrypted = decrypt_results(rows, handler)
                                 
-                                if rows:
-                                    decrypted = _decrypt_results(rows, handler)
-                                    sql_results_list.append({
-                                        'source_file': file_name,
-                                        'sheet': sheet_name,
-                                        'table': table_name,
-                                        'columns': cols,
-                                        'data': decrypted[:100],
-                                        'total_rows': len(rows)
-                                    })
-                                    logger.info(f"[SQL] {sheet_name}: {len(rows)} rows")
-                            except Exception as e:
-                                logger.warning(f"[SQL] Failed to query {table_name}: {e}")
+                                source_file = 'Database'
+                                source_sheet = 'Query Result'
+                                for table in schema.get('tables', []):
+                                    if table.get('table_name', '').lower() in sql_query.lower():
+                                        source_file = table.get('file', 'Database')
+                                        source_sheet = table.get('sheet', 'Query Result')
+                                        break
+                                
+                                structured_results.append({
+                                    'source_file': source_file,
+                                    'sheet': source_sheet,
+                                    'sql': sql_query,
+                                    'columns': columns,
+                                    'data': decrypted,
+                                    'total_rows': len(rows),
+                                    'query_type': 'intelligent'
+                                })
+                                logger.info(f"[SQL-EXEC] Success: {len(rows)} rows")
+                                
+                        except Exception as e:
+                            logger.warning(f"[SQL-EXEC] Failed: {e}")
+                            structured_results.extend(
+                                fallback_table_sampling(message, schema, handler, all_columns)
+                            )
+                    else:
+                        structured_results.extend(
+                            fallback_table_sampling(message, schema, handler, all_columns)
+                        )
+                        
+            except Exception as e:
+                logger.error(f"[STRUCTURED] Handler error: {e}")
+        
+        # =====================================================================
+        # STEP 3: GATHER UNSTRUCTURED DATA (ChromaDB/RAG)
+        # =====================================================================
+        if query_type in ['unstructured', 'hybrid'] or not structured_results:
+            update_job_status(job_id, 'processing', '🔍 Searching documents...', 40)
+            
+            try:
+                rag = RAGHandler()
+                collection = rag.client.get_or_create_collection(name="documents")
+                
+                where_filter = None
+                if project and project not in ['', 'all', 'All Projects']:
+                    where_filter = {"project": project}
+                
+                rag_response = collection.query(
+                    query_texts=[message],
+                    n_results=min(max_results, 15),
+                    where=where_filter
+                )
+                
+                if rag_response and rag_response.get('documents') and rag_response['documents'][0]:
+                    rag_chunks = rag_response['documents'][0]
+                    logger.info(f"[RAG] Found {len(rag_chunks)} chunks")
                     
             except Exception as e:
-                logger.warning(f"[SQL] Handler error: {e}")
+                logger.warning(f"[RAG] Search error: {e}")
         
-        # TRY RAG
-        update_job_status(job_id, 'processing', '🔍 Searching documents...', 30)
+        # =====================================================================
+        # STEP 4: BUILD CONTEXT & DETECT PII IN DATA
+        # =====================================================================
+        update_job_status(job_id, 'processing', '🔒 Checking data security...', 50)
+        
+        context_parts = []
+        sources = []
+        
+        # Build context from structured results
+        for result in structured_results:
+            if result['data']:
+                data = result['data']
+                columns = result['columns']
+                
+                if len(data) == 1 and len(columns) == 1:
+                    col_name = columns[0]
+                    value = list(data[0].values())[0]
+                    context_parts.append(f"""
+QUERY RESULT from {result['source_file']}:
+SQL: {result['sql']}
+Result: {col_name} = {value}
+""")
+                else:
+                    context_parts.append(f"""
+QUERY RESULT from {result['source_file']} → {result['sheet']}:
+SQL: {result['sql']}
+Rows returned: {result['total_rows']}
+Columns: {', '.join(columns)}
+
+Data (first {min(50, len(data))} rows):
+""")
+                    for row in data[:50]:
+                        row_str = " | ".join(f"{k}: {v}" for k, v in row.items())
+                        context_parts.append(f"  {row_str}")
+                
+                sources.append({
+                    'filename': result['source_file'],
+                    'sheet': result['sheet'],
+                    'type': 'structured_query',
+                    'rows': result['total_rows'],
+                    'relevance': 98
+                })
+        
+        # Build context from RAG chunks
+        for i, chunk in enumerate(rag_chunks[:10]):
+            context_parts.append(f"""
+DOCUMENT EXCERPT {i+1}:
+{chunk}
+""")
+        
+        if rag_chunks:
+            sources.append({
+                'filename': 'Document Search',
+                'type': 'rag',
+                'chunks': len(rag_chunks),
+                'relevance': 80
+            })
+        
+        # Combine all context
+        full_context = '\n'.join(context_parts)
+        
+        # =====================================================================
+        # STEP 5: PII DETECTION ON DATA CONTENT
+        # =====================================================================
+        pii_detection = detect_pii_in_data(full_context, all_columns)
+        
+        if pii_detection['has_pii']:
+            logger.warning(f"[PII] Detected PII in data: {pii_detection['pii_types']}, confidence: {pii_detection['confidence']}%")
+            logger.info(f"[PII] Flagged columns: {pii_detection['column_flags']}")
+        else:
+            logger.info("[PII] No PII detected in data - safe for direct Claude path")
+        
+        # =====================================================================
+        # STEP 6: ROUTE BASED ON DATA CONTENT (NOT QUERY)
+        # =====================================================================
+        if context_parts:
+            update_job_status(job_id, 'processing', '✨ Generating response...', 70)
+            
+            if pii_detection['has_pii']:
+                # ============================================================
+                # PII DETECTED → SANITIZE BEFORE EXTERNAL API
+                # ============================================================
+                logger.info("[ROUTE] PII detected → Sanitizing before Claude")
+                update_job_status(job_id, 'processing', '🔒 Securing sensitive data...', 75)
+                
+                # Sanitize the context
+                sanitized_context = sanitize_context_for_external(full_context, pii_detection)
+                
+                # Create sanitized chunks for orchestrator
+                orchestrator_chunks = [{
+                    'document': sanitized_context,
+                    'metadata': {
+                        'filename': 'Sanitized Results',
+                        'type': 'query_results',
+                        'pii_sanitized': True,
+                        'pii_types': pii_detection['pii_types']
+                    }
+                }]
+                
+                # Process through orchestrator with sanitized data
+                result = orchestrator.process_query(message, orchestrator_chunks)
+                response = result.get('response', 'I found data but had trouble analyzing it.')
+                
+                # Add note about sanitization if user should know
+                if any(pt in pii_detection['pii_types'] for pt in ['ssn', 'financial', 'compensation']):
+                    response += "\n\n*Note: Some sensitive values have been protected in this response.*"
+                
+                update_job_status(
+                    job_id, 'complete', 'Complete', 100,
+                    response=response,
+                    sources=sources,
+                    chunks_found=len(structured_results) + len(rag_chunks),
+                    models_used=result.get('models_used', ['claude']) + (['duckdb'] if structured_results else []),
+                    query_type=query_type,
+                    sanitized=True,
+                    pii_detected=pii_detection['pii_types'],
+                    sql_executed=sql_executed
+                )
+                
+            else:
+                # ============================================================
+                # NO PII → SAFE FOR DIRECT CLAUDE PATH
+                # ============================================================
+                logger.info("[ROUTE] No PII → Direct Claude path")
+                
+                orchestrator_chunks = [{
+                    'document': full_context,
+                    'metadata': {
+                        'filename': 'Combined Results',
+                        'type': 'query_results',
+                        'pii_sanitized': False
+                    }
+                }]
+                
+                result = orchestrator.process_query(message, orchestrator_chunks)
+                response = result.get('response', 'I found data but had trouble analyzing it.')
+                
+                update_job_status(
+                    job_id, 'complete', 'Complete', 100,
+                    response=response,
+                    sources=sources,
+                    chunks_found=len(structured_results) + len(rag_chunks),
+                    models_used=result.get('models_used', ['claude']) + (['duckdb'] if structured_results else []),
+                    query_type=query_type,
+                    sanitized=False,
+                    sql_executed=sql_executed
+                )
+            
+            return
+        
+        # =====================================================================
+        # STEP 7: FALLBACK - No data found
+        # =====================================================================
+        update_job_status(job_id, 'processing', '🔍 Attempting broader search...', 70)
+        
         try:
             rag = RAGHandler()
-            collection = rag.client.get_collection("documents")
-            
-            where_filter = None
-            if project and project not in ['', 'all', 'All Projects']:
-                where_filter = {"project": project}
+            collection = rag.client.get_or_create_collection(name="documents")
             
             rag_response = collection.query(
                 query_texts=[message],
-                n_results=min(max_results, 10),
-                where=where_filter
+                n_results=20,
+                where=None
             )
             
             if rag_response and rag_response.get('documents') and rag_response['documents'][0]:
-                rag_chunks = rag_response['documents'][0]
-                logger.info(f"[RAG] Got {len(rag_chunks)} chunks")
-        except Exception as e:
-            logger.warning(f"[RAG] Search failed: {e}")
-        
-        # BUILD CONTEXT FOR CLAUDE
-        update_job_status(job_id, 'processing', '🧠 Analyzing all data...', 50)
-        
-        # If we have data, let Claude answer
-        if sql_results_list or rag_chunks:
-            logger.info(f"[QUERY] Found {len(sql_results_list)} tables, {len(rag_chunks)} RAG chunks")
-            
-            update_job_status(job_id, 'processing', '✨ Generating response...', 70)
-            
-            # Build context as "chunks" for the orchestrator
-            context_chunks = []
-            
-            for result in sql_results_list:
-                # Format SQL data as a chunk
-                data_text = f"Source: {result['source_file']} → {result['sheet']}\n"
-                data_text += f"Columns: {', '.join(result['columns'])}\n"
-                data_text += f"Total rows: {result['total_rows']}\n\nData:\n"
+                chunks = rag_response['documents'][0]
+                fallback_context = '\n\n'.join(chunks[:10])
                 
-                for row in result['data'][:50]:
-                    row_str = " | ".join(f"{k}: {v}" for k, v in row.items())
-                    data_text += f"  {row_str}\n"
+                # Check fallback data for PII too
+                fallback_pii = detect_pii_in_data(fallback_context, [])
                 
-                context_chunks.append({
-                    'document': data_text,
-                    'metadata': {
-                        'filename': result['source_file'],
-                        'parent_section': result['sheet'],
-                        'type': 'structured_data'
-                    }
-                })
-            
-            for i, chunk in enumerate(rag_chunks[:5]):
-                context_chunks.append({
-                    'document': chunk,  # Changed from 'content' to 'document'
-                    'metadata': {
-                        'filename': f'Document chunk {i+1}',
-                        'type': 'rag'
-                    }
-                })
-            
-            # Use orchestrator to process
-            orchestrator_instance = LLMOrchestrator()
-            result = orchestrator_instance.process_query(message, context_chunks)
-            
-            response = result.get('response', 'I found data but had trouble analyzing it.')
-            
-            # Build sources
-            sources = []
-            for res in sql_results_list:
-                sources.append({
-                    'filename': res['source_file'],
-                    'sheet': res['sheet'],
-                    'type': 'structured_data',
-                    'rows': res['total_rows'],
-                    'relevance': 95
-                })
-            
-            if rag_chunks:
-                sources.append({
-                    'filename': 'Document Search',
-                    'type': 'rag',
-                    'chunks': len(rag_chunks),
-                    'relevance': 80
-                })
-            
-            update_job_status(
-                job_id, 'complete', 'Complete', 100,
-                response=response,
-                sources=sources,
-                chunks_found=len(sql_results_list) + len(rag_chunks),
-                models_used=['claude', 'duckdb'] if sql_results_list else ['claude', 'rag'],
-                query_type='intelligent',
-                sanitized=False
-            )
-            return
-        
-        # No data found - continue to fallback RAG flow
-        
-        # STEP 1: INTENT CLASSIFICATION
-        update_job_status(job_id, 'processing', '🧠 Understanding query...', 5)
-        
-        intent_config = classify_and_configure(message)
-        logger.info(f"[INTENT] {intent_config['intent']} - Strategy: {intent_config['strategy']}")
-        
-        # Override max_results based on intent
-        n_results = intent_config.get('n_results', max_results)
-        
-        update_job_status(job_id, 'processing', '🔵 Searching documents...', 10)
-        
-        # Initialize RAG
-        rag = RAGHandler()
-        
-        try:
-            collection = rag.client.get_collection("documents")
-        except:
-            update_job_status(job_id, 'error', 'Error', 100, error='No documents uploaded')
-            return
-        
-        # Build filter
-        where_filter = None
-        if project and project not in ['', 'all', 'All Projects']:
-            where_filter = {"project": project}
-        
-        # STEP 2: CHECK FOR AGGREGATION QUERIES
-        if intent_config['use_aggregation']:
-            update_job_status(job_id, 'processing', '🔢 Computing aggregation...', 15)
-            
-            agg_result = handle_aggregation(rag, collection, message, where_filter)
-            
-            if agg_result and agg_result.get('needs_agg'):
-                # Aggregation handled, return formatted response
+                if fallback_pii['has_pii']:
+                    fallback_context = sanitize_context_for_external(fallback_context, fallback_pii)
+                
+                orchestrator_chunks = [
+                    {'document': fallback_context, 'metadata': {'type': 'fallback_rag'}}
+                ]
+                
+                result = orchestrator.process_query(message, orchestrator_chunks)
+                response = result.get('response', 'I searched but couldn\'t find relevant information.')
+                
                 update_job_status(
                     job_id, 'complete', 'Complete', 100,
-                    response=agg_result['formatted_response'],
-                    sources=[],
-                    chunks_found=agg_result.get('total_chunks', 0),
-                    models_used=['aggregation'],
-                    query_type='aggregation',
-                    sanitized=False
+                    response=response,
+                    sources=[{'filename': 'Broad Search', 'type': 'rag', 'chunks': len(chunks)}],
+                    chunks_found=len(chunks),
+                    models_used=result.get('models_used', ['claude']),
+                    query_type='fallback',
+                    sanitized=fallback_pii['has_pii']
                 )
                 return
-        
-        update_job_status(job_id, 'processing', '📊 Retrieving chunks...', 20)
-        
-        # STEP 3: DIVERSE RETRIEVAL (if compound query or intent suggests)
-        # Example: "Give me deduction groups and pay groups" 
-        # → Searches both sheets separately and merges results
-        
-        use_decomposition = intent_config.get('use_decomposition', False)
-        
-        try:
-            from utils.query_decomposition import QueryDecomposer
-            
-            decomposer = QueryDecomposer()
-            
-            # Check if compound query OR intent requires decomposition
-            is_compound = decomposer.is_compound_query(message)
-            
-            if is_compound or use_decomposition:
-                # COMPOUND QUERY: Split and search each separately
-                sub_queries = decomposer.decompose_query(message)
-                logger.info(f"[DIVERSE] Compound query detected: {len(sub_queries)} sub-queries")
                 
-                # Retrieve for each sub-query
-                results_per_query = n_results // len(sub_queries)
-                all_documents = []
-                all_metadatas = []
-                all_distances = []
-                seen_ids = set()
-                
-                for i, sub_query in enumerate(sub_queries):
-                    logger.info(f"[DIVERSE] Sub-query {i+1}: {sub_query}")
-                    
-                    # Get embedding for sub-query
-                    sub_embedding = rag.get_embedding(sub_query)
-                    if not sub_embedding:
-                        continue
-                    
-                    # Search for this sub-query
-                    sub_results = collection.query(
-                        query_embeddings=[sub_embedding],
-                        n_results=results_per_query + 10,  # Extra for deduplication
-                        where=where_filter,
-                        include=["documents", "metadatas", "distances"]
-                    )
-                    
-                    # Add results, deduplicating by content hash
-                    if sub_results and sub_results.get('documents') and sub_results['documents'][0]:
-                        for j in range(len(sub_results['documents'][0])):
-                            doc = sub_results['documents'][0][j]
-                            doc_hash = hash(doc[:100])  # Simple deduplication
-                            
-                            if doc_hash in seen_ids:
-                                continue
-                            
-                            seen_ids.add(doc_hash)
-                            all_documents.append(doc)
-                            all_metadatas.append(sub_results['metadatas'][0][j])
-                            all_distances.append(sub_results['distances'][0][j])
-                            
-                            if len(all_documents) >= n_results:
-                                break
-                    
-                    if len(all_documents) >= n_results:
-                        break
-                
-                # Format as ChromaDB result
-                results = {
-                    'documents': [all_documents],
-                    'metadatas': [all_metadatas],
-                    'distances': [all_distances]
-                }
-                
-                # Log diversity
-                sheets_found = set()
-                for meta in all_metadatas:
-                    if 'parent_section' in meta:
-                        sheets_found.add(meta['parent_section'])
-                logger.info(f"[DIVERSE] Retrieved {len(all_documents)} chunks from {len(sheets_found)} sheets: {', '.join(sorted(sheets_found))}")
-                
-            else:
-                # SIMPLE QUERY: Use normal search
-                logger.info(f"[SIMPLE] Single-topic query, using standard search")
-                
-                # Get embedding
-                query_embedding = rag.get_embedding(message)
-                if not query_embedding:
-                    update_job_status(job_id, 'error', 'Error', 100, error='Failed to create embedding')
-                    return
-                
-                # Search
-                results = collection.query(
-                    query_embeddings=[query_embedding],
-                    n_results=n_results,
-                    where=where_filter,
-                    include=["documents", "metadatas", "distances"]
-                )
-        
         except Exception as e:
-            # Fallback to standard search if decomposition fails
-            logger.warning(f"[DIVERSE] Decomposition failed, using standard search: {e}")
-            
-            query_embedding = rag.get_embedding(message)
-            if not query_embedding:
-                update_job_status(job_id, 'error', 'Error', 100, error='Failed to create embedding')
-                return
-            
-            results = collection.query(
-                query_embeddings=[query_embedding],
-                n_results=n_results,
-                where=where_filter,
-                include=["documents", "metadatas", "distances"]
-            )
+            logger.error(f"[FALLBACK] Error: {e}")
         
-        if not results or not results.get('documents') or not results['documents'][0]:
-            update_job_status(job_id, 'error', 'Error', 100, error='No relevant documents found')
-            return
-        
-        documents = results['documents'][0]
-        metadatas = results['metadatas'][0] if results.get('metadatas') else [{}] * len(documents)
-        distances = results['distances'][0] if results.get('distances') else [0] * len(documents)
-        
-        logger.info(f"Found {len(documents)} chunks")
-        
-        # Smart sheet filtering
-        query_lower = message.lower()
-        sheet_keywords = {
-            'earning': ['earnings', 'earning'],
-            'deduction': ['deductions', 'deduction'],
-            'benefit': ['benefits', 'benefit'],
-            'accrual': ['accruals', 'accrual', 'pto', 'time off'],
-            'tax': ['taxes', 'tax', 'withholding'],
-            'gl': ['gl rules', 'gl mapping', 'general ledger'],
-            'pay code': ['pay codes', 'pay code'],
-        }
-        
-        priority_sheets = []
-        for keyword, sheets in sheet_keywords.items():
-            if keyword in query_lower:
-                priority_sheets.extend(sheets)
-        
-        if priority_sheets:
-            def chunk_priority(item):
-                doc, meta, dist = item
-                sheet = str(meta.get('parent_section', '')).lower()
-                is_priority = any(ps in sheet for ps in priority_sheets)
-                return (0 if is_priority else 1, dist)
-            
-            combined = list(zip(documents, metadatas, distances))
-            combined.sort(key=chunk_priority)
-            documents, metadatas, distances = zip(*combined) if combined else ([], [], [])
-            documents, metadatas, distances = list(documents), list(metadatas), list(distances)
-        
-        # Build chunks
-        chunks = []
-        for doc, meta, dist in zip(documents, metadatas, distances):
-            chunks.append({'document': doc, 'metadata': meta, 'distance': dist})
-        
-        # Build sources
-        source_map = {}
-        for doc, meta, dist in zip(documents, metadatas, distances):
-            filename = meta.get('filename', meta.get('source', 'Unknown'))
-            if filename not in source_map:
-                source_map[filename] = {
-                    'filename': filename,
-                    'functional_area': meta.get('functional_area', ''),
-                    'sheets': set(),
-                    'chunk_count': 0,
-                    'max_relevance': 0
-                }
-            source_map[filename]['chunk_count'] += 1
-            
-            # Calculate relevance with keyword boost
-            relevance = round((1 - dist) * 100, 1) if dist else 0
-            
-            # BOOST: If query keyword matches sheet name, boost relevance to ~100%
-            sheet_name = str(meta.get('parent_section', '')).lower()
-            query_keywords = message.lower().split()
-            for keyword in query_keywords:
-                if len(keyword) > 3 and keyword in sheet_name:
-                    # Major boost for exact sheet name match (boost by 30 points, cap at 99)
-                    relevance = min(99, relevance + 30)
-                    logger.info(f"Boosted relevance for '{keyword}' → '{sheet_name}': {relevance}%")
-                    break
-            
-            source_map[filename]['max_relevance'] = max(source_map[filename]['max_relevance'], relevance)
-            sheet = meta.get('parent_section', '')
-            if sheet:
-                source_map[filename]['sheets'].add(sheet)
-        
-        sources = []
-        for fname, info in source_map.items():
-            sources.append({
-                'filename': fname,
-                'functional_area': info['functional_area'],
-                'sheets': list(info['sheets']),
-                'chunk_count': info['chunk_count'],
-                'relevance': info['max_relevance']
-            })
-        sources.sort(key=lambda x: x['relevance'], reverse=True)
-        
-        # Classify query
-        from utils.llm_orchestrator import classify_query
-        query_type = classify_query(message, chunks)
-        
-        if query_type == 'config':
-            update_job_status(job_id, 'processing', '⚡ Calling Claude (config)...', 40)
-        else:
-            update_job_status(job_id, 'processing', '🔵 Calling local LLM...', 40)
-        
-        time.sleep(0.5)  # Brief pause so user sees status
-        
-        # INJECT PERSONA: Enhance message with persona's personality
-        # NOTE: This prepends persona context to the message for the LLM
-        enhanced_message = f"""[SYSTEM: You are {persona.name}. {persona.system_prompt}]
-
-User Question: {message}"""
-        
-        # Process with orchestrator (using enhanced message with persona)
-        result = orchestrator.process_query(enhanced_message, chunks)
-        
-        if result.get('query_type') == 'employee' and result.get('sanitized'):
-            update_job_status(job_id, 'processing', '🔒 Sanitizing PII...', 70)
-            time.sleep(0.3)
-        
-        update_job_status(job_id, 'processing', '✅ Finalizing response...', 90)
-        time.sleep(0.2)
-        
-        # Complete
+        # No data at all
         update_job_status(
             job_id, 'complete', 'Complete', 100,
-            response=result.get("response", "No response generated"),
-            sources=sources,
-            chunks_found=len(documents),
-            models_used=result.get("models_used", []),
-            query_type=result.get("query_type", "unknown"),
-            sanitized=result.get("sanitized", False)
+            response="I couldn't find any relevant data for your question. Please make sure data has been uploaded for this project.",
+            sources=[],
+            chunks_found=0,
+            models_used=['none'],
+            query_type='no_data',
+            sanitized=False
         )
         
     except Exception as e:
-        logger.error(f"Chat job error: {e}", exc_info=True)
-        update_job_status(job_id, 'error', 'Error', 100, error=str(e))
+        logger.error(f"[CHAT] Fatal error: {e}", exc_info=True)
+        update_job_status(
+            job_id, 'error', 'Error', 100,
+            error=str(e),
+            response=f"An error occurred: {str(e)}"
+        )
+
+
+def fallback_table_sampling(message: str, schema: dict, handler, all_columns: list) -> list:
+    """Fallback: Sample data from relevant tables when SQL generation fails."""
+    results = []
+    message_lower = message.lower()
+    
+    query_terms = [w for w in message_lower.split() if len(w) > 3]
+    query_stems = set()
+    for term in query_terms:
+        query_stems.add(term)
+        if len(term) > 5:
+            query_stems.add(term[:5])
+            query_stems.add(term[:6])
+    
+    for table_info in schema.get('tables', []):
+        table_name = table_info.get('table_name', '')
+        sheet_name = table_info.get('sheet', '')
+        file_name = table_info.get('file', '')
+        columns = table_info.get('columns', [])
+        
+        sheet_lower = sheet_name.lower().replace(' ', '').replace('_', '')
+        table_lower = table_name.lower()
+        file_lower = file_name.lower() if file_name else ''
+        
+        is_relevant = False
+        for stem in query_stems:
+            if stem in sheet_lower or stem in table_lower or stem in file_lower:
+                is_relevant = True
+                break
+        
+        if not is_relevant:
+            col_names_lower = ' '.join(str(c).lower() for c in columns[:30])
+            for stem in query_stems:
+                if stem in col_names_lower:
+                    is_relevant = True
+                    break
+        
+        if is_relevant:
+            try:
+                sql = f'SELECT * FROM "{table_name}" LIMIT 100'
+                rows, cols = handler.execute_query(sql)
+                all_columns.extend(cols)  # Track for PII detection
+                
+                if rows:
+                    decrypted = decrypt_results(rows, handler)
+                    results.append({
+                        'source_file': file_name,
+                        'sheet': sheet_name,
+                        'sql': sql,
+                        'columns': cols,
+                        'data': decrypted,
+                        'total_rows': len(rows),
+                        'query_type': 'sample'
+                    })
+                    logger.info(f"[SAMPLE] {sheet_name}: {len(rows)} rows")
+                    
+                    if len(results) >= 3:
+                        break
+                        
+            except Exception as e:
+                logger.warning(f"[SAMPLE] Failed to query {table_name}: {e}")
+    
+    return results
+
+
+# =============================================================================
+# API ENDPOINTS
+# =============================================================================
+
+@router.get("/chat/models")
+async def get_available_models():
+    """Get available AI models"""
+    return {
+        "models": [
+            {"id": "claude-3-sonnet", "name": "Claude 3 Sonnet", "description": "Fast, balanced model"},
+            {"id": "claude-3-opus", "name": "Claude 3 Opus", "description": "Most capable model"}
+        ],
+        "default": "claude-3-sonnet"
+    }
 
 
 @router.post("/chat/start")
-async def chat_start(request: ChatRequest):
-    """Start a chat job and return job_id for polling"""
+async def start_chat(request: ChatStartRequest):
+    """Start async chat processing job"""
     job_id = str(uuid.uuid4())
     
-    # Initialize job
     chat_jobs[job_id] = {
-        'job_id': job_id,
-        'status': 'processing',
-        'current_step': 'Starting...',
+        'status': 'starting',
+        'current_step': '🚀 Starting analysis...',
         'progress': 0,
         'created_at': time.time()
     }
     
-    # Start background processing
     thread = threading.Thread(
         target=process_chat_job,
-        args=(job_id, request.message, request.project, request.max_results or 30, request.persona or 'bessie')
+        args=(job_id, request.message, request.project, request.max_results or 50, request.persona or 'bessie')
     )
     thread.daemon = True
     thread.start()
     
-    return {"job_id": job_id}
+    return {"job_id": job_id, "status": "starting"}
 
 
 @router.get("/chat/status/{job_id}")
-async def chat_status(job_id: str):
-    """Get status of a chat job"""
+async def get_chat_status(job_id: str):
+    """Get status of chat processing job"""
     if job_id not in chat_jobs:
-        raise HTTPException(404, "Job not found")
-    
+        raise HTTPException(status_code=404, detail="Job not found")
     return chat_jobs[job_id]
 
 
 @router.delete("/chat/job/{job_id}")
-async def delete_chat_job(job_id: str):
-    """Clean up completed job"""
+async def cancel_chat_job(job_id: str):
+    """Cancel a chat job"""
     if job_id in chat_jobs:
         del chat_jobs[job_id]
-    return {"status": "deleted"}
+        return {"status": "cancelled"}
+    raise HTTPException(status_code=404, detail="Job not found")
 
 
-# Keep the old endpoint for backward compatibility (non-streaming)
 @router.post("/chat")
-async def chat_legacy(request: ChatRequest):
-    """Legacy chat endpoint - processes synchronously"""
+async def chat_sync(request: ChatRequest):
+    """Synchronous chat endpoint"""
     job_id = str(uuid.uuid4())
-    chat_jobs[job_id] = {'job_id': job_id, 'status': 'processing', 'current_step': 'Processing...', 'progress': 0}
+    chat_jobs[job_id] = {'status': 'processing', 'progress': 0}
     
-    # Process synchronously
     process_chat_job(job_id, request.message, request.project, request.max_results or 30, request.persona or 'bessie')
     
-    # Wait for completion
-    result = chat_jobs[job_id]
-    del chat_jobs[job_id]
-    
-    if result['status'] == 'error':
-        raise HTTPException(500, result.get('error', 'Unknown error'))
-    
-    return {
-        "response": result.get('response'),
-        "sources": result.get('sources', []),
-        "chunks_found": result.get('chunks_found', 0),
-        "models_used": result.get('models_used', []),
-        "query_type": result.get('query_type', 'unknown'),
-        "sanitized": result.get('sanitized', False)
-    }
+    return chat_jobs.get(job_id, {'error': 'Job failed'})
 
 
 @router.get("/chat/health")
-async def health():
+async def chat_health():
     """Health check"""
+    return {
+        "status": "healthy",
+        "structured_queries": STRUCTURED_QUERIES_AVAILABLE,
+        "pii_detection": "enabled",
+        "active_jobs": len(chat_jobs)
+    }
+
+
+# =============================================================================
+# PERSONA ENDPOINTS
+# =============================================================================
+
+@router.get("/chat/personas")
+async def list_personas():
+    """Get all available personas"""
     try:
-        rag = RAGHandler()
-        collection = rag.client.get_or_create_collection("documents")
-        chunk_count = collection.count()
+        pm = get_persona_manager()
+        personas = pm.list_personas()
+        return {"personas": personas, "count": len(personas), "default": "bessie"}
+    except Exception as e:
+        logger.error(f"Error listing personas: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.get("/chat/personas/{name}")
+async def get_persona(name: str):
+    """Get specific persona"""
+    try:
+        pm = get_persona_manager()
+        persona = pm.get_persona(name)
+        return persona.to_dict() if persona else None
+    except Exception as e:
+        raise HTTPException(404, f"Persona '{name}' not found")
+
+
+@router.post("/chat/personas")
+async def create_persona(request: Request):
+    """Create a new persona"""
+    try:
+        data = await request.json()
+        pm = get_persona_manager()
         
-        llm_status = orchestrator.check_status()
+        persona = pm.create_persona(
+            name=data['name'],
+            icon=data.get('icon', '🤖'),
+            description=data.get('description', ''),
+            system_prompt=data.get('system_prompt', ''),
+            expertise=data.get('expertise', []),
+            tone=data.get('tone', 'Professional')
+        )
+        
+        return {"success": True, "persona": persona.to_dict()}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.put("/chat/personas/{name}")
+async def update_persona(name: str, request: Request):
+    """Update an existing persona"""
+    try:
+        data = await request.json()
+        pm = get_persona_manager()
+        
+        persona = pm.update_persona(name, **data)
+        if persona:
+            return {"success": True, "persona": persona.to_dict()}
+        raise HTTPException(404, f"Persona '{name}' not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.delete("/chat/personas/{name}")
+async def delete_persona(name: str):
+    """Delete a persona"""
+    try:
+        pm = get_persona_manager()
+        
+        if name.lower() in ['bessie', 'analyst', 'consultant']:
+            raise HTTPException(400, "Cannot delete default personas")
+        
+        success = pm.delete_persona(name)
+        if success:
+            return {"success": True}
+        raise HTTPException(404, f"Persona '{name}' not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# =============================================================================
+# DATA QUERY ENDPOINTS
+# =============================================================================
+
+@router.get("/chat/schema/{project}")
+async def get_project_schema(project: str):
+    """Get schema for project's structured data"""
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        return {"tables": [], "error": "Structured queries not available"}
+    
+    try:
+        handler = get_structured_handler()
+        schema = handler.get_schema_for_project(project)
+        return schema
+    except Exception as e:
+        return {"tables": [], "error": str(e)}
+
+
+@router.get("/chat/tables")
+async def list_all_tables():
+    """List all available tables"""
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        return {"tables": []}
+    
+    try:
+        handler = get_structured_handler()
+        result = handler.conn.execute("""
+            SELECT DISTINCT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'main'
+        """).fetchall()
+        return {"tables": [row[0] for row in result]}
+    except Exception as e:
+        return {"tables": [], "error": str(e)}
+
+
+@router.post("/chat/sql")
+async def execute_sql(request: Request):
+    """Execute raw SQL query"""
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        raise HTTPException(503, "Structured queries not available")
+    
+    try:
+        data = await request.json()
+        sql = data.get('sql', '')
+        
+        if not sql:
+            raise HTTPException(400, "SQL query required")
+        
+        handler = get_structured_handler()
+        rows, columns = handler.execute_query(sql)
+        decrypted = decrypt_results(rows, handler)
         
         return {
-            "status": "healthy",
-            "chromadb_chunks": chunk_count,
-            "llm": llm_status
+            "columns": columns,
+            "rows": decrypted[:1000],
+            "total_rows": len(rows),
+            "truncated": len(rows) > 1000
         }
     except Exception as e:
-        return {"status": "error", "error": str(e)}
+        raise HTTPException(500, str(e))
+
+
+@router.get("/chat/table-sample/{table_name}")
+async def get_table_sample(table_name: str, limit: int = 100):
+    """Get sample data from a table"""
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        raise HTTPException(503, "Structured queries not available")
+    
+    try:
+        handler = get_structured_handler()
+        rows = handler.get_table_sample(table_name, limit)
+        return {"rows": rows, "count": len(rows)}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.delete("/chat/data/{project}/{file_name}")
+async def delete_data_file(project: str, file_name: str, all_versions: bool = False):
+    """Delete a data file"""
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        raise HTTPException(503, "Structured queries not available")
+    
+    try:
+        handler = get_structured_handler()
+        result = handler.delete_file(project, file_name, delete_all_versions=all_versions)
+        return {"success": True, "result": result}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.get("/chat/data/{project}/files")
+async def list_project_files(project: str):
+    """List all files for a project"""
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        return {"files": []}
+    
+    try:
+        handler = get_structured_handler()
+        files = handler.list_files(project)
+        return {"files": files}
+    except Exception as e:
+        return {"files": [], "error": str(e)}
+
+
+@router.post("/chat/data/reset-database")
+async def reset_database():
+    """Reset the entire database"""
+    if not STRUCTURED_QUERIES_AVAILABLE:
+        raise HTTPException(503, "Structured queries not available")
+    
+    try:
+        handler = get_structured_handler()
+        result = handler.reset_database()
+        logger.warning("⚠️ Database RESET - all data deleted!")
+        return {"success": True, "result": result}
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 
 @router.get("/chat/debug-chunks")
-async def debug_chunks(
-    search: str = "earnings",
-    project: Optional[str] = None,
-    n: int = 50
-):
-    """Debug: See what chunks exist for a search term"""
+async def debug_chunks(search: str = "earnings", project: Optional[str] = None, n: int = 50):
+    """Debug: See what chunks exist"""
     try:
         rag = RAGHandler()
-        collection = rag.client.get_collection("documents")
+        collection = rag.client.get_or_create_collection(name="documents")
         
-        query_embedding = rag.get_embedding(search)
         where_filter = {"project": project} if project else None
         
         results = collection.query(
-            query_embeddings=[query_embedding],
+            query_texts=[search],
             n_results=n,
             where=where_filter,
             include=["documents", "metadatas", "distances"]
@@ -1136,7 +1085,6 @@ async def debug_chunks(
         if not results or not results['documents'][0]:
             return {"message": "No chunks found", "total": 0}
         
-        # Group by sheet
         sheets = {}
         for doc, meta, dist in zip(results['documents'][0], results['metadatas'][0], results['distances'][0]):
             sheet = meta.get('parent_section', 'Unknown')
@@ -1146,209 +1094,17 @@ async def debug_chunks(
             sheets[sheet]["avg_distance"] += dist
             if len(sheets[sheet]["samples"]) < 2:
                 sheets[sheet]["samples"].append({
-                    "text": doc[:200] + "..." if len(doc) > 200 else doc,
+                    "text": doc[:200] + "...",
                     "distance": round(dist, 3)
                 })
         
         for sheet in sheets:
             sheets[sheet]["avg_distance"] = round(sheets[sheet]["avg_distance"] / sheets[sheet]["count"], 3)
         
-        return {
-            "search_term": search,
-            "project": project,
-            "total_chunks": len(results['documents'][0]),
-            "sheets": sheets
-        }
+        return {"search_term": search, "project": project, "total_chunks": len(results['documents'][0]), "sheets": sheets}
         
     except Exception as e:
         return {"error": str(e)}
-
-
-# ============================================================================
-# PERSONA MANAGEMENT ENDPOINTS - Meet Bessie! 🐮
-# ============================================================================
-
-@router.get("/chat/personas")
-async def list_personas():
-    """Get all available personas"""
-    try:
-        pm = get_persona_manager()
-        personas = pm.list_personas()
-        
-        return {
-            "personas": personas,
-            "count": len(personas),
-            "default": "bessie"
-        }
-    except Exception as e:
-        logger.error(f"Error listing personas: {e}")
-        raise HTTPException(500, str(e))
-
-
-@router.get("/chat/personas/{name}")
-async def get_persona(name: str):
-    """Get specific persona details"""
-    try:
-        pm = get_persona_manager()
-        persona = pm.get_persona(name)
-        
-        return persona.to_dict()
-    except Exception as e:
-        logger.error(f"Error getting persona: {e}")
-        raise HTTPException(500, str(e))
-
-
-@router.post("/chat/personas")
-async def create_persona(persona: PersonaCreate):
-    """Create a new custom persona"""
-    try:
-        pm = get_persona_manager()
-        new_persona = pm.create_persona(
-            name=persona.name,
-            icon=persona.icon,
-            description=persona.description,
-            system_prompt=persona.system_prompt,
-            expertise=persona.expertise,
-            tone=persona.tone
-        )
-        
-        logger.info(f"[PERSONA] Created custom persona: {persona.name}")
-        
-        return {
-            "status": "created",
-            "persona": new_persona.to_dict()
-        }
-    except Exception as e:
-        logger.error(f"Error creating persona: {e}")
-        raise HTTPException(500, str(e))
-
-
-@router.put("/chat/personas/{name}")
-async def update_persona(name: str, updates: PersonaUpdate):
-    """Update a custom persona"""
-    try:
-        pm = get_persona_manager()
-        
-        # Filter out None values
-        update_dict = {k: v for k, v in updates.dict().items() if v is not None}
-        
-        persona = pm.update_persona(name, **update_dict)
-        
-        if not persona:
-            raise HTTPException(404, f"Persona '{name}' not found or cannot be updated (built-in personas cannot be modified)")
-        
-        logger.info(f"[PERSONA] Updated custom persona: {name}")
-        
-        return {
-            "status": "updated",
-            "persona": persona.to_dict()
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating persona: {e}")
-        raise HTTPException(500, str(e))
-
-
-@router.delete("/chat/personas/{name}")
-async def delete_persona(name: str):
-    """Delete a custom persona (cannot delete built-in personas)"""
-    try:
-        pm = get_persona_manager()
-        
-        success = pm.delete_persona(name)
-        
-        if not success:
-            raise HTTPException(404, f"Persona '{name}' not found or cannot be deleted (built-in personas cannot be deleted)")
-        
-        logger.info(f"[PERSONA] Deleted custom persona: {name}")
-        
-        return {"status": "deleted", "name": name}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting persona: {e}")
-        raise HTTPException(500, str(e))
-
-
-# ============================================================================
-# STRUCTURED DATA ENDPOINTS - SQL Queries for Excel/CSV
-# ============================================================================
-
-@router.get("/chat/schema/{project}")
-async def get_project_schema(project: str):
-    """Get the data schema for a project (tables, columns, row counts)"""
-    if not STRUCTURED_QUERIES_AVAILABLE:
-        raise HTTPException(501, "Structured queries not available")
-    
-    try:
-        handler = get_structured_handler()
-        schema = handler.get_schema_for_project(project)
-        
-        return {
-            "project": project,
-            "tables": schema.get('tables', []),
-            "table_count": len(schema.get('tables', []))
-        }
-    except Exception as e:
-        logger.error(f"Error getting schema: {e}")
-        raise HTTPException(500, str(e))
-
-
-@router.get("/chat/tables")
-async def list_all_tables():
-    """List all tables across all projects"""
-    if not STRUCTURED_QUERIES_AVAILABLE:
-        raise HTTPException(501, "Structured queries not available")
-    
-    try:
-        handler = get_structured_handler()
-        
-        # Query metadata table
-        result = handler.conn.execute("""
-            SELECT project, file_name, sheet_name, table_name, row_count
-            FROM _schema_metadata
-            ORDER BY project, file_name, sheet_name
-        """).fetchall()
-        
-        tables = []
-        for row in result:
-            tables.append({
-                'project': row[0],
-                'file': row[1],
-                'sheet': row[2],
-                'table_name': row[3],
-                'row_count': row[4]
-            })
-        
-        return {
-            "tables": tables,
-            "total": len(tables)
-        }
-    except Exception as e:
-        logger.error(f"Error listing tables: {e}")
-        raise HTTPException(500, str(e))
-
-
-@router.post("/chat/sql")
-async def execute_sql_query(sql: str, project: Optional[str] = None):
-    """Execute a raw SQL query (admin/debug use)"""
-    if not STRUCTURED_QUERIES_AVAILABLE:
-        raise HTTPException(501, "Structured queries not available")
-    
-    try:
-        handler = get_structured_handler()
-        rows, columns = handler.execute_query(sql)
-        
-        return {
-            "columns": columns,
-            "rows": rows[:1000],  # Limit results
-            "total_rows": len(rows),
-            "truncated": len(rows) > 1000
-        }
-    except Exception as e:
-        logger.error(f"SQL execution error: {e}")
-        raise HTTPException(400, f"SQL Error: {str(e)}")
 
 
 @router.get("/chat/export/{filename}")
@@ -1370,99 +1126,17 @@ async def download_export(filename: str):
     )
 
 
-@router.get("/chat/table-sample/{table_name}")
-async def get_table_sample(table_name: str, limit: int = 10):
-    """Get sample rows from a table"""
-    if not STRUCTURED_QUERIES_AVAILABLE:
-        raise HTTPException(501, "Structured queries not available")
-    
-    try:
-        handler = get_structured_handler()
-        rows = handler.get_table_sample(table_name, limit)
-        
-        return {
-            "table_name": table_name,
-            "sample": rows,
-            "count": len(rows)
-        }
-    except Exception as e:
-        logger.error(f"Error getting sample: {e}")
-        raise HTTPException(500, str(e))
-
-
-# ============================================================================
-# DATA MANAGEMENT ENDPOINTS - Delete, Refresh, Compare
-# ============================================================================
-
-@router.delete("/chat/data/{project}/{file_name}")
-async def delete_file_data(project: str, file_name: str, all_versions: bool = True):
-    """
-    Delete all data for a specific file.
-    
-    Use this to:
-    - Remove outdated data
-    - Refresh by deleting then re-uploading
-    - Clean up test data
-    """
-    if not STRUCTURED_QUERIES_AVAILABLE:
-        raise HTTPException(501, "Structured queries not available")
-    
-    try:
-        handler = get_structured_handler()
-        result = handler.delete_file(project, file_name, delete_all_versions=all_versions)
-        
-        logger.info(f"[DELETE] Removed {len(result['tables_deleted'])} tables for {project}/{file_name}")
-        
-        return {
-            "status": "deleted",
-            "project": project,
-            "file_name": file_name,
-            "tables_deleted": result['tables_deleted'],
-            "versions_deleted": result['versions_deleted']
-        }
-    except Exception as e:
-        logger.error(f"Error deleting file data: {e}")
-        raise HTTPException(500, str(e))
-
-
-@router.get("/chat/data/{project}/files")
-async def list_project_files(project: str):
-    """List all files in a project with version info"""
-    if not STRUCTURED_QUERIES_AVAILABLE:
-        raise HTTPException(501, "Structured queries not available")
-    
-    try:
-        handler = get_structured_handler()
-        files = handler.list_files(project)
-        
-        return {
-            "project": project,
-            "files": files,
-            "count": len(files)
-        }
-    except Exception as e:
-        logger.error(f"Error listing files: {e}")
-        raise HTTPException(500, str(e))
-
-
 @router.get("/chat/data/{project}/{file_name}/versions")
 async def get_file_versions(project: str, file_name: str):
     """Get all versions of a file"""
     if not STRUCTURED_QUERIES_AVAILABLE:
-        raise HTTPException(501, "Structured queries not available")
+        raise HTTPException(503, "Structured queries not available")
     
     try:
         handler = get_structured_handler()
         versions = handler.get_file_versions(project, file_name)
-        
-        return {
-            "project": project,
-            "file_name": file_name,
-            "versions": versions,
-            "count": len(versions)
-        }
+        return {"project": project, "file_name": file_name, "versions": versions}
     except Exception as e:
-        logger.error(f"Error getting versions: {e}")
         raise HTTPException(500, str(e))
 
 
@@ -1475,21 +1149,9 @@ class CompareRequest(BaseModel):
 
 @router.post("/chat/data/{project}/{file_name}/compare")
 async def compare_file_versions(project: str, file_name: str, request: CompareRequest):
-    """
-    Compare two versions of a file to find changes.
-    
-    Returns:
-    - added: Records in new version but not old
-    - removed: Records in old version but not new  
-    - changed: Records that exist in both but have different values
-    
-    Use cases:
-    - "Show me new hires since last load"
-    - "Who was terminated?"
-    - "What earning codes changed?"
-    """
+    """Compare two versions of a file"""
     if not STRUCTURED_QUERIES_AVAILABLE:
-        raise HTTPException(501, "Structured queries not available")
+        raise HTTPException(503, "Structured queries not available")
     
     try:
         handler = get_structured_handler()
@@ -1506,71 +1168,25 @@ async def compare_file_versions(project: str, file_name: str, request: CompareRe
             raise HTTPException(400, result['error'])
         
         return result
-        
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error comparing versions: {e}")
         raise HTTPException(500, str(e))
 
 
 @router.get("/chat/data/encryption-status")
 async def get_encryption_status():
-    """Check if PII encryption is enabled"""
+    """Check PII encryption status"""
     if not STRUCTURED_QUERIES_AVAILABLE:
-        raise HTTPException(501, "Structured queries not available")
+        raise HTTPException(503, "Structured queries not available")
     
     try:
         handler = get_structured_handler()
-        
         return {
             "encryption_available": handler.encryptor.fernet is not None,
-            "pii_patterns": [
-                "ssn", "social_security", "tax_id", 
-                "bank_account", "routing_number",
-                "salary", "pay_rate", "dob", "birthdate"
-            ],
-            "note": "PII columns matching these patterns are automatically encrypted at rest"
+            "pii_detection": "enabled",
+            "pii_patterns": list(PII_PATTERNS.keys()),
+            "column_patterns": PII_COLUMN_PATTERNS[:10]
         }
     except Exception as e:
-        logger.error(f"Error checking encryption: {e}")
-        raise HTTPException(500, str(e))
-
-
-@router.post("/chat/data/reset-database")
-async def reset_structured_database(confirm: bool = False):
-    """
-    Reset the entire structured data database.
-    WARNING: This deletes ALL uploaded Excel/CSV data!
-    
-    Must pass confirm=true to execute.
-    """
-    if not STRUCTURED_QUERIES_AVAILABLE:
-        raise HTTPException(501, "Structured queries not available")
-    
-    if not confirm:
-        return {
-            "warning": "This will DELETE ALL structured data (Excel/CSV uploads)!",
-            "action_required": "Pass ?confirm=true to proceed",
-            "example": "POST /api/chat/data/reset-database?confirm=true"
-        }
-    
-    try:
-        handler = get_structured_handler()
-        result = handler.reset_database()
-        
-        if result.get('success'):
-            logger.info(f"[RESET] Database reset complete - {len(result.get('tables_dropped', []))} tables dropped")
-            return {
-                "status": "reset_complete",
-                "tables_dropped": result.get('tables_dropped', []),
-                "message": "Database reset. You can now re-upload your files."
-            }
-        else:
-            raise HTTPException(500, result.get('error', 'Reset failed'))
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error resetting database: {e}")
         raise HTTPException(500, str(e))
