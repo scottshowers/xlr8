@@ -259,12 +259,24 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
                     
                     selection_prompt = f"""Question: "{message}"
 
-Which table(s) answer this question? Available tables:
+Which table(s) contain the data to answer this question?
+
+IMPORTANT - Understand the difference:
+- CONFIG/LOOKUP tables (like "Change Reasons", "LOA Reasons", "Earnings", "Deductions Plans"): Define codes and settings, NOT actual employee data
+- EMPLOYEE DATA tables (like "Company", "Personal", "Employee Conversion"): Contain actual employee records with statuses, names, IDs
+
+If the question is about ACTUAL EMPLOYEES (list them, count them, who is on leave, active employees, etc.):
+→ Pick EMPLOYEE DATA tables (Company, Personal, Employee Conversion)
+→ DO NOT pick config/lookup tables even if they have matching keywords
+
+If the question is about CODE DEFINITIONS (what does code X mean, list all earning types, etc.):
+→ Pick CONFIG/LOOKUP tables
+
+Available tables:
 
 {chr(10).join(table_summaries)}
 
 Reply with ONLY the table number(s), comma-separated (e.g., "0" or "1,2").
-For employee questions, pick employee/conversion tables (not config/validation).
 
 Table number(s):"""
                     
