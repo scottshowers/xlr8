@@ -39,14 +39,58 @@ async def get_structured_data_status(project: Optional[str] = None):
     try:
         handler = get_structured_handler()
         
-        # Get schema for all projects or specific project
-        if project:
+        # Query DuckDB directly for ALL tables - more reliable than get_schema_for_project
+        tables = []
+        try:
+            # Get all table names from DuckDB
+            table_result = handler.conn.execute("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'main'
+            """).fetchall()
+            
+            for (table_name,) in table_result:
+                try:
+                    # Get row count
+                    count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
+                    row_count = count_result[0] if count_result else 0
+                    
+                    # Get column info
+                    col_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
+                    columns = [col[1] for col in col_result] if col_result else []
+                    
+                    # Parse table name to extract metadata
+                    # Table names are typically: project__filename__sheetname__version
+                    parts = table_name.split('__')
+                    if len(parts) >= 3:
+                        proj = parts[0]
+                        filename = parts[1]
+                        sheet = parts[2] if len(parts) > 2 else ''
+                    else:
+                        proj = 'default'
+                        filename = table_name
+                        sheet = ''
+                    
+                    # Apply project filter if specified
+                    if project and proj.lower() != project.lower():
+                        continue
+                    
+                    tables.append({
+                        'table_name': table_name,
+                        'project': proj,
+                        'file': filename,
+                        'sheet': sheet,
+                        'columns': columns,
+                        'row_count': row_count
+                    })
+                except Exception as te:
+                    logger.warning(f"Error getting info for table {table_name}: {te}")
+                    
+        except Exception as qe:
+            logger.error(f"Error querying tables: {qe}")
+            # Fallback to get_schema_for_project
             schema = handler.get_schema_for_project(project)
-        else:
-            # Get all tables
-            schema = handler.get_schema_for_project(None)
-        
-        tables = schema.get('tables', [])
+            tables = schema.get('tables', [])
         
         # Group by file
         files_dict = {}
@@ -77,6 +121,8 @@ async def get_structured_data_status(project: Optional[str] = None):
         
         files_list = list(files_dict.values())
         
+        logger.info(f"[STATUS] Found {len(files_list)} files, {len(tables)} tables, {total_rows} rows")
+        
         return {
             "available": True,
             "files": files_list,
@@ -86,7 +132,7 @@ async def get_structured_data_status(project: Optional[str] = None):
         }
         
     except Exception as e:
-        logger.error(f"Structured data status error: {e}")
+        logger.error(f"Structured data status error: {e}", exc_info=True)
         return {
             "available": False,
             "error": str(e),
