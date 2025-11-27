@@ -335,16 +335,21 @@ Table number(s):"""
                     update_job_status(job_id, 'processing', '📊 Retrieving data...', 35)
                     logger.warning(f"[STEP 4] Querying {len(selected_indices)} selected tables: {selected_indices}")
                     
+                    # For count/how many queries, get more rows
+                    query_lower = message.lower()
+                    is_count_query = any(kw in query_lower for kw in ['how many', 'count', 'total', 'number of'])
+                    row_limit = 2000 if is_count_query else 500  # More rows for counts
+                    
                     for idx in selected_indices[:3]:
                         table_info = table_lookup[idx]
                         table_name = table_info.get('table_name', '')
                         sheet_name = table_info.get('sheet', '')
                         file_name = table_info.get('file', '')
                         
-                        logger.warning(f"[STEP 4] Querying table {idx}: {table_name}")
+                        logger.warning(f"[STEP 4] Querying table {idx}: {table_name} (limit {row_limit})")
                         
                         try:
-                            sql = f'SELECT * FROM "{table_name}" LIMIT 200'
+                            sql = f'SELECT * FROM "{table_name}" LIMIT {row_limit}'
                             rows, cols = handler.execute_query(sql)
                             all_columns.extend(cols)
                             
@@ -357,7 +362,7 @@ Table number(s):"""
                                     'sheet': sheet_name,
                                     'table': table_name,
                                     'columns': cols,
-                                    'data': decrypted[:100],
+                                    'data': decrypted,  # All rows, limit in context building
                                     'total_rows': len(rows)
                                 })
                         except Exception as query_e:
@@ -409,14 +414,46 @@ Table number(s):"""
         context_parts = []
         sources = []
         
+        # Check if this is a count query
+        query_lower = message.lower()
+        is_count_query = any(kw in query_lower for kw in ['how many', 'count', 'total', 'number of'])
+        is_list_query = any(kw in query_lower for kw in ['list', 'show', 'give me'])
+        
         for result in sql_results_list:
             data_text = f"Source: {result['source_file']} → {result['sheet']}\n"
             data_text += f"Columns: {', '.join(result['columns'])}\n"
-            data_text += f"Total rows: {result['total_rows']}\n\nData:\n"
+            data_text += f"Total rows in query result: {result['total_rows']}\n\n"
             
-            for row in result['data'][:50]:
-                row_str = " | ".join(f"{k}: {v}" for k, v in row.items())
+            # For count queries, include summary statistics
+            if is_count_query and result['data']:
+                # Find status-like columns and count values
+                status_cols = [c for c in result['columns'] if any(s in c.lower() for s in ['status', 'active', 'term', 'type'])]
+                if status_cols:
+                    data_text += "VALUE COUNTS:\n"
+                    for col in status_cols[:3]:
+                        values = {}
+                        for row in result['data']:
+                            val = str(row.get(col, 'None'))
+                            values[val] = values.get(val, 0) + 1
+                        data_text += f"  {col}: {dict(sorted(values.items(), key=lambda x: -x[1]))}\n"
+                    data_text += "\n"
+            
+            # Include more rows for count queries
+            row_limit_for_context = 200 if is_count_query else 75
+            
+            data_text += "Data:\n"
+            for row in result['data'][:row_limit_for_context]:
+                # Only include key columns to save space
+                key_cols = [c for c in result['columns'] if any(s in c.lower() for s in 
+                           ['employee', 'status', 'name', 'number', 'id', 'type', 'active', 'term', 'department', 'job', 'title'])]
+                if not key_cols:
+                    key_cols = result['columns'][:10]
+                
+                row_str = " | ".join(f"{k}: {row.get(k, '')}" for k in key_cols if k in row)
                 data_text += f"  {row_str}\n"
+            
+            if len(result['data']) > row_limit_for_context:
+                data_text += f"  ... and {len(result['data']) - row_limit_for_context} more rows\n"
             
             context_parts.append(data_text)
             sources.append({
