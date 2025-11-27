@@ -148,6 +148,7 @@ def select_local_model(query: str, chunks: List[Dict] = None) -> str:
 class PIISanitizer:
     """
     Sanitizes PII from text before sending to Claude
+    Only sanitizes actual PII - not job titles or departments
     """
     
     SSN_PATTERN = r'\b\d{3}[-\s]?\d{2}[-\s]?\d{4}\b'
@@ -155,9 +156,6 @@ class PIISanitizer:
     EMAIL_PATTERN = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
     DOB_PATTERN = r'\b(?:0?[1-9]|1[0-2])[/-](?:0?[1-9]|[12]\d|3[01])[/-](?:19|20)\d{2}\b'
     SALARY_PATTERN = r'\$[\d,]+(?:\.\d{2})?'
-    
-    # Common name patterns (First Last)
-    NAME_PATTERN = r'\b[A-Z][a-z]+\s+[A-Z][a-z]+\b'
     
     def __init__(self):
         self.name_counter = 0
@@ -168,7 +166,7 @@ class PIISanitizer:
             self.name_counter += 1
             letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
             idx = (self.name_counter - 1) % 26
-            self.name_map[name] = f"[Employee {letters[idx]}]"
+            self.name_map[name] = f"[Person {letters[idx]}]"
         return self.name_map[name]
     
     def _salary_to_range(self, match) -> str:
@@ -184,28 +182,22 @@ class PIISanitizer:
             return "[SALARY]"
     
     def sanitize(self, text: str) -> str:
-        """Remove PII from text"""
+        """Remove PII from text - only SSN, phone, email, DOB, salary"""
         if not text:
             return text
         
         result = text
         
-        # Remove obvious PII patterns
+        # Remove obvious PII patterns - these are unambiguous
         result = re.sub(self.SSN_PATTERN, '[SSN]', result)
         result = re.sub(self.PHONE_PATTERN, '[PHONE]', result)
         result = re.sub(self.EMAIL_PATTERN, '[EMAIL]', result)
         result = re.sub(self.DOB_PATTERN, '[DOB]', result)
         result = re.sub(self.SALARY_PATTERN, self._salary_to_range, result)
         
-        # Replace names (be careful - might catch non-names)
-        # Only do this for employee-focused responses
-        names = re.findall(self.NAME_PATTERN, result)
-        for name in names:
-            # Skip common non-name phrases
-            if name.lower() in ['new york', 'los angeles', 'san francisco', 'united states',
-                               'general ledger', 'human resources', 'time off']:
-                continue
-            result = result.replace(name, self._get_placeholder(name))
+        # NOTE: We do NOT sanitize names anymore - too many false positives
+        # Job titles, departments, locations all get wrongly sanitized
+        # The data already has employee_number as identifier
         
         return result
     
