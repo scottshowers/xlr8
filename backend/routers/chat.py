@@ -289,11 +289,16 @@ def detect_query_type(message: str) -> str:
 
 
 # =============================================================================
-# INTELLIGENT SQL GENERATION
+# INTELLIGENT SQL GENERATION - Actually Intelligent
 # =============================================================================
 
-def generate_intelligent_sql(message: str, schema: dict, orchestrator: LLMOrchestrator) -> Optional[str]:
-    """Generate intelligent SQL query using Claude."""
+def generate_intelligent_sql(message: str, schema: dict, orchestrator: LLMOrchestrator, handler=None) -> Optional[str]:
+    """
+    Generate intelligent SQL query using Claude.
+    
+    KEY: We send Claude the ACTUAL column names AND sample values
+    so it can generate SQL that matches the real data structure.
+    """
     if not schema.get('tables'):
         return None
     
@@ -310,28 +315,45 @@ def generate_intelligent_sql(message: str, schema: dict, orchestrator: LLMOrches
         else:
             col_names = [str(c) for c in columns]
         
+        # GET SAMPLE VALUES - This is the key to being actually intelligent
+        sample_info = ""
+        if handler:
+            try:
+                sample_sql = f'SELECT * FROM "{table_name}" LIMIT 3'
+                sample_rows, _ = handler.execute_query(sample_sql)
+                if sample_rows:
+                    sample_info = "\nSample data (first 3 rows):\n"
+                    for row in sample_rows[:3]:
+                        row_preview = {k: str(v)[:50] for k, v in list(row.items())[:10]}
+                        sample_info += f"  {row_preview}\n"
+            except:
+                pass
+        
         tables_info.append(f"""
 Table: "{table_name}"
 Source: {file_name} → {sheet}
 Rows: {row_count}
 Columns: {', '.join(col_names[:50])}
+{sample_info}
 """)
     
     schema_text = '\n'.join(tables_info)
     
     sql_prompt = f"""Generate a SQL query for DuckDB to answer this question.
 
-AVAILABLE TABLES:
+AVAILABLE TABLES WITH SAMPLE DATA:
 {schema_text}
 
 USER QUESTION: {message}
 
-RULES:
-1. For "how many" → Use COUNT(*)
-2. For "list all" → Use SELECT DISTINCT with relevant columns
-3. Column names with spaces need double quotes
-4. Use ILIKE for case-insensitive text matching
-5. Return ONLY the SQL query, no explanation
+CRITICAL RULES:
+1. Use the EXACT column names shown above - they may have spaces, mixed case, etc.
+2. Look at the SAMPLE DATA to understand what values exist (e.g., "Active", "A", "Y", "Terminated", etc.)
+3. For status queries, find the column that indicates employee status (could be "Status", "Employment Status", "Emp Status", "Active", etc.)
+4. For "how many active" - find rows where status indicates active (not terminated/inactive)
+5. Column names with spaces MUST be wrapped in double quotes: "Column Name"
+6. Use ILIKE for case-insensitive matching
+7. Return ONLY the SQL query, no explanation
 
 SQL:"""
 
@@ -432,9 +454,9 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
                 if schema.get('tables'):
                     logger.info(f"[STRUCTURED] Found {len(schema['tables'])} tables")
                     
-                    # INTELLIGENT SQL GENERATION
+                    # INTELLIGENT SQL GENERATION - Pass handler for sample data lookup
                     update_job_status(job_id, 'processing', '🧠 Generating intelligent query...', 20)
-                    sql_query = generate_intelligent_sql(message, schema, orchestrator)
+                    sql_query = generate_intelligent_sql(message, schema, orchestrator, handler)
                     
                     if sql_query:
                         update_job_status(job_id, 'processing', '⚡ Executing query...', 30)
