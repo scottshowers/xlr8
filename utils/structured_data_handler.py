@@ -35,52 +35,22 @@ except ImportError:
     ENCRYPTION_AVAILABLE = False
     logging.warning("cryptography not installed - PII encryption disabled. Run: pip install cryptography")
 
-# Openpyxl for blue header detection
-try:
-    from openpyxl import load_workbook
-    OPENPYXL_AVAILABLE = True
-except ImportError:
-    OPENPYXL_AVAILABLE = False
-    logging.warning("openpyxl not installed - blue header detection disabled")
-
 logger = logging.getLogger(__name__)
 
 # DuckDB storage location
 DUCKDB_PATH = "/data/structured_data.duckdb"
 ENCRYPTION_KEY_PATH = "/data/.encryption_key"
 
-# PII field patterns to encrypt - EXPANDED for variations
+# PII field patterns to encrypt
 PII_PATTERNS = [
-    # SSN variations
-    r'ssn', r'ss_n', r'ss#', r'soc.*sec', r'social.*sec', r'social_security',
-    r'emp.*ssn', r'employee.*ssn', r'ssn.*num', r'ssnumber',
-    # Tax ID
-    r'tax.*id', r'tin', r'fein', r'ein', r'fed.*id', r'federal.*id',
-    # Bank info
-    r'bank.*acct', r'bank.*account', r'acct.*num', r'account.*num',
-    r'routing', r'aba', r'ach', r'direct.*dep',
-    # Credit/payment
-    r'credit.*card', r'card.*num', r'cc.*num', r'payment.*acct',
-    # Identity docs
-    r'passport', r'license.*num', r'driver.*lic', r'dl.*num', r'id.*num',
-    r'visa.*num', r'green.*card', r'work.*permit', r'i-9', r'i9',
-    # Compensation - be aggressive here
-    r'salary', r'pay.*rate', r'hourly.*rate', r'annual.*sal', r'base.*pay',
-    r'wage', r'compensation', r'comp.*rate', r'rate.*pay', r'pay.*amt',
-    r'gross.*pay', r'net.*pay', r'ytd.*earn', r'ytd.*gross', r'ytd.*net',
-    # Dates - birth
-    r'dob', r'date.*birth', r'birth.*date', r'birthdate', r'bday', r'born',
-    # Contact that could be sensitive
-    r'home.*phone', r'cell', r'mobile', r'personal.*email',
+    r'ssn', r'social.*sec', r'social_security',
+    r'tax.*id', r'tin',
+    r'bank.*account', r'routing.*number', r'account.*number',
+    r'credit.*card', r'card.*number',
+    r'passport', r'license.*number', r'driver.*lic',
+    r'salary', r'pay.*rate', r'wage', r'compensation',
+    r'dob', r'date.*birth', r'birth.*date', r'birthdate',
 ]
-
-# Import intelligent PII detector
-try:
-    from utils.pii_detector_intelligent import get_pii_detector, is_pii_column as intelligent_is_pii
-    INTELLIGENT_PII_AVAILABLE = True
-except ImportError:
-    INTELLIGENT_PII_AVAILABLE = False
-    logger.warning("Intelligent PII detector not available, using regex fallback")
 
 
 class FieldEncryptor:
@@ -89,18 +59,9 @@ class FieldEncryptor:
     def __init__(self, key_path: str = ENCRYPTION_KEY_PATH):
         self.key_path = key_path
         self.fernet = None
-        self.pii_detector = None
         
         if ENCRYPTION_AVAILABLE:
             self._init_encryption()
-        
-        # Use intelligent detector if available
-        if INTELLIGENT_PII_AVAILABLE:
-            try:
-                self.pii_detector = get_pii_detector()
-                logger.info("Using intelligent PII detector")
-            except:
-                pass
     
     def _init_encryption(self):
         """Initialize or load encryption key"""
@@ -123,20 +84,8 @@ class FieldEncryptor:
             logger.error(f"Encryption initialization failed: {e}")
             self.fernet = None
     
-    def is_pii_column(self, column_name: str, sample_data: list = None) -> bool:
-        """
-        Check if column likely contains PII.
-        Uses intelligent detector if available, falls back to regex.
-        """
-        # Try intelligent detector first
-        if self.pii_detector:
-            try:
-                result = self.pii_detector.detect_pii_type(column_name, sample_data)
-                return result['is_pii']
-            except Exception as e:
-                logger.warning(f"Intelligent PII detection failed, using regex: {e}")
-        
-        # Fallback to regex patterns
+    def is_pii_column(self, column_name: str) -> bool:
+        """Check if column likely contains PII"""
         col_lower = column_name.lower()
         for pattern in PII_PATTERNS:
             if re.search(pattern, col_lower):
@@ -176,18 +125,12 @@ class FieldEncryptor:
             return value
     
     def encrypt_dataframe(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
-        """
-        Encrypt PII columns in a DataFrame.
-        Uses intelligent detection with sample data analysis.
-        """
+        """Encrypt PII columns in a DataFrame"""
         encrypted_cols = []
         df = df.copy()
         
         for col in df.columns:
-            # Get sample data for intelligent analysis
-            sample_data = df[col].dropna().head(20).tolist()
-            
-            if self.is_pii_column(col, sample_data):
+            if self.is_pii_column(col):
                 df[col] = df[col].apply(self.encrypt)
                 encrypted_cols.append(col)
                 logger.info(f"Encrypted PII column: {col}")
@@ -329,6 +272,99 @@ class StructuredDataHandler:
             sanitized = 'col_' + sanitized
         return sanitized or 'unnamed'
     
+    def _split_horizontal_tables(self, file_path: str, sheet_name: str) -> List[Tuple[str, pd.DataFrame]]:
+        """
+        Detect and split horizontally arranged tables within a single sheet.
+        Tables are separated by blank columns.
+        
+        Returns: List of (sub_table_name, dataframe) tuples
+        """
+        try:
+            # Read raw sheet without header to detect structure
+            raw_df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
+            
+            if raw_df.empty:
+                return []
+            
+            # Find blank columns (all cells are NaN or empty)
+            blank_cols = []
+            for col_idx in range(len(raw_df.columns)):
+                col_data = raw_df.iloc[:, col_idx]
+                # Check if column is entirely blank
+                is_blank = col_data.isna().all() or (col_data.astype(str).str.strip() == '').all()
+                if is_blank:
+                    blank_cols.append(col_idx)
+            
+            # If no blank columns or less than 2 column groups, no split needed
+            if not blank_cols:
+                return []
+            
+            # Find column groups (consecutive non-blank columns)
+            all_cols = set(range(len(raw_df.columns)))
+            non_blank_cols = sorted(all_cols - set(blank_cols))
+            
+            if not non_blank_cols:
+                return []
+            
+            # Group consecutive columns
+            groups = []
+            current_group = [non_blank_cols[0]]
+            
+            for col_idx in non_blank_cols[1:]:
+                if col_idx == current_group[-1] + 1:
+                    current_group.append(col_idx)
+                else:
+                    if len(current_group) >= 2:  # Need at least 2 columns for a valid table
+                        groups.append(current_group)
+                    current_group = [col_idx]
+            
+            if len(current_group) >= 2:
+                groups.append(current_group)
+            
+            # If only one group, no horizontal split needed
+            if len(groups) <= 1:
+                return []
+            
+            logger.info(f"Sheet '{sheet_name}': Found {len(groups)} horizontal tables")
+            
+            # Extract each table group
+            result = []
+            for group_cols in groups:
+                try:
+                    # Extract columns for this group
+                    sub_df = raw_df.iloc[:, group_cols].copy()
+                    
+                    # Use first row as header
+                    sub_df.columns = sub_df.iloc[0].fillna('').astype(str).tolist()
+                    sub_df = sub_df.iloc[1:]  # Remove header row from data
+                    
+                    # Drop empty rows
+                    sub_df = sub_df.dropna(how='all')
+                    
+                    if sub_df.empty or len(sub_df.columns) < 2:
+                        continue
+                    
+                    # Get table name from first column header (e.g., "Benefit Change Reasons")
+                    first_header = str(sub_df.columns[0]).strip()
+                    if first_header and first_header.lower() not in ['unnamed', '', 'nan']:
+                        # Try to extract a meaningful name
+                        sub_table_name = first_header.split('\n')[0][:50]  # First 50 chars, first line
+                    else:
+                        sub_table_name = f"section_{len(result) + 1}"
+                    
+                    result.append((sub_table_name, sub_df))
+                    logger.info(f"  - Extracted: '{sub_table_name}' ({len(sub_df)} rows, {len(sub_df.columns)} cols)")
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to extract column group: {e}")
+                    continue
+            
+            return result
+            
+        except Exception as e:
+            logger.warning(f"Horizontal table detection failed for '{sheet_name}': {e}")
+            return []
+    
     def _generate_table_name(self, project: str, file_name: str, sheet_name: str) -> str:
         """Generate unique table name for a sheet"""
         project_clean = self._sanitize_name(project)
@@ -449,6 +485,96 @@ class StructuredDataHandler:
             
             for sheet_name in excel_file.sheet_names:
                 try:
+                    # =====================================================
+                    # CHECK FOR HORIZONTAL TABLES (tables side-by-side)
+                    # =====================================================
+                    horizontal_tables = self._split_horizontal_tables(file_path, sheet_name)
+                    
+                    if horizontal_tables:
+                        # Process each horizontal sub-table separately
+                        for sub_table_name, sub_df in horizontal_tables:
+                            try:
+                                # Sanitize column names
+                                sub_df.columns = [self._sanitize_name(str(c)) for c in sub_df.columns]
+                                
+                                # Handle duplicate column names
+                                seen = {}
+                                new_cols = []
+                                for col in sub_df.columns:
+                                    if col in seen:
+                                        seen[col] += 1
+                                        new_cols.append(f"{col}_{seen[col]}")
+                                    else:
+                                        seen[col] = 0
+                                        new_cols.append(col)
+                                sub_df.columns = new_cols
+                                
+                                # Force all columns to string
+                                for col in sub_df.columns:
+                                    sub_df[col] = sub_df[col].fillna('').astype(str)
+                                    sub_df[col] = sub_df[col].replace({'nan': '', 'None': '', 'NaT': ''})
+                                
+                                # Generate combined sheet name: "Change Reasons - Benefit Change Reasons"
+                                combined_sheet = f"{sheet_name} - {sub_table_name}"
+                                
+                                # Encrypt PII if needed
+                                encrypted_cols = []
+                                if encrypt_pii and self.encryptor.fernet:
+                                    sub_df, encrypted_cols = self.encryptor.encrypt_dataframe(sub_df)
+                                    all_encrypted_cols.extend(encrypted_cols)
+                                
+                                # Generate table name
+                                table_name = self._generate_table_name(project, file_name, combined_sheet)
+                                
+                                # Drop existing and create table
+                                self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+                                self.conn.register('temp_df', sub_df)
+                                self.conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM temp_df")
+                                self.conn.unregister('temp_df')
+                                
+                                # Store metadata
+                                columns_info = [
+                                    {'name': col, 'type': 'VARCHAR', 'encrypted': col in encrypted_cols}
+                                    for col in sub_df.columns
+                                ]
+                                
+                                self.conn.execute("""
+                                    INSERT INTO _schema_metadata 
+                                    (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys, encrypted_columns, version, is_current)
+                                    VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                                """, [
+                                    project,
+                                    file_name,
+                                    combined_sheet,
+                                    table_name,
+                                    json.dumps(columns_info),
+                                    len(sub_df),
+                                    json.dumps([]),
+                                    json.dumps(encrypted_cols),
+                                    version
+                                ])
+                                
+                                results['sheets'].append({
+                                    'name': combined_sheet,
+                                    'table_name': table_name,
+                                    'rows': len(sub_df),
+                                    'columns': list(sub_df.columns),
+                                    'encrypted_columns': encrypted_cols
+                                })
+                                results['total_rows'] += len(sub_df)
+                                results['tables_created'].append(table_name)
+                                
+                                logger.info(f"Created horizontal sub-table: {table_name} ({len(sub_df)} rows)")
+                                
+                            except Exception as sub_e:
+                                logger.error(f"Failed to process horizontal sub-table '{sub_table_name}': {sub_e}")
+                        
+                        # Skip normal processing for this sheet - we handled it horizontally
+                        continue
+                    
+                    # =====================================================
+                    # NORMAL SHEET PROCESSING (no horizontal split)
+                    # =====================================================
                     # Read sheet - SMART HEADER DETECTION
                     # Strategy: Look for colored (blue) header rows first, then fall back to text analysis
                     df = None
