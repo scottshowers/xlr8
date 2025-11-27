@@ -422,93 +422,156 @@ Table numbers:"""
                                     # Find the employee table (has employment_status_code) and transaction table
                                     emp_table = None
                                     trans_table = None
+                                    status_column = None
                                     
+                                    # First check selected tables
                                     for t in selected_tables:
                                         cols_result = handler.conn.execute(f'PRAGMA table_info("{t}")').fetchall()
-                                        cols = [c[1].lower() for c in cols_result]
-                                        if 'employment_status_code' in cols or 'employment_status' in cols:
+                                        cols = [c[1] for c in cols_result]
+                                        cols_lower = [c.lower() for c in cols]
+                                        logger.warning(f"[STEP 4a] Checking {t.split('__')[-1]} for status column. Has: {[c for c in cols if 'status' in c.lower()]}")
+                                        
+                                        if 'employment_status_code' in cols_lower:
                                             emp_table = t
+                                            status_column = cols[cols_lower.index('employment_status_code')]
+                                        elif 'employment_status' in cols_lower:
+                                            emp_table = t
+                                            status_column = cols[cols_lower.index('employment_status')]
                                         else:
                                             trans_table = t
                                     
-                                    if emp_table and trans_table:
-                                        # Build JOIN query
-                                        join_conditions = []
-                                        for sc, tc in zip(src_cols, tgt_cols):
-                                            if emp_table == src_table:
-                                                join_conditions.append(f'e."{sc}" = t."{tc}"')
-                                            else:
-                                                join_conditions.append(f'e."{tc}" = t."{sc}"')
+                                    # If no emp_table found in selected, search ALL project tables
+                                    if not emp_table:
+                                        logger.warning(f"[STEP 4a] No status column in selected tables, searching all project tables...")
+                                        all_tables_result = handler.conn.execute("""
+                                            SELECT table_name FROM _schema_metadata 
+                                            WHERE project = ? AND is_current = TRUE
+                                        """, [project]).fetchall()
                                         
-                                        join_on = " AND ".join(join_conditions)
-                                        
-                                        # Get column info for both tables
+                                        for (other_table,) in all_tables_result:
+                                            if other_table in selected_tables:
+                                                continue
+                                            try:
+                                                cols_result = handler.conn.execute(f'PRAGMA table_info("{other_table}")').fetchall()
+                                                cols = [c[1] for c in cols_result]
+                                                cols_lower = [c.lower() for c in cols]
+                                                
+                                                if 'employment_status_code' in cols_lower or 'employment_status' in cols_lower:
+                                                    emp_table = other_table
+                                                    if 'employment_status_code' in cols_lower:
+                                                        status_column = cols[cols_lower.index('employment_status_code')]
+                                                    else:
+                                                        status_column = cols[cols_lower.index('employment_status')]
+                                                    logger.warning(f"[STEP 4a] ✅ Found status column '{status_column}' in {other_table.split('__')[-1]}")
+                                                    break
+                                            except:
+                                                continue
+                                    
+                                    logger.warning(f"[STEP 4a] emp_table={emp_table.split('__')[-1] if emp_table else None}, trans_table={trans_table.split('__')[-1] if trans_table else None}, status_col={status_column}")
+                                    
+                                    if emp_table and trans_table and status_column:
+                                        # Build JOIN - need to find common key between emp_table and trans_table
+                                        # Check for employee_number in both
                                         emp_cols_result = handler.conn.execute(f'PRAGMA table_info("{emp_table}")').fetchall()
                                         emp_cols = [c[1] for c in emp_cols_result]
                                         trans_cols_result = handler.conn.execute(f'PRAGMA table_info("{trans_table}")').fetchall()
                                         trans_cols = [c[1] for c in trans_cols_result]
                                         
-                                        # For aggregation queries on active employees
-                                        if is_aggregation and 'deduction' in query_lower:
-                                            # Find amount column
-                                            amount_col = next((c for c in trans_cols if 'amount' in c.lower()), None)
-                                            if amount_col:
-                                                agg_sql = f'''
-                                                    SELECT 
-                                                        e.employment_status_code,
-                                                        COUNT(DISTINCT e.employee_number) as employee_count,
-                                                        COUNT(*) as deduction_count,
-                                                        SUM(CAST(NULLIF(t."{amount_col}", '') AS DOUBLE)) as total_amount
+                                        # Find common join columns
+                                        join_cols = []
+                                        for col in ['employee_number', 'company_code', 'home_company_code']:
+                                            if col in [c.lower() for c in emp_cols] and col in [c.lower() for c in trans_cols]:
+                                                join_cols.append(col)
+                                            elif col == 'company_code' and 'home_company_code' in [c.lower() for c in trans_cols]:
+                                                # Map company_code to home_company_code
+                                                join_cols.append(('company_code', 'home_company_code'))
+                                        
+                                        if 'employee_number' in join_cols or any(isinstance(c, tuple) or c == 'employee_number' for c in join_cols):
+                                            # Build JOIN conditions
+                                            join_conditions = []
+                                            for col in join_cols:
+                                                if isinstance(col, tuple):
+                                                    join_conditions.append(f'e."{col[0]}" = t."{col[1]}"')
+                                                else:
+                                                    join_conditions.append(f'e."{col}" = t."{col}"')
+                                            
+                                            join_on = " AND ".join(join_conditions) if join_conditions else 'e.employee_number = t.employee_number'
+                                            
+                                            # For aggregation queries on active employees
+                                            if is_aggregation and 'deduction' in query_lower:
+                                                # Find amount column
+                                                amount_col = next((c for c in trans_cols if 'amount' in c.lower()), None)
+                                                if amount_col:
+                                                    agg_sql = f'''
+                                                        SELECT 
+                                                            e."{status_column}" as status,
+                                                            COUNT(DISTINCT e.employee_number) as employee_count,
+                                                            COUNT(*) as deduction_count,
+                                                            SUM(CAST(NULLIF(t."{amount_col}", '') AS DOUBLE)) as total_amount
+                                                        FROM "{emp_table}" e
+                                                        JOIN "{trans_table}" t ON {join_on}
+                                                        WHERE e."{status_column}" = 'A'
+                                                        GROUP BY e."{status_column}"
+                                                    '''
+                                                    logger.warning(f"[STEP 4a] Executing aggregation JOIN: {agg_sql[:300]}...")
+                                                    
+                                                    try:
+                                                        agg_result = handler.conn.execute(agg_sql).fetchall()
+                                                        if agg_result:
+                                                            joined_data = {
+                                                                'type': 'aggregation',
+                                                                'query': 'Total deductions for active employees',
+                                                                'result': agg_result,
+                                                                'columns': ['employment_status_code', 'employee_count', 'deduction_count', 'total_amount'],
+                                                                'emp_table': emp_table.split('__')[-1],
+                                                                'trans_table': trans_table.split('__')[-1]
+                                                            }
+                                                            logger.warning(f"[STEP 4a] ✅ JOIN aggregation result: {agg_result}")
+                                                        else:
+                                                            logger.warning(f"[STEP 4a] JOIN returned no results")
+                                                    except Exception as agg_e:
+                                                        logger.warning(f"[STEP 4a] Aggregation query failed: {agg_e}")
+                                            
+                                            # For sample joined data (non-aggregation or if aggregation failed)
+                                            if not joined_data:
+                                                sample_sql = f'''
+                                                    SELECT e.employee_number, e."{status_column}" as status,
+                                                           t.*
                                                     FROM "{emp_table}" e
                                                     JOIN "{trans_table}" t ON {join_on}
-                                                    WHERE e.employment_status_code = 'A'
-                                                    GROUP BY e.employment_status_code
+                                                    WHERE e."{status_column}" = 'A'
+                                                    LIMIT 100
                                                 '''
-                                                logger.warning(f"[STEP 4a] Executing aggregation JOIN: {agg_sql[:200]}...")
+                                                logger.warning(f"[STEP 4a] Executing sample JOIN: {sample_sql[:200]}...")
                                                 
                                                 try:
-                                                    agg_result = handler.conn.execute(agg_sql).fetchall()
-                                                    if agg_result:
+                                                    sample_result = handler.conn.execute(sample_sql).fetchall()
+                                                    # Get column names
+                                                    sample_cols_result = handler.conn.execute(f'''
+                                                        SELECT e.employee_number, e."{status_column}" as status, t.*
+                                                        FROM "{emp_table}" e
+                                                        JOIN "{trans_table}" t ON {join_on}
+                                                        LIMIT 0
+                                                    ''').description
+                                                    sample_cols = [c[0] for c in sample_cols_result] if sample_cols_result else ['employee_number', 'status'] + trans_cols
+                                                    
+                                                    if sample_result:
                                                         joined_data = {
-                                                            'type': 'aggregation',
-                                                            'query': 'Total deductions for active employees',
-                                                            'result': agg_result,
-                                                            'columns': ['employment_status_code', 'employee_count', 'deduction_count', 'total_amount'],
+                                                            'type': 'sample',
+                                                            'rows': [dict(zip(sample_cols, row)) for row in sample_result[:50]],
+                                                            'total_joined': len(sample_result),
                                                             'emp_table': emp_table.split('__')[-1],
                                                             'trans_table': trans_table.split('__')[-1]
                                                         }
-                                                        logger.warning(f"[STEP 4a] ✅ JOIN aggregation result: {agg_result}")
-                                                except Exception as agg_e:
-                                                    logger.warning(f"[STEP 4a] Aggregation query failed: {agg_e}")
-                                        
-                                        # For sample joined data (non-aggregation)
-                                        if not joined_data:
-                                            sample_sql = f'''
-                                                SELECT e.employee_number, e.employment_status_code, 
-                                                       t.*
-                                                FROM "{emp_table}" e
-                                                JOIN "{trans_table}" t ON {join_on}
-                                                WHERE e.employment_status_code = 'A'
-                                                LIMIT 100
-                                            '''
-                                            logger.warning(f"[STEP 4a] Executing sample JOIN: {sample_sql[:200]}...")
-                                            
-                                            try:
-                                                sample_rows = handler.conn.execute(sample_sql).fetchall()
-                                                sample_cols = ['employee_number', 'employment_status_code'] + trans_cols
-                                                if sample_rows:
-                                                    joined_data = {
-                                                        'type': 'sample',
-                                                        'rows': [dict(zip(sample_cols, row)) for row in sample_rows[:50]],
-                                                        'total_joined': len(sample_rows),
-                                                        'emp_table': emp_table.split('__')[-1],
-                                                        'trans_table': trans_table.split('__')[-1]
-                                                    }
-                                                    logger.warning(f"[STEP 4a] ✅ JOIN sample: {len(sample_rows)} rows")
-                                            except Exception as sample_e:
-                                                logger.warning(f"[STEP 4a] Sample JOIN failed: {sample_e}")
-                                        
-                                        break  # Found and processed relationship
+                                                        logger.warning(f"[STEP 4a] ✅ JOIN sample: {len(sample_result)} rows")
+                                                except Exception as sample_e:
+                                                    logger.warning(f"[STEP 4a] Sample JOIN failed: {sample_e}")
+                                        else:
+                                            logger.warning(f"[STEP 4a] No common join columns found between tables")
+                                    else:
+                                        logger.warning(f"[STEP 4a] Cannot execute JOIN - missing emp_table, trans_table, or status_column")
+                                    
+                                    break  # Found and processed relationship
                                         
                         except Exception as join_e:
                             logger.warning(f"[STEP 4a] JOIN detection failed: {join_e}")
