@@ -110,11 +110,14 @@ async def get_structured_data_status(project: Optional[str] = None):
                 }
             
             row_count = table.get('row_count', 0)
+            columns_list = table.get('columns', [])
             files_dict[key]['sheets'].append({
-                'name': table.get('table_name'),
-                'sheet': table.get('sheet', ''),
-                'columns': table.get('columns', []),
-                'row_count': row_count
+                'table_name': table.get('table_name'),
+                'sheet_name': table.get('sheet', ''),
+                'columns': columns_list,
+                'column_count': len(columns_list),
+                'row_count': row_count,
+                'encrypted_columns': []  # TODO: track encrypted columns if needed
             })
             files_dict[key]['total_rows'] += row_count
             total_rows += row_count
