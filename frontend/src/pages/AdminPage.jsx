@@ -315,6 +315,7 @@ function DataManagementTab() {
                 <th style={styles.th}>Project</th>
                 <th style={{ ...styles.th, textAlign: 'center' }}>Sheets</th>
                 <th style={{ ...styles.th, textAlign: 'center' }}>Rows</th>
+                <th style={{ ...styles.th, textAlign: 'center' }}>Loaded</th>
                 <th style={{ ...styles.th, textAlign: 'center' }}>🔒</th>
                 <th style={{ ...styles.th, textAlign: 'center' }}>Actions</th>
               </tr>
@@ -331,6 +332,9 @@ function DataManagementTab() {
                     <td style={styles.td}><span style={styles.projectBadge}>{file.project}</span></td>
                     <td style={{ ...styles.td, textAlign: 'center' }}>{file.sheets?.length || 0}</td>
                     <td style={{ ...styles.td, textAlign: 'center' }}>{file.total_rows?.toLocaleString()}</td>
+                    <td style={{ ...styles.td, textAlign: 'center', fontSize: '0.75rem', color: '#666' }}>
+                      {file.loaded_at ? new Date(file.loaded_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}
+                    </td>
                     <td style={{ ...styles.td, textAlign: 'center' }}>{file.has_encrypted ? '🔒' : '-'}</td>
                     <td style={{ ...styles.td, textAlign: 'center' }}>
                       <button onClick={(e) => { e.stopPropagation(); deleteStructuredFile(file.project, file.filename); }} disabled={deleting === `structured:${file.project}:${file.filename}`} style={styles.deleteBtn}>
@@ -340,7 +344,7 @@ function DataManagementTab() {
                   </tr>
                   {expandedFile === file.filename && (
                     <tr>
-                      <td colSpan={6} style={styles.expandedTd}>
+                      <td colSpan={7} style={styles.expandedTd}>
                         <p style={{ fontSize: '0.7rem', fontWeight: '600', color: '#999', marginBottom: '0.5rem', letterSpacing: '0.05em' }}>SHEETS / TABLES:</p>
                         {file.sheets?.map((sheet) => (
                           <div key={sheet.table_name} style={styles.sheetRow}>
