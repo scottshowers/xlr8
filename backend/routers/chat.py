@@ -166,20 +166,20 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
     
     Every step logged. No silent failures.
     """
-    logger.info(f"{'='*60}")
-    logger.info(f"[START] Job {job_id[:8]} | Query: {message[:50]}...")
-    logger.info(f"[START] Project: {project} | Persona: {persona_name}")
-    logger.info(f"{'='*60}")
+    logger.warning(f"{'='*60}")
+    logger.warning(f"[START] Job {job_id[:8]} | Query: {message[:50]}...")
+    logger.warning(f"[START] Project: {project} | Persona: {persona_name}")
+    logger.warning(f"{'='*60}")
     
     try:
         # =====================================================================
         # STEP 1: INITIALIZE
         # =====================================================================
-        logger.info("[STEP 1] Initializing...")
+        logger.warning("[STEP 1] Initializing...")
         
         pm = get_persona_manager()
         persona = pm.get_persona(persona_name)
-        logger.info(f"[STEP 1] Persona loaded: {persona.name} {persona.icon}")
+        logger.warning(f"[STEP 1] Persona loaded: {persona.name} {persona.icon}")
         
         sql_results_list = []
         rag_chunks = []
@@ -188,36 +188,33 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
         # =====================================================================
         # STEP 2: GET SCHEMA & BUILD TABLE SUMMARIES
         # =====================================================================
-        logger.info(f"[STEP 2] STRUCTURED_QUERIES_AVAILABLE = {STRUCTURED_QUERIES_AVAILABLE}")
+        logger.warning(f"[STEP 2] STRUCTURED_QUERIES_AVAILABLE = {STRUCTURED_QUERIES_AVAILABLE}")
         
         if STRUCTURED_QUERIES_AVAILABLE:
             update_job_status(job_id, 'processing', '📊 Loading schema...', 10)
             
             try:
-                logger.info("[STEP 2] Getting structured handler...")
+                logger.warning("[STEP 2] Getting structured handler...")
                 handler = get_structured_handler()
-                logger.info("[STEP 2] Handler obtained, getting schema...")
+                logger.warning("[STEP 2] Handler obtained, getting schema...")
                 
                 schema = handler.get_schema_for_project(project) if project else handler.get_schema_for_project(None)
                 tables_list = schema.get('tables', [])
                 
-                logger.info(f"[STEP 2] Schema returned {len(tables_list)} tables")
+                logger.warning(f"[STEP 2] Schema returned {len(tables_list)} tables")
                 
                 if not tables_list:
-                    logger.warning("[STEP 2] ⚠️ NO TABLES IN SCHEMA - this is the problem!")
-                    # Try getting ALL tables directly from DuckDB
-                    logger.info("[STEP 2] Attempting direct DuckDB query...")
+                    logger.warning("[STEP 2] ⚠️ NO TABLES IN SCHEMA!")
                     try:
                         direct_result = handler.conn.execute("""
                             SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'
                         """).fetchall()
-                        logger.info(f"[STEP 2] Direct DuckDB found {len(direct_result)} tables: {[r[0] for r in direct_result[:5]]}")
+                        logger.warning(f"[STEP 2] Direct DuckDB found {len(direct_result)} tables: {[r[0] for r in direct_result[:5]]}")
                     except Exception as ddb_e:
                         logger.error(f"[STEP 2] Direct DuckDB query failed: {ddb_e}")
                 
                 if tables_list:
-                    # Build table summaries for Claude
-                    logger.info("[STEP 2] Building table summaries...")
+                    logger.warning("[STEP 2] Building table summaries...")
                     table_summaries = []
                     table_lookup = {}
                     
@@ -228,15 +225,13 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
                         columns = table_info.get('columns', [])
                         row_count = table_info.get('row_count', 0)
                         
-                        logger.info(f"[STEP 2] Table {idx}: {file_name} → {sheet_name} ({row_count} rows)")
+                        logger.warning(f"[STEP 2] Table {idx}: {file_name} → {sheet_name} ({row_count} rows)")
                         
-                        # Get column names
                         if columns and isinstance(columns[0], dict):
                             col_names = [c.get('name', str(c)) for c in columns]
                         else:
                             col_names = [str(c) for c in columns]
                         
-                        # Get sample rows
                         sample_preview = ""
                         try:
                             sample_sql = f'SELECT * FROM "{table_name}" LIMIT 2'
@@ -252,13 +247,13 @@ def process_chat_job(job_id: str, message: str, project: Optional[str], max_resu
                         table_summaries.append(summary)
                         table_lookup[idx] = table_info
                     
-                    logger.info(f"[STEP 2] Built {len(table_summaries)} summaries")
+                    logger.warning(f"[STEP 2] Built {len(table_summaries)} summaries")
                     
                     # =========================================================
                     # STEP 3: ASK CLAUDE TO PICK TABLES
                     # =========================================================
                     update_job_status(job_id, 'processing', '🧠 Selecting best data source...', 20)
-                    logger.info("[STEP 3] Preparing Claude table selection...")
+                    logger.warning("[STEP 3] Preparing Claude table selection...")
                     
                     selection_prompt = f"""Question: "{message}"
 
@@ -271,12 +266,12 @@ For employee questions, pick employee/conversion tables (not config/validation).
 
 Table number(s):"""
                     
-                    logger.info(f"[STEP 3] Selection prompt length: {len(selection_prompt)} chars")
+                    logger.warning(f"[STEP 3] Selection prompt length: {len(selection_prompt)} chars")
                     
                     selected_indices = []
                     
                     try:
-                        logger.info("[STEP 3] Creating Anthropic client...")
+                        logger.warning("[STEP 3] Creating Anthropic client...")
                         import anthropic
                         
                         orchestrator = LLMOrchestrator()
@@ -285,7 +280,7 @@ Table number(s):"""
                         
                         client = anthropic.Anthropic(api_key=orchestrator.claude_api_key)
                         
-                        logger.info("[STEP 3] Calling Claude for table selection...")
+                        logger.warning("[STEP 3] Calling Claude for table selection...")
                         selection_response = client.messages.create(
                             model="claude-sonnet-4-20250514",
                             max_tokens=50,
@@ -293,15 +288,14 @@ Table number(s):"""
                         )
                         
                         selection_text = selection_response.content[0].text.strip()
-                        logger.info(f"[STEP 3] ✅ Claude responded: '{selection_text}'")
+                        logger.warning(f"[STEP 3] ✅ Claude responded: '{selection_text}'")
                         
-                        # Parse response
                         for part in selection_text.replace(' ', '').split(','):
                             try:
                                 idx = int(part.strip('[]()'))
                                 if idx in table_lookup:
                                     selected_indices.append(idx)
-                                    logger.info(f"[STEP 3] Selected table index: {idx}")
+                                    logger.warning(f"[STEP 3] Selected table index: {idx}")
                             except ValueError:
                                 pass
                         
@@ -313,35 +307,33 @@ Table number(s):"""
                         logger.error(f"[STEP 3] ❌ Claude selection FAILED: {claude_e}")
                         logger.error(f"[STEP 3] Traceback: {traceback.format_exc()}")
                         
-                        # FALLBACK: keyword matching
-                        logger.info("[STEP 3] Using keyword fallback...")
+                        logger.warning("[STEP 3] Using keyword fallback...")
                         query_lower = message.lower()
                         
                         for idx, table_info in table_lookup.items():
                             file_lower = table_info.get('file', '').lower()
                             sheet_lower = table_info.get('sheet', '').lower()
                             
-                            # For employee queries, prefer employee files
                             if any(kw in query_lower for kw in ['employee', 'active', 'list', 'count', 'how many']):
                                 if 'employee' in file_lower or 'conversion' in file_lower:
                                     selected_indices.append(idx)
-                                    logger.info(f"[STEP 3] Fallback selected: {idx} (employee file)")
+                                    logger.warning(f"[STEP 3] Fallback selected: {idx} (employee file)")
                             else:
                                 for term in query_lower.split():
                                     if len(term) > 3 and (term in file_lower or term in sheet_lower):
                                         selected_indices.append(idx)
-                                        logger.info(f"[STEP 3] Fallback selected: {idx} (keyword match)")
+                                        logger.warning(f"[STEP 3] Fallback selected: {idx} (keyword match)")
                                         break
                         
                         if not selected_indices:
                             selected_indices = list(table_lookup.keys())[:2]
-                            logger.info(f"[STEP 3] No matches, using first 2 tables: {selected_indices}")
+                            logger.warning(f"[STEP 3] No matches, using first 2 tables: {selected_indices}")
                     
                     # =========================================================
                     # STEP 4: QUERY SELECTED TABLES
                     # =========================================================
                     update_job_status(job_id, 'processing', '📊 Retrieving data...', 35)
-                    logger.info(f"[STEP 4] Querying {len(selected_indices)} selected tables: {selected_indices}")
+                    logger.warning(f"[STEP 4] Querying {len(selected_indices)} selected tables: {selected_indices}")
                     
                     for idx in selected_indices[:3]:
                         table_info = table_lookup[idx]
@@ -349,14 +341,14 @@ Table number(s):"""
                         sheet_name = table_info.get('sheet', '')
                         file_name = table_info.get('file', '')
                         
-                        logger.info(f"[STEP 4] Querying table {idx}: {table_name}")
+                        logger.warning(f"[STEP 4] Querying table {idx}: {table_name}")
                         
                         try:
                             sql = f'SELECT * FROM "{table_name}" LIMIT 200'
                             rows, cols = handler.execute_query(sql)
                             all_columns.extend(cols)
                             
-                            logger.info(f"[STEP 4] ✅ Got {len(rows)} rows, {len(cols)} columns")
+                            logger.warning(f"[STEP 4] ✅ Got {len(rows)} rows, {len(cols)} columns")
                             
                             if rows:
                                 decrypted = decrypt_results(rows, handler)
@@ -371,7 +363,7 @@ Table number(s):"""
                         except Exception as query_e:
                             logger.error(f"[STEP 4] ❌ Query failed for {table_name}: {query_e}")
                     
-                    logger.info(f"[STEP 4] Total results collected: {len(sql_results_list)}")
+                    logger.warning(f"[STEP 4] Total results collected: {len(sql_results_list)}")
                     
             except Exception as handler_e:
                 logger.error(f"[STEP 2-4] ❌ Handler error: {handler_e}")
@@ -383,7 +375,7 @@ Table number(s):"""
         # STEP 5: RAG SEARCH
         # =====================================================================
         update_job_status(job_id, 'processing', '🔍 Searching documents...', 45)
-        logger.info("[STEP 5] Starting RAG search...")
+        logger.warning("[STEP 5] Starting RAG search...")
         
         try:
             rag = RAGHandler()
@@ -401,9 +393,9 @@ Table number(s):"""
             
             if rag_response and rag_response.get('documents') and rag_response['documents'][0]:
                 rag_chunks = rag_response['documents'][0]
-                logger.info(f"[STEP 5] ✅ RAG found {len(rag_chunks)} chunks")
+                logger.warning(f"[STEP 5] ✅ RAG found {len(rag_chunks)} chunks")
             else:
-                logger.info("[STEP 5] RAG returned no results")
+                logger.warning("[STEP 5] RAG returned no results")
                 
         except Exception as rag_e:
             logger.error(f"[STEP 5] ❌ RAG error: {rag_e}")
@@ -412,7 +404,7 @@ Table number(s):"""
         # STEP 6: BUILD CONTEXT
         # =====================================================================
         update_job_status(job_id, 'processing', '🧠 Building context...', 55)
-        logger.info(f"[STEP 6] Building context from {len(sql_results_list)} SQL results, {len(rag_chunks)} RAG chunks")
+        logger.warning(f"[STEP 6] Building context from {len(sql_results_list)} SQL results, {len(rag_chunks)} RAG chunks")
         
         context_parts = []
         sources = []
@@ -441,13 +433,13 @@ Table number(s):"""
         if rag_chunks:
             sources.append({'filename': 'Documents', 'type': 'rag', 'chunks': len(rag_chunks), 'relevance': 80})
         
-        logger.info(f"[STEP 6] Context parts: {len(context_parts)}, Total sources: {len(sources)}")
+        logger.warning(f"[STEP 6] Context parts: {len(context_parts)}, Total sources: {len(sources)}")
         
         # =====================================================================
         # STEP 7: PII DETECTION & SANITIZATION
         # =====================================================================
         full_context = '\n\n'.join(context_parts)
-        logger.info(f"[STEP 7] Context length: {len(full_context)} chars")
+        logger.warning(f"[STEP 7] Context length: {len(full_context)} chars")
         
         pii_detection = detect_pii_in_data(full_context, all_columns)
         
@@ -457,42 +449,54 @@ Table number(s):"""
             full_context = sanitize_pii(full_context)
             sanitized = True
         else:
-            logger.info("[STEP 7] No PII detected")
+            logger.warning("[STEP 7] No PII detected")
             sanitized = False
         
         # =====================================================================
         # STEP 8: SEND TO CLAUDE FOR ANSWER
         # =====================================================================
+        logger.warning(f"[STEP 8] context_parts count: {len(context_parts)}")
+        
         if context_parts:
             update_job_status(job_id, 'processing', '✨ Generating response...', 75)
-            logger.info("[STEP 8] Sending to orchestrator...")
+            logger.warning("[STEP 8] Sending to orchestrator...")
+            logger.warning(f"[STEP 8] Context to send: {len(full_context)} chars")
             
             orchestrator_chunks = [{
                 'document': full_context,
                 'metadata': {'filename': 'Query Results', 'type': 'combined', 'pii_sanitized': sanitized}
             }]
             
-            orchestrator = LLMOrchestrator()
-            result = orchestrator.process_query(message, orchestrator_chunks)
-            
-            response = result.get('response', 'I found data but had trouble analyzing it.')
-            logger.info(f"[STEP 8] ✅ Got response: {len(response)} chars")
-            
-            if sanitized:
-                response += "\n\n*Note: Some sensitive values have been protected.*"
-            
-            update_job_status(
-                job_id, 'complete', 'Complete', 100,
-                response=response,
-                sources=sources,
-                chunks_found=len(sql_results_list) + len(rag_chunks),
-                models_used=result.get('models_used', ['claude']),
-                query_type='self_healing',
-                sanitized=sanitized,
-                pii_detected=pii_detection['pii_types'] if pii_detection['has_pii'] else []
-            )
-            logger.info(f"[COMPLETE] Job {job_id[:8]} finished successfully")
-            return
+            try:
+                orchestrator = LLMOrchestrator()
+                logger.warning("[STEP 8] Calling orchestrator.process_query...")
+                result = orchestrator.process_query(message, orchestrator_chunks)
+                logger.warning(f"[STEP 8] Orchestrator returned: {list(result.keys())}")
+                
+                response = result.get('response', 'I found data but had trouble analyzing it.')
+                logger.warning(f"[STEP 8] ✅ Got response: {len(response)} chars, first 100: {response[:100]}")
+                
+                if sanitized:
+                    response += "\n\n*Note: Some sensitive values have been protected.*"
+                
+                update_job_status(
+                    job_id, 'complete', 'Complete', 100,
+                    response=response,
+                    sources=sources,
+                    chunks_found=len(sql_results_list) + len(rag_chunks),
+                    models_used=result.get('models_used', ['claude']),
+                    query_type='self_healing',
+                    sanitized=sanitized,
+                    pii_detected=pii_detection['pii_types'] if pii_detection['has_pii'] else []
+                )
+                logger.warning(f"[COMPLETE] Job {job_id[:8]} finished successfully")
+                return
+                
+            except Exception as orch_e:
+                logger.error(f"[STEP 8] ❌ Orchestrator FAILED: {orch_e}")
+                logger.error(f"[STEP 8] Traceback: {traceback.format_exc()}")
+        else:
+            logger.warning("[STEP 8] ⚠️ NO CONTEXT PARTS - skipping to fallback")
         
         # =====================================================================
         # STEP 9: FALLBACK - No data found
@@ -525,7 +529,7 @@ Table number(s):"""
                     query_type='fallback',
                     sanitized=fallback_pii['has_pii']
                 )
-                logger.info(f"[COMPLETE] Job {job_id[:8]} finished via fallback")
+                logger.warning(f"[COMPLETE] Job {job_id[:8]} finished via fallback")
                 return
                 
         except Exception as fallback_e:
