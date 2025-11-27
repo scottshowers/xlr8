@@ -266,6 +266,40 @@ class StructuredDataHandler:
                 )
             """)
             
+            # Column semantic mappings (Claude-inferred + human overrides)
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS _column_mappings (
+                    id INTEGER,
+                    project VARCHAR NOT NULL,
+                    file_name VARCHAR NOT NULL,
+                    table_name VARCHAR NOT NULL,
+                    original_column VARCHAR NOT NULL,
+                    semantic_type VARCHAR NOT NULL,
+                    confidence FLOAT DEFAULT 0.5,
+                    is_override BOOLEAN DEFAULT FALSE,
+                    needs_review BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Mapping inference job status
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS _mapping_jobs (
+                    id VARCHAR PRIMARY KEY,
+                    project VARCHAR NOT NULL,
+                    file_name VARCHAR NOT NULL,
+                    status VARCHAR DEFAULT 'pending',
+                    total_tables INTEGER DEFAULT 0,
+                    completed_tables INTEGER DEFAULT 0,
+                    mappings_found INTEGER DEFAULT 0,
+                    needs_review_count INTEGER DEFAULT 0,
+                    error_message VARCHAR,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
             self.conn.commit()
             logger.info("Metadata tables initialized successfully")
             
@@ -631,6 +665,561 @@ class StructuredDataHandler:
             logger.warning(f"Failed to get relationships: {e}")
             return []
     
+    # =========================================================================
+    # COLUMN MAPPING METHODS (Claude-inferred + human override)
+    # =========================================================================
+    
+    def infer_column_mappings(self, project: str, file_name: str, table_name: str, 
+                               columns: List[str], sample_data: List[Dict]) -> List[Dict]:
+        """
+        Use Claude to infer semantic meaning of columns.
+        
+        Args:
+            project: Project name
+            file_name: Source file name
+            table_name: DuckDB table name
+            columns: List of column names
+            sample_data: First few rows of data
+            
+        Returns:
+            List of mapping dicts with confidence scores
+        """
+        mappings = []
+        
+        try:
+            # Prepare sample data string
+            sample_str = ""
+            for i, row in enumerate(sample_data[:5]):
+                sample_str += f"Row {i+1}: {row}\n"
+            
+            # Build prompt for Claude
+            prompt = f"""Analyze these column names and sample data to identify semantic types.
+
+COLUMN NAMES:
+{columns}
+
+SAMPLE DATA:
+{sample_str}
+
+For each column, identify if it matches one of these semantic types:
+- employee_number: Employee ID/number (unique identifier for employees)
+- company_code: Company/organization code
+- employment_status_code: Employment status (A=Active, T=Terminated, L=Leave, etc.)
+- earning_code: Earning type codes
+- deduction_code: Deduction/benefit codes
+- job_code: Job/position codes
+- department_code: Department/org unit codes
+- amount: Monetary amounts (pay, deductions, etc.)
+- rate: Pay rates (hourly, salary)
+- effective_date: Date fields for effective dates
+- start_date: Start dates
+- end_date: End dates
+- employee_name: Employee name field
+- NONE: Does not match any semantic type
+
+Respond with JSON array only, no explanation:
+[
+  {{"column": "column_name", "semantic_type": "type_or_NONE", "confidence": 0.0-1.0}},
+  ...
+]
+
+Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely matches, below 0.7 for uncertain."""
+
+            # Call Claude for inference
+            import anthropic
+            import os
+            
+            api_key = os.environ.get('ANTHROPIC_API_KEY') or os.environ.get('CLAUDE_API_KEY')
+            if not api_key:
+                logger.warning("[MAPPINGS] No API key available for inference")
+                return self._fallback_column_inference(columns)
+            
+            client = anthropic.Anthropic(api_key=api_key)
+            response = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=2000,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            
+            response_text = response.content[0].text.strip()
+            
+            # Parse JSON response
+            # Handle markdown code blocks
+            if "```json" in response_text:
+                response_text = response_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in response_text:
+                response_text = response_text.split("```")[1].split("```")[0].strip()
+            
+            inferred = json.loads(response_text)
+            
+            # Store mappings
+            for item in inferred:
+                col = item.get('column', '')
+                sem_type = item.get('semantic_type', 'NONE')
+                confidence = item.get('confidence', 0.5)
+                
+                if sem_type and sem_type != 'NONE':
+                    needs_review = confidence < 0.85
+                    
+                    mapping = {
+                        'project': project,
+                        'file_name': file_name,
+                        'table_name': table_name,
+                        'original_column': col,
+                        'semantic_type': sem_type,
+                        'confidence': confidence,
+                        'is_override': False,
+                        'needs_review': needs_review
+                    }
+                    mappings.append(mapping)
+                    
+                    # Store in database
+                    self._store_column_mapping(mapping)
+            
+            logger.info(f"[MAPPINGS] Inferred {len(mappings)} semantic mappings for {table_name}")
+            return mappings
+            
+        except Exception as e:
+            logger.warning(f"[MAPPINGS] Claude inference failed: {e}, using fallback")
+            return self._fallback_column_inference(columns, project, file_name, table_name)
+    
+    def _fallback_column_inference(self, columns: List[str], project: str = None, 
+                                    file_name: str = None, table_name: str = None) -> List[Dict]:
+        """Pattern-based fallback when Claude is unavailable"""
+        mappings = []
+        
+        patterns = {
+            'employee_number': [r'employee.*num', r'emp.*num', r'ee.*num', r'emp.*id', r'employee.*id', r'^emp_no$', r'^ee_id$'],
+            'company_code': [r'company.*code', r'co.*code', r'comp.*code', r'home.*company'],
+            'employment_status_code': [r'employment.*status', r'emp.*status', r'status.*code'],
+            'earning_code': [r'earning.*code', r'earn.*code'],
+            'deduction_code': [r'deduction.*code', r'ded.*code', r'benefit.*code'],
+            'job_code': [r'job.*code', r'position.*code'],
+            'department_code': [r'dept.*code', r'department.*code', r'org.*level'],
+            'amount': [r'amount', r'amt$', r'_amt$'],
+            'rate': [r'rate$', r'pay.*rate', r'hourly.*rate', r'salary'],
+            'effective_date': [r'effective.*date', r'eff.*date'],
+            'employee_name': [r'^name$', r'employee.*name', r'emp.*name', r'full.*name']
+        }
+        
+        for col in columns:
+            col_lower = col.lower()
+            for sem_type, pattern_list in patterns.items():
+                for pattern in pattern_list:
+                    if re.search(pattern, col_lower):
+                        mapping = {
+                            'project': project,
+                            'file_name': file_name,
+                            'table_name': table_name,
+                            'original_column': col,
+                            'semantic_type': sem_type,
+                            'confidence': 0.7,  # Lower confidence for pattern matching
+                            'is_override': False,
+                            'needs_review': True
+                        }
+                        mappings.append(mapping)
+                        
+                        if project and file_name and table_name:
+                            self._store_column_mapping(mapping)
+                        break
+                else:
+                    continue
+                break
+        
+        return mappings
+    
+    def _store_column_mapping(self, mapping: Dict):
+        """Store a single column mapping in database"""
+        try:
+            # Check if mapping already exists
+            existing = self.conn.execute("""
+                SELECT id FROM _column_mappings 
+                WHERE project = ? AND table_name = ? AND original_column = ?
+            """, [mapping['project'], mapping['table_name'], mapping['original_column']]).fetchone()
+            
+            if existing:
+                # Update existing (only if not an override)
+                self.conn.execute("""
+                    UPDATE _column_mappings 
+                    SET semantic_type = ?, confidence = ?, needs_review = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE project = ? AND table_name = ? AND original_column = ? AND is_override = FALSE
+                """, [
+                    mapping['semantic_type'],
+                    mapping['confidence'],
+                    mapping['needs_review'],
+                    mapping['project'],
+                    mapping['table_name'],
+                    mapping['original_column']
+                ])
+            else:
+                # Insert new
+                self.conn.execute("""
+                    INSERT INTO _column_mappings 
+                    (id, project, file_name, table_name, original_column, semantic_type, 
+                     confidence, is_override, needs_review)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    hash(f"{mapping['project']}_{mapping['table_name']}_{mapping['original_column']}") % 2147483647,
+                    mapping['project'],
+                    mapping['file_name'],
+                    mapping['table_name'],
+                    mapping['original_column'],
+                    mapping['semantic_type'],
+                    mapping['confidence'],
+                    mapping['is_override'],
+                    mapping['needs_review']
+                ])
+            
+            self.conn.commit()
+        except Exception as e:
+            logger.warning(f"[MAPPINGS] Failed to store mapping: {e}")
+    
+    def get_column_mappings(self, project: str, file_name: str = None, 
+                            table_name: str = None) -> List[Dict]:
+        """
+        Get column mappings for a project/file/table.
+        
+        Args:
+            project: Project name (required)
+            file_name: Optional file filter
+            table_name: Optional table filter
+            
+        Returns:
+            List of mapping dicts
+        """
+        try:
+            query = "SELECT * FROM _column_mappings WHERE project = ?"
+            params = [project]
+            
+            if file_name:
+                query += " AND file_name = ?"
+                params.append(file_name)
+            
+            if table_name:
+                query += " AND table_name = ?"
+                params.append(table_name)
+            
+            query += " ORDER BY table_name, original_column"
+            
+            result = self.conn.execute(query, params).fetchall()
+            
+            mappings = []
+            for row in result:
+                mappings.append({
+                    'id': row[0],
+                    'project': row[1],
+                    'file_name': row[2],
+                    'table_name': row[3],
+                    'original_column': row[4],
+                    'semantic_type': row[5],
+                    'confidence': row[6],
+                    'is_override': row[7],
+                    'needs_review': row[8],
+                    'created_at': str(row[9]) if row[9] else None,
+                    'updated_at': str(row[10]) if row[10] else None
+                })
+            
+            return mappings
+            
+        except Exception as e:
+            logger.warning(f"[MAPPINGS] Failed to get mappings: {e}")
+            return []
+    
+    def update_column_mapping(self, project: str, table_name: str, 
+                               original_column: str, semantic_type: str) -> bool:
+        """
+        Human override of a column mapping.
+        
+        Args:
+            project: Project name
+            table_name: Table name
+            original_column: Column to update
+            semantic_type: New semantic type (or 'NONE' to remove)
+            
+        Returns:
+            True if successful
+        """
+        try:
+            if semantic_type == 'NONE':
+                # Remove the mapping
+                self.conn.execute("""
+                    DELETE FROM _column_mappings 
+                    WHERE project = ? AND table_name = ? AND original_column = ?
+                """, [project, table_name, original_column])
+            else:
+                # Check if exists
+                existing = self.conn.execute("""
+                    SELECT id FROM _column_mappings 
+                    WHERE project = ? AND table_name = ? AND original_column = ?
+                """, [project, table_name, original_column]).fetchone()
+                
+                if existing:
+                    # Update with override flag
+                    self.conn.execute("""
+                        UPDATE _column_mappings 
+                        SET semantic_type = ?, confidence = 1.0, is_override = TRUE, 
+                            needs_review = FALSE, updated_at = CURRENT_TIMESTAMP
+                        WHERE project = ? AND table_name = ? AND original_column = ?
+                    """, [semantic_type, project, table_name, original_column])
+                else:
+                    # Insert new override
+                    self.conn.execute("""
+                        INSERT INTO _column_mappings 
+                        (id, project, file_name, table_name, original_column, semantic_type, 
+                         confidence, is_override, needs_review)
+                        VALUES (?, ?, '', ?, ?, ?, 1.0, TRUE, FALSE)
+                    """, [
+                        hash(f"{project}_{table_name}_{original_column}") % 2147483647,
+                        project,
+                        table_name,
+                        original_column,
+                        semantic_type
+                    ])
+            
+            self.conn.commit()
+            logger.info(f"[MAPPINGS] Updated {original_column} -> {semantic_type}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"[MAPPINGS] Failed to update mapping: {e}")
+            return False
+    
+    def get_semantic_column(self, project: str, table_name: str, 
+                            semantic_type: str) -> Optional[str]:
+        """
+        Find which column maps to a semantic type.
+        Used by JOIN logic to find employee_number, company_code, etc.
+        
+        Args:
+            project: Project name
+            table_name: Table name
+            semantic_type: What we're looking for (e.g., 'employee_number')
+            
+        Returns:
+            Column name or None
+        """
+        try:
+            result = self.conn.execute("""
+                SELECT original_column FROM _column_mappings
+                WHERE project = ? AND table_name = ? AND semantic_type = ?
+                ORDER BY confidence DESC
+                LIMIT 1
+            """, [project, table_name, semantic_type]).fetchone()
+            
+            return result[0] if result else None
+            
+        except Exception as e:
+            logger.warning(f"[MAPPINGS] Failed to get semantic column: {e}")
+            return None
+    
+    def get_mappings_needing_review(self, project: str) -> List[Dict]:
+        """Get all mappings flagged for review"""
+        try:
+            result = self.conn.execute("""
+                SELECT * FROM _column_mappings 
+                WHERE project = ? AND needs_review = TRUE
+                ORDER BY confidence ASC, table_name, original_column
+            """, [project]).fetchall()
+            
+            mappings = []
+            for row in result:
+                mappings.append({
+                    'id': row[0],
+                    'project': row[1],
+                    'file_name': row[2],
+                    'table_name': row[3],
+                    'original_column': row[4],
+                    'semantic_type': row[5],
+                    'confidence': row[6],
+                    'is_override': row[7],
+                    'needs_review': row[8]
+                })
+            
+            return mappings
+            
+        except Exception as e:
+            logger.warning(f"[MAPPINGS] Failed to get review items: {e}")
+            return []
+    
+    # =========================================================================
+    # MAPPING JOB MANAGEMENT (Background inference tracking)
+    # =========================================================================
+    
+    def create_mapping_job(self, job_id: str, project: str, file_name: str, 
+                           total_tables: int) -> Dict:
+        """Create a new mapping inference job"""
+        try:
+            self.conn.execute("""
+                INSERT INTO _mapping_jobs 
+                (id, project, file_name, status, total_tables, completed_tables, 
+                 mappings_found, needs_review_count)
+                VALUES (?, ?, ?, 'running', ?, 0, 0, 0)
+            """, [job_id, project, file_name, total_tables])
+            self.conn.commit()
+            
+            return {
+                'id': job_id,
+                'project': project,
+                'file_name': file_name,
+                'status': 'running',
+                'total_tables': total_tables
+            }
+        except Exception as e:
+            logger.error(f"[MAPPING_JOB] Failed to create job: {e}")
+            return None
+    
+    def update_mapping_job(self, job_id: str, completed_tables: int = None,
+                           mappings_found: int = None, needs_review_count: int = None,
+                           status: str = None, error_message: str = None):
+        """Update mapping job progress"""
+        try:
+            updates = ["updated_at = CURRENT_TIMESTAMP"]
+            params = []
+            
+            if completed_tables is not None:
+                updates.append("completed_tables = ?")
+                params.append(completed_tables)
+            if mappings_found is not None:
+                updates.append("mappings_found = ?")
+                params.append(mappings_found)
+            if needs_review_count is not None:
+                updates.append("needs_review_count = ?")
+                params.append(needs_review_count)
+            if status is not None:
+                updates.append("status = ?")
+                params.append(status)
+            if error_message is not None:
+                updates.append("error_message = ?")
+                params.append(error_message)
+            
+            params.append(job_id)
+            
+            self.conn.execute(f"""
+                UPDATE _mapping_jobs 
+                SET {', '.join(updates)}
+                WHERE id = ?
+            """, params)
+            self.conn.commit()
+            
+        except Exception as e:
+            logger.warning(f"[MAPPING_JOB] Failed to update job: {e}")
+    
+    def get_mapping_job_status(self, job_id: str = None, project: str = None, 
+                                file_name: str = None) -> Optional[Dict]:
+        """Get mapping job status by ID or project/file"""
+        try:
+            if job_id:
+                result = self.conn.execute("""
+                    SELECT * FROM _mapping_jobs WHERE id = ?
+                """, [job_id]).fetchone()
+            elif project and file_name:
+                result = self.conn.execute("""
+                    SELECT * FROM _mapping_jobs 
+                    WHERE project = ? AND file_name = ?
+                    ORDER BY created_at DESC LIMIT 1
+                """, [project, file_name]).fetchone()
+            else:
+                return None
+            
+            if result:
+                return {
+                    'id': result[0],
+                    'project': result[1],
+                    'file_name': result[2],
+                    'status': result[3],
+                    'total_tables': result[4],
+                    'completed_tables': result[5],
+                    'mappings_found': result[6],
+                    'needs_review_count': result[7],
+                    'error_message': result[8],
+                    'created_at': str(result[9]) if result[9] else None,
+                    'updated_at': str(result[10]) if result[10] else None
+                }
+            return None
+            
+        except Exception as e:
+            logger.warning(f"[MAPPING_JOB] Failed to get status: {e}")
+            return None
+    
+    def get_file_mapping_summary(self, project: str, file_name: str) -> Dict:
+        """Get mapping summary for a file (for UI display)"""
+        try:
+            # Get job status
+            job = self.get_mapping_job_status(project=project, file_name=file_name)
+            
+            # Get actual mapping counts
+            mapping_result = self.conn.execute("""
+                SELECT 
+                    COUNT(*) as total,
+                    SUM(CASE WHEN needs_review = TRUE THEN 1 ELSE 0 END) as needs_review
+                FROM _column_mappings 
+                WHERE project = ? AND file_name = ?
+            """, [project, file_name]).fetchone()
+            
+            total_mappings = mapping_result[0] if mapping_result else 0
+            needs_review_count = mapping_result[1] if mapping_result else 0
+            
+            # Get all mappings for this file
+            mappings = self.get_column_mappings(project, file_name=file_name)
+            
+            return {
+                'status': job['status'] if job else ('complete' if total_mappings > 0 else 'none'),
+                'total_mappings': total_mappings,
+                'needs_review_count': needs_review_count,
+                'mappings': mappings,
+                'job': job
+            }
+            
+        except Exception as e:
+            logger.warning(f"[MAPPING_JOB] Failed to get summary: {e}")
+            return {'status': 'error', 'total_mappings': 0, 'needs_review_count': 0, 'mappings': []}
+    
+    def run_inference_for_file(self, job_id: str, project: str, file_name: str,
+                                tables_info: List[Dict]):
+        """
+        Run column inference for all tables in a file.
+        Called in background thread.
+        """
+        try:
+            total_mappings = 0
+            total_needs_review = 0
+            
+            for i, table_info in enumerate(tables_info):
+                table_name = table_info.get('table_name', '')
+                columns = table_info.get('columns', [])
+                sample_data = table_info.get('sample_data', [])
+                
+                logger.info(f"[MAPPING_JOB] Inferring {table_name} ({i+1}/{len(tables_info)})")
+                
+                # Run inference
+                mappings = self.infer_column_mappings(
+                    project=project,
+                    file_name=file_name,
+                    table_name=table_name,
+                    columns=columns,
+                    sample_data=sample_data
+                )
+                
+                # Count results
+                total_mappings += len(mappings)
+                total_needs_review += sum(1 for m in mappings if m.get('needs_review'))
+                
+                # Update progress
+                self.update_mapping_job(
+                    job_id,
+                    completed_tables=i + 1,
+                    mappings_found=total_mappings,
+                    needs_review_count=total_needs_review
+                )
+            
+            # Mark complete
+            self.update_mapping_job(job_id, status='complete')
+            logger.info(f"[MAPPING_JOB] Complete: {total_mappings} mappings, {total_needs_review} need review")
+            
+        except Exception as e:
+            logger.error(f"[MAPPING_JOB] Inference failed: {e}")
+            self.update_mapping_job(job_id, status='error', error_message=str(e))
+    
     def _get_next_version(self, project: str, file_name: str) -> int:
         """Get next version number for a file"""
         result = self.conn.execute("""
@@ -981,6 +1570,30 @@ class StructuredDataHandler:
             except Exception as rel_e:
                 logger.warning(f"Relationship detection failed: {rel_e}")
                 results['relationships'] = []
+            
+            # Start background column inference
+            try:
+                import threading
+                import uuid
+                
+                job_id = str(uuid.uuid4())[:8]
+                tables_info = results.get('sheets', [])
+                
+                if tables_info:
+                    # Create job record
+                    self.create_mapping_job(job_id, project, file_name, len(tables_info))
+                    results['mapping_job_id'] = job_id
+                    
+                    # Start background thread
+                    thread = threading.Thread(
+                        target=self.run_inference_for_file,
+                        args=(job_id, project, file_name, tables_info),
+                        daemon=True
+                    )
+                    thread.start()
+                    logger.info(f"[MAPPING] Started background inference job {job_id} for {file_name}")
+            except Exception as map_e:
+                logger.warning(f"[MAPPING] Failed to start inference: {map_e}")
             
         except Exception as e:
             logger.error(f"Error storing Excel file: {e}")
