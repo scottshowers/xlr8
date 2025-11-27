@@ -8,6 +8,7 @@ Author: XLR8 Team
 """
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 import threading
@@ -17,6 +18,7 @@ import sys
 import time
 import re
 import traceback
+import io
 
 sys.path.insert(0, '/app')
 sys.path.insert(0, '/data')
@@ -946,6 +948,206 @@ async def download_export(filename: str):
     if not os.path.exists(path):
         raise HTTPException(404, "Not found")
     return FileResponse(path=path, filename=filename)
+
+
+# =============================================================================
+# EXCEL EXPORT ENDPOINT
+# =============================================================================
+
+class ExportRequest(BaseModel):
+    query: str
+    project: Optional[str] = None
+    tables: Optional[List[str]] = None  # Optional: specific tables to export
+
+@router.post("/chat/export-excel")
+async def export_to_excel(request: ExportRequest):
+    """
+    Export query results to Excel with 2 tabs:
+    - Results: The actual data
+    - Sources: Files/sheets referenced
+    """
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+        
+        if not STRUCTURED_QUERIES_AVAILABLE:
+            raise HTTPException(503, "Structured data not available")
+        
+        handler = get_structured_handler()
+        query = request.query.lower()
+        project = request.project
+        
+        logger.warning(f"[EXPORT] Starting export for query: {query[:50]}...")
+        
+        # Get schema and find relevant tables (same logic as chat)
+        schema = handler.get_schema_for_project(project)
+        tables_list = schema.get('tables', [])
+        
+        if not tables_list:
+            raise HTTPException(404, "No tables found for project")
+        
+        # Use provided tables or find relevant ones
+        tables_to_query = []
+        if request.tables:
+            for t in tables_list:
+                if t.get('table_name') in request.tables:
+                    tables_to_query.append(t)
+        else:
+            # Simple keyword matching for table selection
+            keywords = ['employee', 'company', 'personal', 'conversion']
+            if any(kw in query for kw in ['active', 'employee', 'staff', 'worker']):
+                for t in tables_list:
+                    table_name = t.get('table_name', '').lower()
+                    if any(kw in table_name for kw in keywords):
+                        tables_to_query.append(t)
+            
+            # Fallback to first 3 tables if nothing matched
+            if not tables_to_query:
+                tables_to_query = tables_list[:3]
+        
+        # Create workbook
+        wb = Workbook()
+        
+        # ========== RESULTS TAB ==========
+        ws_results = wb.active
+        ws_results.title = "Results"
+        
+        # Styling
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        thin_border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+        
+        current_row = 1
+        sources_info = []
+        
+        for table_info in tables_to_query[:5]:  # Limit to 5 tables
+            table_name = table_info.get('table_name', '')
+            sheet_name = table_info.get('sheet', '')
+            file_name = table_info.get('file', '')
+            
+            try:
+                # Get all data (no limit for export)
+                sql = f'SELECT * FROM "{table_name}"'
+                rows, cols = handler.execute_query(sql)
+                
+                if not rows:
+                    continue
+                
+                # Decrypt if needed
+                decrypted = decrypt_results(rows, handler)
+                
+                # Add section header
+                ws_results.cell(row=current_row, column=1, value=f"📊 {file_name} → {sheet_name}")
+                ws_results.cell(row=current_row, column=1).font = Font(bold=True, size=12)
+                ws_results.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=min(len(cols), 10))
+                current_row += 1
+                
+                # Add column headers
+                for col_idx, col_name in enumerate(cols, 1):
+                    cell = ws_results.cell(row=current_row, column=col_idx, value=col_name)
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.border = thin_border
+                    cell.alignment = Alignment(horizontal='center')
+                current_row += 1
+                
+                # Add data rows
+                for row_data in decrypted:
+                    for col_idx, col_name in enumerate(cols, 1):
+                        cell = ws_results.cell(row=current_row, column=col_idx, value=row_data.get(col_name, ''))
+                        cell.border = thin_border
+                    current_row += 1
+                
+                # Track sources
+                sources_info.append({
+                    'file': file_name,
+                    'sheet': sheet_name,
+                    'table': table_name,
+                    'rows': len(decrypted),
+                    'columns': len(cols)
+                })
+                
+                current_row += 2  # Gap between tables
+                
+            except Exception as te:
+                logger.error(f"[EXPORT] Error querying {table_name}: {te}")
+                continue
+        
+        # Auto-adjust column widths (Results tab)
+        for col_idx in range(1, ws_results.max_column + 1):
+            max_length = 0
+            column_letter = get_column_letter(col_idx)
+            for row_idx in range(1, min(ws_results.max_row + 1, 100)):  # Check first 100 rows
+                cell = ws_results.cell(row=row_idx, column=col_idx)
+                if cell.value:
+                    max_length = max(max_length, len(str(cell.value)))
+            ws_results.column_dimensions[column_letter].width = min(max_length + 2, 50)
+        
+        # ========== SOURCES TAB ==========
+        ws_sources = wb.create_sheet(title="Sources")
+        
+        # Headers
+        source_headers = ["File", "Sheet", "Table Name", "Rows", "Columns"]
+        for col_idx, header in enumerate(source_headers, 1):
+            cell = ws_sources.cell(row=1, column=col_idx, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.border = thin_border
+        
+        # Source data
+        for row_idx, source in enumerate(sources_info, 2):
+            ws_sources.cell(row=row_idx, column=1, value=source['file']).border = thin_border
+            ws_sources.cell(row=row_idx, column=2, value=source['sheet']).border = thin_border
+            ws_sources.cell(row=row_idx, column=3, value=source['table']).border = thin_border
+            ws_sources.cell(row=row_idx, column=4, value=source['rows']).border = thin_border
+            ws_sources.cell(row=row_idx, column=5, value=source['columns']).border = thin_border
+        
+        # Auto-adjust source columns
+        for col_idx in range(1, 6):
+            ws_sources.column_dimensions[get_column_letter(col_idx)].width = 25
+        
+        # Add metadata row
+        metadata_row = len(sources_info) + 3
+        ws_sources.cell(row=metadata_row, column=1, value="Export Info:")
+        ws_sources.cell(row=metadata_row, column=1).font = Font(bold=True)
+        ws_sources.cell(row=metadata_row + 1, column=1, value="Query:")
+        ws_sources.cell(row=metadata_row + 1, column=2, value=request.query)
+        ws_sources.cell(row=metadata_row + 2, column=1, value="Project:")
+        ws_sources.cell(row=metadata_row + 2, column=2, value=project or "All")
+        ws_sources.cell(row=metadata_row + 3, column=1, value="Generated:")
+        ws_sources.cell(row=metadata_row + 3, column=2, value=time.strftime("%Y-%m-%d %H:%M:%S"))
+        
+        # Save to memory buffer
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        
+        # Generate filename
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        safe_query = re.sub(r'[^\w\s]', '', request.query[:30]).strip().replace(' ', '_')
+        filename = f"export_{safe_query}_{timestamp}.xlsx"
+        
+        logger.warning(f"[EXPORT] Generated {filename} with {len(sources_info)} tables, {sum(s['rows'] for s in sources_info)} total rows")
+        
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[EXPORT] Error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(500, f"Export failed: {str(e)}")
 
 @router.get("/chat/data/{project}/{file_name}/versions")
 async def get_file_versions(project: str, file_name: str):
