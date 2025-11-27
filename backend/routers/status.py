@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from typing import Optional
 import sys
 import logging
+import json
 
 sys.path.insert(0, '/app')
 sys.path.insert(0, '/data')
@@ -42,38 +43,27 @@ async def get_structured_data_status(project: Optional[str] = None):
         # Query DuckDB directly for ALL tables - more reliable than get_schema_for_project
         tables = []
         try:
-            # Get all table names from DuckDB
-            table_result = handler.conn.execute("""
-                SELECT table_name 
-                FROM information_schema.tables 
-                WHERE table_schema = 'main'
-            """).fetchall()
-            
-            for (table_name,) in table_result:
-                try:
-                    # Get row count
-                    count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
-                    row_count = count_result[0] if count_result else 0
-                    
-                    # Get column info
-                    col_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
-                    columns = [col[1] for col in col_result] if col_result else []
-                    
-                    # Parse table name to extract metadata
-                    # Table names are typically: project__filename__sheetname__version
-                    parts = table_name.split('__')
-                    if len(parts) >= 3:
-                        proj = parts[0]
-                        filename = parts[1]
-                        sheet = parts[2] if len(parts) > 2 else ''
-                    else:
-                        proj = 'default'
-                        filename = table_name
-                        sheet = ''
+            # First try to get data from metadata table (has timestamps)
+            try:
+                metadata_result = handler.conn.execute("""
+                    SELECT table_name, project, file_name, sheet_name, columns, row_count, created_at
+                    FROM _schema_metadata 
+                    WHERE is_current = TRUE
+                """).fetchall()
+                
+                for row in metadata_result:
+                    table_name, proj, filename, sheet, columns_json, row_count, created_at = row
                     
                     # Apply project filter if specified
                     if project and proj.lower() != project.lower():
                         continue
+                    
+                    # Parse columns JSON
+                    try:
+                        columns_data = json.loads(columns_json) if columns_json else []
+                        columns = [c.get('name', c) if isinstance(c, dict) else c for c in columns_data]
+                    except:
+                        columns = []
                     
                     tables.append({
                         'table_name': table_name,
@@ -81,10 +71,58 @@ async def get_structured_data_status(project: Optional[str] = None):
                         'file': filename,
                         'sheet': sheet,
                         'columns': columns,
-                        'row_count': row_count
+                        'row_count': row_count or 0,
+                        'loaded_at': str(created_at) if created_at else None
                     })
-                except Exception as te:
-                    logger.warning(f"Error getting info for table {table_name}: {te}")
+                
+                logger.info(f"[STATUS] Got {len(tables)} tables from metadata")
+                
+            except Exception as meta_e:
+                logger.warning(f"Metadata query failed, falling back to information_schema: {meta_e}")
+                
+                # Fallback: Get all table names from DuckDB information_schema
+                table_result = handler.conn.execute("""
+                    SELECT table_name 
+                    FROM information_schema.tables 
+                    WHERE table_schema = 'main'
+                """).fetchall()
+                
+                for (table_name,) in table_result:
+                    try:
+                        # Get row count
+                        count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
+                        row_count = count_result[0] if count_result else 0
+                        
+                        # Get column info
+                        col_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
+                        columns = [col[1] for col in col_result] if col_result else []
+                        
+                        # Parse table name to extract metadata
+                        parts = table_name.split('__')
+                        if len(parts) >= 3:
+                            proj = parts[0]
+                            filename = parts[1]
+                            sheet = parts[2] if len(parts) > 2 else ''
+                        else:
+                            proj = 'default'
+                            filename = table_name
+                            sheet = ''
+                        
+                        # Apply project filter if specified
+                        if project and proj.lower() != project.lower():
+                            continue
+                        
+                        tables.append({
+                            'table_name': table_name,
+                            'project': proj,
+                            'file': filename,
+                            'sheet': sheet,
+                            'columns': columns,
+                            'row_count': row_count,
+                            'loaded_at': None
+                        })
+                    except Exception as te:
+                        logger.warning(f"Error getting info for table {table_name}: {te}")
                     
         except Exception as qe:
             logger.error(f"Error querying tables: {qe}")
@@ -106,21 +144,28 @@ async def get_structured_data_status(project: Optional[str] = None):
                     'filename': file_name,
                     'project': project_name,
                     'sheets': [],  # Frontend expects 'sheets' not 'tables'
-                    'total_rows': 0
+                    'total_rows': 0,
+                    'loaded_at': None
                 }
             
             row_count = table.get('row_count', 0)
             columns_list = table.get('columns', [])
+            loaded_at = table.get('loaded_at')
+            
             files_dict[key]['sheets'].append({
                 'table_name': table.get('table_name'),
                 'sheet_name': table.get('sheet', ''),
                 'columns': columns_list,
                 'column_count': len(columns_list),
                 'row_count': row_count,
-                'encrypted_columns': []  # TODO: track encrypted columns if needed
+                'encrypted_columns': []
             })
             files_dict[key]['total_rows'] += row_count
             total_rows += row_count
+            
+            # Track most recent loaded_at for the file
+            if loaded_at and (files_dict[key]['loaded_at'] is None or loaded_at > files_dict[key]['loaded_at']):
+                files_dict[key]['loaded_at'] = loaded_at
         
         files_list = list(files_dict.values())
         
