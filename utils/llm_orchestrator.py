@@ -372,8 +372,9 @@ RULES:
 1. Look at the actual column names and data values
 2. Figure out what the columns mean from context and values
 3. Give actual counts and real data - never placeholders like [Number] or [Employee A]
-4. If listing, show real values from the data (limit to 25 if many)
-5. Never describe what to do - just do it and give the answer"""
+4. For LIST requests with MORE than 25 results: ASK the user "There are X items. Would you like me to list them all in the chat or export to an Excel file?"
+5. For LIST requests with 25 or fewer results: Show all of them
+6. Never describe what to do - just do it and give the answer"""
 
             user_prompt = f"""Question: {query}
 
@@ -409,9 +410,10 @@ RULES:
 1. Look at the actual column names and data values
 2. Figure out what the columns mean from context and values
 3. Give actual counts and real data - never placeholders like [Number] or [Employee A]
-4. If listing, show real values from the data (limit to 25 if many)
-5. Never describe what to do - just do it and give the answer
-6. Keep any [REDACTED] or sanitized placeholders as-is - those are for privacy"""
+4. For LIST requests with MORE than 25 results: ASK the user "There are X items. Would you like me to list them all in the chat or export to an Excel file?"
+5. For LIST requests with 25 or fewer results: Show all of them
+6. Never describe what to do - just do it and give the answer
+7. Keep any [REDACTED] or sanitized placeholders as-is - those are for privacy"""
 
         user_prompt = f"""Question: {query}
 
