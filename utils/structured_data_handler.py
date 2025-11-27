@@ -7,7 +7,7 @@ Each project gets isolated tables. Cross-sheet joins supported.
 
 SECURITY FEATURES:
 - Field-level encryption for PII (SSN, DOB, etc.)
-- Encryption at rest using Fernet (AES-128)
+- Encryption at rest using AES-256-GCM (authenticated encryption)
 
 VERSIONING FEATURES:
 - Load versioning for comparison
@@ -29,7 +29,9 @@ import base64
 
 # Encryption imports
 try:
-    from cryptography.fernet import Fernet
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.fernet import Fernet  # Keep for backward compatibility
+    import base64
     ENCRYPTION_AVAILABLE = True
 except ImportError:
     ENCRYPTION_AVAILABLE = False
@@ -47,7 +49,7 @@ logger = logging.getLogger(__name__)
 
 # DuckDB storage location
 DUCKDB_PATH = "/data/structured_data.duckdb"
-ENCRYPTION_KEY_PATH = "/data/.encryption_key"
+ENCRYPTION_KEY_PATH = "/data/.encryption_key_v2"  # New path for AES-256 key
 
 # PII field patterns to encrypt
 PII_PATTERNS = [
@@ -62,35 +64,74 @@ PII_PATTERNS = [
 
 
 class FieldEncryptor:
-    """Handles field-level encryption for PII data"""
+    """
+    Handles field-level encryption for PII data using AES-256-GCM.
+    
+    - AES-256-GCM: Authenticated encryption with 256-bit key
+    - 96-bit random nonce per encryption
+    - Format: "ENC256:" + base64(nonce + ciphertext + tag)
+    - Backward compatible: can still decrypt old "ENC:" Fernet data
+    
+    Future KMS integration point: Replace _get_key() method
+    """
     
     def __init__(self, key_path: str = ENCRYPTION_KEY_PATH):
         self.key_path = key_path
-        self.fernet = None
+        self.aesgcm = None
+        self.fernet = None  # For backward compatibility
         
         if ENCRYPTION_AVAILABLE:
             self._init_encryption()
     
     def _init_encryption(self):
-        """Initialize or load encryption key"""
+        """Initialize or load AES-256 encryption key"""
         try:
-            if os.path.exists(self.key_path):
-                with open(self.key_path, 'rb') as f:
-                    key = f.read()
-            else:
-                # Generate new key
-                key = Fernet.generate_key()
-                os.makedirs(os.path.dirname(self.key_path), exist_ok=True)
-                with open(self.key_path, 'wb') as f:
-                    f.write(key)
-                os.chmod(self.key_path, 0o600)  # Restrict permissions
-                logger.info("Generated new encryption key")
+            key = self._get_key()
+            self.aesgcm = AESGCM(key)
+            logger.info("AES-256-GCM encryption initialized successfully")
             
-            self.fernet = Fernet(key)
-            logger.info("Encryption initialized successfully")
+            # Also init Fernet for backward compatibility with old data
+            old_key_path = "/data/.encryption_key"
+            if os.path.exists(old_key_path):
+                try:
+                    with open(old_key_path, 'rb') as f:
+                        fernet_key = f.read()
+                    self.fernet = Fernet(fernet_key)
+                    logger.info("Fernet backward compatibility enabled")
+                except:
+                    pass
+                    
         except Exception as e:
             logger.error(f"Encryption initialization failed: {e}")
-            self.fernet = None
+            self.aesgcm = None
+    
+    def _get_key(self) -> bytes:
+        """
+        Get or generate AES-256 key (32 bytes).
+        
+        Future KMS integration: Override this method to fetch from KMS
+        Example:
+            def _get_key(self):
+                import boto3
+                kms = boto3.client('kms')
+                response = kms.generate_data_key(KeyId='alias/pii-key', KeySpec='AES_256')
+                return response['Plaintext']
+        """
+        if os.path.exists(self.key_path):
+            with open(self.key_path, 'rb') as f:
+                key = f.read()
+                if len(key) != 32:
+                    raise ValueError("Invalid key length, expected 32 bytes")
+                return key
+        else:
+            # Generate new 256-bit key
+            key = os.urandom(32)
+            os.makedirs(os.path.dirname(self.key_path), exist_ok=True)
+            with open(self.key_path, 'wb') as f:
+                f.write(key)
+            os.chmod(self.key_path, 0o600)  # Restrict permissions
+            logger.info("Generated new AES-256 encryption key")
+            return key
     
     def is_pii_column(self, column_name: str) -> bool:
         """Check if column likely contains PII"""
@@ -101,33 +142,68 @@ class FieldEncryptor:
         return False
     
     def encrypt(self, value: Any) -> str:
-        """Encrypt a value"""
-        if not self.fernet or value is None or pd.isna(value):
+        """Encrypt a value using AES-256-GCM"""
+        if not self.aesgcm or value is None or pd.isna(value):
             return value
         
         try:
-            # Convert to string and encrypt
-            val_str = str(value)
-            encrypted = self.fernet.encrypt(val_str.encode())
-            # Prefix with 'ENC:' to identify encrypted values
-            return f"ENC:{encrypted.decode()}"
+            # Convert to string and encode
+            val_bytes = str(value).encode('utf-8')
+            
+            # Generate random 96-bit nonce (12 bytes)
+            nonce = os.urandom(12)
+            
+            # Encrypt (returns ciphertext + 16-byte auth tag)
+            ciphertext = self.aesgcm.encrypt(nonce, val_bytes, None)
+            
+            # Combine: nonce + ciphertext (includes tag)
+            encrypted_data = nonce + ciphertext
+            
+            # Base64 encode and prefix
+            encoded = base64.b64encode(encrypted_data).decode('utf-8')
+            return f"ENC256:{encoded}"
+            
         except Exception as e:
             logger.warning(f"Encryption failed for value: {e}")
             return value
     
     def decrypt(self, value: Any) -> str:
-        """Decrypt a value"""
-        if not self.fernet or value is None or pd.isna(value):
+        """Decrypt a value (handles both AES-256-GCM and legacy Fernet)"""
+        if value is None or pd.isna(value):
             return value
         
         try:
             val_str = str(value)
-            if not val_str.startswith("ENC:"):
-                return value
             
-            encrypted_data = val_str[4:].encode()
-            decrypted = self.fernet.decrypt(encrypted_data)
-            return decrypted.decode()
+            # Handle AES-256-GCM encrypted values
+            if val_str.startswith("ENC256:"):
+                if not self.aesgcm:
+                    return value
+                    
+                encoded = val_str[7:]  # Remove "ENC256:" prefix
+                encrypted_data = base64.b64decode(encoded)
+                
+                # Extract nonce (first 12 bytes) and ciphertext+tag (rest)
+                nonce = encrypted_data[:12]
+                ciphertext = encrypted_data[12:]
+                
+                # Decrypt
+                plaintext = self.aesgcm.decrypt(nonce, ciphertext, None)
+                return plaintext.decode('utf-8')
+            
+            # Handle legacy Fernet encrypted values (backward compatibility)
+            elif val_str.startswith("ENC:"):
+                if not self.fernet:
+                    logger.warning("Legacy encrypted data found but Fernet not available")
+                    return value
+                    
+                encrypted_data = val_str[4:].encode()
+                decrypted = self.fernet.decrypt(encrypted_data)
+                return decrypted.decode()
+            
+            # Not encrypted
+            return value
+            
         except Exception as e:
             logger.warning(f"Decryption failed: {e}")
             return value
@@ -141,7 +217,7 @@ class FieldEncryptor:
             if self.is_pii_column(col):
                 df[col] = df[col].apply(self.encrypt)
                 encrypted_cols.append(col)
-                logger.info(f"Encrypted PII column: {col}")
+                logger.info(f"Encrypted PII column: {col} (AES-256-GCM)")
         
         return df, encrypted_cols
     
@@ -149,14 +225,16 @@ class FieldEncryptor:
         """Decrypt PII columns in a DataFrame"""
         df = df.copy()
         
-        # If no encrypted_cols specified, check all columns for ENC: prefix
+        # If no encrypted_cols specified, check all columns for ENC prefix
         if encrypted_cols is None:
             encrypted_cols = []
             for col in df.columns:
                 if df[col].dtype == object:
                     sample = df[col].dropna().head(1)
-                    if len(sample) > 0 and str(sample.iloc[0]).startswith("ENC:"):
-                        encrypted_cols.append(col)
+                    if len(sample) > 0:
+                        sample_val = str(sample.iloc[0])
+                        if sample_val.startswith("ENC256:") or sample_val.startswith("ENC:"):
+                            encrypted_cols.append(col)
         
         for col in encrypted_cols:
             if col in df.columns:
