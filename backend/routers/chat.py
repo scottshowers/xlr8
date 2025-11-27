@@ -450,6 +450,19 @@ Table number(s):"""
         context_parts = []
         sources = []
         
+        # Add UKG Reference Data (standard codes)
+        ukg_reference = """
+** UKG STANDARD REFERENCE CODES **
+Employment Status Codes:
+  A = Active
+  L = Leave of Absence
+  T = Terminated
+  S = Suspended
+
+Use these codes to interpret employment_status_code or similar fields.
+"""
+        context_parts.append(ukg_reference)
+        
         for result in sql_results_list:
             data_text = f"Source: {result['source_file']} → {result['sheet']}\n"
             data_text += f"Columns: {', '.join(result['columns'])}\n"
