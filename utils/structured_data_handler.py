@@ -243,6 +243,21 @@ class StructuredDataHandler:
                 )
             """)
             
+            # Table relationships for JOINs
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS _table_relationships (
+                    id INTEGER,
+                    project VARCHAR NOT NULL,
+                    source_table VARCHAR NOT NULL,
+                    source_columns JSON NOT NULL,
+                    target_table VARCHAR NOT NULL,
+                    target_columns JSON NOT NULL,
+                    relationship_type VARCHAR DEFAULT 'foreign_key',
+                    confidence FLOAT DEFAULT 1.0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
             self.conn.commit()
             logger.info("Metadata tables initialized successfully")
             
@@ -421,6 +436,192 @@ class StructuredDataHandler:
                     break
         
         return likely_keys
+    
+    def detect_relationships(self, project: str) -> List[Dict[str, Any]]:
+        """
+        Detect relationships between tables in a project.
+        
+        UKG KEY CONCEPT: Composite key of company_code + employee_number
+        (Same employee number can exist in different companies)
+        
+        Returns list of detected relationships.
+        """
+        relationships = []
+        
+        try:
+            # Get all tables for this project
+            tables_result = self.conn.execute("""
+                SELECT table_name, sheet_name, columns
+                FROM _schema_metadata
+                WHERE project = ? AND is_current = TRUE
+            """, [project]).fetchall()
+            
+            if not tables_result:
+                return relationships
+            
+            # Build column map: table_name -> set of columns
+            table_columns = {}
+            for table_name, sheet_name, columns_json in tables_result:
+                try:
+                    columns = json.loads(columns_json) if columns_json else []
+                    col_names = [c.get('name', c) if isinstance(c, dict) else c for c in columns]
+                    table_columns[table_name] = {
+                        'sheet': sheet_name,
+                        'columns': set(col_names),
+                        'column_list': col_names
+                    }
+                except:
+                    continue
+            
+            # UKG Composite Key Patterns (priority order)
+            ukg_key_patterns = [
+                # Composite: company + employee (most important for UKG)
+                (['company_code', 'employee_number'], 'ukg_composite'),
+                (['company', 'employee_number'], 'ukg_composite'),
+                (['co_code', 'ee_number'], 'ukg_composite'),
+                
+                # Single key fallbacks
+                (['employee_number'], 'employee_key'),
+                (['employee_id'], 'employee_key'),
+                (['ee_number'], 'employee_key'),
+            ]
+            
+            # Find tables with employee data (not config tables)
+            employee_tables = []
+            for table_name, info in table_columns.items():
+                cols_lower = {c.lower() for c in info['columns']}
+                
+                # Must have employee-related columns
+                has_employee_col = any(
+                    'employee' in c or 'ee_' in c or 'emp_' in c 
+                    for c in cols_lower
+                )
+                
+                if has_employee_col:
+                    employee_tables.append(table_name)
+            
+            logger.info(f"[RELATIONSHIPS] Found {len(employee_tables)} employee data tables")
+            
+            # For each pair of employee tables, find matching key columns
+            processed_pairs = set()
+            
+            for source_table in employee_tables:
+                source_info = table_columns[source_table]
+                source_cols_lower = {c.lower(): c for c in source_info['columns']}
+                
+                for target_table in employee_tables:
+                    if source_table == target_table:
+                        continue
+                    
+                    # Avoid duplicate pairs
+                    pair_key = tuple(sorted([source_table, target_table]))
+                    if pair_key in processed_pairs:
+                        continue
+                    processed_pairs.add(pair_key)
+                    
+                    target_info = table_columns[target_table]
+                    target_cols_lower = {c.lower(): c for c in target_info['columns']}
+                    
+                    # Try each key pattern
+                    for key_cols, key_type in ukg_key_patterns:
+                        # Check if both tables have all key columns
+                        source_matches = []
+                        target_matches = []
+                        
+                        for key_col in key_cols:
+                            # Find matching column in source (fuzzy match)
+                            source_match = None
+                            for col_lower, col_orig in source_cols_lower.items():
+                                if key_col in col_lower or col_lower in key_col:
+                                    source_match = col_orig
+                                    break
+                            
+                            # Find matching column in target
+                            target_match = None
+                            for col_lower, col_orig in target_cols_lower.items():
+                                if key_col in col_lower or col_lower in key_col:
+                                    target_match = col_orig
+                                    break
+                            
+                            if source_match and target_match:
+                                source_matches.append(source_match)
+                                target_matches.append(target_match)
+                        
+                        # If all key columns found in both tables, we have a relationship
+                        if len(source_matches) == len(key_cols) and len(target_matches) == len(key_cols):
+                            relationship = {
+                                'source_table': source_table,
+                                'source_sheet': source_info['sheet'],
+                                'source_columns': source_matches,
+                                'target_table': target_table,
+                                'target_sheet': target_info['sheet'],
+                                'target_columns': target_matches,
+                                'key_type': key_type,
+                                'confidence': 1.0 if key_type == 'ukg_composite' else 0.8
+                            }
+                            relationships.append(relationship)
+                            
+                            logger.info(f"[RELATIONSHIPS] Found: {source_info['sheet']}.{source_matches} -> {target_info['sheet']}.{target_matches} ({key_type})")
+                            break  # Use first matching pattern (highest priority)
+            
+            # Store relationships in database
+            if relationships:
+                # Clear old relationships for this project
+                self.conn.execute("""
+                    DELETE FROM _table_relationships WHERE project = ?
+                """, [project])
+                
+                # Insert new relationships
+                for rel in relationships:
+                    self.conn.execute("""
+                        INSERT INTO _table_relationships 
+                        (id, project, source_table, source_columns, target_table, target_columns, relationship_type, confidence)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, [
+                        len(relationships),
+                        project,
+                        rel['source_table'],
+                        json.dumps(rel['source_columns']),
+                        rel['target_table'],
+                        json.dumps(rel['target_columns']),
+                        rel['key_type'],
+                        rel['confidence']
+                    ])
+                
+                self.conn.commit()
+                logger.info(f"[RELATIONSHIPS] Stored {len(relationships)} relationships for project {project}")
+            
+            return relationships
+            
+        except Exception as e:
+            logger.error(f"[RELATIONSHIPS] Detection failed: {e}")
+            return []
+    
+    def get_relationships(self, project: str) -> List[Dict[str, Any]]:
+        """Get stored relationships for a project"""
+        try:
+            result = self.conn.execute("""
+                SELECT source_table, source_columns, target_table, target_columns, 
+                       relationship_type, confidence
+                FROM _table_relationships
+                WHERE project = ?
+            """, [project]).fetchall()
+            
+            relationships = []
+            for row in result:
+                relationships.append({
+                    'source_table': row[0],
+                    'source_columns': json.loads(row[1]) if row[1] else [],
+                    'target_table': row[2],
+                    'target_columns': json.loads(row[3]) if row[3] else [],
+                    'relationship_type': row[4],
+                    'confidence': row[5]
+                })
+            
+            return relationships
+        except Exception as e:
+            logger.warning(f"Failed to get relationships: {e}")
+            return []
     
     def _get_next_version(self, project: str, file_name: str) -> int:
         """Get next version number for a file"""
@@ -763,6 +964,15 @@ class StructuredDataHandler:
             
             self.conn.commit()
             logger.info(f"Stored {len(results['tables_created'])} tables from {file_name}")
+            
+            # Detect relationships after loading
+            try:
+                relationships = self.detect_relationships(project)
+                results['relationships'] = relationships
+                logger.info(f"Detected {len(relationships)} table relationships")
+            except Exception as rel_e:
+                logger.warning(f"Relationship detection failed: {rel_e}")
+                results['relationships'] = []
             
         except Exception as e:
             logger.error(f"Error storing Excel file: {e}")
