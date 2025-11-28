@@ -9,7 +9,7 @@ import api from '../services/api';
 const COLORS = {
   bg: '#f6f5fa',
   cardBg: '#ffffff',
-  archBg: '#cbd5e1',
+  archBg: '#c9d3d4',
   border: '#e1e8ed',
   text: '#2a3441',
   textMuted: '#5f6c7b',
@@ -111,7 +111,7 @@ function ActivityItem({ time, type, message }) {
   );
 }
 
-function SystemNode({ x, y, icon, label, status, color, isActive }) {
+function SystemNode({ x, y, icon, label, status, color, isActive, encrypted }) {
   const statusColor = status === 'healthy' ? COLORS.green : status === 'warning' ? COLORS.yellow : COLORS.red;
   return (
     <g>
@@ -125,7 +125,7 @@ function SystemNode({ x, y, icon, label, status, color, isActive }) {
           fill="none"
           stroke={color}
           strokeWidth={3}
-          opacity={0.4}
+          opacity={0.5}
         />
       )}
       <rect
@@ -135,9 +135,9 @@ function SystemNode({ x, y, icon, label, status, color, isActive }) {
         height={58}
         rx={10}
         fill={COLORS.cardBg}
-        stroke={isActive ? color : COLORS.border}
-        strokeWidth={isActive ? 2 : 1}
-        style={{ filter: isActive ? 'drop-shadow(0 2px 6px rgba(0,0,0,0.15))' : 'none' }}
+        stroke={isActive ? color : '#94a3b8'}
+        strokeWidth={isActive ? 2.5 : 1.5}
+        style={{ filter: isActive ? 'drop-shadow(0 2px 6px rgba(0,0,0,0.15))' : 'drop-shadow(0 1px 2px rgba(0,0,0,0.08))' }}
       />
       <text x={x} y={y - 4} textAnchor="middle" fontSize="22" fill={COLORS.text}>
         {icon}
@@ -146,6 +146,12 @@ function SystemNode({ x, y, icon, label, status, color, isActive }) {
         {label}
       </text>
       <circle cx={x + 42} cy={y - 20} r={5} fill={statusColor} />
+      {encrypted && (
+        <g>
+          <circle cx={x - 38} cy={y - 18} r={8} fill="#fef3c7" stroke="#f59e0b" strokeWidth={1} />
+          <text x={x - 38} y={y - 14} textAnchor="middle" fontSize="10">🔒</text>
+        </g>
+      )}
     </g>
   );
 }
@@ -160,7 +166,15 @@ export default function SystemMonitor() {
     totalRows: 0,
     uptime: '0h 0m',
     latency: 0,
+    monthlyCost: 0,
   });
+
+  // Cost rates (approximate per call)
+  const COST_RATES = {
+    claude: 0.015,      // ~$0.015 per call average
+    deepseek: 0.002,    // ~$0.002 per call
+    mistral: 0.004,     // ~$0.004 per call
+  };
 
   const [componentStatus, setComponentStatus] = useState({
     frontend: 'healthy',
@@ -293,7 +307,7 @@ export default function SystemMonitor() {
           });
         }, 800);
         setMetrics(function(prev) {
-          return { ...prev, llmCalls: prev.llmCalls + 1 };
+          return { ...prev, llmCalls: prev.llmCalls + 1, monthlyCost: prev.monthlyCost + 0.015 };
         });
       } else if (randomActivity.type === 'deepseek') {
         setDataFlowActive(function(prev) {
@@ -305,7 +319,7 @@ export default function SystemMonitor() {
           });
         }, 700);
         setMetrics(function(prev) {
-          return { ...prev, llmCalls: prev.llmCalls + 1 };
+          return { ...prev, llmCalls: prev.llmCalls + 1, monthlyCost: prev.monthlyCost + 0.002 };
         });
       } else if (randomActivity.type === 'mistral') {
         setDataFlowActive(function(prev) {
@@ -317,7 +331,7 @@ export default function SystemMonitor() {
           });
         }, 500);
         setMetrics(function(prev) {
-          return { ...prev, llmCalls: prev.llmCalls + 1 };
+          return { ...prev, llmCalls: prev.llmCalls + 1, monthlyCost: prev.monthlyCost + 0.004 };
         });
       } else if (randomActivity.type === 'rag') {
         setDataFlowActive(function(prev) {
@@ -390,12 +404,13 @@ export default function SystemMonitor() {
       </div>
 
       <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+        <MetricCard icon="💰" label="Monthly Cost" value={'$' + metrics.monthlyCost.toFixed(2)} subValue={new Date().toLocaleString('default', { month: 'short' }) + ' LLM usage'} color={COLORS.grassGreen} />
         <MetricCard icon="📡" label="API Calls" value={metrics.apiRequests} subValue="This session" color={COLORS.blue} />
         <MetricCard icon="🦆" label="DB Queries" value={metrics.dbQueries} subValue="DuckDB" color={COLORS.purple} />
         <MetricCard icon="🔍" label="RAG Queries" value={metrics.ragQueries} subValue="Vector search" color={COLORS.orange} />
         <MetricCard icon="🤖" label="LLM Calls" value={metrics.llmCalls} subValue="Claude API" color={COLORS.cyan} />
         <MetricCard icon="⚡" label="Latency" value={metrics.latency + 'ms'} subValue="Avg response" color={COLORS.green} />
-        <MetricCard icon="📊" label="Data" value={metrics.totalRows.toLocaleString()} subValue={metrics.totalFiles + ' files'} color={COLORS.grassGreen} />
+        <MetricCard icon="📊" label="Data" value={metrics.totalRows.toLocaleString()} subValue={metrics.totalFiles + ' files'} color={COLORS.yellow} />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: '1.5rem' }}>
@@ -408,11 +423,11 @@ export default function SystemMonitor() {
             boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
           }}
         >
-          <h2 style={{ color: COLORS.text, fontSize: '1rem', fontWeight: 600, margin: '0 0 1rem 0' }}>
-            Architecture
+          <h2 style={{ color: COLORS.text, fontSize: '1.25rem', fontWeight: 700, margin: '0 0 1rem 0' }}>
+            Tech Stack
           </h2>
 
-          <svg width="100%" height="450" viewBox="0 0 750 450">
+          <svg width="100%" height="470" viewBox="0 0 750 470">
             {/* Frontend to API */}
             <path d="M 100 80 L 200 160" style={getLineStyle(dataFlowActive.frontendToApi, COLORS.blue)} />
             
@@ -439,13 +454,13 @@ export default function SystemMonitor() {
 
             {/* Nodes - Left Column */}
             <SystemNode x={70} y={80} icon="🖥️" label="FRONTEND" status={componentStatus.frontend} color={COLORS.blue} isActive={dataFlowActive.frontendToApi} />
-            <SystemNode x={70} y={280} icon="🔐" label="SUPABASE" status={componentStatus.supabase} color={COLORS.pink} isActive={dataFlowActive.apiToSupabase} />
+            <SystemNode x={70} y={280} icon="🔐" label="SUPABASE" status={componentStatus.supabase} color={COLORS.pink} isActive={dataFlowActive.apiToSupabase} encrypted={true} />
             
             {/* Center - API */}
-            <SystemNode x={220} y={180} icon="⚙️" label="API SERVER" status={componentStatus.api} color={COLORS.grassGreen} isActive={true} />
+            <SystemNode x={220} y={180} icon="⚙️" label="API SERVER" status={componentStatus.api} color={COLORS.grassGreen} isActive={true} encrypted={true} />
             
             {/* Right of API */}
-            <SystemNode x={420} y={100} icon="🦆" label="DUCKDB" status={componentStatus.duckdb} color={COLORS.purple} isActive={dataFlowActive.apiToDuckdb} />
+            <SystemNode x={420} y={100} icon="🦆" label="DUCKDB" status={componentStatus.duckdb} color={COLORS.purple} isActive={dataFlowActive.apiToDuckdb} encrypted={true} />
             <SystemNode x={420} y={200} icon="🎯" label="RAG CTRL" status={componentStatus.rag} color={COLORS.orange} isActive={dataFlowActive.apiToRag} />
             
             {/* Far Right - Vector DB */}
@@ -462,6 +477,20 @@ export default function SystemMonitor() {
             <text x="305" y="130" fontSize="8" fill={COLORS.textMuted}>SQL</text>
             <text x="315" y="190" fontSize="8" fill={COLORS.textMuted}>Query</text>
             <text x="510" y="130" fontSize="8" fill={COLORS.textMuted}>Vector</text>
+            
+            {/* HTTPS indicators */}
+            <text x="155" y="125" fontSize="7" fill="#f59e0b">HTTPS</text>
+            <text x="135" y="260" fontSize="7" fill="#f59e0b">HTTPS</text>
+            <text x="320" y="145" fontSize="7" fill="#f59e0b">HTTPS</text>
+            
+            {/* Legend */}
+            <g transform="translate(20, 410)">
+              <circle cx={8} cy={0} r={6} fill="#fef3c7" stroke="#f59e0b" strokeWidth={1} />
+              <text x={8} y={4} textAnchor="middle" fontSize="8">🔒</text>
+              <text x={20} y={3} fontSize="8" fill={COLORS.textMuted}>= Encryption at rest</text>
+              <text x={130} y={3} fontSize="8" fill="#f59e0b">HTTPS</text>
+              <text x={160} y={3} fontSize="8" fill={COLORS.textMuted}>= Encryption in transit</text>
+            </g>
           </svg>
         </div>
 
@@ -474,7 +503,7 @@ export default function SystemMonitor() {
             boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
             display: 'flex',
             flexDirection: 'column',
-            maxHeight: 500,
+            maxHeight: 530,
           }}
         >
           <h2
