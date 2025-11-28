@@ -63,6 +63,59 @@ PII_PATTERNS = [
 ]
 
 
+# =========================================================================
+# INFERENCE JOB QUEUE - processes one file at a time to avoid overload
+# =========================================================================
+import queue
+import threading
+
+_inference_queue = queue.Queue()
+_inference_worker_started = False
+_inference_lock = threading.Lock()
+
+def _inference_worker():
+    """Background worker that processes inference jobs one at a time"""
+    logger.info("[INFERENCE_QUEUE] Worker started")
+    while True:
+        try:
+            job = _inference_queue.get(timeout=60)  # Wait up to 60s for job
+            if job is None:  # Poison pill
+                break
+            
+            handler, job_id, project, file_name, tables_info = job
+            logger.info(f"[INFERENCE_QUEUE] Processing job {job_id} for {file_name} ({len(tables_info)} tables)")
+            
+            try:
+                handler.run_inference_for_file(job_id, project, file_name, tables_info)
+            except Exception as e:
+                logger.error(f"[INFERENCE_QUEUE] Job {job_id} failed: {e}")
+            
+            _inference_queue.task_done()
+            
+        except queue.Empty:
+            # No jobs, just keep waiting
+            continue
+        except Exception as e:
+            logger.error(f"[INFERENCE_QUEUE] Worker error: {e}")
+
+def _ensure_worker_started():
+    """Start the worker thread if not already running"""
+    global _inference_worker_started
+    with _inference_lock:
+        if not _inference_worker_started:
+            worker = threading.Thread(target=_inference_worker, daemon=True)
+            worker.start()
+            _inference_worker_started = True
+            logger.info("[INFERENCE_QUEUE] Worker thread initialized")
+
+def queue_inference_job(handler, job_id: str, project: str, file_name: str, tables_info: list):
+    """Add an inference job to the queue"""
+    _ensure_worker_started()
+    _inference_queue.put((handler, job_id, project, file_name, tables_info))
+    queue_size = _inference_queue.qsize()
+    logger.info(f"[INFERENCE_QUEUE] Queued job {job_id}, queue size: {queue_size}")
+
+
 class FieldEncryptor:
     """
     Handles field-level encryption for PII data using AES-256-GCM.
@@ -1892,7 +1945,6 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             
             # Start background column inference
             try:
-                import threading
                 import uuid
                 
                 job_id = str(uuid.uuid4())[:8]
@@ -1903,14 +1955,9 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                     self.create_mapping_job(job_id, project, file_name, len(tables_info))
                     results['mapping_job_id'] = job_id
                     
-                    # Start background thread
-                    thread = threading.Thread(
-                        target=self.run_inference_for_file,
-                        args=(job_id, project, file_name, tables_info),
-                        daemon=True
-                    )
-                    thread.start()
-                    logger.info(f"[MAPPING] Started background inference job {job_id} for {file_name}")
+                    # Queue the job instead of starting a new thread
+                    queue_inference_job(self, job_id, project, file_name, tables_info)
+                    logger.info(f"[MAPPING] Queued inference job {job_id} for {file_name}")
             except Exception as map_e:
                 logger.warning(f"[MAPPING] Failed to start inference: {map_e}")
             
