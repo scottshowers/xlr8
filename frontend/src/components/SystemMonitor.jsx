@@ -9,6 +9,7 @@ import api from '../services/api';
 const COLORS = {
   bg: '#f6f5fa',
   cardBg: '#ffffff',
+  archBg: '#f1f5f9',
   border: '#e1e8ed',
   text: '#2a3441',
   textMuted: '#5f6c7b',
@@ -21,6 +22,8 @@ const COLORS = {
   cyan: '#06b6d4',
   orange: '#f97316',
   pink: '#ec4899',
+  indigo: '#4f46e5',
+  amber: '#ea580c',
 };
 
 function StatusLight({ status, size = 12 }) {
@@ -70,7 +73,9 @@ function ActivityItem({ time, type, message }) {
   const typeColors = {
     upload: COLORS.blue,
     query: COLORS.purple,
-    llm: COLORS.cyan,
+    claude: COLORS.cyan,
+    deepseek: '#4f46e5',
+    mistral: '#ea580c',
     rag: COLORS.orange,
     auth: COLORS.pink,
     error: COLORS.red,
@@ -165,6 +170,8 @@ export default function SystemMonitor() {
     chromadb: 'healthy',
     rag: 'healthy',
     claude: 'healthy',
+    deepseek: 'healthy',
+    mistral: 'healthy',
   });
 
   const [activity, setActivity] = useState([]);
@@ -175,6 +182,8 @@ export default function SystemMonitor() {
     apiToRag: false,
     ragToChroma: false,
     ragToClaude: false,
+    ragToDeepseek: false,
+    ragToMistral: false,
   });
 
   const requestCountRef = useRef(0);
@@ -226,6 +235,8 @@ export default function SystemMonitor() {
           chromadb: chromaRes.data?.status === 'operational' ? 'healthy' : 'warning',
           rag: 'healthy',
           claude: 'healthy',
+          deepseek: 'healthy',
+          mistral: 'healthy',
         });
 
         setDataFlowActive(function(prev) {
@@ -253,7 +264,9 @@ export default function SystemMonitor() {
     const activities = [
       { type: 'query', message: 'DuckDB: SELECT query executed' },
       { type: 'upload', message: 'File ingested to structured store' },
-      { type: 'llm', message: 'Claude: Response generated' },
+      { type: 'claude', message: 'Claude: Response generated' },
+      { type: 'deepseek', message: 'DeepSeek: Code analysis complete' },
+      { type: 'mistral', message: 'Mistral: Fast inference returned' },
       { type: 'rag', message: 'RAG: Context retrieved (5 docs)' },
       { type: 'auth', message: 'Supabase: Session validated' },
       { type: 'success', message: 'Mapping inference completed' },
@@ -270,7 +283,7 @@ export default function SystemMonitor() {
         return [newItem].concat(prev.slice(0, 9));
       });
 
-      if (randomActivity.type === 'llm') {
+      if (randomActivity.type === 'claude') {
         setDataFlowActive(function(prev) {
           return { ...prev, ragToClaude: true };
         });
@@ -279,6 +292,30 @@ export default function SystemMonitor() {
             return { ...prev, ragToClaude: false };
           });
         }, 800);
+        setMetrics(function(prev) {
+          return { ...prev, llmCalls: prev.llmCalls + 1 };
+        });
+      } else if (randomActivity.type === 'deepseek') {
+        setDataFlowActive(function(prev) {
+          return { ...prev, ragToDeepseek: true };
+        });
+        setTimeout(function() {
+          setDataFlowActive(function(prev) {
+            return { ...prev, ragToDeepseek: false };
+          });
+        }, 700);
+        setMetrics(function(prev) {
+          return { ...prev, llmCalls: prev.llmCalls + 1 };
+        });
+      } else if (randomActivity.type === 'mistral') {
+        setDataFlowActive(function(prev) {
+          return { ...prev, ragToMistral: true };
+        });
+        setTimeout(function() {
+          setDataFlowActive(function(prev) {
+            return { ...prev, ragToMistral: false };
+          });
+        }, 500);
         setMetrics(function(prev) {
           return { ...prev, llmCalls: prev.llmCalls + 1 };
         });
@@ -364,7 +401,7 @@ export default function SystemMonitor() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: '1.5rem' }}>
         <div
           style={{
-            background: COLORS.cardBg,
+            background: COLORS.archBg,
             borderRadius: 16,
             padding: '1.5rem',
             border: '1px solid ' + COLORS.border,
@@ -375,7 +412,7 @@ export default function SystemMonitor() {
             Architecture
           </h2>
 
-          <svg width="100%" height="380" viewBox="0 0 700 380">
+          <svg width="100%" height="420" viewBox="0 0 720 420">
             {/* Frontend to API */}
             <path d="M 100 80 L 200 160" style={getLineStyle(dataFlowActive.frontendToApi, COLORS.blue)} />
             
@@ -392,7 +429,13 @@ export default function SystemMonitor() {
             <path d="M 470 180 L 570 100" style={getLineStyle(dataFlowActive.ragToChroma, COLORS.green)} />
             
             {/* RAG to Claude */}
-            <path d="M 470 220 L 570 300" style={getLineStyle(dataFlowActive.ragToClaude, COLORS.cyan)} />
+            <path d="M 470 200 L 570 200" style={getLineStyle(dataFlowActive.ragToClaude, COLORS.cyan)} />
+            
+            {/* RAG to DeepSeek */}
+            <path d="M 470 210 L 570 280" style={getLineStyle(dataFlowActive.ragToDeepseek, COLORS.indigo)} />
+            
+            {/* RAG to Mistral */}
+            <path d="M 470 220 L 570 360" style={getLineStyle(dataFlowActive.ragToMistral, COLORS.amber)} />
 
             {/* Nodes - Left Column */}
             <SystemNode x={70} y={80} icon="🖥️" label="FRONTEND" status={componentStatus.frontend} color={COLORS.blue} isActive={dataFlowActive.frontendToApi} />
@@ -405,17 +448,23 @@ export default function SystemMonitor() {
             <SystemNode x={420} y={100} icon="🦆" label="DUCKDB" status={componentStatus.duckdb} color={COLORS.purple} isActive={dataFlowActive.apiToDuckdb} />
             <SystemNode x={420} y={200} icon="🎯" label="RAG CTRL" status={componentStatus.rag} color={COLORS.orange} isActive={dataFlowActive.apiToRag} />
             
-            {/* Far Right */}
-            <SystemNode x={600} y={100} icon="🔍" label="CHROMADB" status={componentStatus.chromadb} color={COLORS.green} isActive={dataFlowActive.ragToChroma} />
-            <SystemNode x={600} y={300} icon="🤖" label="CLAUDE" status={componentStatus.claude} color={COLORS.cyan} isActive={dataFlowActive.ragToClaude} />
+            {/* Far Right - Vector DB */}
+            <SystemNode x={620} y={100} icon="🔍" label="CHROMADB" status={componentStatus.chromadb} color={COLORS.green} isActive={dataFlowActive.ragToChroma} />
+            
+            {/* Far Right - LLMs */}
+            <SystemNode x={620} y={200} icon="🤖" label="CLAUDE" status={componentStatus.claude} color={COLORS.cyan} isActive={dataFlowActive.ragToClaude} />
+            <SystemNode x={620} y={280} icon="🧠" label="DEEPSEEK" status={componentStatus.deepseek} color={COLORS.indigo} isActive={dataFlowActive.ragToDeepseek} />
+            <SystemNode x={620} y={360} icon="⚡" label="MISTRAL" status={componentStatus.mistral} color={COLORS.amber} isActive={dataFlowActive.ragToMistral} />
 
             {/* Connection Labels */}
             <text x="135" y="110" fontSize="8" fill={COLORS.textMuted}>REST</text>
             <text x="120" y="245" fontSize="8" fill={COLORS.textMuted}>Auth</text>
             <text x="305" y="130" fontSize="8" fill={COLORS.textMuted}>SQL</text>
             <text x="315" y="190" fontSize="8" fill={COLORS.textMuted}>Query</text>
-            <text x="505" y="130" fontSize="8" fill={COLORS.textMuted}>Vector</text>
-            <text x="505" y="270" fontSize="8" fill={COLORS.textMuted}>LLM</text>
+            <text x="510" y="130" fontSize="8" fill={COLORS.textMuted}>Vector</text>
+            
+            {/* LLM Group Label */}
+            <text x="665" y="280" fontSize="8" fill={COLORS.textMuted} textAnchor="middle">LLMs</text>
           </svg>
         </div>
 
@@ -428,7 +477,7 @@ export default function SystemMonitor() {
             boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
             display: 'flex',
             flexDirection: 'column',
-            maxHeight: 450,
+            maxHeight: 500,
           }}
         >
           <h2
