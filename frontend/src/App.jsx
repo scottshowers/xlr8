@@ -41,6 +41,7 @@ import VacuumUploadPage from './pages/VacuumUploadPage';
 import PlaybooksPage from './pages/PlaybooksPage';
 import AdminPage from './pages/AdminPage';
 import DataModelPage from './pages/DataModelPage';
+import SystemMonitorPage from './pages/SystemMonitorPage';
 
 // CSS
 import './index.css';
@@ -60,6 +61,7 @@ function App() {
           <Route path="/playbooks" element={<Layout><PlaybooksPage /></Layout>} />
           <Route path="/admin" element={<Layout><AdminPage /></Layout>} />
           <Route path="/data-model" element={<Layout><DataModelPage /></Layout>} />
+          <Route path="/system" element={<Layout><SystemMonitorPage /></Layout>} />
           
           {/* Legacy redirects */}
           <Route path="/chat" element={<Navigate to="/workspace" replace />} />
