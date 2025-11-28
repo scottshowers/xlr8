@@ -11,6 +11,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useProject } from '../context/ProjectContext';
 import PersonaManagement from '../components/PersonaManagement';
 import api from '../services/api';
@@ -22,6 +23,7 @@ const TABS = [
   { id: 'data', label: 'Data Management', icon: '📊' },
   { id: 'global', label: 'Global Data', icon: '🌐' },
   { id: 'connections', label: 'UKG Connections', icon: '🔌' },
+  { id: 'system', label: 'System Monitor', icon: '🔮', link: '/system' },
   { id: 'settings', label: 'Settings', icon: '⚙️' },
 ];
 
@@ -810,6 +812,15 @@ function SettingsTab() {
 // ==================== MAIN COMPONENT ====================
 export default function AdminPage() {
   const [activeTab, setActiveTab] = useState('projects');
+  const navigate = useNavigate();
+
+  const handleTabClick = (tab) => {
+    if (tab.link) {
+      navigate(tab.link);
+    } else {
+      setActiveTab(tab.id);
+    }
+  };
 
   const styles = {
     header: { marginBottom: '1.5rem' },
@@ -843,7 +854,7 @@ export default function AdminPage() {
       <div style={styles.card}>
         <div style={styles.tabs}>
           {TABS.map(tab => (
-            <button key={tab.id} style={styles.tab(activeTab === tab.id)} onClick={() => setActiveTab(tab.id)}>
+            <button key={tab.id} style={styles.tab(activeTab === tab.id)} onClick={() => handleTabClick(tab)}>
               <span>{tab.icon}</span>
               {tab.label}
             </button>
