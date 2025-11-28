@@ -55,6 +55,11 @@ export default function DataModelPage() {
   const [selectedConnection, setSelectedConnection] = useState(null);
   const [message, setMessage] = useState(null);
   const [pendingChanges, setPendingChanges] = useState([]);
+  const [zoom, setZoom] = useState(1);
+
+  const zoomIn = () => setZoom(z => Math.min(z + 0.1, 2));
+  const zoomOut = () => setZoom(z => Math.max(z - 0.1, 0.3));
+  const resetZoom = () => setZoom(1);
 
   // Fetch data
   useEffect(() => {
@@ -464,6 +469,59 @@ export default function DataModelPage() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          {/* Zoom Controls */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', background: '#f1f5f9', borderRadius: 6, padding: '0.25rem' }}>
+            <button
+              onClick={zoomOut}
+              style={{
+                width: 28,
+                height: 28,
+                border: 'none',
+                background: 'transparent',
+                cursor: 'pointer',
+                fontSize: '1rem',
+                borderRadius: 4,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+              title="Zoom out"
+            >
+              ➖
+            </button>
+            <span 
+              onClick={resetZoom}
+              style={{ 
+                fontSize: '0.75rem', 
+                color: '#64748b', 
+                minWidth: 45, 
+                textAlign: 'center',
+                cursor: 'pointer'
+              }}
+              title="Reset zoom"
+            >
+              {Math.round(zoom * 100)}%
+            </span>
+            <button
+              onClick={zoomIn}
+              style={{
+                width: 28,
+                height: 28,
+                border: 'none',
+                background: 'transparent',
+                cursor: 'pointer',
+                fontSize: '1rem',
+                borderRadius: 4,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+              title="Zoom in"
+            >
+              ➕
+            </button>
+          </div>
+          
           {pendingChanges.length > 0 && (
             <>
               <span style={{ fontSize: '0.85rem', color: '#f59e0b' }}>
@@ -533,25 +591,33 @@ export default function DataModelPage() {
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
         >
-          {/* SVG for lines */}
-          <svg
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-              pointerEvents: 'none',
-              zIndex: 0
-            }}
-          >
-            <g style={{ pointerEvents: 'auto' }}>
-              {renderConnections()}
-            </g>
-          </svg>
+          {/* Zoomable container */}
+          <div style={{
+            transform: `scale(${zoom})`,
+            transformOrigin: 'top left',
+            minWidth: zoom < 1 ? `${100 / zoom}%` : '100%',
+            minHeight: zoom < 1 ? `${100 / zoom}%` : '100%',
+          }}>
+            {/* SVG for lines */}
+            <svg
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                pointerEvents: 'none',
+                zIndex: 0
+              }}
+            >
+              <g style={{ pointerEvents: 'auto' }}>
+                {renderConnections()}
+              </g>
+            </svg>
 
-          {/* Table boxes */}
-          {tables.map(renderTable)}
+            {/* Table boxes */}
+            {tables.map(renderTable)}
+          </div>
         </div>
       )}
     </div>
