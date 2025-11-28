@@ -9,7 +9,7 @@ import api from '../services/api';
 const COLORS = {
   bg: '#f6f5fa',
   cardBg: '#ffffff',
-  archBg: '#f1f5f9',
+  archBg: '#cbd5e1',
   border: '#e1e8ed',
   text: '#2a3441',
   textMuted: '#5f6c7b',
@@ -117,11 +117,11 @@ function SystemNode({ x, y, icon, label, status, color, isActive }) {
     <g>
       {isActive && (
         <rect
-          x={x - 47}
-          y={y - 27}
-          width={94}
-          height={54}
-          rx={10}
+          x={x - 55}
+          y={y - 32}
+          width={110}
+          height={64}
+          rx={12}
           fill="none"
           stroke={color}
           strokeWidth={3}
@@ -129,23 +129,23 @@ function SystemNode({ x, y, icon, label, status, color, isActive }) {
         />
       )}
       <rect
-        x={x - 44}
-        y={y - 24}
-        width={88}
-        height={48}
-        rx={8}
+        x={x - 52}
+        y={y - 29}
+        width={104}
+        height={58}
+        rx={10}
         fill={COLORS.cardBg}
         stroke={isActive ? color : COLORS.border}
         strokeWidth={isActive ? 2 : 1}
-        style={{ filter: isActive ? 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))' : 'none' }}
+        style={{ filter: isActive ? 'drop-shadow(0 2px 6px rgba(0,0,0,0.15))' : 'none' }}
       />
-      <text x={x} y={y - 4} textAnchor="middle" fontSize="18" fill={COLORS.text}>
+      <text x={x} y={y - 4} textAnchor="middle" fontSize="22" fill={COLORS.text}>
         {icon}
       </text>
-      <text x={x} y={y + 14} textAnchor="middle" fontSize="9" fill={COLORS.textMuted} fontWeight="600">
+      <text x={x} y={y + 18} textAnchor="middle" fontSize="10" fill={COLORS.textMuted} fontWeight="600">
         {label}
       </text>
-      <circle cx={x + 36} cy={y - 16} r={4} fill={statusColor} />
+      <circle cx={x + 42} cy={y - 20} r={5} fill={statusColor} />
     </g>
   );
 }
@@ -412,7 +412,7 @@ export default function SystemMonitor() {
             Architecture
           </h2>
 
-          <svg width="100%" height="420" viewBox="0 0 720 420">
+          <svg width="100%" height="450" viewBox="0 0 750 450">
             {/* Frontend to API */}
             <path d="M 100 80 L 200 160" style={getLineStyle(dataFlowActive.frontendToApi, COLORS.blue)} />
             
@@ -435,7 +435,7 @@ export default function SystemMonitor() {
             <path d="M 470 210 L 570 280" style={getLineStyle(dataFlowActive.ragToDeepseek, COLORS.indigo)} />
             
             {/* RAG to Mistral */}
-            <path d="M 470 220 L 570 360" style={getLineStyle(dataFlowActive.ragToMistral, COLORS.amber)} />
+            <path d="M 470 220 L 570 375" style={getLineStyle(dataFlowActive.ragToMistral, COLORS.amber)} />
 
             {/* Nodes - Left Column */}
             <SystemNode x={70} y={80} icon="🖥️" label="FRONTEND" status={componentStatus.frontend} color={COLORS.blue} isActive={dataFlowActive.frontendToApi} />
@@ -454,7 +454,7 @@ export default function SystemMonitor() {
             {/* Far Right - LLMs */}
             <SystemNode x={620} y={200} icon="🤖" label="CLAUDE" status={componentStatus.claude} color={COLORS.cyan} isActive={dataFlowActive.ragToClaude} />
             <SystemNode x={620} y={280} icon="🧠" label="DEEPSEEK" status={componentStatus.deepseek} color={COLORS.indigo} isActive={dataFlowActive.ragToDeepseek} />
-            <SystemNode x={620} y={360} icon="⚡" label="MISTRAL" status={componentStatus.mistral} color={COLORS.amber} isActive={dataFlowActive.ragToMistral} />
+            <SystemNode x={620} y={375} icon="⚡" label="MISTRAL" status={componentStatus.mistral} color={COLORS.amber} isActive={dataFlowActive.ragToMistral} />
 
             {/* Connection Labels */}
             <text x="135" y="110" fontSize="8" fill={COLORS.textMuted}>REST</text>
@@ -462,9 +462,6 @@ export default function SystemMonitor() {
             <text x="305" y="130" fontSize="8" fill={COLORS.textMuted}>SQL</text>
             <text x="315" y="190" fontSize="8" fill={COLORS.textMuted}>Query</text>
             <text x="510" y="130" fontSize="8" fill={COLORS.textMuted}>Vector</text>
-            
-            {/* LLM Group Label */}
-            <text x="665" y="280" fontSize="8" fill={COLORS.textMuted} textAnchor="middle">LLMs</text>
           </svg>
         </div>
 
