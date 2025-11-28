@@ -21,6 +21,7 @@
  * /vacuum     → VacuumUploadPage (full extraction tool)
  * /playbooks  → PlaybooksPage (Analysis Playbooks)
  * /admin      → AdminPage (Projects, Data, Global, Settings)
+ * /data-model → DataModelPage (Visual ERD for relationships)
  */
 
 import React from 'react';
@@ -39,6 +40,7 @@ import DataPage from './pages/DataPage';
 import VacuumUploadPage from './pages/VacuumUploadPage';
 import PlaybooksPage from './pages/PlaybooksPage';
 import AdminPage from './pages/AdminPage';
+import DataModelPage from './pages/DataModelPage';
 
 // CSS
 import './index.css';
@@ -57,6 +59,7 @@ function App() {
           <Route path="/vacuum" element={<Layout><VacuumUploadPage /></Layout>} />
           <Route path="/playbooks" element={<Layout><PlaybooksPage /></Layout>} />
           <Route path="/admin" element={<Layout><AdminPage /></Layout>} />
+          <Route path="/data-model" element={<Layout><DataModelPage /></Layout>} />
           
           {/* Legacy redirects */}
           <Route path="/chat" element={<Navigate to="/workspace" replace />} />
