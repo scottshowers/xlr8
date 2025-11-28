@@ -657,11 +657,51 @@ function DataManagementTab() {
 
 // ==================== GLOBAL DATA TAB ====================
 function GlobalDataTab() {
-  const [globalData] = useState([
-    { id: 1, name: 'UKG Pro Configuration Guide', type: 'Documentation', updated: '2024-01-15' },
-    { id: 2, name: 'IRS Publication 15', type: 'Compliance', updated: '2024-01-01' },
-    { id: 3, name: 'State Tax Tables 2024', type: 'Reference', updated: '2024-01-10' },
-  ]);
+  const [globalData, setGlobalData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = React.useRef(null);
+
+  const fetchGlobalData = async () => {
+    setLoading(true);
+    try {
+      const res = await api.get('/status/structured');
+      // Filter for GLOBAL project files
+      const globalFiles = (res.data?.files || []).filter(f => f.project === 'GLOBAL');
+      setGlobalData(globalFiles);
+    } catch (err) {
+      console.error('Failed to fetch global data:', err);
+      setGlobalData([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchGlobalData(); }, []);
+
+  const handleFileSelect = async (e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    
+    setUploading(true);
+    try {
+      for (const file of files) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('project', 'GLOBAL');
+        await api.post('/upload', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+      }
+      fetchGlobalData();
+    } catch (err) {
+      console.error('Upload failed:', err);
+      alert('Upload failed: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   const styles = {
     header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' },
@@ -673,21 +713,41 @@ function GlobalDataTab() {
 
   return (
     <div>
+      <input
+        type="file"
+        ref={fileInputRef}
+        style={{ display: 'none' }}
+        accept=".xlsx,.xls,.csv"
+        onChange={handleFileSelect}
+      />
       <div style={styles.header}>
         <h3 style={styles.title}>Global Reference Data</h3>
-        <button style={styles.button}>➕ Add Data</button>
+        <button 
+          style={styles.button} 
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+        >
+          {uploading ? '⏳ Uploading...' : '➕ Add Data'}
+        </button>
       </div>
-      <p style={styles.description}>Shared knowledge base available across all projects. UKG documentation, IRS rules, compliance guides, and firm best practices.</p>
+      <p style={styles.description}>Shared knowledge base available across all projects. UKG documentation, compliance guides, and firm best practices.</p>
 
-      {globalData.map((item) => (
-        <div key={item.id} style={styles.card}>
-          <div>
-            <strong>{item.name}</strong>
-            <div style={{ fontSize: '0.8rem', color: '#5f6c7b' }}>{item.type} • Updated {item.updated}</div>
+      {loading ? (
+        <p style={{ color: '#666' }}>Loading...</p>
+      ) : globalData.length === 0 ? (
+        <p style={{ color: '#666', fontStyle: 'italic' }}>No global data uploaded yet.</p>
+      ) : (
+        globalData.map((file) => (
+          <div key={file.filename} style={styles.card}>
+            <div>
+              <strong>{file.filename}</strong>
+              <div style={{ fontSize: '0.8rem', color: '#5f6c7b' }}>
+                {file.sheets?.length || 0} sheets • {file.total_rows?.toLocaleString() || 0} rows
+              </div>
+            </div>
           </div>
-          <button style={{ ...styles.button, padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}>View</button>
-        </div>
-      ))}
+        ))
+      )}
     </div>
   );
 }
