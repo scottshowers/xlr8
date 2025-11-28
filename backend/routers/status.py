@@ -635,3 +635,82 @@ async def get_semantic_types():
             {"id": "NONE", "label": "Not Mapped", "category": "none"}
         ]
     }
+
+
+# ==================== RELATIONSHIPS ENDPOINTS ====================
+
+@router.get("/status/relationships/{project}")
+async def get_project_relationships(project: str):
+    """Get all table relationships for a project"""
+    if not STRUCTURED_AVAILABLE:
+        raise HTTPException(503, "Structured data not available")
+    
+    try:
+        handler = get_structured_handler()
+        relationships = handler.get_relationships(project)
+        return {
+            "project": project,
+            "relationships": relationships
+        }
+    except Exception as e:
+        logger.error(f"Failed to get relationships: {e}")
+        raise HTTPException(500, str(e))
+
+
+class RelationshipCreate(BaseModel):
+    source_table: str
+    source_columns: list
+    target_table: str
+    target_columns: list
+
+@router.post("/status/relationships/{project}")
+async def create_relationship(project: str, rel: RelationshipCreate):
+    """Create a new table relationship"""
+    if not STRUCTURED_AVAILABLE:
+        raise HTTPException(503, "Structured data not available")
+    
+    try:
+        handler = get_structured_handler()
+        # Add relationship to database
+        handler.conn.execute("""
+            INSERT INTO _table_relationships 
+            (id, project, source_table, source_columns, target_table, target_columns, relationship_type, confidence)
+            VALUES (?, ?, ?, ?, ?, ?, 'manual', 1.0)
+        """, [
+            hash(f"{project}_{rel.source_table}_{rel.target_table}") % 2147483647,
+            project,
+            rel.source_table,
+            json.dumps(rel.source_columns),
+            rel.target_table,
+            json.dumps(rel.target_columns)
+        ])
+        handler.conn.commit()
+        
+        return {"status": "created", "source": rel.source_table, "target": rel.target_table}
+    except Exception as e:
+        logger.error(f"Failed to create relationship: {e}")
+        raise HTTPException(500, str(e))
+
+
+class RelationshipDelete(BaseModel):
+    source_table: str
+    target_table: str
+
+@router.delete("/status/relationships/{project}")
+async def delete_relationship(project: str, rel: RelationshipDelete):
+    """Delete a table relationship"""
+    if not STRUCTURED_AVAILABLE:
+        raise HTTPException(503, "Structured data not available")
+    
+    try:
+        handler = get_structured_handler()
+        handler.conn.execute("""
+            DELETE FROM _table_relationships 
+            WHERE project = ? AND source_table = ? AND target_table = ?
+        """, [project, rel.source_table, rel.target_table])
+        handler.conn.commit()
+        
+        return {"status": "deleted"}
+    except Exception as e:
+        logger.error(f"Failed to delete relationship: {e}")
+        raise HTTPException(500, str(e))
