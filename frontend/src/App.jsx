@@ -19,6 +19,7 @@
  * /workspace  → WorkspacePage
  * /data       → DataPage (Upload, Vacuum link, Status tabs)
  * /vacuum     → VacuumUploadPage (full extraction tool)
+ * /vacuum/explore → VacuumExplore (intelligent detection UI)
  * /playbooks  → PlaybooksPage (Analysis Playbooks)
  * /admin      → AdminPage (Projects, Data, Global, Settings)
  * /data-model → DataModelPage (Visual ERD for relationships)
@@ -38,6 +39,7 @@ import Landing from './pages/Landing';
 import WorkspacePage from './pages/WorkspacePage';
 import DataPage from './pages/DataPage';
 import VacuumUploadPage from './pages/VacuumUploadPage';
+import VacuumExplore from './pages/VacuumExplore';
 import PlaybooksPage from './pages/PlaybooksPage';
 import AdminPage from './pages/AdminPage';
 import DataModelPage from './pages/DataModelPage';
@@ -58,6 +60,7 @@ function App() {
           <Route path="/workspace" element={<Layout><WorkspacePage /></Layout>} />
           <Route path="/data" element={<Layout><DataPage /></Layout>} />
           <Route path="/vacuum" element={<Layout><VacuumUploadPage /></Layout>} />
+          <Route path="/vacuum/explore" element={<Layout><VacuumExplore /></Layout>} />
           <Route path="/playbooks" element={<Layout><PlaybooksPage /></Layout>} />
           <Route path="/admin" element={<Layout><AdminPage /></Layout>} />
           <Route path="/data-model" element={<Layout><DataModelPage /></Layout>} />
