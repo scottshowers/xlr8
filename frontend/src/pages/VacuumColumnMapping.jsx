@@ -15,7 +15,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
  * - Pay Info
  */
 
-const API_BASE = import.meta.env.VITE_API_URL || 'https://hcmpact-xlr8-production.up.railway.app'
+const API_BASE = '/api'
 
 // Section definitions with colors and icons
 const SECTIONS = {
@@ -128,7 +128,7 @@ export default function VacuumColumnMapping() {
 
   const loadFiles = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/vacuum/files`)
+      const res = await fetch(`${API_BASE}/vacuum/files`)
       const data = await res.json()
       setFiles(data.files || [])
       setLoading(false)
@@ -144,7 +144,7 @@ export default function VacuumColumnMapping() {
     
     try {
       // Load extracts for this file
-      const res = await fetch(`${API_BASE}/api/vacuum/extracts?source_file=${encodeURIComponent(file.source_file)}`)
+      const res = await fetch(`${API_BASE}/vacuum/extracts?source_file=${encodeURIComponent(file.source_file)}`)
       const data = await res.json()
       setExtracts(data.extracts || [])
       
@@ -169,7 +169,7 @@ export default function VacuumColumnMapping() {
 
   const extractHeaderMetadata = async (sourceFile) => {
     try {
-      const res = await fetch(`${API_BASE}/api/vacuum/header-metadata?source_file=${encodeURIComponent(sourceFile)}`)
+      const res = await fetch(`${API_BASE}/vacuum/header-metadata?source_file=${encodeURIComponent(sourceFile)}`)
       if (res.ok) {
         const data = await res.json()
         setHeaderMetadata(data.metadata || {
@@ -272,7 +272,7 @@ export default function VacuumColumnMapping() {
         remember_for_vendor: true
       }
       
-      const res = await fetch(`${API_BASE}/api/vacuum/apply-mappings`, {
+      const res = await fetch(`${API_BASE}/vacuum/apply-mappings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -346,13 +346,13 @@ export default function VacuumColumnMapping() {
                   </div>
                   {file.sections_found && (
                     <div style={styles.fileSections}>
-                      {file.sections_found.split(',').map((s, i) => (
+                      {(Array.isArray(file.sections_found) ? file.sections_found : [file.sections_found]).map((s, i) => (
                         <span key={i} style={{
                           ...styles.sectionTag,
-                          background: SECTIONS[s.trim()]?.bgColor || '#f3f4f6',
-                          color: SECTIONS[s.trim()]?.color || '#666'
+                          background: SECTIONS[String(s).trim()]?.bgColor || '#f3f4f6',
+                          color: SECTIONS[String(s).trim()]?.color || '#666'
                         }}>
-                          {SECTIONS[s.trim()]?.icon} {SECTIONS[s.trim()]?.label || s}
+                          {SECTIONS[String(s).trim()]?.icon} {SECTIONS[String(s).trim()]?.label || s}
                         </span>
                       ))}
                     </div>
