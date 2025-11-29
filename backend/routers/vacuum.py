@@ -26,9 +26,14 @@ try:
     from main.utils.vacuum_extractor import get_vacuum_extractor, VacuumExtractor, SectionType, ColumnType
     VACUUM_AVAILABLE = True
     logger.info("Vacuum extractor v2 loaded successfully")
-except ImportError as e:
-    VACUUM_AVAILABLE = False
-    logger.warning(f"Vacuum extractor not available: {e}")
+except ImportError as e1:
+    try:
+        from utils.vacuum_extractor import get_vacuum_extractor, VacuumExtractor, SectionType, ColumnType
+        VACUUM_AVAILABLE = True
+        logger.info("Vacuum extractor v2 loaded successfully")
+    except ImportError as e2:
+        VACUUM_AVAILABLE = False
+        logger.warning(f"Vacuum extractor not available: {e1} / {e2}")
 
 
 # =============================================================================
