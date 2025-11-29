@@ -2131,6 +2131,251 @@ class VacuumExtractor:
             ).fetchall()
         }
     
+    # =========================================================================
+    # HEADER METADATA EXTRACTION
+    # =========================================================================
+    
+    def extract_header_metadata(self, source_file: str) -> Dict[str, str]:
+        """
+        Extract pay register header metadata from document.
+        Returns: company, pay_period_start, pay_period_end, check_date
+        """
+        metadata = {
+            'company': '',
+            'pay_period_start': '',
+            'pay_period_end': '',
+            'check_date': ''
+        }
+        
+        # Get all extracts for this file to look for header info
+        result = self.conn.execute("""
+            SELECT raw_data, raw_headers
+            FROM raw_extracts
+            WHERE source_file = ?
+            ORDER BY page_number, table_index
+            LIMIT 5
+        """, [source_file]).fetchall()
+        
+        if not result:
+            return metadata
+        
+        # Common patterns for dates and company names
+        date_patterns = [
+            r'(\d{1,2}/\d{1,2}/\d{2,4})',  # MM/DD/YYYY or M/D/YY
+            r'(\d{4}-\d{2}-\d{2})',  # YYYY-MM-DD
+            r'(\d{1,2}-\d{1,2}-\d{2,4})',  # MM-DD-YYYY
+        ]
+        
+        period_keywords = ['pay period', 'period ending', 'period:', 'pp end', 'pp start']
+        check_keywords = ['check date', 'pay date', 'payment date', 'check dt']
+        company_keywords = ['company:', 'employer:', 'prepared for:']
+        
+        # Search through raw data for patterns
+        for row in result:
+            raw_data = row[0] if row[0] else ''
+            raw_headers = row[1] if row[1] else ''
+            
+            # Combine for searching
+            search_text = f"{raw_headers} {raw_data}".lower()
+            
+            # Try to find dates
+            for pattern in date_patterns:
+                matches = re.findall(pattern, search_text, re.IGNORECASE)
+                if matches:
+                    # Try to categorize dates
+                    for match in matches[:5]:  # Limit to first 5 dates
+                        context_start = max(0, search_text.find(match.lower()) - 50)
+                        context = search_text[context_start:context_start + 100]
+                        
+                        if any(kw in context for kw in check_keywords):
+                            if not metadata['check_date']:
+                                metadata['check_date'] = match
+                        elif any(kw in context for kw in period_keywords):
+                            if 'start' in context or 'begin' in context:
+                                if not metadata['pay_period_start']:
+                                    metadata['pay_period_start'] = match
+                            elif 'end' in context:
+                                if not metadata['pay_period_end']:
+                                    metadata['pay_period_end'] = match
+                            else:
+                                # Generic period date - assume end
+                                if not metadata['pay_period_end']:
+                                    metadata['pay_period_end'] = match
+            
+            # Try to find company name
+            for kw in company_keywords:
+                if kw in search_text:
+                    idx = search_text.find(kw)
+                    # Extract text after keyword
+                    after = search_text[idx + len(kw):idx + len(kw) + 100]
+                    # Take first line/phrase
+                    company = after.split('\n')[0].strip()
+                    company = re.sub(r'[^\w\s&-]', '', company).strip()
+                    if company and len(company) > 2:
+                        metadata['company'] = company.title()
+                        break
+        
+        return metadata
+    
+    # =========================================================================
+    # MAPPING APPLICATION
+    # =========================================================================
+    
+    def apply_section_mapping(
+        self, 
+        extract_id: int, 
+        section_type: str,
+        column_map: Dict[str, str],
+        header_metadata: Optional[Dict[str, str]] = None
+    ) -> Dict:
+        """
+        Apply column mapping to an extract and create structured output.
+        
+        Args:
+            extract_id: ID of the raw extract
+            section_type: Type of section (earnings, taxes, etc.)
+            column_map: {source_header: target_column_type}
+            header_metadata: Optional metadata to inject (for employee_info section)
+        
+        Returns:
+            Success status and details
+        """
+        # Get the extract
+        extract = self.get_extract_by_id(extract_id)
+        if not extract:
+            return {'success': False, 'error': 'Extract not found'}
+        
+        headers = extract.get('headers', [])
+        data = extract.get('data', [])
+        
+        if not headers or not data:
+            return {'success': False, 'error': 'No data in extract'}
+        
+        # Build column index mapping
+        header_to_idx = {h: i for i, h in enumerate(headers)}
+        
+        # Create mapped data
+        mapped_columns = []
+        mapped_indices = []
+        
+        for source_header, target_type in column_map.items():
+            if source_header in header_to_idx:
+                mapped_columns.append(target_type)
+                mapped_indices.append(header_to_idx[source_header])
+        
+        if not mapped_columns:
+            return {'success': False, 'error': 'No columns mapped'}
+        
+        # Build mapped rows
+        mapped_rows = []
+        for row in data:
+            mapped_row = {}
+            for col_name, idx in zip(mapped_columns, mapped_indices):
+                if idx < len(row):
+                    mapped_row[col_name] = row[idx]
+                else:
+                    mapped_row[col_name] = None
+            
+            # Inject header metadata for employee_info
+            if header_metadata and section_type == 'employee_info':
+                mapped_row['pay_period_start'] = header_metadata.get('pay_period_start', '')
+                mapped_row['pay_period_end'] = header_metadata.get('pay_period_end', '')
+                mapped_row['check_date'] = header_metadata.get('check_date', '')
+                mapped_row['company'] = header_metadata.get('company', '')
+            
+            mapped_rows.append(mapped_row)
+        
+        # Store mapped data (create a structured table)
+        table_name = f"mapped_{section_type}_{extract_id}"
+        
+        try:
+            # Create table dynamically
+            all_columns = list(mapped_rows[0].keys()) if mapped_rows else mapped_columns
+            col_defs = ', '.join([f'"{col}" VARCHAR' for col in all_columns])
+            
+            self.conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+            self.conn.execute(f'CREATE TABLE "{table_name}" ({col_defs})')
+            
+            # Insert data
+            for row in mapped_rows:
+                placeholders = ', '.join(['?' for _ in all_columns])
+                values = [row.get(col, None) for col in all_columns]
+                self.conn.execute(
+                    f'INSERT INTO "{table_name}" VALUES ({placeholders})',
+                    values
+                )
+            
+            self.conn.commit()
+            
+            return {
+                'success': True,
+                'table_name': table_name,
+                'rows_created': len(mapped_rows),
+                'columns': all_columns
+            }
+            
+        except Exception as e:
+            logger.error(f"Error creating mapped table: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def learn_column_mapping(
+        self,
+        source_header: str,
+        target_column_type: str,
+        section_type: str,
+        source_file: str
+    ) -> bool:
+        """
+        Learn a column mapping from user confirmation.
+        Updates confirmed_mappings table with frequency tracking.
+        """
+        try:
+            # Normalize header
+            normalized = source_header.lower().strip()
+            
+            # Check if mapping exists
+            existing = self.conn.execute("""
+                SELECT times_used FROM confirmed_mappings
+                WHERE source_header = ? AND target_column_type = ? AND section_type = ?
+            """, [normalized, target_column_type, section_type]).fetchone()
+            
+            if existing:
+                # Increment usage count
+                self.conn.execute("""
+                    UPDATE confirmed_mappings
+                    SET times_used = times_used + 1,
+                        last_used = CURRENT_TIMESTAMP
+                    WHERE source_header = ? AND target_column_type = ? AND section_type = ?
+                """, [normalized, target_column_type, section_type])
+            else:
+                # Insert new mapping
+                self.conn.execute("""
+                    INSERT INTO confirmed_mappings 
+                    (source_header, target_column_type, section_type, times_used)
+                    VALUES (?, ?, ?, 1)
+                """, [normalized, target_column_type, section_type])
+            
+            self.conn.commit()
+            
+            # Also add to column_patterns if high confidence
+            existing_pattern = self.conn.execute("""
+                SELECT weight FROM column_patterns
+                WHERE pattern = ? AND column_type = ?
+            """, [normalized, target_column_type]).fetchone()
+            
+            if not existing_pattern:
+                self.conn.execute("""
+                    INSERT INTO column_patterns (pattern, column_type, pattern_type, weight, source)
+                    VALUES (?, ?, 'exact', 0.9, 'user')
+                """, [normalized, target_column_type])
+                self.conn.commit()
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error learning column mapping: {e}")
+            return False
+    
     def close(self):
         """Close database connection"""
         if self.conn:
