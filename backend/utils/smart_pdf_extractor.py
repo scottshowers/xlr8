@@ -1,8 +1,9 @@
 """
-Smart PDF Column Extractor v2
-Hybrid approach: Position-based + Pattern-based + AI-assisted + Self-healing
+Smart PDF Column Extractor
+==========================
+Deploy to: backend/utils/smart_pdf_extractor.py
 
-Properly extracts columns from complex PDF pay registers by:
+Hybrid approach for intelligent PDF table extraction:
 1. Character-level X-coordinate analysis
 2. Header boundary detection  
 3. Pattern-based column splitting
@@ -13,67 +14,19 @@ Properly extracts columns from complex PDF pay registers by:
 import pdfplumber
 import re
 from collections import defaultdict
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from typing import List, Dict, Tuple, Optional, Any
 import statistics
 import json
+import logging
 
-
-# ============================================================================
-# DATA STRUCTURES
-# ============================================================================
-
-@dataclass
-class ColumnBoundary:
-    """Detected column boundary from header analysis"""
-    x_start: float
-    x_end: float
-    header_text: str
-    header_words: List[str] = field(default_factory=list)
-    
-
-@dataclass  
-class ExtractedCell:
-    """Single cell with position metadata"""
-    text: str
-    x_start: float
-    x_end: float
-    y_position: float
-    confidence: float = 1.0
-
-
-@dataclass
-class SmartColumn:
-    """A properly detected column with metadata"""
-    index: int
-    header: str
-    x_start: float
-    x_end: float
-    width: float
-    data_type: str  # 'text', 'number', 'currency', 'date', 'code', 'hours'
-    sample_values: List[str] = field(default_factory=list)
-    confidence: float = 0.0
-    was_split: bool = False
-    original_header: Optional[str] = None
-
-
-@dataclass
-class ExtractedTable:
-    """Complete extracted table with proper columns"""
-    section_type: str  # 'employee_info', 'earnings', 'taxes', 'deductions', 'pay_info'
-    columns: List[SmartColumn]
-    rows: List[List[str]]
-    raw_headers: List[str]
-    page_number: int
-    confidence: float
-    extraction_method: str  # 'position', 'pattern', 'hybrid', 'fallback'
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
 # PATTERN DEFINITIONS FOR PAYROLL DATA
 # ============================================================================
 
-# Common header patterns that indicate column boundaries
 HEADER_PATTERNS = {
     'earnings': [
         r'\bearning[s]?\b', r'\bdescription\b', r'\bcode\b', r'\btype\b',
@@ -100,12 +53,11 @@ HEADER_PATTERNS = {
     ]
 }
 
-# Data patterns for value classification
 VALUE_PATTERNS = {
     'currency': r'^\$?[\d,]+\.\d{2}$',
     'number': r'^[\d,]+\.?\d*$',
-    'hours': r'^\d{1,3}\.\d{1,2}$',  # Typically under 200 hours
-    'rate': r'^\d{1,4}\.\d{2,4}$',   # Hourly rates
+    'hours': r'^\d{1,3}\.\d{1,2}$',
+    'rate': r'^\d{1,4}\.\d{2,4}$',
     'date': r'^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$',
     'ssn': r'^\d{3}-?\d{2}-?\d{4}$',
     'employee_id': r'^[A-Z]?\d{4,10}$',
@@ -113,7 +65,6 @@ VALUE_PATTERNS = {
     'text': r'^[A-Za-z\s\-\'\,\.]+$'
 }
 
-# Known earning/deduction codes
 KNOWN_CODES = {
     'earnings': ['REG', 'REGULAR', 'OT', 'OVERTIME', 'HOL', 'HOLIDAY', 'VAC', 
                  'VACATION', 'SICK', 'PTO', 'BONUS', 'GROSS', 'COMMISSION'],
@@ -137,13 +88,16 @@ class SmartPDFExtractor:
     def __init__(self, pdf_path: str):
         self.pdf_path = pdf_path
         self.pdf = None
-        self.pages_data = []
         self.extraction_log = []
         
     def log(self, message: str, level: str = 'info'):
-        """Log extraction progress for debugging"""
         self.extraction_log.append({'level': level, 'message': message})
-        print(f"[{level.upper()}] {message}")
+        if level == 'error':
+            logger.error(message)
+        elif level == 'warning':
+            logger.warning(message)
+        else:
+            logger.info(message)
     
     def extract_all(self) -> Dict[str, Any]:
         """Main extraction entry point"""
@@ -173,7 +127,6 @@ class SmartPDFExtractor:
         results['extraction_log'] = self.extraction_log
         results['stats'] = {
             'total_tables': len(results['tables']),
-            'pages_processed': len(self.pages_data)
         }
         
         return results
@@ -182,29 +135,22 @@ class SmartPDFExtractor:
         """Extract tables from a single page using hybrid approach"""
         tables = []
         
-        # Step 1: Get all characters with positions
         chars = page.chars
         if not chars:
             self.log(f"No characters found on page {page_num + 1}", 'warning')
             return tables
         
-        # Step 2: Group characters into lines by Y position
         lines = self._group_chars_to_lines(chars)
         self.log(f"Found {len(lines)} text lines on page {page_num + 1}")
         
-        # Step 3: Detect potential header rows
         header_candidates = self._find_header_rows(lines)
         self.log(f"Found {len(header_candidates)} potential header rows")
         
-        # Step 4: For each header, extract the table below it
         for header_info in header_candidates:
-            table = self._extract_table_from_header(
-                lines, header_info, page_num
-            )
+            table = self._extract_table_from_header(lines, header_info, page_num)
             if table and len(table.get('rows', [])) > 0:
                 tables.append(table)
         
-        # Step 5: Fallback - use pdfplumber's table detection and fix it
         if not tables:
             self.log("Using fallback pdfplumber extraction", 'warning')
             tables = self._fallback_extraction(page, page_num)
@@ -216,12 +162,11 @@ class SmartPDFExtractor:
         if not chars:
             return []
         
-        # Sort by Y (top to bottom), then X (left to right)
         sorted_chars = sorted(chars, key=lambda c: (round(c['top'], 1), c['x0']))
         
         lines = []
         current_line = {'y': None, 'chars': [], 'top': None, 'bottom': None}
-        y_tolerance = 3  # pixels
+        y_tolerance = 3
         
         for char in sorted_chars:
             if char.get('text', '').strip() == '':
@@ -260,7 +205,7 @@ class SmartPDFExtractor:
         
         words = []
         current_word = {'text': '', 'x0': None, 'x1': None}
-        space_threshold = 4  # pixels between words
+        space_threshold = 4
         
         for char in chars:
             char_text = char.get('text', '')
@@ -272,7 +217,6 @@ class SmartPDFExtractor:
                     'x1': char['x1']
                 }
             elif char['x0'] - current_word['x1'] > space_threshold:
-                # New word
                 if current_word['text'].strip():
                     words.append(current_word.copy())
                 current_word = {
@@ -287,7 +231,6 @@ class SmartPDFExtractor:
         if current_word['text'].strip():
             words.append(current_word)
         
-        # Build full line text
         full_text = ' '.join(w['text'] for w in words)
         
         return {
@@ -306,7 +249,6 @@ class SmartPDFExtractor:
         for i, line in enumerate(lines):
             score = self._score_as_header(line)
             if score > 0.5:
-                # Determine section type
                 section_type = self._classify_section(line['text'])
                 headers.append({
                     'line_index': i,
@@ -323,25 +265,21 @@ class SmartPDFExtractor:
         words = line['words']
         score = 0.0
         
-        # Multiple words spread across the line
         if len(words) >= 3:
             score += 0.2
         
-        # Contains common header terms
         header_terms = ['code', 'description', 'amount', 'hours', 'rate', 
                        'current', 'ytd', 'type', 'tax', 'earning', 'deduction',
                        'employee', 'name', 'id', 'gross', 'net', 'total']
         matches = sum(1 for term in header_terms if term in text)
         score += min(matches * 0.15, 0.5)
         
-        # Words are reasonably spaced (not all clumped)
         if len(words) >= 2:
             x_positions = [w['x0'] for w in words]
             x_spread = max(x_positions) - min(x_positions)
-            if x_spread > 200:  # Spread across page
+            if x_spread > 200:
                 score += 0.2
         
-        # Not mostly numbers (headers are mostly text)
         num_count = sum(1 for w in words if re.match(r'^[\d\.\,\$]+$', w['text']))
         if num_count < len(words) * 0.3:
             score += 0.1
@@ -368,7 +306,6 @@ class SmartPDFExtractor:
         header_idx = header_info['line_index']
         section_type = header_info['section_type']
         
-        # Step 1: Determine column boundaries from header positions
         columns = self._detect_column_boundaries(header_line)
         if not columns:
             self.log(f"Could not detect columns from header: {header_line['text'][:50]}", 'warning')
@@ -376,40 +313,34 @@ class SmartPDFExtractor:
         
         self.log(f"Detected {len(columns)} columns for {section_type}")
         
-        # Step 2: Extract data rows using column boundaries
         rows = []
         for i in range(header_idx + 1, len(lines)):
             line = lines[i]
             
-            # Stop if we hit another header or empty section
             if self._score_as_header(line) > 0.5:
                 break
             if line['word_count'] == 0:
                 continue
             
-            # Extract cells aligned to columns
             row = self._extract_row_cells(line, columns)
             if row and any(cell.strip() for cell in row):
                 rows.append(row)
             
-            # Limit rows per table
             if len(rows) >= 500:
                 break
         
         if not rows:
             return None
         
-        # Step 3: Validate and self-heal if needed
         columns, rows = self._validate_and_heal(columns, rows, section_type)
         
-        # Step 4: Infer data types
         for col in columns:
             col['data_type'] = self._infer_column_type(col, rows)
         
         return {
             'section_type': section_type,
-            'columns': [asdict(c) if hasattr(c, '__dataclass_fields__') else c for c in columns],
-            'raw_headers': [c['header'] if isinstance(c, dict) else c.header for c in columns],
+            'columns': columns,
+            'raw_headers': [c['header'] for c in columns],
             'rows': rows,
             'row_count': len(rows),
             'column_count': len(columns),
@@ -426,20 +357,17 @@ class SmartPDFExtractor:
         
         columns = []
         
-        # Strategy 1: Each word is a column header
-        # (works for simple headers like "Hours Rate Amount")
         if len(words) <= 8 and all(len(w['text']) < 20 for w in words):
             for i, word in enumerate(words):
-                # Estimate column width based on position to next word
                 if i < len(words) - 1:
                     x_end = words[i + 1]['x0'] - 2
                 else:
-                    x_end = word['x1'] + 100  # Last column extends further
+                    x_end = word['x1'] + 100
                 
                 columns.append({
                     'index': i,
                     'header': word['text'].strip(),
-                    'x_start': word['x0'] - 5,  # Small padding
+                    'x_start': word['x0'] - 5,
                     'x_end': x_end,
                     'width': x_end - word['x0'],
                     'data_type': 'unknown',
@@ -448,19 +376,15 @@ class SmartPDFExtractor:
                 })
             return columns
         
-        # Strategy 2: Group adjacent words that form multi-word headers
-        # Look for natural gaps (larger spacing between column headers)
         gaps = []
         for i in range(len(words) - 1):
             gap = words[i + 1]['x0'] - words[i]['x1']
             gaps.append((i, gap))
         
-        # Find significant gaps (larger than median)
         if gaps:
             median_gap = statistics.median(g[1] for g in gaps)
             threshold = max(median_gap * 1.5, 15)
             
-            # Group words between significant gaps
             groups = []
             current_group = [words[0]]
             
@@ -472,7 +396,6 @@ class SmartPDFExtractor:
                     current_group.append(words[i + 1])
             groups.append(current_group)
             
-            # Create columns from groups
             for i, group in enumerate(groups):
                 header_text = ' '.join(w['text'] for w in group)
                 x_start = group[0]['x0'] - 5
@@ -503,7 +426,6 @@ class SmartPDFExtractor:
         for word in words:
             word_center = (word['x0'] + word['x1']) / 2
             
-            # Find which column this word belongs to
             for i, col in enumerate(columns):
                 if col['x_start'] <= word_center <= col['x_end']:
                     if cells[i]:
@@ -512,7 +434,6 @@ class SmartPDFExtractor:
                         cells[i] = word['text']
                     break
             else:
-                # Word doesn't fit any column - assign to nearest
                 distances = [(abs(word_center - (c['x_start'] + c['x_end'])/2), i) 
                             for i, c in enumerate(columns)]
                 nearest = min(distances, key=lambda x: x[0])[1]
@@ -526,10 +447,8 @@ class SmartPDFExtractor:
     def _validate_and_heal(self, columns: List[Dict], rows: List[List[str]], 
                           section_type: str) -> Tuple[List[Dict], List[List[str]]]:
         """Validate extraction and fix issues"""
-        
-        # Check 1: Are cells still merged? (multiple values in one cell)
         needs_splitting = False
-        for row in rows[:10]:  # Check first 10 rows
+        for row in rows[:10]:
             for cell in row:
                 if self._looks_merged(cell, section_type):
                     needs_splitting = True
@@ -539,9 +458,6 @@ class SmartPDFExtractor:
             self.log("Detected merged cells, attempting to split", 'warning')
             columns, rows = self._split_merged_columns(columns, rows, section_type)
         
-        # Check 2: Validate data types match expected patterns
-        # (numbers in number columns, text in text columns)
-        
         return columns, rows
     
     def _looks_merged(self, cell: str, section_type: str) -> bool:
@@ -549,12 +465,10 @@ class SmartPDFExtractor:
         if not cell or len(cell) < 10:
             return False
         
-        # Multiple numbers separated by spaces
         numbers = re.findall(r'\d+\.?\d*', cell)
         if len(numbers) >= 3:
             return True
         
-        # Known codes followed by numbers (e.g., "GROSS 791.55 Regular 12.00")
         if section_type == 'earnings':
             pattern = r'[A-Z]+\s+\d+\.?\d*\s+[A-Z]+'
             if re.search(pattern, cell, re.I):
@@ -565,13 +479,12 @@ class SmartPDFExtractor:
     def _split_merged_columns(self, columns: List[Dict], rows: List[List[str]], 
                               section_type: str) -> Tuple[List[Dict], List[List[str]]]:
         """Attempt to split merged columns using pattern detection"""
-        
-        # Find the merged column (usually the one with most content)
         merged_col_idx = None
         max_avg_len = 0
         
         for i, col in enumerate(columns):
-            avg_len = statistics.mean(len(row[i]) for row in rows if row[i]) if rows else 0
+            vals = [row[i] for row in rows if i < len(row) and row[i]]
+            avg_len = statistics.mean(len(v) for v in vals) if vals else 0
             if avg_len > max_avg_len:
                 max_avg_len = avg_len
                 merged_col_idx = i
@@ -579,47 +492,24 @@ class SmartPDFExtractor:
         if merged_col_idx is None or max_avg_len < 20:
             return columns, rows
         
-        # Analyze the merged column to detect pattern
-        merged_values = [row[merged_col_idx] for row in rows]
-        
-        # Try to split based on section type
         if section_type == 'earnings':
             return self._split_earnings_column(columns, rows, merged_col_idx)
-        elif section_type == 'taxes':
-            return self._split_tax_column(columns, rows, merged_col_idx)
-        elif section_type == 'deductions':
-            return self._split_deduction_column(columns, rows, merged_col_idx)
         
         return columns, rows
     
     def _split_earnings_column(self, columns: List[Dict], rows: List[List[str]], 
                                merged_idx: int) -> Tuple[List[Dict], List[List[str]]]:
-        """Split merged earnings data: 'GROSS 791.55 Regular 12.00 29.93 359.1'"""
-        
-        # Expected pattern: Code Amount [Code Hours Rate Amount]...
-        # Or: Description Hours Rate Amount YTD
-        
-        new_columns = []
-        new_rows = []
-        
-        # Analyze first few rows to detect pattern
-        sample = [row[merged_idx] for row in rows[:5] if row[merged_idx]]
-        
-        # Pattern 1: Multiple earning lines in one cell
-        # "GROSS 791.55 Regular 12.00 29.93 359.1 Orientation 13.00 3.00 39"
-        # This is actually multiple ROWS, not columns
+        """Split merged earnings data"""
+        sample = [row[merged_idx] for row in rows[:5] if merged_idx < len(row) and row[merged_idx]]
         
         pattern = r'([A-Za-z]+)\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)'
         
-        # Check if this is a row-merge situation
         first_cell = sample[0] if sample else ''
         matches = re.findall(pattern, first_cell)
         
         if len(matches) > 1:
-            # This is multiple rows merged into one cell!
             self.log(f"Detected {len(matches)} rows merged into single cells", 'warning')
             
-            # Create proper columns: Code, Hours, Rate, Amount
             new_columns = [
                 {'index': 0, 'header': 'Earning Code', 'x_start': 0, 'x_end': 100, 
                  'width': 100, 'data_type': 'code', 'sample_values': [], 'confidence': 0.9},
@@ -631,30 +521,16 @@ class SmartPDFExtractor:
                  'width': 100, 'data_type': 'currency', 'sample_values': [], 'confidence': 0.9},
             ]
             
-            # Un-merge the rows
+            new_rows = []
             for row in rows:
-                cell = row[merged_idx]
-                matches = re.findall(pattern, cell)
-                for match in matches:
-                    new_rows.append(list(match))
+                if merged_idx < len(row):
+                    cell = row[merged_idx]
+                    matches = re.findall(pattern, cell)
+                    for match in matches:
+                        new_rows.append(list(match))
             
             return new_columns, new_rows
         
-        # Pattern 2: Single row but columns merged
-        # Try to split by detecting number patterns
-        
-        return columns, rows
-    
-    def _split_tax_column(self, columns: List[Dict], rows: List[List[str]], 
-                          merged_idx: int) -> Tuple[List[Dict], List[List[str]]]:
-        """Split merged tax data"""
-        # Similar logic to earnings
-        return columns, rows
-    
-    def _split_deduction_column(self, columns: List[Dict], rows: List[List[str]], 
-                                merged_idx: int) -> Tuple[List[Dict], List[List[str]]]:
-        """Split merged deduction data"""
-        # Similar logic to earnings
         return columns, rows
     
     def _infer_column_type(self, column: Dict, rows: List[List[str]]) -> str:
@@ -665,13 +541,11 @@ class SmartPDFExtractor:
         if not values:
             return 'unknown'
         
-        # Sample values for the column
         column['sample_values'] = values[:5]
         
-        # Count pattern matches
         type_counts = defaultdict(int)
         
-        for val in values[:20]:  # Check first 20 values
+        for val in values[:20]:
             val = val.strip()
             for dtype, pattern in VALUE_PATTERNS.items():
                 if re.match(pattern, val):
@@ -686,9 +560,8 @@ class SmartPDFExtractor:
         """Fallback to pdfplumber table extraction with post-processing"""
         tables = []
         
-        # Try different table settings
         table_settings = [
-            {},  # Default
+            {},
             {"vertical_strategy": "text", "horizontal_strategy": "text"},
             {"vertical_strategy": "lines", "horizontal_strategy": "lines"},
             {"snap_tolerance": 5, "join_tolerance": 5},
@@ -706,7 +579,7 @@ class SmartPDFExtractor:
                     if tables:
                         break
             except Exception as e:
-                self.log(f"Fallback extraction failed with settings {settings}: {e}", 'warning')
+                self.log(f"Fallback extraction failed: {e}", 'warning')
         
         return tables
     
@@ -715,15 +588,12 @@ class SmartPDFExtractor:
         if not table or len(table) < 2:
             return None
         
-        # First row as headers
         headers = [str(h).strip() if h else f'Column_{i}' for i, h in enumerate(table[0])]
         rows = [[str(c).strip() if c else '' for c in row] for row in table[1:]]
         
-        # Classify section
         header_text = ' '.join(headers)
         section_type = self._classify_section(header_text)
         
-        # Check for merged columns and try to fix
         columns = []
         for i, header in enumerate(headers):
             columns.append({
@@ -737,7 +607,6 @@ class SmartPDFExtractor:
                 'confidence': 0.5
             })
         
-        # Validate and heal
         columns, rows = self._validate_and_heal(columns, rows, section_type)
         
         return {
@@ -754,26 +623,173 @@ class SmartPDFExtractor:
 
 
 # ============================================================================
+# COLUMN SPLITTING UTILITIES
+# ============================================================================
+
+def split_by_pattern(data: list, col_idx: int, pattern: str, new_headers: list) -> tuple:
+    """Split column using regex pattern with capture groups"""
+    new_data = []
+    compiled = re.compile(pattern)
+    num_groups = compiled.groups
+    
+    if not new_headers or len(new_headers) != num_groups:
+        new_headers = [f'Split_{i+1}' for i in range(num_groups)]
+    
+    for row in data:
+        if col_idx >= len(row):
+            new_data.append(row)
+            continue
+        
+        cell = str(row[col_idx])
+        match = compiled.search(cell)
+        
+        if match:
+            new_row = list(row[:col_idx]) + list(match.groups()) + list(row[col_idx + 1:])
+        else:
+            new_row = list(row[:col_idx]) + [''] * num_groups + list(row[col_idx + 1:])
+        
+        new_data.append(new_row)
+    
+    return new_data, new_headers
+
+
+def split_by_positions(data: list, col_idx: int, positions: list, new_headers: list) -> tuple:
+    """Split column at specific character positions"""
+    num_cols = len(positions) + 1
+    if not new_headers or len(new_headers) != num_cols:
+        new_headers = [f'Split_{i+1}' for i in range(num_cols)]
+    
+    new_data = []
+    
+    for row in data:
+        if col_idx >= len(row):
+            new_data.append(row)
+            continue
+        
+        cell = str(row[col_idx])
+        splits = []
+        prev_pos = 0
+        
+        for pos in positions:
+            splits.append(cell[prev_pos:pos].strip())
+            prev_pos = pos
+        splits.append(cell[prev_pos:].strip())
+        
+        new_row = list(row[:col_idx]) + splits + list(row[col_idx + 1:])
+        new_data.append(new_row)
+    
+    return new_data, new_headers
+
+
+def split_by_delimiter(data: list, col_idx: int, delimiter: str, new_headers: list) -> tuple:
+    """Split column by delimiter"""
+    max_splits = 1
+    for row in data:
+        if col_idx < len(row):
+            parts = str(row[col_idx]).split(delimiter)
+            max_splits = max(max_splits, len(parts))
+    
+    if not new_headers or len(new_headers) != max_splits:
+        new_headers = [f'Split_{i+1}' for i in range(max_splits)]
+    
+    new_data = []
+    
+    for row in data:
+        if col_idx >= len(row):
+            new_data.append(row)
+            continue
+        
+        cell = str(row[col_idx])
+        parts = cell.split(delimiter)
+        
+        while len(parts) < max_splits:
+            parts.append('')
+        
+        new_row = list(row[:col_idx]) + [p.strip() for p in parts] + list(row[col_idx + 1:])
+        new_data.append(new_row)
+    
+    return new_data, new_headers
+
+
+def detect_split_patterns(sample_values: list, section_type: str = 'unknown') -> list:
+    """Auto-detect split patterns from sample data"""
+    suggestions = []
+    
+    if not sample_values:
+        return suggestions
+    
+    # Pattern 1: Code + Numbers
+    pattern1 = r'([A-Za-z]+)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)'
+    if _test_pattern(sample_values, pattern1):
+        suggestions.append({
+            'pattern': pattern1,
+            'headers': ['Code', 'Value1', 'Value2', 'Value3'],
+            'description': 'Code followed by 3 numbers',
+            'preview': _apply_pattern_preview(sample_values[0], pattern1)
+        })
+    
+    # Pattern 2: Multiple Code+Amount pairs (row merge)
+    pattern2 = r'([A-Za-z]+)\s+([\d,]+\.?\d*)'
+    if _count_pattern_matches(sample_values[0], pattern2) > 1:
+        suggestions.append({
+            'pattern': pattern2,
+            'headers': ['Code', 'Amount'],
+            'description': 'Multiple Code+Amount pairs (suggests row merge)',
+            'is_row_merge': True,
+            'preview': _apply_pattern_preview(sample_values[0], pattern2, multiple=True)
+        })
+    
+    # Pattern 3: Space-separated numbers
+    pattern3 = r'([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)'
+    if _test_pattern(sample_values, pattern3):
+        suggestions.append({
+            'pattern': pattern3,
+            'headers': ['Hours', 'Rate', 'Current', 'YTD'],
+            'description': '4 numeric columns',
+            'preview': _apply_pattern_preview(sample_values[0], pattern3)
+        })
+    
+    # Pattern 4: Text + Numbers
+    pattern4 = r'([A-Za-z\s\-]+?)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)'
+    if _test_pattern(sample_values, pattern4):
+        suggestions.append({
+            'pattern': pattern4,
+            'headers': ['Description', 'Current', 'YTD'],
+            'description': 'Description followed by 2 numbers',
+            'preview': _apply_pattern_preview(sample_values[0], pattern4)
+        })
+    
+    return suggestions
+
+
+def _test_pattern(values: list, pattern: str) -> bool:
+    """Test if pattern matches most values"""
+    matches = sum(1 for v in values if re.search(pattern, str(v)))
+    return matches >= len(values) * 0.5
+
+
+def _count_pattern_matches(value: str, pattern: str) -> int:
+    """Count how many times pattern matches in value"""
+    return len(re.findall(pattern, str(value)))
+
+
+def _apply_pattern_preview(value: str, pattern: str, multiple: bool = False) -> list:
+    """Show what the split would look like"""
+    if multiple:
+        matches = re.findall(pattern, str(value))
+        return [list(m) for m in matches]
+    else:
+        match = re.search(pattern, str(value))
+        if match:
+            return list(match.groups())
+        return []
+
+
+# ============================================================================
 # API FUNCTION
 # ============================================================================
 
 def extract_pdf_smart(pdf_path: str) -> Dict[str, Any]:
-    """
-    Main entry point for smart PDF extraction.
-    Returns structured data with proper column separation.
-    """
+    """Main entry point for smart PDF extraction"""
     extractor = SmartPDFExtractor(pdf_path)
     return extractor.extract_all()
-
-
-# ============================================================================
-# TEST
-# ============================================================================
-
-if __name__ == '__main__':
-    import sys
-    if len(sys.argv) > 1:
-        result = extract_pdf_smart(sys.argv[1])
-        print(json.dumps(result, indent=2, default=str))
-    else:
-        print("Usage: python smart_pdf_extractor.py <pdf_path>")
