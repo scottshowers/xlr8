@@ -23,7 +23,7 @@ router = APIRouter()
 
 # Import vacuum extractor
 try:
-    from utils.vacuum_extractor import get_vacuum_extractor, VacuumExtractor, SectionType, ColumnType
+    from main.utils.vacuum_extractor import get_vacuum_extractor, VacuumExtractor, SectionType, ColumnType
     VACUUM_AVAILABLE = True
     logger.info("Vacuum extractor v2 loaded successfully")
 except ImportError as e:
