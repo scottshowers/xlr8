@@ -247,6 +247,32 @@ class ExtractionOrchestrator:
                 sections, overall_confidence = self._extract_with_cloud(file_path, sections)
                 result.cloud_used = True
             
+            # Step 5.5: Parse cells into structured employee records
+            parsed_employees = []
+            try:
+                from extraction.cell_parser import parse_pay_register
+                employees, flat_records = parse_pay_register(sections)
+                parsed_employees = flat_records
+                result.metadata['parsed_employees'] = flat_records
+                result.metadata['employee_details'] = [
+                    {
+                        'name': e.name,
+                        'code': e.employee_code,
+                        'department': e.department,
+                        'gross': e.gross_pay,
+                        'net': e.net_pay,
+                        'earnings_count': len(e.earnings),
+                        'taxes_count': len(e.taxes),
+                        'deductions_count': len(e.deductions)
+                    }
+                    for e in employees
+                ]
+                logger.info(f"Parsed {len(employees)} employee records from extraction")
+            except ImportError:
+                logger.warning("Cell parser not available")
+            except Exception as e:
+                logger.warning(f"Cell parsing failed: {e}")
+            
             # Step 6: Validate results
             validation_passed = True
             validation_errors = []
@@ -268,10 +294,15 @@ class ExtractionOrchestrator:
             else:
                 status = ExtractionStatus.FAILED
             
-            # Count employees
+            # Count employees - prefer parsed data
             employee_count = 0
-            if 'employee_info' in sections:
+            if parsed_employees:
+                employee_count = len(parsed_employees)
+            elif 'employee_info' in sections:
                 employee_count = sections['employee_info'].row_count
+            elif 'earnings' in sections:
+                # Fall back to earnings row count
+                employee_count = sections['earnings'].row_count
             
             # Build result
             result.status = status
