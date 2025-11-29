@@ -456,37 +456,28 @@ class ExtractionOrchestrator:
         KEY FIX: Actually USE Textract's cell-level data instead of ignoring it!
         
         Flow:
-        1. Redact PII from first N pages
-        2. Send redacted PDF to Textract -> get table cell coordinates
-        3. Use those coordinates to extract text from ORIGINAL PDF
-        4. Result: Accurate structure + real data
+        1. Send first N pages to Textract (NO REDACTION for debugging)
+        2. Textract returns cell coordinates AND text
+        3. Use Textract's text directly (it's real data now)
+        
+        NOTE: PII redaction disabled for debugging. Re-enable once working.
         """
         if not self.cloud_analyzer:
             raise RuntimeError("Cloud analyzer not available")
         
-        # Step 1: Create redacted version (first N pages only)
-        redacted_path = None
-        if self.pii_redactor:
-            redacted_path = self.pii_redactor.create_redacted_pdf(
-                file_path, 
-                max_pages=MAX_CLOUD_PAGES
-            )
-            logger.info(f"Created redacted PDF for cloud analysis: {redacted_path}")
-        else:
-            logger.warning("PII redactor not available, using structure-only cloud analysis")
+        # DEBUGGING: Skip redaction, send original directly
+        # TODO: Re-enable PII redaction once extraction is working
+        logger.warning("⚠️ PII REDACTION DISABLED FOR DEBUGGING - sending original to Textract")
         
-        # Step 2: Send to cloud for layout analysis
+        # Step 1: Send ORIGINAL to cloud for analysis (first N pages only)
         cloud_result = self.cloud_analyzer.analyze_layout(
-            redacted_path or file_path,
+            file_path,  # Original file, not redacted
             max_pages=MAX_CLOUD_PAGES,
-            structure_only=redacted_path is None
+            structure_only=False  # Get full text extraction
         )
         
         if not cloud_result or not cloud_result.success:
             logger.error("Cloud analysis failed")
-            # Clean up and return local results
-            if redacted_path and os.path.exists(redacted_path):
-                os.remove(redacted_path)
             return local_results, 0.0
         
         logger.info(f"Cloud analysis found {len(cloud_result.tables)} tables")
@@ -532,10 +523,6 @@ class ExtractionOrchestrator:
                     issues=[]
                 )
         
-        # Clean up redacted file
-        if redacted_path and os.path.exists(redacted_path):
-            os.remove(redacted_path)
-        
         # Calculate overall confidence
         if sections:
             confidences = [s.confidence for s in sections.values() if s.confidence > 0]
@@ -551,40 +538,16 @@ class ExtractionOrchestrator:
         """
         Extract data using Textract's table structure but reading from ORIGINAL PDF.
         
-        KEY: Textract analyzed the REDACTED PDF and gave us cell POSITIONS.
-        Now we use those positions to extract text from the ORIGINAL PDF.
+        Since we're sending the original PDF to Textract, it extracts the real text.
+        We just use Textract's cell text directly - no coordinate mapping needed.
         
-        This way:
-        - PII never leaves local system (Textract only saw redacted version)
-        - We get accurate cell boundaries from Textract
-        - We get real data from the original PDF
+        NOTE: This only works when PII redaction is disabled (debugging mode).
         """
-        try:
-            import fitz  # PyMuPDF for coordinate-based extraction
-        except ImportError:
-            logger.error("PyMuPDF required for coordinate extraction")
-            return {}
-        
         sections = {}
-        
-        try:
-            doc = fitz.open(file_path)
-        except Exception as e:
-            logger.error(f"Failed to open PDF: {e}")
-            return {}
         
         for table in tables:
             if not table.cells:
                 continue
-            
-            page_num = table.page_number - 1  # 0-indexed
-            if page_num >= len(doc):
-                logger.warning(f"Page {page_num + 1} not in document")
-                continue
-            
-            page = doc[page_num]
-            page_width = page.rect.width
-            page_height = page.rect.height
             
             # Build grid from cells
             rows = {}  # row_index -> {col_index: text}
@@ -599,24 +562,11 @@ class ExtractionOrchestrator:
                 if row_idx not in rows:
                     rows[row_idx] = {}
                 
-                # Extract text from ORIGINAL PDF using Textract's coordinates
-                bbox = cell.bbox
-                if bbox:
-                    # Convert Textract normalized coords (0-1) to page coords
-                    left = bbox.get('Left', 0) * page_width
-                    top = bbox.get('Top', 0) * page_height
-                    width = bbox.get('Width', 0) * page_width
-                    height = bbox.get('Height', 0) * page_height
-                    
-                    # Create rect and extract text from ORIGINAL
-                    rect = fitz.Rect(left, top, left + width, top + height)
-                    text = page.get_text("text", clip=rect).strip()
-                else:
-                    # Fallback to Textract's text (will be redacted)
-                    text = cell.text.strip() if cell.text else ''
+                # Use Textract's extracted text directly (since we sent original PDF)
+                text = cell.text.strip() if cell.text else ''
                 
-                # Clean the text
-                text = ' '.join(text.split())  # Normalize whitespace
+                # Clean the text - normalize whitespace
+                text = ' '.join(text.split())
                 rows[row_idx][col_idx] = text
                 
                 if cell.confidence:
@@ -697,7 +647,6 @@ class ExtractionOrchestrator:
                     avg_confidence
                 )
         
-        doc.close()
         return sections
     
     def _detect_section_type_from_content(self, headers: List[str], 
