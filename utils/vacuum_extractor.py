@@ -523,39 +523,14 @@ class VacuumExtractor:
         logger.info(f"VacuumExtractor v2 initialized with {db_path}")
     
     def _init_tables(self):
-        """Create database tables for extracts, patterns, and learning"""
+        """Create database tables for extracts, patterns, and learning.
+        Auto-migrates existing v1 tables to v2 schema.
+        """
         
-        # ===== EXISTING TABLES (from v1) =====
-        self.conn.execute("CREATE SEQUENCE IF NOT EXISTS extract_seq START 1")
+        # Check if raw_extracts exists and needs migration
+        self._migrate_raw_extracts()
         
-        self.conn.execute("""
-            CREATE TABLE IF NOT EXISTS raw_extracts (
-                id INTEGER DEFAULT nextval('extract_seq'),
-                source_file VARCHAR NOT NULL,
-                project VARCHAR,
-                file_type VARCHAR,
-                page_num INTEGER,
-                table_index INTEGER,
-                raw_headers JSON,
-                raw_data JSON,
-                row_count INTEGER,
-                column_count INTEGER,
-                extraction_method VARCHAR,
-                confidence FLOAT,
-                extracted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                status VARCHAR DEFAULT 'raw',
-                mapped_to VARCHAR,
-                notes VARCHAR,
-                -- NEW: Section detection results
-                detected_section VARCHAR,
-                section_confidence FLOAT,
-                column_classifications JSON,
-                is_continuation BOOLEAN DEFAULT FALSE,
-                continues_from INTEGER
-            )
-        """)
-        
-        # ===== NEW TABLES =====
+        # ===== CREATE NEW TABLES (idempotent) =====
         
         # Section patterns - learned signals for section detection
         self.conn.execute("CREATE SEQUENCE IF NOT EXISTS section_pattern_seq START 1")
@@ -563,14 +538,14 @@ class VacuumExtractor:
             CREATE TABLE IF NOT EXISTS section_patterns (
                 id INTEGER DEFAULT nextval('section_pattern_seq'),
                 section_type VARCHAR NOT NULL,
-                signal_type VARCHAR NOT NULL,  -- 'keyword', 'header_pattern', 'value_pattern'
+                signal_type VARCHAR NOT NULL,
                 signal_value VARCHAR NOT NULL,
                 weight FLOAT DEFAULT 1.0,
                 times_confirmed INTEGER DEFAULT 0,
                 times_rejected INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_used TIMESTAMP,
-                source VARCHAR DEFAULT 'seed'  -- 'seed', 'learned', 'user'
+                source VARCHAR DEFAULT 'seed'
             )
         """)
         
@@ -580,12 +555,12 @@ class VacuumExtractor:
             CREATE TABLE IF NOT EXISTS column_patterns (
                 id INTEGER DEFAULT nextval('column_pattern_seq'),
                 column_type VARCHAR NOT NULL,
-                signal_type VARCHAR NOT NULL,  -- 'header_keyword', 'header_pattern', 'value_pattern', 'value_characteristic'
+                signal_type VARCHAR NOT NULL,
                 signal_value VARCHAR NOT NULL,
                 weight FLOAT DEFAULT 1.0,
                 times_confirmed INTEGER DEFAULT 0,
                 times_rejected INTEGER DEFAULT 0,
-                section_affinity JSON,  -- which sections this column appears in
+                section_affinity JSON,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_used TIMESTAMP,
                 source VARCHAR DEFAULT 'seed'
@@ -598,10 +573,10 @@ class VacuumExtractor:
             CREATE TABLE IF NOT EXISTS vendor_signatures (
                 id INTEGER DEFAULT nextval('vendor_sig_seq'),
                 vendor_name VARCHAR,
-                report_type VARCHAR,  -- 'pay_register', 'census', 'benefits_summary'
-                header_signature VARCHAR,  -- hash of header patterns
-                section_layout JSON,  -- expected sections and order
-                column_map JSON,  -- known column mappings for this vendor
+                report_type VARCHAR,
+                header_signature VARCHAR,
+                section_layout JSON,
+                column_map JSON,
                 times_matched INTEGER DEFAULT 1,
                 confidence FLOAT DEFAULT 1.0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -616,19 +591,91 @@ class VacuumExtractor:
             CREATE TABLE IF NOT EXISTS confirmed_mappings (
                 id INTEGER DEFAULT nextval('mapping_seq'),
                 source_header VARCHAR NOT NULL,
-                source_header_normalized VARCHAR,  -- lowercase, trimmed
+                source_header_normalized VARCHAR,
                 target_column_type VARCHAR NOT NULL,
                 section_type VARCHAR,
                 confidence FLOAT DEFAULT 1.0,
                 times_used INTEGER DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_used TIMESTAMP,
-                vendor_hint VARCHAR  -- if we know the vendor
+                vendor_hint VARCHAR
             )
         """)
         
         self.conn.commit()
         logger.info("Vacuum v2 database tables initialized")
+    
+    def _migrate_raw_extracts(self):
+        """Auto-migrate raw_extracts table from v1 to v2 schema"""
+        
+        # Check if table exists
+        tables = self.conn.execute(
+            "SELECT table_name FROM information_schema.tables WHERE table_name = 'raw_extracts'"
+        ).fetchall()
+        
+        if not tables:
+            # Table doesn't exist - create fresh with v2 schema
+            logger.info("Creating new raw_extracts table with v2 schema")
+            self.conn.execute("CREATE SEQUENCE IF NOT EXISTS extract_seq START 1")
+            self.conn.execute("""
+                CREATE TABLE raw_extracts (
+                    id INTEGER DEFAULT nextval('extract_seq'),
+                    source_file VARCHAR NOT NULL,
+                    project VARCHAR,
+                    file_type VARCHAR,
+                    page_num INTEGER,
+                    table_index INTEGER,
+                    raw_headers JSON,
+                    raw_data JSON,
+                    row_count INTEGER,
+                    column_count INTEGER,
+                    extraction_method VARCHAR,
+                    confidence FLOAT,
+                    extracted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    status VARCHAR DEFAULT 'raw',
+                    mapped_to VARCHAR,
+                    notes VARCHAR,
+                    detected_section VARCHAR,
+                    section_confidence FLOAT,
+                    column_classifications JSON,
+                    is_continuation BOOLEAN DEFAULT FALSE,
+                    continues_from INTEGER
+                )
+            """)
+            return
+        
+        # Table exists - check for missing columns and add them
+        logger.info("Checking raw_extracts for v2 columns...")
+        
+        existing_columns = set()
+        try:
+            result = self.conn.execute("DESCRIBE raw_extracts").fetchall()
+            existing_columns = {row[0] for row in result}
+        except Exception as e:
+            logger.warning(f"Could not describe raw_extracts: {e}")
+            return
+        
+        # V2 columns to add
+        v2_columns = [
+            ("detected_section", "VARCHAR"),
+            ("section_confidence", "FLOAT"),
+            ("column_classifications", "JSON"),
+            ("is_continuation", "BOOLEAN DEFAULT FALSE"),
+            ("continues_from", "INTEGER"),
+        ]
+        
+        for col_name, col_type in v2_columns:
+            if col_name not in existing_columns:
+                try:
+                    self.conn.execute(f"ALTER TABLE raw_extracts ADD COLUMN {col_name} {col_type}")
+                    logger.info(f"  Added column: {col_name}")
+                except Exception as e:
+                    logger.warning(f"  Could not add {col_name}: {e}")
+            else:
+                logger.debug(f"  Column exists: {col_name}")
+        
+        self.conn.commit()
+        logger.info("raw_extracts migration complete")
     
     def _seed_patterns(self):
         """Seed the pattern tables with initial knowledge"""
@@ -1216,15 +1263,19 @@ class VacuumExtractor:
             for c in columns
         ]
         
-        self.conn.execute("""
-            UPDATE raw_extracts 
-            SET detected_section = ?,
-                section_confidence = ?,
-                column_classifications = ?
-            WHERE id = ?
-        """, [section.section_type.value, section.confidence, 
-              json.dumps(col_data), extract_id])
-        self.conn.commit()
+        try:
+            self.conn.execute("""
+                UPDATE raw_extracts 
+                SET detected_section = ?,
+                    section_confidence = ?,
+                    column_classifications = ?
+                WHERE id = ?
+            """, [section.section_type.value, section.confidence, 
+                  json.dumps(col_data), extract_id])
+            self.conn.commit()
+        except Exception as e:
+            # V1 schema - detection columns not available yet
+            logger.warning(f"Could not save detection results (v1 schema?): {e}")
     
     def _match_vendor_signature(self, extracts: List[Dict]) -> Optional[Dict]:
         """Try to match extracted data against known vendor signatures"""
@@ -1558,11 +1609,15 @@ class VacuumExtractor:
                     merged['row_count'] += next_table['row_count']
                     merged['continues_to'] = next_table['id']
                     
-                    # Update database
-                    self.conn.execute("""
-                        UPDATE raw_extracts SET is_continuation = TRUE, continues_from = ?
-                        WHERE id = ?
-                    """, [current['id'], next_table['id']])
+                    # Update database - try v2 columns first
+                    try:
+                        self.conn.execute("""
+                            UPDATE raw_extracts SET is_continuation = TRUE, continues_from = ?
+                            WHERE id = ?
+                        """, [current['id'], next_table['id']])
+                    except Exception as e:
+                        # V1 schema - skip continuation marking
+                        logger.debug(f"Continuation columns not available: {e}")
                     
                     # Merge the data
                     full_current = self.get_extract_by_id(current['id'])
@@ -1626,11 +1681,14 @@ class VacuumExtractor:
         """, [section_type])
         
         # Update the extract
-        self.conn.execute("""
-            UPDATE raw_extracts 
-            SET detected_section = ?, section_confidence = 1.0
-            WHERE id = ?
-        """, [section_type, extract_id])
+        try:
+            self.conn.execute("""
+                UPDATE raw_extracts 
+                SET detected_section = ?, section_confidence = 1.0
+                WHERE id = ?
+            """, [section_type, extract_id])
+        except Exception as e:
+            logger.warning(f"Could not update extract section (v1 schema?): {e}")
         
         self.conn.commit()
         logger.info(f"Section confirmed for extract {extract_id}: {section_type}")
@@ -1881,42 +1939,84 @@ class VacuumExtractor:
     
     def get_files_summary(self, project: str = None) -> List[Dict]:
         """Get summary of all vacuumed files"""
-        query = """
-            SELECT 
-                source_file,
-                project,
-                file_type,
-                COUNT(*) as table_count,
-                SUM(row_count) as total_rows,
-                MIN(extracted_at) as first_extracted,
-                AVG(confidence) as avg_confidence,
-                GROUP_CONCAT(DISTINCT detected_section) as sections_found
-            FROM raw_extracts
-        """
         
-        if project:
-            query += " WHERE project = ?"
-            params = [project]
-        else:
-            params = []
-        
-        query += " GROUP BY source_file, project, file_type ORDER BY first_extracted DESC"
-        
-        result = self.conn.execute(query, params).fetchall()
-        
-        return [
-            {
-                'source_file': row[0],
-                'project': row[1],
-                'file_type': row[2],
-                'table_count': row[3],
-                'total_rows': row[4],
-                'first_extracted': row[5],
-                'avg_confidence': round(row[6], 2) if row[6] else 0,
-                'sections_found': row[7].split(',') if row[7] else []
-            }
-            for row in result
-        ]
+        # Try v2 query first
+        try:
+            query = """
+                SELECT 
+                    source_file,
+                    project,
+                    file_type,
+                    COUNT(*) as table_count,
+                    SUM(row_count) as total_rows,
+                    MIN(extracted_at) as first_extracted,
+                    AVG(confidence) as avg_confidence,
+                    GROUP_CONCAT(DISTINCT detected_section) as sections_found
+                FROM raw_extracts
+            """
+            
+            if project:
+                query += " WHERE project = ?"
+                params = [project]
+            else:
+                params = []
+            
+            query += " GROUP BY source_file, project, file_type ORDER BY first_extracted DESC"
+            
+            result = self.conn.execute(query, params).fetchall()
+            
+            return [
+                {
+                    'source_file': row[0],
+                    'project': row[1],
+                    'file_type': row[2],
+                    'table_count': row[3],
+                    'total_rows': row[4],
+                    'first_extracted': row[5],
+                    'avg_confidence': round(row[6], 2) if row[6] else 0,
+                    'sections_found': row[7].split(',') if row[7] else []
+                }
+                for row in result
+            ]
+        except Exception as e:
+            # Fall back to v1-compatible query (no detected_section column)
+            logger.warning(f"Falling back to v1 query: {e}")
+            
+            query = """
+                SELECT 
+                    source_file,
+                    project,
+                    file_type,
+                    COUNT(*) as table_count,
+                    SUM(row_count) as total_rows,
+                    MIN(extracted_at) as first_extracted,
+                    AVG(confidence) as avg_confidence
+                FROM raw_extracts
+            """
+            
+            if project:
+                query += " WHERE project = ?"
+                params = [project]
+            else:
+                params = []
+            
+            query += " GROUP BY source_file, project, file_type ORDER BY first_extracted DESC"
+            
+            result = self.conn.execute(query, params).fetchall()
+            
+            return [
+                {
+                    'source_file': row[0],
+                    'project': row[1],
+                    'file_type': row[2],
+                    'table_count': row[3],
+                    'total_rows': row[4],
+                    'first_extracted': row[5],
+                    'avg_confidence': round(row[6], 2) if row[6] else 0,
+                    'sections_found': []  # Not available in v1
+                }
+                for row in result
+            ]
     
     def delete_file_extracts(self, source_file: str, project: str = None) -> int:
         """Delete all extracts for a file"""
