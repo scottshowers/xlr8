@@ -1,682 +1,557 @@
-import { useState, useEffect, useCallback } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import React, { useState, useEffect } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 
-/**
- * Vacuum Column Mapping
- * 
- * Visual mapping interface for pay register data.
- * Shows document preview on left, mapping interface on right.
- * 
- * Pay registers always have 5 sections:
- * - Employee Info (+ injected header metadata)
- * - Earnings
- * - Taxes  
- * - Deductions
- * - Pay Info
- */
+const API_BASE = '/api';
 
-const API_BASE = '/api'
-
-// Section definitions with colors and icons
-const SECTIONS = {
-  employee_info: { label: 'Employee Info', icon: '👤', color: '#3b82f6', bgColor: '#eff6ff' },
-  earnings: { label: 'Earnings', icon: '💰', color: '#22c55e', bgColor: '#f0fdf4' },
-  taxes: { label: 'Taxes', icon: '🏛️', color: '#ef4444', bgColor: '#fef2f2' },
-  deductions: { label: 'Deductions', icon: '📋', color: '#f59e0b', bgColor: '#fffbeb' },
-  pay_info: { label: 'Pay Info', icon: '💵', color: '#8b5cf6', bgColor: '#f5f3ff' }
-}
+// Section definitions with colors
+const SECTIONS = [
+  { id: 'employee_info', label: 'Employee Info', color: '#3b82f6', bgColor: '#eff6ff' },
+  { id: 'earnings', label: 'Earnings', color: '#22c55e', bgColor: '#f0fdf4' },
+  { id: 'taxes', label: 'Taxes', color: '#ef4444', bgColor: '#fef2f2' },
+  { id: 'deductions', label: 'Deductions', color: '#f97316', bgColor: '#fff7ed' },
+  { id: 'pay_info', label: 'Pay Info', color: '#8b5cf6', bgColor: '#f5f3ff' }
+];
 
 // Target fields by section
 const TARGET_FIELDS = {
   employee_info: [
-    { value: 'employee_id', label: 'Employee ID' },
-    { value: 'employee_name', label: 'Employee Name' },
-    { value: 'first_name', label: 'First Name' },
-    { value: 'last_name', label: 'Last Name' },
-    { value: 'ssn', label: 'SSN' },
-    { value: 'department', label: 'Department' },
-    { value: 'location', label: 'Location' },
-    { value: 'job_title', label: 'Job Title' },
-    { value: 'hire_date', label: 'Hire Date' },
-    { value: 'term_date', label: 'Term Date' },
-    { value: 'pay_rate', label: 'Pay Rate' },
-    { value: 'skip', label: '⏭️ Skip' },
+    'employee_id', 'employee_name', 'first_name', 'last_name', 'ssn',
+    'department', 'location', 'job_title', 'hire_date', 'term_date', 'pay_rate'
   ],
   earnings: [
-    { value: 'earning_code', label: 'Earning Code' },
-    { value: 'earning_description', label: 'Description' },
-    { value: 'hours_current', label: 'Current Hours' },
-    { value: 'hours_ytd', label: 'YTD Hours' },
-    { value: 'rate', label: 'Rate' },
-    { value: 'amount_current', label: 'Current Amount' },
-    { value: 'amount_ytd', label: 'YTD Amount' },
-    { value: 'skip', label: '⏭️ Skip' },
+    'earning_code', 'earning_description', 'hours_current', 'hours_ytd',
+    'rate', 'amount_current', 'amount_ytd'
   ],
   taxes: [
-    { value: 'tax_code', label: 'Tax Code' },
-    { value: 'tax_description', label: 'Description' },
-    { value: 'taxable_wages', label: 'Taxable Wages' },
-    { value: 'tax_amount_current', label: 'Current Amount' },
-    { value: 'tax_amount_ytd', label: 'YTD Amount' },
-    { value: 'tax_er_current', label: 'Employer Current' },
-    { value: 'tax_er_ytd', label: 'Employer YTD' },
-    { value: 'skip', label: '⏭️ Skip' },
+    'tax_code', 'tax_description', 'taxable_wages',
+    'tax_amount_current', 'tax_amount_ytd', 'tax_er_current', 'tax_er_ytd'
   ],
   deductions: [
-    { value: 'deduction_code', label: 'Deduction Code' },
-    { value: 'deduction_description', label: 'Description' },
-    { value: 'deduction_ee_current', label: 'Employee Current' },
-    { value: 'deduction_ee_ytd', label: 'Employee YTD' },
-    { value: 'deduction_er_current', label: 'Employer Current' },
-    { value: 'deduction_er_ytd', label: 'Employer YTD' },
-    { value: 'skip', label: '⏭️ Skip' },
+    'deduction_code', 'deduction_description',
+    'deduction_ee_current', 'deduction_ee_ytd', 'deduction_er_current', 'deduction_er_ytd'
   ],
   pay_info: [
-    { value: 'gross_pay', label: 'Gross Pay' },
-    { value: 'net_pay', label: 'Net Pay' },
-    { value: 'total_taxes', label: 'Total Taxes' },
-    { value: 'total_deductions', label: 'Total Deductions' },
-    { value: 'check_number', label: 'Check Number' },
-    { value: 'direct_deposit', label: 'Direct Deposit' },
-    { value: 'skip', label: '⏭️ Skip' },
+    'gross_pay', 'net_pay', 'total_taxes', 'total_deductions',
+    'check_number', 'direct_deposit'
   ]
-}
+};
 
 export default function VacuumColumnMapping() {
-  const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
-  const fileParam = searchParams.get('file')
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const sourceFile = searchParams.get('file');
 
   // State
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [files, setFiles] = useState([])
-  const [selectedFile, setSelectedFile] = useState(null)
-  const [extracts, setExtracts] = useState([])
+  const [extracts, setExtracts] = useState([]);
+  const [activeSection, setActiveSection] = useState('employee_info');
   const [headerMetadata, setHeaderMetadata] = useState({
     company: '',
     pay_period_start: '',
     pay_period_end: '',
     check_date: ''
-  })
-  const [activeSection, setActiveSection] = useState('earnings')
-  const [sectionMappings, setSectionMappings] = useState({})
-  const [sectionStatus, setSectionStatus] = useState({
-    employee_info: 'pending',
-    earnings: 'pending',
-    taxes: 'pending',
-    deductions: 'pending',
-    pay_info: 'pending'
-  })
-  const [showPreview, setShowPreview] = useState(true)
-  const [saving, setSaving] = useState(false)
+  });
+  const [mappings, setMappings] = useState({});
+  const [confirmedSections, setConfirmedSections] = useState({});
+  const [rememberMapping, setRememberMapping] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [showPreview, setShowPreview] = useState(true);
 
-  // Load files on mount
+  // Load extracts and header metadata
   useEffect(() => {
-    loadFiles()
-  }, [])
+    if (!sourceFile) return;
 
-  // Load file from URL param
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        // Load extracts
+        const extractsRes = await fetch(`${API_BASE}/vacuum/extracts?source_file=${encodeURIComponent(sourceFile)}`);
+        const extractsData = await extractsRes.json();
+        setExtracts(extractsData.extracts || []);
+
+        // Load header metadata
+        const metaRes = await fetch(`${API_BASE}/vacuum/header-metadata?source_file=${encodeURIComponent(sourceFile)}`);
+        const metaData = await metaRes.json();
+        if (metaData && !metaData.error) {
+          setHeaderMetadata({
+            company: metaData.company || '',
+            pay_period_start: metaData.pay_period_start || '',
+            pay_period_end: metaData.pay_period_end || '',
+            check_date: metaData.check_date || ''
+          });
+        }
+      } catch (err) {
+        console.error('Error loading data:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
+  }, [sourceFile]);
+
+  // Auto-select first section that has data
   useEffect(() => {
-    if (fileParam && files.length > 0) {
-      const file = files.find(f => f.source_file === fileParam)
-      if (file) {
-        selectFile(file)
-      }
-    }
-  }, [fileParam, files])
-
-  const loadFiles = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/vacuum/files`)
-      const data = await res.json()
-      setFiles(data.files || [])
-      setLoading(false)
-    } catch (err) {
-      setError('Failed to load files')
-      setLoading(false)
-    }
-  }
-
-  const selectFile = async (file) => {
-    setSelectedFile(file)
-    setLoading(true)
-    
-    try {
-      // Load extracts for this file
-      const res = await fetch(`${API_BASE}/vacuum/extracts?source_file=${encodeURIComponent(file.source_file)}`)
-      const data = await res.json()
-      setExtracts(data.extracts || [])
-      
-      // Try to extract header metadata
-      await extractHeaderMetadata(file.source_file)
-      
-      // Initialize mappings for each section
-      initializeMappings(data.extracts || [])
-      
-      // Set first section with data as active
-      const sectionsWithData = (data.extracts || []).map(e => e.detected_section).filter(Boolean)
-      if (sectionsWithData.length > 0) {
-        setActiveSection(sectionsWithData[0])
-      }
-      
-      setLoading(false)
-    } catch (err) {
-      setError('Failed to load file data')
-      setLoading(false)
-    }
-  }
-
-  const extractHeaderMetadata = async (sourceFile) => {
-    try {
-      const res = await fetch(`${API_BASE}/vacuum/header-metadata?source_file=${encodeURIComponent(sourceFile)}`)
-      if (res.ok) {
-        const data = await res.json()
-        setHeaderMetadata(data.metadata || {
-          company: '',
-          pay_period_start: '',
-          pay_period_end: '',
-          check_date: ''
-        })
-      }
-    } catch (err) {
-      console.log('Header metadata not available')
-    }
-  }
-
-  const initializeMappings = (extractsList) => {
-    const mappings = {}
-    
-    extractsList.forEach(extract => {
-      const section = extract.detected_section || 'unknown'
-      if (!mappings[section]) {
-        mappings[section] = {
-          extract_id: extract.id,
-          columns: {}
+    if (extracts.length > 0) {
+      const sectionOrder = ['employee_info', 'earnings', 'taxes', 'deductions', 'pay_info'];
+      for (const section of sectionOrder) {
+        const hasData = extracts.some(e => e.detected_section === section);
+        if (hasData) {
+          setActiveSection(section);
+          break;
         }
       }
-      
-      // Initialize column mappings with AI suggestions
-      const headers = extract.headers || []
-      const classifications = extract.column_classifications || {}
-      
-      headers.forEach((header, idx) => {
-        const suggestion = classifications[header] || classifications[idx] || null
-        mappings[section].columns[header] = {
-          index: idx,
-          suggested: suggestion?.type || 'skip',
-          confirmed: suggestion?.type || 'skip',
-          confidence: suggestion?.confidence || 0
-        }
-      })
-    })
-    
-    setSectionMappings(mappings)
-  }
-
-  const getExtractForSection = (section) => {
-    // First try exact match
-    let match = extracts.find(e => e.detected_section === section)
-    if (match) return match
-    
-    // If no exact match and this is the first section, return first unassigned extract
-    if (section === 'employee_info' && extracts.length > 0) {
-      const unassigned = extracts.find(e => !e.detected_section || e.detected_section === 'unknown')
-      if (unassigned) return unassigned
     }
-    
-    return null
-  }
-  
-  // Get all extracts that haven't been assigned to a section
-  const getUnassignedExtracts = () => {
-    const assignedSections = new Set(extracts.map(e => e.detected_section).filter(Boolean))
-    return extracts.filter(e => !e.detected_section || e.detected_section === 'unknown')
-  }
+  }, [extracts]);
 
-  const updateColumnMapping = (section, header, targetField) => {
-    setSectionMappings(prev => ({
-      ...prev,
-      [section]: {
-        ...prev[section],
-        columns: {
-          ...prev[section]?.columns,
-          [header]: {
-            ...prev[section]?.columns?.[header],
-            confirmed: targetField
+  // Initialize mappings from column_classifications
+  useEffect(() => {
+    const newMappings = {};
+    
+    extracts.forEach(extract => {
+      if (extract.detected_section && extract.column_classifications) {
+        const sectionKey = extract.detected_section;
+        if (!newMappings[sectionKey]) {
+          newMappings[sectionKey] = {};
+        }
+        
+        extract.column_classifications.forEach((col, idx) => {
+          const header = extract.raw_headers?.[idx] || `Column ${idx}`;
+          if (!newMappings[sectionKey][header]) {
+            newMappings[sectionKey][header] = {
+              targetField: col.type || '',
+              confidence: col.confidence || 0,
+              confirmed: false,
+              columnIndex: idx
+            };
           }
+        });
+      }
+    });
+    
+    setMappings(newMappings);
+  }, [extracts]);
+
+  // Get extract for current section
+  const getExtractForSection = (sectionId) => {
+    // First try exact match
+    const exactMatch = extracts.find(e => e.detected_section === sectionId);
+    if (exactMatch) return exactMatch;
+    
+    return null;
+  };
+
+  const currentExtract = getExtractForSection(activeSection);
+  const currentSection = SECTIONS.find(s => s.id === activeSection);
+  const currentMappings = mappings[activeSection] || {};
+
+  // Get sample data for preview
+  const getSampleData = () => {
+    if (!currentExtract) return [];
+    return currentExtract.preview || currentExtract.raw_data || currentExtract.sample_data || [];
+  };
+
+  // Update a mapping
+  const updateMapping = (header, targetField) => {
+    setMappings(prev => ({
+      ...prev,
+      [activeSection]: {
+        ...prev[activeSection],
+        [header]: {
+          ...prev[activeSection]?.[header],
+          targetField,
+          confirmed: true
         }
       }
-    }))
-  }
+    }));
+  };
 
-  const confirmSection = (section) => {
-    setSectionStatus(prev => ({
+  // Confirm a single mapping
+  const confirmMapping = (header) => {
+    setMappings(prev => ({
       ...prev,
-      [section]: 'done'
-    }))
-    
-    // Move to next pending section
-    const sectionOrder = ['employee_info', 'earnings', 'taxes', 'deductions', 'pay_info']
-    const currentIdx = sectionOrder.indexOf(section)
-    for (let i = currentIdx + 1; i < sectionOrder.length; i++) {
-      if (sectionStatus[sectionOrder[i]] !== 'done' && getExtractForSection(sectionOrder[i])) {
-        setActiveSection(sectionOrder[i])
-        return
+      [activeSection]: {
+        ...prev[activeSection],
+        [header]: {
+          ...prev[activeSection]?.[header],
+          confirmed: true
+        }
       }
+    }));
+  };
+
+  // Confirm all high-confidence mappings
+  const confirmAllHigh = () => {
+    setMappings(prev => {
+      const updated = { ...prev[activeSection] };
+      Object.keys(updated).forEach(header => {
+        if (updated[header].confidence >= 0.7) {
+          updated[header] = { ...updated[header], confirmed: true };
+        }
+      });
+      return { ...prev, [activeSection]: updated };
+    });
+  };
+
+  // Confirm entire section
+  const confirmSection = () => {
+    // Mark all mappings in section as confirmed
+    setMappings(prev => {
+      const updated = { ...prev[activeSection] };
+      Object.keys(updated).forEach(header => {
+        updated[header] = { ...updated[header], confirmed: true };
+      });
+      return { ...prev, [activeSection]: updated };
+    });
+    
+    // Mark section as done
+    setConfirmedSections(prev => ({ ...prev, [activeSection]: true }));
+    
+    // Move to next section
+    const currentIdx = SECTIONS.findIndex(s => s.id === activeSection);
+    if (currentIdx < SECTIONS.length - 1) {
+      setActiveSection(SECTIONS[currentIdx + 1].id);
     }
-  }
+  };
 
-  const confirmAllHighConfidence = () => {
-    const section = activeSection
-    const mapping = sectionMappings[section]
-    if (!mapping) return
-    
-    // All high confidence mappings are already set as confirmed
-    // Just mark section as done
-    confirmSection(section)
-  }
-
+  // Save all mappings
   const saveAllMappings = async () => {
-    setSaving(true)
-    
+    setSaving(true);
     try {
-      const payload = {
-        source_file: selectedFile.source_file,
-        header_metadata: headerMetadata,
-        section_mappings: sectionMappings,
-        remember_for_vendor: true
-      }
+      const sectionMappings = {};
       
-      const res = await fetch(`${API_BASE}/vacuum/apply-mappings`, {
+      Object.keys(mappings).forEach(sectionId => {
+        const sectionMap = mappings[sectionId];
+        const columnMap = {};
+        
+        Object.keys(sectionMap).forEach(header => {
+          const mapping = sectionMap[header];
+          if (mapping.targetField && mapping.confirmed) {
+            columnMap[mapping.columnIndex] = mapping.targetField;
+          }
+        });
+        
+        if (Object.keys(columnMap).length > 0) {
+          sectionMappings[sectionId] = columnMap;
+        }
+      });
+
+      const response = await fetch(`${API_BASE}/vacuum/apply-mappings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      })
-      
-      if (res.ok) {
-        alert('Mappings saved successfully!')
-        navigate('/vacuum/explore')
+        body: JSON.stringify({
+          source_file: sourceFile,
+          header_metadata: headerMetadata,
+          section_mappings: sectionMappings,
+          remember_for_vendor: rememberMapping
+        })
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        alert('Mappings saved successfully!');
       } else {
-        const data = await res.json()
-        setError(data.detail || 'Failed to save mappings')
+        alert('Error saving mappings: ' + (result.error || 'Unknown error'));
       }
     } catch (err) {
-      setError('Failed to save mappings: ' + err.message)
+      console.error('Error saving mappings:', err);
+      alert('Error saving mappings: ' + err.message);
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
-  }
+  };
 
-  const getConfidenceLevel = (confidence) => {
-    if (confidence >= 0.85) return 'high'
-    if (confidence >= 0.70) return 'medium'
-    return 'low'
-  }
+  // Get confidence color
+  const getConfidenceColor = (confidence) => {
+    if (confidence >= 0.7) return '#22c55e';
+    if (confidence >= 0.4) return '#eab308';
+    return '#9ca3af';
+  };
 
-  const highConfidenceCount = () => {
-    const mapping = sectionMappings[activeSection]
-    if (!mapping) return 0
-    return Object.values(mapping.columns).filter(c => c.confidence >= 0.85).length
-  }
+  // Count sections with data
+  const getSectionStats = (sectionId) => {
+    const sectionExtracts = extracts.filter(e => e.detected_section === sectionId);
+    const rowCount = sectionExtracts.reduce((sum, e) => sum + (e.row_count || 0), 0);
+    const colCount = sectionExtracts[0]?.column_count || 0;
+    return { rowCount, colCount, hasData: sectionExtracts.length > 0 };
+  };
 
-  const completedSections = Object.values(sectionStatus).filter(s => s === 'done').length
-
-  // Loading state
-  if (loading && !selectedFile) {
+  if (!sourceFile) {
     return (
-      <div style={styles.loadingContainer}>
+      <div style={{ padding: '40px', textAlign: 'center' }}>
+        <h2>No file selected</h2>
+        <button onClick={() => navigate('/vacuum')} style={styles.btn}>
+          ← Back to Upload
+        </button>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div style={{ padding: '40px', textAlign: 'center' }}>
         <div style={styles.spinner}></div>
-        <p>Loading...</p>
+        <p>Loading extracts...</p>
       </div>
-    )
+    );
   }
-
-  // File selection if no file selected
-  if (!selectedFile) {
-    return (
-      <div style={styles.fileSelectContainer}>
-        <h1 style={styles.pageTitle}>🗺️ Map Columns</h1>
-        <p style={styles.pageSubtitle}>Select a file to map its columns to the standard schema</p>
-        
-        {files.length === 0 ? (
-          <div style={styles.emptyState}>
-            <p>No files available. Upload files first in the Vacuum Extract section.</p>
-            <button style={styles.btnPrimary} onClick={() => navigate('/vacuum')}>
-              Go to Upload
-            </button>
-          </div>
-        ) : (
-          <div style={styles.fileGrid}>
-            {files.map((file, idx) => (
-              <div 
-                key={idx} 
-                style={styles.fileCard}
-                onClick={() => selectFile(file)}
-              >
-                <div style={styles.fileIcon}>📄</div>
-                <div style={styles.fileDetails}>
-                  <div style={styles.fileName}>{file.source_file}</div>
-                  <div style={styles.fileMeta}>
-                    {file.table_count} tables • {file.total_rows} rows
-                  </div>
-                  {file.sections_found && (
-                    <div style={styles.fileSections}>
-                      {(Array.isArray(file.sections_found) ? file.sections_found : [file.sections_found]).map((s, i) => (
-                        <span key={i} style={{
-                          ...styles.sectionTag,
-                          background: SECTIONS[String(s).trim()]?.bgColor || '#f3f4f6',
-                          color: SECTIONS[String(s).trim()]?.color || '#666'
-                        }}>
-                          {SECTIONS[String(s).trim()]?.icon} {SECTIONS[String(s).trim()]?.label || s}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  const currentExtract = getExtractForSection(activeSection)
-  const currentMapping = sectionMappings[activeSection]
-  const sectionConfig = SECTIONS[activeSection]
 
   return (
     <div style={styles.container}>
       {/* Header */}
       <div style={styles.header}>
-        <div style={styles.headerLeft}>
-          <h1 style={styles.title}>🗺️ Map Columns</h1>
-          <div style={styles.fileInfo}>
-            <span style={styles.fileNameHeader}>{selectedFile.source_file}</span>
-          </div>
-        </div>
-        <div style={styles.headerActions}>
-          <button style={styles.btnSecondary} onClick={() => setSelectedFile(null)}>
-            ← Change File
+        <div>
+          <button onClick={() => navigate('/vacuum/explore?file=' + encodeURIComponent(sourceFile))} style={styles.backBtn}>
+            ← Back to Explore
           </button>
-          <button 
-            style={styles.btnSuccess} 
-            onClick={confirmAllHighConfidence}
-            disabled={!currentExtract}
-          >
-            ✓ Confirm High ({highConfidenceCount()})
-          </button>
-          <button 
-            style={styles.btnPrimary} 
-            onClick={saveAllMappings}
-            disabled={saving || completedSections < 1}
-          >
-            {saving ? 'Saving...' : '💾 Save All Mappings'}
-          </button>
+          <h1 style={styles.title}>Column Mapping</h1>
+          <p style={styles.subtitle}>{sourceFile}</p>
         </div>
       </div>
 
-      {/* Main Split View */}
-      <div style={styles.mainSplit}>
-        {/* Left Panel - Document Preview */}
-        <div style={styles.docPanel}>
-          <div style={styles.docHeader}>
-            <span style={styles.docTitle}>📄 Document Sections</span>
-          </div>
-          
+      <div style={styles.mainContent}>
+        {/* Left Panel - Sections */}
+        <div style={styles.leftPanel}>
           {/* Header Metadata */}
-          <div style={styles.metadataSection}>
-            <h4 style={styles.metadataTitle}>📋 Header Information</h4>
-            <div style={styles.metadataGrid}>
-              <div style={styles.metadataField}>
-                <label>Company</label>
-                <input 
-                  type="text" 
+          <div style={styles.metadataCard}>
+            <h3 style={styles.metadataTitle}>📋 Header Metadata</h3>
+            <div style={styles.metadataFields}>
+              <div style={styles.fieldGroup}>
+                <label style={styles.label}>Company</label>
+                <input
+                  type="text"
                   value={headerMetadata.company}
                   onChange={(e) => setHeaderMetadata(prev => ({ ...prev, company: e.target.value }))}
-                  placeholder="Extracted or enter..."
-                  style={styles.metadataInput}
+                  style={styles.input}
+                  placeholder="Company name"
                 />
               </div>
-              <div style={styles.metadataField}>
-                <label>Pay Period Start</label>
-                <input 
-                  type="text" 
+              <div style={styles.fieldGroup}>
+                <label style={styles.label}>Pay Period Start</label>
+                <input
+                  type="text"
                   value={headerMetadata.pay_period_start}
                   onChange={(e) => setHeaderMetadata(prev => ({ ...prev, pay_period_start: e.target.value }))}
+                  style={styles.input}
                   placeholder="MM/DD/YYYY"
-                  style={styles.metadataInput}
                 />
               </div>
-              <div style={styles.metadataField}>
-                <label>Pay Period End</label>
-                <input 
-                  type="text" 
+              <div style={styles.fieldGroup}>
+                <label style={styles.label}>Pay Period End</label>
+                <input
+                  type="text"
                   value={headerMetadata.pay_period_end}
                   onChange={(e) => setHeaderMetadata(prev => ({ ...prev, pay_period_end: e.target.value }))}
+                  style={styles.input}
                   placeholder="MM/DD/YYYY"
-                  style={styles.metadataInput}
                 />
               </div>
-              <div style={styles.metadataField}>
-                <label>Check Date</label>
-                <input 
-                  type="text" 
+              <div style={styles.fieldGroup}>
+                <label style={styles.label}>Check Date</label>
+                <input
+                  type="text"
                   value={headerMetadata.check_date}
                   onChange={(e) => setHeaderMetadata(prev => ({ ...prev, check_date: e.target.value }))}
+                  style={styles.input}
                   placeholder="MM/DD/YYYY"
-                  style={styles.metadataInput}
                 />
               </div>
             </div>
           </div>
 
-          {/* Section List */}
+          {/* Section Cards */}
           <div style={styles.sectionList}>
-            {Object.entries(SECTIONS).map(([key, config]) => {
-              const extract = getExtractForSection(key)
-              const status = sectionStatus[key]
-              const isActive = activeSection === key
+            {SECTIONS.map((section) => {
+              const stats = getSectionStats(section.id);
+              const isActive = activeSection === section.id;
+              const isConfirmed = confirmedSections[section.id];
               
               return (
                 <div
-                  key={key}
+                  key={section.id}
+                  onClick={() => setActiveSection(section.id)}
                   style={{
                     ...styles.sectionCard,
-                    ...(isActive ? { 
-                      borderColor: config.color,
-                      background: config.bgColor 
-                    } : {}),
-                    ...(status === 'done' ? styles.sectionCardDone : {}),
-                    ...(!extract ? styles.sectionCardEmpty : {})
+                    borderLeft: `4px solid ${section.color}`,
+                    backgroundColor: isActive ? section.bgColor : '#fff',
+                    opacity: stats.hasData ? 1 : 0.5
                   }}
-                  onClick={() => extract && setActiveSection(key)}
                 >
-                  <div style={styles.sectionCardHeader}>
-                    <span style={styles.sectionIcon}>{config.icon}</span>
-                    <span style={styles.sectionLabel}>{config.label}</span>
-                    {status === 'done' && <span style={styles.checkMark}>✓</span>}
+                  <div style={styles.sectionHeader}>
+                    <span style={{ ...styles.sectionLabel, color: section.color }}>
+                      {isConfirmed && '✓ '}{section.label}
+                    </span>
+                    {!stats.hasData && (
+                      <span style={styles.noDataBadge}>No Data</span>
+                    )}
                   </div>
-                  {extract ? (
-                    <div style={styles.sectionCardMeta}>
-                      {extract.row_count} rows • {extract.headers?.length || 0} columns
+                  {stats.hasData && (
+                    <div style={styles.sectionStats}>
+                      {stats.rowCount} rows • {stats.colCount} columns
                     </div>
-                  ) : (
-                    <div style={styles.sectionCardMeta}>No data detected</div>
                   )}
-                  {extract && (
-                    <div style={styles.sectionCardHeaders}>
-                      {extract.headers?.slice(0, 4).join(', ')}
-                      {extract.headers?.length > 4 && ` +${extract.headers.length - 4} more`}
+                  {stats.hasData && currentExtract && isActive && (
+                    <div style={styles.headerPreview}>
+                      {(currentExtract.raw_headers || []).slice(0, 3).map((h, i) => (
+                        <span key={i} style={styles.headerChip}>
+                          {String(h).substring(0, 20)}{String(h).length > 20 ? '...' : ''}
+                        </span>
+                      ))}
                     </div>
                   )}
                 </div>
-              )
+              );
             })}
           </div>
         </div>
 
         {/* Right Panel - Mapping Interface */}
-        <div style={styles.mappingPanel}>
-          <div style={styles.mappingHeader}>
-            <div style={styles.mappingTitleRow}>
-              <span style={styles.mappingTitle}>
-                {sectionConfig?.icon} {sectionConfig?.label} Columns
-              </span>
-              <span style={{
-                ...styles.sectionBadge,
-                background: sectionConfig?.bgColor,
-                color: sectionConfig?.color
-              }}>
-                {currentExtract?.row_count || 0} rows
-              </span>
-            </div>
-          </div>
-
+        <div style={styles.rightPanel}>
           {!currentExtract ? (
-            <div style={styles.noDataMessage}>
-              <p>No data detected for {sectionConfig?.label}.</p>
-              <p style={{marginTop: '1rem', fontSize: '0.9rem', color: '#666'}}>
-                Available extracts in this file:
+            /* Empty Section State */
+            <div style={styles.emptySection}>
+              <div style={styles.emptyIcon}>📋</div>
+              <h3 style={styles.emptyTitle}>No Data Detected for {currentSection?.label}</h3>
+              <p style={styles.emptyText}>
+                This section wasn't automatically detected in the PDF.<br/>
+                You can manually assign an extract from the Explore page.
               </p>
-              <div style={{marginTop: '0.5rem'}}>
-                {extracts.map((ext, idx) => (
-                  <div 
-                    key={idx} 
-                    style={{
-                      padding: '0.5rem',
-                      background: '#f9fafb',
-                      borderRadius: '6px',
-                      marginBottom: '0.5rem',
-                      cursor: 'pointer',
-                      border: '1px solid #e5e7eb'
-                    }}
-                    onClick={() => {
-                      // Manually assign this extract to the current section
-                      const updatedExtracts = [...extracts]
-                      updatedExtracts[idx] = { ...ext, detected_section: activeSection }
-                      setExtracts(updatedExtracts)
-                      initializeMappings(updatedExtracts)
-                    }}
-                  >
-                    <div style={{fontWeight: '500', fontSize: '0.85rem'}}>
-                      Table {idx + 1}: {ext.headers?.slice(0, 3).join(', ')}...
-                    </div>
-                    <div style={{fontSize: '0.75rem', color: '#666'}}>
-                      {ext.row_count} rows • Click to assign to {sectionConfig?.label}
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <button 
+                onClick={() => navigate('/vacuum/explore?file=' + encodeURIComponent(sourceFile))}
+                style={styles.exploreBtn}
+              >
+                Go to Explore →
+              </button>
             </div>
           ) : (
             <>
-              <div style={styles.mappingContent}>
-                {currentExtract.headers?.map((header, idx) => {
-                  const columnMapping = currentMapping?.columns?.[header] || {}
-                  const confidence = columnMapping.confidence || 0
-                  const level = getConfidenceLevel(confidence)
+              {/* Section Title */}
+              <div style={styles.rightHeader}>
+                <h2 style={{ ...styles.rightTitle, color: currentSection?.color }}>
+                  {currentSection?.label}
+                </h2>
+                <span style={styles.rowBadge}>{currentExtract.row_count} rows</span>
+                <div style={styles.rightActions}>
+                  <button onClick={confirmAllHigh} style={styles.confirmHighBtn}>
+                    ✓ Confirm All High
+                  </button>
+                </div>
+              </div>
+
+              {/* Mapping Cards */}
+              <div style={styles.mappingGrid}>
+                {(currentExtract.raw_headers || []).map((header, idx) => {
+                  const headerStr = String(header);
+                  const mapping = currentMappings[headerStr] || {};
+                  const classification = currentExtract.column_classifications?.[idx] || {};
                   
                   return (
-                    <div 
-                      key={idx} 
-                      style={{
-                        ...styles.mappingCard,
-                        borderLeftColor: level === 'high' ? '#22c55e' : level === 'medium' ? '#f59e0b' : '#9ca3af'
-                      }}
-                    >
-                      <div style={styles.sourceCol}>
-                        <div style={styles.sourceName}>{header}</div>
-                        <div style={styles.sourceSamples}>
-                          {(currentExtract.preview || currentExtract.data || currentExtract.sample_data)?.slice(0, 3).map((row, rowIdx) => (
-                            <span key={rowIdx} style={styles.sample}>
-                              {row[idx] || '-'}
+                    <div key={idx} style={{
+                      ...styles.mappingCard,
+                      borderColor: mapping.confirmed ? '#22c55e' : '#e5e7eb'
+                    }}>
+                      {/* Source Column */}
+                      <div style={styles.sourceColumn}>
+                        <div style={styles.sourceLabel}>Source Column</div>
+                        <div style={styles.sourceHeader}>
+                          {headerStr.substring(0, 50)}{headerStr.length > 50 ? '...' : ''}
+                        </div>
+                        {/* Sample values */}
+                        <div style={styles.sampleValues}>
+                          {getSampleData().slice(0, 3).map((row, ri) => (
+                            <span key={ri} style={styles.sampleValue}>
+                              {String(row[idx] || '').substring(0, 25)}
                             </span>
                           ))}
                         </div>
                       </div>
-                      <div style={styles.arrowCol}>→</div>
-                      <div style={styles.targetCol}>
+
+                      {/* Arrow */}
+                      <div style={styles.arrow}>→</div>
+
+                      {/* Target Field */}
+                      <div style={styles.targetColumn}>
+                        <div style={styles.targetLabel}>
+                          Target Field
+                          <span style={{
+                            ...styles.confidenceDot,
+                            backgroundColor: getConfidenceColor(classification.confidence || 0)
+                          }} title={`Confidence: ${Math.round((classification.confidence || 0) * 100)}%`}></span>
+                        </div>
                         <select
-                          value={columnMapping.confirmed || 'skip'}
-                          onChange={(e) => updateColumnMapping(activeSection, header, e.target.value)}
-                          style={{
-                            ...styles.targetSelect,
-                            borderColor: level === 'high' ? '#22c55e' : level === 'medium' ? '#f59e0b' : '#e5e7eb'
-                          }}
+                          value={mapping.targetField || classification.type || ''}
+                          onChange={(e) => updateMapping(headerStr, e.target.value)}
+                          style={styles.select}
                         >
+                          <option value="">-- Skip --</option>
                           {TARGET_FIELDS[activeSection]?.map(field => (
-                            <option key={field.value} value={field.value}>
-                              {field.label}
-                            </option>
+                            <option key={field} value={field}>{field}</option>
                           ))}
                         </select>
-                        <div 
-                          style={{
-                            ...styles.confidenceDot,
-                            background: level === 'high' ? '#22c55e' : level === 'medium' ? '#f59e0b' : '#9ca3af'
-                          }} 
-                          title={`${Math.round(confidence * 100)}% confidence`}
-                        />
+                        {!mapping.confirmed && (
+                          <button
+                            onClick={() => confirmMapping(headerStr)}
+                            style={styles.confirmBtn}
+                          >
+                            Confirm
+                          </button>
+                        )}
+                        {mapping.confirmed && (
+                          <span style={styles.confirmedBadge}>✓ Confirmed</span>
+                        )}
                       </div>
                     </div>
-                  )
+                  );
                 })}
               </div>
 
-              {/* Section Actions */}
-              <div style={styles.sectionActions}>
-                <button 
-                  style={styles.btnSuccess}
-                  onClick={() => confirmSection(activeSection)}
+              {/* Live Preview */}
+              <div style={styles.previewSection}>
+                <div 
+                  style={styles.previewHeader}
+                  onClick={() => setShowPreview(!showPreview)}
                 >
-                  ✓ Confirm {sectionConfig?.label} Mapping
-                </button>
-              </div>
-
-              {/* Collapsible Preview */}
-              <div 
-                style={styles.previewToggle}
-                onClick={() => setShowPreview(!showPreview)}
-              >
-                <span>{showPreview ? '▼' : '▶'}</span> Live Preview
-              </div>
-              
-              {showPreview && (currentExtract.preview || currentExtract.data || currentExtract.sample_data) && (
-                <div style={styles.previewPanel}>
-                  <table style={styles.previewTable}>
-                    <thead>
-                      <tr>
-                        {currentExtract.headers?.map((header, idx) => {
-                          const mapping = currentMapping?.columns?.[header]
-                          const targetField = TARGET_FIELDS[activeSection]?.find(
-                            f => f.value === (mapping?.confirmed || 'skip')
-                          )
-                          if (mapping?.confirmed === 'skip') return null
-                          return (
-                            <th key={idx} style={styles.previewTh}>
-                              {targetField?.label || header}
-                            </th>
-                          )
-                        })}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(currentExtract.preview || currentExtract.data || currentExtract.sample_data)?.slice(0, 5).map((row, rowIdx) => (
-                        <tr key={rowIdx}>
-                          {row.map((cell, cellIdx) => {
-                            const header = currentExtract.headers?.[cellIdx]
-                            const mapping = currentMapping?.columns?.[header]
-                            if (mapping?.confirmed === 'skip') return null
-                            return <td key={cellIdx} style={styles.previewTd}>{cell}</td>
+                  <span>📊 Live Preview</span>
+                  <span>{showPreview ? '▼' : '▶'}</span>
+                </div>
+                {showPreview && (
+                  <div style={styles.previewTable}>
+                    <table style={styles.table}>
+                      <thead>
+                        <tr>
+                          {(currentExtract.raw_headers || []).map((h, i) => {
+                            const mapping = currentMappings[String(h)] || {};
+                            const targetField = mapping.targetField || currentExtract.column_classifications?.[i]?.type || '';
+                            return (
+                              <th key={i} style={styles.th}>
+                                {targetField || `Col ${i}`}
+                              </th>
+                            );
                           })}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+                      </thead>
+                      <tbody>
+                        {getSampleData().slice(0, 5).map((row, ri) => (
+                          <tr key={ri}>
+                            {(Array.isArray(row) ? row : []).map((cell, ci) => (
+                              <td key={ci} style={styles.td}>
+                                {String(cell || '').substring(0, 30)}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Confirm Section Button */}
+              <div style={styles.sectionActions}>
+                <button onClick={confirmSection} style={styles.confirmSectionBtn}>
+                  Confirm Section & Continue →
+                </button>
+              </div>
             </>
           )}
         </div>
@@ -684,526 +559,452 @@ export default function VacuumColumnMapping() {
 
       {/* Footer */}
       <div style={styles.footer}>
-        <div style={styles.footerLeft}>
-          <span style={styles.progressLabel}>Progress:</span>
-          <div style={styles.sectionDots}>
-            {Object.entries(SECTIONS).map(([key, config]) => (
-              <div
-                key={key}
+        <div style={styles.progressDots}>
+          {SECTIONS.map((section, idx) => {
+            const stats = getSectionStats(section.id);
+            const isConfirmed = confirmedSections[section.id];
+            const isActive = activeSection === section.id;
+            return (
+              <span
+                key={section.id}
                 style={{
-                  ...styles.sectionDot,
-                  background: sectionStatus[key] === 'done' ? config.color : 
-                    activeSection === key ? 'white' : '#e5e7eb',
-                  borderColor: activeSection === key ? config.color : 
-                    sectionStatus[key] === 'done' ? config.color : '#e5e7eb',
-                  boxShadow: activeSection === key ? `0 0 0 2px ${config.color}40` : 'none'
+                  ...styles.dot,
+                  backgroundColor: isConfirmed ? '#22c55e' : isActive ? section.color : (stats.hasData ? '#e5e7eb' : '#f3f4f6'),
+                  border: isActive ? `2px solid ${section.color}` : 'none'
                 }}
-                title={config.label}
-                onClick={() => getExtractForSection(key) && setActiveSection(key)}
-              />
-            ))}
-          </div>
-          <span style={styles.progressText}>{completedSections} of 5 sections mapped</span>
+                title={section.label}
+              >
+                {isConfirmed ? '✓' : ''}
+              </span>
+            );
+          })}
         </div>
-        <div style={styles.footerRight}>
-          <label style={styles.rememberCheck}>
-            <input type="checkbox" defaultChecked />
-            Remember mapping for similar files
-          </label>
-        </div>
+        <label style={styles.rememberLabel}>
+          <input
+            type="checkbox"
+            checked={rememberMapping}
+            onChange={(e) => setRememberMapping(e.target.checked)}
+          />
+          Remember mapping for similar files
+        </label>
+        <button
+          onClick={saveAllMappings}
+          disabled={saving}
+          style={styles.saveBtn}
+        >
+          {saving ? 'Saving...' : '💾 Save All Mappings'}
+        </button>
       </div>
-
-      {/* Error Toast */}
-      {error && (
-        <div style={styles.errorToast}>
-          {error}
-          <button onClick={() => setError(null)} style={styles.errorClose}>×</button>
-        </div>
-      )}
     </div>
-  )
+  );
 }
 
-
-// Styles
 const styles = {
   container: {
-    height: '100vh',
     display: 'flex',
     flexDirection: 'column',
-    background: '#f5f7fa'
+    height: '100vh',
+    backgroundColor: '#f8fafc'
   },
-  loadingContainer: {
+  header: {
+    padding: '16px 24px',
+    backgroundColor: '#fff',
+    borderBottom: '1px solid #e5e7eb',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center'
+  },
+  backBtn: {
+    background: 'none',
+    border: 'none',
+    color: '#6b7280',
+    cursor: 'pointer',
+    fontSize: '14px',
+    padding: '4px 0',
+    marginBottom: '4px'
+  },
+  title: {
+    margin: 0,
+    fontSize: '24px',
+    fontWeight: '600',
+    color: '#111827'
+  },
+  subtitle: {
+    margin: '4px 0 0',
+    fontSize: '14px',
+    color: '#6b7280'
+  },
+  mainContent: {
+    display: 'flex',
+    flex: 1,
+    overflow: 'hidden'
+  },
+  leftPanel: {
+    width: '320px',
+    backgroundColor: '#fff',
+    borderRight: '1px solid #e5e7eb',
+    overflowY: 'auto',
+    padding: '16px'
+  },
+  metadataCard: {
+    backgroundColor: '#f9fafb',
+    borderRadius: '8px',
+    padding: '16px',
+    marginBottom: '16px'
+  },
+  metadataTitle: {
+    margin: '0 0 12px',
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#374151'
+  },
+  metadataFields: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px'
+  },
+  fieldGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px'
+  },
+  label: {
+    fontSize: '12px',
+    fontWeight: '500',
+    color: '#6b7280'
+  },
+  input: {
+    padding: '8px 12px',
+    border: '1px solid #d1d5db',
+    borderRadius: '6px',
+    fontSize: '14px'
+  },
+  sectionList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px'
+  },
+  sectionCard: {
+    padding: '12px',
+    borderRadius: '8px',
+    border: '1px solid #e5e7eb',
+    cursor: 'pointer',
+    transition: 'all 0.2s'
+  },
+  sectionHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center'
+  },
+  sectionLabel: {
+    fontWeight: '600',
+    fontSize: '14px'
+  },
+  noDataBadge: {
+    fontSize: '10px',
+    padding: '2px 6px',
+    backgroundColor: '#f3f4f6',
+    borderRadius: '4px',
+    color: '#9ca3af'
+  },
+  sectionStats: {
+    fontSize: '12px',
+    color: '#6b7280',
+    marginTop: '4px'
+  },
+  headerPreview: {
+    marginTop: '8px',
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '4px'
+  },
+  headerChip: {
+    fontSize: '10px',
+    padding: '2px 6px',
+    backgroundColor: '#f3f4f6',
+    borderRadius: '4px',
+    color: '#6b7280'
+  },
+  rightPanel: {
+    flex: 1,
+    overflowY: 'auto',
+    padding: '24px'
+  },
+  emptySection: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    height: '100vh',
-    color: '#666'
-  },
-  spinner: {
-    width: 40,
-    height: 40,
-    border: '3px solid #e5e7eb',
-    borderTop: '3px solid #3b82f6',
-    borderRadius: '50%',
-    animation: 'spin 1s linear infinite',
-    marginBottom: '1rem'
-  },
-  
-  // File selection
-  fileSelectContainer: {
-    padding: '2rem',
-    maxWidth: 1000,
-    margin: '0 auto'
-  },
-  pageTitle: {
-    fontSize: '1.75rem',
-    color: '#1f2937',
-    marginBottom: '0.5rem'
-  },
-  pageSubtitle: {
-    color: '#6b7280',
-    marginBottom: '2rem'
-  },
-  fileGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-    gap: '1rem'
-  },
-  fileCard: {
-    background: 'white',
-    borderRadius: 12,
-    padding: '1.25rem',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-    cursor: 'pointer',
-    display: 'flex',
-    gap: '1rem',
-    transition: 'all 0.15s',
-    border: '2px solid transparent'
-  },
-  fileIcon: {
-    fontSize: '2rem'
-  },
-  fileDetails: {
-    flex: 1
-  },
-  fileName: {
-    fontWeight: 600,
-    color: '#1f2937',
-    marginBottom: '0.25rem'
-  },
-  fileMeta: {
-    fontSize: '0.85rem',
-    color: '#6b7280',
-    marginBottom: '0.5rem'
-  },
-  fileSections: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '0.5rem'
-  },
-  sectionTag: {
-    fontSize: '0.7rem',
-    padding: '2px 8px',
-    borderRadius: 4,
-    fontWeight: 500
-  },
-  emptyState: {
-    textAlign: 'center',
-    padding: '3rem',
-    color: '#666'
-  },
-  
-  // Header
-  header: {
-    background: 'white',
-    padding: '1rem 1.5rem',
-    borderBottom: '1px solid #e5e7eb',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: '1rem',
-    flexShrink: 0
-  },
-  headerLeft: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '1.5rem'
-  },
-  title: {
-    fontSize: '1.25rem',
-    color: '#1f2937',
-    margin: 0
-  },
-  fileInfo: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '0.75rem'
-  },
-  fileNameHeader: {
-    color: '#6b7280',
-    fontSize: '0.9rem'
-  },
-  headerActions: {
-    display: 'flex',
-    gap: '0.5rem'
-  },
-  btnPrimary: {
-    padding: '0.5rem 1rem',
-    background: '#3b82f6',
-    color: 'white',
-    border: 'none',
-    borderRadius: 6,
-    fontSize: '0.85rem',
-    fontWeight: 500,
-    cursor: 'pointer'
-  },
-  btnSuccess: {
-    padding: '0.5rem 1rem',
-    background: '#22c55e',
-    color: 'white',
-    border: 'none',
-    borderRadius: 6,
-    fontSize: '0.85rem',
-    fontWeight: 500,
-    cursor: 'pointer'
-  },
-  btnSecondary: {
-    padding: '0.5rem 1rem',
-    background: '#f3f4f6',
-    color: '#374151',
+    padding: '60px 40px',
+    backgroundColor: '#fff',
+    borderRadius: '12px',
     border: '1px solid #e5e7eb',
-    borderRadius: 6,
-    fontSize: '0.85rem',
-    cursor: 'pointer'
+    textAlign: 'center'
   },
-  
-  // Main split
-  mainSplit: {
-    flex: 1,
-    display: 'flex',
-    overflow: 'hidden'
+  emptyIcon: {
+    fontSize: '64px',
+    marginBottom: '16px'
   },
-  
-  // Doc panel (left)
-  docPanel: {
-    width: '320px',
-    background: 'white',
-    borderRight: '1px solid #e5e7eb',
-    display: 'flex',
-    flexDirection: 'column',
-    flexShrink: 0
-  },
-  docHeader: {
-    padding: '0.75rem 1rem',
-    borderBottom: '1px solid #e5e7eb'
-  },
-  docTitle: {
-    fontWeight: 600,
-    fontSize: '0.9rem',
+  emptyTitle: {
+    margin: '0 0 8px',
+    fontSize: '20px',
+    fontWeight: '600',
     color: '#374151'
   },
-  
-  // Metadata section
-  metadataSection: {
-    padding: '1rem',
-    borderBottom: '1px solid #e5e7eb',
-    background: '#f9fafb'
+  emptyText: {
+    margin: '0 0 24px',
+    fontSize: '14px',
+    color: '#6b7280',
+    lineHeight: '1.5'
   },
-  metadataTitle: {
-    fontSize: '0.8rem',
-    fontWeight: 600,
-    color: '#374151',
-    marginBottom: '0.75rem'
+  exploreBtn: {
+    padding: '10px 20px',
+    backgroundColor: '#3b82f6',
+    color: '#fff',
+    border: 'none',
+    borderRadius: '6px',
+    fontSize: '14px',
+    fontWeight: '500',
+    cursor: 'pointer'
   },
-  metadataGrid: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: '0.75rem'
-  },
-  metadataField: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '0.25rem'
-  },
-  metadataInput: {
-    padding: '0.4rem 0.5rem',
-    border: '1px solid #e5e7eb',
-    borderRadius: 4,
-    fontSize: '0.8rem'
-  },
-  
-  // Section list
-  sectionList: {
-    flex: 1,
-    overflow: 'auto',
-    padding: '0.75rem'
-  },
-  sectionCard: {
-    padding: '0.75rem',
-    borderRadius: 8,
-    marginBottom: '0.5rem',
-    border: '2px solid #e5e7eb',
-    cursor: 'pointer',
-    transition: 'all 0.15s'
-  },
-  sectionCardDone: {
-    background: '#f0fdf4',
-    borderColor: '#86efac'
-  },
-  sectionCardEmpty: {
-    opacity: 0.5,
-    cursor: 'default'
-  },
-  sectionCardHeader: {
+  rightHeader: {
     display: 'flex',
     alignItems: 'center',
-    gap: '0.5rem',
-    marginBottom: '0.25rem'
+    gap: '12px',
+    marginBottom: '20px'
   },
-  sectionIcon: {
-    fontSize: '1rem'
+  rightTitle: {
+    margin: 0,
+    fontSize: '20px',
+    fontWeight: '600'
   },
-  sectionLabel: {
-    fontWeight: 600,
-    fontSize: '0.9rem',
-    color: '#1f2937',
+  rowBadge: {
+    padding: '4px 10px',
+    backgroundColor: '#f3f4f6',
+    borderRadius: '12px',
+    fontSize: '12px',
+    color: '#6b7280'
+  },
+  rightActions: {
+    marginLeft: 'auto'
+  },
+  confirmHighBtn: {
+    padding: '8px 16px',
+    backgroundColor: '#22c55e',
+    color: '#fff',
+    border: 'none',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: '500',
+    cursor: 'pointer'
+  },
+  mappingGrid: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px'
+  },
+  mappingCard: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '16px',
+    padding: '16px',
+    backgroundColor: '#fff',
+    borderRadius: '8px',
+    border: '2px solid #e5e7eb'
+  },
+  sourceColumn: {
     flex: 1
   },
-  checkMark: {
-    color: '#22c55e',
-    fontWeight: 'bold'
-  },
-  sectionCardMeta: {
-    fontSize: '0.75rem',
-    color: '#6b7280',
-    marginBottom: '0.25rem'
-  },
-  sectionCardHeaders: {
-    fontSize: '0.7rem',
+  sourceLabel: {
+    fontSize: '11px',
+    fontWeight: '500',
     color: '#9ca3af',
+    textTransform: 'uppercase',
+    marginBottom: '4px'
+  },
+  sourceHeader: {
+    fontSize: '14px',
+    fontWeight: '500',
+    color: '#374151',
+    wordBreak: 'break-word'
+  },
+  sampleValues: {
+    marginTop: '8px',
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '4px'
+  },
+  sampleValue: {
+    fontSize: '11px',
+    padding: '2px 6px',
+    backgroundColor: '#f9fafb',
+    borderRadius: '4px',
+    color: '#6b7280',
+    maxWidth: '150px',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap'
   },
-  
-  // Mapping panel (right)
-  mappingPanel: {
+  arrow: {
+    fontSize: '20px',
+    color: '#9ca3af'
+  },
+  targetColumn: {
     flex: 1,
     display: 'flex',
     flexDirection: 'column',
-    overflow: 'hidden'
+    gap: '8px'
   },
-  mappingHeader: {
-    padding: '0.75rem 1rem',
-    background: 'white',
-    borderBottom: '1px solid #e5e7eb'
-  },
-  mappingTitleRow: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between'
-  },
-  mappingTitle: {
-    fontWeight: 600,
-    fontSize: '1rem',
-    color: '#1f2937'
-  },
-  sectionBadge: {
-    padding: '4px 10px',
-    borderRadius: 6,
-    fontSize: '0.75rem',
-    fontWeight: 500
-  },
-  noDataMessage: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: '#6b7280',
-    padding: '2rem'
-  },
-  
-  // Mapping content
-  mappingContent: {
-    flex: 1,
-    overflow: 'auto',
-    padding: '1rem',
-    background: '#f9fafb'
-  },
-  mappingCard: {
-    background: 'white',
-    borderRadius: 8,
-    padding: '0.875rem',
-    marginBottom: '0.75rem',
-    boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-    borderLeft: '3px solid #ccc',
-    display: 'grid',
-    gridTemplateColumns: '1fr auto 1fr',
-    alignItems: 'center',
-    gap: '1rem'
-  },
-  sourceCol: {},
-  sourceName: {
-    fontWeight: 600,
-    fontSize: '0.9rem',
-    color: '#1f2937',
-    marginBottom: '0.25rem'
-  },
-  sourceSamples: {
-    display: 'flex',
-    gap: '0.5rem',
-    flexWrap: 'wrap'
-  },
-  sample: {
-    fontSize: '0.7rem',
-    background: '#f3f4f6',
-    padding: '2px 6px',
-    borderRadius: 3,
-    fontFamily: 'monospace',
-    color: '#4b5563'
-  },
-  arrowCol: {
+  targetLabel: {
+    fontSize: '11px',
+    fontWeight: '500',
     color: '#9ca3af',
-    fontSize: '1.25rem'
-  },
-  targetCol: {
+    textTransform: 'uppercase',
     display: 'flex',
     alignItems: 'center',
-    gap: '0.5rem'
-  },
-  targetSelect: {
-    flex: 1,
-    padding: '0.5rem',
-    fontSize: '0.85rem',
-    border: '2px solid #e5e7eb',
-    borderRadius: 6,
-    background: 'white'
+    gap: '6px'
   },
   confidenceDot: {
-    width: 10,
-    height: 10,
+    width: '8px',
+    height: '8px',
     borderRadius: '50%',
-    flexShrink: 0
+    display: 'inline-block'
   },
-  
-  // Section actions
-  sectionActions: {
-    padding: '0.75rem 1rem',
-    background: 'white',
-    borderTop: '1px solid #e5e7eb',
-    display: 'flex',
-    justifyContent: 'flex-end'
+  select: {
+    padding: '8px 12px',
+    border: '1px solid #d1d5db',
+    borderRadius: '6px',
+    fontSize: '14px',
+    backgroundColor: '#fff'
   },
-  
-  // Preview
-  previewToggle: {
-    padding: '0.5rem 1rem',
-    background: '#e5e7eb',
+  confirmBtn: {
+    padding: '6px 12px',
+    backgroundColor: '#f3f4f6',
+    border: '1px solid #d1d5db',
+    borderRadius: '4px',
+    fontSize: '12px',
     cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '0.5rem',
-    fontSize: '0.8rem',
-    color: '#6b7280'
+    alignSelf: 'flex-start'
   },
-  previewPanel: {
-    maxHeight: 200,
-    overflow: 'auto',
-    background: 'white'
+  confirmedBadge: {
+    fontSize: '12px',
+    color: '#22c55e',
+    fontWeight: '500'
   },
-  previewTable: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    fontSize: '0.8rem'
+  previewSection: {
+    marginTop: '24px',
+    backgroundColor: '#fff',
+    borderRadius: '8px',
+    border: '1px solid #e5e7eb',
+    overflow: 'hidden'
   },
-  previewTh: {
-    background: '#f9fafb',
-    padding: '0.5rem 0.75rem',
-    textAlign: 'left',
-    fontWeight: 600,
-    color: '#374151',
-    borderBottom: '2px solid #e5e7eb',
-    position: 'sticky',
-    top: 0
-  },
-  previewTd: {
-    padding: '0.5rem 0.75rem',
-    borderBottom: '1px solid #f3f4f6',
-    color: '#4b5563'
-  },
-  
-  // Footer
-  footer: {
-    background: 'white',
-    padding: '0.75rem 1.5rem',
-    borderTop: '1px solid #e5e7eb',
+  previewHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    flexShrink: 0
-  },
-  footerLeft: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '1rem'
-  },
-  progressLabel: {
-    fontSize: '0.85rem',
-    color: '#6b7280'
-  },
-  sectionDots: {
-    display: 'flex',
-    gap: '0.5rem'
-  },
-  sectionDot: {
-    width: 14,
-    height: 14,
-    borderRadius: '50%',
-    border: '2px solid #e5e7eb',
+    padding: '12px 16px',
+    backgroundColor: '#f9fafb',
     cursor: 'pointer',
-    transition: 'all 0.15s'
+    fontWeight: '500',
+    fontSize: '14px'
   },
-  progressText: {
-    fontSize: '0.8rem',
-    color: '#9ca3af'
+  previewTable: {
+    overflowX: 'auto',
+    padding: '16px'
   },
-  footerRight: {
+  table: {
+    width: '100%',
+    borderCollapse: 'collapse',
+    fontSize: '12px'
+  },
+  th: {
+    textAlign: 'left',
+    padding: '8px 12px',
+    backgroundColor: '#f9fafb',
+    borderBottom: '1px solid #e5e7eb',
+    fontWeight: '600',
+    whiteSpace: 'nowrap'
+  },
+  td: {
+    padding: '8px 12px',
+    borderBottom: '1px solid #f3f4f6',
+    maxWidth: '200px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap'
+  },
+  sectionActions: {
+    marginTop: '24px',
+    display: 'flex',
+    justifyContent: 'flex-end'
+  },
+  confirmSectionBtn: {
+    padding: '12px 24px',
+    backgroundColor: '#3b82f6',
+    color: '#fff',
+    border: 'none',
+    borderRadius: '8px',
+    fontSize: '14px',
+    fontWeight: '500',
+    cursor: 'pointer'
+  },
+  footer: {
+    padding: '16px 24px',
+    backgroundColor: '#fff',
+    borderTop: '1px solid #e5e7eb',
     display: 'flex',
     alignItems: 'center',
-    gap: '1rem'
+    gap: '24px'
   },
-  rememberCheck: {
+  progressDots: {
+    display: 'flex',
+    gap: '8px'
+  },
+  dot: {
+    width: '24px',
+    height: '24px',
+    borderRadius: '50%',
     display: 'flex',
     alignItems: 'center',
-    gap: '0.5rem',
-    fontSize: '0.85rem',
+    justifyContent: 'center',
+    fontSize: '12px',
+    color: '#fff',
+    fontWeight: '600'
+  },
+  rememberLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    fontSize: '14px',
     color: '#6b7280',
     cursor: 'pointer'
   },
-  
-  // Error toast
-  errorToast: {
-    position: 'fixed',
-    bottom: 20,
-    right: 20,
-    background: '#ef4444',
-    color: 'white',
-    padding: '1rem 1.5rem',
-    borderRadius: 8,
-    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '1rem'
-  },
-  errorClose: {
-    background: 'none',
+  saveBtn: {
+    marginLeft: 'auto',
+    padding: '12px 24px',
+    backgroundColor: '#22c55e',
+    color: '#fff',
     border: 'none',
-    color: 'white',
-    fontSize: '1.25rem',
+    borderRadius: '8px',
+    fontSize: '14px',
+    fontWeight: '600',
+    cursor: 'pointer'
+  },
+  spinner: {
+    width: '40px',
+    height: '40px',
+    border: '4px solid #f3f4f6',
+    borderTop: '4px solid #3b82f6',
+    borderRadius: '50%',
+    animation: 'spin 1s linear infinite',
+    margin: '0 auto 16px'
+  },
+  btn: {
+    padding: '10px 20px',
+    backgroundColor: '#3b82f6',
+    color: '#fff',
+    border: 'none',
+    borderRadius: '6px',
     cursor: 'pointer'
   }
-}
+};
