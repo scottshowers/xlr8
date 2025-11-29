@@ -1,6 +1,19 @@
+/**
+ * VacuumColumnMapping.jsx
+ * Deploy to: frontend/src/pages/VacuumColumnMapping.jsx
+ * 
+ * Visual column mapping interface for pay register extraction.
+ * Features:
+ * - Split-screen with sections list and mapping cards
+ * - Auto-selects first populated section
+ * - Detects merged columns and offers split functionality
+ * - AI-suggested mappings with confidence indicators
+ * - Live preview of transformations
+ */
+
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import ColumnSplitter from './ColumnSplitter';
+import ColumnSplitter from '../components/ColumnSplitter';
 
 const API_BASE = '/api';
 
@@ -64,7 +77,6 @@ export default function VacuumColumnMapping() {
   const looksLikeMergedColumn = (headerStr, sampleData, colIdx) => {
     if (!sampleData || sampleData.length === 0) return false;
     
-    // Check sample values for patterns suggesting merged data
     const values = sampleData.slice(0, 5).map(row => String(row[colIdx] || ''));
     
     for (const val of values) {
@@ -118,15 +130,19 @@ export default function VacuumColumnMapping() {
         setExtracts(extractsData.extracts || []);
 
         // Load header metadata
-        const metaRes = await fetch(`${API_BASE}/vacuum/header-metadata?source_file=${encodeURIComponent(sourceFile)}`);
-        const metaData = await metaRes.json();
-        if (metaData && !metaData.error) {
-          setHeaderMetadata({
-            company: metaData.company || '',
-            pay_period_start: metaData.pay_period_start || '',
-            pay_period_end: metaData.pay_period_end || '',
-            check_date: metaData.check_date || ''
-          });
+        try {
+          const metaRes = await fetch(`${API_BASE}/vacuum/header-metadata?source_file=${encodeURIComponent(sourceFile)}`);
+          const metaData = await metaRes.json();
+          if (metaData && metaData.metadata) {
+            setHeaderMetadata({
+              company: metaData.metadata.company || '',
+              pay_period_start: metaData.metadata.pay_period_start || '',
+              pay_period_end: metaData.metadata.pay_period_end || '',
+              check_date: metaData.metadata.check_date || ''
+            });
+          }
+        } catch (err) {
+          console.log('Header metadata not available');
         }
       } catch (err) {
         console.error('Error loading data:', err);
@@ -182,10 +198,8 @@ export default function VacuumColumnMapping() {
 
   // Get extract for current section
   const getExtractForSection = (sectionId) => {
-    // First try exact match
     const exactMatch = extracts.find(e => e.detected_section === sectionId);
     if (exactMatch) return exactMatch;
-    
     return null;
   };
 
@@ -243,7 +257,6 @@ export default function VacuumColumnMapping() {
 
   // Confirm entire section
   const confirmSection = () => {
-    // Mark all mappings in section as confirmed
     setMappings(prev => {
       const updated = { ...prev[activeSection] };
       Object.keys(updated).forEach(header => {
@@ -252,10 +265,8 @@ export default function VacuumColumnMapping() {
       return { ...prev, [activeSection]: updated };
     });
     
-    // Mark section as done
     setConfirmedSections(prev => ({ ...prev, [activeSection]: true }));
     
-    // Move to next section
     const currentIdx = SECTIONS.findIndex(s => s.id === activeSection);
     if (currentIdx < SECTIONS.length - 1) {
       setActiveSection(SECTIONS[currentIdx + 1].id);
@@ -422,7 +433,8 @@ export default function VacuumColumnMapping() {
                     ...styles.sectionCard,
                     borderLeft: `4px solid ${section.color}`,
                     backgroundColor: isActive ? section.bgColor : '#fff',
-                    opacity: stats.hasData ? 1 : 0.5
+                    opacity: stats.hasData ? 1 : 0.5,
+                    cursor: 'pointer'
                   }}
                 >
                   <div style={styles.sectionHeader}>
@@ -438,15 +450,6 @@ export default function VacuumColumnMapping() {
                       {stats.rowCount} rows • {stats.colCount} columns
                     </div>
                   )}
-                  {stats.hasData && currentExtract && isActive && (
-                    <div style={styles.headerPreview}>
-                      {(currentExtract.raw_headers || []).slice(0, 3).map((h, i) => (
-                        <span key={i} style={styles.headerChip}>
-                          {String(h).substring(0, 20)}{String(h).length > 20 ? '...' : ''}
-                        </span>
-                      ))}
-                    </div>
-                  )}
                 </div>
               );
             })}
@@ -456,7 +459,6 @@ export default function VacuumColumnMapping() {
         {/* Right Panel - Mapping Interface */}
         <div style={styles.rightPanel}>
           {!currentExtract ? (
-            /* Empty Section State */
             <div style={styles.emptySection}>
               <div style={styles.emptyIcon}>📋</div>
               <h3 style={styles.emptyTitle}>No Data Detected for {currentSection?.label}</h3>
@@ -492,11 +494,13 @@ export default function VacuumColumnMapping() {
                   const headerStr = String(header);
                   const mapping = currentMappings[headerStr] || {};
                   const classification = currentExtract.column_classifications?.[idx] || {};
+                  const sampleData = getSampleData();
+                  const isMerged = looksLikeMergedColumn(headerStr, sampleData, idx);
                   
                   return (
                     <div key={idx} style={{
                       ...styles.mappingCard,
-                      borderColor: mapping.confirmed ? '#22c55e' : '#e5e7eb'
+                      borderColor: mapping.confirmed ? '#22c55e' : (isMerged ? '#f59e0b' : '#e5e7eb')
                     }}>
                       {/* Source Column */}
                       <div style={styles.sourceColumn}>
@@ -506,19 +510,19 @@ export default function VacuumColumnMapping() {
                         </div>
                         {/* Sample values */}
                         <div style={styles.sampleValues}>
-                          {getSampleData().slice(0, 3).map((row, ri) => (
+                          {sampleData.slice(0, 3).map((row, ri) => (
                             <span key={ri} style={styles.sampleValue}>
-                              {String(row[idx] || '').substring(0, 25)}
+                              {String(row[idx] || '').substring(0, 30)}
                             </span>
                           ))}
                         </div>
                         {/* Merged column warning and split button */}
-                        {looksLikeMergedColumn(headerStr, getSampleData(), idx) && (
+                        {isMerged && (
                           <div style={styles.mergedWarning}>
                             <span style={styles.warningIcon}>⚠️</span>
                             <span>Looks merged</span>
                             <button 
-                              onClick={() => openSplitter(headerStr, idx)}
+                              onClick={(e) => { e.stopPropagation(); openSplitter(headerStr, idx); }}
                               style={styles.splitBtn}
                             >
                               Split Column
@@ -621,7 +625,7 @@ export default function VacuumColumnMapping() {
       {/* Footer */}
       <div style={styles.footer}>
         <div style={styles.progressDots}>
-          {SECTIONS.map((section, idx) => {
+          {SECTIONS.map((section) => {
             const stats = getSectionStats(section.id);
             const isConfirmed = confirmedSections[section.id];
             const isActive = activeSection === section.id;
@@ -762,7 +766,6 @@ const styles = {
     padding: '12px',
     borderRadius: '8px',
     border: '1px solid #e5e7eb',
-    cursor: 'pointer',
     transition: 'all 0.2s'
   },
   sectionHeader: {
@@ -785,19 +788,6 @@ const styles = {
     fontSize: '12px',
     color: '#6b7280',
     marginTop: '4px'
-  },
-  headerPreview: {
-    marginTop: '8px',
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '4px'
-  },
-  headerChip: {
-    fontSize: '10px',
-    padding: '2px 6px',
-    backgroundColor: '#f3f4f6',
-    borderRadius: '4px',
-    color: '#6b7280'
   },
   rightPanel: {
     flex: 1,
