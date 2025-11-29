@@ -162,14 +162,21 @@ class FormatLibrary:
     
     def save(self, fmt: LearnedFormat):
         """Save a format to disk"""
-        self._cache[fmt.format_id] = fmt
+        # Sanitize format_id - remove any path separators
+        safe_id = fmt.format_id.replace('/', '_').replace('\\', '_').replace(' ', '_')
+        fmt.format_id = safe_id
         
-        file_path = os.path.join(self.storage_path, f"{fmt.format_id}.json")
+        self._cache[safe_id] = fmt
+        
+        # Ensure directory exists
+        os.makedirs(self.storage_path, exist_ok=True)
+        
+        file_path = os.path.join(self.storage_path, f"{safe_id}.json")
         with open(file_path, 'w') as f:
             data = asdict(fmt)
             json.dump(data, f, indent=2)
         
-        logger.info(f"Saved format: {fmt.format_name} ({fmt.format_id})")
+        logger.info(f"Saved format: {fmt.format_name} ({safe_id})")
     
     def find_matching_format(self, fingerprint: str) -> Optional[LearnedFormat]:
         """Find a format matching the given fingerprint"""
