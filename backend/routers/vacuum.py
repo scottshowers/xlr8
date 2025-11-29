@@ -642,7 +642,127 @@ async def reset_vacuum():
 
 
 # =============================================================================
-# MAPPING & EXPORT (Future: generate load files)
+# HEADER METADATA EXTRACTION
+# =============================================================================
+
+@router.get("/vacuum/header-metadata")
+async def get_header_metadata(source_file: str):
+    """
+    Extract header metadata from a pay register document.
+    Returns: company, pay_period_start, pay_period_end, check_date
+    """
+    if not VACUUM_AVAILABLE:
+        raise HTTPException(501, "Vacuum extractor not available")
+    
+    try:
+        extractor = get_vacuum_extractor()
+        metadata = extractor.extract_header_metadata(source_file)
+        
+        return {
+            "success": True,
+            "source_file": source_file,
+            "metadata": metadata
+        }
+        
+    except Exception as e:
+        logger.error(f"Error extracting header metadata: {e}")
+        # Return empty metadata rather than error - it's optional
+        return {
+            "success": False,
+            "source_file": source_file,
+            "metadata": {
+                "company": "",
+                "pay_period_start": "",
+                "pay_period_end": "",
+                "check_date": ""
+            }
+        }
+
+
+# =============================================================================
+# FULL MAPPING WORKFLOW
+# =============================================================================
+
+class ApplyMappingsRequest(BaseModel):
+    source_file: str
+    header_metadata: Dict[str, str]  # company, pay_period_start, pay_period_end, check_date
+    section_mappings: Dict[str, Any]  # {section: {extract_id, columns: {header: {confirmed, ...}}}}
+    remember_for_vendor: bool = True
+
+
+@router.post("/vacuum/apply-mappings")
+async def apply_all_mappings(request: ApplyMappingsRequest):
+    """
+    Apply all section mappings for a pay register.
+    Creates structured tables and optionally learns for future files.
+    """
+    if not VACUUM_AVAILABLE:
+        raise HTTPException(501, "Vacuum extractor not available")
+    
+    try:
+        extractor = get_vacuum_extractor()
+        results = []
+        
+        for section, mapping_data in request.section_mappings.items():
+            if not mapping_data or not mapping_data.get('columns'):
+                continue
+                
+            extract_id = mapping_data.get('extract_id')
+            if not extract_id:
+                continue
+            
+            # Build column map from confirmed mappings
+            column_map = {}
+            for header, col_data in mapping_data.get('columns', {}).items():
+                target = col_data.get('confirmed', 'skip')
+                if target and target != 'skip':
+                    column_map[header] = target
+            
+            if not column_map:
+                continue
+            
+            # Apply the mapping
+            result = extractor.apply_section_mapping(
+                extract_id=extract_id,
+                section_type=section,
+                column_map=column_map,
+                header_metadata=request.header_metadata if section == 'employee_info' else None
+            )
+            
+            results.append({
+                "section": section,
+                "extract_id": extract_id,
+                "columns_mapped": len(column_map),
+                "success": result.get('success', False)
+            })
+            
+            # Learn from this mapping if requested
+            if request.remember_for_vendor:
+                for header, target in column_map.items():
+                    try:
+                        extractor.learn_column_mapping(
+                            source_header=header,
+                            target_column_type=target,
+                            section_type=section,
+                            source_file=request.source_file
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to learn mapping {header} -> {target}: {e}")
+        
+        return {
+            "success": True,
+            "source_file": request.source_file,
+            "sections_processed": len(results),
+            "results": results
+        }
+        
+    except Exception as e:
+        logger.error(f"Error applying mappings: {e}")
+        raise HTTPException(500, str(e))
+
+
+# =============================================================================
+# LEGACY MAPPING ENDPOINT (keep for backwards compatibility)
 # =============================================================================
 
 @router.post("/vacuum/apply-mapping")
