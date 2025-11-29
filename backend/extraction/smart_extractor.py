@@ -220,32 +220,46 @@ class StructureAnalyzer:
     # Currency amounts
     CURRENCY_PATTERN = re.compile(r'\$?\d{1,3}(?:,\d{3})*(?:\.\d{2})?')
     
-    def analyze(self, pages_text: List[str]) -> Dict[str, Any]:
+    def analyze(self, pages_text: List[str], 
+                pages_tables: List[List[List[str]]] = None) -> Dict[str, Any]:
         """
         Analyze pages and return structure with PII redacted.
         
         Args:
             pages_text: List of text content from each page
+            pages_tables: Optional list of tables (rows of cells) per page
             
         Returns:
             Structure template safe to send to AI
         """
-        if not pages_text:
+        if not pages_text and not pages_tables:
             return {"error": "No pages to analyze"}
         
         # Combine first few pages for analysis
-        sample_text = "\n---PAGE BREAK---\n".join(pages_text[:3])
+        sample_text = "\n---PAGE BREAK---\n".join(pages_text[:3]) if pages_text else ""
         
         # Create redacted version
         redacted = self._redact_pii(sample_text)
         
+        # If we have table data, create a redacted table structure too
+        redacted_tables = []
+        if pages_tables:
+            for page_tables in pages_tables[:3]:
+                redacted_page = []
+                for row in page_tables:
+                    redacted_row = [self._redact_pii(str(cell)) for cell in row]
+                    redacted_page.append(redacted_row)
+                redacted_tables.append(redacted_page)
+        
         # Extract structure hints
         structure = {
             "redacted_sample": redacted,
+            "redacted_tables": redacted_tables,
             "detected_columns": self._detect_columns(sample_text),
             "detected_patterns": self._detect_patterns(sample_text),
             "line_count": len(sample_text.split('\n')),
-            "has_tables": self._has_table_structure(sample_text),
+            "has_tables": bool(pages_tables) or self._has_table_structure(sample_text),
+            "table_row_counts": [len(t) for t in pages_tables] if pages_tables else [],
         }
         
         # Generate fingerprint for matching
@@ -411,19 +425,36 @@ class FormatLearner:
     
     def _build_learning_prompt(self, structure: Dict, vendor_hint: str = None) -> str:
         """Build the prompt for Claude"""
+        
+        # Format table structure for display
+        tables_display = ""
+        if structure.get('redacted_tables'):
+            tables_display = "\n\nEXTRACTED TABLE STRUCTURE (this is how the data is organized):\n"
+            for page_num, page_rows in enumerate(structure['redacted_tables'][:2]):  # First 2 pages
+                tables_display += f"\n--- Page {page_num + 1} ({len(page_rows)} rows) ---\n"
+                for row_num, row in enumerate(page_rows[:15]):  # First 15 rows
+                    tables_display += f"Row {row_num}: {row}\n"
+                if len(page_rows) > 15:
+                    tables_display += f"... and {len(page_rows) - 15} more rows\n"
+        
         return f"""You are analyzing a pay register document structure. The actual values have been redacted for privacy - you're seeing patterns, not real data.
 
-Here is the redacted document structure:
+Here is the redacted text from the document:
 
 ```
-{structure.get('redacted_sample', 'No sample available')}
+{structure.get('redacted_sample', 'No sample available')[:3000]}
 ```
+{tables_display}
 
 Detected patterns:
 - Columns found: {structure.get('detected_columns', [])}
 - Structure hints: {json.dumps(structure.get('detected_patterns', {}), indent=2)}
 - Has table structure: {structure.get('has_tables', False)}
+- Table row counts per page: {structure.get('table_row_counts', [])}
 {f'- Vendor hint: {vendor_hint}' if vendor_hint else ''}
+
+IMPORTANT: The data will be extracted as table rows where each row is a list of cell values.
+Your patterns will be applied to these cell values, indexed by column position (0, 1, 2, etc).
 
 Based on this structure, please provide:
 
@@ -436,7 +467,11 @@ Based on this structure, please provide:
    - Department headers
    - Subtotal rows to skip
 
-4. **Extraction rules**: For each field below, provide a regex pattern or description of how to extract it:
+4. **Extraction rules**: For each field below, provide:
+   - column_index: which column (0-based) contains this data
+   - pattern: regex pattern to extract the value from that cell
+   
+   Fields needed:
    - employee_name
    - employee_id (or code)
    - department
@@ -457,14 +492,14 @@ Respond in this JSON format:
         {{"index": 1, "name": "Earnings", "description": "All earning types with rate/hours/amount", "data_type": "earnings_block"}}
     ],
     "row_patterns": {{
-        "employee_row": "regex or description to identify employee rows",
-        "department_header": "regex for department headers like '2025 - RN Department'",
-        "skip_patterns": ["Subtotal", "Page \\\\d+"]
+        "employee_row": "Code:|Tax Profile:",
+        "department_header": "^\\\\d+\\\\s*[-–]",
+        "skip_patterns": ["Subtotal", "^\\\\s*$", "Page\\\\s+\\\\d+"]
     }},
     "extraction_rules": [
         {{
             "field_name": "employee_name",
-            "pattern": "^([A-Z]+,\\\\s*[A-Z]+)",
+            "pattern": "^([A-Z][A-Z]+,\\\\s*[A-Z][A-Z]+)",
             "column_index": 0,
             "data_type": "string",
             "required": true
@@ -480,7 +515,7 @@ Respond in this JSON format:
 }}
 ```
 
-Be specific with regex patterns. They will be applied to actual data."""
+CRITICAL: The column_index must match the actual table structure shown above. Row 0 cell 0 is column_index 0, etc."""
 
     def _parse_learning_response(self, response: str, 
                                   structure: Dict) -> LearnedFormat:
@@ -556,16 +591,25 @@ class PatternApplier:
         """
         employees = []
         current_department = ""
+        total_rows = 0
+        employee_rows = 0
+        skipped_rows = 0
         
-        for page_rows in pages_data:
+        for page_num, page_rows in enumerate(pages_data):
+            logger.debug(f"Processing page {page_num + 1} with {len(page_rows)} rows")
+            
             for row in page_rows:
+                total_rows += 1
+                
                 # Check if this is a department header
                 if self._is_department_header(row, fmt):
                     current_department = self._extract_department(row)
+                    logger.debug(f"Found department: {current_department}")
                     continue
                 
                 # Check if this should be skipped
                 if self._should_skip(row, fmt):
+                    skipped_rows += 1
                     continue
                 
                 # Check if this is an employee row
@@ -573,6 +617,12 @@ class PatternApplier:
                     employee = self._extract_employee(row, fmt)
                     employee.department = current_department
                     employees.append(employee)
+                    employee_rows += 1
+                    logger.debug(f"Extracted employee: {employee.employee_name}")
+        
+        logger.info(f"Pattern application complete: {total_rows} total rows, "
+                   f"{employee_rows} employee rows, {skipped_rows} skipped, "
+                   f"{len(employees)} employees extracted")
         
         return employees
     
@@ -610,22 +660,32 @@ class PatternApplier:
         if not row:
             return False
         
-        first_col = list(row.values())[0] if row else ""
+        cells = list(row.values())
+        first_col = cells[0] if cells else ""
+        all_text = ' '.join(str(c) for c in cells)
         
         # Use format's employee row pattern if available
         if fmt.row_pattern:
             try:
+                # Check first column
                 if re.search(fmt.row_pattern, first_col, re.IGNORECASE):
                     return True
-            except:
-                pass
+                # Also check all text
+                if re.search(fmt.row_pattern, all_text, re.IGNORECASE):
+                    return True
+            except re.error as e:
+                logger.debug(f"Invalid employee row pattern: {fmt.row_pattern} - {e}")
         
         # Default: look for name pattern with Code: or Tax Profile:
-        if 'Code:' in first_col or 'Tax Profile:' in first_col:
+        if 'Code:' in all_text or 'Tax Profile:' in all_text:
             return True
         
-        # Or just a name pattern (LASTNAME, FIRSTNAME)
+        # Or just a name pattern (LASTNAME, FIRSTNAME) in first column
         if re.match(r'^[A-Z][A-Z]+,\s*[A-Z]', first_col):
+            return True
+        
+        # Check for GROSS (indicates an employee row with pay data)
+        if 'GROSS' in all_text and re.search(r'GROSS\s+[\d,]+\.?\d*', all_text):
             return True
         
         return False
@@ -792,10 +852,36 @@ class TextExtractor:
         Returns:
             List of text content per page
         """
-        if self.use_textract:
-            return self._extract_with_textract(file_path, max_pages)
-        else:
-            return self._extract_with_pdfplumber(file_path, max_pages)
+        # Always use pdfplumber for consistency with full extraction
+        return self._extract_with_pdfplumber(file_path, max_pages)
+    
+    def extract_sample_tables(self, file_path: str,
+                               max_pages: int = 3) -> List[List[List[str]]]:
+        """
+        Extract table structures from sample pages.
+        
+        Returns:
+            List of pages, each containing list of rows (as lists of cells)
+        """
+        import pdfplumber
+        
+        all_pages = []
+        
+        with pdfplumber.open(file_path) as pdf:
+            for page_num in range(min(max_pages, len(pdf.pages))):
+                page = pdf.pages[page_num]
+                page_rows = []
+                
+                tables = page.extract_tables()
+                if tables:
+                    for table in tables:
+                        for row in table:
+                            if row and any(cell for cell in row):
+                                page_rows.append([str(cell or '') for cell in row])
+                
+                all_pages.append(page_rows)
+        
+        return all_pages
     
     def extract_all_pages(self, file_path: str) -> List[List[Dict[str, str]]]:
         """
@@ -952,9 +1038,10 @@ class SmartExtractor:
             # Step 1: Get sample pages and analyze structure
             logger.info("Step 1: Extracting sample pages...")
             sample_text = self.text_extractor.extract_sample_pages(file_path, max_pages=3)
+            sample_tables = self.text_extractor.extract_sample_tables(file_path, max_pages=3)
             cloud_pages = len(sample_text)
             
-            structure = self.structure_analyzer.analyze(sample_text)
+            structure = self.structure_analyzer.analyze(sample_text, sample_tables)
             fingerprint = structure.get('fingerprint', '')
             
             # Step 2: Check if we know this format
