@@ -1,1030 +1,845 @@
+import { useState, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
+
 /**
- * VacuumExplore.jsx - Intelligent Extract Explorer
- * ================================================
+ * Vacuum Upload Page
  * 
- * Browse extracted tables with section/column detection.
- * Confirm or correct detections to improve learning.
+ * Extract EVERYTHING from complex files (PDFs, Excel)
+ * Parse now, understand later, learn forever.
  * 
- * Author: XLR8 Team
+ * Separate from normal uploads - for complex payroll vendor files
  */
+export default function VacuumUploadPage() {
+  const [currentSection, setCurrentSection] = useState('upload')
+  const navigate = useNavigate()
 
-import React, { useState, useEffect, useCallback } from 'react';
-
-// API base - adjust for your environment
-const API_BASE = '/api';
-
-// Confidence thresholds for visual indicators
-const CONFIDENCE = {
-  HIGH: 0.7,
-  MEDIUM: 0.4
-};
-
-// Section type display info
-const SECTION_INFO = {
-  employee_info: { label: 'Employee Info', color: '#3b82f6', icon: '👤' },
-  earnings: { label: 'Earnings', color: '#22c55e', icon: '💰' },
-  taxes: { label: 'Taxes', color: '#ef4444', icon: '🏛️' },
-  deductions: { label: 'Deductions', color: '#f59e0b', icon: '📋' },
-  pay_info: { label: 'Pay Info', color: '#8b5cf6', icon: '💵' },
-  unknown: { label: 'Unknown', color: '#6b7280', icon: '❓' }
-};
-
-// ============================================================================
-// MAIN COMPONENT
-// ============================================================================
-
-export default function VacuumExplore() {
-  // State
-  const [files, setFiles] = useState([]);
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [extracts, setExtracts] = useState([]);
-  const [selectedExtract, setSelectedExtract] = useState(null);
-  const [extractDetail, setExtractDetail] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [sectionTypes, setSectionTypes] = useState([]);
-  const [columnTypes, setColumnTypes] = useState({});
-  const [learningStats, setLearningStats] = useState(null);
-
-  // Load initial data
-  useEffect(() => {
-    loadFiles();
-    loadTypeDefinitions();
-    loadLearningStats();
-  }, []);
-
-  // Load files list
-  const loadFiles = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/vacuum/files`);
-      const data = await res.json();
-      setFiles(data.files || []);
-    } catch (err) {
-      setError('Failed to load files');
+  const handleNavClick = (section) => {
+    if (section === 'explore') {
+      navigate('/vacuum/explore')
+    } else {
+      setCurrentSection(section)
     }
-  };
-
-  // Load type definitions
-  const loadTypeDefinitions = async () => {
-    try {
-      const [sectRes, colRes] = await Promise.all([
-        fetch(`${API_BASE}/vacuum/section-types`),
-        fetch(`${API_BASE}/vacuum/column-types`)
-      ]);
-      const sectData = await sectRes.json();
-      const colData = await colRes.json();
-      setSectionTypes(sectData.section_types || []);
-      setColumnTypes(colData.column_types || {});
-    } catch (err) {
-      console.error('Failed to load type definitions:', err);
-    }
-  };
-
-  // Load learning stats
-  const loadLearningStats = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/vacuum/learning-stats`);
-      const data = await res.json();
-      setLearningStats(data.stats);
-    } catch (err) {
-      console.error('Failed to load learning stats:', err);
-    }
-  };
-
-  // Load extracts for a file
-  const loadExtracts = async (sourceFile) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`${API_BASE}/vacuum/extracts?source_file=${encodeURIComponent(sourceFile)}`);
-      const data = await res.json();
-      setExtracts(data.extracts || []);
-      setSelectedExtract(null);
-      setExtractDetail(null);
-    } catch (err) {
-      setError('Failed to load extracts');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Load extract detail
-  const loadExtractDetail = async (extractId) => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/vacuum/extract/${extractId}`);
-      const data = await res.json();
-      setExtractDetail(data);
-    } catch (err) {
-      setError('Failed to load extract detail');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Handle file selection
-  const handleFileSelect = (file) => {
-    setSelectedFile(file);
-    loadExtracts(file.source_file);
-  };
-
-  // Handle extract selection
-  const handleExtractSelect = (extract) => {
-    setSelectedExtract(extract);
-    loadExtractDetail(extract.id);
-  };
-
-  // Confirm section
-  const confirmSection = async (extractId, sectionType, isCorrection = false) => {
-    try {
-      const res = await fetch(`${API_BASE}/vacuum/confirm-section`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          extract_id: extractId,
-          section_type: sectionType,
-          user_corrected: isCorrection
-        })
-      });
-      
-      if (res.ok) {
-        // Reload extract detail
-        loadExtractDetail(extractId);
-        loadLearningStats();
-      }
-    } catch (err) {
-      setError('Failed to confirm section');
-    }
-  };
-
-  // Confirm column
-  const confirmColumn = async (extractId, colIndex, colType, isCorrection = false) => {
-    try {
-      const res = await fetch(`${API_BASE}/vacuum/confirm-column`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          extract_id: extractId,
-          column_index: colIndex,
-          column_type: colType,
-          user_corrected: isCorrection
-        })
-      });
-      
-      if (res.ok) {
-        loadExtractDetail(extractId);
-        loadLearningStats();
-      }
-    } catch (err) {
-      setError('Failed to confirm column');
-    }
-  };
-
-  // Confirm all columns
-  const confirmAllColumns = async () => {
-    if (!extractDetail?.column_classifications) return;
-    
-    const mappings = {};
-    extractDetail.column_classifications.forEach((col, idx) => {
-      mappings[idx] = col.detected_type;
-    });
-    
-    try {
-      const res = await fetch(`${API_BASE}/vacuum/confirm-all-columns`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          extract_id: extractDetail.id,
-          column_mappings: mappings
-        })
-      });
-      
-      if (res.ok) {
-        loadExtractDetail(extractDetail.id);
-        loadLearningStats();
-      }
-    } catch (err) {
-      setError('Failed to confirm columns');
-    }
-  };
-
-  // Re-detect
-  const redetect = async (extractId) => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/vacuum/redetect/${extractId}`, {
-        method: 'POST'
-      });
-      
-      if (res.ok) {
-        loadExtractDetail(extractId);
-      }
-    } catch (err) {
-      setError('Failed to re-detect');
-    } finally {
-      setLoading(false);
-    }
-  };
+  }
 
   return (
-    <div className="vacuum-explore" style={styles.container}>
-      {/* Header */}
-      <div style={styles.header}>
-        <h1 style={styles.title}>🔬 Vacuum Explorer</h1>
-        {learningStats && (
-          <div style={styles.statsBar}>
-            <span style={styles.stat}>
-              📚 {learningStats.section_patterns} section patterns
-            </span>
-            <span style={styles.stat}>
-              📊 {learningStats.column_patterns} column patterns
-            </span>
-            <span style={styles.stat}>
-              🏢 {learningStats.vendor_signatures} vendors
-            </span>
-            <span style={styles.stat}>
-              ✅ {learningStats.confirmed_mappings} confirmed mappings
-            </span>
+    <div style={styles.container}>
+      {/* Sidebar Navigation */}
+      <div style={styles.sidebar}>
+        <div style={styles.sidebarHeader}>
+          <h2 style={styles.sidebarTitle}>🧹 Vacuum Extract</h2>
+        </div>
+
+        <nav style={styles.nav}>
+          <button
+            onClick={() => handleNavClick('upload')}
+            style={{
+              ...styles.navItem,
+              ...(currentSection === 'upload' ? styles.navItemActive : {})
+            }}
+          >
+            📤 Upload & Extract
+          </button>
+
+          <button
+            onClick={() => handleNavClick('explore')}
+            style={styles.navItem}
+          >
+            🔍 Explore Data
+            <span style={styles.navBadge}>NEW</span>
+          </button>
+
+          <button
+            onClick={() => handleNavClick('map')}
+            style={{
+              ...styles.navItem,
+              ...(currentSection === 'map' ? styles.navItemActive : {})
+            }}
+          >
+            🗺️ Map Columns
+          </button>
+
+          <button
+            onClick={() => handleNavClick('learn')}
+            style={{
+              ...styles.navItem,
+              ...(currentSection === 'learn' ? styles.navItemActive : {})
+            }}
+          >
+            🧠 Learned Mappings
+          </button>
+
+          <div style={styles.navDivider} />
+          
+          <div style={styles.navPlaceholder}>
+            💡 Extract → Explore → Map → Done
           </div>
+        </nav>
+      </div>
+
+      {/* Main Content Area */}
+      <div style={styles.mainContent}>
+        {currentSection === 'upload' && <UploadSection onExplore={() => handleNavClick('explore')} />}
+        {currentSection === 'map' && <MapSection />}
+        {currentSection === 'learn' && <LearnSection />}
+      </div>
+    </div>
+  )
+}
+
+
+// ============================================================================
+// UPLOAD SECTION
+// ============================================================================
+function UploadSection({ onExplore }) {
+  const [dragOver, setDragOver] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [result, setResult] = useState(null)
+  const [error, setError] = useState(null)
+  const [project, setProject] = useState('')
+  const [status, setStatus] = useState(null)
+  const fileInputRef = useRef(null)
+
+  const API_BASE = import.meta.env.VITE_API_URL || 'https://hcmpact-xlr8-production.up.railway.app'
+
+  useEffect(() => {
+    checkStatus()
+  }, [])
+
+  const checkStatus = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/vacuum/status`)
+      const data = await res.json()
+      setStatus(data)
+    } catch (err) {
+      setStatus({ available: false, error: err.message })
+    }
+  }
+
+  const handleDrop = async (e) => {
+    e.preventDefault()
+    setDragOver(false)
+    
+    const files = e.dataTransfer?.files
+    if (files?.length) {
+      await uploadFile(files[0])
+    }
+  }
+
+  const handleFileSelect = async (e) => {
+    const files = e.target.files
+    if (files?.length) {
+      await uploadFile(files[0])
+    }
+  }
+
+  const uploadFile = async (file) => {
+    setUploading(true)
+    setResult(null)
+    setError(null)
+
+    const formData = new FormData()
+    formData.append('file', file)
+    if (project) {
+      formData.append('project', project)
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/api/vacuum/upload`, {
+        method: 'POST',
+        body: formData
+      })
+
+      const data = await res.json()
+
+      if (res.ok) {
+        setResult(data)
+      } else {
+        setError(data.detail || 'Upload failed')
+      }
+    } catch (err) {
+      setError('Upload failed: ' + err.message)
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  return (
+    <div style={styles.section}>
+      <h1 style={styles.sectionTitle}>📤 Vacuum Upload</h1>
+      <p style={styles.sectionSubtitle}>
+        Extract ALL data from complex files. Parse now, understand later.
+      </p>
+
+      {status && !status.available && (
+        <div style={styles.errorBox}>
+          ❌ Vacuum extractor not available
+        </div>
+      )}
+
+      <div style={styles.formGroup}>
+        <label style={styles.label}>Project (optional)</label>
+        <input
+          type="text"
+          value={project}
+          onChange={(e) => setProject(e.target.value)}
+          placeholder="e.g., ADP Migration, Paychex Conversion"
+          style={styles.input}
+        />
+      </div>
+
+      <div
+        style={{
+          ...styles.dropZone,
+          ...(dragOver ? styles.dropZoneActive : {}),
+          ...(uploading ? styles.dropZoneUploading : {})
+        }}
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={handleDrop}
+        onClick={() => fileInputRef.current?.click()}
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf,.xlsx,.xls,.csv"
+          onChange={handleFileSelect}
+          style={{ display: 'none' }}
+        />
+        
+        {uploading ? (
+          <>
+            <div style={styles.spinner}></div>
+            <p style={styles.dropText}>Extracting all data...</p>
+          </>
+        ) : (
+          <>
+            <span style={styles.dropIcon}>🧹</span>
+            <p style={styles.dropText}>Drop PDF, Excel, or CSV here</p>
+            <p style={styles.dropSubtext}>or click to browse</p>
+          </>
         )}
       </div>
 
       {error && (
-        <div style={styles.error}>
-          {error}
-          <button onClick={() => setError(null)} style={styles.dismissBtn}>×</button>
-        </div>
+        <div style={styles.errorBox}>❌ {error}</div>
       )}
 
-      <div style={styles.layout}>
-        {/* Files Panel */}
-        <div style={styles.panel}>
-          <h3 style={styles.panelTitle}>📁 Files</h3>
-          <div style={styles.fileList}>
-            {files.length === 0 ? (
-              <p style={styles.empty}>No files uploaded yet</p>
-            ) : (
-              files.map((file, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    ...styles.fileItem,
-                    ...(selectedFile?.source_file === file.source_file ? styles.fileItemSelected : {})
-                  }}
-                  onClick={() => handleFileSelect(file)}
-                >
-                  <div style={styles.fileName}>{file.source_file}</div>
-                  <div style={styles.fileMeta}>
-                    {file.table_count} tables • {file.total_rows} rows
-                  </div>
-                </div>
-              ))
+      {result && (
+        <div style={styles.resultBox}>
+          <h3 style={styles.resultTitle}>✅ Extraction Complete!</h3>
+          
+          <div style={styles.resultStats}>
+            <div style={styles.statItem}>
+              <span style={styles.statValue}>{result.tables_found}</span>
+              <span style={styles.statLabel}>Tables Found</span>
+            </div>
+            <div style={styles.statItem}>
+              <span style={styles.statValue}>{result.total_rows?.toLocaleString()}</span>
+              <span style={styles.statLabel}>Total Rows</span>
+            </div>
+            {result.detected_report_type && (
+              <div style={styles.statItem}>
+                <span style={{...styles.statValue, fontSize: '1.2rem'}}>
+                  {result.detected_report_type.replace('_', ' ')}
+                </span>
+                <span style={styles.statLabel}>Detected Type</span>
+              </div>
             )}
           </div>
-        </div>
 
-        {/* Extracts Panel */}
-        <div style={styles.panel}>
-          <h3 style={styles.panelTitle}>📋 Extracts</h3>
-          {loading && !extractDetail ? (
-            <p style={styles.loading}>Loading...</p>
-          ) : extracts.length === 0 ? (
-            <p style={styles.empty}>Select a file to view extracts</p>
-          ) : (
-            <div style={styles.extractList}>
-              {extracts.map((ext) => (
-                <ExtractCard
-                  key={ext.id}
-                  extract={ext}
-                  selected={selectedExtract?.id === ext.id}
-                  onClick={() => handleExtractSelect(ext)}
-                />
+          {result.extracts?.length > 0 && (
+            <div style={styles.extractsList}>
+              <h4 style={styles.extractsTitle}>Extracted Tables:</h4>
+              {result.extracts.map((ext, idx) => (
+                <div key={idx} style={styles.extractItem}>
+                  <div style={styles.extractHeader}>
+                    <span style={styles.extractName}>
+                      {ext.detected_section ? (
+                        <span style={{
+                          ...styles.sectionBadge,
+                          background: getSectionColor(ext.detected_section)
+                        }}>
+                          {getSectionIcon(ext.detected_section)} {formatSectionName(ext.detected_section)}
+                        </span>
+                      ) : (
+                        ext.sheet_name || `Table ${ext.table_index + 1}`
+                      )}
+                    </span>
+                    <span style={styles.extractMeta}>
+                      Page {ext.page + 1} • {ext.row_count} rows • {ext.column_count} cols
+                    </span>
+                  </div>
+                  <div style={styles.extractColumns}>
+                    {ext.headers?.slice(0, 6).map((h, i) => (
+                      <span key={i} style={styles.columnTag}>{h}</span>
+                    ))}
+                    {ext.headers?.length > 6 && (
+                      <span style={styles.columnMore}>+{ext.headers.length - 6} more</span>
+                    )}
+                  </div>
+                  <div style={styles.confidenceBar}>
+                    <div 
+                      style={{
+                        ...styles.confidenceFill,
+                        width: `${(ext.section_confidence || ext.confidence || 0) * 100}%`,
+                        background: (ext.section_confidence || ext.confidence) > 0.7 ? '#22c55e' 
+                          : (ext.section_confidence || ext.confidence) > 0.4 ? '#f59e0b' : '#ef4444'
+                      }}
+                    />
+                  </div>
+                  <span style={styles.confidenceLabel}>
+                    {Math.round((ext.section_confidence || ext.confidence || 0) * 100)}% detection confidence
+                  </span>
+                </div>
               ))}
             </div>
           )}
-        </div>
 
-        {/* Detail Panel */}
-        <div style={{ ...styles.panel, flex: 2 }}>
-          <h3 style={styles.panelTitle}>🔍 Detail</h3>
-          {extractDetail ? (
-            <ExtractDetail
-              extract={extractDetail}
-              sectionTypes={sectionTypes}
-              columnTypes={columnTypes}
-              onConfirmSection={confirmSection}
-              onConfirmColumn={confirmColumn}
-              onConfirmAll={confirmAllColumns}
-              onRedetect={redetect}
-              loading={loading}
-            />
-          ) : (
-            <p style={styles.empty}>Select an extract to view details</p>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// EXTRACT CARD COMPONENT
-// ============================================================================
-
-function ExtractCard({ extract, selected, onClick }) {
-  const section = extract.detected_section || 'unknown';
-  const info = SECTION_INFO[section] || SECTION_INFO.unknown;
-  const confidence = extract.section_confidence || 0;
-  
-  return (
-    <div
-      style={{
-        ...styles.extractCard,
-        borderLeftColor: info.color,
-        ...(selected ? styles.extractCardSelected : {})
-      }}
-      onClick={onClick}
-    >
-      <div style={styles.extractHeader}>
-        <span style={styles.extractIcon}>{info.icon}</span>
-        <span style={styles.extractSection}>{info.label}</span>
-        <ConfidenceBadge confidence={confidence} />
-      </div>
-      <div style={styles.extractMeta}>
-        Table {extract.table_index + 1} • {extract.row_count} rows • {extract.raw_headers?.length || 0} cols
-      </div>
-      {extract.raw_headers && (
-        <div style={styles.extractHeaders}>
-          {extract.raw_headers.slice(0, 4).join(', ')}
-          {extract.raw_headers.length > 4 && '...'}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ============================================================================
-// EXTRACT DETAIL COMPONENT
-// ============================================================================
-
-function ExtractDetail({ 
-  extract, 
-  sectionTypes, 
-  columnTypes, 
-  onConfirmSection, 
-  onConfirmColumn,
-  onConfirmAll,
-  onRedetect,
-  loading 
-}) {
-  const [editingSection, setEditingSection] = useState(false);
-  const [editingColumn, setEditingColumn] = useState(null);
-  
-  const section = extract.detected_section || 'unknown';
-  const info = SECTION_INFO[section] || SECTION_INFO.unknown;
-  const columns = extract.column_classifications || [];
-  const preview = extract.preview || [];
-  const headers = extract.raw_headers || [];
-
-  // Get column types for current section
-  const availableColumnTypes = [
-    ...(columnTypes[section] || []),
-    ...(columnTypes.universal || [])
-  ];
-
-  return (
-    <div style={styles.detail}>
-      {/* Section Detection */}
-      <div style={styles.detectionBox}>
-        <div style={styles.detectionHeader}>
-          <span style={{ ...styles.sectionBadge, backgroundColor: info.color }}>
-            {info.icon} {info.label}
-          </span>
-          <ConfidenceBadge confidence={extract.section_confidence} showLabel />
-          
-          <div style={styles.detectionActions}>
-            {!editingSection ? (
-              <>
-                <button
-                  style={styles.btnConfirm}
-                  onClick={() => onConfirmSection(extract.id, section, false)}
-                  title="Confirm this detection is correct"
-                >
-                  ✓ Confirm
-                </button>
-                <button
-                  style={styles.btnCorrect}
-                  onClick={() => setEditingSection(true)}
-                  title="Correct this detection"
-                >
-                  ✎ Correct
-                </button>
-              </>
-            ) : (
-              <div style={styles.editRow}>
-                <select
-                  style={styles.select}
-                  defaultValue={section}
-                  onChange={(e) => {
-                    onConfirmSection(extract.id, e.target.value, true);
-                    setEditingSection(false);
-                  }}
-                >
-                  {sectionTypes.map((st) => (
-                    <option key={st.value} value={st.value}>{st.label}</option>
-                  ))}
-                </select>
-                <button
-                  style={styles.btnCancel}
-                  onClick={() => setEditingSection(false)}
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
-            <button
-              style={styles.btnRedetect}
-              onClick={() => onRedetect(extract.id)}
-              disabled={loading}
-              title="Re-run detection with updated patterns"
-            >
-              🔄 Re-detect
-            </button>
-          </div>
-        </div>
-        
-        {extract.section_signals && (
-          <div style={styles.signals}>
-            Signals: {extract.section_signals.slice(0, 5).join(', ')}
-            {extract.section_signals.length > 5 && '...'}
-          </div>
-        )}
-      </div>
-
-      {/* Column Classifications */}
-      <div style={styles.columnsSection}>
-        <div style={styles.columnsHeader}>
-          <h4 style={styles.columnsTitle}>Column Classifications</h4>
-          <button
-            style={styles.btnConfirmAll}
-            onClick={onConfirmAll}
-            title="Confirm all column detections"
-          >
-            ✓ Confirm All
+          <button style={styles.exploreButton} onClick={onExplore}>
+            🔍 Go to Explore Data →
           </button>
         </div>
-        
-        <div style={styles.columnsGrid}>
-          {columns.map((col, idx) => (
-            <ColumnCard
-              key={idx}
-              column={col}
-              header={headers[idx]}
-              editing={editingColumn === idx}
-              availableTypes={availableColumnTypes}
-              onEdit={() => setEditingColumn(idx)}
-              onConfirm={(type, isCorrection) => {
-                onConfirmColumn(extract.id, idx, type, isCorrection);
-                setEditingColumn(null);
-              }}
-              onCancel={() => setEditingColumn(null)}
-            />
-          ))}
-        </div>
-      </div>
+      )}
 
-      {/* Data Preview */}
-      <div style={styles.previewSection}>
-        <h4 style={styles.previewTitle}>
-          Data Preview 
-          {extract.truncated && <span style={styles.truncatedNote}> (showing {preview.length} of {extract.full_row_count} rows)</span>}
-        </h4>
-        <div style={styles.tableWrapper}>
-          <table style={styles.table}>
+      <div style={styles.infoBox}>
+        <strong>🧹 How Vacuum Extract Works:</strong>
+        <ol style={styles.infoList}>
+          <li><strong>Upload</strong> - Drop any PDF, Excel, or CSV file</li>
+          <li><strong>Extract</strong> - We find ALL tables with intelligent section detection</li>
+          <li><strong>Explore</strong> - Review detected sections (Earnings, Taxes, Deductions)</li>
+          <li><strong>Confirm/Correct</strong> - Teach the system when it's wrong</li>
+          <li><strong>Learn</strong> - System remembers for next time</li>
+        </ol>
+        <p style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: '#666' }}>
+          💡 Supported formats: PDF (native tables), Excel (.xlsx, .xls), CSV
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function getSectionColor(section) {
+  const colors = {
+    employee_info: '#3b82f6',
+    earnings: '#22c55e',
+    taxes: '#ef4444',
+    deductions: '#f59e0b',
+    pay_info: '#8b5cf6',
+    unknown: '#6b7280'
+  }
+  return colors[section] || colors.unknown
+}
+
+function getSectionIcon(section) {
+  const icons = {
+    employee_info: '👤',
+    earnings: '💰',
+    taxes: '🏛️',
+    deductions: '📋',
+    pay_info: '💵',
+    unknown: '❓'
+  }
+  return icons[section] || icons.unknown
+}
+
+function formatSectionName(section) {
+  const names = {
+    employee_info: 'Employee Info',
+    earnings: 'Earnings',
+    taxes: 'Taxes',
+    deductions: 'Deductions',
+    pay_info: 'Pay Info',
+    unknown: 'Unknown'
+  }
+  return names[section] || section
+}
+
+
+// ============================================================================
+// MAP SECTION
+// ============================================================================
+function MapSection() {
+  const navigate = useNavigate()
+  
+  return (
+    <div style={styles.section}>
+      <h1 style={styles.sectionTitle}>🗺️ Map Columns</h1>
+      <p style={styles.sectionSubtitle}>
+        Define what each column means and create structured tables
+      </p>
+
+      <div style={styles.card}>
+        <h3 style={styles.cardTitle}>🚧 Coming Soon</h3>
+        <p style={styles.cardText}>
+          The column mapping interface will allow you to:
+        </p>
+        <ul style={styles.featureList}>
+          <li>Select an extracted table</li>
+          <li>Map each column to a standard field (employee_id, hire_date, etc.)</li>
+          <li>Get AI suggestions based on column names</li>
+          <li>Create a clean, structured table in DuckDB</li>
+          <li>Apply same mapping to similar files automatically</li>
+        </ul>
+        <p style={{ ...styles.cardText, marginTop: '1rem' }}>
+          For now, use <strong>Explore Data</strong> to review and confirm detections.
+        </p>
+        <button style={styles.exploreButton} onClick={() => navigate('/vacuum/explore')}>
+          🔍 Go to Explore Data →
+        </button>
+      </div>
+    </div>
+  )
+}
+
+
+// ============================================================================
+// LEARN SECTION
+// ============================================================================
+function LearnSection() {
+  const [stats, setStats] = useState(null)
+  const [loading, setLoading] = useState(true)
+  
+  const API_BASE = import.meta.env.VITE_API_URL || 'https://hcmpact-xlr8-production.up.railway.app'
+
+  useEffect(() => {
+    fetchStats()
+  }, [])
+
+  const fetchStats = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/vacuum/learning-stats`)
+      const data = await res.json()
+      if (data.success) {
+        setStats(data.stats)
+      }
+    } catch (err) {
+      console.error('Failed to fetch learning stats:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div style={styles.section}>
+      <h1 style={styles.sectionTitle}>🧠 Learned Mappings</h1>
+      <p style={styles.sectionSubtitle}>
+        View what the system has learned from your confirmations
+      </p>
+
+      {loading ? (
+        <div style={styles.loadingBox}>
+          <div style={styles.spinner}></div>
+          Loading...
+        </div>
+      ) : stats ? (
+        <div style={styles.statsGrid}>
+          <div style={styles.statCard}>
+            <div style={styles.statCardValue}>{stats.section_patterns || 0}</div>
+            <div style={styles.statCardLabel}>Section Patterns</div>
+          </div>
+          <div style={styles.statCard}>
+            <div style={styles.statCardValue}>{stats.column_patterns || 0}</div>
+            <div style={styles.statCardLabel}>Column Patterns</div>
+          </div>
+          <div style={styles.statCard}>
+            <div style={styles.statCardValue}>{stats.vendor_signatures || 0}</div>
+            <div style={styles.statCardLabel}>Vendor Signatures</div>
+          </div>
+          <div style={styles.statCard}>
+            <div style={styles.statCardValue}>{stats.confirmed_mappings || 0}</div>
+            <div style={styles.statCardLabel}>Confirmed Mappings</div>
+          </div>
+        </div>
+      ) : (
+        <div style={styles.card}>
+          <p style={styles.cardText}>
+            No learning data yet. Upload files and confirm detections to start teaching the system.
+          </p>
+        </div>
+      )}
+
+      {stats?.top_mappings?.length > 0 && (
+        <div style={{ ...styles.card, marginTop: '1.5rem' }}>
+          <h3 style={styles.cardTitle}>Top Confirmed Mappings</h3>
+          <table style={styles.mappingsTable}>
             <thead>
               <tr>
-                {headers.map((h, idx) => (
-                  <th key={idx} style={styles.th}>
-                    <div style={styles.thHeader}>{h}</div>
-                    {columns[idx] && (
-                      <div style={styles.thType}>
-                        → {columns[idx].detected_type}
-                      </div>
-                    )}
-                  </th>
-                ))}
+                <th style={styles.mappingsTh}>Source Header</th>
+                <th style={styles.mappingsTh}>Maps To</th>
+                <th style={styles.mappingsTh}>Times Used</th>
               </tr>
             </thead>
             <tbody>
-              {preview.slice(0, 10).map((row, ridx) => (
-                <tr key={ridx}>
-                  {row.map((cell, cidx) => (
-                    <td key={cidx} style={styles.td}>{cell}</td>
-                  ))}
+              {stats.top_mappings.map((m, i) => (
+                <tr key={i}>
+                  <td style={styles.mappingsTd}>{m.source_header}</td>
+                  <td style={styles.mappingsTd}>
+                    <span style={styles.mappingType}>{m.target_column_type}</span>
+                  </td>
+                  <td style={styles.mappingsTd}>{m.times_used}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// COLUMN CARD COMPONENT
-// ============================================================================
-
-function ColumnCard({ column, header, editing, availableTypes, onEdit, onConfirm, onCancel }) {
-  const [selectedType, setSelectedType] = useState(column.detected_type);
-  
-  return (
-    <div style={styles.columnCard}>
-      <div style={styles.columnHeader}>{header}</div>
-      <div style={styles.columnDetected}>
-        → {column.detected_type}
-      </div>
-      <ConfidenceBadge confidence={column.confidence} small />
-      
-      {!editing ? (
-        <div style={styles.columnActions}>
-          <button
-            style={styles.btnSmallConfirm}
-            onClick={() => onConfirm(column.detected_type, false)}
-            title="Confirm"
-          >
-            ✓
-          </button>
-          <button
-            style={styles.btnSmallEdit}
-            onClick={onEdit}
-            title="Correct"
-          >
-            ✎
-          </button>
-        </div>
-      ) : (
-        <div style={styles.columnEdit}>
-          <select
-            style={styles.selectSmall}
-            value={selectedType}
-            onChange={(e) => setSelectedType(e.target.value)}
-          >
-            {availableTypes.map((t) => (
-              <option key={t.value} value={t.value}>{t.label}</option>
-            ))}
-          </select>
-          <button
-            style={styles.btnSmallConfirm}
-            onClick={() => onConfirm(selectedType, selectedType !== column.detected_type)}
-          >
-            ✓
-          </button>
-          <button
-            style={styles.btnSmallCancel}
-            onClick={onCancel}
-          >
-            ×
-          </button>
-        </div>
-      )}
-      
-      {column.signals_matched && column.signals_matched.length > 0 && (
-        <div style={styles.columnSignals}>
-          {column.signals_matched.slice(0, 2).join(', ')}
-        </div>
       )}
     </div>
-  );
+  )
 }
 
-// ============================================================================
-// CONFIDENCE BADGE COMPONENT
-// ============================================================================
-
-function ConfidenceBadge({ confidence, showLabel = false, small = false }) {
-  const pct = Math.round((confidence || 0) * 100);
-  let color = '#ef4444'; // red
-  let label = 'Low';
-  
-  if (confidence >= CONFIDENCE.HIGH) {
-    color = '#22c55e'; // green
-    label = 'High';
-  } else if (confidence >= CONFIDENCE.MEDIUM) {
-    color = '#f59e0b'; // amber
-    label = 'Medium';
-  }
-  
-  return (
-    <span style={{
-      ...styles.confidenceBadge,
-      backgroundColor: color,
-      fontSize: small ? '10px' : '12px',
-      padding: small ? '1px 4px' : '2px 6px'
-    }}>
-      {pct}%{showLabel && ` (${label})`}
-    </span>
-  );
-}
 
 // ============================================================================
 // STYLES
 // ============================================================================
-
 const styles = {
   container: {
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-    padding: '20px',
-    backgroundColor: '#f8fafc',
-    minHeight: '100vh'
-  },
-  header: {
-    marginBottom: '20px'
-  },
-  title: {
-    margin: '0 0 10px 0',
-    fontSize: '24px',
-    color: '#1e293b'
-  },
-  statsBar: {
     display: 'flex',
-    gap: '20px',
-    fontSize: '13px',
-    color: '#64748b'
+    minHeight: '100%',
+    background: '#f5f7fa'
   },
-  stat: {
-    display: 'inline-flex',
+  sidebar: {
+    width: '260px',
+    background: 'linear-gradient(180deg, #e8f0e8 0%, #d4e4d4 100%)',
+    borderRight: '1px solid #c5d5c5',
+    flexShrink: 0
+  },
+  sidebarHeader: {
+    padding: '1.5rem',
+    borderBottom: '1px solid #c5d5c5'
+  },
+  sidebarTitle: {
+    margin: 0,
+    fontSize: '1.25rem',
+    color: '#2d4a2d'
+  },
+  nav: {
+    padding: '1rem'
+  },
+  navItem: {
+    display: 'flex',
     alignItems: 'center',
-    gap: '4px'
-  },
-  error: {
-    backgroundColor: '#fef2f2',
-    border: '1px solid #fecaca',
-    color: '#dc2626',
-    padding: '12px 16px',
-    borderRadius: '8px',
-    marginBottom: '16px',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center'
-  },
-  dismissBtn: {
-    background: 'none',
+    gap: '0.5rem',
+    width: '100%',
+    padding: '0.75rem 1rem',
     border: 'none',
-    fontSize: '20px',
+    background: 'transparent',
+    borderRadius: '8px',
     cursor: 'pointer',
-    color: '#dc2626'
+    fontSize: '0.95rem',
+    color: '#2d4a2d',
+    textAlign: 'left',
+    transition: 'all 0.15s',
+    marginBottom: '0.25rem'
   },
-  layout: {
-    display: 'flex',
-    gap: '16px',
-    alignItems: 'flex-start'
+  navItemActive: {
+    background: 'rgba(45, 74, 45, 0.15)',
+    fontWeight: '600'
   },
-  panel: {
+  navBadge: {
+    marginLeft: 'auto',
+    padding: '2px 6px',
+    background: '#22c55e',
+    color: 'white',
+    borderRadius: '4px',
+    fontSize: '0.65rem',
+    fontWeight: '600'
+  },
+  navDivider: {
+    height: '1px',
+    background: '#c5d5c5',
+    margin: '1rem 0'
+  },
+  navPlaceholder: {
+    padding: '0.75rem 1rem',
+    fontSize: '0.8rem',
+    color: '#5a7a5a',
+    fontStyle: 'italic'
+  },
+  mainContent: {
     flex: 1,
-    backgroundColor: '#fff',
-    borderRadius: '12px',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-    padding: '16px',
-    maxHeight: 'calc(100vh - 150px)',
-    overflow: 'auto'
+    padding: '2rem',
+    overflowY: 'auto'
   },
-  panelTitle: {
-    margin: '0 0 12px 0',
-    fontSize: '14px',
-    fontWeight: '600',
-    color: '#475569'
+  section: {
+    maxWidth: '1200px'
   },
-  empty: {
-    color: '#94a3b8',
-    fontSize: '13px',
-    textAlign: 'center',
-    padding: '20px'
+  sectionTitle: {
+    margin: '0 0 0.5rem 0',
+    fontSize: '1.75rem',
+    color: '#2a3441'
   },
-  loading: {
-    color: '#64748b',
-    fontSize: '13px',
-    textAlign: 'center',
-    padding: '20px'
+  sectionSubtitle: {
+    margin: '0 0 2rem 0',
+    color: '#666',
+    fontSize: '1rem'
   },
-  fileList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px'
+  formGroup: {
+    marginBottom: '1.5rem'
   },
-  fileItem: {
-    padding: '12px',
-    borderRadius: '8px',
-    backgroundColor: '#f8fafc',
-    cursor: 'pointer',
-    transition: 'all 0.15s ease'
-  },
-  fileItemSelected: {
-    backgroundColor: '#e0f2fe',
-    boxShadow: '0 0 0 2px #0ea5e9'
-  },
-  fileName: {
-    fontSize: '13px',
+  label: {
+    display: 'block',
+    marginBottom: '0.5rem',
     fontWeight: '500',
-    color: '#1e293b',
-    wordBreak: 'break-all'
+    color: '#333'
   },
-  fileMeta: {
-    fontSize: '11px',
-    color: '#64748b',
-    marginTop: '4px'
-  },
-  extractList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px'
-  },
-  extractCard: {
-    padding: '12px',
+  input: {
+    width: '100%',
+    maxWidth: '400px',
+    padding: '0.75rem',
+    border: '1px solid #ddd',
     borderRadius: '8px',
-    backgroundColor: '#f8fafc',
-    borderLeft: '4px solid #cbd5e1',
-    cursor: 'pointer',
-    transition: 'all 0.15s ease'
+    fontSize: '1rem'
   },
-  extractCardSelected: {
-    backgroundColor: '#f0f9ff',
-    boxShadow: '0 0 0 2px #0ea5e9'
+  dropZone: {
+    border: '2px dashed #ccc',
+    borderRadius: '12px',
+    padding: '3rem',
+    textAlign: 'center',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    background: '#fafafa',
+    marginBottom: '1.5rem'
+  },
+  dropZoneActive: {
+    borderColor: '#3b82f6',
+    background: '#eff6ff'
+  },
+  dropZoneUploading: {
+    borderColor: '#3b82f6',
+    background: '#f0f9ff',
+    cursor: 'wait'
+  },
+  dropIcon: {
+    fontSize: '3rem',
+    display: 'block',
+    marginBottom: '1rem'
+  },
+  dropText: {
+    fontSize: '1.1rem',
+    color: '#333',
+    margin: '0 0 0.5rem 0'
+  },
+  dropSubtext: {
+    fontSize: '0.9rem',
+    color: '#999',
+    margin: 0
+  },
+  errorBox: {
+    padding: '1rem',
+    background: '#fef2f2',
+    border: '1px solid #fecaca',
+    borderRadius: '8px',
+    color: '#b91c1c',
+    marginBottom: '1rem'
+  },
+  resultBox: {
+    padding: '1.5rem',
+    background: 'white',
+    borderRadius: '12px',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+    marginBottom: '2rem'
+  },
+  resultTitle: {
+    margin: '0 0 1rem 0',
+    color: '#166534'
+  },
+  resultStats: {
+    display: 'flex',
+    gap: '2rem',
+    marginBottom: '1.5rem',
+    flexWrap: 'wrap'
+  },
+  statItem: {
+    display: 'flex',
+    flexDirection: 'column'
+  },
+  statValue: {
+    fontSize: '2rem',
+    fontWeight: '700',
+    color: '#2a3441'
+  },
+  statLabel: {
+    fontSize: '0.85rem',
+    color: '#666'
+  },
+  extractsList: {
+    borderTop: '1px solid #eee',
+    paddingTop: '1rem'
+  },
+  extractsTitle: {
+    margin: '0 0 1rem 0',
+    fontSize: '1rem',
+    color: '#333'
+  },
+  extractItem: {
+    padding: '1rem',
+    background: '#f9fafb',
+    borderRadius: '8px',
+    marginBottom: '0.75rem'
   },
   extractHeader: {
     display: 'flex',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: '8px'
+    marginBottom: '0.5rem',
+    flexWrap: 'wrap',
+    gap: '0.5rem'
   },
-  extractIcon: {
-    fontSize: '16px'
-  },
-  extractSection: {
-    fontSize: '13px',
-    fontWeight: '500',
-    color: '#1e293b'
-  },
-  extractMeta: {
-    fontSize: '11px',
-    color: '#64748b',
-    marginTop: '4px'
-  },
-  extractHeaders: {
-    fontSize: '10px',
-    color: '#94a3b8',
-    marginTop: '4px',
-    fontStyle: 'italic'
-  },
-  confidenceBadge: {
-    display: 'inline-block',
-    padding: '2px 6px',
-    borderRadius: '10px',
-    color: '#fff',
-    fontSize: '12px',
-    fontWeight: '500'
-  },
-  detail: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '16px'
-  },
-  detectionBox: {
-    backgroundColor: '#f8fafc',
-    borderRadius: '8px',
-    padding: '12px'
-  },
-  detectionHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-    flexWrap: 'wrap'
+  extractName: {
+    fontWeight: '600',
+    color: '#333'
   },
   sectionBadge: {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: '6px',
-    padding: '6px 12px',
+    gap: '4px',
+    padding: '4px 10px',
     borderRadius: '6px',
-    color: '#fff',
-    fontSize: '14px',
+    color: 'white',
+    fontSize: '0.85rem',
     fontWeight: '500'
   },
-  detectionActions: {
+  extractMeta: {
+    fontSize: '0.85rem',
+    color: '#666'
+  },
+  extractColumns: {
     display: 'flex',
-    gap: '8px',
-    marginLeft: 'auto',
-    flexWrap: 'wrap'
+    flexWrap: 'wrap',
+    gap: '0.5rem',
+    marginBottom: '0.5rem'
   },
-  signals: {
-    fontSize: '11px',
-    color: '#64748b',
-    marginTop: '8px'
+  columnTag: {
+    padding: '0.25rem 0.5rem',
+    background: '#dbeafe',
+    color: '#1e40af',
+    borderRadius: '4px',
+    fontSize: '0.75rem'
   },
-  btnConfirm: {
-    backgroundColor: '#22c55e',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '6px',
-    padding: '6px 12px',
-    fontSize: '12px',
-    fontWeight: '500',
-    cursor: 'pointer'
+  columnMore: {
+    padding: '0.25rem 0.5rem',
+    color: '#999',
+    fontSize: '0.75rem'
   },
-  btnCorrect: {
-    backgroundColor: '#f59e0b',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '6px',
-    padding: '6px 12px',
-    fontSize: '12px',
-    fontWeight: '500',
-    cursor: 'pointer'
-  },
-  btnRedetect: {
-    backgroundColor: '#6366f1',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '6px',
-    padding: '6px 12px',
-    fontSize: '12px',
-    fontWeight: '500',
-    cursor: 'pointer'
-  },
-  btnCancel: {
-    backgroundColor: '#94a3b8',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '6px',
-    padding: '6px 12px',
-    fontSize: '12px',
-    fontWeight: '500',
-    cursor: 'pointer'
-  },
-  btnConfirmAll: {
-    backgroundColor: '#22c55e',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '6px',
-    padding: '6px 12px',
-    fontSize: '12px',
-    fontWeight: '500',
-    cursor: 'pointer'
-  },
-  editRow: {
-    display: 'flex',
-    gap: '8px',
-    alignItems: 'center'
-  },
-  select: {
-    padding: '6px 10px',
-    borderRadius: '6px',
-    border: '1px solid #cbd5e1',
-    fontSize: '12px',
-    backgroundColor: '#fff'
-  },
-  columnsSection: {
-    backgroundColor: '#f8fafc',
-    borderRadius: '8px',
-    padding: '12px'
-  },
-  columnsHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '12px'
-  },
-  columnsTitle: {
-    margin: 0,
-    fontSize: '13px',
-    fontWeight: '600',
-    color: '#475569'
-  },
-  columnsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
-    gap: '8px'
-  },
-  columnCard: {
-    backgroundColor: '#fff',
-    borderRadius: '6px',
-    padding: '8px',
-    border: '1px solid #e2e8f0'
-  },
-  columnHeader: {
-    fontSize: '11px',
-    fontWeight: '600',
-    color: '#1e293b',
-    marginBottom: '4px',
+  confidenceBar: {
+    height: '4px',
+    background: '#e5e7eb',
+    borderRadius: '2px',
     overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap'
+    marginBottom: '0.25rem'
   },
-  columnDetected: {
-    fontSize: '11px',
-    color: '#0ea5e9',
-    marginBottom: '4px'
+  confidenceFill: {
+    height: '100%',
+    transition: 'width 0.3s'
   },
-  columnActions: {
-    display: 'flex',
-    gap: '4px',
-    marginTop: '6px'
+  confidenceLabel: {
+    fontSize: '0.75rem',
+    color: '#999'
   },
-  columnEdit: {
-    display: 'flex',
-    gap: '4px',
-    marginTop: '6px',
-    flexWrap: 'wrap'
-  },
-  columnSignals: {
-    fontSize: '9px',
-    color: '#94a3b8',
-    marginTop: '4px'
-  },
-  btnSmallConfirm: {
-    backgroundColor: '#22c55e',
-    color: '#fff',
+  exploreButton: {
+    marginTop: '1rem',
+    padding: '0.75rem 1.5rem',
+    background: '#3b82f6',
+    color: 'white',
     border: 'none',
-    borderRadius: '4px',
-    padding: '2px 6px',
-    fontSize: '11px',
-    cursor: 'pointer'
-  },
-  btnSmallEdit: {
-    backgroundColor: '#f59e0b',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '4px',
-    padding: '2px 6px',
-    fontSize: '11px',
-    cursor: 'pointer'
-  },
-  btnSmallCancel: {
-    backgroundColor: '#94a3b8',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '4px',
-    padding: '2px 6px',
-    fontSize: '11px',
-    cursor: 'pointer'
-  },
-  selectSmall: {
-    padding: '2px 4px',
-    borderRadius: '4px',
-    border: '1px solid #cbd5e1',
-    fontSize: '10px',
-    flex: 1,
-    minWidth: '80px'
-  },
-  previewSection: {
-    backgroundColor: '#f8fafc',
     borderRadius: '8px',
-    padding: '12px'
+    fontSize: '1rem',
+    fontWeight: '500',
+    cursor: 'pointer'
   },
-  previewTitle: {
-    margin: '0 0 12px 0',
-    fontSize: '13px',
-    fontWeight: '600',
-    color: '#475569'
+  infoBox: {
+    padding: '1.5rem',
+    background: '#f0f9ff',
+    borderRadius: '8px',
+    border: '1px solid #bae6fd',
+    color: '#0c4a6e'
   },
-  truncatedNote: {
-    fontWeight: '400',
-    color: '#94a3b8',
-    fontSize: '11px'
+  infoList: {
+    margin: '0.75rem 0 0 1.25rem',
+    padding: 0,
+    lineHeight: 1.8
   },
-  tableWrapper: {
-    overflow: 'auto',
-    maxHeight: '300px'
+  statsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+    gap: '1rem',
+    marginBottom: '1.5rem'
   },
-  table: {
+  statCard: {
+    background: 'white',
+    borderRadius: '12px',
+    padding: '1.5rem',
+    textAlign: 'center',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
+  },
+  statCardValue: {
+    fontSize: '2.5rem',
+    fontWeight: '700',
+    color: '#3b82f6'
+  },
+  statCardLabel: {
+    fontSize: '0.9rem',
+    color: '#666',
+    marginTop: '0.5rem'
+  },
+  mappingsTable: {
     width: '100%',
     borderCollapse: 'collapse',
-    fontSize: '11px'
+    marginTop: '1rem'
   },
-  th: {
-    backgroundColor: '#e2e8f0',
-    padding: '8px 6px',
+  mappingsTh: {
     textAlign: 'left',
-    fontWeight: '500',
-    color: '#475569',
-    position: 'sticky',
-    top: 0,
-    whiteSpace: 'nowrap'
+    padding: '0.75rem',
+    borderBottom: '2px solid #e5e7eb',
+    color: '#666',
+    fontSize: '0.85rem'
   },
-  thHeader: {
-    fontWeight: '600'
+  mappingsTd: {
+    padding: '0.75rem',
+    borderBottom: '1px solid #f0f0f0'
   },
-  thType: {
-    fontSize: '10px',
-    color: '#0ea5e9',
-    fontWeight: '400'
+  mappingType: {
+    display: 'inline-block',
+    padding: '2px 8px',
+    background: '#dbeafe',
+    color: '#1e40af',
+    borderRadius: '4px',
+    fontSize: '0.8rem'
   },
-  td: {
-    padding: '6px',
-    borderBottom: '1px solid #f1f5f9',
-    color: '#1e293b',
-    maxWidth: '150px',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap'
+  loadingBox: {
+    textAlign: 'center',
+    padding: '3rem',
+    color: '#666'
+  },
+  spinner: {
+    width: '40px',
+    height: '40px',
+    border: '3px solid #e5e7eb',
+    borderTop: '3px solid #3b82f6',
+    borderRadius: '50%',
+    animation: 'spin 1s linear infinite',
+    margin: '0 auto 1rem'
+  },
+  card: {
+    background: 'white',
+    borderRadius: '12px',
+    padding: '2rem',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
+  },
+  cardTitle: {
+    margin: '0 0 1rem 0',
+    fontSize: '1.25rem',
+    color: '#2a3441'
+  },
+  cardText: {
+    margin: '0 0 1rem 0',
+    color: '#666',
+    lineHeight: 1.6
+  },
+  featureList: {
+    margin: 0,
+    paddingLeft: '1.5rem',
+    color: '#666',
+    lineHeight: 2
   }
-};
+}
