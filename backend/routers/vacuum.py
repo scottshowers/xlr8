@@ -31,30 +31,58 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Import vacuum extractor
-try:
-    from utils.vacuum_extractor import get_vacuum_extractor, VacuumExtractor, SectionType, ColumnType
-    VACUUM_AVAILABLE = True
-    logger.info("Vacuum extractor v2 loaded successfully")
-except ImportError as e:
-    VACUUM_AVAILABLE = False
-    logger.warning(f"Vacuum extractor not available: {e}")
+# Import vacuum extractor - try multiple import paths
+VACUUM_AVAILABLE = False
+get_vacuum_extractor = None
+VacuumExtractor = None
+SectionType = None
+ColumnType = None
 
-# Import smart PDF extractor
-try:
-    from utils.smart_pdf_extractor import (
-        SmartPDFExtractor, 
-        extract_pdf_smart,
-        split_by_pattern,
-        split_by_positions,
-        split_by_delimiter,
-        detect_split_patterns
-    )
-    SMART_EXTRACTOR_AVAILABLE = True
-    logger.info("Smart PDF extractor loaded successfully")
-except ImportError as e:
-    SMART_EXTRACTOR_AVAILABLE = False
-    logger.warning(f"Smart PDF extractor not available: {e}")
+for import_path in ['backend.utils.vacuum_extractor', 'utils.vacuum_extractor']:
+    try:
+        module = __import__(import_path, fromlist=['get_vacuum_extractor', 'VacuumExtractor', 'SectionType', 'ColumnType'])
+        get_vacuum_extractor = module.get_vacuum_extractor
+        VacuumExtractor = module.VacuumExtractor
+        SectionType = module.SectionType
+        ColumnType = module.ColumnType
+        VACUUM_AVAILABLE = True
+        logger.info(f"Vacuum extractor loaded from {import_path}")
+        break
+    except ImportError as e:
+        logger.debug(f"Could not import from {import_path}: {e}")
+
+if not VACUUM_AVAILABLE:
+    logger.warning("Vacuum extractor not available from any path")
+
+# Import smart PDF extractor - try multiple import paths
+SMART_EXTRACTOR_AVAILABLE = False
+SmartPDFExtractor = None
+extract_pdf_smart = None
+split_by_pattern = None
+split_by_positions = None
+split_by_delimiter = None
+detect_split_patterns = None
+
+for import_path in ['backend.utils.smart_pdf_extractor', 'utils.smart_pdf_extractor']:
+    try:
+        module = __import__(import_path, fromlist=[
+            'SmartPDFExtractor', 'extract_pdf_smart', 'split_by_pattern',
+            'split_by_positions', 'split_by_delimiter', 'detect_split_patterns'
+        ])
+        SmartPDFExtractor = module.SmartPDFExtractor
+        extract_pdf_smart = module.extract_pdf_smart
+        split_by_pattern = module.split_by_pattern
+        split_by_positions = module.split_by_positions
+        split_by_delimiter = module.split_by_delimiter
+        detect_split_patterns = module.detect_split_patterns
+        SMART_EXTRACTOR_AVAILABLE = True
+        logger.info(f"Smart PDF extractor loaded from {import_path}")
+        break
+    except ImportError as e:
+        logger.debug(f"Could not import from {import_path}: {e}")
+
+if not SMART_EXTRACTOR_AVAILABLE:
+    logger.warning("Smart PDF extractor not available from any path")
 
 
 # =============================================================================
@@ -240,9 +268,7 @@ async def vacuum_upload(
     file: UploadFile = File(...),
     project: Optional[str] = Form(None)
 ):
-    """
-    Upload a file for vacuum extraction with intelligent detection.
-    """
+    """Upload a file for vacuum extraction with intelligent detection."""
     if not VACUUM_AVAILABLE:
         raise HTTPException(501, "Vacuum extractor not available")
     
@@ -283,20 +309,16 @@ async def vacuum_upload(
 
 
 # =============================================================================
-# SMART EXTRACTION (NEW)
+# SMART EXTRACTION
 # =============================================================================
 
 @router.post("/vacuum/smart-extract")
 async def smart_extract(request: SmartExtractRequest):
-    """
-    Perform smart extraction on an uploaded PDF.
-    Uses position-based column detection with self-healing.
-    """
+    """Perform smart extraction on an uploaded PDF."""
     if not SMART_EXTRACTOR_AVAILABLE:
         raise HTTPException(501, "Smart PDF extractor not available")
     
     try:
-        # Find the file in uploads directory
         upload_dirs = ['/tmp/uploads', '/data/uploads', '/app/uploads']
         filepath = None
         
@@ -310,7 +332,6 @@ async def smart_extract(request: SmartExtractRequest):
             raise HTTPException(404, f"File not found: {request.filename}")
         
         result = extract_pdf_smart(filepath)
-        
         return result
         
     except HTTPException:
@@ -321,21 +342,18 @@ async def smart_extract(request: SmartExtractRequest):
 
 
 # =============================================================================
-# COLUMN SPLITTING (NEW)
+# COLUMN SPLITTING
 # =============================================================================
 
 @router.post("/vacuum/split-column")
-async def split_column(request: SplitColumnRequest):
-    """
-    Manually split a merged column based on user-defined pattern.
-    """
+async def split_column_endpoint(request: SplitColumnRequest):
+    """Manually split a merged column based on user-defined pattern."""
     if not VACUUM_AVAILABLE:
         raise HTTPException(501, "Vacuum extractor not available")
     
     try:
         extractor = get_vacuum_extractor()
         
-        # Get the extract
         extract = extractor.get_extract_by_id(request.extract_id)
         if not extract:
             raise HTTPException(404, "Extract not found")
@@ -348,17 +366,33 @@ async def split_column(request: SplitColumnRequest):
         
         # Perform the split
         if request.split_method == 'pattern' and request.pattern:
-            new_data, new_cols = split_by_pattern(
-                raw_data, request.column_index, request.pattern, request.new_headers or []
-            )
+            if split_by_pattern:
+                new_data, new_cols = split_by_pattern(
+                    raw_data, request.column_index, request.pattern, request.new_headers or []
+                )
+            else:
+                # Fallback implementation
+                new_data, new_cols = _fallback_split_by_pattern(
+                    raw_data, request.column_index, request.pattern, request.new_headers or []
+                )
         elif request.split_method == 'positions' and request.positions:
-            new_data, new_cols = split_by_positions(
-                raw_data, request.column_index, request.positions, request.new_headers or []
-            )
+            if split_by_positions:
+                new_data, new_cols = split_by_positions(
+                    raw_data, request.column_index, request.positions, request.new_headers or []
+                )
+            else:
+                new_data, new_cols = _fallback_split_by_positions(
+                    raw_data, request.column_index, request.positions, request.new_headers or []
+                )
         elif request.split_method == 'delimiter' and request.delimiter:
-            new_data, new_cols = split_by_delimiter(
-                raw_data, request.column_index, request.delimiter, request.new_headers or []
-            )
+            if split_by_delimiter:
+                new_data, new_cols = split_by_delimiter(
+                    raw_data, request.column_index, request.delimiter, request.new_headers or []
+                )
+            else:
+                new_data, new_cols = _fallback_split_by_delimiter(
+                    raw_data, request.column_index, request.delimiter, request.new_headers or []
+                )
         else:
             raise HTTPException(400, "Invalid split method or missing parameters")
         
@@ -366,21 +400,16 @@ async def split_column(request: SplitColumnRequest):
         new_raw_headers = list(raw_headers[:request.column_index]) + new_cols + list(raw_headers[request.column_index + 1:])
         
         # Update the extract in database
-        success = extractor.update_extract_data(
-            request.extract_id,
-            raw_data=new_data,
-            raw_headers=new_raw_headers,
-            column_count=len(new_raw_headers),
-            metadata={
-                'was_manually_split': True,
-                'split_details': {
-                    'method': request.split_method,
-                    'original_column': request.column_index,
-                    'pattern': request.pattern,
-                    'new_columns': new_cols
-                }
-            }
-        )
+        if hasattr(extractor, 'update_extract_data'):
+            success = extractor.update_extract_data(
+                request.extract_id,
+                raw_data=new_data,
+                raw_headers=new_raw_headers,
+                column_count=len(new_raw_headers)
+            )
+        else:
+            success = False
+            logger.warning("update_extract_data method not available")
         
         return {
             "success": success,
@@ -398,19 +427,15 @@ async def split_column(request: SplitColumnRequest):
 
 
 @router.post("/vacuum/detect-pattern")
-async def detect_pattern(request: DetectPatternRequest):
-    """
-    Auto-detect split pattern from sample data.
-    Returns suggested patterns and how they would split the data.
-    """
+async def detect_pattern_endpoint(request: DetectPatternRequest):
+    """Auto-detect split pattern from sample data."""
     try:
         if not request.sample_values:
             raise HTTPException(400, "No sample values provided")
         
-        if SMART_EXTRACTOR_AVAILABLE:
+        if SMART_EXTRACTOR_AVAILABLE and detect_split_patterns:
             suggestions = detect_split_patterns(request.sample_values, request.section_type)
         else:
-            # Fallback pattern detection
             suggestions = _fallback_detect_patterns(request.sample_values)
         
         return {
@@ -425,6 +450,95 @@ async def detect_pattern(request: DetectPatternRequest):
         raise HTTPException(500, str(e))
 
 
+# =============================================================================
+# FALLBACK IMPLEMENTATIONS
+# =============================================================================
+
+def _fallback_split_by_pattern(data: list, col_idx: int, pattern: str, new_headers: list) -> tuple:
+    """Fallback pattern split implementation"""
+    new_data = []
+    compiled = re.compile(pattern)
+    num_groups = compiled.groups
+    
+    if not new_headers or len(new_headers) != num_groups:
+        new_headers = [f'Split_{i+1}' for i in range(num_groups)]
+    
+    for row in data:
+        if col_idx >= len(row):
+            new_data.append(row)
+            continue
+        
+        cell = str(row[col_idx])
+        match = compiled.search(cell)
+        
+        if match:
+            new_row = list(row[:col_idx]) + list(match.groups()) + list(row[col_idx + 1:])
+        else:
+            new_row = list(row[:col_idx]) + [''] * num_groups + list(row[col_idx + 1:])
+        
+        new_data.append(new_row)
+    
+    return new_data, new_headers
+
+
+def _fallback_split_by_positions(data: list, col_idx: int, positions: list, new_headers: list) -> tuple:
+    """Fallback position split implementation"""
+    num_cols = len(positions) + 1
+    if not new_headers or len(new_headers) != num_cols:
+        new_headers = [f'Split_{i+1}' for i in range(num_cols)]
+    
+    new_data = []
+    
+    for row in data:
+        if col_idx >= len(row):
+            new_data.append(row)
+            continue
+        
+        cell = str(row[col_idx])
+        splits = []
+        prev_pos = 0
+        
+        for pos in positions:
+            splits.append(cell[prev_pos:pos].strip())
+            prev_pos = pos
+        splits.append(cell[prev_pos:].strip())
+        
+        new_row = list(row[:col_idx]) + splits + list(row[col_idx + 1:])
+        new_data.append(new_row)
+    
+    return new_data, new_headers
+
+
+def _fallback_split_by_delimiter(data: list, col_idx: int, delimiter: str, new_headers: list) -> tuple:
+    """Fallback delimiter split implementation"""
+    max_splits = 1
+    for row in data:
+        if col_idx < len(row):
+            parts = str(row[col_idx]).split(delimiter)
+            max_splits = max(max_splits, len(parts))
+    
+    if not new_headers or len(new_headers) != max_splits:
+        new_headers = [f'Split_{i+1}' for i in range(max_splits)]
+    
+    new_data = []
+    
+    for row in data:
+        if col_idx >= len(row):
+            new_data.append(row)
+            continue
+        
+        cell = str(row[col_idx])
+        parts = cell.split(delimiter)
+        
+        while len(parts) < max_splits:
+            parts.append('')
+        
+        new_row = list(row[:col_idx]) + [p.strip() for p in parts] + list(row[col_idx + 1:])
+        new_data.append(new_row)
+    
+    return new_data, new_headers
+
+
 def _fallback_detect_patterns(sample_values: list) -> list:
     """Simple fallback pattern detection"""
     suggestions = []
@@ -434,7 +548,6 @@ def _fallback_detect_patterns(sample_values: list) -> list:
     
     first_val = str(sample_values[0])
     
-    # Check for code + numbers pattern
     if re.search(r'[A-Z]+\s+[\d.]+', first_val):
         suggestions.append({
             'pattern': r'([A-Za-z]+)\s+([\d,]+\.?\d*)',
@@ -442,7 +555,6 @@ def _fallback_detect_patterns(sample_values: list) -> list:
             'description': 'Code followed by number'
         })
     
-    # Check for multiple numbers
     numbers = re.findall(r'[\d,]+\.?\d*', first_val)
     if len(numbers) >= 3:
         suggestions.append({
