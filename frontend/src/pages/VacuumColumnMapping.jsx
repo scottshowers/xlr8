@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import ColumnSplitter from './ColumnSplitter';
 
 const API_BASE = '/api';
 
@@ -56,6 +57,53 @@ export default function VacuumColumnMapping() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showPreview, setShowPreview] = useState(true);
+  const [showSplitter, setShowSplitter] = useState(false);
+  const [splitColumnInfo, setSplitColumnInfo] = useState(null);
+
+  // Check if a cell looks merged (multiple values)
+  const looksLikeMergedColumn = (headerStr, sampleData, colIdx) => {
+    if (!sampleData || sampleData.length === 0) return false;
+    
+    // Check sample values for patterns suggesting merged data
+    const values = sampleData.slice(0, 5).map(row => String(row[colIdx] || ''));
+    
+    for (const val of values) {
+      // Multiple numbers with text between them
+      const hasMultipleNumbers = (val.match(/\d+\.?\d*/g) || []).length >= 3;
+      // Has code-like patterns followed by numbers
+      const hasCodePattern = /[A-Z]{2,}\s+\d+\.?\d*\s+[A-Z]/i.test(val);
+      // Very long for what should be a simple field
+      const isTooLong = val.length > 40;
+      
+      if ((hasMultipleNumbers && isTooLong) || hasCodePattern) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Open column splitter
+  const openSplitter = (headerStr, colIdx) => {
+    const sampleData = getSampleData();
+    const sampleValues = sampleData.slice(0, 10).map(row => String(row[colIdx] || ''));
+    
+    setSplitColumnInfo({
+      extractId: currentExtract?.id,
+      columnIndex: colIdx,
+      columnHeader: headerStr,
+      sampleValues: sampleValues,
+      sectionType: activeSection
+    });
+    setShowSplitter(true);
+  };
+
+  // Handle split completion
+  const handleSplitComplete = (result) => {
+    setShowSplitter(false);
+    setSplitColumnInfo(null);
+    // Reload extracts to get updated data
+    window.location.reload();
+  };
 
   // Load extracts and header metadata
   useEffect(() => {
@@ -464,6 +512,19 @@ export default function VacuumColumnMapping() {
                             </span>
                           ))}
                         </div>
+                        {/* Merged column warning and split button */}
+                        {looksLikeMergedColumn(headerStr, getSampleData(), idx) && (
+                          <div style={styles.mergedWarning}>
+                            <span style={styles.warningIcon}>⚠️</span>
+                            <span>Looks merged</span>
+                            <button 
+                              onClick={() => openSplitter(headerStr, idx)}
+                              style={styles.splitBtn}
+                            >
+                              Split Column
+                            </button>
+                          </div>
+                        )}
                       </div>
 
                       {/* Arrow */}
@@ -595,6 +656,19 @@ export default function VacuumColumnMapping() {
           {saving ? 'Saving...' : '💾 Save All Mappings'}
         </button>
       </div>
+
+      {/* Column Splitter Modal */}
+      {showSplitter && splitColumnInfo && (
+        <ColumnSplitter
+          extractId={splitColumnInfo.extractId}
+          columnIndex={splitColumnInfo.columnIndex}
+          columnHeader={splitColumnInfo.columnHeader}
+          sampleValues={splitColumnInfo.sampleValues}
+          sectionType={splitColumnInfo.sectionType}
+          onSplitComplete={handleSplitComplete}
+          onCancel={() => setShowSplitter(false)}
+        />
+      )}
     </div>
   );
 }
@@ -844,6 +918,31 @@ const styles = {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap'
+  },
+  mergedWarning: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    marginTop: '8px',
+    padding: '6px 10px',
+    backgroundColor: '#fef3c7',
+    borderRadius: '4px',
+    fontSize: '12px',
+    color: '#92400e'
+  },
+  warningIcon: {
+    fontSize: '14px'
+  },
+  splitBtn: {
+    marginLeft: 'auto',
+    padding: '4px 10px',
+    backgroundColor: '#f59e0b',
+    color: '#fff',
+    border: 'none',
+    borderRadius: '4px',
+    fontSize: '11px',
+    fontWeight: '500',
+    cursor: 'pointer'
   },
   arrow: {
     fontSize: '20px',
