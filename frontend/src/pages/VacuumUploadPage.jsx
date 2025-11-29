@@ -16,6 +16,8 @@ export default function VacuumUploadPage() {
   const handleNavClick = (section) => {
     if (section === 'explore') {
       navigate('/vacuum/explore')
+    } else if (section === 'map') {
+      navigate('/vacuum/map')
     } else {
       setCurrentSection(section)
     }
@@ -50,12 +52,10 @@ export default function VacuumUploadPage() {
 
           <button
             onClick={() => handleNavClick('map')}
-            style={{
-              ...styles.navItem,
-              ...(currentSection === 'map' ? styles.navItemActive : {})
-            }}
+            style={styles.navItem}
           >
             🗺️ Map Columns
+            <span style={styles.navBadge}>NEW</span>
           </button>
 
           <button
@@ -79,7 +79,6 @@ export default function VacuumUploadPage() {
       {/* Main Content Area */}
       <div style={styles.mainContent}>
         {currentSection === 'upload' && <UploadSection onExplore={() => handleNavClick('explore')} />}
-        {currentSection === 'map' && <MapSection />}
         {currentSection === 'learn' && <LearnSection />}
       </div>
     </div>
