@@ -235,10 +235,13 @@ class CloudAnalyzer:
             # Get bytes
             pdf_bytes = new_doc.write()
             
+            # Save length before closing
+            original_page_count = len(doc)
+            
             new_doc.close()
             doc.close()
             
-            logger.info(f"Prepared {max_pages} pages for cloud analysis (original: {len(doc)} pages)")
+            logger.info(f"Prepared {max_pages} pages for cloud analysis (original: {original_page_count} pages)")
             
             return bytes(pdf_bytes)
             
