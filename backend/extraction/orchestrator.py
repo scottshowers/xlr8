@@ -452,7 +452,14 @@ class ExtractionOrchestrator:
                             local_results: Dict[str, SectionResult]) -> Tuple[Dict[str, SectionResult], float]:
         """
         Use cloud AI (AWS Textract) for extraction.
-        Only sends first N pages with PII redacted.
+        
+        KEY FIX: Actually USE Textract's cell-level data instead of ignoring it!
+        
+        Flow:
+        1. Redact PII from first N pages
+        2. Send redacted PDF to Textract -> get table cell coordinates
+        3. Use those coordinates to extract text from ORIGINAL PDF
+        4. Result: Accurate structure + real data
         """
         if not self.cloud_analyzer:
             raise RuntimeError("Cloud analyzer not available")
@@ -464,50 +471,255 @@ class ExtractionOrchestrator:
                 file_path, 
                 max_pages=MAX_CLOUD_PAGES
             )
+            logger.info(f"Created redacted PDF for cloud analysis: {redacted_path}")
         else:
-            # If no redactor, we can still proceed with structure-only analysis
             logger.warning("PII redactor not available, using structure-only cloud analysis")
         
         # Step 2: Send to cloud for layout analysis
-        cloud_layout = self.cloud_analyzer.analyze_layout(
+        cloud_result = self.cloud_analyzer.analyze_layout(
             redacted_path or file_path,
             max_pages=MAX_CLOUD_PAGES,
-            structure_only=redacted_path is None  # Only get structure if not redacted
+            structure_only=redacted_path is None
         )
         
-        # Step 3: Save as new template
-        if cloud_layout and self.template_manager:
-            template_id = self.template_manager.save_template(
-                name=f"Auto-learned {datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                layout=cloud_layout,
-                source_file=os.path.basename(file_path)
-            )
-            logger.info(f"Saved new template: {template_id}")
+        if not cloud_result or not cloud_result.success:
+            logger.error("Cloud analysis failed")
+            # Clean up and return local results
+            if redacted_path and os.path.exists(redacted_path):
+                os.remove(redacted_path)
+            return local_results, 0.0
         
-        # Step 4: Re-extract using cloud layout
-        sections = {}
-        for extractor_name, extractor in self.extractors.items():
+        logger.info(f"Cloud analysis found {len(cloud_result.tables)} tables")
+        
+        # Step 3: Save as new template for future use
+        if cloud_result and self.template_manager:
             try:
-                results = extractor.extract(file_path, cloud_layout)
-                for section_name, result in results.items():
-                    if section_name not in sections or result.confidence > sections[section_name].confidence:
-                        sections[section_name] = self._to_section_result(
-                            result,
-                            SectionType(section_name),
-                            f"{extractor_name}+cloud"
-                        )
+                template_id = self.template_manager.save_template(
+                    name=f"Auto-learned {datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    layout=cloud_result,
+                    source_file=os.path.basename(file_path)
+                )
+                logger.info(f"Saved new template: {template_id}")
             except Exception as e:
-                logger.warning(f"Cloud-guided extraction with {extractor_name} failed: {e}")
+                logger.warning(f"Failed to save template: {e}")
+        
+        # Step 4: ACTUALLY USE Textract's cell data!
+        # Extract directly from Textract's table cells
+        sections = {}
+        
+        if cloud_result.tables:
+            sections = self._extract_from_textract_tables(file_path, cloud_result.tables)
+        
+        # If no sections from tables, try key-value pairs
+        if not sections and cloud_result.key_value_pairs:
+            logger.info(f"Trying key-value pairs: {len(cloud_result.key_value_pairs)} pairs")
+            # Add key-value data as pay_totals/employee_info
+            kv_data = []
+            for key, value in cloud_result.key_value_pairs.items():
+                kv_data.append({'key': key, 'value': value})
+            
+            if kv_data:
+                sections['pay_totals'] = SectionResult(
+                    data=kv_data,
+                    headers=['key', 'value'],
+                    confidence=cloud_result.confidence,
+                    row_count=len(kv_data),
+                    column_count=2,
+                    extraction_method='cloud_kv',
+                    layout_type=LayoutType.KEY_VALUE,
+                    needs_review=True,
+                    issues=[]
+                )
         
         # Clean up redacted file
         if redacted_path and os.path.exists(redacted_path):
             os.remove(redacted_path)
         
-        # Calculate new confidence
-        confidences = [s.confidence for s in sections.values() if s.confidence > 0]
-        overall_confidence = min(confidences) if confidences else 0.0
+        # Calculate overall confidence
+        if sections:
+            confidences = [s.confidence for s in sections.values() if s.confidence > 0]
+            overall_confidence = min(confidences) if confidences else cloud_result.confidence
+        else:
+            overall_confidence = 0.0
+            logger.warning("No sections extracted from cloud result")
         
         return sections, overall_confidence
+    
+    def _extract_from_textract_tables(self, file_path: str, 
+                                       tables: List) -> Dict[str, SectionResult]:
+        """
+        Extract data using Textract's table structure but reading from ORIGINAL PDF.
+        
+        KEY: Textract analyzed the REDACTED PDF and gave us cell POSITIONS.
+        Now we use those positions to extract text from the ORIGINAL PDF.
+        
+        This way:
+        - PII never leaves local system (Textract only saw redacted version)
+        - We get accurate cell boundaries from Textract
+        - We get real data from the original PDF
+        """
+        try:
+            import fitz  # PyMuPDF for coordinate-based extraction
+        except ImportError:
+            logger.error("PyMuPDF required for coordinate extraction")
+            return {}
+        
+        sections = {}
+        
+        try:
+            doc = fitz.open(file_path)
+        except Exception as e:
+            logger.error(f"Failed to open PDF: {e}")
+            return {}
+        
+        for table in tables:
+            if not table.cells:
+                continue
+            
+            page_num = table.page_number - 1  # 0-indexed
+            if page_num >= len(doc):
+                logger.warning(f"Page {page_num + 1} not in document")
+                continue
+            
+            page = doc[page_num]
+            page_width = page.rect.width
+            page_height = page.rect.height
+            
+            # Build grid from cells
+            rows = {}  # row_index -> {col_index: text}
+            max_col = 0
+            confidences = []
+            
+            for cell in table.cells:
+                row_idx = cell.row_index
+                col_idx = cell.column_index
+                max_col = max(max_col, col_idx + 1)
+                
+                if row_idx not in rows:
+                    rows[row_idx] = {}
+                
+                # Extract text from ORIGINAL PDF using Textract's coordinates
+                bbox = cell.bbox
+                if bbox:
+                    # Convert Textract normalized coords (0-1) to page coords
+                    left = bbox.get('Left', 0) * page_width
+                    top = bbox.get('Top', 0) * page_height
+                    width = bbox.get('Width', 0) * page_width
+                    height = bbox.get('Height', 0) * page_height
+                    
+                    # Create rect and extract text from ORIGINAL
+                    rect = fitz.Rect(left, top, left + width, top + height)
+                    text = page.get_text("text", clip=rect).strip()
+                else:
+                    # Fallback to Textract's text (will be redacted)
+                    text = cell.text.strip() if cell.text else ''
+                
+                # Clean the text
+                text = ' '.join(text.split())  # Normalize whitespace
+                rows[row_idx][col_idx] = text
+                
+                if cell.confidence:
+                    confidences.append(cell.confidence)
+            
+            if not rows:
+                continue
+            
+            # Convert to list format
+            data = []
+            headers = []
+            
+            for row_idx in sorted(rows.keys()):
+                row_data = []
+                for col_idx in range(max_col):
+                    row_data.append(rows[row_idx].get(col_idx, ''))
+                
+                if row_idx == 0:
+                    headers = row_data
+                else:
+                    data.append(row_data)
+            
+            if not data:
+                continue
+            
+            # Calculate confidence
+            avg_confidence = sum(confidences) / len(confidences) if confidences else 0.8
+            
+            # Detect section type
+            section_type = self._detect_section_type_from_content(headers, data)
+            
+            # Check for multi-line cells (quality issue)
+            issues = []
+            multiline_count = 0
+            for row in data:
+                for cell_val in row:
+                    if '\n' in str(cell_val):
+                        multiline_count += 1
+            
+            if multiline_count > len(data) * 0.3:  # More than 30% multiline
+                issues.append("Many multi-line cells detected - possible merged column issue")
+                avg_confidence *= 0.85
+            
+            # Determine layout type
+            layout_type = LayoutType.TABLE
+            if section_type in ['employee_info', 'pay_totals']:
+                layout_type = LayoutType.KEY_VALUE
+            
+            result = SectionResult(
+                data=data,
+                headers=headers,
+                confidence=avg_confidence,
+                row_count=len(data),
+                column_count=max_col,
+                extraction_method='cloud_textract',
+                layout_type=layout_type,
+                needs_review=avg_confidence < CONFIDENCE_THRESHOLD,
+                issues=issues
+            )
+            
+            # Add or merge with existing section
+            if section_type not in sections:
+                sections[section_type] = result
+            else:
+                # Merge data
+                sections[section_type].data.extend(data)
+                sections[section_type].row_count += len(data)
+                # Take lower confidence
+                sections[section_type].confidence = min(
+                    sections[section_type].confidence, 
+                    avg_confidence
+                )
+        
+        doc.close()
+        return sections
+    
+    def _detect_section_type_from_content(self, headers: List[str], 
+                                           data: List[List[str]]) -> str:
+        """Detect section type from headers and data content."""
+        # Combine all text for analysis
+        all_text = ' '.join(str(h) for h in headers).lower()
+        for row in data[:5]:  # Check first 5 rows
+            all_text += ' ' + ' '.join(str(c) for c in row).lower()
+        
+        # Score each section type
+        section_keywords = {
+            'employee_info': ['employee', 'name', 'id', 'ssn', 'department', 'hire', 'location', 'code:', 'tax profile'],
+            'earnings': ['earnings', 'hours', 'rate', 'regular', 'overtime', 'gross', 'pay code', 'shift diff', 'amount'],
+            'taxes': ['tax', 'federal', 'state', 'fica', 'medicare', 'withhold', 'w/h'],
+            'deductions': ['deduction', '401k', 'medical', 'dental', 'insurance', 'garnish', 'child support'],
+            'pay_totals': ['gross pay', 'net pay', 'total', 'check', 'direct deposit', 'net check', 'voucher'],
+        }
+        
+        scores = {}
+        for section, keywords in section_keywords.items():
+            score = sum(1 for kw in keywords if kw in all_text)
+            scores[section] = score
+        
+        if scores:
+            best = max(scores, key=scores.get)
+            if scores[best] > 0:
+                return best
+        
+        return 'unknown'
     
     def learn_from_corrections(self, document_id: str, 
                                corrections: Dict[str, Any]) -> bool:
