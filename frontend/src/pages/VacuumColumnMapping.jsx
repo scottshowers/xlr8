@@ -215,7 +215,23 @@ export default function VacuumColumnMapping() {
   }
 
   const getExtractForSection = (section) => {
-    return extracts.find(e => e.detected_section === section)
+    // First try exact match
+    let match = extracts.find(e => e.detected_section === section)
+    if (match) return match
+    
+    // If no exact match and this is the first section, return first unassigned extract
+    if (section === 'employee_info' && extracts.length > 0) {
+      const unassigned = extracts.find(e => !e.detected_section || e.detected_section === 'unknown')
+      if (unassigned) return unassigned
+    }
+    
+    return null
+  }
+  
+  // Get all extracts that haven't been assigned to a section
+  const getUnassignedExtracts = () => {
+    const assignedSections = new Set(extracts.map(e => e.detected_section).filter(Boolean))
+    return extracts.filter(e => !e.detected_section || e.detected_section === 'unknown')
   }
 
   const updateColumnMapping = (section, header, targetField) => {
@@ -521,7 +537,38 @@ export default function VacuumColumnMapping() {
           {!currentExtract ? (
             <div style={styles.noDataMessage}>
               <p>No data detected for {sectionConfig?.label}.</p>
-              <p>Select a different section or re-upload the file.</p>
+              <p style={{marginTop: '1rem', fontSize: '0.9rem', color: '#666'}}>
+                Available extracts in this file:
+              </p>
+              <div style={{marginTop: '0.5rem'}}>
+                {extracts.map((ext, idx) => (
+                  <div 
+                    key={idx} 
+                    style={{
+                      padding: '0.5rem',
+                      background: '#f9fafb',
+                      borderRadius: '6px',
+                      marginBottom: '0.5rem',
+                      cursor: 'pointer',
+                      border: '1px solid #e5e7eb'
+                    }}
+                    onClick={() => {
+                      // Manually assign this extract to the current section
+                      const updatedExtracts = [...extracts]
+                      updatedExtracts[idx] = { ...ext, detected_section: activeSection }
+                      setExtracts(updatedExtracts)
+                      initializeMappings(updatedExtracts)
+                    }}
+                  >
+                    <div style={{fontWeight: '500', fontSize: '0.85rem'}}>
+                      Table {idx + 1}: {ext.headers?.slice(0, 3).join(', ')}...
+                    </div>
+                    <div style={{fontSize: '0.75rem', color: '#666'}}>
+                      {ext.row_count} rows • Click to assign to {sectionConfig?.label}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           ) : (
             <>
@@ -542,7 +589,7 @@ export default function VacuumColumnMapping() {
                       <div style={styles.sourceCol}>
                         <div style={styles.sourceName}>{header}</div>
                         <div style={styles.sourceSamples}>
-                          {currentExtract.sample_data?.slice(0, 3).map((row, rowIdx) => (
+                          {(currentExtract.preview || currentExtract.data || currentExtract.sample_data)?.slice(0, 3).map((row, rowIdx) => (
                             <span key={rowIdx} style={styles.sample}>
                               {row[idx] || '-'}
                             </span>
@@ -596,7 +643,7 @@ export default function VacuumColumnMapping() {
                 <span>{showPreview ? '▼' : '▶'}</span> Live Preview
               </div>
               
-              {showPreview && currentExtract.sample_data && (
+              {showPreview && (currentExtract.preview || currentExtract.data || currentExtract.sample_data) && (
                 <div style={styles.previewPanel}>
                   <table style={styles.previewTable}>
                     <thead>
@@ -616,7 +663,7 @@ export default function VacuumColumnMapping() {
                       </tr>
                     </thead>
                     <tbody>
-                      {currentExtract.sample_data?.slice(0, 5).map((row, rowIdx) => (
+                      {(currentExtract.preview || currentExtract.data || currentExtract.sample_data)?.slice(0, 5).map((row, rowIdx) => (
                         <tr key={rowIdx}>
                           {row.map((cell, cellIdx) => {
                             const header = currentExtract.headers?.[cellIdx]
