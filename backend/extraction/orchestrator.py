@@ -520,13 +520,14 @@ class ExtractionOrchestrator:
             
             if kv_data:
                 sections['pay_totals'] = SectionResult(
+                    section_type=SectionType.PAY_TOTALS,
+                    layout_type=LayoutType.KEY_VALUE,
                     data=kv_data,
                     headers=['key', 'value'],
                     confidence=cloud_result.confidence,
                     row_count=len(kv_data),
                     column_count=2,
                     extraction_method='cloud_kv',
-                    layout_type=LayoutType.KEY_VALUE,
                     needs_review=True,
                     issues=[]
                 )
@@ -664,14 +665,21 @@ class ExtractionOrchestrator:
             if section_type in ['employee_info', 'pay_totals']:
                 layout_type = LayoutType.KEY_VALUE
             
+            # Convert section_type string to enum
+            try:
+                section_type_enum = SectionType(section_type)
+            except ValueError:
+                section_type_enum = SectionType.UNKNOWN
+            
             result = SectionResult(
+                section_type=section_type_enum,
+                layout_type=layout_type,
                 data=data,
                 headers=headers,
                 confidence=avg_confidence,
                 row_count=len(data),
                 column_count=max_col,
                 extraction_method='cloud_textract',
-                layout_type=layout_type,
                 needs_review=avg_confidence < CONFIDENCE_THRESHOLD,
                 issues=issues
             )
