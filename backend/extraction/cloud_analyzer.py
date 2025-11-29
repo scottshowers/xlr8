@@ -249,22 +249,61 @@ class CloudAnalyzer:
     def _call_textract(self, pdf_bytes: bytes) -> Optional[Dict]:
         """
         Call AWS Textract API.
-        Uses AnalyzeDocument for synchronous processing (up to 1 page)
-        or StartDocumentAnalysis for async (multiple pages).
+        AnalyzeDocument only supports single pages, so we convert PDF pages
+        to images and analyze each one, then merge results.
         """
         try:
-            # For documents up to ~5MB and single page, use synchronous API
-            if len(pdf_bytes) < 5 * 1024 * 1024:
-                response = self.client.analyze_document(
-                    Document={'Bytes': pdf_bytes},
-                    FeatureTypes=['TABLES', 'FORMS', 'LAYOUT']
-                )
-                return response
-            else:
-                # For larger documents, would need async API with S3
-                # For now, raise an error
-                raise ValueError("Document too large for synchronous processing. "
-                               "Implement async processing with S3 for production.")
+            if not PYMUPDF_AVAILABLE:
+                logger.error("PyMuPDF required for Textract multi-page support")
+                return None
+            
+            # Open PDF from bytes
+            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            all_blocks = []
+            page_count = len(doc)
+            
+            logger.info(f"Analyzing {page_count} pages with Textract...")
+            
+            for page_num in range(page_count):
+                page = doc[page_num]
+                
+                # Convert page to PNG image (Textract likes this better)
+                # Use 150 DPI for good quality without huge size
+                mat = fitz.Matrix(150/72, 150/72)  # 150 DPI
+                pix = page.get_pixmap(matrix=mat)
+                img_bytes = pix.tobytes("png")
+                
+                logger.info(f"  Analyzing page {page_num + 1}/{page_count} ({len(img_bytes)} bytes)")
+                
+                try:
+                    response = self.client.analyze_document(
+                        Document={'Bytes': img_bytes},
+                        FeatureTypes=['TABLES', 'FORMS', 'LAYOUT']
+                    )
+                    
+                    # Add page number to each block and collect
+                    for block in response.get('Blocks', []):
+                        block['Page'] = page_num + 1
+                        all_blocks.append(block)
+                        
+                except ClientError as e:
+                    error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+                    error_msg = e.response.get('Error', {}).get('Message', str(e))
+                    logger.warning(f"Textract error on page {page_num + 1}: {error_code} - {error_msg}")
+                    continue
+            
+            doc.close()
+            
+            if not all_blocks:
+                logger.error("No blocks extracted from any page")
+                return None
+            
+            # Return merged response
+            logger.info(f"Textract complete: {len(all_blocks)} blocks from {page_count} pages")
+            return {
+                'Blocks': all_blocks,
+                'DocumentMetadata': {'Pages': page_count}
+            }
                 
         except ClientError as e:
             error_code = e.response.get('Error', {}).get('Code', 'Unknown')
@@ -275,7 +314,7 @@ class CloudAnalyzer:
             logger.error("AWS credentials not found")
             return None
         except Exception as e:
-            logger.error(f"Textract call failed: {e}")
+            logger.error(f"Textract call failed: {e}", exc_info=True)
             return None
     
     def _parse_textract_response(self, response: Dict) -> CloudAnalysisResult:
