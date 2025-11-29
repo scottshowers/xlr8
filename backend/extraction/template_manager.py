@@ -268,6 +268,36 @@ class TemplateManager:
             f"{name}{datetime.now().isoformat()}".encode()
         ).hexdigest()[:16]
         
+        # Handle both dict and CloudAnalysisResult dataclass
+        if hasattr(layout, 'confidence'):
+            # It's a CloudAnalysisResult dataclass
+            confidence = layout.confidence
+            fingerprint = getattr(layout, 'fingerprint', '')
+            
+            # Convert tables to section definitions
+            sections = []
+            for table in getattr(layout, 'tables', []):
+                sections.append({
+                    'section_type': 'unknown',
+                    'layout_type': 'table',
+                    'page': table.page_number,
+                    'bbox': table.bbox,
+                    'row_count': table.row_count,
+                    'column_count': table.column_count,
+                    'expected_headers': [c.text for c in table.cells if c.is_header][:20]
+                })
+            
+            metadata = {
+                'page_count': getattr(layout, 'page_count', 1),
+                'source': 'cloud_analysis'
+            }
+        else:
+            # It's a dict
+            confidence = layout.get('confidence', 0.9)
+            fingerprint = layout.get('fingerprint', '')
+            sections = layout.get('sections', [])
+            metadata = layout.get('metadata', {})
+        
         template_data = {
             'id': template_id,
             'name': name,
@@ -275,11 +305,11 @@ class TemplateManager:
             'version': '1.0',
             'created_at': datetime.now().isoformat(),
             'updated_at': datetime.now().isoformat(),
-            'confidence': layout.get('confidence', 0.9),
+            'confidence': confidence,
             'source_file': source_file,
-            'fingerprint': layout.get('fingerprint', ''),
-            'sections': layout.get('sections', []),
-            'metadata': layout.get('metadata', {})
+            'fingerprint': fingerprint,
+            'sections': sections,
+            'metadata': metadata
         }
         
         if self.supabase:
