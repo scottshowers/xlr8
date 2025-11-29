@@ -21,21 +21,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Import vacuum extractor v2
+# Import vacuum extractor
 try:
-    from utils.vacuum_extractor_v2 import get_vacuum_extractor, VacuumExtractor, SectionType, ColumnType
+    from utils.vacuum_extractor import get_vacuum_extractor, VacuumExtractor, SectionType, ColumnType
     VACUUM_AVAILABLE = True
     logger.info("Vacuum extractor v2 loaded successfully")
 except ImportError as e:
     VACUUM_AVAILABLE = False
-    logger.warning(f"Vacuum extractor v2 not available: {e}")
-    # Fallback to v1 if v2 not available
-    try:
-        from utils.vacuum_extractor import get_vacuum_extractor, VacuumExtractor
-        VACUUM_AVAILABLE = True
-        logger.info("Fell back to vacuum extractor v1")
-    except ImportError:
-        logger.error("No vacuum extractor available")
+    logger.warning(f"Vacuum extractor not available: {e}")
 
 
 # =============================================================================
