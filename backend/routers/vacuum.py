@@ -118,8 +118,8 @@ class SimpleExtractor:
             valid_count = sum(1 for e in employees if e.is_valid)
             confidence = valid_count / len(employees) if employees else 0.0
             
-            # Cost: $0.015/page for Textract + ~$0.03 for Claude
-            cost = (pages_processed * 0.015) + 0.03
+            # Cost: $0.015/page for Textract + ~$0.05 for Claude
+            cost = (pages_processed * 0.015) + 0.05
             
             processing_time = int((datetime.now() - start).total_seconds() * 1000)
             
@@ -222,22 +222,41 @@ IMPORTANT:
 
         response = self.claude.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=16000,
+            max_tokens=32000,
             messages=[{"role": "user", "content": prompt}]
         )
         
         response_text = response.content[0].text
         logger.info(f"Claude response length: {len(response_text)}")
         
-        # Parse JSON
+        # Parse JSON - handle common issues
         employees = []
         try:
             # Find JSON array in response
             json_match = re.search(r'\[[\s\S]*\]', response_text)
             if json_match:
-                data = json.loads(json_match.group())
+                json_str = json_match.group()
             else:
-                data = json.loads(response_text)
+                json_str = response_text
+            
+            # Clean up common JSON issues
+            # Remove trailing commas before ] or }
+            json_str = re.sub(r',\s*]', ']', json_str)
+            json_str = re.sub(r',\s*}', '}', json_str)
+            
+            # If truncated mid-object, try to close it
+            if json_str.count('[') > json_str.count(']'):
+                # Find last complete object
+                last_complete = json_str.rfind('},')
+                if last_complete > 0:
+                    json_str = json_str[:last_complete + 1] + ']'
+                else:
+                    # Try to find last complete object without comma
+                    last_complete = json_str.rfind('}')
+                    if last_complete > 0:
+                        json_str = json_str[:last_complete + 1] + ']'
+            
+            data = json.loads(json_str)
             
             for emp_data in data:
                 emp = Employee(
@@ -312,13 +331,13 @@ async def status():
 @router.post("/vacuum/upload")
 async def upload(
     file: UploadFile = File(...),
-    max_pages: int = Form(10)
+    max_pages: int = Form(5)
 ):
     """
     Upload and extract pay register.
     
-    Cost: ~$0.015/page (Textract) + ~$0.03 (Claude)
-    Default 10 pages = ~$0.18
+    Cost: ~$0.015/page (Textract) + ~$0.05 (Claude)
+    Default 5 pages = ~$0.13
     """
     ext = get_extractor()
     
@@ -378,7 +397,7 @@ async def upload(
 @router.post("/vacuum/extract")
 async def extract(
     file: UploadFile = File(...),
-    max_pages: int = Form(10)
+    max_pages: int = Form(5)
 ):
     """Alias for /vacuum/upload"""
     return await upload(file, max_pages)
