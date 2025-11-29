@@ -1,18 +1,12 @@
 """
-Vacuum Upload Router v3 - API endpoints for intelligent vacuum extraction
-=========================================================================
+Vacuum Upload Router v4 - NOW USING THE NEW EXTRACTION SYSTEM
+==============================================================
 Deploy to: backend/routers/vacuum.py
 
-Enhanced with:
-- Smart PDF extraction (character-level position analysis)
-- Column splitting with pattern detection
-- Self-healing for merged columns
-- AI-suggested split patterns
-
-Author: XLR8 Team
+This version actually connects to the extraction orchestrator!
 """
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Body
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import JSONResponse
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
@@ -22,107 +16,67 @@ import sys
 import logging
 import tempfile
 import shutil
-import re
 
+# Add paths
 sys.path.insert(0, '/app')
-sys.path.insert(0, '/data')
+sys.path.insert(0, '/app/backend')
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Import vacuum extractor - try multiple import paths
-VACUUM_AVAILABLE = False
+# =============================================================================
+# IMPORT NEW EXTRACTION SYSTEM
+# =============================================================================
+
+EXTRACTION_AVAILABLE = False
+get_extraction_orchestrator = None
+ExtractionStatus = None
+
+# Try to import the new extraction orchestrator
+for import_path in ['extraction', 'backend.extraction']:
+    try:
+        module = __import__(import_path, fromlist=[
+            'get_extraction_orchestrator', 
+            'ExtractionStatus',
+            'CONFIDENCE_THRESHOLD'
+        ])
+        get_extraction_orchestrator = module.get_extraction_orchestrator
+        ExtractionStatus = module.ExtractionStatus
+        EXTRACTION_AVAILABLE = True
+        logger.info(f"✅ New extraction orchestrator loaded from {import_path}")
+        break
+    except ImportError as e:
+        logger.debug(f"Could not import from {import_path}: {e}")
+
+if not EXTRACTION_AVAILABLE:
+    logger.warning("❌ New extraction system not available, falling back to legacy")
+
+# Legacy imports (fallback)
+LEGACY_AVAILABLE = False
 get_vacuum_extractor = None
 VacuumExtractor = None
-SectionType = None
-ColumnType = None
 
 for import_path in ['backend.utils.vacuum_extractor', 'utils.vacuum_extractor']:
     try:
-        module = __import__(import_path, fromlist=['get_vacuum_extractor', 'VacuumExtractor', 'SectionType', 'ColumnType'])
+        module = __import__(import_path, fromlist=['get_vacuum_extractor', 'VacuumExtractor'])
         get_vacuum_extractor = module.get_vacuum_extractor
         VacuumExtractor = module.VacuumExtractor
-        SectionType = module.SectionType
-        ColumnType = module.ColumnType
-        VACUUM_AVAILABLE = True
-        logger.info(f"Vacuum extractor loaded from {import_path}")
+        LEGACY_AVAILABLE = True
+        logger.info(f"Legacy vacuum extractor loaded from {import_path}")
         break
     except ImportError as e:
-        logger.debug(f"Could not import from {import_path}: {e}")
-
-if not VACUUM_AVAILABLE:
-    logger.warning("Vacuum extractor not available from any path")
-
-# Import smart PDF extractor - try multiple import paths
-SMART_EXTRACTOR_AVAILABLE = False
-SmartPDFExtractor = None
-extract_pdf_smart = None
-split_by_pattern = None
-split_by_positions = None
-split_by_delimiter = None
-detect_split_patterns = None
-
-for import_path in ['backend.utils.smart_pdf_extractor', 'utils.smart_pdf_extractor']:
-    try:
-        module = __import__(import_path, fromlist=[
-            'SmartPDFExtractor', 'extract_pdf_smart', 'split_by_pattern',
-            'split_by_positions', 'split_by_delimiter', 'detect_split_patterns'
-        ])
-        SmartPDFExtractor = module.SmartPDFExtractor
-        extract_pdf_smart = module.extract_pdf_smart
-        split_by_pattern = module.split_by_pattern
-        split_by_positions = module.split_by_positions
-        split_by_delimiter = module.split_by_delimiter
-        detect_split_patterns = module.detect_split_patterns
-        SMART_EXTRACTOR_AVAILABLE = True
-        logger.info(f"Smart PDF extractor loaded from {import_path}")
-        break
-    except ImportError as e:
-        logger.debug(f"Could not import from {import_path}: {e}")
-
-if not SMART_EXTRACTOR_AVAILABLE:
-    logger.warning("Smart PDF extractor not available from any path")
+        logger.debug(f"Could not import legacy from {import_path}: {e}")
 
 
 # =============================================================================
 # PYDANTIC MODELS
 # =============================================================================
 
-class ConfirmSectionRequest(BaseModel):
-    extract_id: int
-    section_type: str
-    user_corrected: bool = False
-
-
-class ConfirmColumnRequest(BaseModel):
-    extract_id: int
-    column_index: int
-    column_type: str
-    user_corrected: bool = False
-
-
-class ConfirmAllColumnsRequest(BaseModel):
-    extract_id: int
-    column_mappings: Dict[int, str]
-
-
-class LearnVendorRequest(BaseModel):
-    extract_ids: List[int]
-    vendor_name: str
-    report_type: str = "pay_register"
-
-
-class ColumnMappingRequest(BaseModel):
-    extract_id: int
-    column_map: Dict[str, str]
-    target_table: str
-
-
 class SplitColumnRequest(BaseModel):
     extract_id: int
     column_index: int
-    split_method: str  # 'pattern', 'positions', 'delimiter'
+    split_method: str
     pattern: Optional[str] = None
     new_headers: Optional[List[str]] = None
     positions: Optional[List[int]] = None
@@ -134,10 +88,6 @@ class DetectPatternRequest(BaseModel):
     section_type: Optional[str] = 'unknown'
 
 
-class SmartExtractRequest(BaseModel):
-    filename: str
-
-
 class ApplyMappingsRequest(BaseModel):
     source_file: str
     header_metadata: Dict[str, str]
@@ -146,52 +96,205 @@ class ApplyMappingsRequest(BaseModel):
 
 
 # =============================================================================
-# STATUS & INFO ENDPOINTS
+# STATUS ENDPOINT
 # =============================================================================
 
 @router.get("/vacuum/status")
 async def vacuum_status():
     """Check vacuum extractor status and capabilities"""
-    if not VACUUM_AVAILABLE:
-        return {
-            "available": False,
-            "version": None,
-            "message": "Vacuum extractor not available. Check dependencies."
-        }
+    status = {
+        "available": EXTRACTION_AVAILABLE or LEGACY_AVAILABLE,
+        "version": "4.0",
+        "new_extraction_system": EXTRACTION_AVAILABLE,
+        "legacy_fallback": LEGACY_AVAILABLE,
+    }
+    
+    if EXTRACTION_AVAILABLE:
+        try:
+            orchestrator = get_extraction_orchestrator()
+            status["extractors_loaded"] = list(orchestrator.extractors.keys())
+            status["cloud_available"] = orchestrator.cloud_analyzer is not None and orchestrator.cloud_analyzer.is_available
+            status["template_manager"] = orchestrator.template_manager is not None
+            status["validator"] = orchestrator.validator is not None
+            status["pii_redactor"] = orchestrator.pii_redactor is not None
+        except Exception as e:
+            status["orchestrator_error"] = str(e)
+    
+    if LEGACY_AVAILABLE:
+        try:
+            extractor = get_vacuum_extractor()
+            files = extractor.get_files_summary()
+            stats = extractor.get_pattern_stats()
+            status["files_count"] = len(files)
+            status["total_tables"] = sum(f['table_count'] for f in files)
+            status["total_rows"] = sum(f['total_rows'] for f in files)
+            status["learning_stats"] = stats
+        except Exception as e:
+            status["legacy_error"] = str(e)
+    
+    return status
+
+
+# =============================================================================
+# MAIN UPLOAD ENDPOINT - USES NEW EXTRACTION SYSTEM
+# =============================================================================
+
+@router.post("/vacuum/upload")
+async def vacuum_upload(
+    file: UploadFile = File(...),
+    project: Optional[str] = Form(None),
+    force_cloud: bool = Form(False)
+):
+    """
+    Upload a file for extraction using the new multi-layer system.
+    
+    The new system:
+    1. Detects document layout
+    2. Matches against learned templates
+    3. Runs multiple extractors
+    4. Falls back to AWS Textract if confidence < 80%
+    5. Validates results (Earnings=Gross, Gross-Tax-Ded=Net)
+    6. Targets 98% confidence
+    """
+    
+    filename = file.filename
+    file_ext = filename.split('.')[-1].lower()
+    
+    if file_ext not in ['pdf', 'xlsx', 'xls', 'csv']:
+        raise HTTPException(400, f"Unsupported file type: {file_ext}")
+    
+    # Save to temp file
+    temp_dir = tempfile.mkdtemp()
+    temp_path = os.path.join(temp_dir, filename)
     
     try:
-        extractor = get_vacuum_extractor()
-        files = extractor.get_files_summary()
-        stats = extractor.get_pattern_stats()
+        with open(temp_path, 'wb') as f:
+            shutil.copyfileobj(file.file, f)
         
-        return {
-            "available": True,
-            "version": "3.0",
-            "smart_extractor_available": SMART_EXTRACTOR_AVAILABLE,
-            "files_count": len(files),
-            "total_tables": sum(f['table_count'] for f in files),
-            "total_rows": sum(f['total_rows'] for f in files),
-            "learning_stats": stats
-        }
+        # =====================================================================
+        # USE NEW EXTRACTION SYSTEM
+        # =====================================================================
+        if EXTRACTION_AVAILABLE:
+            logger.info(f"🚀 Using NEW extraction orchestrator for {filename}")
+            
+            orchestrator = get_extraction_orchestrator()
+            result = orchestrator.extract_document(
+                file_path=temp_path,
+                project=project,
+                force_cloud=force_cloud
+            )
+            
+            # Convert to API response format
+            sections_response = {}
+            for section_name, section_data in result.sections.items():
+                sections_response[section_name] = {
+                    "row_count": section_data.row_count,
+                    "column_count": section_data.column_count,
+                    "headers": section_data.headers,
+                    "confidence": section_data.confidence,
+                    "extraction_method": section_data.extraction_method,
+                    "layout_type": section_data.layout_type.value,
+                    "needs_review": section_data.needs_review,
+                    "issues": section_data.issues,
+                    "preview": section_data.data[:10] if section_data.data else []
+                }
+            
+            # Also store in legacy system for UI compatibility
+            if LEGACY_AVAILABLE:
+                try:
+                    legacy_extractor = get_vacuum_extractor()
+                    legacy_result = legacy_extractor.vacuum_file(temp_path, project)
+                except Exception as e:
+                    logger.warning(f"Legacy storage failed: {e}")
+            
+            return {
+                "success": result.status in [ExtractionStatus.SUCCESS, ExtractionStatus.NEEDS_REVIEW],
+                "source_file": filename,
+                "project": project,
+                "extraction_system": "v4_orchestrator",
+                
+                # Key metrics
+                "status": result.status.value,
+                "overall_confidence": result.overall_confidence,
+                "employee_count": result.employee_count,
+                "processing_time_ms": result.processing_time_ms,
+                
+                # Validation
+                "validation_passed": result.validation_passed,
+                "validation_errors": result.validation_errors,
+                
+                # Template info
+                "template_matched": result.template_matched,
+                "template_id": result.template_id,
+                "cloud_used": result.cloud_used,
+                
+                # Sections
+                "sections": sections_response,
+                "section_count": len(sections_response),
+                
+                # Metadata
+                "metadata": result.metadata
+            }
+        
+        # =====================================================================
+        # FALLBACK TO LEGACY SYSTEM
+        # =====================================================================
+        elif LEGACY_AVAILABLE:
+            logger.info(f"📦 Using LEGACY extractor for {filename}")
+            
+            extractor = get_vacuum_extractor()
+            result = extractor.vacuum_file(temp_path, project)
+            
+            return {
+                "success": True,
+                "source_file": filename,
+                "project": project,
+                "extraction_system": "legacy",
+                "tables_found": result['tables_found'],
+                "total_rows": result['total_rows'],
+                "extracts": result['extracts'],
+                "errors": result['errors']
+            }
+        
+        else:
+            raise HTTPException(501, "No extraction system available")
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Vacuum status error: {e}")
-        return {
-            "available": False,
-            "error": str(e)
-        }
+        logger.error(f"Upload error: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
+
+# =============================================================================
+# FORCE CLOUD EXTRACTION
+# =============================================================================
+
+@router.post("/vacuum/upload-with-cloud")
+async def vacuum_upload_force_cloud(
+    file: UploadFile = File(...),
+    project: Optional[str] = Form(None)
+):
+    """Force cloud (AWS Textract) analysis regardless of local confidence"""
+    return await vacuum_upload(file, project, force_cloud=True)
+
+
+# =============================================================================
+# SECTION TYPES & COLUMN TYPES
+# =============================================================================
 
 @router.get("/vacuum/section-types")
 async def get_section_types():
     """Get all available section types"""
     return {
         "section_types": [
-            {"value": "employee_info", "label": "Employee Information", "description": "Names, IDs, SSNs, hire dates, departments"},
-            {"value": "earnings", "label": "Earnings", "description": "Pay codes, hours, rates, current and YTD amounts"},
-            {"value": "taxes", "label": "Taxes", "description": "Federal, state, local taxes, FICA, Medicare"},
-            {"value": "deductions", "label": "Deductions", "description": "401k, medical, dental, garnishments, etc."},
-            {"value": "pay_info", "label": "Pay Information", "description": "Gross pay, net pay, check numbers, direct deposit"},
-            {"value": "unknown", "label": "Unknown", "description": "Section type not detected"}
+            {"value": "employee_info", "label": "Employee Information", "layout": "key_value"},
+            {"value": "earnings", "label": "Earnings", "layout": "table"},
+            {"value": "taxes", "label": "Taxes", "layout": "table"},
+            {"value": "deductions", "label": "Deductions", "layout": "table"},
+            {"value": "pay_totals", "label": "Pay Totals", "layout": "key_value"},
         ]
     }
 
@@ -203,23 +306,19 @@ async def get_column_types():
         "column_types": {
             "employee_info": [
                 {"value": "employee_id", "label": "Employee ID"},
-                {"value": "employee_name", "label": "Employee Name (Full)"},
+                {"value": "employee_name", "label": "Employee Name"},
                 {"value": "first_name", "label": "First Name"},
                 {"value": "last_name", "label": "Last Name"},
                 {"value": "ssn", "label": "SSN"},
                 {"value": "department", "label": "Department"},
                 {"value": "location", "label": "Location"},
                 {"value": "job_title", "label": "Job Title"},
-                {"value": "pay_rate", "label": "Pay Rate"},
                 {"value": "hire_date", "label": "Hire Date"},
-                {"value": "term_date", "label": "Term Date"},
-                {"value": "check_date", "label": "Check Date"},
-                {"value": "pay_period_start", "label": "Pay Period Start"},
-                {"value": "pay_period_end", "label": "Pay Period End"},
+                {"value": "tax_status", "label": "Tax Status (Fed/State/Local)"},
             ],
             "earnings": [
                 {"value": "earning_code", "label": "Earning Code"},
-                {"value": "earning_description", "label": "Earning Description"},
+                {"value": "earning_description", "label": "Description"},
                 {"value": "hours_current", "label": "Current Hours"},
                 {"value": "hours_ytd", "label": "YTD Hours"},
                 {"value": "rate", "label": "Rate"},
@@ -228,365 +327,48 @@ async def get_column_types():
             ],
             "taxes": [
                 {"value": "tax_code", "label": "Tax Code"},
-                {"value": "tax_description", "label": "Tax Description"},
+                {"value": "tax_description", "label": "Description"},
                 {"value": "taxable_wages", "label": "Taxable Wages"},
-                {"value": "tax_amount_current", "label": "Current Tax Amount"},
-                {"value": "tax_amount_ytd", "label": "YTD Tax Amount"},
-                {"value": "tax_er_current", "label": "Employer Current"},
-                {"value": "tax_er_ytd", "label": "Employer YTD"},
+                {"value": "tax_amount_current", "label": "Current Amount"},
+                {"value": "tax_amount_ytd", "label": "YTD Amount"},
             ],
             "deductions": [
                 {"value": "deduction_code", "label": "Deduction Code"},
-                {"value": "deduction_description", "label": "Deduction Description"},
-                {"value": "deduction_election", "label": "Election/Percent"},
+                {"value": "deduction_description", "label": "Description"},
                 {"value": "deduction_ee_current", "label": "Employee Current"},
                 {"value": "deduction_ee_ytd", "label": "Employee YTD"},
                 {"value": "deduction_er_current", "label": "Employer Current"},
                 {"value": "deduction_er_ytd", "label": "Employer YTD"},
             ],
-            "pay_info": [
+            "pay_totals": [
                 {"value": "gross_pay", "label": "Gross Pay"},
                 {"value": "net_pay", "label": "Net Pay"},
+                {"value": "total_taxes", "label": "Total Taxes"},
+                {"value": "total_deductions", "label": "Total Deductions"},
                 {"value": "check_number", "label": "Check Number"},
                 {"value": "direct_deposit", "label": "Direct Deposit Amount"},
             ],
-            "universal": [
-                {"value": "code", "label": "Code (Generic)"},
-                {"value": "description", "label": "Description (Generic)"},
-                {"value": "unknown", "label": "Unknown"},
-            ]
         }
     }
 
 
 # =============================================================================
-# UPLOAD & EXTRACTION
-# =============================================================================
-
-@router.post("/vacuum/upload")
-async def vacuum_upload(
-    file: UploadFile = File(...),
-    project: Optional[str] = Form(None)
-):
-    """Upload a file for vacuum extraction with intelligent detection."""
-    if not VACUUM_AVAILABLE:
-        raise HTTPException(501, "Vacuum extractor not available")
-    
-    filename = file.filename
-    file_ext = filename.split('.')[-1].lower()
-    
-    if file_ext not in ['pdf', 'xlsx', 'xls', 'csv']:
-        raise HTTPException(400, f"Unsupported file type: {file_ext}. Supported: pdf, xlsx, xls, csv")
-    
-    temp_dir = tempfile.mkdtemp()
-    temp_path = os.path.join(temp_dir, filename)
-    
-    try:
-        with open(temp_path, 'wb') as f:
-            shutil.copyfileobj(file.file, f)
-        
-        extractor = get_vacuum_extractor()
-        result = extractor.vacuum_file(temp_path, project)
-        
-        return {
-            "success": True,
-            "source_file": filename,
-            "project": project,
-            "tables_found": result['tables_found'],
-            "total_rows": result['total_rows'],
-            "detected_report_type": result.get('detected_report_type'),
-            "vendor_match": result.get('vendor_match'),
-            "extracts": result['extracts'],
-            "errors": result['errors']
-        }
-        
-    except Exception as e:
-        logger.error(f"Vacuum upload error: {e}", exc_info=True)
-        raise HTTPException(500, str(e))
-    
-    finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-
-
-# =============================================================================
-# SMART EXTRACTION
-# =============================================================================
-
-@router.post("/vacuum/smart-extract")
-async def smart_extract(request: SmartExtractRequest):
-    """Perform smart extraction on an uploaded PDF."""
-    if not SMART_EXTRACTOR_AVAILABLE:
-        raise HTTPException(501, "Smart PDF extractor not available")
-    
-    try:
-        upload_dirs = ['/tmp/uploads', '/data/uploads', '/app/uploads']
-        filepath = None
-        
-        for upload_dir in upload_dirs:
-            test_path = os.path.join(upload_dir, request.filename)
-            if os.path.exists(test_path):
-                filepath = test_path
-                break
-        
-        if not filepath:
-            raise HTTPException(404, f"File not found: {request.filename}")
-        
-        result = extract_pdf_smart(filepath)
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Smart extract error: {e}", exc_info=True)
-        raise HTTPException(500, str(e))
-
-
-# =============================================================================
-# COLUMN SPLITTING
-# =============================================================================
-
-@router.post("/vacuum/split-column")
-async def split_column_endpoint(request: SplitColumnRequest):
-    """Manually split a merged column based on user-defined pattern."""
-    if not VACUUM_AVAILABLE:
-        raise HTTPException(501, "Vacuum extractor not available")
-    
-    try:
-        extractor = get_vacuum_extractor()
-        
-        extract = extractor.get_extract_by_id(request.extract_id)
-        if not extract:
-            raise HTTPException(404, "Extract not found")
-        
-        raw_data = extract.get('raw_data', [])
-        raw_headers = extract.get('raw_headers', [])
-        
-        if not raw_data:
-            raise HTTPException(400, "No data to split")
-        
-        # Perform the split
-        if request.split_method == 'pattern' and request.pattern:
-            if split_by_pattern:
-                new_data, new_cols = split_by_pattern(
-                    raw_data, request.column_index, request.pattern, request.new_headers or []
-                )
-            else:
-                # Fallback implementation
-                new_data, new_cols = _fallback_split_by_pattern(
-                    raw_data, request.column_index, request.pattern, request.new_headers or []
-                )
-        elif request.split_method == 'positions' and request.positions:
-            if split_by_positions:
-                new_data, new_cols = split_by_positions(
-                    raw_data, request.column_index, request.positions, request.new_headers or []
-                )
-            else:
-                new_data, new_cols = _fallback_split_by_positions(
-                    raw_data, request.column_index, request.positions, request.new_headers or []
-                )
-        elif request.split_method == 'delimiter' and request.delimiter:
-            if split_by_delimiter:
-                new_data, new_cols = split_by_delimiter(
-                    raw_data, request.column_index, request.delimiter, request.new_headers or []
-                )
-            else:
-                new_data, new_cols = _fallback_split_by_delimiter(
-                    raw_data, request.column_index, request.delimiter, request.new_headers or []
-                )
-        else:
-            raise HTTPException(400, "Invalid split method or missing parameters")
-        
-        # Build new headers list
-        new_raw_headers = list(raw_headers[:request.column_index]) + new_cols + list(raw_headers[request.column_index + 1:])
-        
-        # Update the extract in database
-        if hasattr(extractor, 'update_extract_data'):
-            success = extractor.update_extract_data(
-                request.extract_id,
-                raw_data=new_data,
-                raw_headers=new_raw_headers,
-                column_count=len(new_raw_headers)
-            )
-        else:
-            success = False
-            logger.warning("update_extract_data method not available")
-        
-        return {
-            "success": success,
-            "new_headers": new_raw_headers,
-            "new_column_count": len(new_raw_headers),
-            "rows_processed": len(new_data),
-            "preview": new_data[:5]
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error splitting column: {e}", exc_info=True)
-        raise HTTPException(500, str(e))
-
-
-@router.post("/vacuum/detect-pattern")
-async def detect_pattern_endpoint(request: DetectPatternRequest):
-    """Auto-detect split pattern from sample data."""
-    try:
-        if not request.sample_values:
-            raise HTTPException(400, "No sample values provided")
-        
-        if SMART_EXTRACTOR_AVAILABLE and detect_split_patterns:
-            suggestions = detect_split_patterns(request.sample_values, request.section_type)
-        else:
-            suggestions = _fallback_detect_patterns(request.sample_values)
-        
-        return {
-            "suggestions": suggestions,
-            "sample_analyzed": request.sample_values[0][:100] if request.sample_values else ''
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error detecting pattern: {e}", exc_info=True)
-        raise HTTPException(500, str(e))
-
-
-# =============================================================================
-# FALLBACK IMPLEMENTATIONS
-# =============================================================================
-
-def _fallback_split_by_pattern(data: list, col_idx: int, pattern: str, new_headers: list) -> tuple:
-    """Fallback pattern split implementation"""
-    new_data = []
-    compiled = re.compile(pattern)
-    num_groups = compiled.groups
-    
-    if not new_headers or len(new_headers) != num_groups:
-        new_headers = [f'Split_{i+1}' for i in range(num_groups)]
-    
-    for row in data:
-        if col_idx >= len(row):
-            new_data.append(row)
-            continue
-        
-        cell = str(row[col_idx])
-        match = compiled.search(cell)
-        
-        if match:
-            new_row = list(row[:col_idx]) + list(match.groups()) + list(row[col_idx + 1:])
-        else:
-            new_row = list(row[:col_idx]) + [''] * num_groups + list(row[col_idx + 1:])
-        
-        new_data.append(new_row)
-    
-    return new_data, new_headers
-
-
-def _fallback_split_by_positions(data: list, col_idx: int, positions: list, new_headers: list) -> tuple:
-    """Fallback position split implementation"""
-    num_cols = len(positions) + 1
-    if not new_headers or len(new_headers) != num_cols:
-        new_headers = [f'Split_{i+1}' for i in range(num_cols)]
-    
-    new_data = []
-    
-    for row in data:
-        if col_idx >= len(row):
-            new_data.append(row)
-            continue
-        
-        cell = str(row[col_idx])
-        splits = []
-        prev_pos = 0
-        
-        for pos in positions:
-            splits.append(cell[prev_pos:pos].strip())
-            prev_pos = pos
-        splits.append(cell[prev_pos:].strip())
-        
-        new_row = list(row[:col_idx]) + splits + list(row[col_idx + 1:])
-        new_data.append(new_row)
-    
-    return new_data, new_headers
-
-
-def _fallback_split_by_delimiter(data: list, col_idx: int, delimiter: str, new_headers: list) -> tuple:
-    """Fallback delimiter split implementation"""
-    max_splits = 1
-    for row in data:
-        if col_idx < len(row):
-            parts = str(row[col_idx]).split(delimiter)
-            max_splits = max(max_splits, len(parts))
-    
-    if not new_headers or len(new_headers) != max_splits:
-        new_headers = [f'Split_{i+1}' for i in range(max_splits)]
-    
-    new_data = []
-    
-    for row in data:
-        if col_idx >= len(row):
-            new_data.append(row)
-            continue
-        
-        cell = str(row[col_idx])
-        parts = cell.split(delimiter)
-        
-        while len(parts) < max_splits:
-            parts.append('')
-        
-        new_row = list(row[:col_idx]) + [p.strip() for p in parts] + list(row[col_idx + 1:])
-        new_data.append(new_row)
-    
-    return new_data, new_headers
-
-
-def _fallback_detect_patterns(sample_values: list) -> list:
-    """Simple fallback pattern detection"""
-    suggestions = []
-    
-    if not sample_values:
-        return suggestions
-    
-    first_val = str(sample_values[0])
-    
-    if re.search(r'[A-Z]+\s+[\d.]+', first_val):
-        suggestions.append({
-            'pattern': r'([A-Za-z]+)\s+([\d,]+\.?\d*)',
-            'headers': ['Code', 'Amount'],
-            'description': 'Code followed by number'
-        })
-    
-    numbers = re.findall(r'[\d,]+\.?\d*', first_val)
-    if len(numbers) >= 3:
-        suggestions.append({
-            'pattern': r'([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)',
-            'headers': ['Value1', 'Value2', 'Value3'],
-            'description': '3 numeric values'
-        })
-    
-    return suggestions
-
-
-# =============================================================================
-# BROWSE & EXPLORE
+# FILES & EXTRACTS (uses legacy storage for now)
 # =============================================================================
 
 @router.get("/vacuum/files")
 async def get_vacuum_files(project: Optional[str] = None):
     """Get summary of all vacuumed files"""
-    if not VACUUM_AVAILABLE:
-        raise HTTPException(501, "Vacuum extractor not available")
+    if not LEGACY_AVAILABLE:
+        return {"files": [], "total": 0}
     
     try:
         extractor = get_vacuum_extractor()
         files = extractor.get_files_summary(project)
-        
-        return {
-            "files": files,
-            "total": len(files)
-        }
+        return {"files": files, "total": len(files)}
     except Exception as e:
-        logger.error(f"Error getting vacuum files: {e}")
-        raise HTTPException(500, str(e))
+        logger.error(f"Error getting files: {e}")
+        return {"files": [], "total": 0, "error": str(e)}
 
 
 @router.get("/vacuum/extracts")
@@ -594,33 +376,31 @@ async def get_extracts(
     project: Optional[str] = None,
     source_file: Optional[str] = None
 ):
-    """Get all extracts with detection results, optionally filtered"""
-    if not VACUUM_AVAILABLE:
-        raise HTTPException(501, "Vacuum extractor not available")
+    """Get all extracts with optional filters"""
+    if not LEGACY_AVAILABLE:
+        return {"extracts": [], "total": 0}
     
     try:
         extractor = get_vacuum_extractor()
         extracts = extractor.get_extracts(project, source_file)
         
+        # Truncate large data for response
         for ext in extracts:
-            if ext.get('raw_data') and len(ext['raw_data']) > 5:
-                ext['preview'] = ext['raw_data'][:5]
+            if ext.get('raw_data') and len(ext['raw_data']) > 10:
+                ext['preview'] = ext['raw_data'][:10]
                 ext['raw_data'] = None
         
-        return {
-            "extracts": extracts,
-            "total": len(extracts)
-        }
+        return {"extracts": extracts, "total": len(extracts)}
     except Exception as e:
         logger.error(f"Error getting extracts: {e}")
-        raise HTTPException(500, str(e))
+        return {"extracts": [], "total": 0, "error": str(e)}
 
 
 @router.get("/vacuum/extract/{extract_id}")
 async def get_extract_detail(extract_id: int, preview_rows: int = 50):
-    """Get full detail for a single extract including detection results"""
-    if not VACUUM_AVAILABLE:
-        raise HTTPException(501, "Vacuum extractor not available")
+    """Get full detail for a single extract"""
+    if not LEGACY_AVAILABLE:
+        raise HTTPException(501, "Legacy extractor not available")
     
     try:
         extractor = get_vacuum_extractor()
@@ -629,17 +409,7 @@ async def get_extract_detail(extract_id: int, preview_rows: int = 50):
         if not extract:
             raise HTTPException(404, "Extract not found")
         
-        raw_data = extract.get('raw_data', [])
-        if raw_data and len(raw_data) > preview_rows:
-            extract['preview'] = raw_data[:preview_rows]
-            extract['truncated'] = True
-            extract['full_row_count'] = len(raw_data)
-        else:
-            extract['preview'] = raw_data
-            extract['truncated'] = False
-        
         return extract
-        
     except HTTPException:
         raise
     except Exception as e:
@@ -648,246 +418,83 @@ async def get_extract_detail(extract_id: int, preview_rows: int = 50):
 
 
 # =============================================================================
-# LEARNING & CONFIRMATION ENDPOINTS
+# TEMPLATE MANAGEMENT
 # =============================================================================
 
-@router.post("/vacuum/confirm-section")
-async def confirm_section(request: ConfirmSectionRequest):
-    """Confirm or correct section detection."""
-    if not VACUUM_AVAILABLE:
-        raise HTTPException(501, "Vacuum extractor not available")
-    
-    valid_sections = ['employee_info', 'earnings', 'taxes', 'deductions', 'pay_info', 'unknown']
-    if request.section_type not in valid_sections:
-        raise HTTPException(400, f"Invalid section type. Valid: {valid_sections}")
+@router.get("/vacuum/templates")
+async def get_templates():
+    """Get all learned extraction templates"""
+    if not EXTRACTION_AVAILABLE:
+        return {"templates": [], "message": "New extraction system not available"}
     
     try:
-        extractor = get_vacuum_extractor()
-        success = extractor.confirm_section(
-            request.extract_id, 
-            request.section_type,
-            request.user_corrected
-        )
-        
-        if success:
-            return {
-                "success": True,
-                "message": f"Section confirmed as '{request.section_type}'",
-                "extract_id": request.extract_id,
-                "learning_applied": True
+        orchestrator = get_extraction_orchestrator()
+        if orchestrator.template_manager:
+            templates = orchestrator.template_manager._get_all_templates()
+            return {"templates": templates, "count": len(templates)}
+        return {"templates": [], "message": "Template manager not available"}
+    except Exception as e:
+        logger.error(f"Error getting templates: {e}")
+        return {"templates": [], "error": str(e)}
+
+
+@router.delete("/vacuum/template/{template_id}")
+async def delete_template(template_id: str):
+    """Delete a learned template"""
+    if not EXTRACTION_AVAILABLE:
+        raise HTTPException(501, "New extraction system not available")
+    
+    try:
+        orchestrator = get_extraction_orchestrator()
+        if orchestrator.template_manager:
+            success = orchestrator.template_manager.delete_template(template_id)
+            return {"success": success, "template_id": template_id}
+        raise HTTPException(501, "Template manager not available")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting template: {e}")
+        raise HTTPException(500, str(e))
+
+
+# =============================================================================
+# VALIDATION INFO
+# =============================================================================
+
+@router.get("/vacuum/validation-rules")
+async def get_validation_rules():
+    """Get the validation rules being applied"""
+    return {
+        "rules": [
+            {
+                "name": "earnings_gross_match",
+                "description": "Sum of earnings should equal Gross Pay",
+                "tolerance": "$0.02"
+            },
+            {
+                "name": "math_check", 
+                "description": "Gross - Taxes - Deductions should equal Net Pay",
+                "tolerance": "$0.02"
+            },
+            {
+                "name": "required_employee_fields",
+                "description": "Every employee must have Name and Employee ID",
+                "fields": ["employee_name", "employee_id"]
+            },
+            {
+                "name": "tax_indicators",
+                "description": "Employees should have tax filing status (Fed/State/Local)",
+                "severity": "warning"
+            },
+            {
+                "name": "value_ranges",
+                "description": "Hours should not exceed 744 (max in a month)",
+                "severity": "warning"
             }
-        else:
-            raise HTTPException(404, "Extract not found")
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error confirming section: {e}")
-        raise HTTPException(500, str(e))
-
-
-@router.post("/vacuum/confirm-column")
-async def confirm_column(request: ConfirmColumnRequest):
-    """Confirm or correct column classification."""
-    if not VACUUM_AVAILABLE:
-        raise HTTPException(501, "Vacuum extractor not available")
-    
-    try:
-        extractor = get_vacuum_extractor()
-        success = extractor.confirm_column(
-            request.extract_id,
-            request.column_index,
-            request.column_type,
-            request.user_corrected
-        )
-        
-        if success:
-            return {
-                "success": True,
-                "message": f"Column {request.column_index} confirmed as '{request.column_type}'",
-                "extract_id": request.extract_id,
-                "column_index": request.column_index,
-                "learning_applied": True
-            }
-        else:
-            raise HTTPException(404, "Extract or column not found")
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error confirming column: {e}")
-        raise HTTPException(500, str(e))
-
-
-@router.post("/vacuum/confirm-all-columns")
-async def confirm_all_columns(request: ConfirmAllColumnsRequest):
-    """Confirm multiple column mappings at once."""
-    if not VACUUM_AVAILABLE:
-        raise HTTPException(501, "Vacuum extractor not available")
-    
-    try:
-        extractor = get_vacuum_extractor()
-        results = []
-        
-        for col_index, col_type in request.column_mappings.items():
-            success = extractor.confirm_column(
-                request.extract_id,
-                int(col_index),
-                col_type,
-                user_corrected=False
-            )
-            results.append({
-                "column_index": col_index,
-                "column_type": col_type,
-                "success": success
-            })
-        
-        return {
-            "success": True,
-            "extract_id": request.extract_id,
-            "columns_confirmed": len([r for r in results if r['success']]),
-            "results": results
-        }
-        
-    except Exception as e:
-        logger.error(f"Error confirming columns: {e}")
-        raise HTTPException(500, str(e))
-
-
-@router.post("/vacuum/learn-vendor")
-async def learn_vendor(request: LearnVendorRequest):
-    """Learn a vendor signature from confirmed extracts."""
-    if not VACUUM_AVAILABLE:
-        raise HTTPException(501, "Vacuum extractor not available")
-    
-    try:
-        extractor = get_vacuum_extractor()
-        
-        extracts = []
-        for ext_id in request.extract_ids:
-            ext = extractor.get_extract_by_id(ext_id)
-            if ext:
-                extracts.append(ext)
-        
-        if not extracts:
-            raise HTTPException(404, "No valid extracts found")
-        
-        success = extractor.learn_vendor_signature(
-            extracts,
-            request.vendor_name,
-            request.report_type
-        )
-        
-        if success:
-            return {
-                "success": True,
-                "message": f"Learned vendor signature for '{request.vendor_name}'",
-                "vendor_name": request.vendor_name,
-                "report_type": request.report_type,
-                "extracts_used": len(extracts)
-            }
-        else:
-            raise HTTPException(400, "Failed to learn vendor signature")
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error learning vendor: {e}")
-        raise HTTPException(500, str(e))
-
-
-# =============================================================================
-# LEARNING STATS & EXPORT
-# =============================================================================
-
-@router.get("/vacuum/learning-stats")
-async def get_learning_stats():
-    """Get statistics on learned patterns and mappings"""
-    if not VACUUM_AVAILABLE:
-        raise HTTPException(501, "Vacuum extractor not available")
-    
-    try:
-        extractor = get_vacuum_extractor()
-        stats = extractor.get_pattern_stats()
-        
-        return {
-            "success": True,
-            "stats": stats
-        }
-        
-    except Exception as e:
-        logger.error(f"Error getting learning stats: {e}")
-        raise HTTPException(500, str(e))
-
-
-@router.get("/vacuum/export-learning")
-async def export_learning():
-    """Export all learned patterns for backup"""
-    if not VACUUM_AVAILABLE:
-        raise HTTPException(501, "Vacuum extractor not available")
-    
-    try:
-        extractor = get_vacuum_extractor()
-        data = extractor.export_learning_data()
-        
-        return {
-            "success": True,
-            "export_date": datetime.now().isoformat(),
-            "data": data
-        }
-        
-    except Exception as e:
-        logger.error(f"Error exporting learning data: {e}")
-        raise HTTPException(500, str(e))
-
-
-# =============================================================================
-# RE-DETECTION
-# =============================================================================
-
-@router.post("/vacuum/redetect/{extract_id}")
-async def redetect_extract(extract_id: int):
-    """Re-run detection on an existing extract."""
-    if not VACUUM_AVAILABLE:
-        raise HTTPException(501, "Vacuum extractor not available")
-    
-    try:
-        extractor = get_vacuum_extractor()
-        extract = extractor.get_extract_by_id(extract_id)
-        
-        if not extract:
-            raise HTTPException(404, "Extract not found")
-        
-        headers = extract.get('raw_headers', [])
-        data = extract.get('raw_data', [])
-        
-        section_result = extractor.detect_section(headers, data, extract_id)
-        col_results = extractor.classify_columns(headers, data, section_result.section_type)
-        extractor._update_extract_detection(extract_id, section_result, col_results)
-        
-        return {
-            "success": True,
-            "extract_id": extract_id,
-            "detected_section": section_result.section_type.value,
-            "section_confidence": section_result.confidence,
-            "section_signals": section_result.signals_matched,
-            "column_classifications": [
-                {
-                    "index": c.column_index,
-                    "header": c.header,
-                    "detected_type": c.detected_type.value,
-                    "confidence": c.confidence,
-                    "signals": c.signals_matched
-                }
-                for c in col_results
-            ]
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error re-detecting: {e}")
-        raise HTTPException(500, str(e))
+        ],
+        "confidence_threshold": 0.98,
+        "cloud_fallback_threshold": 0.80
+    }
 
 
 # =============================================================================
@@ -897,88 +504,61 @@ async def redetect_extract(extract_id: int):
 @router.delete("/vacuum/file/{source_file}")
 async def delete_vacuum_file(source_file: str, project: Optional[str] = None):
     """Delete all extracts for a file"""
-    if not VACUUM_AVAILABLE:
-        raise HTTPException(501, "Vacuum extractor not available")
+    if not LEGACY_AVAILABLE:
+        raise HTTPException(501, "Legacy extractor not available")
     
     try:
         extractor = get_vacuum_extractor()
         count = extractor.delete_file_extracts(source_file, project)
-        
-        return {
-            "success": True,
-            "deleted_extracts": count,
-            "source_file": source_file
-        }
+        return {"success": True, "deleted_extracts": count, "source_file": source_file}
     except Exception as e:
-        logger.error(f"Error deleting vacuum file: {e}")
+        logger.error(f"Error deleting file: {e}")
         raise HTTPException(500, str(e))
 
 
 @router.post("/vacuum/reset")
 async def reset_vacuum():
-    """Delete all vacuum extracts (keeps learned patterns)"""
-    if not VACUUM_AVAILABLE:
-        raise HTTPException(501, "Vacuum extractor not available")
+    """Delete all vacuum extracts"""
+    if not LEGACY_AVAILABLE:
+        raise HTTPException(501, "Legacy extractor not available")
     
     try:
         extractor = get_vacuum_extractor()
         count = extractor.delete_all_extracts()
-        
-        logger.warning(f"Vacuum data reset - {count} extracts deleted")
-        
-        return {
-            "success": True,
-            "deleted_extracts": count,
-            "note": "Learned patterns preserved"
-        }
+        return {"success": True, "deleted_extracts": count}
     except Exception as e:
-        logger.error(f"Error resetting vacuum: {e}")
+        logger.error(f"Error resetting: {e}")
         raise HTTPException(500, str(e))
 
 
 # =============================================================================
-# HEADER METADATA EXTRACTION
+# HEADER METADATA
 # =============================================================================
 
 @router.get("/vacuum/header-metadata")
 async def get_header_metadata(source_file: str):
-    """Extract header metadata from a pay register document."""
-    if not VACUUM_AVAILABLE:
-        raise HTTPException(501, "Vacuum extractor not available")
+    """Extract header metadata from a document"""
+    if not LEGACY_AVAILABLE:
+        return {"success": False, "metadata": {}}
     
     try:
         extractor = get_vacuum_extractor()
         metadata = extractor.extract_header_metadata(source_file)
-        
-        return {
-            "success": True,
-            "source_file": source_file,
-            "metadata": metadata
-        }
-        
+        return {"success": True, "source_file": source_file, "metadata": metadata}
     except Exception as e:
-        logger.error(f"Error extracting header metadata: {e}")
-        return {
-            "success": False,
-            "source_file": source_file,
-            "metadata": {
-                "company": "",
-                "pay_period_start": "",
-                "pay_period_end": "",
-                "check_date": ""
-            }
-        }
+        logger.error(f"Error extracting metadata: {e}")
+        return {"success": False, "metadata": {}}
 
 
 # =============================================================================
-# FULL MAPPING WORKFLOW
+# MAPPINGS
 # =============================================================================
 
 @router.post("/vacuum/apply-mappings")
 async def apply_all_mappings(request: ApplyMappingsRequest):
-    """Apply all section mappings for a pay register."""
-    if not VACUUM_AVAILABLE:
-        raise HTTPException(501, "Vacuum extractor not available")
+    """Apply all section mappings for a pay register"""
+    if not LEGACY_AVAILABLE:
+        raise HTTPException(501, "Legacy extractor not available")
     
     try:
         extractor = get_vacuum_extractor()
@@ -987,7 +567,7 @@ async def apply_all_mappings(request: ApplyMappingsRequest):
         for section, mapping_data in request.section_mappings.items():
             if not mapping_data or not mapping_data.get('columns'):
                 continue
-                
+            
             extract_id = mapping_data.get('extract_id')
             if not extract_id:
                 continue
@@ -998,34 +578,19 @@ async def apply_all_mappings(request: ApplyMappingsRequest):
                 if target and target != 'skip':
                     column_map[header] = target
             
-            if not column_map:
-                continue
-            
-            result = extractor.apply_section_mapping(
-                extract_id=extract_id,
-                section_type=section,
-                column_map=column_map,
-                header_metadata=request.header_metadata if section == 'employee_info' else None
-            )
-            
-            results.append({
-                "section": section,
-                "extract_id": extract_id,
-                "columns_mapped": len(column_map),
-                "success": result.get('success', False)
-            })
-            
-            if request.remember_for_vendor:
-                for header, target in column_map.items():
-                    try:
-                        extractor.learn_column_mapping(
-                            source_header=header,
-                            target_column_type=target,
-                            section_type=section,
-                            source_file=request.source_file
-                        )
-                    except Exception as e:
-                        logger.warning(f"Failed to learn mapping {header} -> {target}: {e}")
+            if column_map:
+                result = extractor.apply_section_mapping(
+                    extract_id=extract_id,
+                    section_type=section,
+                    column_map=column_map,
+                    header_metadata=request.header_metadata if section == 'employee_info' else None
+                )
+                results.append({
+                    "section": section,
+                    "extract_id": extract_id,
+                    "columns_mapped": len(column_map),
+                    "success": result.get('success', False)
+                })
         
         return {
             "success": True,
@@ -1033,39 +598,6 @@ async def apply_all_mappings(request: ApplyMappingsRequest):
             "sections_processed": len(results),
             "results": results
         }
-        
     except Exception as e:
         logger.error(f"Error applying mappings: {e}")
-        raise HTTPException(500, str(e))
-
-
-# =============================================================================
-# LEGACY MAPPING ENDPOINT
-# =============================================================================
-
-@router.post("/vacuum/apply-mapping")
-async def apply_mapping(request: ColumnMappingRequest):
-    """Apply column mapping to create a structured table (legacy endpoint)."""
-    if not VACUUM_AVAILABLE:
-        raise HTTPException(501, "Vacuum extractor not available")
-    
-    try:
-        extractor = get_vacuum_extractor()
-        extract = extractor.get_extract_by_id(request.extract_id)
-        
-        if not extract:
-            raise HTTPException(404, "Extract not found")
-        
-        return {
-            "success": True,
-            "message": f"Mapping applied to create '{request.target_table}'",
-            "extract_id": request.extract_id,
-            "target_table": request.target_table,
-            "columns_mapped": len(request.column_map)
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error applying mapping: {e}")
         raise HTTPException(500, str(e))
