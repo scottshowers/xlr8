@@ -517,10 +517,50 @@ class VacuumExtractor:
         
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self.db_path = db_path
-        self.conn = duckdb.connect(db_path)
-        self._init_tables()
+        
+        # Try to connect, auto-recover from corruption
+        try:
+            self.conn = duckdb.connect(db_path)
+            self._init_tables()
+        except Exception as e:
+            error_msg = str(e)
+            if 'WAL' in error_msg or 'Failure while replaying' in error_msg or 'INTERNAL Error' in error_msg:
+                logger.warning(f"Database corrupted, resetting: {e}")
+                self._reset_corrupted_database(db_path)
+                self.conn = duckdb.connect(db_path)
+                self._init_tables()
+            else:
+                raise
+        
         self._seed_patterns()
         logger.info(f"VacuumExtractor v2 initialized with {db_path}")
+    
+    def _reset_corrupted_database(self, db_path: str):
+        """Delete corrupted database files to start fresh"""
+        import glob
+        
+        # Close any existing connection
+        try:
+            if hasattr(self, 'conn') and self.conn:
+                self.conn.close()
+        except:
+            pass
+        
+        # Delete all related files
+        patterns = [
+            db_path,
+            f"{db_path}.wal",
+            f"{db_path}.tmp",
+            f"{db_path}-journal",
+        ]
+        
+        for pattern in patterns:
+            for filepath in glob.glob(pattern):
+                try:
+                    os.remove(filepath)
+                    logger.info(f"Removed corrupted file: {filepath}")
+                except Exception as e:
+                    logger.warning(f"Could not remove {filepath}: {e}")
     
     def _init_tables(self):
         """Create database tables for extracts, patterns, and learning.
