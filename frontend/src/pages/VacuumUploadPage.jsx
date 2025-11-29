@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 /**
  * Vacuum Upload Page
@@ -10,6 +11,15 @@ import { useState, useEffect, useRef } from 'react'
  */
 export default function VacuumUploadPage() {
   const [currentSection, setCurrentSection] = useState('upload')
+  const navigate = useNavigate()
+
+  const handleNavClick = (section) => {
+    if (section === 'explore') {
+      navigate('/vacuum/explore')
+    } else {
+      setCurrentSection(section)
+    }
+  }
 
   return (
     <div style={styles.container}>
@@ -21,7 +31,7 @@ export default function VacuumUploadPage() {
 
         <nav style={styles.nav}>
           <button
-            onClick={() => setCurrentSection('upload')}
+            onClick={() => handleNavClick('upload')}
             style={{
               ...styles.navItem,
               ...(currentSection === 'upload' ? styles.navItemActive : {})
@@ -31,17 +41,15 @@ export default function VacuumUploadPage() {
           </button>
 
           <button
-            onClick={() => setCurrentSection('explore')}
-            style={{
-              ...styles.navItem,
-              ...(currentSection === 'explore' ? styles.navItemActive : {})
-            }}
+            onClick={() => handleNavClick('explore')}
+            style={styles.navItem}
           >
             🔍 Explore Data
+            <span style={styles.navBadge}>NEW</span>
           </button>
 
           <button
-            onClick={() => setCurrentSection('map')}
+            onClick={() => handleNavClick('map')}
             style={{
               ...styles.navItem,
               ...(currentSection === 'map' ? styles.navItemActive : {})
@@ -51,7 +59,7 @@ export default function VacuumUploadPage() {
           </button>
 
           <button
-            onClick={() => setCurrentSection('learn')}
+            onClick={() => handleNavClick('learn')}
             style={{
               ...styles.navItem,
               ...(currentSection === 'learn' ? styles.navItemActive : {})
@@ -70,8 +78,7 @@ export default function VacuumUploadPage() {
 
       {/* Main Content Area */}
       <div style={styles.mainContent}>
-        {currentSection === 'upload' && <UploadSection />}
-        {currentSection === 'explore' && <ExploreSection />}
+        {currentSection === 'upload' && <UploadSection onExplore={() => handleNavClick('explore')} />}
         {currentSection === 'map' && <MapSection />}
         {currentSection === 'learn' && <LearnSection />}
       </div>
@@ -83,15 +90,30 @@ export default function VacuumUploadPage() {
 // ============================================================================
 // UPLOAD SECTION
 // ============================================================================
-function UploadSection() {
+function UploadSection({ onExplore }) {
   const [dragOver, setDragOver] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
   const [project, setProject] = useState('')
+  const [status, setStatus] = useState(null)
   const fileInputRef = useRef(null)
 
   const API_BASE = import.meta.env.VITE_API_URL || 'https://hcmpact-xlr8-production.up.railway.app'
+
+  useEffect(() => {
+    checkStatus()
+  }, [])
+
+  const checkStatus = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/vacuum/status`)
+      const data = await res.json()
+      setStatus(data)
+    } catch (err) {
+      setStatus({ available: false, error: err.message })
+    }
+  }
 
   const handleDrop = async (e) => {
     e.preventDefault()
@@ -148,7 +170,12 @@ function UploadSection() {
         Extract ALL data from complex files. Parse now, understand later.
       </p>
 
-      {/* Project Input */}
+      {status && !status.available && (
+        <div style={styles.errorBox}>
+          ❌ Vacuum extractor not available
+        </div>
+      )}
+
       <div style={styles.formGroup}>
         <label style={styles.label}>Project (optional)</label>
         <input
@@ -160,7 +187,6 @@ function UploadSection() {
         />
       </div>
 
-      {/* Drop Zone */}
       <div
         style={{
           ...styles.dropZone,
@@ -188,24 +214,16 @@ function UploadSection() {
         ) : (
           <>
             <span style={styles.dropIcon}>🧹</span>
-            <p style={styles.dropText}>
-              Drop PDF, Excel, or CSV here
-            </p>
-            <p style={styles.dropSubtext}>
-              or click to browse
-            </p>
+            <p style={styles.dropText}>Drop PDF, Excel, or CSV here</p>
+            <p style={styles.dropSubtext}>or click to browse</p>
           </>
         )}
       </div>
 
-      {/* Error Message */}
       {error && (
-        <div style={styles.errorBox}>
-          ❌ {error}
-        </div>
+        <div style={styles.errorBox}>❌ {error}</div>
       )}
 
-      {/* Success Result */}
       {result && (
         <div style={styles.resultBox}>
           <h3 style={styles.resultTitle}>✅ Extraction Complete!</h3>
@@ -219,6 +237,14 @@ function UploadSection() {
               <span style={styles.statValue}>{result.total_rows?.toLocaleString()}</span>
               <span style={styles.statLabel}>Total Rows</span>
             </div>
+            {result.detected_report_type && (
+              <div style={styles.statItem}>
+                <span style={{...styles.statValue, fontSize: '1.2rem'}}>
+                  {result.detected_report_type.replace('_', ' ')}
+                </span>
+                <span style={styles.statLabel}>Detected Type</span>
+              </div>
+            )}
           </div>
 
           {result.extracts?.length > 0 && (
@@ -228,7 +254,16 @@ function UploadSection() {
                 <div key={idx} style={styles.extractItem}>
                   <div style={styles.extractHeader}>
                     <span style={styles.extractName}>
-                      {ext.sheet_name || `Table ${ext.table_index + 1}`}
+                      {ext.detected_section ? (
+                        <span style={{
+                          ...styles.sectionBadge,
+                          background: getSectionColor(ext.detected_section)
+                        }}>
+                          {getSectionIcon(ext.detected_section)} {formatSectionName(ext.detected_section)}
+                        </span>
+                      ) : (
+                        ext.sheet_name || `Table ${ext.table_index + 1}`
+                      )}
                     </span>
                     <span style={styles.extractMeta}>
                       Page {ext.page + 1} • {ext.row_count} rows • {ext.column_count} cols
@@ -246,34 +281,34 @@ function UploadSection() {
                     <div 
                       style={{
                         ...styles.confidenceFill,
-                        width: `${(ext.confidence || 0) * 100}%`,
-                        background: ext.confidence > 0.7 ? '#22c55e' : ext.confidence > 0.4 ? '#f59e0b' : '#ef4444'
+                        width: `${(ext.section_confidence || ext.confidence || 0) * 100}%`,
+                        background: (ext.section_confidence || ext.confidence) > 0.7 ? '#22c55e' 
+                          : (ext.section_confidence || ext.confidence) > 0.4 ? '#f59e0b' : '#ef4444'
                       }}
                     />
                   </div>
                   <span style={styles.confidenceLabel}>
-                    {Math.round((ext.confidence || 0) * 100)}% header confidence
+                    {Math.round((ext.section_confidence || ext.confidence || 0) * 100)}% detection confidence
                   </span>
                 </div>
               ))}
             </div>
           )}
 
-          <p style={styles.nextStep}>
-            👉 Go to <strong>Explore Data</strong> to view and map columns
-          </p>
+          <button style={styles.exploreButton} onClick={onExplore}>
+            🔍 Go to Explore Data →
+          </button>
         </div>
       )}
 
-      {/* Info Box */}
       <div style={styles.infoBox}>
         <strong>🧹 How Vacuum Extract Works:</strong>
         <ol style={styles.infoList}>
           <li><strong>Upload</strong> - Drop any PDF, Excel, or CSV file</li>
-          <li><strong>Extract</strong> - We find ALL tables, no interpretation</li>
-          <li><strong>Explore</strong> - Browse what we found, preview data</li>
-          <li><strong>Map</strong> - You tell us what each column means</li>
-          <li><strong>Learn</strong> - We remember for next time</li>
+          <li><strong>Extract</strong> - We find ALL tables with intelligent section detection</li>
+          <li><strong>Explore</strong> - Review detected sections (Earnings, Taxes, Deductions)</li>
+          <li><strong>Confirm/Correct</strong> - Teach the system when it's wrong</li>
+          <li><strong>Learn</strong> - System remembers for next time</li>
         </ol>
         <p style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: '#666' }}>
           💡 Supported formats: PDF (native tables), Excel (.xlsx, .xls), CSV
@@ -283,222 +318,49 @@ function UploadSection() {
   )
 }
 
-
-// ============================================================================
-// EXPLORE SECTION
-// ============================================================================
-function ExploreSection() {
-  const [files, setFiles] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [selectedFile, setSelectedFile] = useState(null)
-  const [extracts, setExtracts] = useState([])
-  const [selectedExtract, setSelectedExtract] = useState(null)
-  const [extractDetail, setExtractDetail] = useState(null)
-
-  const API_BASE = import.meta.env.VITE_API_URL || 'https://hcmpact-xlr8-production.up.railway.app'
-
-  useEffect(() => {
-    fetchFiles()
-  }, [])
-
-  const fetchFiles = async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(`${API_BASE}/api/vacuum/files`)
-      const data = await res.json()
-      setFiles(data.files || [])
-    } catch (err) {
-      console.error('Failed to fetch files:', err)
-    } finally {
-      setLoading(false)
-    }
+function getSectionColor(section) {
+  const colors = {
+    employee_info: '#3b82f6',
+    earnings: '#22c55e',
+    taxes: '#ef4444',
+    deductions: '#f59e0b',
+    pay_info: '#8b5cf6',
+    unknown: '#6b7280'
   }
+  return colors[section] || colors.unknown
+}
 
-  const fetchExtracts = async (sourceFile) => {
-    try {
-      const res = await fetch(`${API_BASE}/api/vacuum/extracts?source_file=${encodeURIComponent(sourceFile)}`)
-      const data = await res.json()
-      setExtracts(data.extracts || [])
-    } catch (err) {
-      console.error('Failed to fetch extracts:', err)
-    }
+function getSectionIcon(section) {
+  const icons = {
+    employee_info: '👤',
+    earnings: '💰',
+    taxes: '🏛️',
+    deductions: '📋',
+    pay_info: '💵',
+    unknown: '❓'
   }
+  return icons[section] || icons.unknown
+}
 
-  const fetchExtractDetail = async (extractId) => {
-    try {
-      const res = await fetch(`${API_BASE}/api/vacuum/extract/${extractId}`)
-      const data = await res.json()
-      setExtractDetail(data)
-    } catch (err) {
-      console.error('Failed to fetch extract detail:', err)
-    }
+function formatSectionName(section) {
+  const names = {
+    employee_info: 'Employee Info',
+    earnings: 'Earnings',
+    taxes: 'Taxes',
+    deductions: 'Deductions',
+    pay_info: 'Pay Info',
+    unknown: 'Unknown'
   }
-
-  const handleFileSelect = (file) => {
-    setSelectedFile(file)
-    setSelectedExtract(null)
-    setExtractDetail(null)
-    fetchExtracts(file.source_file)
-  }
-
-  const handleExtractSelect = (extract) => {
-    setSelectedExtract(extract)
-    fetchExtractDetail(extract.id)
-  }
-
-  const handleDelete = async (sourceFile) => {
-    if (!confirm(`Delete all extracts for "${sourceFile}"?`)) return
-    
-    try {
-      await fetch(`${API_BASE}/api/vacuum/file/${encodeURIComponent(sourceFile)}`, {
-        method: 'DELETE'
-      })
-      fetchFiles()
-      setSelectedFile(null)
-      setExtracts([])
-    } catch (err) {
-      alert('Delete failed')
-    }
-  }
-
-  return (
-    <div style={styles.section}>
-      <h1 style={styles.sectionTitle}>🔍 Explore Extracted Data</h1>
-      <p style={styles.sectionSubtitle}>
-        Browse files and tables extracted by vacuum upload
-      </p>
-
-      {loading ? (
-        <div style={styles.loadingBox}>
-          <div style={styles.spinner}></div>
-          <p>Loading...</p>
-        </div>
-      ) : files.length === 0 ? (
-        <div style={styles.emptyState}>
-          <span style={{ fontSize: '4rem' }}>🧹</span>
-          <p>No files extracted yet</p>
-          <p style={{ fontSize: '0.9rem', color: '#999' }}>
-            Go to Upload & Extract to add files
-          </p>
-        </div>
-      ) : (
-        <div style={styles.exploreGrid}>
-          {/* Files List */}
-          <div style={styles.filesList}>
-            <h3 style={styles.panelTitle}>Files ({files.length})</h3>
-            {files.map((file, idx) => (
-              <div
-                key={idx}
-                style={{
-                  ...styles.fileItem,
-                  ...(selectedFile?.source_file === file.source_file ? styles.fileItemActive : {})
-                }}
-                onClick={() => handleFileSelect(file)}
-              >
-                <div style={styles.fileIcon}>
-                  {file.file_type === 'pdf' ? '📄' : '📊'}
-                </div>
-                <div style={styles.fileInfo}>
-                  <div style={styles.fileName}>{file.source_file}</div>
-                  <div style={styles.fileMeta}>
-                    {file.table_count} tables • {file.total_rows?.toLocaleString()} rows
-                  </div>
-                </div>
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleDelete(file.source_file) }}
-                  style={styles.deleteBtn}
-                  title="Delete"
-                >
-                  🗑️
-                </button>
-              </div>
-            ))}
-          </div>
-
-          {/* Extracts List */}
-          <div style={styles.extractsPanel}>
-            <h3 style={styles.panelTitle}>
-              {selectedFile ? `Tables in ${selectedFile.source_file}` : 'Select a file'}
-            </h3>
-            {extracts.length === 0 ? (
-              <p style={styles.placeholder}>Select a file to see tables</p>
-            ) : (
-              extracts.map((ext, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    ...styles.extractCard,
-                    ...(selectedExtract?.id === ext.id ? styles.extractCardActive : {})
-                  }}
-                  onClick={() => handleExtractSelect(ext)}
-                >
-                  <div style={styles.extractCardHeader}>
-                    <strong>Table {ext.table_index + 1}</strong>
-                    <span>Page {ext.page_num + 1}</span>
-                  </div>
-                  <div style={styles.extractCardMeta}>
-                    {ext.row_count} rows • {ext.column_count} columns
-                  </div>
-                  <div style={styles.extractCardHeaders}>
-                    {ext.raw_headers?.slice(0, 4).join(', ')}
-                    {ext.raw_headers?.length > 4 && '...'}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-
-          {/* Data Preview */}
-          <div style={styles.previewPanel}>
-            <h3 style={styles.panelTitle}>
-              {extractDetail ? 'Data Preview' : 'Select a table'}
-            </h3>
-            {!extractDetail ? (
-              <p style={styles.placeholder}>Select a table to preview data</p>
-            ) : (
-              <div style={styles.previewContent}>
-                <div style={styles.previewMeta}>
-                  <span>Showing {extractDetail.preview?.length || 0} of {extractDetail.row_count} rows</span>
-                  <span style={{
-                    color: extractDetail.confidence > 0.7 ? '#22c55e' : '#f59e0b'
-                  }}>
-                    {Math.round((extractDetail.confidence || 0) * 100)}% confidence
-                  </span>
-                </div>
-                <div style={styles.tableWrapper}>
-                  <table style={styles.dataTable}>
-                    <thead>
-                      <tr>
-                        {extractDetail.raw_headers?.map((h, i) => (
-                          <th key={i} style={styles.dataTableTh}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {extractDetail.preview?.map((row, rowIdx) => (
-                        <tr key={rowIdx}>
-                          {row.map((cell, cellIdx) => (
-                            <td key={cellIdx} style={styles.dataTableTd}>{cell}</td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  )
+  return names[section] || section
 }
 
 
 // ============================================================================
-// MAP SECTION (Placeholder - full implementation would be larger)
+// MAP SECTION
 // ============================================================================
 function MapSection() {
+  const navigate = useNavigate()
+  
   return (
     <div style={styles.section}>
       <h1 style={styles.sectionTitle}>🗺️ Map Columns</h1>
@@ -518,9 +380,12 @@ function MapSection() {
           <li>Create a clean, structured table in DuckDB</li>
           <li>Apply same mapping to similar files automatically</li>
         </ul>
-        <p style={{ marginTop: '1rem', color: '#666' }}>
-          For now, use the Explore section to preview your data.
+        <p style={{ ...styles.cardText, marginTop: '1rem' }}>
+          For now, use <strong>Explore Data</strong> to review and confirm detections.
         </p>
+        <button style={styles.exploreButton} onClick={() => navigate('/vacuum/explore')}>
+          🔍 Go to Explore Data →
+        </button>
       </div>
     </div>
   )
@@ -528,29 +393,96 @@ function MapSection() {
 
 
 // ============================================================================
-// LEARN SECTION (Placeholder)
+// LEARN SECTION
 // ============================================================================
 function LearnSection() {
+  const [stats, setStats] = useState(null)
+  const [loading, setLoading] = useState(true)
+  
+  const API_BASE = import.meta.env.VITE_API_URL || 'https://hcmpact-xlr8-production.up.railway.app'
+
+  useEffect(() => {
+    fetchStats()
+  }, [])
+
+  const fetchStats = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/vacuum/learning-stats`)
+      const data = await res.json()
+      if (data.success) {
+        setStats(data.stats)
+      }
+    } catch (err) {
+      console.error('Failed to fetch learning stats:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
     <div style={styles.section}>
       <h1 style={styles.sectionTitle}>🧠 Learned Mappings</h1>
       <p style={styles.sectionSubtitle}>
-        View and manage column mappings the system has learned
+        View what the system has learned from your confirmations
       </p>
 
-      <div style={styles.card}>
-        <h3 style={styles.cardTitle}>🚧 Coming Soon</h3>
-        <p style={styles.cardText}>
-          The learning system will:
-        </p>
-        <ul style={styles.featureList}>
-          <li>Remember your column mappings</li>
-          <li>Recognize vendor-specific formats (ADP, Paychex, etc.)</li>
-          <li>Auto-suggest mappings for new files</li>
-          <li>Improve accuracy over time</li>
-          <li>Export/import mapping templates</li>
-        </ul>
-      </div>
+      {loading ? (
+        <div style={styles.loadingBox}>
+          <div style={styles.spinner}></div>
+          Loading...
+        </div>
+      ) : stats ? (
+        <div style={styles.statsGrid}>
+          <div style={styles.statCard}>
+            <div style={styles.statCardValue}>{stats.section_patterns || 0}</div>
+            <div style={styles.statCardLabel}>Section Patterns</div>
+          </div>
+          <div style={styles.statCard}>
+            <div style={styles.statCardValue}>{stats.column_patterns || 0}</div>
+            <div style={styles.statCardLabel}>Column Patterns</div>
+          </div>
+          <div style={styles.statCard}>
+            <div style={styles.statCardValue}>{stats.vendor_signatures || 0}</div>
+            <div style={styles.statCardLabel}>Vendor Signatures</div>
+          </div>
+          <div style={styles.statCard}>
+            <div style={styles.statCardValue}>{stats.confirmed_mappings || 0}</div>
+            <div style={styles.statCardLabel}>Confirmed Mappings</div>
+          </div>
+        </div>
+      ) : (
+        <div style={styles.card}>
+          <p style={styles.cardText}>
+            No learning data yet. Upload files and confirm detections to start teaching the system.
+          </p>
+        </div>
+      )}
+
+      {stats?.top_mappings?.length > 0 && (
+        <div style={{ ...styles.card, marginTop: '1.5rem' }}>
+          <h3 style={styles.cardTitle}>Top Confirmed Mappings</h3>
+          <table style={styles.mappingsTable}>
+            <thead>
+              <tr>
+                <th style={styles.mappingsTh}>Source Header</th>
+                <th style={styles.mappingsTh}>Maps To</th>
+                <th style={styles.mappingsTh}>Times Used</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stats.top_mappings.map((m, i) => (
+                <tr key={i}>
+                  <td style={styles.mappingsTd}>{m.source_header}</td>
+                  <td style={styles.mappingsTd}>
+                    <span style={styles.mappingType}>{m.target_column_type}</span>
+                  </td>
+                  <td style={styles.mappingsTd}>{m.times_used}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }
@@ -560,82 +492,87 @@ function LearnSection() {
 // STYLES
 // ============================================================================
 const styles = {
-  // Layout
   container: {
     display: 'flex',
-    minHeight: '100vh',
+    minHeight: '100%',
     background: '#f5f7fa'
   },
   sidebar: {
-    width: '280px',
-    background: '#c9d3d4',
-    color: '#2a3441',
-    display: 'flex',
-    flexDirection: 'column'
+    width: '260px',
+    background: 'linear-gradient(180deg, #e8f0e8 0%, #d4e4d4 100%)',
+    borderRight: '1px solid #c5d5c5',
+    flexShrink: 0
   },
   sidebarHeader: {
     padding: '1.5rem',
-    borderBottom: '1px solid rgba(42, 52, 65, 0.15)'
+    borderBottom: '1px solid #c5d5c5'
   },
   sidebarTitle: {
     margin: 0,
-    fontSize: '1.5rem',
-    fontWeight: '600'
+    fontSize: '1.25rem',
+    color: '#2d4a2d'
   },
   nav: {
-    padding: '1rem',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '0.5rem'
+    padding: '1rem'
   },
   navItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem',
+    width: '100%',
     padding: '0.75rem 1rem',
-    fontSize: '0.95rem',
-    background: 'transparent',
-    color: 'rgba(42, 52, 65, 0.7)',
     border: 'none',
+    background: 'transparent',
     borderRadius: '8px',
     cursor: 'pointer',
+    fontSize: '0.95rem',
+    color: '#2d4a2d',
     textAlign: 'left',
-    transition: 'all 0.2s'
+    transition: 'all 0.15s',
+    marginBottom: '0.25rem'
   },
   navItemActive: {
-    background: 'rgba(131, 177, 109, 0.3)',
-    color: '#2a3441',
+    background: 'rgba(45, 74, 45, 0.15)',
+    fontWeight: '600'
+  },
+  navBadge: {
+    marginLeft: 'auto',
+    padding: '2px 6px',
+    background: '#22c55e',
+    color: 'white',
+    borderRadius: '4px',
+    fontSize: '0.65rem',
     fontWeight: '600'
   },
   navDivider: {
     height: '1px',
-    background: 'rgba(42, 52, 65, 0.15)',
+    background: '#c5d5c5',
     margin: '1rem 0'
   },
   navPlaceholder: {
     padding: '0.75rem 1rem',
-    fontSize: '0.85rem',
-    color: 'rgba(42, 52, 65, 0.5)',
+    fontSize: '0.8rem',
+    color: '#5a7a5a',
     fontStyle: 'italic'
   },
   mainContent: {
     flex: 1,
-    overflow: 'auto'
+    padding: '2rem',
+    overflowY: 'auto'
   },
   section: {
-    padding: '2rem',
-    maxWidth: '1400px',
-    margin: '0 auto'
+    maxWidth: '1200px'
   },
   sectionTitle: {
     margin: '0 0 0.5rem 0',
-    fontSize: '2rem',
+    fontSize: '1.75rem',
     color: '#2a3441'
   },
   sectionSubtitle: {
     margin: '0 0 2rem 0',
-    fontSize: '1rem',
-    color: '#666'
+    color: '#666',
+    fontSize: '1rem'
   },
-
-  // Form
   formGroup: {
     marginBottom: '1.5rem'
   },
@@ -648,40 +585,37 @@ const styles = {
   input: {
     width: '100%',
     maxWidth: '400px',
-    padding: '0.75rem 1rem',
-    fontSize: '1rem',
-    border: '2px solid #e0e0e0',
+    padding: '0.75rem',
+    border: '1px solid #ddd',
     borderRadius: '8px',
-    outline: 'none'
+    fontSize: '1rem'
   },
-
-  // Drop Zone
   dropZone: {
-    border: '3px dashed #ccc',
-    borderRadius: '16px',
+    border: '2px dashed #ccc',
+    borderRadius: '12px',
     padding: '3rem',
     textAlign: 'center',
     cursor: 'pointer',
     transition: 'all 0.2s',
     background: '#fafafa',
-    marginBottom: '2rem'
+    marginBottom: '1.5rem'
   },
   dropZoneActive: {
     borderColor: '#3b82f6',
     background: '#eff6ff'
   },
   dropZoneUploading: {
-    borderColor: '#22c55e',
-    background: '#f0fdf4',
+    borderColor: '#3b82f6',
+    background: '#f0f9ff',
     cursor: 'wait'
   },
   dropIcon: {
-    fontSize: '4rem',
+    fontSize: '3rem',
     display: 'block',
     marginBottom: '1rem'
   },
   dropText: {
-    fontSize: '1.25rem',
+    fontSize: '1.1rem',
     color: '#333',
     margin: '0 0 0.5rem 0'
   },
@@ -690,8 +624,6 @@ const styles = {
     color: '#999',
     margin: 0
   },
-
-  // Results
   errorBox: {
     padding: '1rem',
     background: '#fef2f2',
@@ -714,7 +646,8 @@ const styles = {
   resultStats: {
     display: 'flex',
     gap: '2rem',
-    marginBottom: '1.5rem'
+    marginBottom: '1.5rem',
+    flexWrap: 'wrap'
   },
   statItem: {
     display: 'flex',
@@ -747,11 +680,24 @@ const styles = {
   extractHeader: {
     display: 'flex',
     justifyContent: 'space-between',
-    marginBottom: '0.5rem'
+    alignItems: 'center',
+    marginBottom: '0.5rem',
+    flexWrap: 'wrap',
+    gap: '0.5rem'
   },
   extractName: {
     fontWeight: '600',
     color: '#333'
+  },
+  sectionBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
+    padding: '4px 10px',
+    borderRadius: '6px',
+    color: 'white',
+    fontSize: '0.85rem',
+    fontWeight: '500'
   },
   extractMeta: {
     fontSize: '0.85rem',
@@ -790,15 +736,17 @@ const styles = {
     fontSize: '0.75rem',
     color: '#999'
   },
-  nextStep: {
+  exploreButton: {
     marginTop: '1rem',
-    padding: '1rem',
-    background: '#eff6ff',
+    padding: '0.75rem 1.5rem',
+    background: '#3b82f6',
+    color: 'white',
+    border: 'none',
     borderRadius: '8px',
-    color: '#1e40af'
+    fontSize: '1rem',
+    fontWeight: '500',
+    cursor: 'pointer'
   },
-
-  // Info Box
   infoBox: {
     padding: '1.5rem',
     background: '#f0f9ff',
@@ -811,152 +759,53 @@ const styles = {
     padding: 0,
     lineHeight: 1.8
   },
-
-  // Explore Grid
-  exploreGrid: {
+  statsGrid: {
     display: 'grid',
-    gridTemplateColumns: '280px 300px 1fr',
-    gap: '1.5rem',
-    minHeight: '600px'
+    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+    gap: '1rem',
+    marginBottom: '1.5rem'
   },
-  filesList: {
+  statCard: {
     background: 'white',
     borderRadius: '12px',
-    padding: '1rem',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
-  },
-  extractsPanel: {
-    background: 'white',
-    borderRadius: '12px',
-    padding: '1rem',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
-  },
-  previewPanel: {
-    background: 'white',
-    borderRadius: '12px',
-    padding: '1rem',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
-    overflow: 'hidden'
-  },
-  panelTitle: {
-    margin: '0 0 1rem 0',
-    fontSize: '1rem',
-    color: '#333',
-    paddingBottom: '0.75rem',
-    borderBottom: '1px solid #eee'
-  },
-  fileItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '0.75rem',
-    padding: '0.75rem',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    transition: 'background 0.15s',
-    marginBottom: '0.5rem'
-  },
-  fileItemActive: {
-    background: 'rgba(59, 130, 246, 0.1)'
-  },
-  fileIcon: {
-    fontSize: '1.5rem'
-  },
-  fileInfo: {
-    flex: 1,
-    minWidth: 0
-  },
-  fileName: {
-    fontWeight: '500',
-    fontSize: '0.9rem',
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis'
-  },
-  fileMeta: {
-    fontSize: '0.75rem',
-    color: '#999'
-  },
-  deleteBtn: {
-    padding: '0.4rem',
-    background: 'transparent',
-    border: 'none',
-    cursor: 'pointer',
-    opacity: 0.5,
-    transition: 'opacity 0.15s'
-  },
-  extractCard: {
-    padding: '0.75rem',
-    background: '#f9fafb',
-    borderRadius: '8px',
-    marginBottom: '0.5rem',
-    cursor: 'pointer',
-    border: '2px solid transparent',
-    transition: 'all 0.15s'
-  },
-  extractCardActive: {
-    borderColor: '#3b82f6',
-    background: '#eff6ff'
-  },
-  extractCardHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    fontSize: '0.9rem',
-    marginBottom: '0.25rem'
-  },
-  extractCardMeta: {
-    fontSize: '0.75rem',
-    color: '#999',
-    marginBottom: '0.25rem'
-  },
-  extractCardHeaders: {
-    fontSize: '0.75rem',
-    color: '#666',
-    fontStyle: 'italic'
-  },
-  placeholder: {
-    color: '#999',
+    padding: '1.5rem',
     textAlign: 'center',
-    padding: '2rem'
+    boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
   },
-  previewContent: {
-    height: '100%',
-    display: 'flex',
-    flexDirection: 'column'
+  statCardValue: {
+    fontSize: '2.5rem',
+    fontWeight: '700',
+    color: '#3b82f6'
   },
-  previewMeta: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    fontSize: '0.85rem',
+  statCardLabel: {
+    fontSize: '0.9rem',
     color: '#666',
-    marginBottom: '0.75rem'
+    marginTop: '0.5rem'
   },
-  tableWrapper: {
-    flex: 1,
-    overflow: 'auto'
-  },
-  dataTable: {
+  mappingsTable: {
     width: '100%',
     borderCollapse: 'collapse',
+    marginTop: '1rem'
+  },
+  mappingsTh: {
+    textAlign: 'left',
+    padding: '0.75rem',
+    borderBottom: '2px solid #e5e7eb',
+    color: '#666',
+    fontSize: '0.85rem'
+  },
+  mappingsTd: {
+    padding: '0.75rem',
+    borderBottom: '1px solid #f0f0f0'
+  },
+  mappingType: {
+    display: 'inline-block',
+    padding: '2px 8px',
+    background: '#dbeafe',
+    color: '#1e40af',
+    borderRadius: '4px',
     fontSize: '0.8rem'
   },
-  dataTableTh: {
-    padding: '0.5rem',
-    background: '#f3f4f6',
-    borderBottom: '2px solid #e5e7eb',
-    textAlign: 'left',
-    fontWeight: '600',
-    whiteSpace: 'nowrap'
-  },
-  dataTableTd: {
-    padding: '0.5rem',
-    borderBottom: '1px solid #f0f0f0',
-    maxWidth: '200px',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap'
-  },
-
-  // Common
   loadingBox: {
     textAlign: 'center',
     padding: '3rem',
@@ -970,11 +819,6 @@ const styles = {
     borderRadius: '50%',
     animation: 'spin 1s linear infinite',
     margin: '0 auto 1rem'
-  },
-  emptyState: {
-    textAlign: 'center',
-    padding: '4rem 2rem',
-    color: '#666'
   },
   card: {
     background: 'white',
