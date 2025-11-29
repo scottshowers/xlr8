@@ -869,9 +869,14 @@ def get_vacuum_extractor() -> VacuumExtractor:
 # APPLY PATCH FOR COLUMN SPLITTING
 # =============================================================================
 
-try:
-    from utils.vacuum_extractor_patch import patch_vacuum_extractor
-    patch_vacuum_extractor(VacuumExtractor)
-    logger.info("Vacuum extractor patched with update_extract_data method")
-except ImportError:
+# Try multiple import paths for the patch
+for import_path in ['backend.utils.vacuum_extractor_patch', 'utils.vacuum_extractor_patch']:
+    try:
+        patch_module = __import__(import_path, fromlist=['patch_vacuum_extractor'])
+        patch_module.patch_vacuum_extractor(VacuumExtractor)
+        logger.info(f"Vacuum extractor patched from {import_path}")
+        break
+    except ImportError:
+        continue
+else:
     logger.warning("vacuum_extractor_patch not found, column splitting may not work")
