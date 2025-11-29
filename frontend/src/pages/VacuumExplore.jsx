@@ -9,6 +9,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 // API base - adjust for your environment
 const API_BASE = '/api';
@@ -34,6 +35,8 @@ const SECTION_INFO = {
 // ============================================================================
 
 export default function VacuumExplore() {
+  const navigate = useNavigate();
+  
   // State
   const [files, setFiles] = useState([]);
   const [selectedFile, setSelectedFile] = useState(null);
@@ -228,6 +231,27 @@ export default function VacuumExplore() {
 
   return (
     <div className="vacuum-explore" style={styles.container}>
+      {/* Navigation Bar */}
+      <div style={styles.navBar}>
+        <button style={styles.navBtn} onClick={() => navigate('/vacuum')}>
+          ← Back to Upload
+        </button>
+        <div style={styles.navTabs}>
+          <button style={styles.navTabActive}>🔬 Explore</button>
+          <button style={styles.navTab} onClick={() => navigate('/vacuum/map')}>
+            🗺️ Map Columns
+          </button>
+        </div>
+        {selectedFile && (
+          <button 
+            style={styles.mapFileBtn} 
+            onClick={() => navigate(`/vacuum/map?file=${encodeURIComponent(selectedFile.source_file)}`)}
+          >
+            Map This File →
+          </button>
+        )}
+      </div>
+
       {/* Header */}
       <div style={styles.header}>
         <h1 style={styles.title}>🔬 Vacuum Explorer</h1>
@@ -637,6 +661,60 @@ const styles = {
     padding: '20px',
     backgroundColor: '#f8fafc',
     minHeight: '100vh'
+  },
+  navBar: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: '16px',
+    paddingBottom: '16px',
+    borderBottom: '1px solid #e2e8f0'
+  },
+  navBtn: {
+    padding: '8px 16px',
+    background: '#f1f5f9',
+    border: '1px solid #e2e8f0',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    color: '#475569'
+  },
+  navTabs: {
+    display: 'flex',
+    gap: '4px',
+    background: '#f1f5f9',
+    padding: '4px',
+    borderRadius: '8px'
+  },
+  navTab: {
+    padding: '8px 16px',
+    background: 'transparent',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    color: '#64748b'
+  },
+  navTabActive: {
+    padding: '8px 16px',
+    background: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    color: '#1e293b',
+    fontWeight: '600',
+    boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+  },
+  mapFileBtn: {
+    padding: '8px 16px',
+    background: '#3b82f6',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '500'
   },
   header: {
     marginBottom: '20px'
