@@ -241,6 +241,31 @@ async def delete_format(format_id: str):
         raise HTTPException(500, str(e))
 
 
+@router.get("/vacuum/format/{format_id}/delete")
+async def delete_format_get(format_id: str):
+    """Delete a learned format (GET for browser use)"""
+    return await delete_format(format_id)
+
+
+@router.get("/vacuum/reset-formats")
+async def reset_all_formats():
+    """Delete ALL learned formats and start fresh"""
+    if not EXTRACTOR_AVAILABLE:
+        raise HTTPException(503, "Extraction system not available")
+    
+    try:
+        extractor = get_smart_extractor()
+        formats = extractor.get_formats()
+        deleted = []
+        for fmt in formats:
+            if extractor.delete_format(fmt["format_id"]):
+                deleted.append(fmt["format_id"])
+        return {"success": True, "deleted": deleted, "count": len(deleted)}
+    except Exception as e:
+        logger.error(f"Error resetting formats: {e}")
+        raise HTTPException(500, str(e))
+
+
 @router.get("/vacuum/validation-rules")
 async def get_validation_rules():
     """Get the validation rules being applied"""
