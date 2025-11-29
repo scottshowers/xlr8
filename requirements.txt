@@ -25,3 +25,5 @@ pymupdf>=1.23.0
 pypdfium2>=4.26.0
 duckdb>=0.9.0
 cryptography>=41.0.0
+boto3>=1.28.0
+camelot-py[cv]>=0.11.0
