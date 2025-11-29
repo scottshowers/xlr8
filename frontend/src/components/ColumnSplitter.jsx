@@ -1,23 +1,24 @@
+/**
+ * ColumnSplitter.jsx
+ * Deploy to: frontend/src/components/ColumnSplitter.jsx
+ * 
+ * Modal component for manually splitting merged columns.
+ * Provides pattern suggestions from AI and live preview.
+ */
+
 import React, { useState, useEffect } from 'react';
 
 const API_BASE = '/api';
 
-/**
- * ColumnSplitter Component
- * 
- * Allows users to manually split merged columns when auto-detection fails.
- * Provides pattern suggestions and live preview.
- */
 export default function ColumnSplitter({ 
   extractId, 
   columnIndex, 
   columnHeader, 
-  sampleValues, 
-  sectionType,
+  sampleValues = [], 
+  sectionType = 'unknown',
   onSplitComplete,
   onCancel 
 }) {
-  // State
   const [splitMethod, setSplitMethod] = useState('pattern');
   const [pattern, setPattern] = useState('');
   const [newHeaders, setNewHeaders] = useState(['']);
@@ -41,6 +42,8 @@ export default function ColumnSplitter({
   }, [pattern, splitMethod]);
 
   const loadSuggestions = async () => {
+    if (!sampleValues || sampleValues.length === 0) return;
+    
     try {
       const response = await fetch(`${API_BASE}/vacuum/detect-pattern`, {
         method: 'POST',
@@ -52,15 +55,13 @@ export default function ColumnSplitter({
       });
       
       const data = await response.json();
-      if (data.suggestions) {
+      if (data.suggestions && data.suggestions.length > 0) {
         setSuggestions(data.suggestions);
         
         // Auto-select first suggestion
-        if (data.suggestions.length > 0) {
-          const first = data.suggestions[0];
-          setPattern(first.pattern);
-          setNewHeaders(first.headers);
-        }
+        const first = data.suggestions[0];
+        setPattern(first.pattern);
+        setNewHeaders(first.headers || []);
       }
     } catch (err) {
       console.error('Error loading suggestions:', err);
@@ -68,22 +69,22 @@ export default function ColumnSplitter({
   };
 
   const generatePreview = () => {
-    if (!pattern || !sampleValues.length) return;
+    if (!pattern || !sampleValues || sampleValues.length === 0) return;
     
     try {
       const regex = new RegExp(pattern);
       const previews = sampleValues.slice(0, 5).map(val => {
-        const match = regex.exec(val);
+        const match = regex.exec(String(val));
         if (match) {
-          return match.slice(1); // Return capture groups
+          return match.slice(1);
         }
         return ['(no match)'];
       });
       setPreview(previews);
       
       // Update headers count based on capture groups
-      const firstMatch = regex.exec(sampleValues[0]);
-      if (firstMatch && firstMatch.length - 1 !== newHeaders.length) {
+      const firstMatch = regex.exec(String(sampleValues[0]));
+      if (firstMatch) {
         const count = firstMatch.length - 1;
         setNewHeaders(prev => {
           const updated = [...prev];
@@ -99,7 +100,7 @@ export default function ColumnSplitter({
 
   const applySuggestion = (suggestion) => {
     setPattern(suggestion.pattern);
-    setNewHeaders(suggestion.headers);
+    setNewHeaders(suggestion.headers || []);
     setSplitMethod('pattern');
   };
 
@@ -168,7 +169,7 @@ export default function ColumnSplitter({
           <div style={styles.sampleList}>
             {sampleValues.slice(0, 3).map((val, i) => (
               <div key={i} style={styles.sampleItem}>
-                {String(val).substring(0, 80)}{String(val).length > 80 ? '...' : ''}
+                {String(val).substring(0, 100)}{String(val).length > 100 ? '...' : ''}
               </div>
             ))}
           </div>
@@ -190,16 +191,11 @@ export default function ColumnSplitter({
                 >
                   <div style={styles.sugDescription}>{sug.description}</div>
                   <div style={styles.sugHeaders}>
-                    → {sug.headers.join(' | ')}
+                    → {(sug.headers || []).join(' | ')}
                   </div>
                   {sug.is_row_merge && (
                     <div style={styles.rowMergeWarning}>
                       ⚠️ Multiple rows detected in single cell
-                    </div>
-                  )}
-                  {sug.preview && (
-                    <div style={styles.sugPreview}>
-                      Preview: [{sug.preview.join(', ')}]
                     </div>
                   )}
                 </div>
@@ -343,8 +339,11 @@ export default function ColumnSplitter({
           </button>
           <button 
             onClick={executeSplit} 
-            disabled={loading || !pattern}
-            style={styles.applyBtn}
+            disabled={loading || (!pattern && splitMethod === 'pattern')}
+            style={{
+              ...styles.applyBtn,
+              opacity: loading || (!pattern && splitMethod === 'pattern') ? 0.5 : 1
+            }}
           >
             {loading ? 'Splitting...' : '✓ Apply Split'}
           </button>
@@ -393,7 +392,8 @@ const styles = {
     border: 'none',
     fontSize: '24px',
     cursor: 'pointer',
-    color: '#6b7280'
+    color: '#6b7280',
+    padding: '4px 8px'
   },
   infoBox: {
     padding: '16px 24px',
@@ -464,12 +464,6 @@ const styles = {
     color: '#f59e0b',
     marginTop: '4px'
   },
-  sugPreview: {
-    fontSize: '11px',
-    fontFamily: 'monospace',
-    color: '#6b7280',
-    marginTop: '4px'
-  },
   methodSection: {
     padding: '16px 24px',
     borderBottom: '1px solid #e5e7eb'
@@ -482,10 +476,12 @@ const styles = {
   },
   methodButtons: {
     display: 'flex',
-    gap: '8px'
+    gap: '8px',
+    flexWrap: 'wrap'
   },
   methodBtn: {
-    flex: 1,
+    flex: '1 1 auto',
+    minWidth: '140px',
     padding: '10px 16px',
     border: 'none',
     borderRadius: '6px',
