@@ -13,9 +13,13 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
 from datetime import datetime
 import os
+import sys
 import logging
 import tempfile
 import shutil
+
+sys.path.insert(0, '/app')
+sys.path.insert(0, '/data')
 
 logger = logging.getLogger(__name__)
 
