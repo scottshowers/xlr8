@@ -359,7 +359,7 @@ class FormatLearner:
     """
     
     def __init__(self, api_key: str = None):
-        self.api_key = api_key or os.environ.get('ANTHROPIC_API_KEY')
+        self.api_key = api_key or os.environ.get('CLAUDE_API_KEY')
         self._client = None
     
     @property
@@ -392,7 +392,7 @@ class FormatLearner:
             LearnedFormat with extraction rules
         """
         if not self.is_available:
-            raise RuntimeError("Anthropic API key not configured")
+            raise RuntimeError("Claude API key not configured")
         
         prompt = self._build_learning_prompt(structure, vendor_hint)
         
@@ -908,20 +908,20 @@ class SmartExtractor:
     """
     
     def __init__(self, 
-                 anthropic_api_key: str = None,
+                 claude_api_key: str = None,
                  aws_region: str = None,
                  formats_path: str = None):
         """
         Initialize the smart extractor.
         
         Args:
-            anthropic_api_key: API key for Claude (format learning)
+            claude_api_key: API key for Claude (format learning)
             aws_region: AWS region for Textract
             formats_path: Path to store learned formats
         """
         self.format_library = FormatLibrary(formats_path)
         self.structure_analyzer = StructureAnalyzer()
-        self.format_learner = FormatLearner(anthropic_api_key)
+        self.format_learner = FormatLearner(claude_api_key)
         self.pattern_applier = PatternApplier()
         self.validator = PayrollValidator()
         self.text_extractor = TextExtractor(aws_region=aws_region)
@@ -969,7 +969,7 @@ class SmartExtractor:
                 if not self.format_learner.is_available:
                     raise RuntimeError(
                         "Unknown format and Claude API not available. "
-                        "Please set ANTHROPIC_API_KEY environment variable."
+                        "Please set CLAUDE_API_KEY environment variable."
                     )
                 
                 logger.info("Step 3: Learning new format with Claude...")
