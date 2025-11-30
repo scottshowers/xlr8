@@ -299,11 +299,7 @@ class VacuumExtractor:
             logger.info("Sending REDACTED text to Claude for parsing...")
             employees = self._parse_with_claude(redacted_pages)
             
-            # Step 3.5: Fix truncated descriptions using ORIGINAL text (not redacted)
-            original_text = "\n\n--- PAGE BREAK ---\n\n".join(pages_text)
-            print(f"[VACUUM] Starting description fix for {len(employees)} employees", flush=True)
-            employees = self._fix_descriptions(employees, original_text)
-            print(f"[VACUUM] Description fix complete", flush=True)
+            # Note: Description post-processing removed - Claude prompt now handles this correctly
             
             # Step 4: Validate employees
             if job_id:
