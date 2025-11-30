@@ -268,6 +268,10 @@ export default function VacuumUploadPage() {
     
     // Sheet 1: Employee Summary
     const empData = employees.map(emp => ({
+      'Company': emp.company_name || '',
+      'Client Code': emp.client_code || '',
+      'Period Ending': emp.period_ending || '',
+      'Check Date': emp.check_date || '',
       'Name': emp.name || '',
       'Employee ID': emp.employee_id || '',
       'Department': emp.department || '',
@@ -288,6 +292,9 @@ export default function VacuumUploadPage() {
     employees.forEach(emp => {
       (emp.earnings || []).forEach(e => {
         earningsDetail.push({
+          'Company': emp.company_name || '',
+          'Period Ending': emp.period_ending || '',
+          'Check Date': emp.check_date || '',
           'Employee': emp.name || '',
           'Employee ID': emp.employee_id || '',
           'Department': emp.department || '',
@@ -307,6 +314,9 @@ export default function VacuumUploadPage() {
     employees.forEach(emp => {
       (emp.deductions || []).forEach(d => {
         deductionsDetail.push({
+          'Company': emp.company_name || '',
+          'Period Ending': emp.period_ending || '',
+          'Check Date': emp.check_date || '',
           'Employee': emp.name || '',
           'Employee ID': emp.employee_id || '',
           'Department': emp.department || '',
@@ -324,6 +334,9 @@ export default function VacuumUploadPage() {
     employees.forEach(emp => {
       (emp.taxes || []).forEach(t => {
         taxesDetail.push({
+          'Company': emp.company_name || '',
+          'Period Ending': emp.period_ending || '',
+          'Check Date': emp.check_date || '',
           'Employee': emp.name || '',
           'Employee ID': emp.employee_id || '',
           'Department': emp.department || '',
