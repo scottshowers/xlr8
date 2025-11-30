@@ -895,7 +895,7 @@ function EmployeeTable({ employees }) {
                             <ul className="space-y-1">
                               {emp.earnings.map((e, i) => (
                                 <li key={i} className="flex justify-between text-xs">
-                                  <span>{e.type || e.description || 'Earning'}</span>
+                                  <span>{e.description || e.type || 'Earning'}</span>
                                   <span className="font-medium">${(e.amount || 0).toFixed(2)}</span>
                                 </li>
                               ))}
@@ -912,7 +912,7 @@ function EmployeeTable({ employees }) {
                             <ul className="space-y-1">
                               {emp.taxes.map((t, i) => (
                                 <li key={i} className="flex justify-between text-xs">
-                                  <span>{t.type || t.description || 'Tax'}</span>
+                                  <span>{t.description || t.type || 'Tax'}</span>
                                   <span className="font-medium">${(t.amount || 0).toFixed(2)}</span>
                                 </li>
                               ))}
@@ -929,7 +929,7 @@ function EmployeeTable({ employees }) {
                             <ul className="space-y-1">
                               {emp.deductions.map((d, i) => (
                                 <li key={i} className="flex justify-between text-xs">
-                                  <span>{d.type || d.description || 'Deduction'}</span>
+                                  <span>{d.description || d.type || 'Deduction'}</span>
                                   <span className="font-medium">${(d.amount || 0).toFixed(2)}</span>
                                 </li>
                               ))}
