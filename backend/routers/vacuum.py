@@ -673,7 +673,11 @@ Return the JSON array now:"""
         deductions = emp.get('total_deductions', 0)
         
         if gross > 0 and net > 0:
-            calculated = gross - taxes - deductions
+            # Calculate totals from line items for more accurate validation
+            taxes_from_items = sum(t.get('amount', 0) or 0 for t in emp.get('taxes', []))
+            deductions_from_items = sum(d.get('amount', 0) or 0 for d in emp.get('deductions', []))
+            
+            calculated = gross - taxes_from_items - deductions_from_items
             if abs(calculated - net) > 1.00:
                 errors.append(
                     f"{emp.get('name', 'Unknown')}: Net mismatch (calc {calculated:.2f}, actual {net:.2f})"
