@@ -297,13 +297,11 @@ class VacuumExtractor:
                 update_job(job_id, message='Parsing with AI...', progress=80)
             
             logger.info("Sending REDACTED text to Claude for parsing...")
-            parse_result = self._parse_with_claude(redacted_pages)
-            employees = parse_result.get("employees", [])
-            report_totals = parse_result.get("report_totals", None)
+            employees = self._parse_with_claude(redacted_pages)
             
             # Step 4: Validate employees
             if job_id:
-                update_job(job_id, message='Validating results...', progress=90)
+                update_job(job_id, message='Validating results...', progress=95)
             
             validation_errors = []
             for emp in employees:
@@ -314,12 +312,6 @@ class VacuumExtractor:
             
             valid_count = sum(1 for e in employees if e.get('is_valid', False))
             confidence = valid_count / len(employees) if employees else 0.0
-            
-            # Step 5: Cross-validate against report totals
-            if job_id:
-                update_job(job_id, message='Cross-validating totals...', progress=95)
-            
-            totals_validation = self._validate_against_report_totals(employees, report_totals)
             
             # Cost calculation
             if use_textract:
@@ -342,9 +334,7 @@ class VacuumExtractor:
                 "cost_usd": round(cost, 4),
                 "extraction_method": method,
                 "pii_redacted": redaction_stats['total_redacted'],
-                "privacy_compliant": True,
-                "report_totals": report_totals,
-                "totals_validation": totals_validation
+                "privacy_compliant": True
             }
             
             if job_id:
@@ -457,8 +447,8 @@ class VacuumExtractor:
         
         return pages_text, len(pages_text)
     
-    def _parse_with_claude(self, pages_text: List[str]) -> Dict:
-        """Send REDACTED text to Claude for parsing. Returns both employees and report_totals."""
+    def _parse_with_claude(self, pages_text: List[str]) -> List[Dict]:
+        """Send REDACTED text to Claude for parsing."""
         
         full_text = "\n\n--- PAGE BREAK ---\n\n".join(pages_text)
         
@@ -466,47 +456,23 @@ class VacuumExtractor:
             logger.warning(f"Text too long ({len(full_text)}), truncating")
             full_text = full_text[:35000]
         
-        prompt = f"""Extract employee pay data AND report totals from this pay register.
+        prompt = f"""Extract employees from this pay register as a JSON array.
 
 DATA:
 {full_text}
 
 STRICT RULES:
-1. Return ONLY valid JSON with this exact structure - no markdown, no explanation
-2. The response must have two keys: "employees" (array) and "report_totals" (object)
-
-EMPLOYEES ARRAY:
-Each employee object must have these EXACT keys:
-- name, employee_id, department, gross_pay, net_pay, total_taxes, total_deductions
-- earnings: array of {{type, description, amount, hours, rate}}
-- taxes: array of {{type, description, amount}}
-- deductions: array of {{type, description, amount}}
-- check_number, pay_method
-
-REPORT TOTALS:
-Extract the grand totals section (usually at end of report) with:
-- earnings: array of {{code, description, total}} - each earning type with company-wide total
-- taxes: array of {{code, description, total}} - each tax type with company-wide total  
-- deductions: array of {{code, description, total}} - each deduction type with company-wide total
-- grand_totals: {{gross_pay, total_taxes, total_deductions, net_pay}}
-
-Use 0 for missing numbers, "" for missing strings, [] for missing arrays.
-Note: Some data has been redacted with [REDACTED] placeholders - ignore those.
+1. Return ONLY a valid JSON array - no markdown, no explanation
+2. Each employee object must have these EXACT keys (no duplicates):
+   name, employee_id, department, gross_pay, net_pay, total_taxes, total_deductions, earnings, taxes, deductions, check_number, pay_method
+3. earnings/taxes/deductions are arrays of objects with: type, description, amount, hours (if applicable), rate (if applicable)
+4. Use 0 for missing numbers, "" for missing strings, [] for missing arrays
+5. Note: Some sensitive data has been redacted with [REDACTED] placeholders - ignore those
 
 Example format:
-{{
-  "employees": [
-    {{"name":"DOE, JOHN","employee_id":"A123","department":"Sales","gross_pay":1000.00,"net_pay":800.00,"total_taxes":150.00,"total_deductions":50.00,"earnings":[{{"type":"REG","description":"Regular Pay","rate":25.00,"hours":40,"amount":1000.00}}],"taxes":[{{"type":"FED","description":"Federal W/H","amount":100.00}}],"deductions":[{{"type":"401K","description":"401K Contribution","amount":50.00}}],"check_number":"","pay_method":"Direct Deposit"}}
-  ],
-  "report_totals": {{
-    "earnings": [{{"code":"REG","description":"Regular Pay","total":45000.00}},{{"code":"OT","description":"Overtime","total":5000.00}}],
-    "taxes": [{{"code":"FED","description":"Federal W/H","total":8500.00}},{{"code":"SS","description":"Social Security","total":3100.00}}],
-    "deductions": [{{"code":"401K","description":"401K Contribution","total":4500.00}},{{"code":"MED","description":"Medical","total":2200.00}}],
-    "grand_totals": {{"gross_pay":50000.00,"total_taxes":11600.00,"total_deductions":6700.00,"net_pay":31700.00}}
-  }}
-}}
+[{{"name":"DOE, JOHN","employee_id":"A123","department":"Sales","gross_pay":1000.00,"net_pay":800.00,"total_taxes":150.00,"total_deductions":50.00,"earnings":[{{"type":"Regular","description":"Regular Pay","rate":25.00,"hours":40,"amount":1000.00}}],"taxes":[{{"type":"Federal","description":"Federal W/H","amount":100.00}}],"deductions":[{{"type":"401K","description":"401K Contribution","amount":50.00}}],"check_number":"","pay_method":"Direct Deposit"}}]
 
-Return the JSON now:"""
+Return the JSON array now:"""
 
         try:
             response_text = ""
@@ -522,54 +488,9 @@ Return the JSON now:"""
             
         except Exception as e:
             logger.error(f"Claude API error: {e}")
-            return {"employees": [], "report_totals": None}
+            return []
         
-        return self._parse_json_response_v2(response_text)
-    
-    def _parse_json_response_v2(self, response_text: str) -> Dict:
-        """Parse JSON response containing employees and report_totals."""
-        
-        text = response_text.strip()
-        
-        # Remove markdown code fences
-        text = re.sub(r'^```json\s*', '', text)
-        text = re.sub(r'^```\s*', '', text)
-        text = re.sub(r'\s*```\s*$', '', text)
-        
-        # Find object bounds (now expecting {...} not [...])
-        start_idx = text.find('{')
-        end_idx = text.rfind('}')
-        
-        if start_idx < 0 or end_idx <= start_idx:
-            logger.error("No JSON object found in response")
-            # Fallback: try old array format
-            return {"employees": self._parse_json_response(response_text), "report_totals": None}
-        
-        json_str = text[start_idx:end_idx + 1]
-        
-        # Fix common issues
-        json_str = re.sub(r',\s*]', ']', json_str)
-        json_str = re.sub(r',\s*}', '}', json_str)
-        
-        try:
-            data = json.loads(json_str)
-            
-            employees = data.get("employees", [])
-            report_totals = data.get("report_totals", None)
-            
-            # Normalize employees
-            normalized_employees = [self._normalize_employee(e) for e in employees if isinstance(e, dict)]
-            
-            logger.info(f"Parsed {len(normalized_employees)} employees, report_totals: {report_totals is not None}")
-            
-            return {
-                "employees": normalized_employees,
-                "report_totals": report_totals
-            }
-            
-        except json.JSONDecodeError as e:
-            logger.warning(f"JSON parse failed: {e}, falling back to legacy parser")
-            return {"employees": self._parse_json_response(response_text), "report_totals": None}
+        return self._parse_json_response(response_text)
     
     def _parse_json_response(self, response_text: str) -> List[Dict]:
         """Parse JSON from Claude response with multiple fallback strategies."""
