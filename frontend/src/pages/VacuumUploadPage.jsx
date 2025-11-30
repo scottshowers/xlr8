@@ -716,7 +716,23 @@ export default function VacuumUploadPage() {
           
           {/* Selected Extract Details */}
           <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold mb-4">Extract Details</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">Extract Details</h2>
+              
+              {/* Export XLSX Button - shows when extract is selected */}
+              {selectedExtract && selectedExtract.employees?.length > 0 && (
+                <button
+                  onClick={() => exportToXLSX(
+                    selectedExtract.employees, 
+                    selectedExtract.source_file?.replace('.pdf', '') || 'pay_extract'
+                  )}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                >
+                  <Download className="w-4 h-4" />
+                  Export XLSX
+                </button>
+              )}
+            </div>
             
             {selectedExtract ? (
               <div>
