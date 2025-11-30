@@ -1,9 +1,10 @@
 """
-Vacuum Router - All In One v7
-==============================
-Robust JSON parsing with fallback extraction.
-
+Vacuum Router - All In One v8
 Deploy to: backend/routers/vacuum.py
+
+Changes in v8:
+- Local LLM support (use_local_llm parameter)
+- Cleaner logging (no strategy warnings in validation_errors)
 """
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
@@ -26,7 +27,6 @@ router = APIRouter()
 # =============================================================================
 
 def get_supabase():
-    """Get Supabase client"""
     try:
         from utils.supabase_client import get_supabase as _get_supabase
         return _get_supabase()
@@ -44,7 +44,6 @@ def save_extraction(project_id: Optional[str], source_file: str,
                     validation_passed: bool, validation_errors: List[str],
                     pages_processed: int, cost_usd: float, 
                     processing_time_ms: int) -> Optional[Dict]:
-    """Save extraction results to Supabase"""
     supabase = get_supabase()
     if not supabase:
         logger.warning("Cannot save - Supabase not available")
@@ -63,7 +62,6 @@ def save_extraction(project_id: Optional[str], source_file: str,
             'cost_usd': cost_usd,
             'processing_time_ms': processing_time_ms
         }
-        
         response = supabase.table('pay_extracts').insert(data).execute()
         logger.info(f"Saved extraction: {source_file} with {len(employees)} employees")
         return response.data[0] if response.data else None
@@ -73,11 +71,9 @@ def save_extraction(project_id: Optional[str], source_file: str,
 
 
 def get_extractions(project_id: Optional[str] = None, limit: int = 50) -> List[Dict]:
-    """Get extraction history"""
     supabase = get_supabase()
     if not supabase:
         return []
-    
     try:
         query = supabase.table('pay_extracts').select('*').order('created_at', desc=True).limit(limit)
         if project_id:
@@ -90,11 +86,9 @@ def get_extractions(project_id: Optional[str] = None, limit: int = 50) -> List[D
 
 
 def get_extraction_by_id(extract_id: str) -> Optional[Dict]:
-    """Get single extraction by ID"""
     supabase = get_supabase()
     if not supabase:
         return None
-    
     try:
         response = supabase.table('pay_extracts').select('*').eq('id', extract_id).execute()
         return response.data[0] if response.data else None
@@ -104,11 +98,9 @@ def get_extraction_by_id(extract_id: str) -> Optional[Dict]:
 
 
 def delete_extraction(extract_id: str) -> bool:
-    """Delete an extraction"""
     supabase = get_supabase()
     if not supabase:
         return False
-    
     try:
         supabase.table('pay_extracts').delete().eq('id', extract_id).execute()
         return True
@@ -144,11 +136,10 @@ class Employee:
 # =============================================================================
 
 class SimpleExtractor:
-    """Textract + Claude extractor."""
-    
     def __init__(self):
         self.claude_api_key = os.environ.get('CLAUDE_API_KEY')
         self.aws_region = os.environ.get('AWS_REGION', 'us-east-1')
+        self.local_llm_url = os.environ.get('LOCAL_LLM_URL', 'http://localhost:11434')
         self._textract = None
         self._claude = None
     
@@ -170,13 +161,11 @@ class SimpleExtractor:
             self._claude = anthropic.Anthropic(api_key=self.claude_api_key)
         return self._claude
     
-    def extract(self, file_path: str, max_pages: int = 10) -> Dict:
-        """Extract employee pay data from PDF. Returns dict for JSON response."""
+    def extract(self, file_path: str, max_pages: int = 10, use_local_llm: bool = False) -> Dict:
         start = datetime.now()
         filename = os.path.basename(file_path)
         
         try:
-            # Step 1: Get text from pages using Textract
             logger.info(f"Step 1: Extracting text with Textract (max {max_pages} pages)...")
             pages_text = self._extract_pages_text(file_path, max_pages)
             pages_processed = len(pages_text)
@@ -184,11 +173,12 @@ class SimpleExtractor:
             if not pages_text:
                 raise ValueError("No text extracted from PDF")
             
-            # Step 2: Send to Claude for parsing
-            logger.info("Step 2: Sending to Claude for parsing...")
-            employees = self._parse_with_claude(pages_text)
+            logger.info(f"Step 2: Parsing with {'Local LLM' if use_local_llm else 'Claude'}...")
+            if use_local_llm:
+                employees = self._parse_with_local_llm(pages_text)
+            else:
+                employees = self._parse_with_claude(pages_text)
             
-            # Step 3: Validate
             logger.info("Step 3: Validating...")
             validation_errors = []
             for emp in employees:
@@ -200,8 +190,8 @@ class SimpleExtractor:
             valid_count = sum(1 for e in employees if e.get('is_valid', False))
             confidence = valid_count / len(employees) if employees else 0.0
             
-            # Cost: $0.015/page for Textract + ~$0.05 for Claude
-            cost = (pages_processed * 0.015) + 0.05
+            # Cost: Local LLM = free, Claude = $0.05
+            cost = (pages_processed * 0.015) + (0.0 if use_local_llm else 0.05)
             processing_time = int((datetime.now() - start).total_seconds() * 1000)
             
             return {
@@ -214,7 +204,8 @@ class SimpleExtractor:
                 "validation_errors": validation_errors[:20],
                 "pages_processed": pages_processed,
                 "processing_time_ms": processing_time,
-                "cost_usd": round(cost, 4)
+                "cost_usd": round(cost, 4),
+                "llm_used": "local" if use_local_llm else "claude"
             }
             
         except Exception as e:
@@ -234,9 +225,7 @@ class SimpleExtractor:
             }
     
     def _extract_pages_text(self, file_path: str, max_pages: int) -> List[str]:
-        """Extract text using Textract."""
-        import fitz  # PyMuPDF
-        
+        import fitz
         pages_text = []
         doc = fitz.open(file_path)
         
@@ -268,11 +257,8 @@ class SimpleExtractor:
         return pages_text
     
     def _parse_with_claude(self, pages_text: List[str]) -> List[Dict]:
-        """Send text to Claude for parsing."""
-        
         full_text = "\n\n--- PAGE BREAK ---\n\n".join(pages_text)
         
-        # Limit text
         if len(full_text) > 35000:
             logger.warning(f"Text too long ({len(full_text)}), truncating")
             full_text = full_text[:35000]
@@ -312,18 +298,57 @@ Return the JSON array now:"""
         
         return self._parse_json_response(response_text)
     
+    def _parse_with_local_llm(self, pages_text: List[str]) -> List[Dict]:
+        """Parse with local LLM (Ollama/Mistral/DeepSeek)"""
+        import requests
+        
+        full_text = "\n\n--- PAGE BREAK ---\n\n".join(pages_text)
+        
+        if len(full_text) > 30000:
+            logger.warning(f"Text too long ({len(full_text)}), truncating for local LLM")
+            full_text = full_text[:30000]
+        
+        prompt = f"""Extract employees from this pay register as a JSON array.
+
+DATA:
+{full_text}
+
+Return ONLY a valid JSON array with these fields per employee:
+name, employee_id, department, gross_pay, net_pay, total_taxes, total_deductions, earnings, taxes, deductions, check_number, pay_method
+
+JSON array:"""
+
+        try:
+            response = requests.post(
+                f"{self.local_llm_url}/api/generate",
+                json={
+                    "model": os.environ.get('LOCAL_LLM_MODEL', 'mistral'),
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {"num_predict": 8000}
+                },
+                timeout=120
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                response_text = result.get('response', '')
+                logger.info(f"Local LLM response length: {len(response_text)}")
+                return self._parse_json_response(response_text)
+            else:
+                logger.error(f"Local LLM error: {response.status_code}")
+                return []
+                
+        except Exception as e:
+            logger.error(f"Local LLM error: {e}")
+            return []
+    
     def _parse_json_response(self, response_text: str) -> List[Dict]:
-        """Parse JSON from Claude response with multiple fallback strategies."""
-        
-        # Clean up response
         text = response_text.strip()
-        
-        # Remove markdown code fences
         text = re.sub(r'^```json\s*', '', text)
         text = re.sub(r'^```\s*', '', text)
         text = re.sub(r'\s*```\s*$', '', text)
         
-        # Find array bounds
         start_idx = text.find('[')
         end_idx = text.rfind(']')
         
@@ -332,7 +357,6 @@ Return the JSON array now:"""
             return []
         
         if end_idx < start_idx:
-            # Array not closed - find last complete object
             last_brace = text.rfind('}')
             if last_brace > start_idx:
                 text = text[:last_brace + 1] + ']'
@@ -342,10 +366,8 @@ Return the JSON array now:"""
                 return []
         
         json_str = text[start_idx:end_idx + 1]
-        
-        # Fix common issues
-        json_str = re.sub(r',\s*]', ']', json_str)  # trailing comma before ]
-        json_str = re.sub(r',\s*}', '}', json_str)  # trailing comma before }
+        json_str = re.sub(r',\s*]', ']', json_str)
+        json_str = re.sub(r',\s*}', '}', json_str)
         
         # Strategy 1: Direct parse
         try:
@@ -354,7 +376,7 @@ Return the JSON array now:"""
                 logger.info(f"Strategy 1 (direct): Parsed {len(data)} employees")
                 return [self._normalize_employee(e) for e in data if isinstance(e, dict)]
         except json.JSONDecodeError as e:
-            logger.warning(f"Strategy 1 failed: {e}")
+            logger.debug(f"Strategy 1 failed: {e}")
         
         # Strategy 2: Extract objects one by one
         employees = []
@@ -379,21 +401,15 @@ Return the JSON array now:"""
         return employees
     
     def _try_parse_object(self, obj_str: str) -> Optional[Dict]:
-        """Try to parse a single JSON object, fixing issues."""
-        
-        # Fix trailing commas
         obj_str = re.sub(r',\s*}', '}', obj_str)
         obj_str = re.sub(r',\s*]', ']', obj_str)
         
-        # Try direct parse
         try:
             obj = json.loads(obj_str)
             return self._normalize_employee(obj)
         except:
             pass
         
-        # Try removing duplicate keys by keeping only first occurrence
-        # This is a hack but handles Claude's duplicate key bug
         try:
             seen_keys = set()
             fixed_parts = []
@@ -432,7 +448,6 @@ Return the JSON array now:"""
                 
                 i += 1
             
-            # If parsing still fails, extract what we can manually
             name_match = re.search(r'"name"\s*:\s*"([^"]*)"', obj_str)
             emp_id_match = re.search(r'"employee_id"\s*:\s*"([^"]*)"', obj_str)
             dept_match = re.search(r'"department"\s*:\s*"([^"]*)"', obj_str)
@@ -464,7 +479,6 @@ Return the JSON array now:"""
         return None
     
     def _normalize_employee(self, data: Dict) -> Dict:
-        """Ensure employee dict has all required fields."""
         return {
             "name": str(data.get('name', '')),
             "employee_id": str(data.get('employee_id', '')),
@@ -481,9 +495,7 @@ Return the JSON array now:"""
         }
     
     def _validate_employee(self, emp: Dict) -> List[str]:
-        """Validate employee record."""
         errors = []
-        
         if not emp.get('name'):
             errors.append("Missing employee name")
         
@@ -495,9 +507,7 @@ Return the JSON array now:"""
         if gross > 0 and net > 0:
             calculated = gross - taxes - deductions
             if abs(calculated - net) > 1.00:
-                errors.append(
-                    f"{emp.get('name', 'Unknown')}: Net mismatch (calc {calculated:.2f}, actual {net:.2f})"
-                )
+                errors.append(f"{emp.get('name', 'Unknown')}: Net mismatch (calc {calculated:.2f}, actual {net:.2f})")
         
         return errors
 
@@ -524,10 +534,11 @@ async def status():
     ext = get_extractor()
     return {
         "available": ext.is_available,
-        "version": "7.0-robust",
-        "method": "Textract + Claude",
+        "version": "8.0-local-llm",
+        "method": "Textract + Claude/Local",
         "claude_key_set": bool(ext.claude_api_key),
-        "aws_region": ext.aws_region
+        "aws_region": ext.aws_region,
+        "local_llm_url": ext.local_llm_url
     }
 
 
@@ -535,12 +546,12 @@ async def status():
 async def upload(
     file: UploadFile = File(...),
     max_pages: int = Form(3),
-    project_id: Optional[str] = Form(None)
+    project_id: Optional[str] = Form(None),
+    use_local_llm: bool = Form(False)
 ):
-    """Upload and extract pay register."""
     ext = get_extractor()
     
-    if not ext.is_available:
+    if not ext.is_available and not use_local_llm:
         return {"success": False, "error": "CLAUDE_API_KEY not set", "employees": [], "employee_count": 0}
     
     if not file.filename.lower().endswith('.pdf'):
@@ -553,13 +564,11 @@ async def upload(
         with open(temp_path, 'wb') as f:
             shutil.copyfileobj(file.file, f)
         
-        result = ext.extract(temp_path, max_pages=max_pages)
+        result = ext.extract(temp_path, max_pages=max_pages, use_local_llm=use_local_llm)
         
-        # Add id field to employees for frontend
         for emp in result.get('employees', []):
             emp['id'] = emp.get('employee_id', '')
         
-        # Save to database
         saved = None
         if result.get('success'):
             saved = save_extraction(
@@ -597,17 +606,15 @@ async def upload(
 async def extract(
     file: UploadFile = File(...),
     max_pages: int = Form(3),
-    project_id: Optional[str] = Form(None)
+    project_id: Optional[str] = Form(None),
+    use_local_llm: bool = Form(False)
 ):
-    """Alias for /vacuum/upload"""
-    return await upload(file, max_pages, project_id)
+    return await upload(file, max_pages, project_id, use_local_llm)
 
 
 @router.get("/vacuum/extracts")
 async def get_extracts(project_id: Optional[str] = None, limit: int = 50):
-    """Get extraction history"""
     extracts = get_extractions(project_id=project_id, limit=limit)
-    
     return {
         "extracts": [
             {
@@ -628,7 +635,6 @@ async def get_extracts(project_id: Optional[str] = None, limit: int = 50):
 
 @router.get("/vacuum/extract/{extract_id}")
 async def get_extract(extract_id: str):
-    """Get full extraction details"""
     extraction = get_extraction_by_id(extract_id)
     if not extraction:
         return {"error": "Extraction not found"}
@@ -637,7 +643,6 @@ async def get_extract(extract_id: str):
 
 @router.delete("/vacuum/extract/{extract_id}")
 async def delete_extract(extract_id: str):
-    """Delete an extraction"""
     success = delete_extraction(extract_id)
     return {"success": success, "id": extract_id}
 
