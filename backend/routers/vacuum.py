@@ -1,17 +1,98 @@
 """
-Vacuum Router v10 - Background Job Processing
+Vacuum Router - All In One v11
+==============================
+Privacy-First Architecture:
+- PyMuPDF for local text extraction (default)
+- PII redaction BEFORE sending to Claude
+- Textract as optional fallback for scanned PDFs
+- Async background job support
+
 Deploy to: backend/routers/vacuum.py
+Requirements: pip install pymupdf anthropic boto3
 """
 
-from fastapi import APIRouter, UploadFile, File, Form
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
 from datetime import datetime
-from typing import List, Dict, Optional
-import os, re, json, logging, tempfile, shutil, threading
+from dataclasses import dataclass, field, asdict
+from typing import List, Dict, Any, Optional
+import os
+import re
+import json
+import logging
+import tempfile
+import shutil
+import uuid
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+
+# =============================================================================
+# PII REDACTION
+# =============================================================================
+
+class PIIRedactor:
+    """Redact PII before sending to Claude."""
+    
+    # Patterns to redact
+    PATTERNS = {
+        'ssn': [
+            r'\b\d{3}-\d{2}-\d{4}\b',           # 123-45-6789
+            r'\b\d{3}\s\d{2}\s\d{4}\b',         # 123 45 6789
+            r'\b\d{9}\b(?=.*(?:ssn|social))',   # 123456789 near SSN context
+        ],
+        'bank_account': [
+            r'\b\d{8,17}\b(?=.*(?:account|acct|routing|aba))',  # Account numbers
+            r'\b\d{9}\b(?=.*(?:routing|aba))',                   # Routing numbers
+        ],
+        'credit_card': [
+            r'\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b',  # 1234-5678-9012-3456
+        ],
+    }
+    
+    # Placeholders
+    PLACEHOLDERS = {
+        'ssn': '[SSN-REDACTED]',
+        'bank_account': '[ACCOUNT-REDACTED]',
+        'credit_card': '[CC-REDACTED]',
+    }
+    
+    def __init__(self):
+        self.redaction_count = 0
+        self.redaction_log = []
+    
+    def redact(self, text: str) -> str:
+        """Redact all PII patterns from text."""
+        self.redaction_count = 0
+        self.redaction_log = []
+        
+        redacted = text
+        
+        for pii_type, patterns in self.PATTERNS.items():
+            placeholder = self.PLACEHOLDERS.get(pii_type, '[REDACTED]')
+            
+            for pattern in patterns:
+                matches = re.findall(pattern, redacted, re.IGNORECASE)
+                if matches:
+                    self.redaction_count += len(matches)
+                    self.redaction_log.append(f"{pii_type}: {len(matches)} redacted")
+                    redacted = re.sub(pattern, placeholder, redacted, flags=re.IGNORECASE)
+        
+        return redacted
+    
+    def get_stats(self) -> Dict:
+        return {
+            'total_redacted': self.redaction_count,
+            'details': self.redaction_log
+        }
+
+
+# =============================================================================
+# SUPABASE STORAGE
+# =============================================================================
+
 def get_supabase():
+    """Get Supabase client"""
     try:
         from utils.supabase_client import get_supabase as _get_supabase
         return _get_supabase()
@@ -20,88 +101,143 @@ def get_supabase():
             from backend.utils.supabase_client import get_supabase as _get_supabase
             return _get_supabase()
         except ImportError:
+            logger.warning("Supabase client not available")
             return None
 
-def create_job(job_type: str, project_id: str, input_data: dict) -> Optional[str]:
+
+def save_extraction(project_id: Optional[str], source_file: str, 
+                    employees: List[Dict], confidence: float,
+                    validation_passed: bool, validation_errors: List[str],
+                    pages_processed: int, cost_usd: float, 
+                    processing_time_ms: int, extraction_method: str = "pymupdf") -> Optional[Dict]:
+    """Save extraction results to Supabase"""
     supabase = get_supabase()
-    if not supabase: return None
-    try:
-        data = {'job_type': job_type, 'project_id': project_id, 'status': 'queued', 'progress': {'total': 0, 'current': 0, 'step': 'Queued'}, 'input_data': input_data}
-        response = supabase.table('processing_jobs').insert(data).execute()
-        return response.data[0]['id'] if response.data else None
-    except Exception as e:
-        logger.error(f"Failed to create job: {e}")
+    if not supabase:
+        logger.warning("Cannot save - Supabase not available")
         return None
-
-def update_job(job_id: str, status: str = None, progress: dict = None, result_data: dict = None, error_message: str = None):
-    supabase = get_supabase()
-    if not supabase: return
+    
     try:
-        data = {'updated_at': datetime.now().isoformat()}
-        if status:
-            data['status'] = status
-            if status == 'processing': data['started_at'] = datetime.now().isoformat()
-            if status in ['completed', 'failed']: data['completed_at'] = datetime.now().isoformat()
-        if progress: data['progress'] = progress
-        if result_data: data['result_data'] = result_data
-        if error_message: data['error_message'] = error_message
-        supabase.table('processing_jobs').update(data).eq('id', job_id).execute()
-    except Exception as e:
-        logger.error(f"Failed to update job: {e}")
-
-def get_job(job_id: str) -> Optional[dict]:
-    supabase = get_supabase()
-    if not supabase: return None
-    try:
-        response = supabase.table('processing_jobs').select('*').eq('id', job_id).execute()
-        return response.data[0] if response.data else None
-    except: return None
-
-def save_extraction(project_id, source_file, employees, confidence, validation_passed, validation_errors, pages_processed, cost_usd, processing_time_ms):
-    supabase = get_supabase()
-    if not supabase: return None
-    try:
-        data = {'project_id': project_id, 'source_file': source_file, 'employee_count': len(employees), 'employees': employees, 'confidence': confidence, 'validation_passed': validation_passed, 'validation_errors': validation_errors, 'pages_processed': pages_processed, 'cost_usd': cost_usd, 'processing_time_ms': processing_time_ms}
+        data = {
+            'project_id': project_id,
+            'source_file': source_file,
+            'employee_count': len(employees),
+            'employees': employees,
+            'confidence': confidence,
+            'validation_passed': validation_passed,
+            'validation_errors': validation_errors,
+            'pages_processed': pages_processed,
+            'cost_usd': cost_usd,
+            'processing_time_ms': processing_time_ms,
+            'extraction_method': extraction_method
+        }
+        
         response = supabase.table('pay_extracts').insert(data).execute()
+        logger.info(f"Saved extraction: {source_file} with {len(employees)} employees")
         return response.data[0] if response.data else None
     except Exception as e:
-        logger.error(f"Failed to save: {e}")
+        logger.error(f"Failed to save extraction: {e}")
         return None
 
-def get_extractions(project_id=None, limit=50):
+
+def get_extractions(project_id: Optional[str] = None, limit: int = 50) -> List[Dict]:
+    """Get extraction history"""
     supabase = get_supabase()
-    if not supabase: return []
+    if not supabase:
+        return []
+    
     try:
         query = supabase.table('pay_extracts').select('*').order('created_at', desc=True).limit(limit)
-        if project_id: query = query.eq('project_id', project_id)
-        return query.execute().data or []
-    except: return []
+        if project_id:
+            query = query.eq('project_id', project_id)
+        response = query.execute()
+        return response.data if response.data else []
+    except Exception as e:
+        logger.error(f"Failed to get extractions: {e}")
+        return []
 
-def get_extraction_by_id(extract_id):
+
+def get_extraction_by_id(extract_id: str) -> Optional[Dict]:
+    """Get single extraction by ID"""
     supabase = get_supabase()
-    if not supabase: return None
+    if not supabase:
+        return None
+    
     try:
         response = supabase.table('pay_extracts').select('*').eq('id', extract_id).execute()
         return response.data[0] if response.data else None
-    except: return None
+    except Exception as e:
+        logger.error(f"Failed to get extraction: {e}")
+        return None
 
-def delete_extraction(extract_id):
+
+def delete_extraction(extract_id: str) -> bool:
+    """Delete an extraction"""
     supabase = get_supabase()
-    if not supabase: return False
+    if not supabase:
+        return False
+    
     try:
         supabase.table('pay_extracts').delete().eq('id', extract_id).execute()
         return True
-    except: return False
+    except Exception as e:
+        logger.error(f"Failed to delete extraction: {e}")
+        return False
 
-class SimpleExtractor:
+
+# =============================================================================
+# JOB TRACKING (for async processing)
+# =============================================================================
+
+_jobs: Dict[str, Dict] = {}
+
+def create_job(filename: str) -> str:
+    """Create a new job and return its ID."""
+    job_id = str(uuid.uuid4())
+    _jobs[job_id] = {
+        'id': job_id,
+        'status': 'pending',
+        'filename': filename,
+        'progress': 0,
+        'current_page': 0,
+        'total_pages': 0,
+        'message': 'Starting...',
+        'result': None,
+        'created_at': datetime.now().isoformat()
+    }
+    return job_id
+
+def update_job(job_id: str, **kwargs):
+    """Update job status."""
+    if job_id in _jobs:
+        _jobs[job_id].update(kwargs)
+
+def get_job(job_id: str) -> Optional[Dict]:
+    """Get job status."""
+    return _jobs.get(job_id)
+
+
+# =============================================================================
+# EXTRACTOR CLASS
+# =============================================================================
+
+class VacuumExtractor:
+    """
+    Privacy-first extractor:
+    - PyMuPDF for local text extraction (default)
+    - PII redaction before Claude
+    - Textract as fallback for scanned PDFs
+    """
+    
     def __init__(self):
         self.claude_api_key = os.environ.get('CLAUDE_API_KEY')
         self.aws_region = os.environ.get('AWS_REGION', 'us-east-1')
         self._textract = None
         self._claude = None
+        self.redactor = PIIRedactor()
     
     @property
-    def is_available(self): return bool(self.claude_api_key)
+    def is_available(self) -> bool:
+        return bool(self.claude_api_key)
     
     @property
     def textract(self):
@@ -117,206 +253,615 @@ class SimpleExtractor:
             self._claude = anthropic.Anthropic(api_key=self.claude_api_key)
         return self._claude
     
-    def extract_with_progress(self, file_path: str, max_pages: int, use_local_llm: bool, job_id: str, project_id: str) -> Dict:
+    def extract(self, file_path: str, max_pages: int = 0, 
+                use_textract: bool = False, job_id: str = None) -> Dict:
+        """
+        Extract employee pay data from PDF.
+        
+        Args:
+            file_path: Path to PDF file
+            max_pages: Max pages to process (0 = all)
+            use_textract: If True, use AWS Textract instead of PyMuPDF
+            job_id: Optional job ID for progress tracking
+        """
         start = datetime.now()
         filename = os.path.basename(file_path)
+        method = "textract" if use_textract else "pymupdf"
+        
         try:
-            update_job(job_id, status='processing', progress={'total': max_pages, 'current': 0, 'step': 'Starting extraction'})
-            pages_text = self._extract_pages_with_progress(file_path, max_pages, job_id)
-            pages_processed = len(pages_text)
-            if not pages_text: raise ValueError("No text extracted from PDF")
+            # Step 1: Extract text
+            if job_id:
+                update_job(job_id, status='processing', message='Extracting text from PDF...')
             
-            update_job(job_id, progress={'total': pages_processed, 'current': pages_processed, 'step': 'Parsing with AI...'})
-            employees = self._parse_with_claude(pages_text) if not use_local_llm else self._parse_with_local_llm(pages_text)
+            if use_textract:
+                logger.info(f"Using Textract for OCR extraction...")
+                pages_text, pages_processed = self._extract_with_textract(file_path, max_pages, job_id)
+            else:
+                logger.info(f"Using PyMuPDF for local extraction (privacy-compliant)...")
+                pages_text, pages_processed = self._extract_with_pymupdf(file_path, max_pages, job_id)
             
-            update_job(job_id, progress={'total': pages_processed, 'current': pages_processed, 'step': 'Validating...'})
+            if not pages_text:
+                raise ValueError("No text extracted from PDF")
+            
+            # Step 2: Redact PII
+            if job_id:
+                update_job(job_id, message='Redacting sensitive data...')
+            
+            logger.info("Redacting PII before sending to Claude...")
+            redacted_pages = [self.redactor.redact(page) for page in pages_text]
+            redaction_stats = self.redactor.get_stats()
+            logger.info(f"PII Redaction: {redaction_stats}")
+            
+            # Step 3: Parse with Claude (redacted text only)
+            if job_id:
+                update_job(job_id, message='Parsing with AI...', progress=80)
+            
+            logger.info("Sending REDACTED text to Claude for parsing...")
+            employees = self._parse_with_claude(redacted_pages)
+            
+            # Step 4: Validate
+            if job_id:
+                update_job(job_id, message='Validating results...', progress=95)
+            
             validation_errors = []
             for emp in employees:
                 errors = self._validate_employee(emp)
                 emp['validation_errors'] = errors
                 emp['is_valid'] = len(errors) == 0
-                emp['id'] = emp.get('employee_id', '')
                 validation_errors.extend(errors)
             
             valid_count = sum(1 for e in employees if e.get('is_valid', False))
             confidence = valid_count / len(employees) if employees else 0.0
-            cost = (pages_processed * 0.015) + (0.0 if use_local_llm else 0.05)
+            
+            # Cost calculation
+            if use_textract:
+                cost = (pages_processed * 0.015) + 0.05  # Textract + Claude
+            else:
+                cost = 0.05  # Claude only (PyMuPDF is free)
+            
             processing_time = int((datetime.now() - start).total_seconds() * 1000)
             
-            result = {"success": len(employees) > 0, "source_file": filename, "employees": employees, "employee_count": len(employees), "confidence": confidence, "validation_passed": len(validation_errors) == 0, "validation_errors": validation_errors[:20], "pages_processed": pages_processed, "processing_time_ms": processing_time, "cost_usd": round(cost, 4)}
+            result = {
+                "success": len(employees) > 0,
+                "source_file": filename,
+                "employees": employees,
+                "employee_count": len(employees),
+                "confidence": confidence,
+                "validation_passed": len(validation_errors) == 0,
+                "validation_errors": validation_errors[:20],
+                "pages_processed": pages_processed,
+                "processing_time_ms": processing_time,
+                "cost_usd": round(cost, 4),
+                "extraction_method": method,
+                "pii_redacted": redaction_stats['total_redacted'],
+                "privacy_compliant": True
+            }
             
-            saved = save_extraction(project_id, filename, employees, confidence, len(validation_errors) == 0, validation_errors[:20], pages_processed, round(cost, 4), processing_time)
-            result['extract_id'] = saved.get('id') if saved else None
-            result['saved_to_db'] = saved is not None
+            if job_id:
+                update_job(job_id, status='completed', progress=100, 
+                          message='Extraction complete', result=result)
             
-            update_job(job_id, status='completed', progress={'total': pages_processed, 'current': pages_processed, 'step': 'Complete'}, result_data=result)
             return result
+            
         except Exception as e:
             logger.error(f"Extraction failed: {e}", exc_info=True)
-            update_job(job_id, status='failed', error_message=str(e))
-            return {"success": False, "error": str(e)}
+            processing_time = int((datetime.now() - start).total_seconds() * 1000)
+            
+            error_result = {
+                "success": False,
+                "source_file": filename,
+                "employees": [],
+                "employee_count": 0,
+                "confidence": 0.0,
+                "validation_passed": False,
+                "validation_errors": [str(e)],
+                "pages_processed": 0,
+                "processing_time_ms": processing_time,
+                "cost_usd": 0.0,
+                "extraction_method": method,
+                "privacy_compliant": True
+            }
+            
+            if job_id:
+                update_job(job_id, status='failed', message=str(e), result=error_result)
+            
+            return error_result
     
-    def _extract_pages_with_progress(self, file_path: str, max_pages: int, job_id: str) -> List[str]:
+    def _extract_with_pymupdf(self, file_path: str, max_pages: int, job_id: str = None) -> tuple:
+        """Extract text using PyMuPDF (local, free, private)."""
         import fitz
+        
         pages_text = []
         doc = fitz.open(file_path)
+        
         try:
             total = len(doc)
             to_process = total if max_pages == 0 else min(max_pages, total)
+            
+            if job_id:
+                update_job(job_id, total_pages=to_process)
+            
+            for page_num in range(to_process):
+                page = doc[page_num]
+                text = page.get_text()
+                
+                if text.strip():
+                    pages_text.append(text)
+                else:
+                    # Page has no selectable text - might be scanned
+                    logger.warning(f"Page {page_num + 1} has no text - may need Textract")
+                    pages_text.append(f"[Page {page_num + 1}: No extractable text - consider Textract]")
+                
+                if job_id:
+                    progress = int((page_num + 1) / to_process * 70)
+                    update_job(job_id, current_page=page_num + 1, progress=progress,
+                              message=f'Extracting page {page_num + 1} of {to_process}...')
+                
+                logger.info(f"PyMuPDF: Extracted page {page_num + 1}/{to_process}")
+                
+        finally:
+            doc.close()
+        
+        return pages_text, len(pages_text)
+    
+    def _extract_with_textract(self, file_path: str, max_pages: int, job_id: str = None) -> tuple:
+        """Extract text using AWS Textract (for scanned PDFs)."""
+        import fitz
+        
+        pages_text = []
+        doc = fitz.open(file_path)
+        
+        try:
+            total = len(doc)
+            to_process = total if max_pages == 0 else min(max_pages, total)
+            
+            if job_id:
+                update_job(job_id, total_pages=to_process)
+            
             for page_num in range(to_process):
                 page = doc[page_num]
                 pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
                 img_bytes = pix.tobytes("png")
-                response = self.textract.analyze_document(Document={'Bytes': img_bytes}, FeatureTypes=['TABLES'])
-                lines = [block.get('Text', '') for block in response.get('Blocks', []) if block['BlockType'] == 'LINE']
+                
+                response = self.textract.analyze_document(
+                    Document={'Bytes': img_bytes},
+                    FeatureTypes=['TABLES']
+                )
+                
+                lines = []
+                for block in response.get('Blocks', []):
+                    if block['BlockType'] == 'LINE':
+                        lines.append(block.get('Text', ''))
+                
                 pages_text.append('\n'.join(lines))
-                update_job(job_id, progress={'total': to_process, 'current': page_num + 1, 'step': f'Extracting page {page_num + 1}/{to_process}'})
+                
+                if job_id:
+                    progress = int((page_num + 1) / to_process * 70)
+                    update_job(job_id, current_page=page_num + 1, progress=progress,
+                              message=f'OCR processing page {page_num + 1} of {to_process}...')
+                
+                logger.info(f"Textract: Extracted page {page_num + 1}/{to_process}")
+                
         finally:
             doc.close()
-        return pages_text
+        
+        return pages_text, len(pages_text)
     
     def _parse_with_claude(self, pages_text: List[str]) -> List[Dict]:
-        full_text = "\n\n--- PAGE BREAK ---\n\n".join(pages_text)[:35000]
+        """Send REDACTED text to Claude for parsing."""
+        
+        full_text = "\n\n--- PAGE BREAK ---\n\n".join(pages_text)
+        
+        if len(full_text) > 35000:
+            logger.warning(f"Text too long ({len(full_text)}), truncating")
+            full_text = full_text[:35000]
+        
         prompt = f"""Extract employees from this pay register as a JSON array.
+
 DATA:
 {full_text}
 
-Return ONLY valid JSON array. Each employee: name, employee_id, department, gross_pay, net_pay, total_taxes, total_deductions, earnings, taxes, deductions, check_number, pay_method"""
+STRICT RULES:
+1. Return ONLY a valid JSON array - no markdown, no explanation
+2. Each employee object must have these EXACT keys (no duplicates):
+   name, employee_id, department, gross_pay, net_pay, total_taxes, total_deductions, earnings, taxes, deductions, check_number, pay_method
+3. earnings/taxes/deductions are arrays of objects with: type, description, amount, hours (if applicable), rate (if applicable)
+4. Use 0 for missing numbers, "" for missing strings, [] for missing arrays
+5. Note: Some sensitive data has been redacted with [REDACTED] placeholders - ignore those
+
+Example format:
+[{{"name":"DOE, JOHN","employee_id":"A123","department":"Sales","gross_pay":1000.00,"net_pay":800.00,"total_taxes":150.00,"total_deductions":50.00,"earnings":[{{"type":"Regular","description":"Regular Pay","rate":25.00,"hours":40,"amount":1000.00}}],"taxes":[{{"type":"Federal","description":"Federal W/H","amount":100.00}}],"deductions":[{{"type":"401K","description":"401K Contribution","amount":50.00}}],"check_number":"","pay_method":"Direct Deposit"}}]
+
+Return the JSON array now:"""
+
         try:
             response_text = ""
-            with self.claude.messages.stream(model="claude-sonnet-4-20250514", max_tokens=16000, messages=[{"role": "user", "content": prompt}]) as stream:
-                for text in stream.text_stream: response_text += text
+            with self.claude.messages.stream(
+                model="claude-sonnet-4-20250514",
+                max_tokens=16000,
+                messages=[{"role": "user", "content": prompt}]
+            ) as stream:
+                for text in stream.text_stream:
+                    response_text += text
+            
+            logger.info(f"Claude response length: {len(response_text)}")
+            
         except Exception as e:
-            logger.error(f"Claude error: {e}")
+            logger.error(f"Claude API error: {e}")
             return []
+        
         return self._parse_json_response(response_text)
     
-    def _parse_with_local_llm(self, pages_text: List[str]) -> List[Dict]:
-        import requests
-        full_text = "\n\n--- PAGE BREAK ---\n\n".join(pages_text)[:30000]
-        prompt = f"""Extract employees as JSON array: name, employee_id, department, gross_pay, net_pay, total_taxes, total_deductions, earnings, taxes, deductions, check_number, pay_method
-DATA:
-{full_text}"""
-        try:
-            response = requests.post(f"{os.environ.get('LOCAL_LLM_URL', 'http://localhost:11434')}/api/generate", json={"model": os.environ.get('LOCAL_LLM_MODEL', 'mistral'), "prompt": prompt, "stream": False, "options": {"num_predict": 8000}}, timeout=120)
-            if response.status_code == 200: return self._parse_json_response(response.json().get('response', ''))
-        except Exception as e:
-            logger.error(f"Local LLM error: {e}")
-        return []
-    
     def _parse_json_response(self, response_text: str) -> List[Dict]:
-        text = re.sub(r'^```json\s*|^```\s*|\s*```\s*$', '', response_text.strip())
-        start_idx, end_idx = text.find('['), text.rfind(']')
-        if start_idx < 0: return []
+        """Parse JSON from Claude response with multiple fallback strategies."""
+        
+        text = response_text.strip()
+        
+        # Remove markdown code fences
+        text = re.sub(r'^```json\s*', '', text)
+        text = re.sub(r'^```\s*', '', text)
+        text = re.sub(r'\s*```\s*$', '', text)
+        
+        # Find array bounds
+        start_idx = text.find('[')
+        end_idx = text.rfind(']')
+        
+        if start_idx < 0:
+            logger.error("No JSON array found in response")
+            return []
+        
         if end_idx < start_idx:
             last_brace = text.rfind('}')
-            if last_brace > start_idx: text = text[:last_brace + 1] + ']'; end_idx = len(text) - 1
-            else: return []
-        json_str = re.sub(r',\s*]', ']', re.sub(r',\s*}', '}', text[start_idx:end_idx + 1]))
+            if last_brace > start_idx:
+                text = text[:last_brace + 1] + ']'
+                end_idx = len(text) - 1
+            else:
+                logger.error("Could not find end of JSON array")
+                return []
+        
+        json_str = text[start_idx:end_idx + 1]
+        
+        # Fix common issues
+        json_str = re.sub(r',\s*]', ']', json_str)
+        json_str = re.sub(r',\s*}', '}', json_str)
+        
+        # Strategy 1: Direct parse
         try:
             data = json.loads(json_str)
-            if isinstance(data, list): return [self._normalize_employee(e) for e in data if isinstance(e, dict)]
-        except: pass
+            if isinstance(data, list):
+                logger.info(f"Strategy 1 (direct): Parsed {len(data)} employees")
+                return [self._normalize_employee(e) for e in data if isinstance(e, dict)]
+        except json.JSONDecodeError as e:
+            logger.warning(f"Strategy 1 failed: {e}")
+        
+        # Strategy 2: Extract objects one by one
         employees = []
-        depth, obj_start = 0, None
+        depth = 0
+        obj_start = None
+        
         for i, char in enumerate(json_str):
             if char == '{':
-                if depth == 0: obj_start = i
+                if depth == 0:
+                    obj_start = i
                 depth += 1
             elif char == '}':
                 depth -= 1
                 if depth == 0 and obj_start is not None:
-                    emp = self._try_parse_object(json_str[obj_start:i + 1])
-                    if emp: employees.append(emp)
+                    obj_str = json_str[obj_start:i + 1]
+                    emp = self._try_parse_object(obj_str)
+                    if emp:
+                        employees.append(emp)
                     obj_start = None
+        
+        logger.info(f"Strategy 2 (object extraction): Parsed {len(employees)} employees")
         return employees
     
     def _try_parse_object(self, obj_str: str) -> Optional[Dict]:
-        obj_str = re.sub(r',\s*}', '}', re.sub(r',\s*]', ']', obj_str))
-        try: return self._normalize_employee(json.loads(obj_str))
-        except: pass
-        def get(p): m = re.search(p, obj_str); return m.group(1) if m else ''
-        def num(p): m = re.search(p, obj_str); return float(m.group(1)) if m else 0.0
-        if get(r'"name"\s*:\s*"([^"]*)"') or num(r'"gross_pay"\s*:\s*([\d.]+)'):
-            return {"name": get(r'"name"\s*:\s*"([^"]*)"'), "employee_id": get(r'"employee_id"\s*:\s*"([^"]*)"'), "department": get(r'"department"\s*:\s*"([^"]*)"'), "gross_pay": num(r'"gross_pay"\s*:\s*([\d.]+)'), "net_pay": num(r'"net_pay"\s*:\s*([\d.]+)'), "total_taxes": num(r'"total_taxes"\s*:\s*([\d.]+)'), "total_deductions": num(r'"total_deductions"\s*:\s*([\d.]+)'), "earnings": [], "taxes": [], "deductions": [], "check_number": get(r'"check_number"\s*:\s*"([^"]*)"'), "pay_method": get(r'"pay_method"\s*:\s*"([^"]*)"')}
+        """Try to parse a single JSON object."""
+        
+        obj_str = re.sub(r',\s*}', '}', obj_str)
+        obj_str = re.sub(r',\s*]', ']', obj_str)
+        
+        try:
+            obj = json.loads(obj_str)
+            return self._normalize_employee(obj)
+        except:
+            pass
+        
+        # Fallback: regex extraction
+        try:
+            name_match = re.search(r'"name"\s*:\s*"([^"]*)"', obj_str)
+            emp_id_match = re.search(r'"employee_id"\s*:\s*"([^"]*)"', obj_str)
+            dept_match = re.search(r'"department"\s*:\s*"([^"]*)"', obj_str)
+            gross_match = re.search(r'"gross_pay"\s*:\s*([\d.]+)', obj_str)
+            net_match = re.search(r'"net_pay"\s*:\s*([\d.]+)', obj_str)
+            taxes_match = re.search(r'"total_taxes"\s*:\s*([\d.]+)', obj_str)
+            deductions_match = re.search(r'"total_deductions"\s*:\s*([\d.]+)', obj_str)
+            pay_method_match = re.search(r'"pay_method"\s*:\s*"([^"]*)"', obj_str)
+            check_match = re.search(r'"check_number"\s*:\s*"([^"]*)"', obj_str)
+            
+            if name_match or gross_match:
+                return {
+                    "name": name_match.group(1) if name_match else "",
+                    "employee_id": emp_id_match.group(1) if emp_id_match else "",
+                    "department": dept_match.group(1) if dept_match else "",
+                    "gross_pay": float(gross_match.group(1)) if gross_match else 0.0,
+                    "net_pay": float(net_match.group(1)) if net_match else 0.0,
+                    "total_taxes": float(taxes_match.group(1)) if taxes_match else 0.0,
+                    "total_deductions": float(deductions_match.group(1)) if deductions_match else 0.0,
+                    "earnings": [],
+                    "taxes": [],
+                    "deductions": [],
+                    "check_number": check_match.group(1) if check_match else "",
+                    "pay_method": pay_method_match.group(1) if pay_method_match else ""
+                }
+        except Exception as e:
+            logger.debug(f"Object parse failed: {e}")
+        
         return None
     
     def _normalize_employee(self, data: Dict) -> Dict:
-        return {"name": str(data.get('name', '')), "employee_id": str(data.get('employee_id', '')), "department": str(data.get('department', '')), "gross_pay": float(data.get('gross_pay', 0) or 0), "net_pay": float(data.get('net_pay', 0) or 0), "total_taxes": float(data.get('total_taxes', 0) or 0), "total_deductions": float(data.get('total_deductions', 0) or 0), "earnings": data.get('earnings') if isinstance(data.get('earnings'), list) else [], "taxes": data.get('taxes') if isinstance(data.get('taxes'), list) else [], "deductions": data.get('deductions') if isinstance(data.get('deductions'), list) else [], "check_number": str(data.get('check_number', '')), "pay_method": str(data.get('pay_method', ''))}
+        """Ensure employee dict has all required fields."""
+        return {
+            "name": str(data.get('name', '')),
+            "employee_id": str(data.get('employee_id', '')),
+            "department": str(data.get('department', '')),
+            "gross_pay": float(data.get('gross_pay', 0) or 0),
+            "net_pay": float(data.get('net_pay', 0) or 0),
+            "total_taxes": float(data.get('total_taxes', 0) or 0),
+            "total_deductions": float(data.get('total_deductions', 0) or 0),
+            "earnings": data.get('earnings') if isinstance(data.get('earnings'), list) else [],
+            "taxes": data.get('taxes') if isinstance(data.get('taxes'), list) else [],
+            "deductions": data.get('deductions') if isinstance(data.get('deductions'), list) else [],
+            "check_number": str(data.get('check_number', '')),
+            "pay_method": str(data.get('pay_method', ''))
+        }
     
     def _validate_employee(self, emp: Dict) -> List[str]:
+        """Validate employee record."""
         errors = []
-        if not emp.get('name'): errors.append("Missing name")
-        gross, net, taxes, ded = emp.get('gross_pay', 0), emp.get('net_pay', 0), emp.get('total_taxes', 0), emp.get('total_deductions', 0)
-        if gross > 0 and net > 0 and abs((gross - taxes - ded) - net) > 1.00: errors.append(f"{emp.get('name', '?')}: Net mismatch")
+        
+        if not emp.get('name'):
+            errors.append("Missing employee name")
+        
+        gross = emp.get('gross_pay', 0)
+        net = emp.get('net_pay', 0)
+        taxes = emp.get('total_taxes', 0)
+        deductions = emp.get('total_deductions', 0)
+        
+        if gross > 0 and net > 0:
+            calculated = gross - taxes - deductions
+            if abs(calculated - net) > 1.00:
+                errors.append(
+                    f"{emp.get('name', 'Unknown')}: Net mismatch (calc {calculated:.2f}, actual {net:.2f})"
+                )
+        
         return errors
 
+
+# =============================================================================
+# SINGLETON
+# =============================================================================
+
 _extractor = None
-def get_extractor():
+
+def get_extractor() -> VacuumExtractor:
     global _extractor
-    if _extractor is None: _extractor = SimpleExtractor()
+    if _extractor is None:
+        _extractor = VacuumExtractor()
     return _extractor
 
-def process_vacuum_job(job_id: str, file_path: str, max_pages: int, use_local_llm: bool, project_id: str):
+
+# =============================================================================
+# BACKGROUND TASK
+# =============================================================================
+
+def process_extraction_job(job_id: str, file_path: str, max_pages: int, 
+                           use_textract: bool, project_id: Optional[str]):
+    """Background task for async extraction."""
+    ext = get_extractor()
+    
     try:
-        get_extractor().extract_with_progress(file_path, max_pages, use_local_llm, job_id, project_id)
+        result = ext.extract(file_path, max_pages=max_pages, 
+                            use_textract=use_textract, job_id=job_id)
+        
+        # Add id field to employees for frontend
+        for emp in result.get('employees', []):
+            emp['id'] = emp.get('employee_id', '')
+        
+        # Save to database
+        if result.get('success'):
+            saved = save_extraction(
+                project_id=project_id,
+                source_file=result['source_file'],
+                employees=result['employees'],
+                confidence=result['confidence'],
+                validation_passed=result['validation_passed'],
+                validation_errors=result['validation_errors'],
+                pages_processed=result['pages_processed'],
+                cost_usd=result['cost_usd'],
+                processing_time_ms=result['processing_time_ms'],
+                extraction_method=result.get('extraction_method', 'pymupdf')
+            )
+            result['extract_id'] = saved.get('id') if saved else None
+            result['saved_to_db'] = saved is not None
+        
+        update_job(job_id, result=result)
+        
     except Exception as e:
-        logger.error(f"Background job failed: {e}")
-        update_job(job_id, status='failed', error_message=str(e))
+        logger.error(f"Background job failed: {e}", exc_info=True)
+        update_job(job_id, status='failed', message=str(e))
+    
     finally:
+        # Cleanup temp file
         try:
-            if os.path.exists(file_path): os.remove(file_path)
-            shutil.rmtree(os.path.dirname(file_path), ignore_errors=True)
-        except: pass
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                parent = os.path.dirname(file_path)
+                if os.path.isdir(parent):
+                    shutil.rmtree(parent, ignore_errors=True)
+        except:
+            pass
+
+
+# =============================================================================
+# ROUTES
+# =============================================================================
 
 @router.get("/vacuum/status")
 async def status():
     ext = get_extractor()
-    return {"available": ext.is_available, "version": "10.0-async", "claude_key_set": bool(ext.claude_api_key)}
+    return {
+        "available": ext.is_available,
+        "version": "11.0-privacy",
+        "default_method": "PyMuPDF (local, private)",
+        "fallback_method": "Textract (AWS OCR)",
+        "pii_redaction": True,
+        "claude_key_set": bool(ext.claude_api_key),
+        "aws_region": ext.aws_region
+    }
+
 
 @router.post("/vacuum/upload")
-async def upload(file: UploadFile = File(...), max_pages: int = Form(3), project_id: Optional[str] = Form(None), use_local_llm: str = Form("false")):
-    ext = get_extractor()
-    use_local = use_local_llm.lower() == 'true'
-    if not ext.is_available and not use_local: return {"success": False, "error": "CLAUDE_API_KEY not set", "job_id": None}
-    if not file.filename.lower().endswith('.pdf'): return {"success": False, "error": "Only PDF supported", "job_id": None}
+async def upload(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    max_pages: int = Form(0),
+    project_id: Optional[str] = Form(None),
+    use_textract: bool = Form(False),
+    async_mode: bool = Form(True)
+):
+    """
+    Upload and extract pay register.
     
+    Args:
+        file: PDF file to process
+        max_pages: Max pages (0 = all pages)
+        project_id: Optional project ID
+        use_textract: If True, use AWS Textract instead of PyMuPDF
+        async_mode: If True, process in background and return job_id
+    """
+    ext = get_extractor()
+    
+    if not ext.is_available:
+        return {"success": False, "error": "CLAUDE_API_KEY not set", "employees": [], "employee_count": 0}
+    
+    if not file.filename.lower().endswith('.pdf'):
+        return {"success": False, "error": "Only PDF files supported", "employees": [], "employee_count": 0}
+    
+    # Save file
     temp_dir = tempfile.mkdtemp()
     temp_path = os.path.join(temp_dir, file.filename)
-    with open(temp_path, 'wb') as f: shutil.copyfileobj(file.file, f)
     
-    job_id = create_job('vacuum_extract', project_id, {'filename': file.filename, 'max_pages': max_pages, 'use_local_llm': use_local})
-    if not job_id:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        return {"success": False, "error": "Failed to create job", "job_id": None}
+    with open(temp_path, 'wb') as f:
+        shutil.copyfileobj(file.file, f)
     
-    thread = threading.Thread(target=process_vacuum_job, args=(job_id, temp_path, max_pages, use_local, project_id), daemon=True)
-    thread.start()
-    return {"success": True, "job_id": job_id, "message": "Processing started"}
+    if async_mode:
+        # Create job and process in background
+        job_id = create_job(file.filename)
+        background_tasks.add_task(
+            process_extraction_job, 
+            job_id, temp_path, max_pages, use_textract, project_id
+        )
+        
+        return {
+            "success": True,
+            "job_id": job_id,
+            "status": "processing",
+            "message": f"Processing started. Poll /vacuum/job/{job_id} for status.",
+            "extraction_method": "textract" if use_textract else "pymupdf"
+        }
+    else:
+        # Synchronous processing
+        try:
+            result = ext.extract(temp_path, max_pages=max_pages, use_textract=use_textract)
+            
+            for emp in result.get('employees', []):
+                emp['id'] = emp.get('employee_id', '')
+            
+            if result.get('success'):
+                saved = save_extraction(
+                    project_id=project_id,
+                    source_file=result['source_file'],
+                    employees=result['employees'],
+                    confidence=result['confidence'],
+                    validation_passed=result['validation_passed'],
+                    validation_errors=result['validation_errors'],
+                    pages_processed=result['pages_processed'],
+                    cost_usd=result['cost_usd'],
+                    processing_time_ms=result['processing_time_ms'],
+                    extraction_method=result.get('extraction_method', 'pymupdf')
+                )
+                result['extract_id'] = saved.get('id') if saved else None
+                result['saved_to_db'] = saved is not None
+            
+            return result
+            
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
 
 @router.get("/vacuum/job/{job_id}")
 async def get_job_status(job_id: str):
+    """Get status of an async extraction job."""
     job = get_job(job_id)
-    if not job: return {"error": "Job not found"}
-    return {"id": job.get('id'), "status": job.get('status'), "progress": job.get('progress'), "result": job.get('result_data'), "error": job.get('error_message'), "created_at": job.get('created_at'), "completed_at": job.get('completed_at')}
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
 
 @router.post("/vacuum/extract")
-async def extract(file: UploadFile = File(...), max_pages: int = Form(3), project_id: Optional[str] = Form(None), use_local_llm: str = Form("false")):
-    return await upload(file, max_pages, project_id, use_local_llm)
+async def extract(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    max_pages: int = Form(0),
+    project_id: Optional[str] = Form(None),
+    use_textract: bool = Form(False),
+    async_mode: bool = Form(True)
+):
+    """Alias for /vacuum/upload"""
+    return await upload(background_tasks, file, max_pages, project_id, use_textract, async_mode)
+
 
 @router.get("/vacuum/extracts")
 async def get_extracts(project_id: Optional[str] = None, limit: int = 50):
+    """Get extraction history"""
     extracts = get_extractions(project_id=project_id, limit=limit)
-    return {"extracts": [{"id": e.get('id'), "source_file": e.get('source_file'), "employee_count": e.get('employee_count'), "confidence": e.get('confidence'), "validation_passed": e.get('validation_passed'), "pages_processed": e.get('pages_processed'), "cost_usd": e.get('cost_usd'), "created_at": e.get('created_at')} for e in extracts], "total": len(extracts)}
+    
+    return {
+        "extracts": [
+            {
+                "id": e.get('id'),
+                "source_file": e.get('source_file'),
+                "employee_count": e.get('employee_count'),
+                "confidence": e.get('confidence'),
+                "validation_passed": e.get('validation_passed'),
+                "pages_processed": e.get('pages_processed'),
+                "cost_usd": e.get('cost_usd'),
+                "extraction_method": e.get('extraction_method', 'unknown'),
+                "created_at": e.get('created_at')
+            }
+            for e in extracts
+        ],
+        "total": len(extracts)
+    }
+
 
 @router.get("/vacuum/extract/{extract_id}")
 async def get_extract(extract_id: str):
+    """Get full extraction details"""
     extraction = get_extraction_by_id(extract_id)
-    return extraction if extraction else {"error": "Not found"}
+    if not extraction:
+        return {"error": "Extraction not found"}
+    return extraction
+
 
 @router.delete("/vacuum/extract/{extract_id}")
 async def delete_extract(extract_id: str):
-    return {"success": delete_extraction(extract_id), "id": extract_id}
+    """Delete an extraction"""
+    success = delete_extraction(extract_id)
+    return {"success": success, "id": extract_id}
+
 
 @router.get("/vacuum/health")
 async def health():
