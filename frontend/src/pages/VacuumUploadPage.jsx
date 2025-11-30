@@ -271,6 +271,7 @@ export default function VacuumUploadPage() {
       'Name': emp.name || '',
       'Employee ID': emp.employee_id || '',
       'Department': emp.department || '',
+      'Tax Profile': emp.tax_profile || '',
       'Gross Pay': emp.gross_pay || 0,
       'Total Taxes': emp.total_taxes || 0,
       'Total Deductions': emp.total_deductions || 0,
@@ -833,6 +834,7 @@ function EmployeeTable({ employees }) {
             <th className="text-left p-2">Employee</th>
             <th className="text-left p-2">ID</th>
             <th className="text-left p-2">Department</th>
+            <th className="text-left p-2">Tax Profile</th>
             <th className="text-right p-2">Gross</th>
             <th className="text-right p-2">Taxes</th>
             <th className="text-right p-2">Deductions</th>
@@ -854,6 +856,7 @@ function EmployeeTable({ employees }) {
                   <td className="p-2 font-medium">{emp.name || '(Unknown)'}</td>
                   <td className="p-2 text-gray-600">{emp.employee_id || '-'}</td>
                   <td className="p-2 text-gray-600">{emp.department || '-'}</td>
+                  <td className="p-2 text-gray-600">{emp.tax_profile || '-'}</td>
                   <td className="p-2 text-right font-medium">${(emp.gross_pay || 0).toFixed(2)}</td>
                   <td className="p-2 text-right text-red-600">${(emp.total_taxes || 0).toFixed(2)}</td>
                   <td className="p-2 text-right text-orange-600">${(emp.total_deductions || 0).toFixed(2)}</td>
