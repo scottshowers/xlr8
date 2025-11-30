@@ -483,17 +483,32 @@ CRITICAL - PAGE BREAK HANDLING:
 2. If a page STARTS with "Code:" and "Tax Profile:" WITHOUT a name above it, this is CONTINUATION data - MERGE with previous employee.
 3. The GROSS and NET PAY values are the authoritative totals.
 
-FULL DESCRIPTIONS - VERY IMPORTANT: 
-Copy the COMPLETE description text exactly as shown:
-- "Shift Diff 2L OT" not "Shift Diff"
-- "Shift Diff C2" not "Shift Diff"  
-- "Federal W/H (S)" not "Federal"
-- "MD State W/H (S/0)" not "MD State"
-- "401K %" not "401K"
-- "Wicomico County, MD - Res. Local" not "Local"
+DESCRIPTIONS - READ THIS CAREFULLY:
+For "type" field: Use a short code (e.g., "Regular", "Overtime", "Federal", "401K")
+For "description" field: Copy the EXACT FULL TEXT from the document line - character for character.
+
+The description is NOT a summary. It is a VERBATIM COPY of the text.
+
+From this line in the document:
+"Shift Diff 2L OT    35.25    0.16    5.64"
+The description must be: "Shift Diff 2L OT" (not "Shift Diff", not "Shift Differential")
+
+From this line:
+"Federal W/H (S)    77.64"
+The description must be: "Federal W/H (S)" (not "Federal", not "Federal Withholding")
+
+From this line:
+"Wicomico County, MD - Res. Local    55.67"
+The description must be: "Wicomico County, MD - Res. Local" (not "Local", not "County Tax")
+
+From this line:
+"MD State W/H (S/0)    82.64"
+The description must be: "MD State W/H (S/0)" (not "MD State", not "State Tax")
+
+DO NOT summarize, shorten, or paraphrase descriptions. Copy them exactly.
 
 Example format:
-[{{"company_name":"JOHN B PARSONS HOME LLC","client_code":"0EA14","period_ending":"10/17/2020","check_date":"10/23/2020","name":"DOE, JOHN","employee_id":"A123","department":"2100 - LPN","tax_profile":"1 - MD/MD/MD","gross_pay":1000.00,"net_pay":800.00,"total_taxes":150.00,"total_deductions":50.00,"earnings":[{{"type":"Regular","description":"Regular Pay","rate":25.00,"hours":40,"amount":1000.00}},{{"type":"Shift Diff","description":"Shift Diff 2L OT","rate":2.50,"hours":8,"amount":20.00}}],"taxes":[{{"type":"FWT","description":"Federal W/H (S)","amount":100.00}}],"deductions":[{{"type":"401K","description":"401K %","amount":50.00}}],"check_number":"","pay_method":"Direct Deposit"}}]
+[{{"company_name":"JOHN B PARSONS HOME LLC","client_code":"0EA14","period_ending":"10/17/2020","check_date":"10/23/2020","name":"DOE, JOHN","employee_id":"A123","department":"2100 - LPN","tax_profile":"1 - MD/MD/MD","gross_pay":1000.00,"net_pay":800.00,"total_taxes":150.00,"total_deductions":50.00,"earnings":[{{"type":"Regular","description":"Regular","rate":25.00,"hours":40,"amount":1000.00}},{{"type":"Shift Diff","description":"Shift Diff 2L OT","rate":2.50,"hours":8,"amount":20.00}}],"taxes":[{{"type":"Federal","description":"Federal W/H (S)","amount":100.00}}],"deductions":[{{"type":"401K","description":"401K %","amount":50.00}}],"check_number":"","pay_method":"Direct Deposit"}}]
 
 Return the JSON array now:"""
 
