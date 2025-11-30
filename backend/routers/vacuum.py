@@ -464,13 +464,18 @@ DATA:
 STRICT RULES:
 1. Return ONLY a valid JSON array - no markdown, no explanation
 2. Each employee object must have these EXACT keys (no duplicates):
-   name, employee_id, department, gross_pay, net_pay, total_taxes, total_deductions, earnings, taxes, deductions, check_number, pay_method
+   name, employee_id, department, tax_profile, gross_pay, net_pay, total_taxes, total_deductions, earnings, taxes, deductions, check_number, pay_method
 3. earnings/taxes/deductions are arrays of objects with: type, description, amount, hours (if applicable), rate (if applicable)
 4. Use 0 for missing numbers, "" for missing strings, [] for missing arrays
 5. Note: Some sensitive data has been redacted with [REDACTED] placeholders - ignore those
 
+CRITICAL - PAY ATTENTION:
+- tax_profile: Look for "Tax Profile:" in employee header (e.g., "Tax Profile: 2 - MD/MD/MD")
+- description: Capture the FULL description text, not truncated (e.g., "Shift Diff 2L OT" not just "Shift Diff")
+- PAGE BREAKS: If an employee's data spans across a page break (--- PAGE BREAK ---), MERGE their data into ONE employee record. Do NOT create duplicate employees.
+
 Example format:
-[{{"name":"DOE, JOHN","employee_id":"A123","department":"Sales","gross_pay":1000.00,"net_pay":800.00,"total_taxes":150.00,"total_deductions":50.00,"earnings":[{{"type":"Regular","description":"Regular Pay","rate":25.00,"hours":40,"amount":1000.00}}],"taxes":[{{"type":"Federal","description":"Federal W/H","amount":100.00}}],"deductions":[{{"type":"401K","description":"401K Contribution","amount":50.00}}],"check_number":"","pay_method":"Direct Deposit"}}]
+[{{"name":"DOE, JOHN","employee_id":"A123","department":"Sales","tax_profile":"2 - MD/MD/MD","gross_pay":1000.00,"net_pay":800.00,"total_taxes":150.00,"total_deductions":50.00,"earnings":[{{"type":"Regular","description":"Regular Pay","rate":25.00,"hours":40,"amount":1000.00}},{{"type":"Shift Diff","description":"Shift Diff 2L OT","rate":2.50,"hours":8,"amount":20.00}}],"taxes":[{{"type":"Federal","description":"Federal Withholding","amount":100.00}}],"deductions":[{{"type":"401K","description":"401K Pre-Tax","amount":50.00}}],"check_number":"","pay_method":"Direct Deposit"}}]
 
 Return the JSON array now:"""
 
@@ -606,6 +611,7 @@ Return the JSON array now:"""
             "name": str(data.get('name', '')),
             "employee_id": str(data.get('employee_id', '')),
             "department": str(data.get('department', '')),
+            "tax_profile": str(data.get('tax_profile', '')),
             "gross_pay": float(data.get('gross_pay', 0) or 0),
             "net_pay": float(data.get('net_pay', 0) or 0),
             "total_taxes": float(data.get('total_taxes', 0) or 0),
