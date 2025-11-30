@@ -472,20 +472,23 @@ STRICT RULES:
 4. Use 0 for missing numbers, "" for missing strings, [] for missing arrays
 5. Note: Some sensitive data has been redacted with [REDACTED] placeholders - ignore those
 
-CRITICAL - YOU MUST DO THESE:
-1. tax_profile: Extract "Tax Profile:" from employee header (e.g., "Tax Profile: 2 - MD/MD/MD" → "2 - MD/MD/MD")
+CRITICAL - PAGE BREAK HANDLING:
+Employee data often spans across page breaks. Here's how to detect and merge:
 
-2. FULL DESCRIPTIONS: The "description" field must contain the COMPLETE text from the earnings/deductions/taxes column. 
+1. If a page ENDS with an employee name and partial data (like just one earning line), the NEXT page will have the rest of their data.
+
+2. If a page STARTS with "Code:" and "Tax Profile:" WITHOUT an employee name above it, this is CONTINUATION data for the employee from the previous page. MERGE this data with that employee.
+
+3. Look for these patterns to identify continuations:
+   - Page ends: "SMITH, JOHN" followed by partial earnings
+   - Next page starts: "Code: A123" and "Tax Profile: 1 - MD/MD/MD" (no name = continuation)
+   
+4. The GROSS and NET PAY values at the end of an employee's section are the authoritative totals - use those.
+
+FULL DESCRIPTIONS: The "description" field must contain the COMPLETE text from the earnings/deductions/taxes column. 
    - WRONG: "Shift Diff" 
    - CORRECT: "Shift Diff 2L OT"
-   - WRONG: "Federal"
-   - CORRECT: "Federal Withholding"
-   Do NOT truncate or abbreviate descriptions.
-
-3. PAGE BREAKS: Employees may span across "--- PAGE BREAK ---" markers. 
-   - If you see an employee's header on one page and their earnings/taxes/deductions continue on the next page, COMBINE them into ONE employee record.
-   - Do NOT create duplicate employee records for the same person.
-   - Match by employee name and ID to merge split data.
+   Do NOT truncate descriptions.
 
 Example format:
 [{{"name":"DOE, JOHN","employee_id":"A123","department":"Sales","tax_profile":"2 - MD/MD/MD","gross_pay":1000.00,"net_pay":800.00,"total_taxes":150.00,"total_deductions":50.00,"earnings":[{{"type":"Regular","description":"Regular Pay","rate":25.00,"hours":40,"amount":1000.00}},{{"type":"Shift Diff","description":"Shift Diff 2L OT","rate":2.50,"hours":8,"amount":20.00}}],"taxes":[{{"type":"FWT","description":"Federal Withholding Tax","amount":100.00}}],"deductions":[{{"type":"401K","description":"401K Pre-Tax Contribution","amount":50.00}}],"check_number":"","pay_method":"Direct Deposit"}}]
