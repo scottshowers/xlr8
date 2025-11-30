@@ -35,6 +35,7 @@ export default function VacuumUploadPage() {
   const [error, setError] = useState(null);
   const [maxPages, setMaxPages] = useState(0); // 0 = all pages
   const [useTextract, setUseTextract] = useState(false); // PyMuPDF is default
+  const [vendorType, setVendorType] = useState('unknown'); // auto-detect by default
   const [activeTab, setActiveTab] = useState('employees'); // 'employees' or 'summary'
   
   // Job polling state
@@ -146,6 +147,7 @@ export default function VacuumUploadPage() {
       formData.append('max_pages', maxPages.toString());
       formData.append('project_id', selectedProject);
       formData.append('use_textract', useTextract.toString());
+      formData.append('vendor_type', vendorType);
       formData.append('async_mode', 'true');
       
       const res = await fetch(`${API_BASE}/api/vacuum/upload`, {
@@ -488,6 +490,28 @@ export default function VacuumUploadPage() {
                 max={2000}
                 className="w-full border rounded-lg px-3 py-2"
               />
+            </div>
+            
+            {/* Vendor Type */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Vendor
+              </label>
+              <select
+                value={vendorType}
+                onChange={(e) => setVendorType(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2"
+              >
+                <option value="unknown">🔍 Auto-Detect</option>
+                <option value="paycom">Paycom</option>
+                <option value="dayforce">Dayforce / Ceridian</option>
+                <option value="adp">ADP</option>
+                <option value="paychex">Paychex</option>
+                <option value="ultipro">UKG Pro / UltiPro</option>
+                <option value="workday">Workday</option>
+                <option value="gusto">Gusto</option>
+                <option value="quickbooks">QuickBooks</option>
+              </select>
             </div>
             
             {/* OCR Method Toggle */}
