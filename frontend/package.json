@@ -12,7 +12,8 @@
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.20.0",
     "axios": "^1.6.2",
-    "lucide-react": "^0.263.1"
+    "lucide-react": "^0.263.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/react": "^18.2.43",
