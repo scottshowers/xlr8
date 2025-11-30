@@ -1509,6 +1509,148 @@ async def get_extract(extract_id: str):
     return extraction
 
 
+@router.get("/vacuum/extract/{extract_id}/raw")
+async def get_extract_raw_text(extract_id: str):
+    """Get raw extracted text for Consultant Assist review."""
+    supabase = get_supabase()
+    if not supabase:
+        return {"error": "Database not available", "raw_text": ""}
+    
+    try:
+        # Get the extraction job
+        response = supabase.table('extraction_jobs').select('source_file').eq('id', extract_id).execute()
+        if not response.data:
+            return {"error": "Extraction not found", "raw_text": ""}
+        
+        # For now, return a message - we'd need to store raw_text in the job
+        # or re-extract from the PDF
+        return {
+            "raw_text": "Raw text preview not yet stored. Feature coming soon.\n\nTo see raw text, re-run extraction with logging enabled.",
+            "source_file": response.data[0].get('source_file', '')
+        }
+    except Exception as e:
+        logger.error(f"Failed to get raw text: {e}")
+        return {"error": str(e), "raw_text": ""}
+
+
+@router.get("/vacuum/field-definitions")
+async def get_field_definitions(
+    customer_id: Optional[str] = None,
+    vendor_type: Optional[str] = None
+):
+    """Get custom field definitions for a customer or vendor."""
+    supabase = get_supabase()
+    if not supabase:
+        return {"fields": []}
+    
+    try:
+        query = supabase.table('field_definitions').select('*')
+        if customer_id:
+            query = query.eq('customer_id', customer_id)
+        if vendor_type:
+            query = query.eq('vendor_type', vendor_type)
+        
+        response = query.order('sort_order').execute()
+        return {"fields": response.data or []}
+    except Exception as e:
+        logger.error(f"Failed to get field definitions: {e}")
+        return {"fields": []}
+
+
+@router.post("/vacuum/field-definitions")
+async def create_field_definition(request: dict):
+    """Create a new custom field definition."""
+    supabase = get_supabase()
+    if not supabase:
+        return {"success": False, "error": "Database not available"}
+    
+    try:
+        data = {
+            "customer_id": request.get('customer_id'),
+            "vendor_type": request.get('vendor_type'),
+            "table_name": request.get('table_name'),
+            "field_name": request.get('field_name'),
+            "field_label": request.get('field_label'),
+            "field_type": request.get('field_type', 'text'),
+            "is_required": request.get('is_required', False),
+            "default_value": request.get('default_value'),
+            "sort_order": request.get('sort_order', 0)
+        }
+        
+        response = supabase.table('field_definitions').insert(data).execute()
+        return {"success": True, "field": response.data[0] if response.data else None}
+    except Exception as e:
+        logger.error(f"Failed to create field definition: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/vacuum/assist/save-template")
+async def save_assist_template(request: dict):
+    """Save Consultant Assist template (sections, fields, hints)."""
+    supabase = get_supabase()
+    if not supabase:
+        return {"success": False, "error": "Database not available"}
+    
+    try:
+        vendor_type = request.get('vendor_type', 'unknown')
+        customer_id = request.get('customer_id')
+        sections = request.get('sections', [])
+        fields = request.get('fields', [])
+        hints = request.get('hints', {})
+        
+        # Save field definitions
+        for field in fields:
+            if field.get('id', '').startswith('temp-'):
+                # New field - insert
+                field_data = {
+                    "customer_id": customer_id,
+                    "vendor_type": vendor_type,
+                    "table_name": field.get('table_name'),
+                    "field_name": field.get('field_name'),
+                    "field_label": field.get('field_label'),
+                    "field_type": field.get('field_type', 'text'),
+                }
+                supabase.table('field_definitions').insert(field_data).execute()
+        
+        # Update or create vendor prompt with hints
+        if hints.get('specialInstructions') or hints.get('employeeMarker'):
+            # Get existing prompt
+            existing = supabase.table('vendor_prompts').select('*').eq('vendor_type', vendor_type).execute()
+            
+            # Build enhanced prompt with hints
+            hint_additions = []
+            if hints.get('layout') == 'horizontal':
+                hint_additions.append("LAYOUT: This register has a HORIZONTAL layout with columns side-by-side.")
+            if hints.get('employeeMarker'):
+                hint_additions.append(f"EMPLOYEE MARKER: Each employee section starts with '{hints['employeeMarker']}'")
+            if hints.get('specialInstructions'):
+                hint_additions.append(f"SPECIAL INSTRUCTIONS: {hints['specialInstructions']}")
+            
+            if hint_additions and existing.data:
+                # Append hints to existing prompt
+                existing_prompt = existing.data[0].get('prompt_template', '')
+                enhanced_prompt = existing_prompt + "\n\n" + "\n".join(hint_additions)
+                
+                supabase.table('vendor_prompts').update({
+                    'prompt_template': enhanced_prompt
+                }).eq('vendor_type', vendor_type).execute()
+            elif hint_additions:
+                # Create new prompt with hints
+                base_prompt = VacuumExtractor()._get_default_prompt()
+                enhanced_prompt = base_prompt + "\n\n" + "\n".join(hint_additions)
+                
+                supabase.table('vendor_prompts').insert({
+                    'vendor_type': vendor_type,
+                    'description': f'Auto-generated from Consultant Assist',
+                    'prompt_template': enhanced_prompt
+                }).execute()
+        
+        return {"success": True, "message": "Template saved successfully"}
+    except Exception as e:
+        logger.error(f"Failed to save assist template: {e}")
+        return {"success": False, "error": str(e)}
+
+
 @router.delete("/vacuum/extract/{extract_id}")
 async def delete_extract(extract_id: str):
     """Delete an extraction"""
