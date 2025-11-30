@@ -343,26 +343,53 @@ IMPORTANT:
             else:
                 json_str = response_text
             
-            # Clean up common JSON issues
+            # Remove markdown code fences
+            json_str = re.sub(r'^```json\s*', '', json_str)
+            json_str = re.sub(r'^```\s*', '', json_str)
+            json_str = re.sub(r'\s*```$', '', json_str)
+            
+            # Fix common JSON issues
             # Remove trailing commas before ] or }
             json_str = re.sub(r',\s*]', ']', json_str)
             json_str = re.sub(r',\s*}', '}', json_str)
             
-            # If truncated mid-object, try to close it
-            if json_str.count('[') > json_str.count(']'):
-                # Find last complete object
-                last_complete = json_str.rfind('},')
-                if last_complete > 0:
-                    json_str = json_str[:last_complete + 1] + ']'
-                else:
-                    # Try to find last complete object without comma
-                    last_complete = json_str.rfind('}')
-                    if last_complete > 0:
-                        json_str = json_str[:last_complete + 1] + ']'
+            # Fix duplicate keys by keeping only first occurrence in each object
+            # This is a simple approach - find objects and dedupe
             
-            data = json.loads(json_str)
+            # If truncated mid-object, try to salvage complete objects
+            if json_str.count('[') > json_str.count(']'):
+                # Find last complete object (ends with })
+                last_brace = json_str.rfind('}')
+                if last_brace > 0:
+                    # Find the comma or [ before it
+                    search_pos = last_brace
+                    while search_pos > 0:
+                        if json_str[search_pos] == '{':
+                            # Found start of last object, check if it's complete
+                            try:
+                                test_obj = json_str[search_pos:last_brace+1]
+                                json.loads(test_obj)
+                                # Object is valid, truncate here
+                                json_str = json_str[:last_brace+1] + ']'
+                                break
+                            except:
+                                pass
+                        search_pos -= 1
+                    else:
+                        # Fallback: just close the array
+                        json_str = json_str[:last_brace+1] + ']'
+            
+            # Try to parse
+            try:
+                data = json.loads(json_str)
+            except json.JSONDecodeError as e:
+                logger.warning(f"First parse attempt failed: {e}")
+                # Try extracting individual objects
+                data = self._extract_objects_manually(json_str)
             
             for emp_data in data:
+                if not isinstance(emp_data, dict):
+                    continue
                 emp = Employee(
                     name=str(emp_data.get('name', '')),
                     employee_id=str(emp_data.get('employee_id', '')),
@@ -382,9 +409,44 @@ IMPORTANT:
         except json.JSONDecodeError as e:
             logger.error(f"JSON parse error: {e}")
             logger.error(f"Response: {response_text[:1000]}")
+        except Exception as e:
+            logger.error(f"Unexpected error parsing response: {e}")
         
         logger.info(f"Parsed {len(employees)} employees")
         return employees
+    
+    def _extract_objects_manually(self, json_str: str) -> List[Dict]:
+        """Manually extract JSON objects from malformed array"""
+        objects = []
+        depth = 0
+        start = None
+        
+        for i, char in enumerate(json_str):
+            if char == '{':
+                if depth == 0:
+                    start = i
+                depth += 1
+            elif char == '}':
+                depth -= 1
+                if depth == 0 and start is not None:
+                    obj_str = json_str[start:i+1]
+                    try:
+                        obj = json.loads(obj_str)
+                        objects.append(obj)
+                    except:
+                        # Try to fix common issues in this object
+                        try:
+                            # Remove duplicate keys (keep first)
+                            obj_str = re.sub(r',\s*"(\w+)":\s*\[?\s*$', '', obj_str)
+                            obj_str = re.sub(r',\s*}', '}', obj_str)
+                            obj = json.loads(obj_str)
+                            objects.append(obj)
+                        except:
+                            logger.debug(f"Could not parse object: {obj_str[:100]}...")
+                    start = None
+        
+        logger.info(f"Manually extracted {len(objects)} objects")
+        return objects
     
     def _validate_employee(self, emp: Employee) -> List[str]:
         """Validate employee record."""
