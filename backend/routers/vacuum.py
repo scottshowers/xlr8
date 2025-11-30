@@ -499,7 +499,7 @@ Return the JSON array now:"""
             response_text = ""
             with self.claude.messages.stream(
                 model="claude-sonnet-4-20250514",
-                max_tokens=24000,
+                max_tokens=64000,
                 messages=[{"role": "user", "content": prompt}]
             ) as stream:
                 for text in stream.text_stream:
