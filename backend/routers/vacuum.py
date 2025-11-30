@@ -521,8 +521,10 @@ Return the JSON array now:"""
         employees = self._parse_json_response(response_text)
         
         # Post-process to fix truncated descriptions
+        print(f"[VACUUM] Starting description fix for {len(employees)} employees", flush=True)
         logger.info(f"Starting description fix for {len(employees)} employees")
         employees = self._fix_descriptions(employees, full_text)
+        print(f"[VACUUM] Description fix complete", flush=True)
         logger.info(f"Description fix complete")
         
         return employees
@@ -532,6 +534,7 @@ Return the JSON array now:"""
         
         # Build a list of all lines
         lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
+        print(f"[VACUUM] Raw text has {len(lines)} lines for description matching", flush=True)
         logger.info(f"Raw text has {len(lines)} lines for description matching")
         
         fixes_made = 0
@@ -576,6 +579,7 @@ Return the JSON array now:"""
                     deduction['description'] = full_desc
                     fixes_made += 1
         
+        print(f"[VACUUM] Description fixes made: {fixes_made}", flush=True)
         logger.info(f"Description fixes made: {fixes_made}")
         return employees
     
