@@ -521,7 +521,9 @@ Return the JSON array now:"""
         employees = self._parse_json_response(response_text)
         
         # Post-process to fix truncated descriptions
+        logger.info(f"Starting description fix for {len(employees)} employees")
         employees = self._fix_descriptions(employees, full_text)
+        logger.info(f"Description fix complete")
         
         return employees
     
@@ -530,6 +532,9 @@ Return the JSON array now:"""
         
         # Build a list of all lines
         lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
+        logger.info(f"Raw text has {len(lines)} lines for description matching")
+        
+        fixes_made = 0
         
         for emp in employees:
             # Fix earnings descriptions
@@ -540,8 +545,10 @@ Return the JSON array now:"""
                     earning.get('amount', 0),
                     lines
                 )
-                if full_desc:
+                if full_desc and full_desc != earning.get('description', ''):
+                    logger.debug(f"Fixed earning: '{earning.get('description')}' -> '{full_desc}'")
                     earning['description'] = full_desc
+                    fixes_made += 1
             
             # Fix taxes descriptions
             for tax in emp.get('taxes', []):
@@ -551,8 +558,10 @@ Return the JSON array now:"""
                     tax.get('amount', 0),
                     lines
                 )
-                if full_desc:
+                if full_desc and full_desc != tax.get('description', ''):
+                    logger.debug(f"Fixed tax: '{tax.get('description')}' -> '{full_desc}'")
                     tax['description'] = full_desc
+                    fixes_made += 1
             
             # Fix deductions descriptions
             for deduction in emp.get('deductions', []):
@@ -562,9 +571,12 @@ Return the JSON array now:"""
                     deduction.get('amount', 0),
                     lines
                 )
-                if full_desc:
+                if full_desc and full_desc != deduction.get('description', ''):
+                    logger.debug(f"Fixed deduction: '{deduction.get('description')}' -> '{full_desc}'")
                     deduction['description'] = full_desc
+                    fixes_made += 1
         
+        logger.info(f"Description fixes made: {fixes_made}")
         return employees
     
     def _find_full_description(self, type_code: str, short_desc: str, amount: float, lines: List[str]) -> Optional[str]:
