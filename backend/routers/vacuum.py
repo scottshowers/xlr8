@@ -297,11 +297,13 @@ class VacuumExtractor:
                 update_job(job_id, message='Parsing with AI...', progress=80)
             
             logger.info("Sending REDACTED text to Claude for parsing...")
-            employees = self._parse_with_claude(redacted_pages)
+            parse_result = self._parse_with_claude(redacted_pages)
+            employees = parse_result.get("employees", [])
+            report_totals = parse_result.get("report_totals", None)
             
-            # Step 4: Validate
+            # Step 4: Validate employees
             if job_id:
-                update_job(job_id, message='Validating results...', progress=95)
+                update_job(job_id, message='Validating results...', progress=90)
             
             validation_errors = []
             for emp in employees:
@@ -312,6 +314,12 @@ class VacuumExtractor:
             
             valid_count = sum(1 for e in employees if e.get('is_valid', False))
             confidence = valid_count / len(employees) if employees else 0.0
+            
+            # Step 5: Cross-validate against report totals
+            if job_id:
+                update_job(job_id, message='Cross-validating totals...', progress=95)
+            
+            totals_validation = self._validate_against_report_totals(employees, report_totals)
             
             # Cost calculation
             if use_textract:
@@ -334,7 +342,9 @@ class VacuumExtractor:
                 "cost_usd": round(cost, 4),
                 "extraction_method": method,
                 "pii_redacted": redaction_stats['total_redacted'],
-                "privacy_compliant": True
+                "privacy_compliant": True,
+                "report_totals": report_totals,
+                "totals_validation": totals_validation
             }
             
             if job_id:
@@ -447,8 +457,8 @@ class VacuumExtractor:
         
         return pages_text, len(pages_text)
     
-    def _parse_with_claude(self, pages_text: List[str]) -> List[Dict]:
-        """Send REDACTED text to Claude for parsing."""
+    def _parse_with_claude(self, pages_text: List[str]) -> Dict:
+        """Send REDACTED text to Claude for parsing. Returns both employees and report_totals."""
         
         full_text = "\n\n--- PAGE BREAK ---\n\n".join(pages_text)
         
@@ -456,23 +466,47 @@ class VacuumExtractor:
             logger.warning(f"Text too long ({len(full_text)}), truncating")
             full_text = full_text[:35000]
         
-        prompt = f"""Extract employees from this pay register as a JSON array.
+        prompt = f"""Extract employee pay data AND report totals from this pay register.
 
 DATA:
 {full_text}
 
 STRICT RULES:
-1. Return ONLY a valid JSON array - no markdown, no explanation
-2. Each employee object must have these EXACT keys (no duplicates):
-   name, employee_id, department, gross_pay, net_pay, total_taxes, total_deductions, earnings, taxes, deductions, check_number, pay_method
-3. earnings/taxes/deductions are arrays of objects with: type, description, amount, hours (if applicable), rate (if applicable)
-4. Use 0 for missing numbers, "" for missing strings, [] for missing arrays
-5. Note: Some sensitive data has been redacted with [REDACTED] placeholders - ignore those
+1. Return ONLY valid JSON with this exact structure - no markdown, no explanation
+2. The response must have two keys: "employees" (array) and "report_totals" (object)
+
+EMPLOYEES ARRAY:
+Each employee object must have these EXACT keys:
+- name, employee_id, department, gross_pay, net_pay, total_taxes, total_deductions
+- earnings: array of {{type, description, amount, hours, rate}}
+- taxes: array of {{type, description, amount}}
+- deductions: array of {{type, description, amount}}
+- check_number, pay_method
+
+REPORT TOTALS:
+Extract the grand totals section (usually at end of report) with:
+- earnings: array of {{code, description, total}} - each earning type with company-wide total
+- taxes: array of {{code, description, total}} - each tax type with company-wide total  
+- deductions: array of {{code, description, total}} - each deduction type with company-wide total
+- grand_totals: {{gross_pay, total_taxes, total_deductions, net_pay}}
+
+Use 0 for missing numbers, "" for missing strings, [] for missing arrays.
+Note: Some data has been redacted with [REDACTED] placeholders - ignore those.
 
 Example format:
-[{{"name":"DOE, JOHN","employee_id":"A123","department":"Sales","gross_pay":1000.00,"net_pay":800.00,"total_taxes":150.00,"total_deductions":50.00,"earnings":[{{"type":"Regular","description":"Regular Pay","rate":25.00,"hours":40,"amount":1000.00}}],"taxes":[{{"type":"Federal","description":"Federal W/H","amount":100.00}}],"deductions":[{{"type":"401K","description":"401K Contribution","amount":50.00}}],"check_number":"","pay_method":"Direct Deposit"}}]
+{{
+  "employees": [
+    {{"name":"DOE, JOHN","employee_id":"A123","department":"Sales","gross_pay":1000.00,"net_pay":800.00,"total_taxes":150.00,"total_deductions":50.00,"earnings":[{{"type":"REG","description":"Regular Pay","rate":25.00,"hours":40,"amount":1000.00}}],"taxes":[{{"type":"FED","description":"Federal W/H","amount":100.00}}],"deductions":[{{"type":"401K","description":"401K Contribution","amount":50.00}}],"check_number":"","pay_method":"Direct Deposit"}}
+  ],
+  "report_totals": {{
+    "earnings": [{{"code":"REG","description":"Regular Pay","total":45000.00}},{{"code":"OT","description":"Overtime","total":5000.00}}],
+    "taxes": [{{"code":"FED","description":"Federal W/H","total":8500.00}},{{"code":"SS","description":"Social Security","total":3100.00}}],
+    "deductions": [{{"code":"401K","description":"401K Contribution","total":4500.00}},{{"code":"MED","description":"Medical","total":2200.00}}],
+    "grand_totals": {{"gross_pay":50000.00,"total_taxes":11600.00,"total_deductions":6700.00,"net_pay":31700.00}}
+  }}
+}}
 
-Return the JSON array now:"""
+Return the JSON now:"""
 
         try:
             response_text = ""
@@ -488,9 +522,54 @@ Return the JSON array now:"""
             
         except Exception as e:
             logger.error(f"Claude API error: {e}")
-            return []
+            return {"employees": [], "report_totals": None}
         
-        return self._parse_json_response(response_text)
+        return self._parse_json_response_v2(response_text)
+    
+    def _parse_json_response_v2(self, response_text: str) -> Dict:
+        """Parse JSON response containing employees and report_totals."""
+        
+        text = response_text.strip()
+        
+        # Remove markdown code fences
+        text = re.sub(r'^```json\s*', '', text)
+        text = re.sub(r'^```\s*', '', text)
+        text = re.sub(r'\s*```\s*$', '', text)
+        
+        # Find object bounds (now expecting {...} not [...])
+        start_idx = text.find('{')
+        end_idx = text.rfind('}')
+        
+        if start_idx < 0 or end_idx <= start_idx:
+            logger.error("No JSON object found in response")
+            # Fallback: try old array format
+            return {"employees": self._parse_json_response(response_text), "report_totals": None}
+        
+        json_str = text[start_idx:end_idx + 1]
+        
+        # Fix common issues
+        json_str = re.sub(r',\s*]', ']', json_str)
+        json_str = re.sub(r',\s*}', '}', json_str)
+        
+        try:
+            data = json.loads(json_str)
+            
+            employees = data.get("employees", [])
+            report_totals = data.get("report_totals", None)
+            
+            # Normalize employees
+            normalized_employees = [self._normalize_employee(e) for e in employees if isinstance(e, dict)]
+            
+            logger.info(f"Parsed {len(normalized_employees)} employees, report_totals: {report_totals is not None}")
+            
+            return {
+                "employees": normalized_employees,
+                "report_totals": report_totals
+            }
+            
+        except json.JSONDecodeError as e:
+            logger.warning(f"JSON parse failed: {e}, falling back to legacy parser")
+            return {"employees": self._parse_json_response(response_text), "report_totals": None}
     
     def _parse_json_response(self, response_text: str) -> List[Dict]:
         """Parse JSON from Claude response with multiple fallback strategies."""
@@ -637,6 +716,159 @@ Return the JSON array now:"""
                 )
         
         return errors
+    
+    def _validate_against_report_totals(self, employees: List[Dict], report_totals: Optional[Dict]) -> Dict:
+        """Cross-validate calculated totals against report totals section."""
+        
+        validation = {
+            "has_report_totals": report_totals is not None,
+            "all_matched": False,
+            "discrepancies": [],
+            "calculated": {
+                "earnings": {},
+                "taxes": {},
+                "deductions": {},
+                "grand_totals": {}
+            },
+            "reported": {
+                "earnings": {},
+                "taxes": {},
+                "deductions": {},
+                "grand_totals": {}
+            }
+        }
+        
+        if not report_totals:
+            return validation
+        
+        # Calculate totals from employee data
+        earnings_calc = {}
+        taxes_calc = {}
+        deductions_calc = {}
+        grand_gross = 0
+        grand_taxes = 0
+        grand_deductions = 0
+        grand_net = 0
+        
+        for emp in employees:
+            grand_gross += emp.get('gross_pay', 0) or 0
+            grand_taxes += emp.get('total_taxes', 0) or 0
+            grand_deductions += emp.get('total_deductions', 0) or 0
+            grand_net += emp.get('net_pay', 0) or 0
+            
+            for e in emp.get('earnings', []):
+                key = e.get('type') or e.get('code') or e.get('description') or 'Unknown'
+                earnings_calc[key] = earnings_calc.get(key, 0) + (e.get('amount', 0) or 0)
+            
+            for t in emp.get('taxes', []):
+                key = t.get('type') or t.get('code') or t.get('description') or 'Unknown'
+                taxes_calc[key] = taxes_calc.get(key, 0) + (t.get('amount', 0) or 0)
+            
+            for d in emp.get('deductions', []):
+                key = d.get('type') or d.get('code') or d.get('description') or 'Unknown'
+                deductions_calc[key] = deductions_calc.get(key, 0) + (d.get('amount', 0) or 0)
+        
+        validation["calculated"]["earnings"] = earnings_calc
+        validation["calculated"]["taxes"] = taxes_calc
+        validation["calculated"]["deductions"] = deductions_calc
+        validation["calculated"]["grand_totals"] = {
+            "gross_pay": round(grand_gross, 2),
+            "total_taxes": round(grand_taxes, 2),
+            "total_deductions": round(grand_deductions, 2),
+            "net_pay": round(grand_net, 2)
+        }
+        
+        # Extract reported totals
+        reported_earnings = {}
+        for e in report_totals.get('earnings', []):
+            key = e.get('code') or e.get('description') or 'Unknown'
+            reported_earnings[key] = e.get('total', 0)
+        
+        reported_taxes = {}
+        for t in report_totals.get('taxes', []):
+            key = t.get('code') or t.get('description') or 'Unknown'
+            reported_taxes[key] = t.get('total', 0)
+        
+        reported_deductions = {}
+        for d in report_totals.get('deductions', []):
+            key = d.get('code') or d.get('description') or 'Unknown'
+            reported_deductions[key] = d.get('total', 0)
+        
+        reported_grand = report_totals.get('grand_totals', {})
+        
+        validation["reported"]["earnings"] = reported_earnings
+        validation["reported"]["taxes"] = reported_taxes
+        validation["reported"]["deductions"] = reported_deductions
+        validation["reported"]["grand_totals"] = reported_grand
+        
+        # Compare and find discrepancies
+        discrepancies = []
+        
+        # Compare grand totals
+        for key in ['gross_pay', 'total_taxes', 'total_deductions', 'net_pay']:
+            calc_val = validation["calculated"]["grand_totals"].get(key, 0)
+            rep_val = reported_grand.get(key, 0) or 0
+            diff = round(calc_val - rep_val, 2)
+            if abs(diff) > 0.01:
+                discrepancies.append({
+                    "category": "Grand Total",
+                    "code": key.replace('_', ' ').title(),
+                    "calculated": calc_val,
+                    "reported": rep_val,
+                    "difference": diff
+                })
+        
+        # Compare earnings by code
+        all_earning_codes = set(earnings_calc.keys()) | set(reported_earnings.keys())
+        for code in all_earning_codes:
+            calc_val = round(earnings_calc.get(code, 0), 2)
+            rep_val = round(reported_earnings.get(code, 0), 2)
+            diff = round(calc_val - rep_val, 2)
+            if abs(diff) > 0.01:
+                discrepancies.append({
+                    "category": "Earnings",
+                    "code": code,
+                    "calculated": calc_val,
+                    "reported": rep_val,
+                    "difference": diff
+                })
+        
+        # Compare taxes by code
+        all_tax_codes = set(taxes_calc.keys()) | set(reported_taxes.keys())
+        for code in all_tax_codes:
+            calc_val = round(taxes_calc.get(code, 0), 2)
+            rep_val = round(reported_taxes.get(code, 0), 2)
+            diff = round(calc_val - rep_val, 2)
+            if abs(diff) > 0.01:
+                discrepancies.append({
+                    "category": "Taxes",
+                    "code": code,
+                    "calculated": calc_val,
+                    "reported": rep_val,
+                    "difference": diff
+                })
+        
+        # Compare deductions by code
+        all_ded_codes = set(deductions_calc.keys()) | set(reported_deductions.keys())
+        for code in all_ded_codes:
+            calc_val = round(deductions_calc.get(code, 0), 2)
+            rep_val = round(reported_deductions.get(code, 0), 2)
+            diff = round(calc_val - rep_val, 2)
+            if abs(diff) > 0.01:
+                discrepancies.append({
+                    "category": "Deductions",
+                    "code": code,
+                    "calculated": calc_val,
+                    "reported": rep_val,
+                    "difference": diff
+                })
+        
+        validation["discrepancies"] = discrepancies
+        validation["all_matched"] = len(discrepancies) == 0
+        
+        logger.info(f"Totals validation: {len(discrepancies)} discrepancies found")
+        
+        return validation
 
 
 # =============================================================================
