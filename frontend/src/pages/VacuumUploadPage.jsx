@@ -1,78 +1,135 @@
 /**
- * Vacuum Upload Page v10 - Async Job Processing
+ * Vacuum Upload Page - Pay Register Extraction v11
+ * 
+ * Privacy-First Features:
+ * - PyMuPDF (local extraction) as DEFAULT
+ * - Textract toggle for scanned PDFs
+ * - PII redaction indicator
+ * - Async job polling with progress bar
+ * - Full employee data with details
+ * 
  * Deploy to: frontend/src/pages/VacuumUploadPage.jsx
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Upload, FileText, Users, DollarSign, CheckCircle, XCircle, Loader2, Trash2, Eye, AlertTriangle, ChevronDown, ChevronRight, Download, Cpu } from 'lucide-react';
+import { 
+  Upload, FileText, Users, DollarSign, CheckCircle, XCircle, 
+  Loader2, Trash2, Eye, AlertTriangle, ChevronDown, ChevronRight,
+  Shield, Cloud, Lock
+} from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
 export default function VacuumUploadPage() {
+  // State
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState('');
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
-  const [jobId, setJobId] = useState(null);
-  const [jobStatus, setJobStatus] = useState(null);
   const [result, setResult] = useState(null);
   const [extracts, setExtracts] = useState([]);
   const [selectedExtract, setSelectedExtract] = useState(null);
   const [error, setError] = useState(null);
-  const [maxPages, setMaxPages] = useState(11);
-  const [useLocalLLM, setUseLocalLLM] = useState(false);
-  const pollRef = useRef(null);
+  const [maxPages, setMaxPages] = useState(0); // 0 = all pages
+  const [useTextract, setUseTextract] = useState(false); // PyMuPDF is default
+  
+  // Job polling state
+  const [jobId, setJobId] = useState(null);
+  const [jobStatus, setJobStatus] = useState(null);
+  const pollIntervalRef = useRef(null);
 
+  // Load projects
   useEffect(() => {
-    fetch(`${API_BASE}/api/projects/list`).then(r => r.json()).then(data => {
-      if (Array.isArray(data)) setProjects(data);
-      else if (data.projects) setProjects(data.projects);
-    }).catch(() => {});
-  }, []);
-
-  const loadExtracts = useCallback(async () => {
-    try {
-      const url = selectedProject ? `${API_BASE}/api/vacuum/extracts?project_id=${selectedProject}` : `${API_BASE}/api/vacuum/extracts`;
-      const data = await fetch(url).then(r => r.json());
-      setExtracts(data.extracts || []);
-    } catch {}
-  }, [selectedProject]);
-
-  useEffect(() => { loadExtracts(); }, [loadExtracts]);
-
-  // Poll for job status
-  useEffect(() => {
-    if (!jobId) return;
-    
-    const poll = async () => {
+    const loadProjects = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/vacuum/job/${jobId}`);
-        const data = await res.json();
-        setJobStatus(data);
-        
-        if (data.status === 'completed') {
-          setResult(data.result);
-          setJobId(null);
-          setUploading(false);
-          loadExtracts();
-        } else if (data.status === 'failed') {
-          setError(data.error || 'Extraction failed');
-          setJobId(null);
-          setUploading(false);
+        const res = await fetch(`${API_BASE}/api/projects/list`);
+        if (!res.ok) {
+          console.error('Projects endpoint returned:', res.status);
+          setProjects([]);
+          return;
         }
-      } catch (e) {
-        console.error('Poll error:', e);
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setProjects(data);
+        } else if (data.projects && Array.isArray(data.projects)) {
+          setProjects(data.projects);
+        } else {
+          console.error('Unexpected projects format:', data);
+          setProjects([]);
+        }
+      } catch (err) {
+        console.error('Failed to load projects:', err);
+        setProjects([]);
       }
     };
-    
-    poll();
-    pollRef.current = setInterval(poll, 2000);
-    return () => clearInterval(pollRef.current);
-  }, [jobId, loadExtracts]);
+    loadProjects();
+  }, []);
 
+  // Load extraction history
+  const loadExtracts = useCallback(async () => {
+    try {
+      const url = selectedProject 
+        ? `${API_BASE}/api/vacuum/extracts?project_id=${selectedProject}`
+        : `${API_BASE}/api/vacuum/extracts`;
+      const res = await fetch(url);
+      const data = await res.json();
+      setExtracts(data.extracts || []);
+    } catch (err) {
+      console.error('Failed to load extracts:', err);
+    }
+  }, [selectedProject]);
+
+  useEffect(() => {
+    loadExtracts();
+  }, [loadExtracts]);
+
+  // Poll job status
+  const pollJobStatus = useCallback(async (id) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/vacuum/job/${id}`);
+      if (!res.ok) {
+        throw new Error('Job not found');
+      }
+      const data = await res.json();
+      setJobStatus(data);
+      
+      if (data.status === 'completed') {
+        clearInterval(pollIntervalRef.current);
+        setUploading(false);
+        setJobId(null);
+        if (data.result) {
+          setResult(data.result);
+          loadExtracts();
+        }
+      } else if (data.status === 'failed') {
+        clearInterval(pollIntervalRef.current);
+        setUploading(false);
+        setJobId(null);
+        setError(data.message || 'Extraction failed');
+      }
+    } catch (err) {
+      console.error('Poll failed:', err);
+    }
+  }, [loadExtracts]);
+
+  // Start polling when job is created
+  useEffect(() => {
+    if (jobId) {
+      pollIntervalRef.current = setInterval(() => pollJobStatus(jobId), 1000);
+      return () => clearInterval(pollIntervalRef.current);
+    }
+  }, [jobId, pollJobStatus]);
+
+  // Handle file upload
   const handleUpload = async () => {
-    if (!file) { setError('Please select a file'); return; }
-    if (!selectedProject) { setError('Please select a project'); return; }
+    if (!file) {
+      setError('Please select a file');
+      return;
+    }
+    if (!selectedProject) {
+      setError('Please select a project');
+      return;
+    }
     
     setUploading(true);
     setError(null);
@@ -84,243 +141,560 @@ export default function VacuumUploadPage() {
       formData.append('file', file);
       formData.append('max_pages', maxPages.toString());
       formData.append('project_id', selectedProject);
-      formData.append('use_local_llm', useLocalLLM ? 'true' : 'false');
+      formData.append('use_textract', useTextract.toString());
+      formData.append('async_mode', 'true');
       
-      const res = await fetch(`${API_BASE}/api/vacuum/upload`, { method: 'POST', body: formData });
+      const res = await fetch(`${API_BASE}/api/vacuum/upload`, {
+        method: 'POST',
+        body: formData
+      });
+      
       const data = await res.json();
       
-      if (data.success && data.job_id) {
-        setJobId(data.job_id);
-      } else {
-        setError(data.error || 'Upload failed');
-        setUploading(false);
+      if (!res.ok) {
+        throw new Error(data.detail || 'Upload failed');
       }
+      
+      if (data.job_id) {
+        // Async mode - start polling
+        setJobId(data.job_id);
+        setJobStatus({ status: 'processing', progress: 0, message: 'Starting...' });
+      } else {
+        // Sync mode - result is immediate
+        setResult(data);
+        setUploading(false);
+        loadExtracts();
+      }
+      
     } catch (err) {
       setError(err.message);
       setUploading(false);
     }
   };
 
+  // Load full extraction details
   const viewExtract = async (id) => {
-    const data = await fetch(`${API_BASE}/api/vacuum/extract/${id}`).then(r => r.json());
-    setSelectedExtract(data);
+    try {
+      const res = await fetch(`${API_BASE}/api/vacuum/extract/${id}`);
+      const data = await res.json();
+      setSelectedExtract(data);
+    } catch (err) {
+      console.error('Failed to load extract:', err);
+    }
   };
 
+  // Delete extraction
   const deleteExtract = async (id) => {
     if (!confirm('Delete this extraction?')) return;
-    await fetch(`${API_BASE}/api/vacuum/extract/${id}`, { method: 'DELETE' });
-    loadExtracts();
-    if (selectedExtract?.id === id) setSelectedExtract(null);
+    
+    try {
+      await fetch(`${API_BASE}/api/vacuum/extract/${id}`, { method: 'DELETE' });
+      loadExtracts();
+      if (selectedExtract?.id === id) {
+        setSelectedExtract(null);
+      }
+    } catch (err) {
+      console.error('Failed to delete:', err);
+    }
   };
 
-  const exportToCSV = (employees, filename = 'pay_extract') => {
-    if (!employees?.length) { alert('No data'); return; }
-    let csv = 'EMPLOYEE SUMMARY\nName,Employee ID,Department,Gross Pay,Net Pay,Total Taxes,Total Deductions,Pay Method,Check Number,Valid\n';
-    employees.forEach(emp => {
-      csv += `"${emp.name || ''}","${emp.id || emp.employee_id || ''}","${emp.department || ''}",${emp.gross_pay?.toFixed(2) || '0.00'},${emp.net_pay?.toFixed(2) || '0.00'},${emp.total_taxes?.toFixed(2) || '0.00'},${emp.total_deductions?.toFixed(2) || '0.00'},"${emp.pay_method || ''}","${emp.check_number || ''}",${emp.is_valid ? 'Yes' : 'No'}\n`;
-    });
-    csv += '\nEARNINGS DETAIL\nEmployee Name,Employee ID,Earning Type,Rate,Hours,Amount\n';
-    employees.forEach(emp => (emp.earnings || []).forEach(e => { csv += `"${emp.name || ''}","${emp.id || emp.employee_id || ''}","${e.description || e.type || ''}",${e.rate || ''},${e.hours || ''},${e.amount?.toFixed(2) || '0.00'}\n`; }));
-    csv += '\nTAXES DETAIL\nEmployee Name,Employee ID,Tax Type,Amount\n';
-    employees.forEach(emp => (emp.taxes || []).forEach(t => { csv += `"${emp.name || ''}","${emp.id || emp.employee_id || ''}","${t.description || t.type || ''}",${t.amount?.toFixed(2) || '0.00'}\n`; }));
-    csv += '\nDEDUCTIONS DETAIL\nEmployee Name,Employee ID,Deduction Type,Amount\n';
-    employees.forEach(emp => (emp.deductions || []).forEach(d => { csv += `"${emp.name || ''}","${emp.id || emp.employee_id || ''}","${d.description || d.type || ''}",${d.amount?.toFixed(2) || '0.00'}\n`; }));
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `${filename}_${new Date().toISOString().split('T')[0]}.csv`; link.click();
-  };
-
-  const exportToExcel = (employees, filename = 'pay_extract') => {
-    if (!employees?.length) { alert('No data'); return; }
-    const esc = (s) => (s || '').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-    let xml = '<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Styles><Style ss:ID="H"><Font ss:Bold="1"/></Style><Style ss:ID="C"><NumberFormat ss:Format="$#,##0.00"/></Style></Styles>';
-    xml += '<Worksheet ss:Name="Summary"><Table><Row><Cell ss:StyleID="H"><Data ss:Type="String">Name</Data></Cell><Cell ss:StyleID="H"><Data ss:Type="String">ID</Data></Cell><Cell ss:StyleID="H"><Data ss:Type="String">Dept</Data></Cell><Cell ss:StyleID="H"><Data ss:Type="String">Gross</Data></Cell><Cell ss:StyleID="H"><Data ss:Type="String">Net</Data></Cell><Cell ss:StyleID="H"><Data ss:Type="String">Taxes</Data></Cell><Cell ss:StyleID="H"><Data ss:Type="String">Deductions</Data></Cell><Cell ss:StyleID="H"><Data ss:Type="String">Pay Method</Data></Cell><Cell ss:StyleID="H"><Data ss:Type="String">Valid</Data></Cell></Row>';
-    employees.forEach(emp => { xml += `<Row><Cell><Data ss:Type="String">${esc(emp.name)}</Data></Cell><Cell><Data ss:Type="String">${esc(emp.id||emp.employee_id)}</Data></Cell><Cell><Data ss:Type="String">${esc(emp.department)}</Data></Cell><Cell ss:StyleID="C"><Data ss:Type="Number">${emp.gross_pay||0}</Data></Cell><Cell ss:StyleID="C"><Data ss:Type="Number">${emp.net_pay||0}</Data></Cell><Cell ss:StyleID="C"><Data ss:Type="Number">${emp.total_taxes||0}</Data></Cell><Cell ss:StyleID="C"><Data ss:Type="Number">${emp.total_deductions||0}</Data></Cell><Cell><Data ss:Type="String">${esc(emp.pay_method)}</Data></Cell><Cell><Data ss:Type="String">${emp.is_valid?'Yes':'No'}</Data></Cell></Row>`; });
-    xml += '</Table></Worksheet>';
-    xml += '<Worksheet ss:Name="Earnings"><Table><Row><Cell ss:StyleID="H"><Data ss:Type="String">Employee</Data></Cell><Cell ss:StyleID="H"><Data ss:Type="String">ID</Data></Cell><Cell ss:StyleID="H"><Data ss:Type="String">Type</Data></Cell><Cell ss:StyleID="H"><Data ss:Type="String">Rate</Data></Cell><Cell ss:StyleID="H"><Data ss:Type="String">Hours</Data></Cell><Cell ss:StyleID="H"><Data ss:Type="String">Amount</Data></Cell></Row>';
-    employees.forEach(emp => (emp.earnings||[]).forEach(e => { xml += `<Row><Cell><Data ss:Type="String">${esc(emp.name)}</Data></Cell><Cell><Data ss:Type="String">${esc(emp.id||emp.employee_id)}</Data></Cell><Cell><Data ss:Type="String">${esc(e.description||e.type)}</Data></Cell><Cell ss:StyleID="C"><Data ss:Type="Number">${e.rate||0}</Data></Cell><Cell><Data ss:Type="Number">${e.hours||0}</Data></Cell><Cell ss:StyleID="C"><Data ss:Type="Number">${e.amount||0}</Data></Cell></Row>`; }));
-    xml += '</Table></Worksheet>';
-    xml += '<Worksheet ss:Name="Taxes"><Table><Row><Cell ss:StyleID="H"><Data ss:Type="String">Employee</Data></Cell><Cell ss:StyleID="H"><Data ss:Type="String">ID</Data></Cell><Cell ss:StyleID="H"><Data ss:Type="String">Tax Type</Data></Cell><Cell ss:StyleID="H"><Data ss:Type="String">Amount</Data></Cell></Row>';
-    employees.forEach(emp => (emp.taxes||[]).forEach(t => { xml += `<Row><Cell><Data ss:Type="String">${esc(emp.name)}</Data></Cell><Cell><Data ss:Type="String">${esc(emp.id||emp.employee_id)}</Data></Cell><Cell><Data ss:Type="String">${esc(t.description||t.type)}</Data></Cell><Cell ss:StyleID="C"><Data ss:Type="Number">${t.amount||0}</Data></Cell></Row>`; }));
-    xml += '</Table></Worksheet>';
-    xml += '<Worksheet ss:Name="Deductions"><Table><Row><Cell ss:StyleID="H"><Data ss:Type="String">Employee</Data></Cell><Cell ss:StyleID="H"><Data ss:Type="String">ID</Data></Cell><Cell ss:StyleID="H"><Data ss:Type="String">Deduction Type</Data></Cell><Cell ss:StyleID="H"><Data ss:Type="String">Amount</Data></Cell></Row>';
-    employees.forEach(emp => (emp.deductions||[]).forEach(d => { xml += `<Row><Cell><Data ss:Type="String">${esc(emp.name)}</Data></Cell><Cell><Data ss:Type="String">${esc(emp.id||emp.employee_id)}</Data></Cell><Cell><Data ss:Type="String">${esc(d.description||d.type)}</Data></Cell><Cell ss:StyleID="C"><Data ss:Type="Number">${d.amount||0}</Data></Cell></Row>`; }));
-    xml += '</Table></Worksheet></Workbook>';
-    const blob = new Blob([xml], { type: 'application/vnd.ms-excel' });
-    const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `${filename}_${new Date().toISOString().split('T')[0]}.xls`; link.click();
-  };
-
-  const progress = jobStatus?.progress || {};
+  // Calculate cost estimate
+  const estimatedCost = useTextract 
+    ? ((maxPages || 50) * 0.015 + 0.05).toFixed(2)
+    : '0.05'; // PyMuPDF is free, only Claude cost
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Pay Register Extraction</h1>
-        <p className="text-gray-600 mb-6">Upload pay registers to extract employee data using AI-powered parsing</p>
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">
+          Pay Register Extraction
+        </h1>
+        <p className="text-gray-600 mb-6">
+          Upload pay registers to extract employee data using AI-powered parsing
+        </p>
         
+        {/* Upload Section */}
         <div className="bg-white rounded-lg shadow p-6 mb-6">
-          <h2 className="text-lg font-semibold mb-4">Upload Pay Register</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold">Upload Pay Register</h2>
+            
+            {/* Privacy Badge */}
+            <div className="flex items-center gap-2 text-sm">
+              <div className={`flex items-center gap-1 px-3 py-1 rounded-full ${
+                useTextract 
+                  ? 'bg-yellow-100 text-yellow-800' 
+                  : 'bg-green-100 text-green-800'
+              }`}>
+                {useTextract ? (
+                  <><Cloud className="w-4 h-4" /> AWS Processing</>
+                ) : (
+                  <><Lock className="w-4 h-4" /> Local Processing</>
+                )}
+              </div>
+            </div>
+          </div>
+          
           <div className="grid md:grid-cols-5 gap-4 mb-4">
+            {/* Project Selector */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Project <span className="text-red-500">*</span></label>
-              <select value={selectedProject} onChange={(e) => setSelectedProject(e.target.value)} disabled={uploading} className="w-full border rounded-lg px-3 py-2">
-                <option value="">Select project...</option>
-                {projects.map(p => <option key={p.id} value={p.id}>{p.name} {p.customer ? `(${p.customer})` : ''}</option>)}
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Project <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={selectedProject}
+                onChange={(e) => setSelectedProject(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="">Select a project...</option>
+                {projects.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} {p.customer ? `(${p.customer})` : ''}
+                  </option>
+                ))}
               </select>
             </div>
+            
+            {/* File Input */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">PDF File <span className="text-red-500">*</span></label>
-              <input type="file" accept=".pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} disabled={uploading} className="w-full border rounded-lg px-3 py-2 text-sm" />
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                PDF File <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="file"
+                accept=".pdf"
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+              />
             </div>
+            
+            {/* Max Pages */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Pages</label>
-              <input type="number" value={maxPages} onChange={(e) => setMaxPages(parseInt(e.target.value) || 3)} min={1} max={1500} disabled={uploading} className="w-full border rounded-lg px-3 py-2" />
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Pages (0 = all)
+              </label>
+              <input
+                type="number"
+                value={maxPages}
+                onChange={(e) => setMaxPages(parseInt(e.target.value) || 0)}
+                min={0}
+                max={2000}
+                className="w-full border rounded-lg px-3 py-2"
+              />
             </div>
+            
+            {/* OCR Method Toggle */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">LLM</label>
-              <button onClick={() => setUseLocalLLM(!useLocalLLM)} disabled={uploading} className={`w-full px-3 py-2 rounded-lg border flex items-center justify-center gap-2 ${useLocalLLM ? 'bg-purple-100 border-purple-300 text-purple-700' : 'bg-gray-50 border-gray-300 text-gray-600'}`}>
-                <Cpu className="w-4 h-4" />{useLocalLLM ? 'Local' : 'Claude'}
-              </button>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Extraction Method
+              </label>
+              <select
+                value={useTextract ? 'textract' : 'pymupdf'}
+                onChange={(e) => setUseTextract(e.target.value === 'textract')}
+                className="w-full border rounded-lg px-3 py-2"
+              >
+                <option value="pymupdf">🔒 PyMuPDF (Local/Free)</option>
+                <option value="textract">☁️ Textract (Scanned PDFs)</option>
+              </select>
             </div>
+            
+            {/* Upload Button */}
             <div className="flex items-end">
-              <button onClick={handleUpload} disabled={!file || !selectedProject || uploading} className="w-full px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2">
-                {uploading ? <><Loader2 className="w-4 h-4 animate-spin" /> Processing...</> : <><Upload className="w-4 h-4" /> Extract</>}
+              <button
+                onClick={handleUpload}
+                disabled={!file || !selectedProject || uploading}
+                className="w-full px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {uploading ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Processing...</>
+                ) : (
+                  <><Upload className="w-4 h-4" /> Extract Data</>
+                )}
               </button>
             </div>
           </div>
-          <div className="text-sm text-gray-500">Est. cost: <strong>${(maxPages * 0.015 + (useLocalLLM ? 0 : 0.05)).toFixed(2)}</strong> • {maxPages} pages</div>
           
-          {/* Progress Bar */}
+          {/* Method Info */}
+          <div className="flex items-center gap-4 text-sm text-gray-500 mb-3">
+            {useTextract ? (
+              <>
+                <span className="flex items-center gap-1">
+                  <Cloud className="w-4 h-4" />
+                  AWS Textract (for scanned/image PDFs)
+                </span>
+                <span className="text-gray-300">|</span>
+                <span>
+                  Estimated cost: <strong>${estimatedCost}</strong>
+                </span>
+                <span className="text-gray-300">|</span>
+                <span className="text-yellow-600">
+                  ⚠️ Data sent to AWS for OCR
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="flex items-center gap-1 text-green-600">
+                  <Shield className="w-4 h-4" />
+                  PII Redacted before AI processing
+                </span>
+                <span className="text-gray-300">|</span>
+                <span>
+                  Cost: <strong>~$0.05</strong> (AI parsing only)
+                </span>
+                <span className="text-gray-300">|</span>
+                <span className="text-green-600">
+                  ✓ Privacy-compliant extraction
+                </span>
+              </>
+            )}
+          </div>
+          
+          {/* Progress Bar (when processing) */}
           {uploading && jobStatus && (
             <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
               <div className="flex items-center justify-between mb-2">
-                <span className="font-medium text-blue-700">{progress.step || 'Processing...'}</span>
-                <span className="text-sm text-blue-600">{progress.current || 0} / {progress.total || '?'} pages</span>
+                <span className="text-sm font-medium text-blue-700">
+                  {jobStatus.message || 'Processing...'}
+                </span>
+                <span className="text-sm text-blue-600">
+                  {jobStatus.current_page > 0 && jobStatus.total_pages > 0 
+                    ? `Page ${jobStatus.current_page} of ${jobStatus.total_pages}`
+                    : `${jobStatus.progress || 0}%`
+                  }
+                </span>
               </div>
-              <div className="w-full bg-blue-200 rounded-full h-3">
-                <div className="bg-blue-600 h-3 rounded-full transition-all" style={{ width: `${progress.total ? (progress.current / progress.total * 100) : 0}%` }} />
+              <div className="w-full bg-blue-200 rounded-full h-2">
+                <div 
+                  className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${jobStatus.progress || 0}%` }}
+                />
               </div>
             </div>
           )}
           
-          {error && <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 flex items-center gap-2"><AlertTriangle className="w-5 h-5" />{error}</div>}
+          {/* Error */}
+          {error && (
+            <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5" />
+              {error}
+            </div>
+          )}
         </div>
         
+        {/* Results Section */}
         {result && (
           <div className="bg-white rounded-lg shadow p-6 mb-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold">Extraction Results</h2>
               <div className="flex items-center gap-3">
-                {result.employees?.length > 0 && <>
-                  <button onClick={() => exportToCSV(result.employees, result.source_file?.replace('.pdf', ''))} className="px-3 py-1.5 text-sm bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-1"><Download className="w-4 h-4" /> CSV</button>
-                  <button onClick={() => exportToExcel(result.employees, result.source_file?.replace('.pdf', ''))} className="px-3 py-1.5 text-sm bg-emerald-600 text-white rounded hover:bg-emerald-700 flex items-center gap-1"><Download className="w-4 h-4" /> Excel</button>
-                </>}
-                {result.saved_to_db && <span className="text-sm text-green-600 flex items-center gap-1"><CheckCircle className="w-4 h-4" /> Saved</span>}
-                <span className={`px-3 py-1 rounded-full text-sm font-medium ${result.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{result.success ? 'Success' : 'Review'}</span>
+                {result.pii_redacted > 0 && (
+                  <span className="text-sm text-green-600 flex items-center gap-1">
+                    <Shield className="w-4 h-4" /> {result.pii_redacted} PII redacted
+                  </span>
+                )}
+                {result.saved_to_db && (
+                  <span className="text-sm text-green-600 flex items-center gap-1">
+                    <CheckCircle className="w-4 h-4" /> Saved
+                  </span>
+                )}
+                <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                  result.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                }`}>
+                  {result.success ? 'Success' : 'Needs Review'}
+                </span>
               </div>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-              <StatCard icon={<Users className="w-5 h-5 text-blue-600" />} label="Employees" value={result.employee_count} />
-              <StatCard icon={<FileText className="w-5 h-5 text-purple-600" />} label="Pages" value={result.pages_processed} />
-              <StatCard icon={<CheckCircle className="w-5 h-5 text-green-600" />} label="Confidence" value={`${(result.confidence * 100).toFixed(0)}%`} />
-              <StatCard icon={<DollarSign className="w-5 h-5 text-amber-600" />} label="Cost" value={`$${result.cost_usd?.toFixed(3) || '0.00'}`} />
-              <StatCard icon={<Loader2 className="w-5 h-5 text-gray-600" />} label="Time" value={`${(result.processing_time_ms / 1000).toFixed(1)}s`} />
+            
+            {/* Summary Stats */}
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
+              <StatCard 
+                icon={<Users className="w-5 h-5 text-blue-600" />}
+                label="Employees"
+                value={result.employee_count}
+              />
+              <StatCard 
+                icon={<FileText className="w-5 h-5 text-purple-600" />}
+                label="Pages"
+                value={result.pages_processed}
+              />
+              <StatCard 
+                icon={<CheckCircle className="w-5 h-5 text-green-600" />}
+                label="Confidence"
+                value={`${(result.confidence * 100).toFixed(0)}%`}
+              />
+              <StatCard 
+                icon={<DollarSign className="w-5 h-5 text-amber-600" />}
+                label="Cost"
+                value={`$${result.cost_usd?.toFixed(3) || '0.000'}`}
+              />
+              <StatCard 
+                icon={<Shield className="w-5 h-5 text-green-600" />}
+                label="Method"
+                value={result.extraction_method === 'pymupdf' ? 'Local' : 'AWS'}
+              />
+              <StatCard 
+                icon={<Loader2 className="w-5 h-5 text-gray-600" />}
+                label="Time"
+                value={`${((result.processing_time_ms || 0) / 1000).toFixed(1)}s`}
+              />
             </div>
-            {result.employees?.length > 0 && (
-              <div className="overflow-x-auto border rounded-lg">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 border-b"><tr><th className="text-left p-3">Name</th><th className="text-left p-3">ID</th><th className="text-left p-3">Dept</th><th className="text-right p-3">Gross</th><th className="text-right p-3">Taxes</th><th className="text-right p-3">Ded</th><th className="text-right p-3">Net</th><th className="text-center p-3">✓</th></tr></thead>
-                  <tbody>{result.employees.map((emp, i) => (
-                    <tr key={i} className="border-t hover:bg-gray-50">
-                      <td className="p-3 font-medium">{emp.name || <span className="text-red-400">Missing</span>}</td>
-                      <td className="p-3 text-gray-600">{emp.id || '-'}</td>
-                      <td className="p-3 text-gray-600">{emp.department || '-'}</td>
-                      <td className="p-3 text-right">${emp.gross_pay?.toFixed(2)}</td>
-                      <td className="p-3 text-right text-red-600">-${emp.total_taxes?.toFixed(2)}</td>
-                      <td className="p-3 text-right text-orange-600">-${emp.total_deductions?.toFixed(2)}</td>
-                      <td className="p-3 text-right font-semibold">${emp.net_pay?.toFixed(2)}</td>
-                      <td className="p-3 text-center">{emp.is_valid ? <CheckCircle className="w-4 h-4 text-green-500 mx-auto" /> : <XCircle className="w-4 h-4 text-red-500 mx-auto" />}</td>
-                    </tr>
-                  ))}</tbody>
-                </table>
+            
+            {/* Validation Errors */}
+            {result.validation_errors?.length > 0 && (
+              <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <h3 className="font-medium text-yellow-800 mb-2">Validation Notes</h3>
+                <ul className="text-sm text-yellow-700 space-y-1">
+                  {result.validation_errors.slice(0, 5).map((err, i) => (
+                    <li key={i}>• {err}</li>
+                  ))}
+                  {result.validation_errors.length > 5 && (
+                    <li className="text-yellow-600">
+                      ... and {result.validation_errors.length - 5} more
+                    </li>
+                  )}
+                </ul>
               </div>
             )}
+            
+            {/* Employee Table */}
+            <EmployeeTable employees={result.employees || []} />
           </div>
         )}
         
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold mb-4">Extraction History</h2>
-          {extracts.length === 0 ? <p className="text-gray-500 py-8 text-center">No extractions yet.</p> : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b"><tr><th className="text-left p-3">File</th><th className="text-right p-3">Emp</th><th className="text-right p-3">Conf</th><th className="text-right p-3">Pages</th><th className="text-right p-3">Cost</th><th className="text-left p-3">Date</th><th className="text-center p-3">Actions</th></tr></thead>
-                <tbody>{extracts.map((ext) => (
-                  <tr key={ext.id} className="border-t hover:bg-gray-50">
-                    <td className="p-3 font-medium">{ext.source_file}</td>
-                    <td className="p-3 text-right">{ext.employee_count}</td>
-                    <td className="p-3 text-right"><span className={`px-2 py-0.5 rounded text-xs ${ext.confidence >= 0.9 ? 'bg-green-100 text-green-700' : ext.confidence >= 0.7 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>{(ext.confidence * 100).toFixed(0)}%</span></td>
-                    <td className="p-3 text-right">{ext.pages_processed}</td>
-                    <td className="p-3 text-right">${ext.cost_usd?.toFixed(3)}</td>
-                    <td className="p-3 text-gray-600">{new Date(ext.created_at).toLocaleDateString()}</td>
-                    <td className="p-3 text-center">
-                      <button onClick={() => viewExtract(ext.id)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded mr-1"><Eye className="w-4 h-4" /></button>
-                      <button onClick={() => deleteExtract(ext.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4" /></button>
-                    </td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            </div>
-          )}
-        </div>
-        {selectedExtract && <DetailModal extract={selectedExtract} onClose={() => setSelectedExtract(null)} onExportCSV={exportToCSV} onExportExcel={exportToExcel} />}
-      </div>
-    </div>
-  );
-}
-
-function StatCard({ icon, label, value }) {
-  return <div className="bg-gray-50 rounded-lg p-4"><div className="flex items-center gap-2 mb-1">{icon}<span className="text-sm text-gray-600">{label}</span></div><div className="text-2xl font-bold">{value}</div></div>;
-}
-
-function DetailModal({ extract, onClose, onExportCSV, onExportExcel }) {
-  const employees = extract.employees || [];
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden">
-        <div className="flex items-center justify-between p-4 border-b bg-gray-50">
-          <div><h2 className="text-xl font-semibold">{extract.source_file}</h2><p className="text-sm text-gray-500">{employees.length} employees • {extract.pages_processed} pages • {(extract.confidence * 100).toFixed(0)}%</p></div>
-          <div className="flex items-center gap-2">
-            {employees.length > 0 && <><button onClick={() => onExportCSV(employees, extract.source_file?.replace('.pdf', ''))} className="px-3 py-1.5 text-sm bg-green-600 text-white rounded flex items-center gap-1"><Download className="w-4 h-4" /> CSV</button><button onClick={() => onExportExcel(employees, extract.source_file?.replace('.pdf', ''))} className="px-3 py-1.5 text-sm bg-emerald-600 text-white rounded flex items-center gap-1"><Download className="w-4 h-4" /> Excel</button></>}
-            <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-lg">✕</button>
+        {/* History Section */}
+        <div className="grid md:grid-cols-2 gap-6">
+          {/* Extraction History */}
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-lg font-semibold mb-4">Extraction History</h2>
+            
+            {extracts.length === 0 ? (
+              <p className="text-gray-500 text-center py-8">No extractions yet</p>
+            ) : (
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {extracts.map(ext => (
+                  <div 
+                    key={ext.id}
+                    className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm truncate">{ext.source_file}</div>
+                      <div className="text-xs text-gray-500">
+                        {ext.employee_count} employees • {ext.pages_processed} pages 
+                        • {ext.extraction_method === 'pymupdf' ? '🔒 Local' : '☁️ AWS'}
+                        • {new Date(ext.created_at).toLocaleDateString()}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-0.5 rounded text-xs ${
+                        ext.confidence >= 0.8 
+                          ? 'bg-green-100 text-green-800' 
+                          : 'bg-yellow-100 text-yellow-800'
+                      }`}>
+                        {(ext.confidence * 100).toFixed(0)}%
+                      </span>
+                      <button
+                        onClick={() => viewExtract(ext.id)}
+                        className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"
+                        title="View Details"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => deleteExtract(ext.id)}
+                        className="p-1.5 text-red-600 hover:bg-red-50 rounded"
+                        title="Delete"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          
+          {/* Selected Extract Details */}
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-lg font-semibold mb-4">Extract Details</h2>
+            
+            {selectedExtract ? (
+              <div>
+                <div className="mb-4">
+                  <h3 className="font-medium">{selectedExtract.source_file}</h3>
+                  <p className="text-sm text-gray-500">
+                    {selectedExtract.employee_count} employees extracted on{' '}
+                    {new Date(selectedExtract.created_at).toLocaleString()}
+                  </p>
+                </div>
+                
+                <EmployeeTable employees={selectedExtract.employees || []} />
+              </div>
+            ) : (
+              <p className="text-gray-500 text-center py-8">
+                Select an extraction to view details
+              </p>
+            )}
           </div>
         </div>
-        <div className="p-4 overflow-y-auto" style={{ maxHeight: 'calc(90vh - 80px)' }}>{employees.length === 0 ? <p className="text-gray-500 text-center py-8">No employees</p> : employees.map((emp, i) => <EmployeeCard key={i} employee={emp} index={i} />)}</div>
       </div>
     </div>
   );
 }
 
-function EmployeeCard({ employee, index }) {
-  const [expanded, setExpanded] = useState(index === 0);
+// Stat Card Component
+function StatCard({ icon, label, value }) {
   return (
-    <div className="border rounded-lg mb-3 overflow-hidden">
-      <div className={`flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 ${expanded ? 'bg-blue-50 border-b' : 'bg-gray-50'}`} onClick={() => setExpanded(!expanded)}>
-        <div className="flex items-center gap-4">
-          <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-medium">{index + 1}</div>
-          <div><div className="font-semibold">{employee.name || 'Unknown'}</div><div className="text-sm text-gray-500">{employee.department || ''}{employee.id && ` • ${employee.id}`}</div></div>
-        </div>
-        <div className="flex items-center gap-6 text-right">
-          <div><div className="text-xs text-gray-500">Gross</div><div className="font-semibold">${employee.gross_pay?.toFixed(2)}</div></div>
-          <div><div className="text-xs text-gray-500">Net</div><div className="font-semibold text-green-600">${employee.net_pay?.toFixed(2)}</div></div>
-          {expanded ? <ChevronDown className="w-5 h-5 text-gray-400" /> : <ChevronRight className="w-5 h-5 text-gray-400" />}
-        </div>
+    <div className="bg-gray-50 rounded-lg p-3 flex items-center gap-3">
+      {icon}
+      <div>
+        <div className="text-xs text-gray-500">{label}</div>
+        <div className="font-semibold">{value}</div>
       </div>
-      {expanded && (
-        <div className="p-4 grid md:grid-cols-3 gap-6 text-sm bg-white">
-          <div><h4 className="font-semibold mb-3 text-blue-600"><DollarSign className="w-4 h-4 inline" /> Earnings</h4>{employee.earnings?.length > 0 ? <>{employee.earnings.map((e, i) => <div key={i} className="flex justify-between py-1 border-b border-gray-100"><span>{e.description || e.type}</span><span>${e.amount?.toFixed(2)}</span></div>)}<div className="flex justify-between py-2 font-semibold text-blue-600"><span>Total</span><span>${employee.gross_pay?.toFixed(2)}</span></div></> : <p className="text-gray-400 italic">No detail</p>}</div>
-          <div><h4 className="font-semibold mb-3 text-red-600"><FileText className="w-4 h-4 inline" /> Taxes</h4>{employee.taxes?.length > 0 ? <>{employee.taxes.map((t, i) => <div key={i} className="flex justify-between py-1 border-b border-gray-100"><span>{t.description || t.type}</span><span className="text-red-600">-${t.amount?.toFixed(2)}</span></div>)}<div className="flex justify-between py-2 font-semibold text-red-600"><span>Total</span><span>-${employee.total_taxes?.toFixed(2)}</span></div></> : <p className="text-gray-400 italic">No detail</p>}</div>
-          <div><h4 className="font-semibold mb-3 text-orange-600"><FileText className="w-4 h-4 inline" /> Deductions</h4>{employee.deductions?.length > 0 ? <>{employee.deductions.map((d, i) => <div key={i} className="flex justify-between py-1 border-b border-gray-100"><span>{d.description || d.type}</span><span className="text-orange-600">-${d.amount?.toFixed(2)}</span></div>)}<div className="flex justify-between py-2 font-semibold text-orange-600"><span>Total</span><span>-${employee.total_deductions?.toFixed(2)}</span></div></> : <p className="text-gray-400 italic">No detail</p>}{employee.pay_method && <div className="mt-4 pt-4 border-t"><div className="text-xs text-gray-500">Payment</div><div className="font-medium">{employee.pay_method}{employee.check_number && ` #${employee.check_number}`}</div></div>}</div>
-        </div>
-      )}
+    </div>
+  );
+}
+
+// Employee Table Component
+function EmployeeTable({ employees }) {
+  const [expandedRows, setExpandedRows] = useState(new Set());
+  
+  const toggleRow = (id) => {
+    const next = new Set(expandedRows);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setExpandedRows(next);
+  };
+  
+  if (!employees || employees.length === 0) {
+    return <p className="text-gray-500 text-center py-4">No employee data</p>;
+  }
+  
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b bg-gray-50">
+            <th className="text-left p-2 w-8"></th>
+            <th className="text-left p-2">Employee</th>
+            <th className="text-left p-2">ID</th>
+            <th className="text-left p-2">Department</th>
+            <th className="text-right p-2">Gross</th>
+            <th className="text-right p-2">Taxes</th>
+            <th className="text-right p-2">Deductions</th>
+            <th className="text-right p-2">Net</th>
+            <th className="text-center p-2">Valid</th>
+          </tr>
+        </thead>
+        <tbody>
+          {employees.map((emp, idx) => {
+            const isExpanded = expandedRows.has(idx);
+            return (
+              <React.Fragment key={idx}>
+                <tr className={`border-b hover:bg-gray-50 cursor-pointer ${
+                  !emp.is_valid ? 'bg-red-50' : ''
+                }`} onClick={() => toggleRow(idx)}>
+                  <td className="p-2">
+                    {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  </td>
+                  <td className="p-2 font-medium">{emp.name || '(Unknown)'}</td>
+                  <td className="p-2 text-gray-600">{emp.employee_id || '-'}</td>
+                  <td className="p-2 text-gray-600">{emp.department || '-'}</td>
+                  <td className="p-2 text-right font-medium">${(emp.gross_pay || 0).toFixed(2)}</td>
+                  <td className="p-2 text-right text-red-600">${(emp.total_taxes || 0).toFixed(2)}</td>
+                  <td className="p-2 text-right text-orange-600">${(emp.total_deductions || 0).toFixed(2)}</td>
+                  <td className="p-2 text-right font-medium text-green-600">${(emp.net_pay || 0).toFixed(2)}</td>
+                  <td className="p-2 text-center">
+                    {emp.is_valid ? (
+                      <CheckCircle className="w-4 h-4 text-green-500 inline" />
+                    ) : (
+                      <XCircle className="w-4 h-4 text-red-500 inline" />
+                    )}
+                  </td>
+                </tr>
+                
+                {/* Expanded Details */}
+                {isExpanded && (
+                  <tr className="bg-gray-50">
+                    <td colSpan={9} className="p-4">
+                      <div className="grid md:grid-cols-3 gap-4">
+                        {/* Earnings */}
+                        <div>
+                          <h4 className="font-medium mb-2 text-blue-700">Earnings</h4>
+                          {emp.earnings?.length > 0 ? (
+                            <ul className="space-y-1">
+                              {emp.earnings.map((e, i) => (
+                                <li key={i} className="flex justify-between text-xs">
+                                  <span>{e.type || e.description || 'Earning'}</span>
+                                  <span className="font-medium">${(e.amount || 0).toFixed(2)}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="text-xs text-gray-400">No earnings data</p>
+                          )}
+                        </div>
+                        
+                        {/* Taxes */}
+                        <div>
+                          <h4 className="font-medium mb-2 text-red-700">Taxes</h4>
+                          {emp.taxes?.length > 0 ? (
+                            <ul className="space-y-1">
+                              {emp.taxes.map((t, i) => (
+                                <li key={i} className="flex justify-between text-xs">
+                                  <span>{t.type || t.description || 'Tax'}</span>
+                                  <span className="font-medium">${(t.amount || 0).toFixed(2)}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="text-xs text-gray-400">No tax data</p>
+                          )}
+                        </div>
+                        
+                        {/* Deductions */}
+                        <div>
+                          <h4 className="font-medium mb-2 text-orange-700">Deductions</h4>
+                          {emp.deductions?.length > 0 ? (
+                            <ul className="space-y-1">
+                              {emp.deductions.map((d, i) => (
+                                <li key={i} className="flex justify-between text-xs">
+                                  <span>{d.type || d.description || 'Deduction'}</span>
+                                  <span className="font-medium">${(d.amount || 0).toFixed(2)}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="text-xs text-gray-400">No deduction data</p>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {/* Pay Method & Check */}
+                      <div className="mt-3 flex gap-4 text-xs text-gray-600">
+                        {emp.pay_method && (
+                          <span>Payment: <strong>{emp.pay_method}</strong></span>
+                        )}
+                        {emp.check_number && (
+                          <span>Check #: <strong>{emp.check_number}</strong></span>
+                        )}
+                      </div>
+                      
+                      {/* Validation Errors */}
+                      {emp.validation_errors?.length > 0 && (
+                        <div className="mt-3 p-2 bg-red-50 rounded text-xs text-red-700">
+                          {emp.validation_errors.join(', ')}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
