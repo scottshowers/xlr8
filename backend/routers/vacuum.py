@@ -521,7 +521,8 @@ class VacuumExtractor:
         return self._claude
     
     def extract(self, file_path: str, max_pages: int = 0, 
-                use_textract: bool = False, job_id: str = None) -> Dict:
+                use_textract: bool = False, job_id: str = None,
+                vendor_type: str = "unknown") -> Dict:
         """
         Extract employee pay data from PDF.
         
@@ -530,6 +531,7 @@ class VacuumExtractor:
             max_pages: Max pages to process (0 = all)
             use_textract: If True, use AWS Textract instead of PyMuPDF
             job_id: Optional job ID for progress tracking
+            vendor_type: Vendor type for prompt selection (paycom, dayforce, adp, etc.)
         """
         start = datetime.now()
         filename = os.path.basename(file_path)
@@ -550,6 +552,11 @@ class VacuumExtractor:
             if not pages_text:
                 raise ValueError("No text extracted from PDF")
             
+            # Step 1.5: Auto-detect vendor if not specified
+            if vendor_type == "unknown":
+                vendor_type = self._detect_vendor(pages_text)
+                logger.info(f"Auto-detected vendor: {vendor_type}")
+            
             # Step 2: Redact PII
             if job_id:
                 update_job(job_id, message='Redacting sensitive data...')
@@ -561,10 +568,10 @@ class VacuumExtractor:
             
             # Step 3: Parse with Claude (redacted text only)
             if job_id:
-                update_job(job_id, message='Parsing with AI...', progress=80)
+                update_job(job_id, message=f'Parsing with AI ({vendor_type})...', progress=80)
             
             logger.info("Sending REDACTED text to Claude for parsing...")
-            employees = self._parse_with_claude(redacted_pages)
+            employees = self._parse_with_claude(redacted_pages, vendor_type)
             
             # Step 3.5: Fix truncated descriptions using ORIGINAL text
             # Only replace if we find a LONGER description (don't make things worse)
@@ -719,8 +726,8 @@ class VacuumExtractor:
         
         return pages_text, len(pages_text)
     
-    def _parse_with_claude(self, pages_text: List[str]) -> List[Dict]:
-        """Send REDACTED text to Claude for parsing."""
+    def _parse_with_claude(self, pages_text: List[str], vendor_type: str = "unknown") -> List[Dict]:
+        """Send REDACTED text to Claude for parsing using vendor-specific prompt."""
         
         full_text = "\n\n--- PAGE BREAK ---\n\n".join(pages_text)
         
@@ -729,50 +736,13 @@ class VacuumExtractor:
             logger.warning(f"Text too long ({len(full_text)}), truncating to 80k chars")
             full_text = full_text[:80000]
         
-        logger.info(f"Sending {len(full_text)} characters to Claude ({len(pages_text)} pages)")
+        logger.info(f"Sending {len(full_text)} characters to Claude ({len(pages_text)} pages), vendor: {vendor_type}")
         
-        prompt = f"""IMPORTANT - READ FIRST:
-When extracting earnings, taxes, and deductions, the "description" field must be the EXACT TEXT from the document.
-DO NOT shorten "Shift Diff 2L OT" to "Shift Diff".
-DO NOT shorten "Federal W/H (S)" to "Federal".  
-DO NOT shorten "Wicomico County, MD - Res. Local" to "Local".
-Copy each description EXACTLY as written, character for character.
-
-Now extract employees from this pay register as a JSON array.
-
-DATA:
-{full_text}
-
-STRICT RULES:
-1. Return ONLY a valid JSON array - no markdown, no explanation
-2. Each employee object must have these EXACT keys (no duplicates):
-   company_name, client_code, period_ending, check_date, name, employee_id, department, tax_profile, gross_pay, net_pay, total_taxes, total_deductions, earnings, taxes, deductions, check_number, pay_method
-3. earnings/taxes/deductions are arrays of objects with: type, description, amount, hours (if applicable), rate (if applicable)
-4. Use 0 for missing numbers, "" for missing strings, [] for missing arrays
-5. Ignore [REDACTED] placeholders
-
-HEADER FIELDS (from page headers - apply to each employee):
-- company_name: Company name (e.g., "JOHN B PARSONS HOME LLC")
-- client_code: Client code (e.g., "0EA14")
-- period_ending: "Period Ending" date as shown (e.g., "10/17/2020")
-- check_date: "Check Date" as shown (e.g., "10/23/2020")
-
-CRITICAL - PAGE BREAK HANDLING:
-1. If a page ENDS with an employee name and partial data, the NEXT page has the rest.
-2. If a page STARTS with "Code:" and "Tax Profile:" WITHOUT a name above it, this is CONTINUATION data - MERGE with previous employee.
-3. The GROSS and NET PAY values are the authoritative totals.
-
-REMINDER - DESCRIPTIONS MUST BE EXACT:
-"Shift Diff 2L OT" not "Shift Diff"
-"Federal W/H (S)" not "Federal"
-"Wicomico County, MD - Res. Local" not "Local"
-"MD State W/H (S/0)" not "MD State"
-"401K %" not "401K"
-
-Example format:
-[{{"company_name":"JOHN B PARSONS HOME LLC","client_code":"0EA14","period_ending":"10/17/2020","check_date":"10/23/2020","name":"DOE, JOHN","employee_id":"A123","department":"2100 - LPN","tax_profile":"1 - MD/MD/MD","gross_pay":1000.00,"net_pay":800.00,"total_taxes":150.00,"total_deductions":50.00,"earnings":[{{"type":"Regular","description":"Regular","rate":25.00,"hours":40,"amount":1000.00}},{{"type":"Shift Diff","description":"Shift Diff 2L OT","rate":2.50,"hours":8,"amount":20.00}}],"taxes":[{{"type":"Federal","description":"Federal W/H (S)","amount":100.00}}],"deductions":[{{"type":"401K","description":"401K %","amount":50.00}}],"check_number":"","pay_method":"Direct Deposit"}}]
-
-Return the JSON array now:"""
+        # Get vendor-specific prompt from database, fall back to default
+        prompt_template = self._get_vendor_prompt(vendor_type)
+        
+        # Build the full prompt with data
+        prompt = self._build_prompt(prompt_template, full_text, vendor_type)
 
         try:
             response_text = ""
@@ -793,6 +763,87 @@ Return the JSON array now:"""
         employees = self._parse_json_response(response_text)
         return employees
     
+    def _get_vendor_prompt(self, vendor_type: str) -> str:
+        """Load vendor-specific prompt from database, with fallback to default."""
+        supabase = get_supabase()
+        
+        if supabase:
+            try:
+                response = supabase.table('vendor_prompts').select('prompt_template').eq('vendor_type', vendor_type).eq('is_active', True).execute()
+                if response.data:
+                    logger.info(f"Loaded prompt for vendor: {vendor_type}")
+                    return response.data[0]['prompt_template']
+            except Exception as e:
+                logger.warning(f"Failed to load vendor prompt: {e}")
+        
+        # Fallback to default prompt
+        logger.info(f"Using default prompt for vendor: {vendor_type}")
+        return self._get_default_prompt()
+    
+    def _get_default_prompt(self) -> str:
+        """Default prompt template - works for most register formats."""
+        return """IMPORTANT - READ FIRST:
+When extracting earnings, taxes, and deductions, the "description" field must be the EXACT TEXT from the document.
+Copy each description EXACTLY as written, character for character.
+
+STRICT RULES:
+1. Return ONLY a valid JSON array - no markdown, no explanation
+2. Each employee object must have these EXACT keys:
+   company_name, client_code, period_ending, check_date, name, employee_id, department, tax_profile, gross_pay, net_pay, total_taxes, total_deductions, earnings, taxes, deductions, check_number, pay_method
+3. earnings array: objects with type, description, amount, hours, rate, amount_ytd, hours_ytd
+4. taxes array: objects with type, description, amount, taxable_wages, amount_ytd, is_employer (true if employer-paid)
+5. deductions array: objects with type, description, amount, amount_ytd, category (pre_tax, post_tax, or memo)
+6. Use 0 for missing numbers, "" for missing strings, [] for missing arrays
+7. Ignore [REDACTED] placeholders
+
+Extract all employees and return as JSON array."""
+    
+    def _build_prompt(self, template: str, full_text: str, vendor_type: str) -> str:
+        """Build the complete prompt with data and vendor-specific instructions."""
+        
+        # Base structure
+        prompt = f"""{template}
+
+DATA TO EXTRACT:
+{full_text}
+
+Return the JSON array now:"""
+        
+        return prompt
+    
+    def _detect_vendor(self, pages_text: List[str]) -> str:
+        """Auto-detect vendor from register content."""
+        
+        # Combine first few pages for detection
+        sample_text = "\n".join(pages_text[:3]).lower()
+        
+        # Vendor signatures
+        vendor_signatures = {
+            'dayforce': ['dayforce', 'ceridian', 'payroll register report (pr001)'],
+            'paycom': ['paycom', 'client:', 'tax profile:'],
+            'adp': ['adp', 'automatic data processing', 'run payroll'],
+            'paychex': ['paychex', 'paychex flex'],
+            'ultipro': ['ultipro', 'ukg pro', 'ultimate software'],
+            'workday': ['workday', 'wd payroll'],
+            'gusto': ['gusto', 'zenpayroll'],
+            'quickbooks': ['quickbooks', 'intuit payroll'],
+        }
+        
+        for vendor, signatures in vendor_signatures.items():
+            for sig in signatures:
+                if sig in sample_text:
+                    logger.info(f"Detected vendor '{vendor}' from signature '{sig}'")
+                    return vendor
+        
+        # Fallback: check for common patterns
+        if 'emp #:' in sample_text and 'dept:' in sample_text:
+            return 'dayforce'  # Dayforce-style employee info block
+        
+        if 'code:' in sample_text and 'tax profile:' in sample_text:
+            return 'paycom'  # Paycom-style
+        
+        return 'unknown'
+
     def _fix_descriptions(self, employees: List[Dict], raw_text: str) -> List[Dict]:
         """Post-process to replace truncated descriptions with full text from PDF."""
         
@@ -1249,13 +1300,15 @@ def get_extractor() -> VacuumExtractor:
 # =============================================================================
 
 def process_extraction_job(job_id: str, file_path: str, max_pages: int, 
-                           use_textract: bool, project_id: Optional[str]):
+                           use_textract: bool, project_id: Optional[str],
+                           vendor_type: str = "unknown", customer_id: Optional[str] = None):
     """Background task for async extraction."""
     ext = get_extractor()
     
     try:
         result = ext.extract(file_path, max_pages=max_pages, 
-                            use_textract=use_textract, job_id=job_id)
+                            use_textract=use_textract, job_id=job_id,
+                            vendor_type=vendor_type)
         
         # Add id field to employees for frontend
         for emp in result.get('employees', []):
@@ -1273,10 +1326,12 @@ def process_extraction_job(job_id: str, file_path: str, max_pages: int,
                 pages_processed=result['pages_processed'],
                 cost_usd=result['cost_usd'],
                 processing_time_ms=result['processing_time_ms'],
-                extraction_method=result.get('extraction_method', 'pymupdf')
+                extraction_method=result.get('extraction_method', 'pymupdf'),
+                customer_id=customer_id
             )
             result['extract_id'] = saved.get('id') if saved else None
             result['saved_to_db'] = saved is not None
+            result['vendor_type'] = vendor_type
         
         update_job(job_id, result=result)
         
@@ -1321,7 +1376,9 @@ async def upload(
     max_pages: int = Form(0),
     project_id: Optional[str] = Form(None),
     use_textract: bool = Form(False),
-    async_mode: bool = Form(True)
+    async_mode: bool = Form(True),
+    vendor_type: str = Form("unknown"),
+    customer_id: Optional[str] = Form(None)
 ):
     """
     Upload and extract pay register.
@@ -1332,6 +1389,8 @@ async def upload(
         project_id: Optional project ID
         use_textract: If True, use AWS Textract instead of PyMuPDF
         async_mode: If True, process in background and return job_id
+        vendor_type: Vendor type (paycom, dayforce, adp, etc.) - 'unknown' for auto-detect
+        customer_id: Optional customer ID for data isolation
     """
     ext = get_extractor()
     
@@ -1353,7 +1412,8 @@ async def upload(
         job_id = create_job(file.filename)
         background_tasks.add_task(
             process_extraction_job, 
-            job_id, temp_path, max_pages, use_textract, project_id
+            job_id, temp_path, max_pages, use_textract, project_id,
+            vendor_type, customer_id
         )
         
         return {
@@ -1361,7 +1421,8 @@ async def upload(
             "job_id": job_id,
             "status": "processing",
             "message": f"Processing started. Poll /vacuum/job/{job_id} for status.",
-            "extraction_method": "textract" if use_textract else "pymupdf"
+            "extraction_method": "textract" if use_textract else "pymupdf",
+            "vendor_type": vendor_type
         }
     else:
         # Synchronous processing
