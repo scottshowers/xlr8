@@ -299,7 +299,10 @@ class VacuumExtractor:
             logger.info("Sending REDACTED text to Claude for parsing...")
             employees = self._parse_with_claude(redacted_pages)
             
-            # Note: Description post-processing removed - Claude prompt now handles this correctly
+            # Step 3.5: Fix truncated descriptions using ORIGINAL text
+            # Only replace if we find a LONGER description (don't make things worse)
+            original_text = "\n\n--- PAGE BREAK ---\n\n".join(pages_text)
+            employees = self._fix_descriptions(employees, original_text)
             
             # Step 4: Validate employees
             if job_id:
@@ -544,12 +547,11 @@ Return the JSON array now:"""
                     lines
                 )
                 if full_desc:
-                    if full_desc != old_desc:
+                    # Only fix if new description is LONGER (don't make things worse)
+                    if len(full_desc) > len(old_desc):
                         print(f"[FIX] Earning: '{old_desc}' -> '{full_desc}'", flush=True)
                         earning['description'] = full_desc
                         fixes_made += 1
-                    else:
-                        print(f"[SKIP] Earning already correct: '{old_desc}'", flush=True)
             
             # Fix taxes descriptions
             for tax in emp.get('taxes', []):
@@ -561,12 +563,11 @@ Return the JSON array now:"""
                     lines
                 )
                 if full_desc:
-                    if full_desc != old_desc:
+                    # Only fix if new description is LONGER
+                    if len(full_desc) > len(old_desc):
                         print(f"[FIX] Tax: '{old_desc}' -> '{full_desc}'", flush=True)
                         tax['description'] = full_desc
                         fixes_made += 1
-                    else:
-                        print(f"[SKIP] Tax already correct: '{old_desc}'", flush=True)
             
             # Fix deductions descriptions
             for deduction in emp.get('deductions', []):
@@ -578,12 +579,11 @@ Return the JSON array now:"""
                     lines
                 )
                 if full_desc:
-                    if full_desc != old_desc:
+                    # Only fix if new description is LONGER
+                    if len(full_desc) > len(old_desc):
                         print(f"[FIX] Deduction: '{old_desc}' -> '{full_desc}'", flush=True)
                         deduction['description'] = full_desc
                         fixes_made += 1
-                    else:
-                        print(f"[SKIP] Deduction already correct: '{old_desc}'", flush=True)
         
         print(f"[VACUUM] Description fixes made: {fixes_made}", flush=True)
         logger.info(f"Description fixes made: {fixes_made}")
