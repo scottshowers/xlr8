@@ -3,7 +3,7 @@
  * Vertical logo, no Analysis Engine subtitle, fixed scroll
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useLayoutEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Rocket } from 'lucide-react';
 import ContextBar from './ContextBar';
@@ -139,15 +139,12 @@ function Navigation() {
 export default function Layout({ children }) {
   const location = useLocation();
   
-  // Scroll to top on route change AND on initial mount
-  useEffect(() => {
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  // useLayoutEffect fires BEFORE browser paint - more reliable for scroll
+  useLayoutEffect(() => {
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
   }, [location.pathname]);
-  
-  // Also scroll immediately on mount (for Landing → Workspace transition)
-  useEffect(() => {
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-  }, []);
 
   return (
     <div style={{ 
