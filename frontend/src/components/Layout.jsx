@@ -139,10 +139,15 @@ function Navigation() {
 export default function Layout({ children }) {
   const location = useLocation();
   
-  // Scroll to top on route change
+  // Scroll to top on route change AND on initial mount
   useEffect(() => {
-    window.scrollTo(0, 0);
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   }, [location.pathname]);
+  
+  // Also scroll immediately on mount (for Landing → Workspace transition)
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }, []);
 
   return (
     <div style={{ 
