@@ -187,14 +187,19 @@ class SimpleExtractor:
         return pages_text
     
     def _parse_with_claude(self, pages_text: List[str]) -> List[Employee]:
-        """Send text to Claude for parsing."""
+        """Send text to Claude for parsing with streaming."""
         
         full_text = "\n\n--- PAGE BREAK ---\n\n".join(pages_text)
+        
+        # Limit text size to avoid timeout
+        if len(full_text) > 40000:
+            logger.warning(f"Text too long ({len(full_text)}), truncating to 40000")
+            full_text = full_text[:40000]
         
         prompt = f"""Parse this pay register and extract ALL employees as JSON.
 
 PAY REGISTER DATA:
-{full_text[:60000]}
+{full_text}
 
 Return a JSON array where each employee has:
 {{
@@ -220,13 +225,16 @@ IMPORTANT:
 - NET PAY amount goes in net_pay
 - Return ONLY the JSON array, no other text"""
 
-        response = self.claude.messages.create(
+        # Use streaming to avoid timeout
+        response_text = ""
+        with self.claude.messages.stream(
             model="claude-sonnet-4-20250514",
-            max_tokens=32000,
+            max_tokens=16000,
             messages=[{"role": "user", "content": prompt}]
-        )
+        ) as stream:
+            for text in stream.text_stream:
+                response_text += text
         
-        response_text = response.content[0].text
         logger.info(f"Claude response length: {len(response_text)}")
         
         # Parse JSON - handle common issues
@@ -331,13 +339,13 @@ async def status():
 @router.post("/vacuum/upload")
 async def upload(
     file: UploadFile = File(...),
-    max_pages: int = Form(5)
+    max_pages: int = Form(3)
 ):
     """
     Upload and extract pay register.
     
     Cost: ~$0.015/page (Textract) + ~$0.05 (Claude)
-    Default 5 pages = ~$0.13
+    Default 3 pages = ~$0.10
     """
     ext = get_extractor()
     
@@ -397,7 +405,7 @@ async def upload(
 @router.post("/vacuum/extract")
 async def extract(
     file: UploadFile = File(...),
-    max_pages: int = Form(5)
+    max_pages: int = Form(3)
 ):
     """Alias for /vacuum/upload"""
     return await upload(file, max_pages)
