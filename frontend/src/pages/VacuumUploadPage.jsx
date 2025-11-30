@@ -17,9 +17,10 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Upload, FileText, Users, DollarSign, CheckCircle, XCircle, 
   Loader2, Trash2, Eye, AlertTriangle, ChevronDown, ChevronRight,
-  Shield, Cloud, Lock, Download, BarChart3
+  Shield, Cloud, Lock, Download, BarChart3, Wand2, HelpCircle
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import ConsultantAssist from './ConsultantAssist';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -37,6 +38,7 @@ export default function VacuumUploadPage() {
   const [useTextract, setUseTextract] = useState(false); // PyMuPDF is default
   const [vendorType, setVendorType] = useState('unknown'); // auto-detect by default
   const [activeTab, setActiveTab] = useState('employees'); // 'employees' or 'summary'
+  const [showAssist, setShowAssist] = useState(false); // Consultant Assist modal
   
   // Job polling state
   const [jobId, setJobId] = useState(null);
@@ -687,7 +689,7 @@ export default function VacuumUploadPage() {
               </div>
             )}
             
-            {/* Tabs + Export */}
+            {/* Tabs + Export + Assist */}
             <div className="flex items-center justify-between mb-4 border-b">
               <div className="flex">
                 <button
@@ -714,16 +716,29 @@ export default function VacuumUploadPage() {
                 </button>
               </div>
               
-              <button
-                onClick={() => exportToXLSX(
-                  result.employees, 
-                  result.source_file?.replace('.pdf', '') || 'pay_extract'
+              <div className="flex items-center gap-2">
+                {/* Consultant Assist Button - shows when confidence is low or validation errors exist */}
+                {(result.confidence < 0.7 || (result.validation_errors && result.validation_errors.length > 0)) && (
+                  <button
+                    onClick={() => setShowAssist(true)}
+                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center gap-2 text-sm"
+                  >
+                    <Wand2 className="w-4 h-4" />
+                    Help Claude
+                  </button>
                 )}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 text-sm"
-              >
-                <Download className="w-4 h-4" />
-                Export XLSX
-              </button>
+                
+                <button
+                  onClick={() => exportToXLSX(
+                    result.employees, 
+                    result.source_file?.replace('.pdf', '') || 'pay_extract'
+                  )}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 text-sm"
+                >
+                  <Download className="w-4 h-4" />
+                  Export XLSX
+                </button>
+              </div>
             </div>
             
             {/* Tab Content */}
@@ -827,6 +842,23 @@ export default function VacuumUploadPage() {
           </div>
         </div>
       </div>
+      
+      {/* Consultant Assist Modal */}
+      {showAssist && result && (
+        <ConsultantAssist
+          extractionId={result.extract_id}
+          vendorType={vendorType}
+          customerId={null}
+          confidence={result.confidence}
+          validationErrors={result.validation_errors}
+          onClose={() => setShowAssist(false)}
+          onRetry={(hints) => {
+            setShowAssist(false);
+            // Could trigger a re-extraction with hints here
+            console.log('Retry with hints:', hints);
+          }}
+        />
+      )}
     </div>
   );
 }
