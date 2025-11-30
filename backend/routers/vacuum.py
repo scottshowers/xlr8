@@ -299,6 +299,12 @@ class VacuumExtractor:
             logger.info("Sending REDACTED text to Claude for parsing...")
             employees = self._parse_with_claude(redacted_pages)
             
+            # Step 3.5: Fix truncated descriptions using ORIGINAL text (not redacted)
+            original_text = "\n\n--- PAGE BREAK ---\n\n".join(pages_text)
+            print(f"[VACUUM] Starting description fix for {len(employees)} employees", flush=True)
+            employees = self._fix_descriptions(employees, original_text)
+            print(f"[VACUUM] Description fix complete", flush=True)
+            
             # Step 4: Validate employees
             if job_id:
                 update_job(job_id, message='Validating results...', progress=95)
@@ -519,14 +525,6 @@ Return the JSON array now:"""
             return []
         
         employees = self._parse_json_response(response_text)
-        
-        # Post-process to fix truncated descriptions
-        print(f"[VACUUM] Starting description fix for {len(employees)} employees", flush=True)
-        logger.info(f"Starting description fix for {len(employees)} employees")
-        employees = self._fix_descriptions(employees, full_text)
-        print(f"[VACUUM] Description fix complete", flush=True)
-        logger.info(f"Description fix complete")
-        
         return employees
     
     def _fix_descriptions(self, employees: List[Dict], raw_text: str) -> List[Dict]:
@@ -606,6 +604,8 @@ Return the JSON array now:"""
             if amount_str in line or amount_with_comma in line:
                 amount_line_indices.append(i)
         
+        print(f"[DEBUG] Looking for '{short_desc}'/'{type_code}' amount={amount_str}, found {len(amount_line_indices)} amount matches", flush=True)
+        
         # For each amount match, look backwards for the description line
         for amt_idx in amount_line_indices:
             # Look at the 5 lines BEFORE the amount line
@@ -618,16 +618,19 @@ Return the JSON array now:"""
                     continue
                     
                 # Check if this line contains our search term or type
-                # Use partial matching - "State" should match "MD State W/H"
                 if search_term and search_term in line_lower:
+                    print(f"[DEBUG] MATCH: '{search_term}' found in '{line}'", flush=True)
                     return self._build_full_description(lines, j)
                 if type_term and type_term in line_lower:
+                    print(f"[DEBUG] MATCH: '{type_term}' found in '{line}'", flush=True)
                     return self._build_full_description(lines, j)
                     
                 # Also try if line STARTS with what we're looking for
                 if search_term and line_lower.startswith(search_term[:min(len(search_term), 4)]):
+                    print(f"[DEBUG] MATCH (prefix): '{search_term[:4]}' starts '{line}'", flush=True)
                     return self._build_full_description(lines, j)
         
+        print(f"[DEBUG] NO MATCH for '{short_desc}'/'{type_code}' amount={amount_str}", flush=True)
         return None
     
     def _build_full_description(self, lines: List[str], idx: int) -> str:
