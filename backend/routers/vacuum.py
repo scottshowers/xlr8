@@ -452,10 +452,10 @@ class VacuumExtractor:
         
         full_text = "\n\n--- PAGE BREAK ---\n\n".join(pages_text)
         
-        # Claude can handle ~100k tokens, so allow up to 150k characters
-        if len(full_text) > 150000:
-            logger.warning(f"Text too long ({len(full_text)}), truncating to 150k chars")
-            full_text = full_text[:150000]
+        # Conservative limit - can increase once chunking is implemented
+        if len(full_text) > 80000:
+            logger.warning(f"Text too long ({len(full_text)}), truncating to 80k chars")
+            full_text = full_text[:80000]
         
         logger.info(f"Sending {len(full_text)} characters to Claude ({len(pages_text)} pages)")
         
@@ -472,13 +472,23 @@ STRICT RULES:
 4. Use 0 for missing numbers, "" for missing strings, [] for missing arrays
 5. Note: Some sensitive data has been redacted with [REDACTED] placeholders - ignore those
 
-CRITICAL - PAY ATTENTION:
-- tax_profile: Look for "Tax Profile:" in employee header (e.g., "Tax Profile: 2 - MD/MD/MD")
-- description: Capture the FULL description text, not truncated (e.g., "Shift Diff 2L OT" not just "Shift Diff")
-- PAGE BREAKS: If an employee's data spans across a page break (--- PAGE BREAK ---), MERGE their data into ONE employee record. Do NOT create duplicate employees.
+CRITICAL - YOU MUST DO THESE:
+1. tax_profile: Extract "Tax Profile:" from employee header (e.g., "Tax Profile: 2 - MD/MD/MD" → "2 - MD/MD/MD")
+
+2. FULL DESCRIPTIONS: The "description" field must contain the COMPLETE text from the earnings/deductions/taxes column. 
+   - WRONG: "Shift Diff" 
+   - CORRECT: "Shift Diff 2L OT"
+   - WRONG: "Federal"
+   - CORRECT: "Federal Withholding"
+   Do NOT truncate or abbreviate descriptions.
+
+3. PAGE BREAKS: Employees may span across "--- PAGE BREAK ---" markers. 
+   - If you see an employee's header on one page and their earnings/taxes/deductions continue on the next page, COMBINE them into ONE employee record.
+   - Do NOT create duplicate employee records for the same person.
+   - Match by employee name and ID to merge split data.
 
 Example format:
-[{{"name":"DOE, JOHN","employee_id":"A123","department":"Sales","tax_profile":"2 - MD/MD/MD","gross_pay":1000.00,"net_pay":800.00,"total_taxes":150.00,"total_deductions":50.00,"earnings":[{{"type":"Regular","description":"Regular Pay","rate":25.00,"hours":40,"amount":1000.00}},{{"type":"Shift Diff","description":"Shift Diff 2L OT","rate":2.50,"hours":8,"amount":20.00}}],"taxes":[{{"type":"Federal","description":"Federal Withholding","amount":100.00}}],"deductions":[{{"type":"401K","description":"401K Pre-Tax","amount":50.00}}],"check_number":"","pay_method":"Direct Deposit"}}]
+[{{"name":"DOE, JOHN","employee_id":"A123","department":"Sales","tax_profile":"2 - MD/MD/MD","gross_pay":1000.00,"net_pay":800.00,"total_taxes":150.00,"total_deductions":50.00,"earnings":[{{"type":"Regular","description":"Regular Pay","rate":25.00,"hours":40,"amount":1000.00}},{{"type":"Shift Diff","description":"Shift Diff 2L OT","rate":2.50,"hours":8,"amount":20.00}}],"taxes":[{{"type":"FWT","description":"Federal Withholding Tax","amount":100.00}}],"deductions":[{{"type":"401K","description":"401K Pre-Tax Contribution","amount":50.00}}],"check_number":"","pay_method":"Direct Deposit"}}]
 
 Return the JSON array now:"""
 
@@ -486,7 +496,7 @@ Return the JSON array now:"""
             response_text = ""
             with self.claude.messages.stream(
                 model="claude-sonnet-4-20250514",
-                max_tokens=32000,
+                max_tokens=24000,
                 messages=[{"role": "user", "content": prompt}]
             ) as stream:
                 for text in stream.text_stream:
