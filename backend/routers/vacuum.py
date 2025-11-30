@@ -452,9 +452,12 @@ class VacuumExtractor:
         
         full_text = "\n\n--- PAGE BREAK ---\n\n".join(pages_text)
         
-        if len(full_text) > 35000:
-            logger.warning(f"Text too long ({len(full_text)}), truncating")
-            full_text = full_text[:35000]
+        # Claude can handle ~100k tokens, so allow up to 150k characters
+        if len(full_text) > 150000:
+            logger.warning(f"Text too long ({len(full_text)}), truncating to 150k chars")
+            full_text = full_text[:150000]
+        
+        logger.info(f"Sending {len(full_text)} characters to Claude ({len(pages_text)} pages)")
         
         prompt = f"""Extract employees from this pay register as a JSON array.
 
@@ -483,7 +486,7 @@ Return the JSON array now:"""
             response_text = ""
             with self.claude.messages.stream(
                 model="claude-sonnet-4-20250514",
-                max_tokens=16000,
+                max_tokens=32000,
                 messages=[{"role": "user", "content": prompt}]
             ) as stream:
                 for text in stream.text_stream:
