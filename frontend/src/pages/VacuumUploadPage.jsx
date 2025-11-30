@@ -266,7 +266,7 @@ export default function VacuumUploadPage() {
     const summary = calculateSummary(employees);
     const wb = XLSX.utils.book_new();
     
-    // Sheet 1: Employee Details
+    // Sheet 1: Employee Summary
     const empData = employees.map(emp => ({
       'Name': emp.name || '',
       'Employee ID': emp.employee_id || '',
@@ -282,78 +282,110 @@ export default function VacuumUploadPage() {
     const empSheet = XLSX.utils.json_to_sheet(empData);
     XLSX.utils.book_append_sheet(wb, empSheet, 'Employees');
     
-    // Sheet 2: Earnings Summary
-    const earningsData = summary.earnings.map(e => ({
-      'Earning Type': e.description,
-      'Total Amount': e.total,
-      'Employee Count': e.count
-    }));
-    earningsData.push({ 'Earning Type': 'TOTAL', 'Total Amount': summary.totals.grossPay, 'Employee Count': employees.length });
-    const earningsSheet = XLSX.utils.json_to_sheet(earningsData);
-    XLSX.utils.book_append_sheet(wb, earningsSheet, 'Earnings Summary');
-    
-    // Sheet 3: Taxes Summary
-    const taxesData = summary.taxes.map(t => ({
-      'Tax Type': t.description,
-      'Total Amount': t.total,
-      'Employee Count': t.count
-    }));
-    taxesData.push({ 'Tax Type': 'TOTAL', 'Total Amount': summary.totals.totalTaxes, 'Employee Count': employees.length });
-    const taxesSheet = XLSX.utils.json_to_sheet(taxesData);
-    XLSX.utils.book_append_sheet(wb, taxesSheet, 'Taxes Summary');
-    
-    // Sheet 4: Deductions Summary
-    const deductionsData = summary.deductions.map(d => ({
-      'Deduction Type': d.description,
-      'Total Amount': d.total,
-      'Employee Count': d.count
-    }));
-    deductionsData.push({ 'Deduction Type': 'TOTAL', 'Total Amount': summary.totals.totalDeductions, 'Employee Count': employees.length });
-    const deductionsSheet = XLSX.utils.json_to_sheet(deductionsData);
-    XLSX.utils.book_append_sheet(wb, deductionsSheet, 'Deductions Summary');
-    
-    // Sheet 5: Detailed Line Items (all earnings/taxes/deductions per employee)
-    const lineItems = [];
+    // Sheet 2: Earnings Detail (each earning by employee)
+    const earningsDetail = [];
     employees.forEach(emp => {
       (emp.earnings || []).forEach(e => {
-        lineItems.push({
-          'Employee': emp.name,
-          'Employee ID': emp.employee_id,
-          'Category': 'Earning',
-          'Type': e.type || e.description || 'Other',
+        earningsDetail.push({
+          'Employee': emp.name || '',
+          'Employee ID': emp.employee_id || '',
+          'Department': emp.department || '',
+          'Earning Code': e.type || e.code || '',
           'Description': e.description || '',
           'Hours': e.hours || '',
           'Rate': e.rate || '',
           'Amount': e.amount || 0
         });
       });
-      (emp.taxes || []).forEach(t => {
-        lineItems.push({
-          'Employee': emp.name,
-          'Employee ID': emp.employee_id,
-          'Category': 'Tax',
-          'Type': t.type || t.description || 'Other',
-          'Description': t.description || '',
-          'Hours': '',
-          'Rate': '',
-          'Amount': t.amount || 0
-        });
-      });
+    });
+    const earningsDetailSheet = XLSX.utils.json_to_sheet(earningsDetail);
+    XLSX.utils.book_append_sheet(wb, earningsDetailSheet, 'Earnings');
+    
+    // Sheet 3: Deductions Detail (each deduction by employee)
+    const deductionsDetail = [];
+    employees.forEach(emp => {
       (emp.deductions || []).forEach(d => {
-        lineItems.push({
-          'Employee': emp.name,
-          'Employee ID': emp.employee_id,
-          'Category': 'Deduction',
-          'Type': d.type || d.description || 'Other',
+        deductionsDetail.push({
+          'Employee': emp.name || '',
+          'Employee ID': emp.employee_id || '',
+          'Department': emp.department || '',
+          'Deduction Code': d.type || d.code || '',
           'Description': d.description || '',
-          'Hours': '',
-          'Rate': '',
           'Amount': d.amount || 0
         });
       });
     });
-    const lineItemsSheet = XLSX.utils.json_to_sheet(lineItems);
-    XLSX.utils.book_append_sheet(wb, lineItemsSheet, 'All Line Items');
+    const deductionsDetailSheet = XLSX.utils.json_to_sheet(deductionsDetail);
+    XLSX.utils.book_append_sheet(wb, deductionsDetailSheet, 'Deductions');
+    
+    // Sheet 4: Taxes Detail (each tax by employee)
+    const taxesDetail = [];
+    employees.forEach(emp => {
+      (emp.taxes || []).forEach(t => {
+        taxesDetail.push({
+          'Employee': emp.name || '',
+          'Employee ID': emp.employee_id || '',
+          'Department': emp.department || '',
+          'Tax Code': t.type || t.code || '',
+          'Description': t.description || '',
+          'Amount': t.amount || 0
+        });
+      });
+    });
+    const taxesDetailSheet = XLSX.utils.json_to_sheet(taxesDetail);
+    XLSX.utils.book_append_sheet(wb, taxesDetailSheet, 'Taxes');
+    
+    // Sheet 5: Summary (all rollups on one sheet)
+    const summaryData = [];
+    
+    // Earnings section
+    summaryData.push({ 'Category': 'EARNINGS', 'Code': '', 'Total Amount': '', 'Employee Count': '' });
+    summary.earnings.forEach(e => {
+      summaryData.push({
+        'Category': '',
+        'Code': e.description,
+        'Total Amount': e.total,
+        'Employee Count': e.count
+      });
+    });
+    summaryData.push({ 'Category': '', 'Code': 'EARNINGS TOTAL', 'Total Amount': summary.totals.grossPay, 'Employee Count': '' });
+    summaryData.push({ 'Category': '', 'Code': '', 'Total Amount': '', 'Employee Count': '' }); // blank row
+    
+    // Taxes section
+    summaryData.push({ 'Category': 'TAXES', 'Code': '', 'Total Amount': '', 'Employee Count': '' });
+    summary.taxes.forEach(t => {
+      summaryData.push({
+        'Category': '',
+        'Code': t.description,
+        'Total Amount': t.total,
+        'Employee Count': t.count
+      });
+    });
+    summaryData.push({ 'Category': '', 'Code': 'TAXES TOTAL', 'Total Amount': summary.totals.totalTaxes, 'Employee Count': '' });
+    summaryData.push({ 'Category': '', 'Code': '', 'Total Amount': '', 'Employee Count': '' }); // blank row
+    
+    // Deductions section
+    summaryData.push({ 'Category': 'DEDUCTIONS', 'Code': '', 'Total Amount': '', 'Employee Count': '' });
+    summary.deductions.forEach(d => {
+      summaryData.push({
+        'Category': '',
+        'Code': d.description,
+        'Total Amount': d.total,
+        'Employee Count': d.count
+      });
+    });
+    summaryData.push({ 'Category': '', 'Code': 'DEDUCTIONS TOTAL', 'Total Amount': summary.totals.totalDeductions, 'Employee Count': '' });
+    summaryData.push({ 'Category': '', 'Code': '', 'Total Amount': '', 'Employee Count': '' }); // blank row
+    
+    // Grand totals
+    summaryData.push({ 'Category': 'GRAND TOTALS', 'Code': '', 'Total Amount': '', 'Employee Count': '' });
+    summaryData.push({ 'Category': '', 'Code': 'Total Gross Pay', 'Total Amount': summary.totals.grossPay, 'Employee Count': employees.length });
+    summaryData.push({ 'Category': '', 'Code': 'Total Taxes', 'Total Amount': summary.totals.totalTaxes, 'Employee Count': '' });
+    summaryData.push({ 'Category': '', 'Code': 'Total Deductions', 'Total Amount': summary.totals.totalDeductions, 'Employee Count': '' });
+    summaryData.push({ 'Category': '', 'Code': 'Total Net Pay', 'Total Amount': summary.totals.netPay, 'Employee Count': '' });
+    
+    const summarySheet = XLSX.utils.json_to_sheet(summaryData);
+    XLSX.utils.book_append_sheet(wb, summarySheet, 'Summary');
     
     // Download
     const timestamp = new Date().toISOString().split('T')[0];
