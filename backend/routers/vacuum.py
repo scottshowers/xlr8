@@ -584,7 +584,7 @@ Return the JSON array now:"""
         return employees
     
     def _find_full_description(self, type_code: str, short_desc: str, amount: float, lines: List[str]) -> Optional[str]:
-        """Find the full description from raw text by matching type prefix and amount on nearby lines."""
+        """Find the full description from raw text by matching amount and partial text."""
         
         if not amount or amount == 0:
             return None
@@ -593,35 +593,56 @@ Return the JSON array now:"""
         amount_str = f"{amount:.2f}"
         amount_with_comma = f"{amount:,.2f}"
         
-        # Use the shorter of type or description as prefix to match
-        prefix = short_desc if short_desc else type_code
-        if not prefix:
+        # Get search terms from both type and description
+        search_term = short_desc.lower().strip() if short_desc else ""
+        type_term = type_code.lower().strip() if type_code else ""
+        
+        if not search_term and not type_term:
             return None
         
-        prefix_lower = prefix.lower().strip()
-        
-        # Find lines that match our prefix
+        # First, find all lines that contain the amount
+        amount_line_indices = []
         for i, line in enumerate(lines):
-            line_lower = line.lower()
-            
-            # Check if this line starts with our prefix
-            if line_lower.startswith(prefix_lower[:min(len(prefix_lower), 6)]):
-                # Look within next 5 lines for the amount
-                for j in range(i, min(i + 6, len(lines))):
-                    if amount_str in lines[j] or amount_with_comma in lines[j]:
-                        # Found the match! Now build the full description
-                        # Check if description spans multiple lines (e.g., "Wicomico County, MD" + "- Res. Local")
-                        full_desc = line
-                        
-                        # Check if next line is a continuation (starts with "- " or lowercase)
-                        if i + 1 < len(lines):
-                            next_line = lines[i + 1]
-                            if next_line.startswith('- ') or (next_line and next_line[0].islower()):
-                                full_desc = line + " " + next_line
-                        
-                        return full_desc
+            if amount_str in line or amount_with_comma in line:
+                amount_line_indices.append(i)
+        
+        # For each amount match, look backwards for the description line
+        for amt_idx in amount_line_indices:
+            # Look at the 5 lines BEFORE the amount line
+            for j in range(max(0, amt_idx - 5), amt_idx + 1):
+                line = lines[j]
+                line_lower = line.lower()
+                
+                # Skip lines that are just numbers
+                if line.replace(',', '').replace('.', '').replace('-', '').isdigit():
+                    continue
+                    
+                # Check if this line contains our search term or type
+                # Use partial matching - "State" should match "MD State W/H"
+                if search_term and search_term in line_lower:
+                    return self._build_full_description(lines, j)
+                if type_term and type_term in line_lower:
+                    return self._build_full_description(lines, j)
+                    
+                # Also try if line STARTS with what we're looking for
+                if search_term and line_lower.startswith(search_term[:min(len(search_term), 4)]):
+                    return self._build_full_description(lines, j)
         
         return None
+    
+    def _build_full_description(self, lines: List[str], idx: int) -> str:
+        """Build full description, handling multi-line cases."""
+        full_desc = lines[idx]
+        
+        # Check if next line is a continuation (starts with "- " or is part of the description)
+        if idx + 1 < len(lines):
+            next_line = lines[idx + 1]
+            # Skip if next line is a number
+            if not next_line.replace(',', '').replace('.', '').replace('-', '').isdigit():
+                if next_line.startswith('- '):
+                    full_desc = full_desc + " " + next_line
+        
+        return full_desc
     
     def _parse_json_response(self, response_text: str) -> List[Dict]:
         """Parse JSON from Claude response with multiple fallback strategies."""
