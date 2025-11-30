@@ -518,7 +518,86 @@ Return the JSON array now:"""
             logger.error(f"Claude API error: {e}")
             return []
         
-        return self._parse_json_response(response_text)
+        employees = self._parse_json_response(response_text)
+        
+        # Post-process to fix truncated descriptions
+        employees = self._fix_descriptions(employees, full_text)
+        
+        return employees
+    
+    def _fix_descriptions(self, employees: List[Dict], raw_text: str) -> List[Dict]:
+        """Post-process to replace truncated descriptions with full text from PDF."""
+        
+        # Build a list of all lines with amounts for matching
+        lines = raw_text.split('\n')
+        
+        for emp in employees:
+            # Fix earnings descriptions
+            for earning in emp.get('earnings', []):
+                full_desc = self._find_full_description(
+                    earning.get('type', ''),
+                    earning.get('description', ''),
+                    earning.get('amount', 0),
+                    lines
+                )
+                if full_desc:
+                    earning['description'] = full_desc
+            
+            # Fix taxes descriptions
+            for tax in emp.get('taxes', []):
+                full_desc = self._find_full_description(
+                    tax.get('type', ''),
+                    tax.get('description', ''),
+                    tax.get('amount', 0),
+                    lines
+                )
+                if full_desc:
+                    tax['description'] = full_desc
+            
+            # Fix deductions descriptions
+            for deduction in emp.get('deductions', []):
+                full_desc = self._find_full_description(
+                    deduction.get('type', ''),
+                    deduction.get('description', ''),
+                    deduction.get('amount', 0),
+                    lines
+                )
+                if full_desc:
+                    deduction['description'] = full_desc
+        
+        return employees
+    
+    def _find_full_description(self, type_code: str, short_desc: str, amount: float, lines: List[str]) -> Optional[str]:
+        """Find the full description from raw text by matching type prefix and amount."""
+        
+        if not amount or amount == 0:
+            return None
+        
+        # Format amount for matching (handle both "5.64" and "1,883.08" formats)
+        amount_str = f"{amount:.2f}"
+        amount_with_comma = f"{amount:,.2f}"
+        
+        # Use the shorter of type or description as prefix to match
+        prefix = short_desc if short_desc else type_code
+        if not prefix:
+            return None
+        
+        # Take first 4+ characters as prefix for matching
+        prefix = prefix[:min(len(prefix), 8)].lower().strip()
+        
+        for line in lines:
+            line_lower = line.lower()
+            
+            # Check if line starts with our prefix and contains the amount
+            if line_lower.strip().startswith(prefix):
+                if amount_str in line or amount_with_comma in line:
+                    # Extract the description (everything before the first number)
+                    # Pattern: "Description Text    25.00    0.16    5.64" -> "Description Text"
+                    match = re.match(r'^([A-Za-z][A-Za-z0-9\s,./\-()%&]+?)\s+\d', line.strip())
+                    if match:
+                        return match.group(1).strip()
+        
+        return None
     
     def _parse_json_response(self, response_text: str) -> List[Dict]:
         """Parse JSON from Claude response with multiple fallback strategies."""
