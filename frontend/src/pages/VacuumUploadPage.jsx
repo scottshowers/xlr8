@@ -260,7 +260,7 @@ export default function VacuumUploadPage() {
   };
 
   // Export to XLSX
-  const exportToXLSX = (employees, filename = 'pay_extract', totalsValidation = null) => {
+  const exportToXLSX = (employees, filename = 'pay_extract') => {
     if (!employees?.length) return;
     
     const summary = calculateSummary(employees);
@@ -349,7 +349,7 @@ export default function VacuumUploadPage() {
       });
     });
     summaryData.push({ 'Category': '', 'Code': 'EARNINGS TOTAL', 'Total Amount': summary.totals.grossPay, 'Employee Count': '' });
-    summaryData.push({ 'Category': '', 'Code': '', 'Total Amount': '', 'Employee Count': '' }); // blank row
+    summaryData.push({ 'Category': '', 'Code': '', 'Total Amount': '', 'Employee Count': '' });
     
     // Taxes section
     summaryData.push({ 'Category': 'TAXES', 'Code': '', 'Total Amount': '', 'Employee Count': '' });
@@ -362,7 +362,7 @@ export default function VacuumUploadPage() {
       });
     });
     summaryData.push({ 'Category': '', 'Code': 'TAXES TOTAL', 'Total Amount': summary.totals.totalTaxes, 'Employee Count': '' });
-    summaryData.push({ 'Category': '', 'Code': '', 'Total Amount': '', 'Employee Count': '' }); // blank row
+    summaryData.push({ 'Category': '', 'Code': '', 'Total Amount': '', 'Employee Count': '' });
     
     // Deductions section
     summaryData.push({ 'Category': 'DEDUCTIONS', 'Code': '', 'Total Amount': '', 'Employee Count': '' });
@@ -375,7 +375,7 @@ export default function VacuumUploadPage() {
       });
     });
     summaryData.push({ 'Category': '', 'Code': 'DEDUCTIONS TOTAL', 'Total Amount': summary.totals.totalDeductions, 'Employee Count': '' });
-    summaryData.push({ 'Category': '', 'Code': '', 'Total Amount': '', 'Employee Count': '' }); // blank row
+    summaryData.push({ 'Category': '', 'Code': '', 'Total Amount': '', 'Employee Count': '' });
     
     // Grand totals
     summaryData.push({ 'Category': 'GRAND TOTALS', 'Code': '', 'Total Amount': '', 'Employee Count': '' });
@@ -386,78 +386,6 @@ export default function VacuumUploadPage() {
     
     const summarySheet = XLSX.utils.json_to_sheet(summaryData);
     XLSX.utils.book_append_sheet(wb, summarySheet, 'Summary');
-    
-    // Sheet 6: Validation (compare calculated vs reported totals)
-    const validationData = [];
-    
-    if (totalsValidation && totalsValidation.has_report_totals) {
-      // Header
-      validationData.push({
-        'Category': 'VALIDATION RESULTS',
-        'Code': '',
-        'Our Total': '',
-        'Report Total': '',
-        'Difference': '',
-        'Status': totalsValidation.all_matched ? '✓ ALL MATCHED' : '⚠️ DISCREPANCIES FOUND'
-      });
-      validationData.push({ 'Category': '', 'Code': '', 'Our Total': '', 'Report Total': '', 'Difference': '', 'Status': '' });
-      
-      // Discrepancies or matches
-      if (totalsValidation.discrepancies && totalsValidation.discrepancies.length > 0) {
-        totalsValidation.discrepancies.forEach(d => {
-          validationData.push({
-            'Category': d.category,
-            'Code': d.code,
-            'Our Total': d.calculated,
-            'Report Total': d.reported,
-            'Difference': d.difference,
-            'Status': d.difference === 0 ? '✓' : '⚠️'
-          });
-        });
-      } else {
-        validationData.push({
-          'Category': 'All totals matched!',
-          'Code': '',
-          'Our Total': '',
-          'Report Total': '',
-          'Difference': '',
-          'Status': '✓'
-        });
-      }
-      
-      // Add calculated vs reported grand totals
-      validationData.push({ 'Category': '', 'Code': '', 'Our Total': '', 'Report Total': '', 'Difference': '', 'Status': '' });
-      validationData.push({ 'Category': 'GRAND TOTAL COMPARISON', 'Code': '', 'Our Total': '', 'Report Total': '', 'Difference': '', 'Status': '' });
-      
-      const calcGrand = totalsValidation.calculated?.grand_totals || {};
-      const repGrand = totalsValidation.reported?.grand_totals || {};
-      
-      ['gross_pay', 'total_taxes', 'total_deductions', 'net_pay'].forEach(key => {
-        const calcVal = calcGrand[key] || 0;
-        const repVal = repGrand[key] || 0;
-        const diff = Math.round((calcVal - repVal) * 100) / 100;
-        validationData.push({
-          'Category': '',
-          'Code': key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-          'Our Total': calcVal,
-          'Report Total': repVal,
-          'Difference': diff,
-          'Status': Math.abs(diff) < 0.01 ? '✓' : '⚠️'
-        });
-      });
-    } else {
-      validationData.push({
-        'Category': 'No report totals found',
-        'Code': 'Report totals section was not detected in the document',
-        'Our Total': '',
-        'Report Total': '',
-        'Difference': '',
-        'Status': '—'
-      });
-    }
-    
-    const validationSheet = XLSX.utils.json_to_sheet(validationData);
-    XLSX.utils.book_append_sheet(wb, validationSheet, 'Validation');
     
     // Download
     const timestamp = new Date().toISOString().split('T')[0];
@@ -721,57 +649,6 @@ export default function VacuumUploadPage() {
               </div>
             )}
             
-            {/* Totals Validation Status */}
-            {result.totals_validation && (
-              <div className={`mb-4 p-3 rounded-lg border ${
-                result.totals_validation.all_matched 
-                  ? 'bg-green-50 border-green-200' 
-                  : result.totals_validation.has_report_totals
-                    ? 'bg-yellow-50 border-yellow-200'
-                    : 'bg-gray-50 border-gray-200'
-              }`}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    {result.totals_validation.all_matched ? (
-                      <CheckCircle className="w-5 h-5 text-green-600" />
-                    ) : result.totals_validation.has_report_totals ? (
-                      <AlertTriangle className="w-5 h-5 text-yellow-600" />
-                    ) : (
-                      <Shield className="w-5 h-5 text-gray-500" />
-                    )}
-                    <span className={`font-medium ${
-                      result.totals_validation.all_matched 
-                        ? 'text-green-800' 
-                        : result.totals_validation.has_report_totals
-                          ? 'text-yellow-800'
-                          : 'text-gray-600'
-                    }`}>
-                      {result.totals_validation.all_matched 
-                        ? 'All totals verified against report' 
-                        : result.totals_validation.has_report_totals
-                          ? `${result.totals_validation.discrepancies?.length || 0} discrepancies found`
-                          : 'Report totals not detected'}
-                    </span>
-                  </div>
-                  {result.totals_validation.discrepancies?.length > 0 && (
-                    <span className="text-sm text-yellow-600">
-                      Check Validation sheet in export
-                    </span>
-                  )}
-                </div>
-                {result.totals_validation.discrepancies?.slice(0, 3).map((d, i) => (
-                  <div key={i} className="text-sm text-yellow-700 mt-1 ml-7">
-                    • {d.category} - {d.code}: Expected ${d.reported?.toLocaleString()}, Got ${d.calculated?.toLocaleString()} (diff: ${d.difference?.toLocaleString()})
-                  </div>
-                ))}
-                {result.totals_validation.discrepancies?.length > 3 && (
-                  <div className="text-sm text-yellow-600 mt-1 ml-7">
-                    ... and {result.totals_validation.discrepancies.length - 3} more
-                  </div>
-                )}
-              </div>
-            )}
-            
             {/* Tabs + Export */}
             <div className="flex items-center justify-between mb-4 border-b">
               <div className="flex">
@@ -802,8 +679,7 @@ export default function VacuumUploadPage() {
               <button
                 onClick={() => exportToXLSX(
                   result.employees, 
-                  result.source_file?.replace('.pdf', '') || 'pay_extract',
-                  result.totals_validation
+                  result.source_file?.replace('.pdf', '') || 'pay_extract'
                 )}
                 className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 text-sm"
               >
@@ -883,8 +759,7 @@ export default function VacuumUploadPage() {
                 <button
                   onClick={() => exportToXLSX(
                     selectedExtract.employees, 
-                    selectedExtract.source_file?.replace('.pdf', '') || 'pay_extract',
-                    selectedExtract.totals_validation
+                    selectedExtract.source_file?.replace('.pdf', '') || 'pay_extract'
                   )}
                   className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
                 >
