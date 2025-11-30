@@ -528,8 +528,8 @@ Return the JSON array now:"""
     def _fix_descriptions(self, employees: List[Dict], raw_text: str) -> List[Dict]:
         """Post-process to replace truncated descriptions with full text from PDF."""
         
-        # Build a list of all lines with amounts for matching
-        lines = raw_text.split('\n')
+        # Build a list of all lines
+        lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
         
         for emp in employees:
             # Fix earnings descriptions
@@ -568,12 +568,12 @@ Return the JSON array now:"""
         return employees
     
     def _find_full_description(self, type_code: str, short_desc: str, amount: float, lines: List[str]) -> Optional[str]:
-        """Find the full description from raw text by matching type prefix and amount."""
+        """Find the full description from raw text by matching type prefix and amount on nearby lines."""
         
         if not amount or amount == 0:
             return None
         
-        # Format amount for matching (handle both "5.64" and "1,883.08" formats)
+        # Format amount for matching
         amount_str = f"{amount:.2f}"
         amount_with_comma = f"{amount:,.2f}"
         
@@ -582,20 +582,28 @@ Return the JSON array now:"""
         if not prefix:
             return None
         
-        # Take first 4+ characters as prefix for matching
-        prefix = prefix[:min(len(prefix), 8)].lower().strip()
+        prefix_lower = prefix.lower().strip()
         
-        for line in lines:
+        # Find lines that match our prefix
+        for i, line in enumerate(lines):
             line_lower = line.lower()
             
-            # Check if line starts with our prefix and contains the amount
-            if line_lower.strip().startswith(prefix):
-                if amount_str in line or amount_with_comma in line:
-                    # Extract the description (everything before the first number)
-                    # Pattern: "Description Text    25.00    0.16    5.64" -> "Description Text"
-                    match = re.match(r'^([A-Za-z][A-Za-z0-9\s,./\-()%&]+?)\s+\d', line.strip())
-                    if match:
-                        return match.group(1).strip()
+            # Check if this line starts with our prefix
+            if line_lower.startswith(prefix_lower[:min(len(prefix_lower), 6)]):
+                # Look within next 5 lines for the amount
+                for j in range(i, min(i + 6, len(lines))):
+                    if amount_str in lines[j] or amount_with_comma in lines[j]:
+                        # Found the match! Now build the full description
+                        # Check if description spans multiple lines (e.g., "Wicomico County, MD" + "- Res. Local")
+                        full_desc = line
+                        
+                        # Check if next line is a continuation (starts with "- " or lowercase)
+                        if i + 1 < len(lines):
+                            next_line = lines[i + 1]
+                            if next_line.startswith('- ') or (next_line and next_line[0].islower()):
+                                full_desc = line + " " + next_line
+                        
+                        return full_desc
         
         return None
     
