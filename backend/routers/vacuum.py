@@ -467,31 +467,33 @@ DATA:
 STRICT RULES:
 1. Return ONLY a valid JSON array - no markdown, no explanation
 2. Each employee object must have these EXACT keys (no duplicates):
-   name, employee_id, department, tax_profile, gross_pay, net_pay, total_taxes, total_deductions, earnings, taxes, deductions, check_number, pay_method
+   company_name, client_code, period_ending, check_date, name, employee_id, department, tax_profile, gross_pay, net_pay, total_taxes, total_deductions, earnings, taxes, deductions, check_number, pay_method
 3. earnings/taxes/deductions are arrays of objects with: type, description, amount, hours (if applicable), rate (if applicable)
 4. Use 0 for missing numbers, "" for missing strings, [] for missing arrays
-5. Note: Some sensitive data has been redacted with [REDACTED] placeholders - ignore those
+5. Ignore [REDACTED] placeholders
+
+HEADER FIELDS (from page headers - apply to each employee):
+- company_name: Company name (e.g., "JOHN B PARSONS HOME LLC")
+- client_code: Client code (e.g., "0EA14")
+- period_ending: "Period Ending" date as shown (e.g., "10/17/2020")
+- check_date: "Check Date" as shown (e.g., "10/23/2020")
 
 CRITICAL - PAGE BREAK HANDLING:
-Employee data often spans across page breaks. Here's how to detect and merge:
+1. If a page ENDS with an employee name and partial data, the NEXT page has the rest.
+2. If a page STARTS with "Code:" and "Tax Profile:" WITHOUT a name above it, this is CONTINUATION data - MERGE with previous employee.
+3. The GROSS and NET PAY values are the authoritative totals.
 
-1. If a page ENDS with an employee name and partial data (like just one earning line), the NEXT page will have the rest of their data.
-
-2. If a page STARTS with "Code:" and "Tax Profile:" WITHOUT an employee name above it, this is CONTINUATION data for the employee from the previous page. MERGE this data with that employee.
-
-3. Look for these patterns to identify continuations:
-   - Page ends: "SMITH, JOHN" followed by partial earnings
-   - Next page starts: "Code: A123" and "Tax Profile: 1 - MD/MD/MD" (no name = continuation)
-   
-4. The GROSS and NET PAY values at the end of an employee's section are the authoritative totals - use those.
-
-FULL DESCRIPTIONS: The "description" field must contain the COMPLETE text from the earnings/deductions/taxes column. 
-   - WRONG: "Shift Diff" 
-   - CORRECT: "Shift Diff 2L OT"
-   Do NOT truncate descriptions.
+FULL DESCRIPTIONS - VERY IMPORTANT: 
+Copy the COMPLETE description text exactly as shown:
+- "Shift Diff 2L OT" not "Shift Diff"
+- "Shift Diff C2" not "Shift Diff"  
+- "Federal W/H (S)" not "Federal"
+- "MD State W/H (S/0)" not "MD State"
+- "401K %" not "401K"
+- "Wicomico County, MD - Res. Local" not "Local"
 
 Example format:
-[{{"name":"DOE, JOHN","employee_id":"A123","department":"Sales","tax_profile":"2 - MD/MD/MD","gross_pay":1000.00,"net_pay":800.00,"total_taxes":150.00,"total_deductions":50.00,"earnings":[{{"type":"Regular","description":"Regular Pay","rate":25.00,"hours":40,"amount":1000.00}},{{"type":"Shift Diff","description":"Shift Diff 2L OT","rate":2.50,"hours":8,"amount":20.00}}],"taxes":[{{"type":"FWT","description":"Federal Withholding Tax","amount":100.00}}],"deductions":[{{"type":"401K","description":"401K Pre-Tax Contribution","amount":50.00}}],"check_number":"","pay_method":"Direct Deposit"}}]
+[{{"company_name":"JOHN B PARSONS HOME LLC","client_code":"0EA14","period_ending":"10/17/2020","check_date":"10/23/2020","name":"DOE, JOHN","employee_id":"A123","department":"2100 - LPN","tax_profile":"1 - MD/MD/MD","gross_pay":1000.00,"net_pay":800.00,"total_taxes":150.00,"total_deductions":50.00,"earnings":[{{"type":"Regular","description":"Regular Pay","rate":25.00,"hours":40,"amount":1000.00}},{{"type":"Shift Diff","description":"Shift Diff 2L OT","rate":2.50,"hours":8,"amount":20.00}}],"taxes":[{{"type":"FWT","description":"Federal W/H (S)","amount":100.00}}],"deductions":[{{"type":"401K","description":"401K %","amount":50.00}}],"check_number":"","pay_method":"Direct Deposit"}}]
 
 Return the JSON array now:"""
 
@@ -624,6 +626,10 @@ Return the JSON array now:"""
     def _normalize_employee(self, data: Dict) -> Dict:
         """Ensure employee dict has all required fields."""
         return {
+            "company_name": str(data.get('company_name', '')),
+            "client_code": str(data.get('client_code', '')),
+            "period_ending": str(data.get('period_ending', '')),
+            "check_date": str(data.get('check_date', '')),
             "name": str(data.get('name', '')),
             "employee_id": str(data.get('employee_id', '')),
             "department": str(data.get('department', '')),
