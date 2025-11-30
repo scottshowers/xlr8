@@ -26,6 +26,7 @@ export default function Chat({
   const [expandedSources, setExpandedSources] = useState({})
   const [modelInfo, setModelInfo] = useState(null)
   const messagesEndRef = useRef(null)
+  const messagesAreaRef = useRef(null)
   
   // Persona state - store full persona object
   const [currentPersona, setCurrentPersona] = useState({
@@ -65,7 +66,10 @@ export default function Chat({
   }, [])
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    // Scroll within the messages container only, not the whole page
+    if (messagesAreaRef.current) {
+      messagesAreaRef.current.scrollTop = messagesAreaRef.current.scrollHeight
+    }
   }
 
   const loadProjects = async () => {
@@ -566,7 +570,7 @@ export default function Chat({
       </div>
 
       {/* Messages Area */}
-      <div style={styles.messagesArea}>
+      <div ref={messagesAreaRef} style={styles.messagesArea}>
         {messages.length === 0 ? (
           <div style={styles.emptyState}>
             <div style={styles.emptyIcon}>💬</div>
