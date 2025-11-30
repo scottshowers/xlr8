@@ -540,42 +540,54 @@ Return the JSON array now:"""
         for emp in employees:
             # Fix earnings descriptions
             for earning in emp.get('earnings', []):
+                old_desc = earning.get('description', '')
                 full_desc = self._find_full_description(
                     earning.get('type', ''),
-                    earning.get('description', ''),
+                    old_desc,
                     earning.get('amount', 0),
                     lines
                 )
-                if full_desc and full_desc != earning.get('description', ''):
-                    logger.debug(f"Fixed earning: '{earning.get('description')}' -> '{full_desc}'")
-                    earning['description'] = full_desc
-                    fixes_made += 1
+                if full_desc:
+                    if full_desc != old_desc:
+                        print(f"[FIX] Earning: '{old_desc}' -> '{full_desc}'", flush=True)
+                        earning['description'] = full_desc
+                        fixes_made += 1
+                    else:
+                        print(f"[SKIP] Earning already correct: '{old_desc}'", flush=True)
             
             # Fix taxes descriptions
             for tax in emp.get('taxes', []):
+                old_desc = tax.get('description', '')
                 full_desc = self._find_full_description(
                     tax.get('type', ''),
-                    tax.get('description', ''),
+                    old_desc,
                     tax.get('amount', 0),
                     lines
                 )
-                if full_desc and full_desc != tax.get('description', ''):
-                    logger.debug(f"Fixed tax: '{tax.get('description')}' -> '{full_desc}'")
-                    tax['description'] = full_desc
-                    fixes_made += 1
+                if full_desc:
+                    if full_desc != old_desc:
+                        print(f"[FIX] Tax: '{old_desc}' -> '{full_desc}'", flush=True)
+                        tax['description'] = full_desc
+                        fixes_made += 1
+                    else:
+                        print(f"[SKIP] Tax already correct: '{old_desc}'", flush=True)
             
             # Fix deductions descriptions
             for deduction in emp.get('deductions', []):
+                old_desc = deduction.get('description', '')
                 full_desc = self._find_full_description(
                     deduction.get('type', ''),
-                    deduction.get('description', ''),
+                    old_desc,
                     deduction.get('amount', 0),
                     lines
                 )
-                if full_desc and full_desc != deduction.get('description', ''):
-                    logger.debug(f"Fixed deduction: '{deduction.get('description')}' -> '{full_desc}'")
-                    deduction['description'] = full_desc
-                    fixes_made += 1
+                if full_desc:
+                    if full_desc != old_desc:
+                        print(f"[FIX] Deduction: '{old_desc}' -> '{full_desc}'", flush=True)
+                        deduction['description'] = full_desc
+                        fixes_made += 1
+                    else:
+                        print(f"[SKIP] Deduction already correct: '{old_desc}'", flush=True)
         
         print(f"[VACUUM] Description fixes made: {fixes_made}", flush=True)
         logger.info(f"Description fixes made: {fixes_made}")
