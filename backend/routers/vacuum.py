@@ -109,75 +109,342 @@ def save_extraction(project_id: Optional[str], source_file: str,
                     employees: List[Dict], confidence: float,
                     validation_passed: bool, validation_errors: List[str],
                     pages_processed: int, cost_usd: float, 
-                    processing_time_ms: int, extraction_method: str = "pymupdf") -> Optional[Dict]:
-    """Save extraction results to Supabase"""
+                    processing_time_ms: int, extraction_method: str = "pymupdf",
+                    customer_id: Optional[str] = None) -> Optional[Dict]:
+    """Save extraction results to normalized Supabase tables.
+    
+    Writes to:
+    - extraction_jobs (header)
+    - extraction_employees (each employee)
+    - extraction_earnings/taxes/deductions (line items)
+    
+    Returns the same format as before for API compatibility.
+    """
     supabase = get_supabase()
     if not supabase:
         logger.warning("Cannot save - Supabase not available")
         return None
     
+    # Use default customer if none specified
+    if not customer_id:
+        customer_id = '00000000-0000-0000-0000-000000000001'
+    
     try:
-        data = {
+        # Extract header info from first employee if available
+        first_emp = employees[0] if employees else {}
+        
+        # 1. Insert extraction job (header)
+        job_data = {
+            'customer_id': customer_id,
             'project_id': project_id,
             'source_file': source_file,
+            'company_name': first_emp.get('company_name', ''),
+            'client_code': first_emp.get('client_code', ''),
+            'check_date': _parse_date(first_emp.get('check_date')),
+            'pay_period_end': _parse_date(first_emp.get('period_ending')),
             'employee_count': len(employees),
-            'employees': employees,
             'confidence': confidence,
             'validation_passed': validation_passed,
             'validation_errors': validation_errors,
             'pages_processed': pages_processed,
             'cost_usd': cost_usd,
             'processing_time_ms': processing_time_ms,
-            'extraction_method': extraction_method
+            'extraction_method': extraction_method,
+            'status': 'completed',
+            'completed_at': datetime.now().isoformat()
         }
         
-        response = supabase.table('pay_extracts').insert(data).execute()
-        logger.info(f"Saved extraction: {source_file} with {len(employees)} employees")
-        return response.data[0] if response.data else None
+        job_response = supabase.table('extraction_jobs').insert(job_data).execute()
+        if not job_response.data:
+            logger.error("Failed to insert extraction job")
+            return None
+        
+        extraction_id = job_response.data[0]['id']
+        
+        # 2. Insert each employee and their line items
+        for sort_order, emp in enumerate(employees):
+            emp_data = {
+                'extraction_id': extraction_id,
+                'customer_id': customer_id,
+                'name': emp.get('name', ''),
+                'employee_id': emp.get('employee_id', ''),
+                'department': emp.get('department', ''),
+                'tax_profile': emp.get('tax_profile', ''),
+                'company_name': emp.get('company_name', ''),
+                'client_code': emp.get('client_code', ''),
+                'period_ending': emp.get('period_ending', ''),
+                'check_date': emp.get('check_date', ''),
+                'gross_pay': _safe_decimal(emp.get('gross_pay')),
+                'net_pay': _safe_decimal(emp.get('net_pay')),
+                'total_taxes': _safe_decimal(emp.get('total_taxes')),
+                'total_deductions': _safe_decimal(emp.get('total_deductions')),
+                'gross_pay_ytd': _safe_decimal(emp.get('gross_pay_ytd')),
+                'net_pay_ytd': _safe_decimal(emp.get('net_pay_ytd')),
+                'check_number': emp.get('check_number', ''),
+                'pay_method': emp.get('pay_method', ''),
+                'is_valid': emp.get('is_valid', True),
+                'validation_errors': emp.get('validation_errors', []),
+                'sort_order': sort_order
+            }
+            
+            emp_response = supabase.table('extraction_employees').insert(emp_data).execute()
+            if not emp_response.data:
+                logger.warning(f"Failed to insert employee: {emp.get('name')}")
+                continue
+            
+            employee_id = emp_response.data[0]['id']
+            
+            # 3. Insert earnings
+            for earn_order, earning in enumerate(emp.get('earnings', [])):
+                earn_data = {
+                    'employee_id': employee_id,
+                    'extraction_id': extraction_id,
+                    'customer_id': customer_id,
+                    'type': earning.get('type', ''),
+                    'description': earning.get('description', ''),
+                    'amount': _safe_decimal(earning.get('amount')),
+                    'hours': _safe_decimal(earning.get('hours')),
+                    'rate': _safe_decimal(earning.get('rate')),
+                    'amount_ytd': _safe_decimal(earning.get('amount_ytd')),
+                    'hours_ytd': _safe_decimal(earning.get('hours_ytd')),
+                    'sort_order': earn_order
+                }
+                supabase.table('extraction_earnings').insert(earn_data).execute()
+            
+            # 4. Insert taxes
+            for tax_order, tax in enumerate(emp.get('taxes', [])):
+                tax_data = {
+                    'employee_id': employee_id,
+                    'extraction_id': extraction_id,
+                    'customer_id': customer_id,
+                    'type': tax.get('type', ''),
+                    'description': tax.get('description', ''),
+                    'amount': _safe_decimal(tax.get('amount')),
+                    'taxable_wages': _safe_decimal(tax.get('taxable_wages')),
+                    'amount_ytd': _safe_decimal(tax.get('amount_ytd')),
+                    'taxable_wages_ytd': _safe_decimal(tax.get('taxable_wages_ytd')),
+                    'is_employer': tax.get('is_employer', False),
+                    'sort_order': tax_order
+                }
+                supabase.table('extraction_taxes').insert(tax_data).execute()
+            
+            # 5. Insert deductions
+            for ded_order, ded in enumerate(emp.get('deductions', [])):
+                ded_data = {
+                    'employee_id': employee_id,
+                    'extraction_id': extraction_id,
+                    'customer_id': customer_id,
+                    'type': ded.get('type', ''),
+                    'description': ded.get('description', ''),
+                    'amount': _safe_decimal(ded.get('amount')),
+                    'amount_ytd': _safe_decimal(ded.get('amount_ytd')),
+                    'category': ded.get('category', ''),
+                    'sort_order': ded_order
+                }
+                supabase.table('extraction_deductions').insert(ded_data).execute()
+        
+        logger.info(f"Saved extraction: {source_file} with {len(employees)} employees to normalized tables")
+        
+        # Return format compatible with old API
+        return {
+            'id': extraction_id,
+            'project_id': project_id,
+            'source_file': source_file,
+            'employee_count': len(employees),
+            'created_at': job_response.data[0].get('created_at')
+        }
+        
     except Exception as e:
         logger.error(f"Failed to save extraction: {e}")
         return None
 
 
-def get_extractions(project_id: Optional[str] = None, limit: int = 50) -> List[Dict]:
-    """Get extraction history"""
+def _parse_date(date_str: Optional[str]) -> Optional[str]:
+    """Parse date string to ISO format for Supabase."""
+    if not date_str:
+        return None
+    try:
+        # Try common formats
+        for fmt in ['%m/%d/%Y', '%Y-%m-%d', '%m-%d-%Y']:
+            try:
+                dt = datetime.strptime(date_str, fmt)
+                return dt.strftime('%Y-%m-%d')
+            except ValueError:
+                continue
+        return None
+    except Exception:
+        return None
+
+
+def _safe_decimal(value) -> Optional[float]:
+    """Safely convert value to decimal/float for Supabase."""
+    if value is None:
+        return None
+    try:
+        if isinstance(value, str):
+            value = value.replace(',', '').replace('$', '')
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def get_extractions(project_id: Optional[str] = None, limit: int = 50, 
+                   customer_id: Optional[str] = None) -> List[Dict]:
+    """Get extraction history from normalized tables.
+    
+    Returns data in the same format as before for API compatibility.
+    """
     supabase = get_supabase()
     if not supabase:
         return []
     
     try:
-        query = supabase.table('pay_extracts').select('*').order('created_at', desc=True).limit(limit)
+        query = supabase.table('extraction_jobs').select('*').order('created_at', desc=True).limit(limit)
         if project_id:
             query = query.eq('project_id', project_id)
+        if customer_id:
+            query = query.eq('customer_id', customer_id)
         response = query.execute()
-        return response.data if response.data else []
+        
+        if not response.data:
+            return []
+        
+        # Convert to old format for compatibility
+        results = []
+        for job in response.data:
+            results.append({
+                'id': job['id'],
+                'project_id': job.get('project_id'),
+                'source_file': job.get('source_file'),
+                'employee_count': job.get('employee_count', 0),
+                'confidence': job.get('confidence', 0),
+                'validation_passed': job.get('validation_passed', False),
+                'validation_errors': job.get('validation_errors', []),
+                'pages_processed': job.get('pages_processed', 0),
+                'cost_usd': job.get('cost_usd', 0),
+                'processing_time_ms': job.get('processing_time_ms', 0),
+                'extraction_method': job.get('extraction_method'),
+                'created_at': job.get('created_at')
+            })
+        
+        return results
     except Exception as e:
         logger.error(f"Failed to get extractions: {e}")
         return []
 
 
 def get_extraction_by_id(extract_id: str) -> Optional[Dict]:
-    """Get single extraction by ID"""
+    """Get single extraction by ID with all employees and line items.
+    
+    Reassembles the nested JSON structure from normalized tables.
+    """
     supabase = get_supabase()
     if not supabase:
         return None
     
     try:
-        response = supabase.table('pay_extracts').select('*').eq('id', extract_id).execute()
-        return response.data[0] if response.data else None
+        # Get the job
+        job_response = supabase.table('extraction_jobs').select('*').eq('id', extract_id).execute()
+        if not job_response.data:
+            return None
+        
+        job = job_response.data[0]
+        
+        # Get employees
+        emp_response = supabase.table('extraction_employees').select('*').eq('extraction_id', extract_id).order('sort_order').execute()
+        employees = []
+        
+        for emp in (emp_response.data or []):
+            employee_id = emp['id']
+            
+            # Get earnings
+            earn_response = supabase.table('extraction_earnings').select('*').eq('employee_id', employee_id).order('sort_order').execute()
+            earnings = [{
+                'type': e.get('type', ''),
+                'description': e.get('description', ''),
+                'amount': float(e.get('amount') or 0),
+                'hours': float(e.get('hours') or 0) if e.get('hours') else None,
+                'rate': float(e.get('rate') or 0) if e.get('rate') else None,
+                'amount_ytd': float(e.get('amount_ytd') or 0) if e.get('amount_ytd') else None,
+            } for e in (earn_response.data or [])]
+            
+            # Get taxes
+            tax_response = supabase.table('extraction_taxes').select('*').eq('employee_id', employee_id).order('sort_order').execute()
+            taxes = [{
+                'type': t.get('type', ''),
+                'description': t.get('description', ''),
+                'amount': float(t.get('amount') or 0),
+                'taxable_wages': float(t.get('taxable_wages') or 0) if t.get('taxable_wages') else None,
+                'amount_ytd': float(t.get('amount_ytd') or 0) if t.get('amount_ytd') else None,
+                'is_employer': t.get('is_employer', False),
+            } for t in (tax_response.data or [])]
+            
+            # Get deductions
+            ded_response = supabase.table('extraction_deductions').select('*').eq('employee_id', employee_id).order('sort_order').execute()
+            deductions = [{
+                'type': d.get('type', ''),
+                'description': d.get('description', ''),
+                'amount': float(d.get('amount') or 0),
+                'amount_ytd': float(d.get('amount_ytd') or 0) if d.get('amount_ytd') else None,
+                'category': d.get('category', ''),
+            } for d in (ded_response.data or [])]
+            
+            employees.append({
+                'id': emp.get('employee_id', ''),
+                'name': emp.get('name', ''),
+                'employee_id': emp.get('employee_id', ''),
+                'department': emp.get('department', ''),
+                'tax_profile': emp.get('tax_profile', ''),
+                'company_name': emp.get('company_name', ''),
+                'client_code': emp.get('client_code', ''),
+                'period_ending': emp.get('period_ending', ''),
+                'check_date': emp.get('check_date', ''),
+                'gross_pay': float(emp.get('gross_pay') or 0),
+                'net_pay': float(emp.get('net_pay') or 0),
+                'total_taxes': float(emp.get('total_taxes') or 0),
+                'total_deductions': float(emp.get('total_deductions') or 0),
+                'check_number': emp.get('check_number', ''),
+                'pay_method': emp.get('pay_method', ''),
+                'is_valid': emp.get('is_valid', True),
+                'validation_errors': emp.get('validation_errors', []),
+                'earnings': earnings,
+                'taxes': taxes,
+                'deductions': deductions
+            })
+        
+        # Return in old format for compatibility
+        return {
+            'id': job['id'],
+            'project_id': job.get('project_id'),
+            'source_file': job.get('source_file'),
+            'employee_count': job.get('employee_count', 0),
+            'employees': employees,
+            'confidence': job.get('confidence', 0),
+            'validation_passed': job.get('validation_passed', False),
+            'validation_errors': job.get('validation_errors', []),
+            'pages_processed': job.get('pages_processed', 0),
+            'cost_usd': float(job.get('cost_usd') or 0),
+            'processing_time_ms': job.get('processing_time_ms', 0),
+            'extraction_method': job.get('extraction_method'),
+            'created_at': job.get('created_at')
+        }
+        
     except Exception as e:
         logger.error(f"Failed to get extraction: {e}")
         return None
 
 
 def delete_extraction(extract_id: str) -> bool:
-    """Delete an extraction"""
+    """Delete an extraction and all related data.
+    
+    CASCADE delete handles employees and line items automatically.
+    """
     supabase = get_supabase()
     if not supabase:
         return False
     
     try:
-        supabase.table('pay_extracts').delete().eq('id', extract_id).execute()
+        supabase.table('extraction_jobs').delete().eq('id', extract_id).execute()
         return True
     except Exception as e:
         logger.error(f"Failed to delete extraction: {e}")
