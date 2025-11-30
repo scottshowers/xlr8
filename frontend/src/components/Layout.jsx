@@ -3,7 +3,7 @@
  * Vertical logo, no Analysis Engine subtitle, fixed scroll
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Rocket } from 'lucide-react';
 import ContextBar from './ContextBar';
@@ -137,6 +137,13 @@ function Navigation() {
 }
 
 export default function Layout({ children }) {
+  const location = useLocation();
+  
+  // Scroll to top on route change
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [location.pathname]);
+
   return (
     <div style={{ 
       minHeight: '100vh', 
