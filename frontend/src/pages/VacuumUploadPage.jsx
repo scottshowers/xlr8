@@ -33,10 +33,24 @@ export default function VacuumUploadPage() {
     const loadProjects = async () => {
       try {
         const res = await fetch(`${API_BASE}/api/projects`);
+        if (!res.ok) {
+          console.error('Projects endpoint returned:', res.status);
+          setProjects([]);
+          return;
+        }
         const data = await res.json();
-        setProjects(data.projects || data || []);
+        // Handle different response formats
+        if (Array.isArray(data)) {
+          setProjects(data);
+        } else if (data.projects && Array.isArray(data.projects)) {
+          setProjects(data.projects);
+        } else {
+          console.error('Unexpected projects format:', data);
+          setProjects([]);
+        }
       } catch (err) {
         console.error('Failed to load projects:', err);
+        setProjects([]);
       }
     };
     loadProjects();
