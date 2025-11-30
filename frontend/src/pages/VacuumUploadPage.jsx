@@ -32,7 +32,7 @@ export default function VacuumUploadPage() {
   useEffect(() => {
     const loadProjects = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/projects`);
+        const res = await fetch(`${API_BASE}/api/projects/list`);
         if (!res.ok) {
           console.error('Projects endpoint returned:', res.status);
           setProjects([]);
