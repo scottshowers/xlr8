@@ -9,7 +9,7 @@ Deploy to: backend/routers/vacuum.py
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from datetime import datetime
 from dataclasses import dataclass, field
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import os
 import re
 import json
@@ -19,6 +19,102 @@ import shutil
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+# =============================================================================
+# SUPABASE STORAGE
+# =============================================================================
+
+def get_supabase():
+    """Get Supabase client"""
+    try:
+        from utils.supabase_client import get_supabase as _get_supabase
+        return _get_supabase()
+    except ImportError:
+        try:
+            from backend.utils.supabase_client import get_supabase as _get_supabase
+            return _get_supabase()
+        except ImportError:
+            logger.warning("Supabase client not available")
+            return None
+
+
+def save_extraction(project_id: Optional[str], source_file: str, 
+                    employees: List[Dict], confidence: float,
+                    validation_passed: bool, validation_errors: List[str],
+                    pages_processed: int, cost_usd: float, 
+                    processing_time_ms: int) -> Optional[Dict]:
+    """Save extraction results to Supabase"""
+    supabase = get_supabase()
+    if not supabase:
+        logger.warning("Cannot save - Supabase not available")
+        return None
+    
+    try:
+        data = {
+            'project_id': project_id,
+            'source_file': source_file,
+            'employee_count': len(employees),
+            'employees': employees,
+            'confidence': confidence,
+            'validation_passed': validation_passed,
+            'validation_errors': validation_errors,
+            'pages_processed': pages_processed,
+            'cost_usd': cost_usd,
+            'processing_time_ms': processing_time_ms
+        }
+        
+        response = supabase.table('pay_extracts').insert(data).execute()
+        logger.info(f"Saved extraction: {source_file} with {len(employees)} employees")
+        return response.data[0] if response.data else None
+    except Exception as e:
+        logger.error(f"Failed to save extraction: {e}")
+        return None
+
+
+def get_extractions(project_id: Optional[str] = None, limit: int = 50) -> List[Dict]:
+    """Get extraction history"""
+    supabase = get_supabase()
+    if not supabase:
+        return []
+    
+    try:
+        query = supabase.table('pay_extracts').select('*').order('created_at', desc=True).limit(limit)
+        if project_id:
+            query = query.eq('project_id', project_id)
+        response = query.execute()
+        return response.data if response.data else []
+    except Exception as e:
+        logger.error(f"Failed to get extractions: {e}")
+        return []
+
+
+def get_extraction_by_id(extract_id: str) -> Optional[Dict]:
+    """Get single extraction by ID"""
+    supabase = get_supabase()
+    if not supabase:
+        return None
+    
+    try:
+        response = supabase.table('pay_extracts').select('*').eq('id', extract_id).execute()
+        return response.data[0] if response.data else None
+    except Exception as e:
+        logger.error(f"Failed to get extraction: {e}")
+        return None
+
+
+def delete_extraction(extract_id: str) -> bool:
+    """Delete an extraction"""
+    supabase = get_supabase()
+    if not supabase:
+        return False
+    
+    try:
+        supabase.table('pay_extracts').delete().eq('id', extract_id).execute()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to delete extraction: {e}")
+        return False
 
 
 # =============================================================================
@@ -339,7 +435,8 @@ async def status():
 @router.post("/vacuum/upload")
 async def upload(
     file: UploadFile = File(...),
-    max_pages: int = Form(3)
+    max_pages: int = Form(3),
+    project_id: Optional[str] = Form(None)
 ):
     """
     Upload and extract pay register.
@@ -364,35 +461,53 @@ async def upload(
         
         result = ext.extract(temp_path, max_pages=max_pages)
         
+        # Convert employees to dicts for storage
+        employees_data = [
+            {
+                "name": e.name,
+                "id": e.employee_id,
+                "department": e.department,
+                "gross_pay": e.gross_pay,
+                "net_pay": e.net_pay,
+                "total_taxes": e.total_taxes,
+                "total_deductions": e.total_deductions,
+                "earnings": e.earnings,
+                "taxes": e.taxes,
+                "deductions": e.deductions,
+                "check_number": e.check_number,
+                "pay_method": e.pay_method,
+                "is_valid": e.is_valid,
+                "validation_errors": e.validation_errors
+            }
+            for e in result.employees
+        ]
+        
+        # Save to database
+        saved = save_extraction(
+            project_id=project_id,
+            source_file=result.source_file,
+            employees=employees_data,
+            confidence=result.confidence,
+            validation_passed=result.validation_passed,
+            validation_errors=result.validation_errors,
+            pages_processed=result.pages_processed,
+            cost_usd=result.cost_usd,
+            processing_time_ms=result.processing_time_ms
+        )
+        
         return {
             "success": result.success,
+            "extract_id": saved.get('id') if saved else None,
             "source_file": result.source_file,
             "employee_count": result.employee_count,
-            "employees": [
-                {
-                    "name": e.name,
-                    "id": e.employee_id,
-                    "department": e.department,
-                    "gross_pay": e.gross_pay,
-                    "net_pay": e.net_pay,
-                    "total_taxes": e.total_taxes,
-                    "total_deductions": e.total_deductions,
-                    "earnings": e.earnings,
-                    "taxes": e.taxes,
-                    "deductions": e.deductions,
-                    "check_number": e.check_number,
-                    "pay_method": e.pay_method,
-                    "is_valid": e.is_valid,
-                    "validation_errors": e.validation_errors
-                }
-                for e in result.employees
-            ],
+            "employees": employees_data,
             "confidence": result.confidence,
             "validation_passed": result.validation_passed,
             "validation_errors": result.validation_errors,
             "pages_processed": result.pages_processed,
             "processing_time_ms": result.processing_time_ms,
-            "cost_usd": result.cost_usd
+            "cost_usd": result.cost_usd,
+            "saved_to_db": saved is not None
         }
         
     except Exception as e:
@@ -405,10 +520,51 @@ async def upload(
 @router.post("/vacuum/extract")
 async def extract(
     file: UploadFile = File(...),
-    max_pages: int = Form(3)
+    max_pages: int = Form(3),
+    project_id: Optional[str] = Form(None)
 ):
     """Alias for /vacuum/upload"""
-    return await upload(file, max_pages)
+    return await upload(file, max_pages, project_id)
+
+
+@router.get("/vacuum/extracts")
+async def get_extracts(project_id: Optional[str] = None, limit: int = 50):
+    """Get extraction history"""
+    extracts = get_extractions(project_id=project_id, limit=limit)
+    
+    # Simplify for list view (don't return all employee data)
+    return {
+        "extracts": [
+            {
+                "id": e.get('id'),
+                "source_file": e.get('source_file'),
+                "employee_count": e.get('employee_count'),
+                "confidence": e.get('confidence'),
+                "validation_passed": e.get('validation_passed'),
+                "pages_processed": e.get('pages_processed'),
+                "cost_usd": e.get('cost_usd'),
+                "created_at": e.get('created_at')
+            }
+            for e in extracts
+        ],
+        "total": len(extracts)
+    }
+
+
+@router.get("/vacuum/extract/{extract_id}")
+async def get_extract(extract_id: str):
+    """Get full extraction details including all employees"""
+    extraction = get_extraction_by_id(extract_id)
+    if not extraction:
+        raise HTTPException(404, "Extraction not found")
+    return extraction
+
+
+@router.delete("/vacuum/extract/{extract_id}")
+async def delete_extract(extract_id: str):
+    """Delete an extraction"""
+    success = delete_extraction(extract_id)
+    return {"success": success, "id": extract_id}
 
 
 @router.get("/vacuum/health")
