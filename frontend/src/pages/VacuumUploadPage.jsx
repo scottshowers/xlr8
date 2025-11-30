@@ -1,5 +1,5 @@
 /**
- * Vacuum Upload Page - Pay Register Extraction v11
+ * Vacuum Upload Page - Pay Register Extraction v12
  * 
  * Privacy-First Features:
  * - PyMuPDF (local extraction) as DEFAULT
@@ -7,6 +7,8 @@
  * - PII redaction indicator
  * - Async job polling with progress bar
  * - Full employee data with details
+ * - XLSX Export
+ * - Summary by Earnings/Taxes/Deductions type
  * 
  * Deploy to: frontend/src/pages/VacuumUploadPage.jsx
  */
@@ -15,8 +17,9 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Upload, FileText, Users, DollarSign, CheckCircle, XCircle, 
   Loader2, Trash2, Eye, AlertTriangle, ChevronDown, ChevronRight,
-  Shield, Cloud, Lock
+  Shield, Cloud, Lock, Download, BarChart3
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -32,6 +35,7 @@ export default function VacuumUploadPage() {
   const [error, setError] = useState(null);
   const [maxPages, setMaxPages] = useState(0); // 0 = all pages
   const [useTextract, setUseTextract] = useState(false); // PyMuPDF is default
+  const [activeTab, setActiveTab] = useState('employees'); // 'employees' or 'summary'
   
   // Job polling state
   const [jobId, setJobId] = useState(null);
@@ -196,6 +200,164 @@ export default function VacuumUploadPage() {
     } catch (err) {
       console.error('Failed to delete:', err);
     }
+  };
+
+  // Calculate summary data from employees
+  const calculateSummary = (employees) => {
+    if (!employees?.length) return { earnings: [], taxes: [], deductions: [] };
+    
+    const earningsMap = new Map();
+    const taxesMap = new Map();
+    const deductionsMap = new Map();
+    
+    employees.forEach(emp => {
+      // Earnings
+      (emp.earnings || []).forEach(e => {
+        const key = e.type || e.description || 'Other';
+        const existing = earningsMap.get(key) || { total: 0, count: 0 };
+        earningsMap.set(key, { 
+          total: existing.total + (e.amount || 0), 
+          count: existing.count + 1 
+        });
+      });
+      
+      // Taxes
+      (emp.taxes || []).forEach(t => {
+        const key = t.type || t.description || 'Other';
+        const existing = taxesMap.get(key) || { total: 0, count: 0 };
+        taxesMap.set(key, { 
+          total: existing.total + (t.amount || 0), 
+          count: existing.count + 1 
+        });
+      });
+      
+      // Deductions
+      (emp.deductions || []).forEach(d => {
+        const key = d.type || d.description || 'Other';
+        const existing = deductionsMap.get(key) || { total: 0, count: 0 };
+        deductionsMap.set(key, { 
+          total: existing.total + (d.amount || 0), 
+          count: existing.count + 1 
+        });
+      });
+    });
+    
+    const mapToArray = (map) => Array.from(map.entries())
+      .map(([description, data]) => ({ description, ...data }))
+      .sort((a, b) => b.total - a.total);
+    
+    return {
+      earnings: mapToArray(earningsMap),
+      taxes: mapToArray(taxesMap),
+      deductions: mapToArray(deductionsMap),
+      totals: {
+        grossPay: employees.reduce((sum, e) => sum + (e.gross_pay || 0), 0),
+        netPay: employees.reduce((sum, e) => sum + (e.net_pay || 0), 0),
+        totalTaxes: employees.reduce((sum, e) => sum + (e.total_taxes || 0), 0),
+        totalDeductions: employees.reduce((sum, e) => sum + (e.total_deductions || 0), 0),
+      }
+    };
+  };
+
+  // Export to XLSX
+  const exportToXLSX = (employees, filename = 'pay_extract') => {
+    if (!employees?.length) return;
+    
+    const summary = calculateSummary(employees);
+    const wb = XLSX.utils.book_new();
+    
+    // Sheet 1: Employee Details
+    const empData = employees.map(emp => ({
+      'Name': emp.name || '',
+      'Employee ID': emp.employee_id || '',
+      'Department': emp.department || '',
+      'Gross Pay': emp.gross_pay || 0,
+      'Total Taxes': emp.total_taxes || 0,
+      'Total Deductions': emp.total_deductions || 0,
+      'Net Pay': emp.net_pay || 0,
+      'Pay Method': emp.pay_method || '',
+      'Check Number': emp.check_number || '',
+      'Valid': emp.is_valid ? 'Yes' : 'No'
+    }));
+    const empSheet = XLSX.utils.json_to_sheet(empData);
+    XLSX.utils.book_append_sheet(wb, empSheet, 'Employees');
+    
+    // Sheet 2: Earnings Summary
+    const earningsData = summary.earnings.map(e => ({
+      'Earning Type': e.description,
+      'Total Amount': e.total,
+      'Employee Count': e.count
+    }));
+    earningsData.push({ 'Earning Type': 'TOTAL', 'Total Amount': summary.totals.grossPay, 'Employee Count': employees.length });
+    const earningsSheet = XLSX.utils.json_to_sheet(earningsData);
+    XLSX.utils.book_append_sheet(wb, earningsSheet, 'Earnings Summary');
+    
+    // Sheet 3: Taxes Summary
+    const taxesData = summary.taxes.map(t => ({
+      'Tax Type': t.description,
+      'Total Amount': t.total,
+      'Employee Count': t.count
+    }));
+    taxesData.push({ 'Tax Type': 'TOTAL', 'Total Amount': summary.totals.totalTaxes, 'Employee Count': employees.length });
+    const taxesSheet = XLSX.utils.json_to_sheet(taxesData);
+    XLSX.utils.book_append_sheet(wb, taxesSheet, 'Taxes Summary');
+    
+    // Sheet 4: Deductions Summary
+    const deductionsData = summary.deductions.map(d => ({
+      'Deduction Type': d.description,
+      'Total Amount': d.total,
+      'Employee Count': d.count
+    }));
+    deductionsData.push({ 'Deduction Type': 'TOTAL', 'Total Amount': summary.totals.totalDeductions, 'Employee Count': employees.length });
+    const deductionsSheet = XLSX.utils.json_to_sheet(deductionsData);
+    XLSX.utils.book_append_sheet(wb, deductionsSheet, 'Deductions Summary');
+    
+    // Sheet 5: Detailed Line Items (all earnings/taxes/deductions per employee)
+    const lineItems = [];
+    employees.forEach(emp => {
+      (emp.earnings || []).forEach(e => {
+        lineItems.push({
+          'Employee': emp.name,
+          'Employee ID': emp.employee_id,
+          'Category': 'Earning',
+          'Type': e.type || e.description || 'Other',
+          'Description': e.description || '',
+          'Hours': e.hours || '',
+          'Rate': e.rate || '',
+          'Amount': e.amount || 0
+        });
+      });
+      (emp.taxes || []).forEach(t => {
+        lineItems.push({
+          'Employee': emp.name,
+          'Employee ID': emp.employee_id,
+          'Category': 'Tax',
+          'Type': t.type || t.description || 'Other',
+          'Description': t.description || '',
+          'Hours': '',
+          'Rate': '',
+          'Amount': t.amount || 0
+        });
+      });
+      (emp.deductions || []).forEach(d => {
+        lineItems.push({
+          'Employee': emp.name,
+          'Employee ID': emp.employee_id,
+          'Category': 'Deduction',
+          'Type': d.type || d.description || 'Other',
+          'Description': d.description || '',
+          'Hours': '',
+          'Rate': '',
+          'Amount': d.amount || 0
+        });
+      });
+    });
+    const lineItemsSheet = XLSX.utils.json_to_sheet(lineItems);
+    XLSX.utils.book_append_sheet(wb, lineItemsSheet, 'All Line Items');
+    
+    // Download
+    const timestamp = new Date().toISOString().split('T')[0];
+    XLSX.writeFile(wb, `${filename}_${timestamp}.xlsx`);
   };
 
   // Calculate cost estimate
@@ -455,8 +617,48 @@ export default function VacuumUploadPage() {
               </div>
             )}
             
-            {/* Employee Table */}
-            <EmployeeTable employees={result.employees || []} />
+            {/* Tabs + Export */}
+            <div className="flex items-center justify-between mb-4 border-b">
+              <div className="flex">
+                <button
+                  onClick={() => setActiveTab('employees')}
+                  className={`px-4 py-2 font-medium text-sm border-b-2 -mb-px ${
+                    activeTab === 'employees' 
+                      ? 'border-blue-600 text-blue-600' 
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  <Users className="w-4 h-4 inline mr-1" />
+                  Employees ({result.employee_count})
+                </button>
+                <button
+                  onClick={() => setActiveTab('summary')}
+                  className={`px-4 py-2 font-medium text-sm border-b-2 -mb-px ${
+                    activeTab === 'summary' 
+                      ? 'border-blue-600 text-blue-600' 
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  <BarChart3 className="w-4 h-4 inline mr-1" />
+                  Summary
+                </button>
+              </div>
+              
+              <button
+                onClick={() => exportToXLSX(result.employees, result.source_file?.replace('.pdf', '') || 'pay_extract')}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 text-sm"
+              >
+                <Download className="w-4 h-4" />
+                Export XLSX
+              </button>
+            </div>
+            
+            {/* Tab Content */}
+            {activeTab === 'employees' ? (
+              <EmployeeTable employees={result.employees || []} />
+            ) : (
+              <SummaryView employees={result.employees || []} calculateSummary={calculateSummary} />
+            )}
           </div>
         )}
         
@@ -695,6 +897,151 @@ function EmployeeTable({ employees }) {
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// Summary View Component
+function SummaryView({ employees, calculateSummary }) {
+  const summary = calculateSummary(employees);
+  
+  return (
+    <div className="space-y-6">
+      {/* Grand Totals */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-gray-50 rounded-lg">
+        <div className="text-center">
+          <div className="text-2xl font-bold text-blue-600">
+            ${summary.totals.grossPay.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </div>
+          <div className="text-sm text-gray-500">Total Gross Pay</div>
+        </div>
+        <div className="text-center">
+          <div className="text-2xl font-bold text-red-600">
+            ${summary.totals.totalTaxes.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </div>
+          <div className="text-sm text-gray-500">Total Taxes</div>
+        </div>
+        <div className="text-center">
+          <div className="text-2xl font-bold text-orange-600">
+            ${summary.totals.totalDeductions.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </div>
+          <div className="text-sm text-gray-500">Total Deductions</div>
+        </div>
+        <div className="text-center">
+          <div className="text-2xl font-bold text-green-600">
+            ${summary.totals.netPay.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </div>
+          <div className="text-sm text-gray-500">Total Net Pay</div>
+        </div>
+      </div>
+      
+      {/* Summary Tables */}
+      <div className="grid md:grid-cols-3 gap-6">
+        {/* Earnings by Type */}
+        <div>
+          <h3 className="font-semibold text-blue-700 mb-3 flex items-center gap-2">
+            <DollarSign className="w-5 h-5" />
+            Earnings by Type
+          </h3>
+          {summary.earnings.length > 0 ? (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-blue-50">
+                  <th className="text-left p-2">Type</th>
+                  <th className="text-right p-2">Total</th>
+                  <th className="text-right p-2"># Emp</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.earnings.map((e, i) => (
+                  <tr key={i} className="border-b hover:bg-gray-50">
+                    <td className="p-2 truncate max-w-[150px]" title={e.description}>{e.description}</td>
+                    <td className="p-2 text-right font-medium">${e.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td className="p-2 text-right text-gray-500">{e.count}</td>
+                  </tr>
+                ))}
+                <tr className="bg-blue-100 font-semibold">
+                  <td className="p-2">TOTAL</td>
+                  <td className="p-2 text-right">${summary.totals.grossPay.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td className="p-2 text-right">{employees.length}</td>
+                </tr>
+              </tbody>
+            </table>
+          ) : (
+            <p className="text-gray-400 text-sm">No earnings data</p>
+          )}
+        </div>
+        
+        {/* Taxes by Type */}
+        <div>
+          <h3 className="font-semibold text-red-700 mb-3 flex items-center gap-2">
+            <FileText className="w-5 h-5" />
+            Taxes by Type
+          </h3>
+          {summary.taxes.length > 0 ? (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-red-50">
+                  <th className="text-left p-2">Type</th>
+                  <th className="text-right p-2">Total</th>
+                  <th className="text-right p-2"># Emp</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.taxes.map((t, i) => (
+                  <tr key={i} className="border-b hover:bg-gray-50">
+                    <td className="p-2 truncate max-w-[150px]" title={t.description}>{t.description}</td>
+                    <td className="p-2 text-right font-medium">${t.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td className="p-2 text-right text-gray-500">{t.count}</td>
+                  </tr>
+                ))}
+                <tr className="bg-red-100 font-semibold">
+                  <td className="p-2">TOTAL</td>
+                  <td className="p-2 text-right">${summary.totals.totalTaxes.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td className="p-2 text-right">{employees.length}</td>
+                </tr>
+              </tbody>
+            </table>
+          ) : (
+            <p className="text-gray-400 text-sm">No tax data</p>
+          )}
+        </div>
+        
+        {/* Deductions by Type */}
+        <div>
+          <h3 className="font-semibold text-orange-700 mb-3 flex items-center gap-2">
+            <FileText className="w-5 h-5" />
+            Deductions by Type
+          </h3>
+          {summary.deductions.length > 0 ? (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-orange-50">
+                  <th className="text-left p-2">Type</th>
+                  <th className="text-right p-2">Total</th>
+                  <th className="text-right p-2"># Emp</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.deductions.map((d, i) => (
+                  <tr key={i} className="border-b hover:bg-gray-50">
+                    <td className="p-2 truncate max-w-[150px]" title={d.description}>{d.description}</td>
+                    <td className="p-2 text-right font-medium">${d.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td className="p-2 text-right text-gray-500">{d.count}</td>
+                  </tr>
+                ))}
+                <tr className="bg-orange-100 font-semibold">
+                  <td className="p-2">TOTAL</td>
+                  <td className="p-2 text-right">${summary.totals.totalDeductions.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td className="p-2 text-right">{employees.length}</td>
+                </tr>
+              </tbody>
+            </table>
+          ) : (
+            <p className="text-gray-400 text-sm">No deduction data</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
