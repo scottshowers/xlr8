@@ -574,9 +574,12 @@ class VacuumExtractor:
             employees = self._parse_with_claude(redacted_pages, vendor_type)
             
             # Step 3.5: Fix truncated descriptions using ORIGINAL text
-            # Only replace if we find a LONGER description (don't make things worse)
-            original_text = "\n\n--- PAGE BREAK ---\n\n".join(pages_text)
-            employees = self._fix_descriptions(employees, original_text)
+            # Skip for Dayforce - the post-processing grabs YTD amounts incorrectly
+            if vendor_type != 'dayforce':
+                original_text = "\n\n--- PAGE BREAK ---\n\n".join(pages_text)
+                employees = self._fix_descriptions(employees, original_text)
+            else:
+                logger.info("Skipping description fix for Dayforce (causes YTD confusion)")
             
             # Step 4: Validate employees
             if job_id:
