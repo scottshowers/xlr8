@@ -110,7 +110,8 @@ def save_extraction(project_id: Optional[str], source_file: str,
                     validation_passed: bool, validation_errors: List[str],
                     pages_processed: int, cost_usd: float, 
                     processing_time_ms: int, extraction_method: str = "pymupdf",
-                    customer_id: Optional[str] = None) -> Optional[Dict]:
+                    customer_id: Optional[str] = None,
+                    raw_text: Optional[str] = None) -> Optional[Dict]:
     """Save extraction results to normalized Supabase tables.
     
     Writes to:
@@ -151,7 +152,8 @@ def save_extraction(project_id: Optional[str], source_file: str,
             'processing_time_ms': processing_time_ms,
             'extraction_method': extraction_method,
             'status': 'completed',
-            'completed_at': datetime.now().isoformat()
+            'completed_at': datetime.now().isoformat(),
+            'raw_text': raw_text[:500000] if raw_text else None  # Limit to 500KB
         }
         
         job_response = supabase.table('extraction_jobs').insert(job_data).execute()
@@ -603,6 +605,9 @@ class VacuumExtractor:
             
             processing_time = int((datetime.now() - start).total_seconds() * 1000)
             
+            # Join pages for raw_text storage
+            raw_text = "\n\n--- PAGE BREAK ---\n\n".join(pages_text)
+            
             result = {
                 "success": len(employees) > 0,
                 "source_file": filename,
@@ -616,7 +621,8 @@ class VacuumExtractor:
                 "cost_usd": round(cost, 4),
                 "extraction_method": method,
                 "pii_redacted": redaction_stats['total_redacted'],
-                "privacy_compliant": True
+                "privacy_compliant": True,
+                "raw_text": raw_text
             }
             
             if job_id:
@@ -1351,7 +1357,8 @@ def process_extraction_job(job_id: str, file_path: str, max_pages: int,
                 cost_usd=result['cost_usd'],
                 processing_time_ms=result['processing_time_ms'],
                 extraction_method=result.get('extraction_method', 'pymupdf'),
-                customer_id=customer_id
+                customer_id=customer_id,
+                raw_text=result.get('raw_text')
             )
             result['extract_id'] = saved.get('id') if saved else None
             result['saved_to_db'] = saved is not None
@@ -1541,15 +1548,20 @@ async def get_extract_raw_text(extract_id: str):
         return {"error": "Database not available", "raw_text": ""}
     
     try:
-        # Get the extraction job
-        response = supabase.table('extraction_jobs').select('source_file').eq('id', extract_id).execute()
+        # Get the extraction job with raw_text
+        response = supabase.table('extraction_jobs').select('source_file, raw_text').eq('id', extract_id).execute()
         if not response.data:
             return {"error": "Extraction not found", "raw_text": ""}
         
-        # For now, return a message - we'd need to store raw_text in the job
-        # or re-extract from the PDF
+        raw_text = response.data[0].get('raw_text', '')
+        if not raw_text:
+            return {
+                "raw_text": "Raw text not available for this extraction.\n\nRe-run the extraction to capture raw text.",
+                "source_file": response.data[0].get('source_file', '')
+            }
+        
         return {
-            "raw_text": "Raw text preview not yet stored. Feature coming soon.\n\nTo see raw text, re-run extraction with logging enabled.",
+            "raw_text": raw_text,
             "source_file": response.data[0].get('source_file', '')
         }
     except Exception as e:
@@ -1680,6 +1692,67 @@ async def delete_extract(extract_id: str):
     """Delete an extraction"""
     success = delete_extraction(extract_id)
     return {"success": success, "id": extract_id}
+
+
+@router.post("/vacuum/debug-extract")
+async def debug_extract(
+    file: UploadFile = File(...),
+    page_num: int = Form(0)
+):
+    """Debug endpoint - extract one page with position data."""
+    import fitz
+    
+    # Save file temporarily
+    temp_dir = tempfile.mkdtemp()
+    temp_path = os.path.join(temp_dir, file.filename)
+    
+    with open(temp_path, 'wb') as f:
+        shutil.copyfileobj(file.file, f)
+    
+    try:
+        doc = fitz.open(temp_path)
+        
+        if page_num >= len(doc):
+            return {"error": f"Page {page_num} doesn't exist. Doc has {len(doc)} pages."}
+        
+        page = doc[page_num]
+        
+        # Get text with positions
+        blocks = page.get_text("dict")["blocks"]
+        
+        lines_with_positions = []
+        for block in blocks:
+            if "lines" in block:
+                for line in block["lines"]:
+                    spans = line.get("spans", [])
+                    line_text = " ".join(s.get("text", "") for s in spans)
+                    bbox = line.get("bbox", [0,0,0,0])
+                    lines_with_positions.append({
+                        "text": line_text,
+                        "x0": round(bbox[0], 1),
+                        "y0": round(bbox[1], 1),
+                        "x1": round(bbox[2], 1),
+                        "y1": round(bbox[3], 1)
+                    })
+        
+        # Also get plain text for comparison
+        plain_text = page.get_text()
+        
+        doc.close()
+        
+        return {
+            "page": page_num,
+            "total_pages": len(doc),
+            "plain_text": plain_text[:5000],  # First 5000 chars
+            "lines_with_positions": lines_with_positions[:100]  # First 100 lines
+        }
+        
+    finally:
+        try:
+            os.remove(temp_path)
+            os.rmdir(temp_dir)
+        except:
+            pass
 
 
 @router.get("/vacuum/health")
