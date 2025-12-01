@@ -549,12 +549,18 @@ class VacuumExtractor:
                 pages_text, pages_processed = self._extract_with_textract(file_path, max_pages, job_id)
             else:
                 logger.info(f"Using PyMuPDF for local extraction (privacy-compliant)...")
-                pages_text, pages_processed = self._extract_with_pymupdf(file_path, max_pages, job_id)
+                # For auto-detect, do a quick first page scan
+                if vendor_type == "unknown":
+                    quick_text = self._quick_vendor_detect(file_path)
+                    vendor_type = self._detect_vendor([quick_text]) if quick_text else "unknown"
+                    logger.info(f"Quick vendor detection: {vendor_type}")
+                
+                pages_text, pages_processed = self._extract_with_pymupdf(file_path, max_pages, job_id, vendor_type)
             
             if not pages_text:
                 raise ValueError("No text extracted from PDF")
             
-            # Step 1.5: Auto-detect vendor if not specified
+            # Confirm/update vendor detection if still unknown
             if vendor_type == "unknown":
                 vendor_type = self._detect_vendor(pages_text)
                 logger.info(f"Auto-detected vendor: {vendor_type}")
@@ -655,7 +661,7 @@ class VacuumExtractor:
             
             return error_result
     
-    def _extract_with_pymupdf(self, file_path: str, max_pages: int, job_id: str = None) -> tuple:
+    def _extract_with_pymupdf(self, file_path: str, max_pages: int, job_id: str = None, vendor_type: str = "unknown") -> tuple:
         """Extract text using PyMuPDF (local, free, private)."""
         import fitz
         
@@ -671,7 +677,12 @@ class VacuumExtractor:
             
             for page_num in range(to_process):
                 page = doc[page_num]
-                text = page.get_text()
+                
+                # For Dayforce, use column-aware extraction
+                if vendor_type == 'dayforce':
+                    text = self._extract_dayforce_page(page)
+                else:
+                    text = page.get_text()
                 
                 if text.strip():
                     pages_text.append(text)
@@ -691,6 +702,99 @@ class VacuumExtractor:
             doc.close()
         
         return pages_text, len(pages_text)
+    
+    def _extract_dayforce_page(self, page) -> str:
+        """Extract Dayforce page with column awareness using x-coordinates.
+        
+        Dayforce has these approximate column regions (x-coordinates):
+        - Employee Info: 0-100
+        - Earnings: 100-400 (Description, Rate, Hours, Amount, HoursYTD, AmountYTD)
+        - Taxes: 400-600 (Description, Wages, Amount, WagesYTD, AmountYTD)
+        - Deductions: 600-800 (Description, Scheduled, Amount, AmountYTD)
+        - Net Pay: 800+
+        
+        For earnings, we need to distinguish current vs YTD based on x-position.
+        """
+        # Get text with position info
+        blocks = page.get_text("dict")["blocks"]
+        
+        # Collect all text spans with positions
+        spans = []
+        for block in blocks:
+            if "lines" in block:
+                for line in block["lines"]:
+                    for span in line.get("spans", []):
+                        text = span.get("text", "").strip()
+                        if text:
+                            bbox = span.get("bbox", [0, 0, 0, 0])
+                            spans.append({
+                                "text": text,
+                                "x": bbox[0],
+                                "y": bbox[1],
+                                "x2": bbox[2]
+                            })
+        
+        # Sort by y (top to bottom), then x (left to right)
+        spans.sort(key=lambda s: (round(s["y"] / 5) * 5, s["x"]))  # Group by ~5px rows
+        
+        # Build structured output with column markers
+        # Detect column boundaries from header row
+        earnings_cols = self._detect_earnings_columns(spans)
+        
+        lines = []
+        current_y = -1
+        current_line = []
+        
+        for span in spans:
+            y_group = round(span["y"] / 5) * 5
+            
+            if y_group != current_y:
+                if current_line:
+                    lines.append(" ".join(current_line))
+                current_line = []
+                current_y = y_group
+            
+            # Add column marker for earnings section based on x position
+            text = span["text"]
+            x = span["x"]
+            
+            # Mark YTD values in earnings section (approximate x-ranges)
+            # These will vary by document but the pattern is consistent
+            if earnings_cols:
+                if earnings_cols.get("hours_ytd_x") and abs(x - earnings_cols["hours_ytd_x"]) < 20:
+                    text = f"[HYTD]{text}"
+                elif earnings_cols.get("amount_ytd_x") and abs(x - earnings_cols["amount_ytd_x"]) < 20:
+                    text = f"[AYTD]{text}"
+                elif earnings_cols.get("amount_x") and abs(x - earnings_cols["amount_x"]) < 20:
+                    text = f"[AMT]{text}"
+                elif earnings_cols.get("hours_x") and abs(x - earnings_cols["hours_x"]) < 20:
+                    text = f"[HRS]{text}"
+            
+            current_line.append(text)
+        
+        if current_line:
+            lines.append(" ".join(current_line))
+        
+        return "\n".join(lines)
+    
+    def _detect_earnings_columns(self, spans) -> dict:
+        """Detect column x-positions from header row."""
+        cols = {}
+        
+        for span in spans:
+            text = span["text"].lower()
+            x = span["x"]
+            
+            if text == "hoursytd":
+                cols["hours_ytd_x"] = x
+            elif text == "amountytd" and "hours_ytd_x" in cols:
+                cols["amount_ytd_x"] = x
+            elif text == "amount" and "amount_ytd_x" not in cols:
+                cols["amount_x"] = x
+            elif text == "hours" and "hours_ytd_x" not in cols:
+                cols["hours_x"] = x
+        
+        return cols
     
     def _extract_with_textract(self, file_path: str, max_pages: int, job_id: str = None) -> tuple:
         """Extract text using AWS Textract (for scanned PDFs)."""
@@ -820,6 +924,20 @@ Return the JSON array now:"""
         
         return prompt
     
+    def _quick_vendor_detect(self, file_path: str) -> str:
+        """Quick first-page scan for vendor detection before full extraction."""
+        import fitz
+        try:
+            doc = fitz.open(file_path)
+            if len(doc) > 0:
+                text = doc[0].get_text()
+                doc.close()
+                return text
+            doc.close()
+        except Exception as e:
+            logger.warning(f"Quick vendor detect failed: {e}")
+        return ""
+
     def _detect_vendor(self, pages_text: List[str]) -> str:
         """Auto-detect vendor from register content."""
         
