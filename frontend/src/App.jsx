@@ -1,21 +1,9 @@
 /**
  * App.jsx - Main Application Entry
  * 
- * STRUCTURE:
- * ┌─────────────────────────────────────┐
- * │ ProjectProvider (global context)    │
- * │ ┌─────────────────────────────────┐ │
- * │ │ Router                          │ │
- * │ │ ├── "/" → Landing (no layout)   │ │
- * │ │ └── Layout wrapper for app      │ │
- * │ │     ├── ContextBar              │ │
- * │ │     ├── Navigation              │ │
- * │ │     └── Page Content            │ │
- * │ └─────────────────────────────────┘ │
- * └─────────────────────────────────────┘
- * 
  * Routes:
  * /           → Landing (public, no layout)
+ * /dashboard  → DashboardPage (overview hub)
  * /workspace  → WorkspacePage (Chat + Personas)
  * /projects   → ProjectsPage (Project management)
  * /data       → DataPage (Upload, Vacuum, Status, Data Mgmt, Global, Connections)
@@ -38,6 +26,7 @@ import Layout from './components/Layout';
 
 // Pages
 import Landing from './pages/Landing';
+import DashboardPage from './pages/DashboardPage';
 import WorkspacePage from './pages/WorkspacePage';
 import ProjectsPage from './pages/ProjectsPage';
 import DataPage from './pages/DataPage';
@@ -61,6 +50,7 @@ function App() {
           <Route path="/" element={<Landing />} />
           
           {/* App routes - with layout */}
+          <Route path="/dashboard" element={<Layout><DashboardPage /></Layout>} />
           <Route path="/workspace" element={<Layout><WorkspacePage /></Layout>} />
           <Route path="/projects" element={<Layout><ProjectsPage /></Layout>} />
           <Route path="/data" element={<Layout><DataPage /></Layout>} />
