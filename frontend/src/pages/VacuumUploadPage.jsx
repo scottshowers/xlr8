@@ -847,6 +847,7 @@ export default function VacuumUploadPage() {
       {showAssist && result && (
         <ConsultantAssist
           extractionId={result.extract_id}
+          sourceFile={result.source_file}
           vendorType={vendorType}
           customerId={null}
           confidence={result.confidence}
@@ -860,7 +861,7 @@ export default function VacuumUploadPage() {
         />
       )}
       {/* Debug */}
-      {showAssist && console.log('ConsultantAssist extractionId:', result?.extract_id, 'full result:', result)}
+      {showAssist && console.log('ConsultantAssist extractionId:', result?.extract_id, 'sourceFile:', result?.source_file, 'full result:', result)}
     </div>
   );
 }
