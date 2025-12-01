@@ -16,13 +16,14 @@
  * 
  * Routes:
  * /           → Landing (public, no layout)
- * /workspace  → WorkspacePage
- * /data       → DataPage (Upload, Vacuum link, Status tabs)
+ * /workspace  → WorkspacePage (Chat + Personas)
+ * /projects   → ProjectsPage (Project management)
+ * /data       → DataPage (Upload, Vacuum, Status, Data Mgmt, Global, Connections)
  * /vacuum     → VacuumUploadPage (full extraction tool)
  * /vacuum/explore → VacuumExplore (intelligent detection UI)
  * /vacuum/map → VacuumColumnMapping (column mapping interface)
  * /playbooks  → PlaybooksPage (Analysis Playbooks)
- * /admin      → AdminPage (Projects, Data, Global, Settings)
+ * /admin      → AdminPage (System Monitor + Settings only)
  * /data-model → DataModelPage (Visual ERD for relationships)
  */
 
@@ -38,6 +39,7 @@ import Layout from './components/Layout';
 // Pages
 import Landing from './pages/Landing';
 import WorkspacePage from './pages/WorkspacePage';
+import ProjectsPage from './pages/ProjectsPage';
 import DataPage from './pages/DataPage';
 import VacuumUploadPage from './pages/VacuumUploadPage';
 import VacuumExplore from './pages/VacuumExplore';
@@ -60,6 +62,7 @@ function App() {
           
           {/* App routes - with layout */}
           <Route path="/workspace" element={<Layout><WorkspacePage /></Layout>} />
+          <Route path="/projects" element={<Layout><ProjectsPage /></Layout>} />
           <Route path="/data" element={<Layout><DataPage /></Layout>} />
           <Route path="/vacuum" element={<Layout><VacuumUploadPage /></Layout>} />
           <Route path="/vacuum/explore" element={<Layout><VacuumExplore /></Layout>} />
@@ -73,7 +76,6 @@ function App() {
           <Route path="/chat" element={<Navigate to="/workspace" replace />} />
           <Route path="/upload" element={<Navigate to="/data" replace />} />
           <Route path="/status" element={<Navigate to="/data" replace />} />
-          <Route path="/projects" element={<Navigate to="/admin" replace />} />
           <Route path="/secure20" element={<Navigate to="/playbooks" replace />} />
           <Route path="/packs" element={<Navigate to="/playbooks" replace />} />
           
