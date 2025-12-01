@@ -1115,15 +1115,36 @@ Return the JSON array now:"""
         
         gross = emp.get('gross_pay', 0)
         net = emp.get('net_pay', 0)
-        taxes = emp.get('total_taxes', 0)
-        deductions = emp.get('total_deductions', 0)
+        total_taxes = emp.get('total_taxes', 0)
+        total_deductions = emp.get('total_deductions', 0)
         
         if gross > 0 and net > 0:
-            # Calculate totals from line items for more accurate validation
-            taxes_from_items = sum(t.get('amount', 0) or 0 for t in emp.get('taxes', []))
-            deductions_from_items = sum(d.get('amount', 0) or 0 for d in emp.get('deductions', []))
+            # Sum only EMPLOYEE taxes/deductions (exclude ER/memo items)
+            # These are what actually affect net pay
             
-            calculated = gross - taxes_from_items - deductions_from_items
+            ee_taxes = sum(
+                t.get('amount', 0) or 0 
+                for t in emp.get('taxes', []) 
+                if not t.get('is_employer', False)
+            )
+            
+            ee_deductions = sum(
+                d.get('amount', 0) or 0 
+                for d in emp.get('deductions', []) 
+                if not d.get('is_employer', False) and d.get('category') != 'memo'
+            )
+            
+            # Use provided totals if they exist and seem reasonable, otherwise use calculated
+            # This handles cases where Claude correctly identified Emp Total / Post Total
+            use_taxes = total_taxes if total_taxes > 0 else ee_taxes
+            use_deductions = total_deductions if total_deductions >= 0 else ee_deductions
+            
+            # If totals are provided and different from sums, trust the totals (Emp Total, Post Total)
+            if total_taxes > 0 or total_deductions >= 0:
+                calculated = gross - total_taxes - total_deductions
+            else:
+                calculated = gross - ee_taxes - ee_deductions
+            
             if abs(calculated - net) > 1.00:
                 errors.append(
                     f"{emp.get('name', 'Unknown')}: Net mismatch (calc {calculated:.2f}, actual {net:.2f})"
