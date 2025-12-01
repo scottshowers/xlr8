@@ -222,7 +222,7 @@ function PlaybookCard({ playbook, onRun, isActive }) {
           style={styles.button} 
           onClick={() => onRun(playbook)}
         >
-          {playbook.hasRunner ? 'Run Playbook →' : 'Coming Soon'}
+          {playbook.hasRunner ? 'Kickoff →' : 'Coming Soon'}
         </button>
       </div>
     </div>
