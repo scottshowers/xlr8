@@ -17,9 +17,10 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Upload, FileText, Users, DollarSign, CheckCircle, XCircle, 
   Loader2, Trash2, Eye, AlertTriangle, ChevronDown, ChevronRight,
-  Shield, Cloud, Lock, Download, BarChart3
+  Shield, Cloud, Lock, Download, BarChart3, Wand2, HelpCircle
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import ConsultantAssist from './ConsultantAssist';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -35,7 +36,9 @@ export default function VacuumUploadPage() {
   const [error, setError] = useState(null);
   const [maxPages, setMaxPages] = useState(0); // 0 = all pages
   const [useTextract, setUseTextract] = useState(false); // PyMuPDF is default
+  const [vendorType, setVendorType] = useState('unknown'); // auto-detect by default
   const [activeTab, setActiveTab] = useState('employees'); // 'employees' or 'summary'
+  const [showAssist, setShowAssist] = useState(false); // Consultant Assist modal
   
   // Job polling state
   const [jobId, setJobId] = useState(null);
@@ -146,6 +149,7 @@ export default function VacuumUploadPage() {
       formData.append('max_pages', maxPages.toString());
       formData.append('project_id', selectedProject);
       formData.append('use_textract', useTextract.toString());
+      formData.append('vendor_type', vendorType);
       formData.append('async_mode', 'true');
       
       const res = await fetch(`${API_BASE}/api/vacuum/upload`, {
@@ -266,8 +270,13 @@ export default function VacuumUploadPage() {
     const summary = calculateSummary(employees);
     const wb = XLSX.utils.book_new();
     
-    // Sheet 1: Employee Details (with demographics)
+    // Sheet 1: Employee Summary (with demographics)
     const empData = employees.map(emp => ({
+      'Company': emp.company_name || '',
+      'Client Code': emp.client_code || '',
+      'Pay Period Start': emp.pay_period_start || '',
+      'Pay Period End': emp.pay_period_end || '',
+      'Check Date': emp.check_date || '',
       'Name': emp.name || '',
       'Employee ID': emp.employee_id || '',
       'Department': emp.department || '',
@@ -282,8 +291,7 @@ export default function VacuumUploadPage() {
       'Work State': emp.work_state || '',
       'Federal Filing Status': emp.federal_filing_status || '',
       'State Filing Status': emp.state_filing_status || '',
-      'Pay Period Start': emp.pay_period_start || '',
-      'Pay Period End': emp.pay_period_end || '',
+      'Tax Profile': emp.tax_profile || '',
       'Gross Pay': emp.gross_pay || 0,
       'Total Taxes': emp.total_taxes || 0,
       'Total Deductions': emp.total_deductions || 0,
@@ -295,45 +303,18 @@ export default function VacuumUploadPage() {
     const empSheet = XLSX.utils.json_to_sheet(empData);
     XLSX.utils.book_append_sheet(wb, empSheet, 'Employees');
     
-    // Sheet 2: Earnings Summary
-    const earningsData = summary.earnings.map(e => ({
-      'Earning Type': e.description,
-      'Total Amount': e.total,
-      'Employee Count': e.count
-    }));
-    earningsData.push({ 'Earning Type': 'TOTAL', 'Total Amount': summary.totals.grossPay, 'Employee Count': employees.length });
-    const earningsSheet = XLSX.utils.json_to_sheet(earningsData);
-    XLSX.utils.book_append_sheet(wb, earningsSheet, 'Earnings Summary');
-    
-    // Sheet 3: Taxes Summary
-    const taxesData = summary.taxes.map(t => ({
-      'Tax Type': t.description,
-      'Total Amount': t.total,
-      'Employee Count': t.count
-    }));
-    taxesData.push({ 'Tax Type': 'TOTAL', 'Total Amount': summary.totals.totalTaxes, 'Employee Count': employees.length });
-    const taxesSheet = XLSX.utils.json_to_sheet(taxesData);
-    XLSX.utils.book_append_sheet(wb, taxesSheet, 'Taxes Summary');
-    
-    // Sheet 4: Deductions Summary
-    const deductionsData = summary.deductions.map(d => ({
-      'Deduction Type': d.description,
-      'Total Amount': d.total,
-      'Employee Count': d.count
-    }));
-    deductionsData.push({ 'Deduction Type': 'TOTAL', 'Total Amount': summary.totals.totalDeductions, 'Employee Count': employees.length });
-    const deductionsSheet = XLSX.utils.json_to_sheet(deductionsData);
-    XLSX.utils.book_append_sheet(wb, deductionsSheet, 'Deductions Summary');
-    
-    // Sheet 5: Detailed Line Items (all earnings/taxes/deductions per employee with YTD)
-    const lineItems = [];
+    // Sheet 2: Earnings Detail (each earning by employee with YTD)
+    const earningsDetail = [];
     employees.forEach(emp => {
       (emp.earnings || []).forEach(e => {
-        lineItems.push({
-          'Employee': emp.name,
-          'Employee ID': emp.employee_id,
-          'Category': 'Earning',
-          'Type': e.type || e.description || 'Other',
+        earningsDetail.push({
+          'Company': emp.company_name || '',
+          'Period Ending': emp.period_ending || '',
+          'Check Date': emp.check_date || '',
+          'Employee': emp.name || '',
+          'Employee ID': emp.employee_id || '',
+          'Department': emp.department || '',
+          'Earning Code': e.type || e.code || '',
           'Description': e.description || '',
           'Hours': e.hours || '',
           'Rate': e.rate || '',
@@ -342,37 +323,107 @@ export default function VacuumUploadPage() {
           'Amount YTD': e.amount_ytd || ''
         });
       });
-      (emp.taxes || []).forEach(t => {
-        lineItems.push({
-          'Employee': emp.name,
-          'Employee ID': emp.employee_id,
-          'Category': t.is_employer ? 'Tax (ER)' : 'Tax (EE)',
-          'Type': t.type || t.description || 'Other',
-          'Description': t.description || '',
-          'Hours': '',
-          'Rate': '',
-          'Amount': t.amount || 0,
-          'Hours YTD': '',
-          'Amount YTD': t.amount_ytd || ''
-        });
-      });
+    });
+    const earningsDetailSheet = XLSX.utils.json_to_sheet(earningsDetail);
+    XLSX.utils.book_append_sheet(wb, earningsDetailSheet, 'Earnings');
+    
+    // Sheet 3: Deductions Detail (each deduction by employee with YTD)
+    const deductionsDetail = [];
+    employees.forEach(emp => {
       (emp.deductions || []).forEach(d => {
-        lineItems.push({
-          'Employee': emp.name,
-          'Employee ID': emp.employee_id,
-          'Category': d.is_employer ? 'Deduction (ER)' : `Deduction (${d.category || 'EE'})`,
-          'Type': d.type || d.description || 'Other',
+        deductionsDetail.push({
+          'Company': emp.company_name || '',
+          'Period Ending': emp.period_ending || '',
+          'Check Date': emp.check_date || '',
+          'Employee': emp.name || '',
+          'Employee ID': emp.employee_id || '',
+          'Department': emp.department || '',
+          'Deduction Code': d.type || d.code || '',
           'Description': d.description || '',
-          'Hours': '',
-          'Rate': '',
+          'Category': d.is_employer ? 'Employer' : (d.category || 'Employee'),
           'Amount': d.amount || 0,
-          'Hours YTD': '',
           'Amount YTD': d.amount_ytd || ''
         });
       });
     });
-    const lineItemsSheet = XLSX.utils.json_to_sheet(lineItems);
-    XLSX.utils.book_append_sheet(wb, lineItemsSheet, 'All Line Items');
+    const deductionsDetailSheet = XLSX.utils.json_to_sheet(deductionsDetail);
+    XLSX.utils.book_append_sheet(wb, deductionsDetailSheet, 'Deductions');
+    
+    // Sheet 4: Taxes Detail (each tax by employee with YTD)
+    const taxesDetail = [];
+    employees.forEach(emp => {
+      (emp.taxes || []).forEach(t => {
+        taxesDetail.push({
+          'Company': emp.company_name || '',
+          'Period Ending': emp.period_ending || '',
+          'Check Date': emp.check_date || '',
+          'Employee': emp.name || '',
+          'Employee ID': emp.employee_id || '',
+          'Department': emp.department || '',
+          'Tax Code': t.type || t.code || '',
+          'Description': t.description || '',
+          'EE/ER': t.is_employer ? 'Employer' : 'Employee',
+          'Amount': t.amount || 0,
+          'Taxable Wages': t.taxable_wages || '',
+          'Amount YTD': t.amount_ytd || '',
+          'Taxable Wages YTD': t.taxable_wages_ytd || ''
+        });
+      });
+    });
+    const taxesDetailSheet = XLSX.utils.json_to_sheet(taxesDetail);
+    XLSX.utils.book_append_sheet(wb, taxesDetailSheet, 'Taxes');
+    
+    // Sheet 5: Summary (all rollups on one sheet)
+    const summaryData = [];
+    
+    // Earnings section
+    summaryData.push({ 'Category': 'EARNINGS', 'Code': '', 'Total Amount': '', 'Employee Count': '' });
+    summary.earnings.forEach(e => {
+      summaryData.push({
+        'Category': '',
+        'Code': e.description,
+        'Total Amount': e.total,
+        'Employee Count': e.count
+      });
+    });
+    summaryData.push({ 'Category': '', 'Code': 'EARNINGS TOTAL', 'Total Amount': summary.totals.grossPay, 'Employee Count': '' });
+    summaryData.push({ 'Category': '', 'Code': '', 'Total Amount': '', 'Employee Count': '' });
+    
+    // Taxes section
+    summaryData.push({ 'Category': 'TAXES', 'Code': '', 'Total Amount': '', 'Employee Count': '' });
+    summary.taxes.forEach(t => {
+      summaryData.push({
+        'Category': '',
+        'Code': t.description,
+        'Total Amount': t.total,
+        'Employee Count': t.count
+      });
+    });
+    summaryData.push({ 'Category': '', 'Code': 'TAXES TOTAL', 'Total Amount': summary.totals.totalTaxes, 'Employee Count': '' });
+    summaryData.push({ 'Category': '', 'Code': '', 'Total Amount': '', 'Employee Count': '' });
+    
+    // Deductions section
+    summaryData.push({ 'Category': 'DEDUCTIONS', 'Code': '', 'Total Amount': '', 'Employee Count': '' });
+    summary.deductions.forEach(d => {
+      summaryData.push({
+        'Category': '',
+        'Code': d.description,
+        'Total Amount': d.total,
+        'Employee Count': d.count
+      });
+    });
+    summaryData.push({ 'Category': '', 'Code': 'DEDUCTIONS TOTAL', 'Total Amount': summary.totals.totalDeductions, 'Employee Count': '' });
+    summaryData.push({ 'Category': '', 'Code': '', 'Total Amount': '', 'Employee Count': '' });
+    
+    // Grand totals
+    summaryData.push({ 'Category': 'GRAND TOTALS', 'Code': '', 'Total Amount': '', 'Employee Count': '' });
+    summaryData.push({ 'Category': '', 'Code': 'Total Gross Pay', 'Total Amount': summary.totals.grossPay, 'Employee Count': employees.length });
+    summaryData.push({ 'Category': '', 'Code': 'Total Taxes', 'Total Amount': summary.totals.totalTaxes, 'Employee Count': '' });
+    summaryData.push({ 'Category': '', 'Code': 'Total Deductions', 'Total Amount': summary.totals.totalDeductions, 'Employee Count': '' });
+    summaryData.push({ 'Category': '', 'Code': 'Total Net Pay', 'Total Amount': summary.totals.netPay, 'Employee Count': '' });
+    
+    const summarySheet = XLSX.utils.json_to_sheet(summaryData);
+    XLSX.utils.book_append_sheet(wb, summarySheet, 'Summary');
     
     // Download
     const timestamp = new Date().toISOString().split('T')[0];
@@ -461,6 +512,28 @@ export default function VacuumUploadPage() {
                 max={2000}
                 className="w-full border rounded-lg px-3 py-2"
               />
+            </div>
+            
+            {/* Vendor Type */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Vendor
+              </label>
+              <select
+                value={vendorType}
+                onChange={(e) => setVendorType(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2"
+              >
+                <option value="unknown">🔍 Auto-Detect</option>
+                <option value="paycom">Paycom</option>
+                <option value="dayforce">Dayforce / Ceridian</option>
+                <option value="adp">ADP</option>
+                <option value="paychex">Paychex</option>
+                <option value="ultipro">UKG Pro / UltiPro</option>
+                <option value="workday">Workday</option>
+                <option value="gusto">Gusto</option>
+                <option value="quickbooks">QuickBooks</option>
+              </select>
             </div>
             
             {/* OCR Method Toggle */}
@@ -636,7 +709,7 @@ export default function VacuumUploadPage() {
               </div>
             )}
             
-            {/* Tabs + Export */}
+            {/* Tabs + Export + Assist */}
             <div className="flex items-center justify-between mb-4 border-b">
               <div className="flex">
                 <button
@@ -663,13 +736,29 @@ export default function VacuumUploadPage() {
                 </button>
               </div>
               
-              <button
-                onClick={() => exportToXLSX(result.employees, result.source_file?.replace('.pdf', '') || 'pay_extract')}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 text-sm"
-              >
-                <Download className="w-4 h-4" />
-                Export XLSX
-              </button>
+              <div className="flex items-center gap-2">
+                {/* Consultant Assist Button - shows when confidence is low or validation errors exist */}
+                {(result.confidence < 0.7 || (result.validation_errors && result.validation_errors.length > 0)) && (
+                  <button
+                    onClick={() => setShowAssist(true)}
+                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center gap-2 text-sm"
+                  >
+                    <Wand2 className="w-4 h-4" />
+                    Help Claude
+                  </button>
+                )}
+                
+                <button
+                  onClick={() => exportToXLSX(
+                    result.employees, 
+                    result.source_file?.replace('.pdf', '') || 'pay_extract'
+                  )}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 text-sm"
+                >
+                  <Download className="w-4 h-4" />
+                  Export XLSX
+                </button>
+              </div>
             </div>
             
             {/* Tab Content */}
@@ -735,7 +824,23 @@ export default function VacuumUploadPage() {
           
           {/* Selected Extract Details */}
           <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold mb-4">Extract Details</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">Extract Details</h2>
+              
+              {/* Export XLSX Button - shows when extract is selected */}
+              {selectedExtract && selectedExtract.employees?.length > 0 && (
+                <button
+                  onClick={() => exportToXLSX(
+                    selectedExtract.employees, 
+                    selectedExtract.source_file?.replace('.pdf', '') || 'pay_extract'
+                  )}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                >
+                  <Download className="w-4 h-4" />
+                  Export XLSX
+                </button>
+              )}
+            </div>
             
             {selectedExtract ? (
               <div>
@@ -757,6 +862,25 @@ export default function VacuumUploadPage() {
           </div>
         </div>
       </div>
+      
+      {/* Consultant Assist Modal */}
+      {showAssist && result && (
+        <ConsultantAssist
+          extractionId={result.extract_id}
+          vendorType={vendorType}
+          customerId={null}
+          confidence={result.confidence}
+          validationErrors={result.validation_errors}
+          onClose={() => setShowAssist(false)}
+          onRetry={(hints) => {
+            setShowAssist(false);
+            // Could trigger a re-extraction with hints here
+            console.log('Retry with hints:', hints);
+          }}
+        />
+      )}
+      {/* Debug */}
+      {showAssist && console.log('ConsultantAssist extractionId:', result?.extract_id, 'full result:', result)}
     </div>
   );
 }
@@ -801,6 +925,7 @@ function EmployeeTable({ employees }) {
             <th className="text-left p-2">Employee</th>
             <th className="text-left p-2">ID</th>
             <th className="text-left p-2">Department</th>
+            <th className="text-left p-2">Tax Profile</th>
             <th className="text-right p-2">Gross</th>
             <th className="text-right p-2">Taxes</th>
             <th className="text-right p-2">Deductions</th>
@@ -822,6 +947,7 @@ function EmployeeTable({ employees }) {
                   <td className="p-2 font-medium">{emp.name || '(Unknown)'}</td>
                   <td className="p-2 text-gray-600">{emp.employee_id || '-'}</td>
                   <td className="p-2 text-gray-600">{emp.department || '-'}</td>
+                  <td className="p-2 text-gray-600">{emp.tax_profile || '-'}</td>
                   <td className="p-2 text-right font-medium">${(emp.gross_pay || 0).toFixed(2)}</td>
                   <td className="p-2 text-right text-red-600">${(emp.total_taxes || 0).toFixed(2)}</td>
                   <td className="p-2 text-right text-orange-600">${(emp.total_deductions || 0).toFixed(2)}</td>
@@ -847,7 +973,7 @@ function EmployeeTable({ employees }) {
                             <ul className="space-y-1">
                               {emp.earnings.map((e, i) => (
                                 <li key={i} className="flex justify-between text-xs">
-                                  <span>{e.type || e.description || 'Earning'}</span>
+                                  <span>{e.description || e.type || 'Earning'}</span>
                                   <span className="font-medium">${(e.amount || 0).toFixed(2)}</span>
                                 </li>
                               ))}
@@ -864,7 +990,7 @@ function EmployeeTable({ employees }) {
                             <ul className="space-y-1">
                               {emp.taxes.map((t, i) => (
                                 <li key={i} className="flex justify-between text-xs">
-                                  <span>{t.type || t.description || 'Tax'}</span>
+                                  <span>{t.description || t.type || 'Tax'}</span>
                                   <span className="font-medium">${(t.amount || 0).toFixed(2)}</span>
                                 </li>
                               ))}
@@ -881,7 +1007,7 @@ function EmployeeTable({ employees }) {
                             <ul className="space-y-1">
                               {emp.deductions.map((d, i) => (
                                 <li key={i} className="flex justify-between text-xs">
-                                  <span>{d.type || d.description || 'Deduction'}</span>
+                                  <span>{d.description || d.type || 'Deduction'}</span>
                                   <span className="font-medium">${(d.amount || 0).toFixed(2)}</span>
                                 </li>
                               ))}
