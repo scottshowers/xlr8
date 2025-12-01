@@ -40,12 +40,18 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
   const [expanded, setExpanded] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState(null); // 'success' | 'error' | null
   const [notes, setNotes] = useState(progress?.notes || '');
   const [localStatus, setLocalStatus] = useState(progress?.status || 'not_started');
+  const [localDocsFound, setLocalDocsFound] = useState(progress?.documents_found || []);
   const fileInputRef = React.useRef(null);
   
+  // Sync local docs with progress prop
+  React.useEffect(() => {
+    setLocalDocsFound(progress?.documents_found || []);
+  }, [progress?.documents_found]);
+  
   const findings = progress?.findings;
-  const docsFound = progress?.documents_found || [];
   const reportsNeeded = action.reports_needed || [];
   const expectedCount = reportsNeeded.length || 1;
   
@@ -56,12 +62,14 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
     try {
       const res = await api.post(`/playbooks/year-end/scan/${projectId}/${action.action_id}`);
       if (res.data) {
+        const newDocs = res.data.documents?.map(d => d.filename) || [];
+        setLocalDocsFound(newDocs);
+        setLocalStatus(res.data.suggested_status);
         onUpdate(action.action_id, {
           status: res.data.suggested_status,
           findings: res.data.findings,
-          documents_found: res.data.documents?.map(d => d.filename) || []
+          documents_found: newDocs
         });
-        setLocalStatus(res.data.suggested_status);
       }
     } catch (err) {
       console.error('Scan failed:', err);
@@ -79,25 +87,37 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
     if (!files || files.length === 0) return;
     
     setUploading(true);
+    setUploadStatus(null);
+    
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const formData = new FormData();
         formData.append('file', file);
         formData.append('project_id', projectId);
+        // Tag with action for context
+        formData.append('tags', `year-end,${action.action_id}`);
         
         await api.post('/documents/upload', formData, {
           headers: { 'Content-Type': 'multipart/form-data' }
         });
       }
       
-      // After upload, auto-scan to find the new docs
-      await handleScan();
+      setUploadStatus('success');
+      
+      // Wait briefly for ChromaDB indexing, then scan
+      setTimeout(async () => {
+        await handleScan();
+        // Clear success status after scan completes
+        setTimeout(() => setUploadStatus(null), 2000);
+      }, 1500);
+      
     } catch (err) {
       console.error('Upload failed:', err);
+      setUploadStatus('error');
+      setTimeout(() => setUploadStatus(null), 3000);
     } finally {
       setUploading(false);
-      // Reset file input
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -129,6 +149,31 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
     } catch (err) {
       console.error('Failed to save notes:', err);
     }
+  };
+
+  // Determine upload button state
+  const getUploadButtonContent = () => {
+    if (uploading) return '⏳ Uploading...';
+    if (uploadStatus === 'success') return '✓ Uploaded!';
+    if (uploadStatus === 'error') return '✗ Failed';
+    return (
+      <>
+        📤 Upload Document
+        <span style={styles.docCount}>
+          {localDocsFound.length}/{expectedCount}
+        </span>
+      </>
+    );
+  };
+
+  const getUploadButtonStyle = () => {
+    if (uploadStatus === 'success') {
+      return { ...styles.uploadBtn, background: '#C6EFCE', color: '#006600' };
+    }
+    if (uploadStatus === 'error') {
+      return { ...styles.uploadBtn, background: '#FFC7CE', color: '#9C0006' };
+    }
+    return styles.uploadBtn;
   };
 
   const styles = {
@@ -297,6 +342,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
       display: 'flex',
       alignItems: 'center',
       gap: '0.5rem',
+      transition: 'background 0.2s, color 0.2s',
     },
     scanBtn: {
       padding: '0.5rem 1rem',
@@ -340,9 +386,9 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
               <span style={styles.dueDate}>📅 Due: {action.due_date}</span>
             )}
             <span style={styles.actionType}>{action.action_type}</span>
-            {docsFound.length > 0 && (
+            {localDocsFound.length > 0 && (
               <span style={{ fontSize: '0.75rem', color: COLORS.grassGreen }}>
-                ✓ {docsFound.length} doc{docsFound.length > 1 ? 's' : ''} found
+                ✓ {localDocsFound.length} doc{localDocsFound.length > 1 ? 's' : ''} found
               </span>
             )}
           </div>
@@ -376,23 +422,16 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
                 accept=".pdf,.xlsx,.xls,.csv,.docx,.doc,.txt"
               />
               <button 
-                style={styles.uploadBtn} 
+                style={getUploadButtonStyle()} 
                 onClick={(e) => { e.stopPropagation(); handleUploadClick(); }}
-                disabled={uploading}
+                disabled={uploading || scanning}
               >
-                {uploading ? '⏳ Uploading...' : (
-                  <>
-                    📤 Upload Document
-                    <span style={styles.docCount}>
-                      {docsFound.length}/{expectedCount}
-                    </span>
-                  </>
-                )}
+                {getUploadButtonContent()}
               </button>
               <button 
                 style={styles.scanBtn} 
                 onClick={(e) => { e.stopPropagation(); handleScan(); }}
-                disabled={scanning}
+                disabled={scanning || uploading}
               >
                 {scanning ? '⏳ Scanning...' : '🔍 Scan Documents'}
               </button>
@@ -400,11 +439,11 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
           </div>
 
           {/* Documents Found */}
-          {docsFound.length > 0 && (
+          {localDocsFound.length > 0 && (
             <div style={styles.section}>
-              <div style={styles.sectionTitle}>Documents Found</div>
+              <div style={styles.sectionTitle}>Documents Found ({localDocsFound.length})</div>
               <div style={styles.docsFound}>
-                {docsFound.map((doc, i) => (
+                {localDocsFound.map((doc, i) => (
                   <span key={i} style={styles.docBadge}>📄 {doc}</span>
                 ))}
               </div>
