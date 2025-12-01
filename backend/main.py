@@ -18,6 +18,13 @@ try:
 except ImportError:
     VACUUM_AVAILABLE = False
 
+# Import playbooks router
+try:
+    from backend.routers import playbooks
+    PLAYBOOKS_AVAILABLE = True
+except ImportError:
+    PLAYBOOKS_AVAILABLE = False
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -28,9 +35,10 @@ app = FastAPI(title="XLR8", version="2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://xlr8-six.vercel.app",   # Production Vercel
-        "http://localhost:5173",          # Vite dev server
-        "http://localhost:3000",          # Alternative dev server
+        "https://xlr8-six.vercel.app",                           # Production Vercel
+        "https://xlr8-git-main-scott-showers-projects.vercel.app", # Vercel preview
+        "http://localhost:5173",                                  # Vite dev server
+        "http://localhost:3000",                                  # Alternative dev server
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -51,6 +59,13 @@ if VACUUM_AVAILABLE:
     logger.info("Vacuum router registered")
 else:
     logger.warning("Vacuum router not available")
+
+# Register playbooks router if available
+if PLAYBOOKS_AVAILABLE:
+    app.include_router(playbooks.router, prefix="/api", tags=["playbooks"])
+    logger.info("Playbooks router registered")
+else:
+    logger.warning("Playbooks router not available")
 
 @app.get("/api/health")
 async def health():
