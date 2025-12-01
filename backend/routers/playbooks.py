@@ -70,6 +70,17 @@ async def generate_year_end_workbook(request: GenerateRequest):
         all_context = []
         docs_analyzed = 0
         
+        def clean_encrypted_content(text: str) -> str:
+            """Remove encrypted values from text - they're not useful for config analysis."""
+            import re
+            # Remove ENC256: encrypted values (they look like ENC256:base64string==)
+            cleaned = re.sub(r'ENC256:[A-Za-z0-9+/=]+', '[ENCRYPTED]', text)
+            # If more than 30% of content is [ENCRYPTED], skip this chunk
+            encrypted_count = cleaned.count('[ENCRYPTED]')
+            if encrypted_count > 10:  # Too much encrypted content
+                return None
+            return cleaned
+        
         for query in doc_queries:
             try:
                 results = rag.query(
@@ -80,8 +91,11 @@ async def generate_year_end_workbook(request: GenerateRequest):
                 if results and results.get('documents'):
                     for doc in results['documents'][0]:
                         if doc and len(doc) > 100:  # Only meaningful content
-                            all_context.append(doc[:3000])  # Limit per doc
-                            docs_analyzed += 1
+                            # Clean out encrypted values
+                            cleaned_doc = clean_encrypted_content(doc)
+                            if cleaned_doc and len(cleaned_doc) > 100:
+                                all_context.append(cleaned_doc[:3000])  # Limit per doc
+                                docs_analyzed += 1
             except Exception as e:
                 logger.warning(f"Query failed for '{query}': {e}")
         
