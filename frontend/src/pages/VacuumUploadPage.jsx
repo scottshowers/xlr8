@@ -859,6 +859,8 @@ export default function VacuumUploadPage() {
           }}
         />
       )}
+      {/* Debug */}
+      {showAssist && console.log('ConsultantAssist extractionId:', result?.extract_id, 'full result:', result)}
     </div>
   );
 }
