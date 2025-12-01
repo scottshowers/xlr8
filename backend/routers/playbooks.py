@@ -261,7 +261,7 @@ def get_default_year_end_structure() -> Dict[str, Any]:
 # ============================================================================
 
 @router.get("/year-end/progress/{project_id}")
-async def get_progress(project_id: int):
+async def get_progress(project_id: str):
     """Get playbook progress for a project."""
     if project_id not in PLAYBOOK_PROGRESS:
         PLAYBOOK_PROGRESS[project_id] = {}
@@ -274,7 +274,7 @@ async def get_progress(project_id: int):
 
 
 @router.post("/year-end/progress/{project_id}/{action_id}")
-async def update_progress(project_id: int, action_id: str, update: ActionUpdate):
+async def update_progress(project_id: str, action_id: str, update: ActionUpdate):
     """Update status for a specific action."""
     if project_id not in PLAYBOOK_PROGRESS:
         PLAYBOOK_PROGRESS[project_id] = {}
@@ -294,7 +294,7 @@ async def update_progress(project_id: int, action_id: str, update: ActionUpdate)
 # ============================================================================
 
 @router.post("/year-end/scan/{project_id}/{action_id}")
-async def scan_for_action(project_id: int, action_id: str):
+async def scan_for_action(project_id: str, action_id: str):
     """
     Scan project documents for content relevant to a specific action.
     Returns findings and suggested status.
@@ -460,7 +460,7 @@ Return ONLY valid JSON."""
 # ============================================================================
 
 @router.get("/year-end/export/{project_id}")
-async def export_progress(project_id: int, customer_name: str = "Customer"):
+async def export_progress(project_id: str, customer_name: str = "Customer"):
     """Export current playbook progress as XLSX."""
     
     structure = await get_year_end_structure()
