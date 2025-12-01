@@ -719,7 +719,7 @@ function GlobalDataTab() {
         type="file"
         ref={fileInputRef}
         style={{ display: 'none' }}
-        accept=".xlsx,.xls,.csv"
+        accept=".doc,.docx,.xls,.xlsx,.csv,.pdf,.txt"
         onChange={handleFileSelect}
       />
       <div style={styles.header}>
