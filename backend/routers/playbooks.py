@@ -69,7 +69,7 @@ async def get_year_end_structure():
     
     # Try to find and parse the Year-End doc from Global Data
     try:
-        from backend.utils.playbook_parser import parse_year_end_checklist
+        from utils.playbook_parser import parse_year_end_checklist
         
         # Look for Year-End doc in global data or known locations
         possible_paths = [
@@ -300,7 +300,7 @@ async def scan_for_action(project_id: str, action_id: str):
     Returns findings and suggested status.
     """
     try:
-        from backend.utils.rag_handler import RAGHandler
+        from utils.rag_handler import RAGHandler
         
         # Get action details from structure
         structure = await get_year_end_structure()
@@ -905,7 +905,7 @@ async def upload_playbook_definition(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="File must be a .docx document")
     
     try:
-        from backend.utils.playbook_parser import parse_year_end_checklist
+        from utils.playbook_parser import parse_year_end_checklist
         import tempfile
         
         # Save to temp file
