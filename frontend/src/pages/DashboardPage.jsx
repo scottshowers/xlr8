@@ -100,68 +100,70 @@ export default function DashboardPage() {
       margin: '0 auto',
     },
     
-    // Hero Section
+    // Hero Section - Compact, subtle
     hero: {
-      background: `linear-gradient(135deg, ${COLORS.turkishSea} 0%, ${COLORS.electricBlue} 100%)`,
-      borderRadius: '20px',
-      padding: '2.5rem',
-      marginBottom: '2rem',
-      color: 'white',
-      position: 'relative',
-      overflow: 'hidden',
-    },
-    heroPattern: {
-      position: 'absolute',
-      top: 0,
-      right: 0,
-      bottom: 0,
-      width: '40%',
-      opacity: 0.1,
-      background: `repeating-linear-gradient(
-        45deg,
-        transparent,
-        transparent 10px,
-        rgba(255,255,255,0.1) 10px,
-        rgba(255,255,255,0.1) 20px
-      )`,
+      background: '#f8f9fa',
+      borderRadius: '12px',
+      padding: '1.25rem 1.5rem',
+      marginBottom: '1.5rem',
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      border: '1px solid #e1e5e9',
     },
     heroContent: {
-      position: 'relative',
-      zIndex: 1,
+      display: 'flex',
+      alignItems: 'center',
+      gap: '1rem',
+    },
+    heroIcon: {
+      width: '48px',
+      height: '48px',
+      background: COLORS.grassGreen,
+      borderRadius: '10px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: '1.5rem',
+    },
+    heroText: {
+      display: 'flex',
+      flexDirection: 'column',
     },
     greeting: {
-      fontSize: '0.9rem',
-      opacity: 0.9,
-      marginBottom: '0.5rem',
-      fontWeight: '500',
+      fontSize: '0.8rem',
+      color: COLORS.silver,
+      marginBottom: '0.15rem',
     },
     heroTitle: {
       fontFamily: "'Sora', sans-serif",
-      fontSize: '2rem',
+      fontSize: '1.25rem',
       fontWeight: '700',
-      margin: '0 0 0.5rem 0',
+      color: COLORS.text,
+      margin: 0,
     },
     heroSubtitle: {
-      fontSize: '1rem',
-      opacity: 0.9,
-      maxWidth: '600px',
+      fontSize: '0.85rem',
+      color: COLORS.textLight,
+      marginTop: '0.1rem',
     },
     heroStats: {
       display: 'flex',
-      gap: '3rem',
-      marginTop: '2rem',
+      gap: '2rem',
     },
     heroStat: {
       display: 'flex',
       flexDirection: 'column',
+      alignItems: 'center',
     },
     heroStatValue: {
-      fontSize: '2rem',
+      fontSize: '1.25rem',
       fontWeight: '700',
+      color: COLORS.text,
     },
     heroStatLabel: {
-      fontSize: '0.85rem',
-      opacity: 0.8,
+      fontSize: '0.75rem',
+      color: COLORS.silver,
     },
 
     // Main Grid
@@ -465,34 +467,36 @@ export default function DashboardPage() {
 
     // No project selected state
     noProjectHero: {
-      background: `linear-gradient(135deg, ${COLORS.iceFlow} 0%, ${COLORS.clearwater} 100%)`,
-      borderRadius: '20px',
-      padding: '3rem 2.5rem',
-      marginBottom: '2rem',
+      background: '#f8f9fa',
+      border: '1px solid #e1e5e9',
+      borderRadius: '12px',
+      padding: '2rem',
+      marginBottom: '1.5rem',
       textAlign: 'center',
     },
     noProjectTitle: {
       fontFamily: "'Sora', sans-serif",
-      fontSize: '1.75rem',
+      fontSize: '1.25rem',
       fontWeight: '700',
       color: COLORS.text,
       marginBottom: '0.5rem',
     },
     noProjectText: {
       color: COLORS.textLight,
-      marginBottom: '1.5rem',
+      fontSize: '0.9rem',
+      marginBottom: '1.25rem',
     },
     selectProjectBtn: {
       display: 'inline-flex',
       alignItems: 'center',
       gap: '0.5rem',
-      padding: '0.75rem 1.5rem',
-      background: COLORS.turkishSea,
+      padding: '0.6rem 1.25rem',
+      background: COLORS.grassGreen,
       color: 'white',
       border: 'none',
       borderRadius: '8px',
       fontWeight: '600',
-      fontSize: '0.95rem',
+      fontSize: '0.9rem',
       cursor: 'pointer',
       textDecoration: 'none',
     },
@@ -503,11 +507,10 @@ export default function DashboardPage() {
     return (
       <div style={styles.container}>
         <div style={styles.noProjectHero}>
-          <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🚀</div>
-          <h1 style={styles.noProjectTitle}>{getGreeting()}! Ready to get started?</h1>
-          <p style={styles.noProjectText}>Select a project to begin your implementation journey.</p>
+          <h1 style={styles.noProjectTitle}>{getGreeting()}! Select a project to get started</h1>
+          <p style={styles.noProjectText}>Choose a project below or create a new one.</p>
           <Link to="/projects" style={styles.selectProjectBtn}>
-            📁 Select a Project
+            📁 Go to Projects
           </Link>
         </div>
 
@@ -571,32 +574,34 @@ export default function DashboardPage() {
 
   return (
     <div style={styles.container}>
-      {/* Hero Section */}
+      {/* Hero Section - Compact */}
       <div style={styles.hero}>
-        <div style={styles.heroPattern} />
         <div style={styles.heroContent}>
-          <div style={styles.greeting}>{getGreeting()}</div>
-          <h1 style={styles.heroTitle}>{activeProject.name}</h1>
-          <p style={styles.heroSubtitle}>
-            {activeProject.customer} • {activeProject.product || 'UKG Pro'} Implementation
-          </p>
-          <div style={styles.heroStats}>
-            <div style={styles.heroStat}>
-              <span style={styles.heroStatValue}>{stats.documents}</span>
-              <span style={styles.heroStatLabel}>Documents</span>
-            </div>
-            <div style={styles.heroStat}>
-              <span style={styles.heroStatValue}>{stats.structured}</span>
-              <span style={styles.heroStatLabel}>Data Files</span>
-            </div>
-            <div style={styles.heroStat}>
-              <span style={styles.heroStatValue}>{stats.tables}</span>
-              <span style={styles.heroStatLabel}>Tables</span>
-            </div>
-            <div style={styles.heroStat}>
-              <span style={styles.heroStatValue}>{(stats.rows || 0).toLocaleString()}</span>
-              <span style={styles.heroStatLabel}>Rows</span>
-            </div>
+          <div style={styles.heroIcon}>🏢</div>
+          <div style={styles.heroText}>
+            <div style={styles.greeting}>{getGreeting()}</div>
+            <h1 style={styles.heroTitle}>{activeProject.name}</h1>
+            <p style={styles.heroSubtitle}>
+              {activeProject.customer} • {activeProject.product || 'UKG Pro'}
+            </p>
+          </div>
+        </div>
+        <div style={styles.heroStats}>
+          <div style={styles.heroStat}>
+            <span style={styles.heroStatValue}>{stats.documents}</span>
+            <span style={styles.heroStatLabel}>Docs</span>
+          </div>
+          <div style={styles.heroStat}>
+            <span style={styles.heroStatValue}>{stats.structured}</span>
+            <span style={styles.heroStatLabel}>Files</span>
+          </div>
+          <div style={styles.heroStat}>
+            <span style={styles.heroStatValue}>{stats.tables}</span>
+            <span style={styles.heroStatLabel}>Tables</span>
+          </div>
+          <div style={styles.heroStat}>
+            <span style={styles.heroStatValue}>{(stats.rows || 0).toLocaleString()}</span>
+            <span style={styles.heroStatLabel}>Rows</span>
           </div>
         </div>
       </div>
