@@ -1,6 +1,5 @@
 import { Link } from 'react-router-dom'
 import { 
-  Lock, 
   Shield,
   Database, 
   Cpu,
@@ -9,16 +8,12 @@ import {
   MessageSquare,
   FileText,
   BookOpen,
-  BarChart3,
   Users,
   ArrowRight,
   Rocket,
-  CheckCircle,
-  Sparkles,
-  Table,
-  FileSpreadsheet,
-  Eye,
-  GitBranch
+  Brain,
+  Clock,
+  TrendingUp
 } from 'lucide-react'
 
 // Brand Colors
@@ -51,7 +46,7 @@ const SpeedLinesStyles = () => (
   `}</style>
 )
 
-// Speed Lines Component - positioned BEHIND the H
+// Speed Lines Component
 const SpeedLines = () => (
   <div style={{
     position: 'absolute',
@@ -69,12 +64,10 @@ const SpeedLines = () => (
   </div>
 )
 
-// Full Detail White H Logo SVG Component
+// H Logo SVG Component
 const HLogoWhiteFull = ({ size = 90 }) => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 570 570" style={{ width: size, height: size, position: 'relative', zIndex: 1 }}>
-    {/* Drop Shadow */}
     <path fill="#c5c4cc" d="M495.76,506.16v-31.35l-36.53-35.01V169.93c0-15.8,.94-16.74,16.74-16.74h19.79v-31.36l-45.66-45.66H76.72v31.36l36.53,36.53V412.4c0,15.8-.94,16.74-16.74,16.74h-19.79v31.35l45.66,45.66H495.76Zm-197.11-93.76c0,15.8-.94,16.74-16.74,16.74h-8.07v-103.81h24.81v87.07Zm-24.81-242.48c0-15.8,.94-16.74,16.74-16.74h8.07v95.13h-24.81v-78.39Z"/>
-    {/* Inner Lines */}
     <g fill="#dedde6">
       <rect x="138.52" y="354.41" width="64.39" height="11.87"/>
       <rect x="138.52" y="331.12" width="64.39" height="11.87"/>
@@ -107,9 +100,7 @@ const HLogoWhiteFull = ({ size = 90 }) => (
       <rect x="323.91" y="262.17" width="64.39" height="11.87"/>
       <rect x="323.91" y="239.34" width="64.39" height="11.87"/>
     </g>
-    {/* Base H with internal lines */}
     <path fill="#f9f8ff" d="M430.31,101.43h13.7v-19.18h-173.52v19.18h11.42c19.18,0,22.83,3.65,22.83,22.83V254.4h-82.65V124.26c0-19.18,3.65-22.83,22.83-22.83h11.42v-19.18H82.81v19.18h13.7c19.18,0,22.83,3.65,22.83,22.83V412.4c0,19.18-3.65,22.83-22.83,22.83h-13.7v19.18h173.52v-19.18h-11.42c-19.18,0-22.83-3.65-22.83-22.83v-138.82h82.65v138.82c0,19.18-3.65,22.83-22.83,22.83h-11.42v19.18h173.52v-19.18h-13.7c-19.18,0-22.83-3.65-22.83-22.83V124.26c0-19.18,3.65-22.83,22.83-22.83Zm-42.01,45.66v11.87h-64.39v-11.87h64.39Zm-64.39-10.96v-11.87h64.39v11.87h-64.39Zm64.39,34.25v11.87h-64.39v-11.87h64.39Zm0,22.83v11.87h-64.39v-11.87h64.39Zm0,23.29v11.87h-64.39v-11.87h64.39Zm0,22.83v11.87h-64.39v-11.87h64.39Zm0,22.83v11.87h-64.39v-11.87h64.39Zm0,23.29v11.87h-64.39v-11.87h64.39Zm0,22.83v11.87h-64.39v-11.87h64.39Zm0,22.83v11.87h-64.39v-11.87h64.39Zm0,23.29v11.87h-64.39v-11.87h64.39Zm0,22.83v11.87h-64.39v-11.87h64.39Zm0,22.83v11.87h-64.39v-11.87h64.39Zm.91,23.29c.46,4.57,1.37,8.22,2.74,11.87h-71.69c1.37-3.65,2.74-7.31,3.2-11.87h65.75Zm0-310.05h-65.75c-.46-4.57-1.83-8.68-3.2-11.87h71.69c-1.37,3.2-2.28,7.31-2.74,11.87Zm-186.31,33.79v11.87h-64.39v-11.87h64.39Zm-64.39-10.96v-11.87h64.39v11.87h-64.39Zm64.39,34.25v11.87h-64.39v-11.87h64.39Zm0,22.83v11.87h-64.39v-11.87h64.39Zm0,23.29v11.87h-64.39v-11.87h64.39Zm0,22.83v11.87h-64.39v-11.87h64.39Zm0,22.83v11.87h-64.39v-11.87h64.39Zm0,23.29v11.87h-64.39v-11.87h64.39Zm0,22.83v11.87h-64.39v-11.87h64.39Zm0,22.83v11.87h-64.39v-11.87h64.39Zm0,23.29v11.87h-64.39v-11.87h64.39Zm0,22.83v11.87h-64.39v-11.87h64.39Zm0,22.83v11.87h-64.39v-11.87h64.39Zm.91,23.29c.46,4.57,1.37,8.22,2.74,11.87h-71.69c1.37-3.65,2.74-7.31,3.2-11.87h65.76Zm0-310.05h-65.76c-.46-4.57-1.83-8.68-3.2-11.87h71.69c-1.37,3.2-2.28,7.31-2.74,11.87Z"/>
-    {/* Outer Stroke */}
     <path fill="#dedde6" d="M430.31,107.52h19.79v-31.36h-183.7v31.36h15.5c15.8,0,16.74,.94,16.74,16.74v124.05h-70.47V124.26c0-15.8,.94-16.74,16.74-16.74h15.5v-31.36H76.72v31.36h19.79c15.8,0,16.74,.94,16.74,16.74V412.4c0,15.8-.94,16.74-16.74,16.74h-19.79v31.35h183.7v-31.35h-15.5c-15.8,0-16.74-.94-16.74-16.74v-132.73h70.47v132.73c0,15.8,.94,16.74-16.74,16.74h-15.5v31.35h183.7v-31.35h-19.79c-15.8,0-16.74-.94-16.74-16.74V124.26c0-15.8,.94-16.74,16.74-16.74Zm0,327.71h13.7v19.18h-173.52v-19.18h11.42c19.18,0,22.83-3.65,22.83-22.83v-138.82h-82.65v138.82c0,19.18,3.65,22.83,22.83,22.83h11.42v19.18H82.81v-19.18h13.7c19.18,0,22.83-3.65,22.83-22.83V124.26c0-19.18-3.65-22.83-22.83-22.83h-13.7v-19.18h173.52v19.18h-11.42c-19.18,0-22.83,3.65-22.83,22.83V254.4h82.65V124.26c0-19.18-3.65-22.83-22.83-22.83h-11.42v-19.18h173.52v19.18h-13.7c-19.18,0-22.83,3.65-22.83,22.83V412.4c0,19.18,3.65,22.83,22.83,22.83Z"/>
   </svg>
 )
@@ -119,7 +110,7 @@ export default function Landing() {
     <div style={{ minHeight: '100vh', background: COLORS.white }}>
       <SpeedLinesStyles />
       
-      {/* HERO - Compact, H is the star */}
+      {/* HERO */}
       <div style={{
         background: COLORS.grassGreen,
         color: 'white',
@@ -134,19 +125,11 @@ export default function Landing() {
           flexWrap: 'wrap',
           gap: '1.5rem'
         }}>
-          {/* Left side - H Logo with speed lines + XLR8 🚀 Analysis Platform */}
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: '1rem'
-          }}>
-            {/* H Logo container with speed lines BEHIND - BIGGER */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
             <div style={{ position: 'relative' }}>
               <SpeedLines />
               <HLogoWhiteFull size={100} />
             </div>
-            
-            {/* XLR8 🚀 Analysis Platform - all inline */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <span style={{ 
                 fontFamily: "'Ubuntu Mono', monospace",
@@ -169,49 +152,24 @@ export default function Landing() {
             </div>
           </div>
           
-          {/* Right side - CTA Buttons */}
-          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-            <Link 
-              to="/workspace" 
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.625rem 1.25rem',
-                background: 'white',
-                color: COLORS.grassGreen,
-                border: 'none',
-                borderRadius: '8px',
-                fontSize: '0.9rem',
-                fontWeight: '600',
-                textDecoration: 'none',
-                cursor: 'pointer'
-              }}
-            >
-              Launch Workspace
-              <ArrowRight style={{ width: 16, height: 16 }} />
-            </Link>
-            <Link 
-              to="/vacuum" 
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.625rem 1.25rem',
-                background: 'rgba(255,255,255,0.15)',
-                color: 'white',
-                border: '1px solid rgba(255,255,255,0.3)',
-                borderRadius: '8px',
-                fontSize: '0.9rem',
-                fontWeight: '600',
-                textDecoration: 'none',
-                cursor: 'pointer'
-              }}
-            >
-              <FileSearch style={{ width: 16, height: 16 }} />
-              Vacuum Extractor
-            </Link>
-          </div>
+          <Link 
+            to="/workspace" 
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.625rem 1.25rem',
+              background: 'white',
+              color: COLORS.grassGreen,
+              borderRadius: '8px',
+              fontSize: '0.9rem',
+              fontWeight: '600',
+              textDecoration: 'none'
+            }}
+          >
+            Launch Workspace
+            <ArrowRight style={{ width: 16, height: 16 }} />
+          </Link>
         </div>
       </div>
 
@@ -220,164 +178,90 @@ export default function Landing() {
         
         {/* Tagline */}
         <section style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
+          <h1 style={{
+            fontFamily: "'Sora', sans-serif",
+            fontSize: '1.75rem',
+            fontWeight: '700',
+            color: COLORS.text,
+            marginBottom: '0.75rem'
+          }}>
+            AI-Powered HCM Implementation Analysis
+          </h1>
           <p style={{
             fontFamily: "'Manrope', sans-serif",
-            fontSize: '1.2rem',
+            fontSize: '1.1rem',
             color: COLORS.textLight,
-            maxWidth: '700px',
+            maxWidth: '650px',
             margin: '0 auto',
             lineHeight: '1.7'
           }}>
-            AI-powered document analysis for HCM implementations. Extract payroll data, 
-            analyze configurations, and accelerate your UKG deployments.
+            Reduce implementation timelines by 50%. Analyze source documents, extract configurations, 
+            and accelerate UKG deployments with intelligent automation.
           </p>
         </section>
 
-        {/* Vacuum Extractor - Featured */}
+        {/* Value Props */}
         <section style={{ marginBottom: '2.5rem' }}>
-          <div style={{ 
-            background: 'linear-gradient(135deg, #83b16d 0%, #6a9a56 100%)',
-            borderRadius: '16px',
-            padding: '2rem',
-            color: 'white'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
-              <FileSearch style={{ width: 28, height: 28 }} />
-              <h2 style={{
-                fontFamily: "'Sora', sans-serif",
-                fontSize: '1.5rem',
-                fontWeight: '700',
-                margin: 0
-              }}>
-                Vacuum Extractor
-              </h2>
-              <span style={{
-                background: 'rgba(255,255,255,0.2)',
-                padding: '0.25rem 0.75rem',
-                borderRadius: '12px',
-                fontSize: '0.75rem',
-                fontWeight: '600'
-              }}>
-                LIVE
-              </span>
-            </div>
-            <p style={{ 
-              fontSize: '1rem', 
-              opacity: 0.9, 
-              marginBottom: '1.5rem',
-              maxWidth: '600px'
-            }}>
-              Extract complete payroll register data from any vendor PDF. Intelligent column detection, 
-              automatic vendor recognition, and validated output ready for UKG conversion.
-            </p>
-            
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-              gap: '1rem',
-              marginBottom: '1.5rem'
-            }}>
-              {[
-                { icon: <Sparkles size={18} />, text: 'Auto-detect Paycom, Dayforce, ADP & more' },
-                { icon: <Table size={18} />, text: 'Column-aware extraction with YTD separation' },
-                { icon: <CheckCircle size={18} />, text: 'Net pay validation & confidence scoring' },
-                { icon: <Eye size={18} />, text: 'Consultant Assist for edge cases' },
-                { icon: <FileSpreadsheet size={18} />, text: 'Export to Excel with full detail' },
-                { icon: <GitBranch size={18} />, text: 'EE/ER tax & deduction classification' },
-              ].map((item, idx) => (
-                <div key={idx} style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '0.5rem',
-                  fontSize: '0.9rem'
-                }}>
-                  {item.icon}
-                  <span>{item.text}</span>
-                </div>
-              ))}
-            </div>
-
-            <Link 
-              to="/vacuum" 
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.75rem 1.5rem',
-                background: 'white',
-                color: COLORS.grassGreen,
-                border: 'none',
-                borderRadius: '8px',
-                fontSize: '0.95rem',
-                fontWeight: '600',
-                textDecoration: 'none',
-                cursor: 'pointer'
-              }}
-            >
-              Try Vacuum Extractor
-              <ArrowRight style={{ width: 18, height: 18 }} />
-            </Link>
-          </div>
-        </section>
-
-        {/* Tech Stack */}
-        <section style={{ marginBottom: '2.5rem' }}>
-          <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
-            <h2 style={{
-              fontFamily: "'Sora', sans-serif",
-              fontSize: '1.35rem',
-              fontWeight: '700',
-              color: COLORS.text
-            }}>
-              Built for Scale & Intelligence
-            </h2>
-          </div>
-
           <div style={{ 
             display: 'grid', 
-            gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-            gap: '1rem'
+            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+            gap: '1.25rem'
           }}>
             {[
-              { icon: <Cpu style={{ width: 20, height: 20 }} />, title: 'Claude AI Powered', desc: 'Anthropic Claude for intelligent document understanding and extraction.' },
-              { icon: <FileSearch style={{ width: 20, height: 20 }} />, title: 'PyMuPDF + Textract', desc: 'Local extraction for privacy, AWS Textract for scanned documents.' },
-              { icon: <Zap style={{ width: 20, height: 20 }} />, title: 'Vendor-Specific Prompts', desc: 'Trained prompts for each payroll vendor format and layout.' }
+              { 
+                icon: <Clock style={{ width: 24, height: 24 }} />, 
+                title: '50% Faster Analysis', 
+                desc: 'What takes weeks manually, we do in days. AI reads and interprets your source documents automatically.' 
+              },
+              { 
+                icon: <Brain style={{ width: 24, height: 24 }} />, 
+                title: 'Domain Expertise Built-In', 
+                desc: 'Trained on UKG configurations, payroll rules, and implementation best practices from 20+ certified consultants.' 
+              },
+              { 
+                icon: <TrendingUp style={{ width: 24, height: 24 }} />, 
+                title: 'Quality & Consistency', 
+                desc: 'Eliminate human error in data gathering. Every extraction validated, every configuration cross-referenced.' 
+              }
             ].map((item, idx) => (
               <div key={idx} style={{
                 background: 'white',
-                borderRadius: '10px',
-                padding: '1.25rem',
-                boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-                display: 'flex',
-                gap: '0.75rem'
+                borderRadius: '12px',
+                padding: '1.5rem',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+                borderLeft: `4px solid ${COLORS.grassGreen}`
               }}>
                 <div style={{
-                  flexShrink: 0,
-                  width: '40px',
-                  height: '40px',
+                  width: '48px',
+                  height: '48px',
                   background: COLORS.iceFlow,
-                  borderRadius: '8px',
+                  borderRadius: '10px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  color: COLORS.grassGreen
+                  color: COLORS.grassGreen,
+                  marginBottom: '1rem'
                 }}>
                   {item.icon}
                 </div>
-                <div>
-                  <h3 style={{ fontFamily: "'Sora', sans-serif", fontSize: '0.95rem', fontWeight: '600', color: COLORS.text, marginBottom: '0.25rem' }}>
-                    {item.title}
-                  </h3>
-                  <p style={{ fontSize: '0.85rem', color: COLORS.textLight, lineHeight: 1.5, margin: 0 }}>
-                    {item.desc}
-                  </p>
-                </div>
+                <h3 style={{ 
+                  fontFamily: "'Sora', sans-serif", 
+                  fontSize: '1.1rem', 
+                  fontWeight: '600', 
+                  color: COLORS.text, 
+                  marginBottom: '0.5rem' 
+                }}>
+                  {item.title}
+                </h3>
+                <p style={{ fontSize: '0.9rem', color: COLORS.textLight, lineHeight: 1.6, margin: 0 }}>
+                  {item.desc}
+                </p>
               </div>
             ))}
           </div>
         </section>
 
-        {/* Platform Features */}
+        {/* Platform Capabilities */}
         <section style={{ marginBottom: '2.5rem' }}>
           <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
             <h2 style={{
@@ -392,16 +276,16 @@ export default function Landing() {
 
           <div style={{ 
             display: 'grid', 
-            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
             gap: '1rem'
           }}>
             {[
-              { icon: <MessageSquare style={{ width: 18, height: 18 }} />, title: 'AI Workspace', desc: 'Chat across documents' },
-              { icon: <FileText style={{ width: 18, height: 18 }} />, title: 'Multi-File Upload', desc: 'Batch processing' },
-              { icon: <Database style={{ width: 18, height: 18 }} />, title: 'Normalized Schema', desc: 'Structured data output' },
-              { icon: <BookOpen style={{ width: 18, height: 18 }} />, title: 'Playbooks', desc: 'Analysis templates' },
-              { icon: <BarChart3 style={{ width: 18, height: 18 }} />, title: 'Live Validation', desc: 'Real-time checking' },
-              { icon: <Users style={{ width: 18, height: 18 }} />, title: 'Project Isolation', desc: 'Secure workspaces' }
+              { icon: <MessageSquare style={{ width: 18, height: 18 }} />, title: 'AI Workspace', desc: 'Chat across all your documents' },
+              { icon: <FileText style={{ width: 18, height: 18 }} />, title: 'Multi-Source Upload', desc: 'PDFs, spreadsheets, policies' },
+              { icon: <BookOpen style={{ width: 18, height: 18 }} />, title: 'Playbooks', desc: 'Guided analysis workflows' },
+              { icon: <FileSearch style={{ width: 18, height: 18 }} />, title: 'Vacuum Extractor', desc: 'Payroll register parsing' },
+              { icon: <Database style={{ width: 18, height: 18 }} />, title: 'Structured Output', desc: 'Ready for UKG load' },
+              { icon: <Users style={{ width: 18, height: 18 }} />, title: 'Project Isolation', desc: 'Secure customer workspaces' }
             ].map((feature, idx) => (
               <div key={idx} style={{
                 background: 'white',
@@ -438,51 +322,60 @@ export default function Landing() {
           </div>
         </section>
 
-        {/* Supported Vendors */}
+        {/* Tech Stack */}
         <section style={{ marginBottom: '2.5rem' }}>
-          <div style={{ 
-            background: 'white',
-            borderRadius: '12px',
-            padding: '1.5rem',
-            boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-            textAlign: 'center'
-          }}>
-            <h3 style={{
+          <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+            <h2 style={{
               fontFamily: "'Sora', sans-serif",
-              fontSize: '1rem',
-              fontWeight: '600',
-              color: COLORS.text,
-              marginBottom: '1rem'
+              fontSize: '1.35rem',
+              fontWeight: '700',
+              color: COLORS.text
             }}>
-              Supported Payroll Vendors
-            </h3>
-            <div style={{ 
-              display: 'flex', 
-              flexWrap: 'wrap', 
-              justifyContent: 'center', 
-              gap: '0.75rem' 
-            }}>
-              {['Paycom', 'Dayforce', 'ADP', 'Paychex', 'UKG Pro', 'Workday', 'Gusto', 'QuickBooks'].map((vendor, idx) => (
-                <span key={idx} style={{
-                  padding: '0.5rem 1rem',
-                  background: idx < 2 ? COLORS.grassGreen : COLORS.iceFlow,
-                  color: idx < 2 ? 'white' : COLORS.text,
-                  borderRadius: '20px',
-                  fontSize: '0.85rem',
-                  fontWeight: '500'
+              Built for Enterprise
+            </h2>
+          </div>
+
+          <div style={{ 
+            display: 'grid', 
+            gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+            gap: '1rem'
+          }}>
+            {[
+              { icon: <Cpu style={{ width: 20, height: 20 }} />, title: 'AI-Assisted Analysis', desc: 'Intelligent document understanding with human oversight.' },
+              { icon: <Shield style={{ width: 20, height: 20 }} />, title: 'Privacy-First Design', desc: 'Local processing options. Your data stays yours.' },
+              { icon: <Zap style={{ width: 20, height: 20 }} />, title: 'Continuous Learning', desc: 'Improves with every implementation we run.' }
+            ].map((item, idx) => (
+              <div key={idx} style={{
+                background: 'white',
+                borderRadius: '10px',
+                padding: '1.25rem',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+                display: 'flex',
+                gap: '0.75rem'
+              }}>
+                <div style={{
+                  flexShrink: 0,
+                  width: '40px',
+                  height: '40px',
+                  background: COLORS.iceFlow,
+                  borderRadius: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: COLORS.grassGreen
                 }}>
-                  {vendor} {idx < 2 && '✓'}
-                </span>
-              ))}
-            </div>
-            <p style={{ 
-              fontSize: '0.8rem', 
-              color: COLORS.textLight, 
-              marginTop: '0.75rem',
-              margin: '0.75rem 0 0 0'
-            }}>
-              ✓ = Fully validated | Others in development
-            </p>
+                  {item.icon}
+                </div>
+                <div>
+                  <h3 style={{ fontFamily: "'Sora', sans-serif", fontSize: '0.95rem', fontWeight: '600', color: COLORS.text, marginBottom: '0.25rem' }}>
+                    {item.title}
+                  </h3>
+                  <p style={{ fontSize: '0.85rem', color: COLORS.textLight, lineHeight: 1.5, margin: 0 }}>
+                    {item.desc}
+                  </p>
+                </div>
+              </div>
+            ))}
           </div>
         </section>
 
@@ -510,48 +403,26 @@ export default function Landing() {
             margin: '0 auto 1.25rem',
             lineHeight: '1.6'
           }}>
-            Stop spending weeks on manual document analysis. Extract payroll data in minutes.
+            Stop spending weeks on manual document analysis.
           </p>
-          <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-            <Link 
-              to="/vacuum" 
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.75rem 1.75rem',
-                background: COLORS.grassGreen,
-                color: 'white',
-                border: 'none',
-                borderRadius: '8px',
-                fontSize: '1rem',
-                fontWeight: '600',
-                textDecoration: 'none'
-              }}
-            >
-              <FileSearch style={{ width: 18, height: 18 }} />
-              Try Vacuum Extractor
-            </Link>
-            <Link 
-              to="/workspace" 
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.75rem 1.75rem',
-                background: 'white',
-                color: COLORS.text,
-                border: `1px solid ${COLORS.iceFlow}`,
-                borderRadius: '8px',
-                fontSize: '1rem',
-                fontWeight: '600',
-                textDecoration: 'none'
-              }}
-            >
-              Launch Workspace
-              <ArrowRight style={{ width: 18, height: 18 }} />
-            </Link>
-          </div>
+          <Link 
+            to="/workspace" 
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.75rem 1.75rem',
+              background: COLORS.grassGreen,
+              color: 'white',
+              borderRadius: '8px',
+              fontSize: '1rem',
+              fontWeight: '600',
+              textDecoration: 'none'
+            }}
+          >
+            Launch Workspace
+            <ArrowRight style={{ width: 18, height: 18 }} />
+          </Link>
         </section>
       </div>
 
