@@ -94,11 +94,9 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
         const file = files[i];
         const formData = new FormData();
         formData.append('file', file);
-        formData.append('project_id', projectId);
-        // Tag with action for context
-        formData.append('tags', `year-end,${action.action_id}`);
+        formData.append('project', projectId);
         
-        await api.post('/documents/upload', formData, {
+        await api.post('/upload', formData, {
           headers: { 'Content-Type': 'multipart/form-data' }
         });
       }
