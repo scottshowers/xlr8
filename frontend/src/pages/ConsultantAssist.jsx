@@ -28,6 +28,7 @@ const API_BASE = import.meta.env.VITE_API_URL || '';
  */
 export default function ConsultantAssist({ 
   extractionId, 
+  sourceFile,
   vendorType, 
   customerId,
   confidence,
@@ -62,19 +63,28 @@ export default function ConsultantAssist({
 
   // Load raw text when opened
   useEffect(() => {
-    if (extractionId) {
-      loadRawText();
-      loadFieldDefinitions();
-    }
-  }, [extractionId]);
+    loadRawText();
+    loadFieldDefinitions();
+  }, [extractionId, sourceFile]);
 
   const loadRawText = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/vacuum/extract/${extractionId}/raw`);
+      let res;
+      if (extractionId) {
+        res = await fetch(`${API_BASE}/api/vacuum/extract/${extractionId}/raw`);
+      } else if (sourceFile) {
+        // Fallback: lookup by source file name
+        res = await fetch(`${API_BASE}/api/vacuum/extract-by-file/${encodeURIComponent(sourceFile)}/raw`);
+      } else {
+        setRawText('No extraction ID or source file available.');
+        setLoading(false);
+        return;
+      }
+      
       if (res.ok) {
         const data = await res.json();
-        setRawText(data.raw_text || 'No raw text available');
+        setRawText(data.raw_text || 'No raw text available. Run an extraction first.');
       }
     } catch (err) {
       console.error('Failed to load raw text:', err);
