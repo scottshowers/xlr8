@@ -890,6 +890,7 @@ class VacuumExtractor:
             with self.claude.messages.stream(
                 model="claude-sonnet-4-20250514",
                 max_tokens=64000,
+                temperature=0,  # Deterministic output - same input = same output
                 messages=[{"role": "user", "content": prompt}]
             ) as stream:
                 for text in stream.text_stream:
