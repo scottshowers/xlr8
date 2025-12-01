@@ -14,6 +14,7 @@
 import React, { useState } from 'react';
 import { useProject } from '../context/ProjectContext';
 import { useNavigate } from 'react-router-dom';
+import YearEndPlaybook from '../components/YearEndPlaybook';
 
 // Brand Colors
 const COLORS = {
@@ -25,8 +26,20 @@ const COLORS = {
   textLight: '#5f6c7b',
 };
 
-// Sample Playbooks (will come from backend later)
+// Playbook Definitions
 const PLAYBOOKS = [
+  {
+    id: 'year-end-checklist',
+    name: 'Year-End Checklist',
+    description: 'Comprehensive year-end processing workbook. Analyzes tax setup, earnings/deductions, outstanding items, and generates action-centric checklist with findings and required actions.',
+    category: 'Year-End',
+    icon: '📅',
+    modules: ['Payroll', 'Tax', 'Benefits'],
+    outputs: ['Action Checklist', 'Tax Verification', 'Earnings Analysis', 'Deductions Review', 'Outstanding Items', 'Arrears Summary'],
+    estimatedTime: '5-15 minutes',
+    dataRequired: ['Company Tax Verification', 'Earnings Codes', 'Deduction Codes', 'Workers Comp Rates'],
+    hasRunner: true, // Has dedicated runner component
+  },
   {
     id: 'secure-2.0',
     name: 'SECURE 2.0 Compliance',
@@ -37,6 +50,7 @@ const PLAYBOOKS = [
     outputs: ['Executive Summary', 'Gap Analysis', 'Configuration Guide', 'Action Items'],
     estimatedTime: '5-10 minutes',
     dataRequired: ['Employee Census', 'Benefit Plans', 'Deduction Codes'],
+    hasRunner: false,
   },
   {
     id: 'one-big-bill',
@@ -48,6 +62,7 @@ const PLAYBOOKS = [
     outputs: ['Executive Summary', 'Detailed Next Steps', 'Configuration Guide', 'High Priority Items', 'Import Templates'],
     estimatedTime: '10-15 minutes',
     dataRequired: ['Tax Groups', 'Earning Codes', 'Employee Data'],
+    hasRunner: false,
   },
   {
     id: 'payroll-audit',
@@ -59,6 +74,7 @@ const PLAYBOOKS = [
     outputs: ['Audit Report', 'Issue List', 'Recommendations', 'Best Practices'],
     estimatedTime: '8-12 minutes',
     dataRequired: ['Earning Codes', 'Deduction Codes', 'Pay Groups', 'Tax Setup'],
+    hasRunner: false,
   },
   {
     id: 'data-validation',
@@ -70,20 +86,33 @@ const PLAYBOOKS = [
     outputs: ['Validation Report', 'Error List', 'Warning List', 'Ready-to-Load Files'],
     estimatedTime: '3-5 minutes',
     dataRequired: ['Employee Load Template'],
+    hasRunner: false,
   },
 ];
 
 // Playbook Card Component
-function PlaybookCard({ playbook, onRun }) {
+function PlaybookCard({ playbook, onRun, isActive }) {
   const styles = {
     card: {
       background: 'white',
       borderRadius: '12px',
       padding: '1.5rem',
       boxShadow: '0 1px 3px rgba(42, 52, 65, 0.08)',
-      border: '1px solid #e1e8ed',
+      border: isActive ? `2px solid ${COLORS.grassGreen}` : '1px solid #e1e8ed',
       transition: 'all 0.2s ease',
       cursor: 'pointer',
+      position: 'relative',
+    },
+    activeBadge: {
+      position: 'absolute',
+      top: '0.75rem',
+      right: '0.75rem',
+      background: COLORS.grassGreen,
+      color: 'white',
+      fontSize: '0.7rem',
+      fontWeight: '700',
+      padding: '0.2rem 0.5rem',
+      borderRadius: '4px',
     },
     header: {
       display: 'flex',
@@ -147,7 +176,7 @@ function PlaybookCard({ playbook, onRun }) {
     },
     button: {
       padding: '0.5rem 1rem',
-      background: COLORS.grassGreen,
+      background: playbook.hasRunner ? COLORS.grassGreen : COLORS.textLight,
       border: 'none',
       borderRadius: '6px',
       color: 'white',
@@ -169,6 +198,8 @@ function PlaybookCard({ playbook, onRun }) {
         e.currentTarget.style.transform = 'translateY(0)';
       }}
     >
+      {playbook.hasRunner && <span style={styles.activeBadge}>LIVE</span>}
+      
       <div style={styles.header}>
         <div style={styles.icon}>{playbook.icon}</div>
         <div>
@@ -187,8 +218,11 @@ function PlaybookCard({ playbook, onRun }) {
 
       <div style={styles.footer}>
         <span style={styles.time}>⏱️ {playbook.estimatedTime}</span>
-        <button style={styles.button} onClick={() => onRun(playbook)}>
-          Run Playbook →
+        <button 
+          style={styles.button} 
+          onClick={() => onRun(playbook)}
+        >
+          {playbook.hasRunner ? 'Run Playbook →' : 'Coming Soon'}
         </button>
       </div>
     </div>
@@ -291,6 +325,7 @@ export default function PlaybooksPage() {
   const navigate = useNavigate();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('all');
+  const [activePlaybook, setActivePlaybook] = useState(null);
 
   if (loading) {
     return (
@@ -304,14 +339,33 @@ export default function PlaybooksPage() {
     return <SelectProjectPrompt />;
   }
 
+  // If a playbook runner is active, show it
+  if (activePlaybook) {
+    if (activePlaybook.id === 'year-end-checklist') {
+      return (
+        <YearEndPlaybook 
+          project={activeProject}
+          projectName={projectName}
+          customerName={customerName}
+          onClose={() => setActivePlaybook(null)}
+        />
+      );
+    }
+  }
+
   const categories = ['all', ...new Set(PLAYBOOKS.map(p => p.category))];
   const filteredPlaybooks = selectedCategory === 'all' 
     ? PLAYBOOKS 
     : PLAYBOOKS.filter(p => p.category === selectedCategory);
 
   const handleRunPlaybook = (playbook) => {
-    // Navigate to workspace with playbook context
-    navigate('/workspace', { state: { playbook } });
+    if (playbook.hasRunner) {
+      // Open dedicated runner
+      setActivePlaybook(playbook);
+    } else {
+      // Coming soon - navigate to workspace with context (placeholder)
+      navigate('/workspace', { state: { playbook } });
+    }
   };
 
   const styles = {
@@ -358,6 +412,7 @@ export default function PlaybooksPage() {
       display: 'flex',
       gap: '0.5rem',
       marginBottom: '1.5rem',
+      flexWrap: 'wrap',
     },
     filterButton: (active) => ({
       padding: '0.5rem 1rem',
@@ -418,6 +473,7 @@ export default function PlaybooksPage() {
             key={playbook.id} 
             playbook={playbook} 
             onRun={handleRunPlaybook}
+            isActive={playbook.hasRunner}
           />
         ))}
       </div>
