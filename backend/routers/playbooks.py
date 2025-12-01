@@ -337,18 +337,20 @@ async def scan_for_action(project_id: str, action_id: str):
         
         for query in queries[:5]:
             try:
-                results = rag.query(
+                results = rag.search_collection(
+                    collection_name="documents",
                     query=query,
-                    project_id=project_id,
-                    n_results=3
+                    n_results=3,
+                    project_id=project_id
                 )
-                if results and results.get('documents'):
-                    for i, doc in enumerate(results['documents'][0]):
+                if results:
+                    for result in results:
+                        doc = result.get('document', '')
                         if doc and len(doc) > 50:
                             # Clean encrypted content
                             cleaned = re.sub(r'ENC256:[A-Za-z0-9+/=]+', '[ENCRYPTED]', doc)
                             if cleaned.count('[ENCRYPTED]') < 10:
-                                metadata = results.get('metadatas', [[]])[0][i] if results.get('metadatas') else {}
+                                metadata = result.get('metadata', {})
                                 found_docs.append({
                                     "filename": metadata.get('source', metadata.get('filename', 'Unknown')),
                                     "snippet": cleaned[:300],
