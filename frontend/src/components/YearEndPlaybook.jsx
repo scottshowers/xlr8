@@ -34,11 +34,15 @@ const STATUS_OPTIONS = [
 function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
   const [expanded, setExpanded] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [notes, setNotes] = useState(progress?.notes || '');
   const [localStatus, setLocalStatus] = useState(progress?.status || 'not_started');
+  const fileInputRef = React.useRef(null);
   
   const findings = progress?.findings;
   const docsFound = progress?.documents_found || [];
+  const reportsNeeded = action.reports_needed || [];
+  const expectedCount = reportsNeeded.length || 1;
   
   const statusConfig = STATUS_OPTIONS.find(s => s.value === localStatus) || STATUS_OPTIONS[0];
 
@@ -58,6 +62,40 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
       console.error('Scan failed:', err);
     } finally {
       setScanning(false);
+    }
+  };
+
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    
+    setUploading(true);
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('project_id', projectId);
+        
+        await api.post('/documents/upload', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+      }
+      
+      // After upload, auto-scan to find the new docs
+      await handleScan();
+    } catch (err) {
+      console.error('Upload failed:', err);
+    } finally {
+      setUploading(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
@@ -237,6 +275,24 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
       resize: 'vertical',
       fontFamily: 'inherit',
     },
+    buttonRow: {
+      display: 'flex',
+      gap: '0.75rem',
+      flexWrap: 'wrap',
+    },
+    uploadBtn: {
+      padding: '0.5rem 1rem',
+      background: COLORS.skyBlue,
+      color: 'white',
+      border: 'none',
+      borderRadius: '6px',
+      fontWeight: '600',
+      fontSize: '0.85rem',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.5rem',
+    },
     scanBtn: {
       padding: '0.5rem 1rem',
       background: COLORS.grassGreen,
@@ -254,6 +310,15 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
       fontSize: '0.8rem',
       color: COLORS.textLight,
       fontStyle: 'italic',
+    },
+    hiddenInput: {
+      display: 'none',
+    },
+    docCount: {
+      fontSize: '0.7rem',
+      background: 'rgba(255,255,255,0.3)',
+      padding: '0.1rem 0.4rem',
+      borderRadius: '10px',
     },
   };
 
@@ -284,24 +349,48 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
       {expanded && (
         <div style={styles.expandedContent}>
           {/* Reports Needed */}
-          {action.reports_needed?.length > 0 && (
+          {reportsNeeded.length > 0 && (
             <div style={styles.section}>
               <div style={styles.sectionTitle}>Reports Needed</div>
               <div style={styles.reportsNeeded}>
-                {action.reports_needed.join(', ')}
+                {reportsNeeded.join(', ')}
               </div>
             </div>
           )}
 
-          {/* Scan Button */}
+          {/* Upload & Scan Buttons */}
           <div style={styles.section}>
-            <button 
-              style={styles.scanBtn} 
-              onClick={(e) => { e.stopPropagation(); handleScan(); }}
-              disabled={scanning}
-            >
-              {scanning ? '⏳ Scanning...' : '🔍 Scan Documents'}
-            </button>
+            <div style={styles.buttonRow}>
+              <input
+                type="file"
+                ref={fileInputRef}
+                style={styles.hiddenInput}
+                onChange={handleFileChange}
+                multiple
+                accept=".pdf,.xlsx,.xls,.csv,.docx,.doc,.txt"
+              />
+              <button 
+                style={styles.uploadBtn} 
+                onClick={(e) => { e.stopPropagation(); handleUploadClick(); }}
+                disabled={uploading}
+              >
+                {uploading ? '⏳ Uploading...' : (
+                  <>
+                    📤 Upload Document
+                    <span style={styles.docCount}>
+                      {docsFound.length}/{expectedCount}
+                    </span>
+                  </>
+                )}
+              </button>
+              <button 
+                style={styles.scanBtn} 
+                onClick={(e) => { e.stopPropagation(); handleScan(); }}
+                disabled={scanning}
+              >
+                {scanning ? '⏳ Scanning...' : '🔍 Scan Documents'}
+              </button>
+            </div>
           </div>
 
           {/* Documents Found */}
