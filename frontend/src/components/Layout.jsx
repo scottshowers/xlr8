@@ -18,6 +18,7 @@ const COLORS = {
 };
 
 const NAV_ITEMS = [
+  { path: '/dashboard', label: 'Dashboard', icon: '🏠' },
   { path: '/workspace', label: 'Workspace', icon: '💬' },
   { path: '/projects', label: 'Projects', icon: '🏢' },
   { path: '/data', label: 'Data', icon: '📁' },
@@ -67,8 +68,8 @@ function Navigation() {
   const location = useLocation();
 
   const isActive = (path) => {
-    if (path === '/workspace') {
-      return location.pathname === '/workspace' || location.pathname === '/';
+    if (path === '/dashboard') {
+      return location.pathname === '/dashboard';
     }
     return location.pathname.startsWith(path);
   };
