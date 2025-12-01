@@ -186,7 +186,21 @@ def save_extraction(project_id: Optional[str], source_file: str,
                 'pay_method': emp.get('pay_method', ''),
                 'is_valid': emp.get('is_valid', True),
                 'validation_errors': emp.get('validation_errors', []),
-                'sort_order': sort_order
+                'sort_order': sort_order,
+                # New demographic fields
+                'hire_date': emp.get('hire_date', ''),
+                'term_date': emp.get('term_date', ''),
+                'status': emp.get('status', ''),
+                'pay_frequency': emp.get('pay_frequency', ''),
+                'employee_type': emp.get('employee_type', ''),
+                'hourly_rate': _safe_decimal(emp.get('hourly_rate')),
+                'salary': _safe_decimal(emp.get('salary')),
+                'resident_state': emp.get('resident_state', ''),
+                'work_state': emp.get('work_state', ''),
+                'federal_filing_status': emp.get('federal_filing_status', ''),
+                'state_filing_status': emp.get('state_filing_status', ''),
+                'pay_period_start': emp.get('pay_period_start', ''),
+                'pay_period_end': emp.get('pay_period_end', ''),
             }
             
             emp_response = supabase.table('extraction_employees').insert(emp_data).execute()
@@ -409,6 +423,20 @@ def get_extraction_by_id(extract_id: str) -> Optional[Dict]:
                 'pay_method': emp.get('pay_method', ''),
                 'is_valid': emp.get('is_valid', True),
                 'validation_errors': emp.get('validation_errors', []),
+                # Demographic fields
+                'hire_date': emp.get('hire_date', ''),
+                'term_date': emp.get('term_date', ''),
+                'status': emp.get('status', ''),
+                'pay_frequency': emp.get('pay_frequency', ''),
+                'employee_type': emp.get('employee_type', ''),
+                'hourly_rate': float(emp.get('hourly_rate') or 0) if emp.get('hourly_rate') else None,
+                'salary': float(emp.get('salary') or 0) if emp.get('salary') else None,
+                'resident_state': emp.get('resident_state', ''),
+                'work_state': emp.get('work_state', ''),
+                'federal_filing_status': emp.get('federal_filing_status', ''),
+                'state_filing_status': emp.get('state_filing_status', ''),
+                'pay_period_start': emp.get('pay_period_start', ''),
+                'pay_period_end': emp.get('pay_period_end', ''),
                 'earnings': earnings,
                 'taxes': taxes,
                 'deductions': deductions
