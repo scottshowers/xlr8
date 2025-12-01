@@ -1,11 +1,17 @@
 /**
  * WorkspacePage - The Main Work Hub
- * Fixed scroll/bounce issue
+ * Chat + Personas tabs
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { useProject } from '../context/ProjectContext';
 import Chat from '../components/Chat';
+import PersonaManagement from '../components/PersonaManagement';
+
+const TABS = [
+  { id: 'chat', label: 'Chat', icon: '💬' },
+  { id: 'personas', label: 'Personas', icon: '🎭' },
+];
 
 // No-project placeholder
 function SelectProjectPrompt() {
@@ -41,6 +47,38 @@ function SelectProjectPrompt() {
 
 export default function WorkspacePage() {
   const { activeProject, projectName, customerName, hasActiveProject, loading } = useProject();
+  const [activeTab, setActiveTab] = useState('chat');
+
+  const styles = {
+    tabs: {
+      display: 'flex',
+      borderBottom: '1px solid #e1e8ed',
+      background: '#fafbfc',
+      borderRadius: '16px 16px 0 0',
+      marginBottom: '0',
+    },
+    tab: (active) => ({
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.5rem',
+      padding: '1rem 1.5rem',
+      border: 'none',
+      background: active ? 'white' : 'transparent',
+      color: active ? '#83b16d' : '#5f6c7b',
+      fontWeight: '600',
+      fontSize: '0.9rem',
+      cursor: 'pointer',
+      borderBottom: active ? '2px solid #83b16d' : '2px solid transparent',
+      marginBottom: '-1px',
+      transition: 'all 0.2s ease',
+    }),
+    tabContent: {
+      background: 'white',
+      borderRadius: '0 0 16px 16px',
+      padding: '1.5rem',
+      minHeight: '400px',
+    },
+  };
 
   if (loading) {
     return (
@@ -79,14 +117,34 @@ export default function WorkspacePage() {
         }}>Workspace</h1>
       </div>
 
-      {/* Chat Component - fills remaining space */}
-      <div style={{ flex: 1, minHeight: 0 }}>
-        <Chat 
-          projects={[activeProject]} 
-          selectedProject={projectName}
-          hideProjectSelector={true}
-        />
+      {/* Tabs */}
+      <div style={styles.tabs}>
+        {TABS.map(tab => (
+          <button
+            key={tab.id}
+            style={styles.tab(activeTab === tab.id)}
+            onClick={() => setActiveTab(tab.id)}
+          >
+            <span>{tab.icon}</span>
+            {tab.label}
+          </button>
+        ))}
       </div>
+
+      {/* Tab Content */}
+      {activeTab === 'chat' ? (
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <Chat 
+            projects={[activeProject]} 
+            selectedProject={projectName}
+            hideProjectSelector={true}
+          />
+        </div>
+      ) : (
+        <div style={styles.tabContent}>
+          <PersonaManagement />
+        </div>
+      )}
     </div>
   );
 }
