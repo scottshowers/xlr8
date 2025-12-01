@@ -12,7 +12,13 @@ import {
   BarChart3,
   Users,
   ArrowRight,
-  Rocket
+  Rocket,
+  CheckCircle,
+  Sparkles,
+  Table,
+  FileSpreadsheet,
+  Eye,
+  GitBranch
 } from 'lucide-react'
 
 // Brand Colors
@@ -158,7 +164,7 @@ export default function Landing() {
                 letterSpacing: '0.05em',
                 color: '#c5c4cc'
               }}>
-                Analysis Platform
+                Analysis Engine
               </span>
             </div>
           </div>
@@ -178,150 +184,143 @@ export default function Landing() {
                 borderRadius: '8px',
                 fontSize: '0.9rem',
                 fontWeight: '600',
-                textDecoration: 'none'
+                textDecoration: 'none',
+                cursor: 'pointer'
               }}
             >
-              Get Started
+              Launch Workspace
               <ArrowRight style={{ width: 16, height: 16 }} />
             </Link>
             <Link 
-              to="/playbooks" 
+              to="/vacuum" 
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '0.5rem',
                 padding: '0.625rem 1.25rem',
-                background: 'transparent',
+                background: 'rgba(255,255,255,0.15)',
                 color: 'white',
-                border: '2px solid rgba(255,255,255,0.5)',
+                border: '1px solid rgba(255,255,255,0.3)',
                 borderRadius: '8px',
                 fontSize: '0.9rem',
                 fontWeight: '600',
-                textDecoration: 'none'
+                textDecoration: 'none',
+                cursor: 'pointer'
               }}
             >
-              View Playbooks
+              <FileSearch style={{ width: 16, height: 16 }} />
+              Vacuum Extractor
             </Link>
           </div>
         </div>
       </div>
 
-      <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '2.5rem 2rem' }}>
+      {/* Main Content */}
+      <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '2rem' }}>
         
-        {/* Value Props - 3 columns */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-          gap: '1.5rem',
-          marginBottom: '2rem'
-        }}>
-          {[
-            { icon: '📥', title: 'Ingest', desc: '100+ documents. PDFs, Excel, Word. All queryable.' },
-            { icon: '🧠', title: 'Analyze', desc: 'AI cross-references all sources. Finds conflicts.' },
-            { icon: '📊', title: 'Deliver', desc: 'Generate workbooks, templates, load files.' },
-          ].map((item, i) => (
-            <div key={i} style={{
-              background: 'white',
-              borderRadius: '12px',
-              padding: '1.5rem',
-              boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-              textAlign: 'center'
-            }}>
-              <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>{item.icon}</div>
-              <h3 style={{ 
-                fontFamily: "'Sora', sans-serif",
-                margin: '0 0 0.5rem', 
-                color: COLORS.text, 
-                fontSize: '1.1rem' 
-              }}>{item.title}</h3>
-              <p style={{ 
-                fontFamily: "'Manrope', sans-serif",
-                margin: 0, 
-                color: COLORS.textLight, 
-                fontSize: '0.9rem', 
-                lineHeight: 1.5 
-              }}>{item.desc}</p>
-            </div>
-          ))}
-        </div>
-
-        {/* Security callout */}
-        <div style={{
-          background: COLORS.iceFlow,
-          borderRadius: '12px',
-          padding: '1.25rem 1.5rem',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '1rem',
-          marginBottom: '2.5rem'
-        }}>
-          <Lock style={{ width: 24, height: 24, color: COLORS.grassGreen, flexShrink: 0 }} />
-          <div>
-            <strong style={{ color: COLORS.text }}>Security First.</strong>
-            <span style={{ color: COLORS.textLight, marginLeft: '0.5rem' }}>
-              AES-256 encrypted at rest and in transit. Employee data processed locally.
-            </span>
-          </div>
-        </div>
-
-        {/* Security Section */}
-        <section style={{ marginBottom: '2.5rem' }}>
-          <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
-            <h2 style={{
-              fontFamily: "'Sora', sans-serif",
-              fontSize: '1.35rem',
-              fontWeight: '700',
-              color: COLORS.text
-            }}>
-              Security-First Architecture
-            </h2>
-          </div>
-
-          <div style={{ 
-            display: 'grid', 
-            gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-            gap: '1rem'
+        {/* Tagline */}
+        <section style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
+          <p style={{
+            fontFamily: "'Manrope', sans-serif",
+            fontSize: '1.2rem',
+            color: COLORS.textLight,
+            maxWidth: '700px',
+            margin: '0 auto',
+            lineHeight: '1.7'
           }}>
-            {[
-              { icon: <Lock style={{ width: 20, height: 20 }} />, title: 'AES-256 Encryption', desc: 'Data encrypted at rest and in transit.' },
-              { icon: <Shield style={{ width: 20, height: 20 }} />, title: 'Local Processing', desc: 'Sensitive data stays local. Config data uses Claude.' },
-              { icon: <Database style={{ width: 20, height: 20 }} />, title: 'Project Isolation', desc: 'Complete data separation per customer.' }
-            ].map((item, idx) => (
-              <div key={idx} style={{
-                background: 'white',
-                borderRadius: '10px',
-                padding: '1.25rem',
-                boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-                display: 'flex',
-                gap: '0.75rem'
+            AI-powered document analysis for HCM implementations. Extract payroll data, 
+            analyze configurations, and accelerate your UKG deployments.
+          </p>
+        </section>
+
+        {/* Vacuum Extractor - Featured */}
+        <section style={{ marginBottom: '2.5rem' }}>
+          <div style={{ 
+            background: 'linear-gradient(135deg, #83b16d 0%, #6a9a56 100%)',
+            borderRadius: '16px',
+            padding: '2rem',
+            color: 'white'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+              <FileSearch style={{ width: 28, height: 28 }} />
+              <h2 style={{
+                fontFamily: "'Sora', sans-serif",
+                fontSize: '1.5rem',
+                fontWeight: '700',
+                margin: 0
               }}>
-                <div style={{
-                  flexShrink: 0,
-                  width: '40px',
-                  height: '40px',
-                  background: COLORS.iceFlow,
-                  borderRadius: '8px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: COLORS.grassGreen
+                Vacuum Extractor
+              </h2>
+              <span style={{
+                background: 'rgba(255,255,255,0.2)',
+                padding: '0.25rem 0.75rem',
+                borderRadius: '12px',
+                fontSize: '0.75rem',
+                fontWeight: '600'
+              }}>
+                LIVE
+              </span>
+            </div>
+            <p style={{ 
+              fontSize: '1rem', 
+              opacity: 0.9, 
+              marginBottom: '1.5rem',
+              maxWidth: '600px'
+            }}>
+              Extract complete payroll register data from any vendor PDF. Intelligent column detection, 
+              automatic vendor recognition, and validated output ready for UKG conversion.
+            </p>
+            
+            <div style={{ 
+              display: 'grid', 
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+              gap: '1rem',
+              marginBottom: '1.5rem'
+            }}>
+              {[
+                { icon: <Sparkles size={18} />, text: 'Auto-detect Paycom, Dayforce, ADP & more' },
+                { icon: <Table size={18} />, text: 'Column-aware extraction with YTD separation' },
+                { icon: <CheckCircle size={18} />, text: 'Net pay validation & confidence scoring' },
+                { icon: <Eye size={18} />, text: 'Consultant Assist for edge cases' },
+                { icon: <FileSpreadsheet size={18} />, text: 'Export to Excel with full detail' },
+                { icon: <GitBranch size={18} />, text: 'EE/ER tax & deduction classification' },
+              ].map((item, idx) => (
+                <div key={idx} style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '0.5rem',
+                  fontSize: '0.9rem'
                 }}>
                   {item.icon}
+                  <span>{item.text}</span>
                 </div>
-                <div>
-                  <h3 style={{ fontFamily: "'Sora', sans-serif", fontSize: '0.95rem', fontWeight: '600', color: COLORS.text, marginBottom: '0.25rem' }}>
-                    {item.title}
-                  </h3>
-                  <p style={{ fontSize: '0.85rem', color: COLORS.textLight, lineHeight: 1.5, margin: 0 }}>
-                    {item.desc}
-                  </p>
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
+
+            <Link 
+              to="/vacuum" 
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.75rem 1.5rem',
+                background: 'white',
+                color: COLORS.grassGreen,
+                border: 'none',
+                borderRadius: '8px',
+                fontSize: '0.95rem',
+                fontWeight: '600',
+                textDecoration: 'none',
+                cursor: 'pointer'
+              }}
+            >
+              Try Vacuum Extractor
+              <ArrowRight style={{ width: 18, height: 18 }} />
+            </Link>
           </div>
         </section>
 
-        {/* Tech Stack Section */}
+        {/* Tech Stack */}
         <section style={{ marginBottom: '2.5rem' }}>
           <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
             <h2 style={{
@@ -340,9 +339,9 @@ export default function Landing() {
             gap: '1rem'
           }}>
             {[
-              { icon: <Cpu style={{ width: 20, height: 20 }} />, title: 'Dual-LLM Architecture', desc: 'Claude for config, local LLM for employee data.' },
-              { icon: <FileSearch style={{ width: 20, height: 20 }} />, title: 'Universal Processing', desc: 'OCR, table extraction, intelligent chunking.' },
-              { icon: <Zap style={{ width: 20, height: 20 }} />, title: 'Self-Healing Systems', desc: 'AI-driven detection. No brittle regex.' }
+              { icon: <Cpu style={{ width: 20, height: 20 }} />, title: 'Claude AI Powered', desc: 'Anthropic Claude for intelligent document understanding and extraction.' },
+              { icon: <FileSearch style={{ width: 20, height: 20 }} />, title: 'PyMuPDF + Textract', desc: 'Local extraction for privacy, AWS Textract for scanned documents.' },
+              { icon: <Zap style={{ width: 20, height: 20 }} />, title: 'Vendor-Specific Prompts', desc: 'Trained prompts for each payroll vendor format and layout.' }
             ].map((item, idx) => (
               <div key={idx} style={{
                 background: 'white',
@@ -378,7 +377,7 @@ export default function Landing() {
           </div>
         </section>
 
-        {/* Features Section */}
+        {/* Platform Features */}
         <section style={{ marginBottom: '2.5rem' }}>
           <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
             <h2 style={{
@@ -397,12 +396,12 @@ export default function Landing() {
             gap: '1rem'
           }}>
             {[
-              { icon: <MessageSquare style={{ width: 18, height: 18 }} />, title: 'Intelligent Workspace', desc: 'Chat across all data' },
+              { icon: <MessageSquare style={{ width: 18, height: 18 }} />, title: 'AI Workspace', desc: 'Chat across documents' },
               { icon: <FileText style={{ width: 18, height: 18 }} />, title: 'Multi-File Upload', desc: 'Batch processing' },
-              { icon: <Database style={{ width: 18, height: 18 }} />, title: 'Vacuum Extractor', desc: 'Tables from PDFs' },
+              { icon: <Database style={{ width: 18, height: 18 }} />, title: 'Normalized Schema', desc: 'Structured data output' },
               { icon: <BookOpen style={{ width: 18, height: 18 }} />, title: 'Playbooks', desc: 'Analysis templates' },
-              { icon: <BarChart3 style={{ width: 18, height: 18 }} />, title: 'Processing Dashboard', desc: 'Real-time status' },
-              { icon: <Users style={{ width: 18, height: 18 }} />, title: 'Customer Workspaces', desc: 'Isolated workspaces' }
+              { icon: <BarChart3 style={{ width: 18, height: 18 }} />, title: 'Live Validation', desc: 'Real-time checking' },
+              { icon: <Users style={{ width: 18, height: 18 }} />, title: 'Project Isolation', desc: 'Secure workspaces' }
             ].map((feature, idx) => (
               <div key={idx} style={{
                 background: 'white',
@@ -439,6 +438,54 @@ export default function Landing() {
           </div>
         </section>
 
+        {/* Supported Vendors */}
+        <section style={{ marginBottom: '2.5rem' }}>
+          <div style={{ 
+            background: 'white',
+            borderRadius: '12px',
+            padding: '1.5rem',
+            boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+            textAlign: 'center'
+          }}>
+            <h3 style={{
+              fontFamily: "'Sora', sans-serif",
+              fontSize: '1rem',
+              fontWeight: '600',
+              color: COLORS.text,
+              marginBottom: '1rem'
+            }}>
+              Supported Payroll Vendors
+            </h3>
+            <div style={{ 
+              display: 'flex', 
+              flexWrap: 'wrap', 
+              justifyContent: 'center', 
+              gap: '0.75rem' 
+            }}>
+              {['Paycom', 'Dayforce', 'ADP', 'Paychex', 'UKG Pro', 'Workday', 'Gusto', 'QuickBooks'].map((vendor, idx) => (
+                <span key={idx} style={{
+                  padding: '0.5rem 1rem',
+                  background: idx < 2 ? COLORS.grassGreen : COLORS.iceFlow,
+                  color: idx < 2 ? 'white' : COLORS.text,
+                  borderRadius: '20px',
+                  fontSize: '0.85rem',
+                  fontWeight: '500'
+                }}>
+                  {vendor} {idx < 2 && '✓'}
+                </span>
+              ))}
+            </div>
+            <p style={{ 
+              fontSize: '0.8rem', 
+              color: COLORS.textLight, 
+              marginTop: '0.75rem',
+              margin: '0.75rem 0 0 0'
+            }}>
+              ✓ = Fully validated | Others in development
+            </p>
+          </div>
+        </section>
+
         {/* CTA Section */}
         <section style={{
           background: COLORS.iceFlow,
@@ -463,27 +510,48 @@ export default function Landing() {
             margin: '0 auto 1.25rem',
             lineHeight: '1.6'
           }}>
-            Stop spending weeks on manual document analysis.
+            Stop spending weeks on manual document analysis. Extract payroll data in minutes.
           </p>
-          <Link 
-            to="/workspace" 
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              padding: '0.75rem 1.75rem',
-              background: COLORS.grassGreen,
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              fontSize: '1rem',
-              fontWeight: '600',
-              textDecoration: 'none'
-            }}
-          >
-            Launch Workspace
-            <ArrowRight style={{ width: 18, height: 18 }} />
-          </Link>
+          <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+            <Link 
+              to="/vacuum" 
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.75rem 1.75rem',
+                background: COLORS.grassGreen,
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                fontSize: '1rem',
+                fontWeight: '600',
+                textDecoration: 'none'
+              }}
+            >
+              <FileSearch style={{ width: 18, height: 18 }} />
+              Try Vacuum Extractor
+            </Link>
+            <Link 
+              to="/workspace" 
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.75rem 1.75rem',
+                background: 'white',
+                color: COLORS.text,
+                border: `1px solid ${COLORS.iceFlow}`,
+                borderRadius: '8px',
+                fontSize: '1rem',
+                fontWeight: '600',
+                textDecoration: 'none'
+              }}
+            >
+              Launch Workspace
+              <ArrowRight style={{ width: 18, height: 18 }} />
+            </Link>
+          </div>
         </section>
       </div>
 
