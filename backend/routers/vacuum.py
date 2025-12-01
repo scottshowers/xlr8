@@ -1255,7 +1255,21 @@ Return the JSON array now:"""
             "taxes": data.get('taxes') if isinstance(data.get('taxes'), list) else [],
             "deductions": data.get('deductions') if isinstance(data.get('deductions'), list) else [],
             "check_number": str(data.get('check_number', '')),
-            "pay_method": str(data.get('pay_method', ''))
+            "pay_method": str(data.get('pay_method', '')),
+            # Demographic fields
+            "hire_date": str(data.get('hire_date', '')),
+            "term_date": str(data.get('term_date', '')),
+            "status": str(data.get('status', '')),
+            "pay_frequency": str(data.get('pay_frequency', '')),
+            "employee_type": str(data.get('employee_type', '')),
+            "hourly_rate": float(data.get('hourly_rate', 0) or 0) if data.get('hourly_rate') else None,
+            "salary": float(data.get('salary', 0) or 0) if data.get('salary') else None,
+            "resident_state": str(data.get('resident_state', '')),
+            "work_state": str(data.get('work_state', '')),
+            "federal_filing_status": str(data.get('federal_filing_status', '')),
+            "state_filing_status": str(data.get('state_filing_status', '')),
+            "pay_period_start": str(data.get('pay_period_start', '')),
+            "pay_period_end": str(data.get('pay_period_end', '')),
         }
     
     def _validate_employee(self, emp: Dict) -> List[str]:
