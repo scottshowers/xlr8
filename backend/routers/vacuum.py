@@ -1569,6 +1569,45 @@ async def get_extract_raw_text(extract_id: str):
         return {"error": str(e), "raw_text": ""}
 
 
+@router.get("/vacuum/extract-by-file/{source_file}/raw")
+async def get_extract_raw_text_by_file(source_file: str):
+    """Get raw extracted text by source file name (most recent)."""
+    supabase = get_supabase()
+    if not supabase:
+        return {"error": "Database not available", "raw_text": "", "extract_id": ""}
+    
+    try:
+        # Get the most recent extraction for this file
+        response = supabase.table('extraction_jobs')\
+            .select('id, source_file, raw_text')\
+            .eq('source_file', source_file)\
+            .order('created_at', desc=True)\
+            .limit(1)\
+            .execute()
+        
+        if not response.data:
+            return {"error": "Extraction not found", "raw_text": "", "extract_id": ""}
+        
+        raw_text = response.data[0].get('raw_text', '')
+        extract_id = response.data[0].get('id', '')
+        
+        if not raw_text:
+            return {
+                "raw_text": "Raw text not available for this extraction.\n\nRe-run the extraction to capture raw text.",
+                "source_file": response.data[0].get('source_file', ''),
+                "extract_id": extract_id
+            }
+        
+        return {
+            "raw_text": raw_text,
+            "source_file": response.data[0].get('source_file', ''),
+            "extract_id": extract_id
+        }
+    except Exception as e:
+        logger.error(f"Failed to get raw text by file: {e}")
+        return {"error": str(e), "raw_text": "", "extract_id": ""}
+
+
 @router.get("/vacuum/field-definitions")
 async def get_field_definitions(
     customer_id: Optional[str] = None,
