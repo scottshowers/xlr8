@@ -337,7 +337,7 @@ async def scan_for_action(project_id: str, action_id: str):
         
         for query in queries[:5]:
             try:
-                results = rag.search_collection(
+                results = rag.search(
                     collection_name="documents",
                     query=query,
                     n_results=3,
