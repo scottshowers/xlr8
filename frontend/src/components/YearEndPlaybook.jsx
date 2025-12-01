@@ -16,8 +16,13 @@ import api from '../services/api';
 const COLORS = {
   grassGreen: '#83b16d',
   skyBlue: '#93abd9',
+  clearwater: '#b2d6de',
+  turkishSea: '#285390',
+  electricBlue: '#2766b1',
   iceFlow: '#c9d3d4',
   white: '#f6f5fa',
+  silver: '#a2a1a0',
+  scarletSage: '#993c44',
   text: '#2a3441',
   textLight: '#5f6c7b',
 };
@@ -282,8 +287,8 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
     },
     uploadBtn: {
       padding: '0.5rem 1rem',
-      background: COLORS.skyBlue,
-      color: 'white',
+      background: COLORS.clearwater,
+      color: COLORS.text,
       border: 'none',
       borderRadius: '6px',
       fontWeight: '600',
@@ -316,7 +321,8 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
     },
     docCount: {
       fontSize: '0.7rem',
-      background: 'rgba(255,255,255,0.3)',
+      background: COLORS.turkishSea,
+      color: 'white',
       padding: '0.1rem 0.4rem',
       borderRadius: '10px',
     },
