@@ -166,7 +166,7 @@ export default function Landing() {
           {/* Right side - CTA Buttons */}
           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
             <Link 
-              to="/workspace" 
+              to="/dashboard" 
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -184,86 +184,16 @@ export default function Landing() {
               Get Started
               <ArrowRight style={{ width: 16, height: 16 }} />
             </Link>
-            <Link 
-              to="/playbooks" 
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.625rem 1.25rem',
-                background: 'transparent',
-                color: 'white',
-                border: '2px solid rgba(255,255,255,0.5)',
-                borderRadius: '8px',
-                fontSize: '0.9rem',
-                fontWeight: '600',
-                textDecoration: 'none'
-              }}
-            >
-              View Playbooks
-            </Link>
           </div>
         </div>
       </div>
 
-      <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '2.5rem 2rem' }}>
-        
-        {/* Value Props - 3 columns */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-          gap: '1.5rem',
-          marginBottom: '2rem'
-        }}>
-          {[
-            { icon: '📥', title: 'Ingest', desc: '100+ documents. PDFs, Excel, Word. All queryable.' },
-            { icon: '🧠', title: 'Analyze', desc: 'AI cross-references all sources. Finds conflicts.' },
-            { icon: '📊', title: 'Deliver', desc: 'Generate workbooks, templates, load files.' },
-          ].map((item, i) => (
-            <div key={i} style={{
-              background: 'white',
-              borderRadius: '12px',
-              padding: '1.5rem',
-              boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-              textAlign: 'center'
-            }}>
-              <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>{item.icon}</div>
-              <h3 style={{ 
-                fontFamily: "'Sora', sans-serif",
-                margin: '0 0 0.5rem', 
-                color: COLORS.text, 
-                fontSize: '1.1rem' 
-              }}>{item.title}</h3>
-              <p style={{ 
-                fontFamily: "'Manrope', sans-serif",
-                margin: 0, 
-                color: COLORS.textLight, 
-                fontSize: '0.9rem', 
-                lineHeight: 1.5 
-              }}>{item.desc}</p>
-            </div>
-          ))}
-        </div>
-
-        {/* Security callout */}
-        <div style={{
-          background: COLORS.iceFlow,
-          borderRadius: '12px',
-          padding: '1.25rem 1.5rem',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '1rem',
-          marginBottom: '2.5rem'
-        }}>
-          <Lock style={{ width: 24, height: 24, color: COLORS.grassGreen, flexShrink: 0 }} />
-          <div>
-            <strong style={{ color: COLORS.text }}>Security First.</strong>
-            <span style={{ color: COLORS.textLight, marginLeft: '0.5rem' }}>
-              AES-256 encrypted at rest and in transit. Employee data processed locally.
-            </span>
-          </div>
-        </div>
-
+      {/* Main Content */}
+      <div style={{ 
+        maxWidth: '1000px', 
+        margin: '0 auto',
+        padding: '2rem'
+      }}>
         {/* Security Section */}
         <section style={{ marginBottom: '2.5rem' }}>
           <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
@@ -273,19 +203,19 @@ export default function Landing() {
               fontWeight: '700',
               color: COLORS.text
             }}>
-              Security-First Architecture
+              Enterprise-Grade Security
             </h2>
           </div>
 
           <div style={{ 
             display: 'grid', 
-            gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
             gap: '1rem'
           }}>
             {[
-              { icon: <Lock style={{ width: 20, height: 20 }} />, title: 'AES-256 Encryption', desc: 'Data encrypted at rest and in transit.' },
-              { icon: <Shield style={{ width: 20, height: 20 }} />, title: 'Local Processing', desc: 'Sensitive data stays local. Config data uses Claude.' },
-              { icon: <Database style={{ width: 20, height: 20 }} />, title: 'Project Isolation', desc: 'Complete data separation per customer.' }
+              { icon: <Lock style={{ width: 20, height: 20 }} />, title: 'PII Protection', desc: 'SSN/DOB encrypted at rest, never sent to external AI.' },
+              { icon: <Shield style={{ width: 20, height: 20 }} />, title: 'Dual-LLM Architecture', desc: 'Employee data stays on private infrastructure.' },
+              { icon: <Database style={{ width: 20, height: 20 }} />, title: 'Isolated Workspaces', desc: 'Customer data segregation by project.' }
             ].map((item, idx) => (
               <div key={idx} style={{
                 background: 'white',
@@ -321,7 +251,7 @@ export default function Landing() {
           </div>
         </section>
 
-        {/* Tech Stack Section */}
+        {/* Architecture Section */}
         <section style={{ marginBottom: '2.5rem' }}>
           <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
             <h2 style={{
@@ -466,7 +396,7 @@ export default function Landing() {
             Stop spending weeks on manual document analysis.
           </p>
           <Link 
-            to="/workspace" 
+            to="/dashboard" 
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -481,7 +411,7 @@ export default function Landing() {
               textDecoration: 'none'
             }}
           >
-            Launch Workspace
+            Launch Dashboard
             <ArrowRight style={{ width: 18, height: 18 }} />
           </Link>
         </section>
