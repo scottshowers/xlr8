@@ -1,12 +1,12 @@
 /**
- * YearEndPlaybook - Year-End Checklist Runner
+ * YearEndPlaybook - Interactive Year-End Checklist
  * 
- * Wizard flow:
- * 1. Check document readiness (query what's uploaded for project)
- * 2. Show readiness status with missing/available docs
- * 3. Generate workbook via backend
- * 4. Provide download
- * 5. Allow re-run after modifications
+ * Guided journey through Year-End actions:
+ * - Shows all steps/actions from parsed UKG doc
+ * - Auto-scans for relevant documents per action
+ * - Tracks status (not started, in progress, complete, n/a)
+ * - Consultant can add notes, override status
+ * - Export current state anytime
  */
 
 import React, { useState, useEffect } from 'react';
@@ -22,136 +22,570 @@ const COLORS = {
   textLight: '#5f6c7b',
 };
 
-// Document categories the playbook looks for
-const DOCUMENT_CATEGORIES = [
-  { id: 'company_tax', name: 'Company Tax Verification', required: true, keywords: ['tax verification', 'company tax', 'fein', 'tax code'] },
-  { id: 'earnings', name: 'Earnings Codes / Tax Categories', required: true, keywords: ['earnings', 'earning code', 'tax category', 'earnings tax'] },
-  { id: 'deductions', name: 'Deduction Codes', required: true, keywords: ['deduction', 'benefit code', 'deduction tax'] },
-  { id: 'workers_comp', name: 'Workers Compensation Rates', required: false, keywords: ['workers comp', 'work comp', 'wc rate', 'risk rate'] },
-  { id: 'outstanding_checks', name: 'Outstanding Checks', required: false, keywords: ['outstanding check', 'undelivered', 'payment services'] },
-  { id: 'arrears', name: 'Arrears Report', required: false, keywords: ['arrears', 'outstanding arrears'] },
-  { id: 'employee_data', name: 'Employee Data / Census', required: false, keywords: ['employee', 'census', 'headcount'] },
+const STATUS_OPTIONS = [
+  { value: 'not_started', label: 'Not Started', color: '#9ca3af', bg: '#f3f4f6' },
+  { value: 'in_progress', label: 'In Progress', color: '#d97706', bg: '#fef3c7' },
+  { value: 'complete', label: 'Complete', color: '#059669', bg: '#d1fae5' },
+  { value: 'na', label: 'N/A', color: '#6b7280', bg: '#e5e7eb' },
+  { value: 'blocked', label: 'Blocked', color: '#dc2626', bg: '#fee2e2' },
 ];
 
-export default function YearEndPlaybook({ project, projectName, customerName, onClose }) {
-  const [step, setStep] = useState('checking'); // checking, ready, generating, complete, error
-  const [documents, setDocuments] = useState([]);
-  const [docStatus, setDocStatus] = useState({});
-  const [generateProgress, setGenerateProgress] = useState(0);
-  const [downloadUrl, setDownloadUrl] = useState(null);
-  const [error, setError] = useState(null);
-  const [findings, setFindings] = useState(null);
+// Action Card Component
+function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
+  const [expanded, setExpanded] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [notes, setNotes] = useState(progress?.notes || '');
+  const [localStatus, setLocalStatus] = useState(progress?.status || 'not_started');
+  
+  const findings = progress?.findings;
+  const docsFound = progress?.documents_found || [];
+  
+  const statusConfig = STATUS_OPTIONS.find(s => s.value === localStatus) || STATUS_OPTIONS[0];
 
-  useEffect(() => {
-    checkDocumentReadiness();
-  }, [project]);
-
-  const checkDocumentReadiness = async () => {
-    setStep('checking');
+  const handleScan = async () => {
+    setScanning(true);
     try {
-      // Get all documents for this project
-      const res = await api.get(`/status/documents?project_id=${project.id}`);
-      const docs = res.data?.documents || [];
-      setDocuments(docs);
-
-      // Match documents against categories
-      const status = {};
-      DOCUMENT_CATEGORIES.forEach(cat => {
-        const matched = docs.filter(doc => {
-          const filename = (doc.filename || doc.source || '').toLowerCase();
-          const content = (doc.content_preview || '').toLowerCase();
-          return cat.keywords.some(kw => 
-            filename.includes(kw.toLowerCase()) || content.includes(kw.toLowerCase())
-          );
+      const res = await api.post(`/playbooks/year-end/scan/${projectId}/${action.action_id}`);
+      if (res.data) {
+        onUpdate(action.action_id, {
+          status: res.data.suggested_status,
+          findings: res.data.findings,
+          documents_found: res.data.documents?.map(d => d.filename) || []
         });
-        status[cat.id] = {
-          found: matched.length > 0,
-          count: matched.length,
-          documents: matched,
-          required: cat.required,
-        };
-      });
-      setDocStatus(status);
-      setStep('ready');
-    } catch (err) {
-      console.error('Error checking documents:', err);
-      setError('Failed to check document readiness');
-      setStep('error');
-    }
-  };
-
-  const generateWorkbook = async () => {
-    setStep('generating');
-    setGenerateProgress(10);
-    
-    try {
-      // Call backend to generate workbook
-      setGenerateProgress(30);
-      
-      const res = await api.post('/playbooks/year-end/generate', {
-        project_id: project.id,
-        project_name: projectName,
-        customer_name: customerName,
-      }, {
-        responseType: 'blob',
-        timeout: 300000, // 5 min timeout for large analysis
-        onDownloadProgress: (progressEvent) => {
-          const progress = Math.round((progressEvent.loaded * 100) / (progressEvent.total || progressEvent.loaded));
-          setGenerateProgress(30 + (progress * 0.6)); // 30-90%
-        }
-      });
-
-      setGenerateProgress(95);
-
-      // Create download URL
-      const blob = new Blob([res.data], { 
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
-      });
-      const url = window.URL.createObjectURL(blob);
-      setDownloadUrl(url);
-      
-      // Try to get findings from headers
-      const findingsHeader = res.headers['x-findings-summary'];
-      if (findingsHeader) {
-        try {
-          setFindings(JSON.parse(decodeURIComponent(findingsHeader)));
-        } catch (e) {
-          // Ignore parse errors
-        }
+        setLocalStatus(res.data.suggested_status);
       }
-
-      setGenerateProgress(100);
-      setStep('complete');
     } catch (err) {
-      console.error('Error generating workbook:', err);
-      setError(err.response?.data?.detail || 'Failed to generate workbook');
-      setStep('error');
+      console.error('Scan failed:', err);
+    } finally {
+      setScanning(false);
     }
   };
 
-  const downloadWorkbook = () => {
-    if (downloadUrl) {
-      const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.download = `${customerName.replace(/[^a-zA-Z0-9]/g, '_')}_Year_End_Checklist_2025.xlsx`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+  const handleStatusChange = async (newStatus) => {
+    setLocalStatus(newStatus);
+    try {
+      await api.post(`/playbooks/year-end/progress/${projectId}/${action.action_id}`, {
+        status: newStatus,
+        notes: notes,
+        findings: findings
+      });
+      onUpdate(action.action_id, { status: newStatus });
+    } catch (err) {
+      console.error('Failed to update status:', err);
+    }
+  };
+
+  const handleNotesBlur = async () => {
+    try {
+      await api.post(`/playbooks/year-end/progress/${projectId}/${action.action_id}`, {
+        status: localStatus,
+        notes: notes,
+        findings: findings
+      });
+      onUpdate(action.action_id, { notes });
+    } catch (err) {
+      console.error('Failed to save notes:', err);
     }
   };
 
   const styles = {
+    card: {
+      background: 'white',
+      borderRadius: '10px',
+      border: '1px solid #e1e8ed',
+      marginBottom: '0.75rem',
+      overflow: 'hidden',
+    },
+    header: {
+      display: 'flex',
+      alignItems: 'flex-start',
+      padding: '1rem',
+      cursor: 'pointer',
+      gap: '1rem',
+    },
+    actionId: {
+      fontFamily: "'Ubuntu Mono', monospace",
+      fontWeight: '700',
+      fontSize: '0.9rem',
+      color: COLORS.text,
+      background: '#f0f4f7',
+      padding: '0.25rem 0.5rem',
+      borderRadius: '4px',
+      flexShrink: 0,
+    },
+    content: {
+      flex: 1,
+    },
+    description: {
+      fontSize: '0.9rem',
+      color: COLORS.text,
+      lineHeight: '1.4',
+      marginBottom: '0.5rem',
+    },
+    meta: {
+      display: 'flex',
+      gap: '1rem',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+    },
+    dueDate: {
+      fontSize: '0.75rem',
+      color: '#dc2626',
+      fontWeight: '600',
+    },
+    actionType: {
+      fontSize: '0.7rem',
+      padding: '0.15rem 0.4rem',
+      borderRadius: '3px',
+      fontWeight: '600',
+      textTransform: 'uppercase',
+      background: action.action_type === 'required' ? '#fee2e2' : '#e0f2fe',
+      color: action.action_type === 'required' ? '#b91c1c' : '#0369a1',
+    },
+    statusBadge: {
+      fontSize: '0.75rem',
+      padding: '0.25rem 0.5rem',
+      borderRadius: '4px',
+      fontWeight: '600',
+      background: statusConfig.bg,
+      color: statusConfig.color,
+      marginLeft: 'auto',
+    },
+    expandIcon: {
+      fontSize: '1.25rem',
+      color: COLORS.textLight,
+      transition: 'transform 0.2s',
+      transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
+    },
+    expandedContent: {
+      padding: '0 1rem 1rem 1rem',
+      borderTop: '1px solid #e1e8ed',
+      background: '#fafbfc',
+    },
+    section: {
+      marginBottom: '1rem',
+    },
+    sectionTitle: {
+      fontSize: '0.75rem',
+      fontWeight: '700',
+      color: COLORS.textLight,
+      textTransform: 'uppercase',
+      marginBottom: '0.5rem',
+    },
+    findingsBox: {
+      background: findings?.complete ? '#d1fae5' : '#fef3c7',
+      border: `1px solid ${findings?.complete ? '#86efac' : '#fcd34d'}`,
+      borderRadius: '8px',
+      padding: '0.75rem',
+    },
+    keyValue: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      fontSize: '0.85rem',
+      marginBottom: '0.25rem',
+    },
+    keyLabel: {
+      color: COLORS.textLight,
+    },
+    keyVal: {
+      fontWeight: '600',
+      color: COLORS.text,
+    },
+    issuesList: {
+      margin: '0.5rem 0 0 0',
+      paddingLeft: '1.25rem',
+    },
+    issue: {
+      fontSize: '0.85rem',
+      color: '#b91c1c',
+      marginBottom: '0.25rem',
+    },
+    docsFound: {
+      display: 'flex',
+      flexWrap: 'wrap',
+      gap: '0.5rem',
+    },
+    docBadge: {
+      fontSize: '0.75rem',
+      padding: '0.25rem 0.5rem',
+      background: '#dbeafe',
+      color: '#1e40af',
+      borderRadius: '4px',
+    },
+    statusSelect: {
+      display: 'flex',
+      gap: '0.5rem',
+      flexWrap: 'wrap',
+    },
+    statusBtn: (isActive, config) => ({
+      padding: '0.4rem 0.75rem',
+      fontSize: '0.8rem',
+      fontWeight: '600',
+      border: `2px solid ${isActive ? config.color : '#e1e8ed'}`,
+      background: isActive ? config.bg : 'white',
+      color: isActive ? config.color : COLORS.textLight,
+      borderRadius: '6px',
+      cursor: 'pointer',
+    }),
+    notesArea: {
+      width: '100%',
+      padding: '0.5rem',
+      border: '1px solid #e1e8ed',
+      borderRadius: '6px',
+      fontSize: '0.85rem',
+      minHeight: '60px',
+      resize: 'vertical',
+      fontFamily: 'inherit',
+    },
+    scanBtn: {
+      padding: '0.5rem 1rem',
+      background: COLORS.grassGreen,
+      color: 'white',
+      border: 'none',
+      borderRadius: '6px',
+      fontWeight: '600',
+      fontSize: '0.85rem',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.5rem',
+    },
+    reportsNeeded: {
+      fontSize: '0.8rem',
+      color: COLORS.textLight,
+      fontStyle: 'italic',
+    },
+  };
+
+  return (
+    <div style={styles.card}>
+      {/* Header - always visible */}
+      <div style={styles.header} onClick={() => setExpanded(!expanded)}>
+        <span style={styles.actionId}>{action.action_id}</span>
+        <div style={styles.content}>
+          <div style={styles.description}>{action.description}</div>
+          <div style={styles.meta}>
+            {action.due_date && (
+              <span style={styles.dueDate}>📅 Due: {action.due_date}</span>
+            )}
+            <span style={styles.actionType}>{action.action_type}</span>
+            {docsFound.length > 0 && (
+              <span style={{ fontSize: '0.75rem', color: COLORS.grassGreen }}>
+                ✓ {docsFound.length} doc{docsFound.length > 1 ? 's' : ''} found
+              </span>
+            )}
+          </div>
+        </div>
+        <span style={styles.statusBadge}>{statusConfig.label}</span>
+        <span style={styles.expandIcon}>{expanded ? '▲' : '▼'}</span>
+      </div>
+
+      {/* Expanded content */}
+      {expanded && (
+        <div style={styles.expandedContent}>
+          {/* Reports Needed */}
+          {action.reports_needed?.length > 0 && (
+            <div style={styles.section}>
+              <div style={styles.sectionTitle}>Reports Needed</div>
+              <div style={styles.reportsNeeded}>
+                {action.reports_needed.join(', ')}
+              </div>
+            </div>
+          )}
+
+          {/* Scan Button */}
+          <div style={styles.section}>
+            <button 
+              style={styles.scanBtn} 
+              onClick={(e) => { e.stopPropagation(); handleScan(); }}
+              disabled={scanning}
+            >
+              {scanning ? '⏳ Scanning...' : '🔍 Scan Documents'}
+            </button>
+          </div>
+
+          {/* Documents Found */}
+          {docsFound.length > 0 && (
+            <div style={styles.section}>
+              <div style={styles.sectionTitle}>Documents Found</div>
+              <div style={styles.docsFound}>
+                {docsFound.map((doc, i) => (
+                  <span key={i} style={styles.docBadge}>📄 {doc}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Findings */}
+          {findings && (
+            <div style={styles.section}>
+              <div style={styles.sectionTitle}>AI Findings</div>
+              <div style={styles.findingsBox}>
+                {findings.summary && (
+                  <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.85rem' }}>{findings.summary}</p>
+                )}
+                {findings.key_values && Object.keys(findings.key_values).length > 0 && (
+                  <div style={{ marginBottom: '0.5rem' }}>
+                    {Object.entries(findings.key_values).map(([key, val]) => (
+                      <div key={key} style={styles.keyValue}>
+                        <span style={styles.keyLabel}>{key}:</span>
+                        <span style={styles.keyVal}>{val}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {findings.issues?.length > 0 && (
+                  <ul style={styles.issuesList}>
+                    {findings.issues.map((issue, i) => (
+                      <li key={i} style={styles.issue}>⚠️ {issue}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Status Selection */}
+          <div style={styles.section}>
+            <div style={styles.sectionTitle}>Status</div>
+            <div style={styles.statusSelect}>
+              {STATUS_OPTIONS.map(opt => (
+                <button
+                  key={opt.value}
+                  style={styles.statusBtn(localStatus === opt.value, opt)}
+                  onClick={(e) => { e.stopPropagation(); handleStatusChange(opt.value); }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Notes */}
+          <div style={styles.section}>
+            <div style={styles.sectionTitle}>Consultant Notes</div>
+            <textarea
+              style={styles.notesArea}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              onBlur={handleNotesBlur}
+              onClick={(e) => e.stopPropagation()}
+              placeholder="Add notes, findings, or follow-up items..."
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Step Accordion Component
+function StepAccordion({ step, progress, projectId, onUpdate }) {
+  const [expanded, setExpanded] = useState(true);
+  
+  const completedCount = step.actions.filter(a => 
+    progress[a.action_id]?.status === 'complete' || progress[a.action_id]?.status === 'na'
+  ).length;
+  const totalCount = step.actions.length;
+  const allComplete = completedCount === totalCount;
+
+  const styles = {
     container: {
-      maxWidth: '900px',
+      marginBottom: '1.5rem',
+    },
+    header: {
+      display: 'flex',
+      alignItems: 'center',
+      padding: '1rem',
+      background: allComplete ? '#d1fae5' : 'white',
+      borderRadius: '12px',
+      border: '1px solid #e1e8ed',
+      cursor: 'pointer',
+      gap: '1rem',
+    },
+    stepNumber: {
+      fontFamily: "'Sora', sans-serif",
+      fontWeight: '700',
+      fontSize: '1rem',
+      color: 'white',
+      background: allComplete ? '#059669' : COLORS.grassGreen,
+      width: '36px',
+      height: '36px',
+      borderRadius: '8px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    stepName: {
+      flex: 1,
+      fontFamily: "'Sora', sans-serif",
+      fontWeight: '600',
+      fontSize: '1rem',
+      color: COLORS.text,
+    },
+    progressText: {
+      fontSize: '0.85rem',
+      color: COLORS.textLight,
+    },
+    phaseBadge: {
+      fontSize: '0.7rem',
+      padding: '0.2rem 0.5rem',
+      borderRadius: '4px',
+      fontWeight: '600',
+      textTransform: 'uppercase',
+      background: step.phase === 'before_final_payroll' ? '#dbeafe' : '#fae8ff',
+      color: step.phase === 'before_final_payroll' ? '#1e40af' : '#86198f',
+    },
+    expandIcon: {
+      fontSize: '1.25rem',
+      color: COLORS.textLight,
+    },
+    actionsContainer: {
+      marginTop: '0.75rem',
+      paddingLeft: '1rem',
+    },
+  };
+
+  return (
+    <div style={styles.container}>
+      <div style={styles.header} onClick={() => setExpanded(!expanded)}>
+        <div style={styles.stepNumber}>{step.step_number}</div>
+        <div style={styles.stepName}>{step.step_name}</div>
+        <span style={styles.phaseBadge}>
+          {step.phase === 'before_final_payroll' ? 'Before Final' : 'After Final'}
+        </span>
+        <span style={styles.progressText}>
+          {completedCount}/{totalCount} {allComplete && '✓'}
+        </span>
+        <span style={styles.expandIcon}>{expanded ? '▼' : '▶'}</span>
+      </div>
+      
+      {expanded && (
+        <div style={styles.actionsContainer}>
+          {step.actions.map(action => (
+            <ActionCard
+              key={action.action_id}
+              action={action}
+              stepNumber={step.step_number}
+              progress={progress[action.action_id] || {}}
+              projectId={projectId}
+              onUpdate={onUpdate}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Main Component
+export default function YearEndPlaybook({ project, projectName, customerName, onClose }) {
+  const [structure, setStructure] = useState(null);
+  const [progress, setProgress] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const [activePhase, setActivePhase] = useState('all');
+
+  useEffect(() => {
+    loadPlaybook();
+  }, [project]);
+
+  const loadPlaybook = async () => {
+    setLoading(true);
+    try {
+      // Load structure and progress in parallel
+      const [structRes, progressRes] = await Promise.all([
+        api.get('/playbooks/year-end/structure'),
+        api.get(`/playbooks/year-end/progress/${project.id}`)
+      ]);
+      
+      setStructure(structRes.data);
+      setProgress(progressRes.data?.progress || {});
+    } catch (err) {
+      console.error('Failed to load playbook:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdate = (actionId, updates) => {
+    setProgress(prev => ({
+      ...prev,
+      [actionId]: { ...prev[actionId], ...updates }
+    }));
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const res = await api.get(
+        `/playbooks/year-end/export/${project.id}?customer_name=${encodeURIComponent(customerName)}`,
+        { responseType: 'blob' }
+      );
+      
+      const blob = new Blob([res.data], { 
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${customerName.replace(/[^a-zA-Z0-9]/g, '_')}_Year_End_Progress.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      console.error('Export failed:', err);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // Calculate progress stats
+  const totalActions = structure?.total_actions || 0;
+  const completedActions = Object.values(progress).filter(p => 
+    p.status === 'complete' || p.status === 'na'
+  ).length;
+  const progressPercent = totalActions > 0 ? Math.round((completedActions / totalActions) * 100) : 0;
+
+  // Filter steps by phase
+  const filteredSteps = structure?.steps?.filter(step => {
+    if (activePhase === 'all') return true;
+    return step.phase === activePhase;
+  }) || [];
+
+  const styles = {
+    container: {
+      maxWidth: '1000px',
       margin: '0 auto',
     },
     header: {
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'flex-start',
-      marginBottom: '2rem',
+      marginBottom: '1.5rem',
+      flexWrap: 'wrap',
+      gap: '1rem',
     },
-    backButton: {
+    titleSection: {},
+    title: {
+      fontFamily: "'Sora', sans-serif",
+      fontSize: '1.75rem',
+      fontWeight: '700',
+      color: COLORS.text,
+      margin: 0,
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.5rem',
+    },
+    subtitle: {
+      color: COLORS.textLight,
+      marginTop: '0.25rem',
+    },
+    headerActions: {
+      display: 'flex',
+      gap: '0.75rem',
+    },
+    backBtn: {
       padding: '0.5rem 1rem',
       background: 'white',
       border: '1px solid #e1e8ed',
@@ -159,97 +593,9 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       color: COLORS.textLight,
       fontWeight: '600',
       cursor: 'pointer',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.5rem',
     },
-    title: {
-      fontFamily: "'Sora', sans-serif",
-      fontSize: '1.75rem',
-      fontWeight: '700',
-      color: COLORS.text,
-      margin: 0,
-    },
-    subtitle: {
-      color: COLORS.textLight,
-      marginTop: '0.25rem',
-    },
-    card: {
-      background: 'white',
-      borderRadius: '16px',
-      padding: '2rem',
-      boxShadow: '0 1px 3px rgba(42, 52, 65, 0.08)',
-      marginBottom: '1.5rem',
-    },
-    cardTitle: {
-      fontFamily: "'Sora', sans-serif",
-      fontSize: '1.1rem',
-      fontWeight: '700',
-      color: COLORS.text,
-      marginBottom: '1rem',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.5rem',
-    },
-    docList: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '0.75rem',
-    },
-    docItem: (found, required) => ({
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      padding: '0.75rem 1rem',
-      background: found ? '#f0fdf4' : (required ? '#fef2f2' : '#f8fafc'),
-      borderRadius: '8px',
-      border: `1px solid ${found ? '#86efac' : (required ? '#fecaca' : '#e1e8ed')}`,
-    }),
-    docName: {
-      fontWeight: '600',
-      color: COLORS.text,
-    },
-    docBadge: (found) => ({
-      fontSize: '0.75rem',
-      padding: '0.25rem 0.5rem',
-      borderRadius: '4px',
-      fontWeight: '600',
-      background: found ? '#dcfce7' : '#fee2e2',
-      color: found ? '#166534' : '#b91c1c',
-    }),
-    requiredTag: {
-      fontSize: '0.7rem',
-      color: '#dc2626',
-      fontWeight: '600',
-      marginLeft: '0.5rem',
-    },
-    progressBar: {
-      width: '100%',
-      height: '8px',
-      background: '#e1e8ed',
-      borderRadius: '4px',
-      overflow: 'hidden',
-      marginBottom: '1rem',
-    },
-    progressFill: (progress) => ({
-      width: `${progress}%`,
-      height: '100%',
-      background: COLORS.grassGreen,
-      transition: 'width 0.3s ease',
-    }),
-    progressText: {
-      textAlign: 'center',
-      color: COLORS.textLight,
-      fontSize: '0.9rem',
-    },
-    actions: {
-      display: 'flex',
-      gap: '1rem',
-      justifyContent: 'flex-end',
-      marginTop: '1.5rem',
-    },
-    primaryBtn: {
-      padding: '0.75rem 1.5rem',
+    exportBtn: {
+      padding: '0.5rem 1rem',
       background: COLORS.grassGreen,
       border: 'none',
       borderRadius: '8px',
@@ -260,271 +606,140 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       alignItems: 'center',
       gap: '0.5rem',
     },
-    secondaryBtn: {
-      padding: '0.75rem 1.5rem',
+    progressCard: {
       background: 'white',
-      border: `1px solid ${COLORS.grassGreen}`,
-      borderRadius: '8px',
-      color: COLORS.grassGreen,
-      fontWeight: '600',
-      cursor: 'pointer',
+      borderRadius: '12px',
+      padding: '1.25rem',
+      marginBottom: '1.5rem',
+      border: '1px solid #e1e8ed',
     },
-    disabledBtn: {
-      padding: '0.75rem 1.5rem',
+    progressBar: {
+      height: '12px',
       background: '#e1e8ed',
-      border: 'none',
-      borderRadius: '8px',
-      color: '#9ca3af',
+      borderRadius: '6px',
+      overflow: 'hidden',
+      marginBottom: '0.75rem',
+    },
+    progressFill: {
+      height: '100%',
+      background: `linear-gradient(90deg, ${COLORS.grassGreen}, #6aa84f)`,
+      borderRadius: '6px',
+      transition: 'width 0.3s ease',
+      width: `${progressPercent}%`,
+    },
+    progressStats: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    progressText: {
       fontWeight: '600',
-      cursor: 'not-allowed',
+      color: COLORS.text,
     },
-    successBox: {
-      background: '#f0fdf4',
-      border: '1px solid #86efac',
-      borderRadius: '12px',
-      padding: '1.5rem',
-      textAlign: 'center',
-    },
-    successIcon: {
-      fontSize: '3rem',
-      marginBottom: '1rem',
-    },
-    successTitle: {
-      fontFamily: "'Sora', sans-serif",
-      fontSize: '1.25rem',
-      fontWeight: '700',
-      color: '#166534',
-      marginBottom: '0.5rem',
-    },
-    errorBox: {
-      background: '#fef2f2',
-      border: '1px solid #fecaca',
-      borderRadius: '12px',
-      padding: '1.5rem',
-      textAlign: 'center',
-    },
-    errorIcon: {
-      fontSize: '3rem',
-      marginBottom: '1rem',
-    },
-    errorTitle: {
-      fontFamily: "'Sora', sans-serif",
-      fontSize: '1.25rem',
-      fontWeight: '700',
-      color: '#b91c1c',
-      marginBottom: '0.5rem',
-    },
-    findingsGrid: {
-      display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-      gap: '1rem',
-      marginTop: '1rem',
-    },
-    findingStat: {
-      textAlign: 'center',
-      padding: '1rem',
-      background: '#f8fafc',
-      borderRadius: '8px',
-    },
-    findingValue: {
+    progressPercent: {
       fontSize: '1.5rem',
       fontWeight: '700',
       color: COLORS.grassGreen,
     },
-    findingLabel: {
-      fontSize: '0.8rem',
+    phaseFilter: {
+      display: 'flex',
+      gap: '0.5rem',
+      marginBottom: '1.5rem',
+    },
+    phaseBtn: (isActive) => ({
+      padding: '0.5rem 1rem',
+      background: isActive ? COLORS.grassGreen : 'white',
+      border: `1px solid ${isActive ? COLORS.grassGreen : '#e1e8ed'}`,
+      borderRadius: '20px',
+      color: isActive ? 'white' : COLORS.textLight,
+      fontWeight: '600',
+      fontSize: '0.85rem',
+      cursor: 'pointer',
+    }),
+    loadingState: {
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+      minHeight: '300px',
       color: COLORS.textLight,
     },
   };
 
-  const requiredMissing = DOCUMENT_CATEGORIES
-    .filter(cat => cat.required && !docStatus[cat.id]?.found)
-    .length;
-
-  const totalFound = Object.values(docStatus).filter(s => s.found).length;
+  if (loading) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.loadingState}>
+          <span>Loading Year-End Checklist...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={styles.container}>
       {/* Header */}
       <div style={styles.header}>
-        <div>
+        <div style={styles.titleSection}>
           <h1 style={styles.title}>📅 Year-End Checklist</h1>
           <p style={styles.subtitle}>
             {customerName} → {projectName}
           </p>
         </div>
-        <button style={styles.backButton} onClick={onClose}>
-          ← Back to Playbooks
+        <div style={styles.headerActions}>
+          <button style={styles.backBtn} onClick={onClose}>
+            ← Back
+          </button>
+          <button style={styles.exportBtn} onClick={handleExport} disabled={exporting}>
+            {exporting ? '⏳ Exporting...' : '📥 Export Progress'}
+          </button>
+        </div>
+      </div>
+
+      {/* Progress Card */}
+      <div style={styles.progressCard}>
+        <div style={styles.progressBar}>
+          <div style={styles.progressFill} />
+        </div>
+        <div style={styles.progressStats}>
+          <span style={styles.progressText}>
+            {completedActions} of {totalActions} actions complete
+          </span>
+          <span style={styles.progressPercent}>{progressPercent}%</span>
+        </div>
+      </div>
+
+      {/* Phase Filter */}
+      <div style={styles.phaseFilter}>
+        <button 
+          style={styles.phaseBtn(activePhase === 'all')} 
+          onClick={() => setActivePhase('all')}
+        >
+          All Steps
+        </button>
+        <button 
+          style={styles.phaseBtn(activePhase === 'before_final_payroll')} 
+          onClick={() => setActivePhase('before_final_payroll')}
+        >
+          Before Final Payroll
+        </button>
+        <button 
+          style={styles.phaseBtn(activePhase === 'after_final_payroll')} 
+          onClick={() => setActivePhase('after_final_payroll')}
+        >
+          After Final Payroll
         </button>
       </div>
 
-      {/* Step: Checking */}
-      {step === 'checking' && (
-        <div style={styles.card}>
-          <h3 style={styles.cardTitle}>🔍 Checking Document Readiness...</h3>
-          <div style={styles.progressBar}>
-            <div style={styles.progressFill(50)} />
-          </div>
-          <p style={styles.progressText}>Scanning project documents...</p>
-        </div>
-      )}
-
-      {/* Step: Ready */}
-      {step === 'ready' && (
-        <>
-          <div style={styles.card}>
-            <h3 style={styles.cardTitle}>📄 Document Readiness</h3>
-            <p style={{ color: COLORS.textLight, marginBottom: '1rem' }}>
-              Found {totalFound} of {DOCUMENT_CATEGORIES.length} document categories. 
-              {requiredMissing > 0 && (
-                <span style={{ color: '#dc2626', fontWeight: '600' }}>
-                  {' '}{requiredMissing} required categories missing.
-                </span>
-              )}
-            </p>
-            
-            <div style={styles.docList}>
-              {DOCUMENT_CATEGORIES.map(cat => {
-                const status = docStatus[cat.id] || { found: false, count: 0 };
-                return (
-                  <div key={cat.id} style={styles.docItem(status.found, cat.required)}>
-                    <div>
-                      <span style={styles.docName}>{cat.name}</span>
-                      {cat.required && <span style={styles.requiredTag}>REQUIRED</span>}
-                      {status.found && status.count > 0 && (
-                        <span style={{ fontSize: '0.8rem', color: COLORS.textLight, marginLeft: '0.5rem' }}>
-                          ({status.count} doc{status.count > 1 ? 's' : ''} matched)
-                        </span>
-                      )}
-                    </div>
-                    <span style={styles.docBadge(status.found)}>
-                      {status.found ? '✓ Found' : '✗ Missing'}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div style={styles.actions}>
-              <button style={styles.secondaryBtn} onClick={checkDocumentReadiness}>
-                🔄 Re-scan
-              </button>
-              <button 
-                style={requiredMissing > 0 ? styles.disabledBtn : styles.primaryBtn}
-                onClick={generateWorkbook}
-                disabled={requiredMissing > 0}
-              >
-                {requiredMissing > 0 ? 'Upload Required Docs First' : '🚀 Generate Workbook'}
-              </button>
-            </div>
-          </div>
-
-          {requiredMissing > 0 && (
-            <div style={{ ...styles.card, background: '#fffbeb', border: '1px solid #fcd34d' }}>
-              <h3 style={{ ...styles.cardTitle, color: '#92400e' }}>⚠️ Missing Required Documents</h3>
-              <p style={{ color: '#92400e' }}>
-                Please upload the missing required documents via <strong>Data → Upload Files</strong> before generating the workbook.
-              </p>
-            </div>
-          )}
-        </>
-      )}
-
-      {/* Step: Generating */}
-      {step === 'generating' && (
-        <div style={styles.card}>
-          <h3 style={styles.cardTitle}>⚙️ Generating Workbook...</h3>
-          <div style={styles.progressBar}>
-            <div style={styles.progressFill(generateProgress)} />
-          </div>
-          <p style={styles.progressText}>
-            {generateProgress < 30 && 'Querying documents...'}
-            {generateProgress >= 30 && generateProgress < 60 && 'Analyzing data with AI...'}
-            {generateProgress >= 60 && generateProgress < 90 && 'Building workbook...'}
-            {generateProgress >= 90 && 'Finalizing...'}
-          </p>
-        </div>
-      )}
-
-      {/* Step: Complete */}
-      {step === 'complete' && (
-        <>
-          <div style={styles.successBox}>
-            <div style={styles.successIcon}>✅</div>
-            <h3 style={styles.successTitle}>Workbook Generated Successfully!</h3>
-            <p style={{ color: '#166534', marginBottom: '1.5rem' }}>
-              Your Year-End Checklist workbook is ready for download.
-            </p>
-            <button style={styles.primaryBtn} onClick={downloadWorkbook}>
-              📥 Download Workbook
-            </button>
-          </div>
-
-          {findings && (
-            <div style={{ ...styles.card, marginTop: '1.5rem' }}>
-              <h3 style={styles.cardTitle}>📊 Quick Findings</h3>
-              <div style={styles.findingsGrid}>
-                {findings.total_actions && (
-                  <div style={styles.findingStat}>
-                    <div style={styles.findingValue}>{findings.total_actions}</div>
-                    <div style={styles.findingLabel}>Total Actions</div>
-                  </div>
-                )}
-                {findings.critical_items && (
-                  <div style={{ ...styles.findingStat, background: '#fef2f2' }}>
-                    <div style={{ ...styles.findingValue, color: '#dc2626' }}>{findings.critical_items}</div>
-                    <div style={styles.findingLabel}>Critical Items</div>
-                  </div>
-                )}
-                {findings.documents_analyzed && (
-                  <div style={styles.findingStat}>
-                    <div style={styles.findingValue}>{findings.documents_analyzed}</div>
-                    <div style={styles.findingLabel}>Docs Analyzed</div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          <div style={{ ...styles.card, marginTop: '1.5rem' }}>
-            <h3 style={styles.cardTitle}>🔄 Next Steps</h3>
-            <ol style={{ color: COLORS.textLight, lineHeight: '1.8', paddingLeft: '1.25rem' }}>
-              <li>Download and review the workbook</li>
-              <li>Fact-check findings against source documents</li>
-              <li>Add consultant notes and recommendations</li>
-              <li>If modifications needed, re-upload updated documents and regenerate</li>
-              <li>Deliver to customer</li>
-            </ol>
-            <div style={styles.actions}>
-              <button style={styles.secondaryBtn} onClick={() => setStep('ready')}>
-                ← Back to Readiness
-              </button>
-              <button style={styles.primaryBtn} onClick={generateWorkbook}>
-                🔄 Regenerate
-              </button>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* Step: Error */}
-      {step === 'error' && (
-        <div style={styles.errorBox}>
-          <div style={styles.errorIcon}>❌</div>
-          <h3 style={styles.errorTitle}>Generation Failed</h3>
-          <p style={{ color: '#b91c1c', marginBottom: '1.5rem' }}>
-            {error || 'An unexpected error occurred.'}
-          </p>
-          <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
-            <button style={styles.secondaryBtn} onClick={() => setStep('ready')}>
-              ← Back
-            </button>
-            <button style={styles.primaryBtn} onClick={generateWorkbook}>
-              🔄 Retry
-            </button>
-          </div>
-        </div>
-      )}
+      {/* Steps */}
+      {filteredSteps.map(step => (
+        <StepAccordion
+          key={step.step_number}
+          step={step}
+          progress={progress}
+          projectId={project.id}
+          onUpdate={handleUpdate}
+        />
+      ))}
     </div>
   );
 }
