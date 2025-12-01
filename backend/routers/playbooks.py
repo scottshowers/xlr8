@@ -461,84 +461,302 @@ Return ONLY valid JSON."""
 
 @router.get("/year-end/export/{project_id}")
 async def export_progress(project_id: str, customer_name: str = "Customer"):
-    """Export current playbook progress as XLSX."""
+    """Export current playbook progress as XLSX with professional formatting."""
     
     structure = await get_year_end_structure()
     progress = PLAYBOOK_PROGRESS.get(project_id, {})
     
     wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Year-End Checklist"
     
-    # Styles
+    # =========================================================================
+    # STYLES
+    # =========================================================================
+    title_font = Font(bold=True, size=18, color="FFFFFF")
     header_font = Font(bold=True, size=11, color="FFFFFF")
-    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    subheader_font = Font(bold=True, size=10, color="2a3441")
+    normal_font = Font(size=10, color="2a3441")
+    
+    brand_green = "83b16d"
+    brand_blue = "4472C4"
+    
+    title_fill = PatternFill(start_color=brand_green, end_color=brand_green, fill_type="solid")
+    header_fill = PatternFill(start_color=brand_blue, end_color=brand_blue, fill_type="solid")
     complete_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
     progress_fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
     not_started_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+    blocked_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+    na_fill = PatternFill(start_color="E0E0E0", end_color="E0E0E0", fill_type="solid")
+    alt_row_fill = PatternFill(start_color="F8F9FA", end_color="F8F9FA", fill_type="solid")
+    
     thin_border = Border(
-        left=Side(style='thin'), right=Side(style='thin'),
-        top=Side(style='thin'), bottom=Side(style='thin')
+        left=Side(style='thin', color='CCCCCC'),
+        right=Side(style='thin', color='CCCCCC'),
+        top=Side(style='thin', color='CCCCCC'),
+        bottom=Side(style='thin', color='CCCCCC')
     )
-    wrap = Alignment(wrap_text=True, vertical='top')
     
-    # Title
-    ws.cell(row=1, column=1, value=f"Year-End Checklist - {customer_name}").font = Font(bold=True, size=14)
-    ws.cell(row=2, column=1, value=f"Generated: {datetime.now().strftime('%B %d, %Y %H:%M')}")
-    ws.cell(row=3, column=1, value=f"Progress: {sum(1 for p in progress.values() if p.get('status') == 'complete')}/{structure['total_actions']} Complete")
+    wrap_align = Alignment(wrap_text=True, vertical='top')
+    center_align = Alignment(horizontal='center', vertical='center')
     
-    # Headers
-    headers = ["Action", "Step", "Description", "Due Date", "Status", "Findings", "Documents", "Notes"]
+    # Calculate stats
+    total_actions = structure.get('total_actions', 0)
+    completed = sum(1 for p in progress.values() if p.get('status') == 'complete')
+    in_prog = sum(1 for p in progress.values() if p.get('status') == 'in_progress')
+    blocked = sum(1 for p in progress.values() if p.get('status') == 'blocked')
+    na_count = sum(1 for p in progress.values() if p.get('status') == 'na')
+    not_started = total_actions - completed - in_prog - blocked - na_count
+    
+    # =========================================================================
+    # TAB 1: EXECUTIVE SUMMARY
+    # =========================================================================
+    ws1 = wb.active
+    ws1.title = "Executive Summary"
+    
+    # Title row
+    ws1.merge_cells('A1:F1')
+    title_cell = ws1.cell(row=1, column=1, value=f"Year-End Checklist: {customer_name}")
+    title_cell.font = title_font
+    title_cell.fill = title_fill
+    title_cell.alignment = center_align
+    ws1.row_dimensions[1].height = 35
+    
+    # Generated date
+    ws1.merge_cells('A2:F2')
+    ws1.cell(row=2, column=1, value=f"Generated: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}").font = normal_font
+    ws1.cell(row=2, column=1).alignment = center_align
+    
+    # Progress stats
+    ws1.cell(row=4, column=1, value="PROGRESS SUMMARY").font = Font(bold=True, size=12)
+    
+    stats = [
+        ("Total Actions", total_actions, None),
+        ("Complete", completed, complete_fill),
+        ("In Progress", in_prog, progress_fill),
+        ("Not Started", not_started, not_started_fill),
+        ("N/A", na_count, na_fill),
+        ("Blocked", blocked, blocked_fill),
+    ]
+    
+    for i, (label, value, fill) in enumerate(stats):
+        row = 5 + i
+        ws1.cell(row=row, column=1, value=label).font = normal_font
+        cell = ws1.cell(row=row, column=2, value=value)
+        cell.font = Font(bold=True, size=11)
+        cell.alignment = center_align
+        if fill:
+            cell.fill = fill
+    
+    # Progress percentage
+    pct = round((completed / total_actions * 100), 1) if total_actions > 0 else 0
+    ws1.cell(row=12, column=1, value="Completion Rate:").font = Font(bold=True, size=12)
+    ws1.cell(row=12, column=2, value=f"{pct}%").font = Font(bold=True, size=14, color=brand_green)
+    
+    # Phase breakdown
+    ws1.cell(row=14, column=1, value="PHASE BREAKDOWN").font = Font(bold=True, size=12)
+    
+    before_steps = [s for s in structure.get('steps', []) if s.get('phase') == 'before_final_payroll']
+    after_steps = [s for s in structure.get('steps', []) if s.get('phase') == 'after_final_payroll']
+    
+    before_actions = sum(len(s.get('actions', [])) for s in before_steps)
+    after_actions = sum(len(s.get('actions', [])) for s in after_steps)
+    
+    before_complete = sum(1 for s in before_steps for a in s.get('actions', []) 
+                         if progress.get(a['action_id'], {}).get('status') in ['complete', 'na'])
+    after_complete = sum(1 for s in after_steps for a in s.get('actions', []) 
+                        if progress.get(a['action_id'], {}).get('status') in ['complete', 'na'])
+    
+    ws1.cell(row=15, column=1, value="Before Final Payroll").font = normal_font
+    ws1.cell(row=15, column=2, value=f"{before_complete}/{before_actions}").font = Font(bold=True)
+    
+    ws1.cell(row=16, column=1, value="After Final Payroll").font = normal_font
+    ws1.cell(row=16, column=2, value=f"{after_complete}/{after_actions}").font = Font(bold=True)
+    
+    ws1.column_dimensions['A'].width = 25
+    ws1.column_dimensions['B'].width = 15
+    
+    # =========================================================================
+    # TAB 2: DETAILED CHECKLIST
+    # =========================================================================
+    ws2 = wb.create_sheet("Detailed Checklist")
+    
+    headers = ["Action", "Step", "Description", "Due Date", "Type", "Status", "Findings", "Notes"]
     for col, header in enumerate(headers, 1):
-        cell = ws.cell(row=5, column=col, value=header)
+        cell = ws2.cell(row=1, column=col, value=header)
         cell.font = header_font
         cell.fill = header_fill
         cell.border = thin_border
+        cell.alignment = center_align
+    ws2.row_dimensions[1].height = 25
+    ws2.freeze_panes = 'A2'
     
-    # Data rows
-    row = 6
+    row = 2
     for step in structure.get('steps', []):
-        for action in step.get('actions', []):
+        for idx, action in enumerate(step.get('actions', [])):
             action_id = action['action_id']
             action_progress = progress.get(action_id, {})
             
             status = action_progress.get('status', 'not_started')
             findings = action_progress.get('findings', {})
-            docs = action_progress.get('documents_found', [])
             notes = action_progress.get('notes', '')
             
-            ws.cell(row=row, column=1, value=action_id).border = thin_border
-            ws.cell(row=row, column=2, value=f"Step {step['step_number']}").border = thin_border
-            ws.cell(row=row, column=3, value=action['description'][:200]).border = thin_border
-            ws.cell(row=row, column=3).alignment = wrap
-            ws.cell(row=row, column=4, value=action.get('due_date', '')).border = thin_border
+            row_fill = alt_row_fill if row % 2 == 0 else None
             
-            status_cell = ws.cell(row=row, column=5, value=status.replace('_', ' ').title())
-            status_cell.border = thin_border
+            cell = ws2.cell(row=row, column=1, value=action_id)
+            cell.font = Font(bold=True, size=10)
+            cell.border = thin_border
+            cell.alignment = center_align
+            if row_fill: cell.fill = row_fill
+            
+            cell = ws2.cell(row=row, column=2, value=f"Step {step['step_number']}")
+            cell.font = normal_font
+            cell.border = thin_border
+            if row_fill: cell.fill = row_fill
+            
+            cell = ws2.cell(row=row, column=3, value=action.get('description', '')[:300])
+            cell.font = normal_font
+            cell.border = thin_border
+            cell.alignment = wrap_align
+            if row_fill: cell.fill = row_fill
+            
+            cell = ws2.cell(row=row, column=4, value=action.get('due_date', ''))
+            cell.font = normal_font
+            cell.border = thin_border
+            cell.alignment = center_align
+            if action.get('due_date'):
+                cell.font = Font(size=10, color="CC0000", bold=True)
+            if row_fill: cell.fill = row_fill
+            
+            action_type = action.get('action_type', 'recommended')
+            cell = ws2.cell(row=row, column=5, value=action_type.title())
+            cell.font = normal_font
+            cell.border = thin_border
+            cell.alignment = center_align
+            if row_fill: cell.fill = row_fill
+            
+            status_display = status.replace('_', ' ').title()
+            cell = ws2.cell(row=row, column=6, value=status_display)
+            cell.font = Font(bold=True, size=10)
+            cell.border = thin_border
+            cell.alignment = center_align
+            
             if status == 'complete':
-                status_cell.fill = complete_fill
+                cell.fill = complete_fill
             elif status == 'in_progress':
-                status_cell.fill = progress_fill
+                cell.fill = progress_fill
+            elif status == 'blocked':
+                cell.fill = blocked_fill
+            elif status == 'na':
+                cell.fill = na_fill
             else:
-                status_cell.fill = not_started_fill
+                cell.fill = not_started_fill
             
-            # Findings summary
             findings_text = findings.get('summary', '') if findings else ''
-            ws.cell(row=row, column=6, value=findings_text).border = thin_border
-            ws.cell(row=row, column=6).alignment = wrap
+            if findings and findings.get('issues'):
+                findings_text += '\n- ' + '\n- '.join(findings.get('issues', []))
+            cell = ws2.cell(row=row, column=7, value=findings_text)
+            cell.font = normal_font
+            cell.border = thin_border
+            cell.alignment = wrap_align
             
-            ws.cell(row=row, column=7, value=', '.join(docs[:3])).border = thin_border
-            ws.cell(row=row, column=8, value=notes or '').border = thin_border
-            ws.cell(row=row, column=8).alignment = wrap
+            cell = ws2.cell(row=row, column=8, value=notes or '')
+            cell.font = normal_font
+            cell.border = thin_border
+            cell.alignment = wrap_align
             
             row += 1
     
-    # Column widths
-    widths = [8, 10, 50, 15, 12, 40, 30, 30]
+    widths = [8, 10, 55, 18, 12, 12, 40, 35]
     for i, w in enumerate(widths, 1):
-        ws.column_dimensions[get_column_letter(i)].width = w
+        ws2.column_dimensions[get_column_letter(i)].width = w
     
-    ws.freeze_panes = 'A6'
+    # =========================================================================
+    # TAB 3: BY STEP SUMMARY
+    # =========================================================================
+    ws3 = wb.create_sheet("By Step")
+    
+    step_headers = ["Step", "Name", "Phase", "Actions", "Complete", "Progress"]
+    for col, header in enumerate(step_headers, 1):
+        cell = ws3.cell(row=1, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = thin_border
+    
+    row = 2
+    for step in structure.get('steps', []):
+        step_actions = step.get('actions', [])
+        step_complete = sum(1 for a in step_actions 
+                          if progress.get(a['action_id'], {}).get('status') in ['complete', 'na'])
+        step_total = len(step_actions)
+        step_pct = round((step_complete / step_total * 100)) if step_total > 0 else 0
+        
+        ws3.cell(row=row, column=1, value=f"Step {step['step_number']}").font = Font(bold=True)
+        ws3.cell(row=row, column=2, value=step['step_name']).font = normal_font
+        ws3.cell(row=row, column=3, value=step.get('phase', '').replace('_', ' ').title()).font = normal_font
+        ws3.cell(row=row, column=4, value=step_total).alignment = center_align
+        ws3.cell(row=row, column=5, value=step_complete).alignment = center_align
+        
+        pct_cell = ws3.cell(row=row, column=6, value=f"{step_pct}%")
+        pct_cell.alignment = center_align
+        if step_pct == 100:
+            pct_cell.fill = complete_fill
+            pct_cell.font = Font(bold=True, color="006600")
+        elif step_pct > 0:
+            pct_cell.fill = progress_fill
+        
+        row += 1
+    
+    ws3.column_dimensions['A'].width = 10
+    ws3.column_dimensions['B'].width = 45
+    ws3.column_dimensions['C'].width = 22
+    ws3.column_dimensions['D'].width = 10
+    ws3.column_dimensions['E'].width = 10
+    ws3.column_dimensions['F'].width = 12
+    
+    # =========================================================================
+    # TAB 4: ISSUES & BLOCKERS
+    # =========================================================================
+    ws4 = wb.create_sheet("Issues & Blockers")
+    
+    issue_headers = ["Action", "Description", "Issue / Finding", "Status"]
+    red_fill = PatternFill(start_color="CC0000", end_color="CC0000", fill_type="solid")
+    for col, header in enumerate(issue_headers, 1):
+        cell = ws4.cell(row=1, column=col, value=header)
+        cell.font = header_font
+        cell.fill = red_fill
+        cell.border = thin_border
+    
+    row = 2
+    for step in structure.get('steps', []):
+        for action in step.get('actions', []):
+            action_id = action['action_id']
+            action_progress = progress.get(action_id, {})
+            findings = action_progress.get('findings', {})
+            status = action_progress.get('status', 'not_started')
+            
+            issues = findings.get('issues', []) if findings else []
+            if status == 'blocked' or issues:
+                ws4.cell(row=row, column=1, value=action_id).font = Font(bold=True)
+                ws4.cell(row=row, column=2, value=action.get('description', '')[:150])
+                ws4.cell(row=row, column=2).alignment = wrap_align
+                ws4.cell(row=row, column=3, value='\n'.join(issues) if issues else 'Blocked - see notes')
+                ws4.cell(row=row, column=3).alignment = wrap_align
+                
+                status_cell = ws4.cell(row=row, column=4, value=status.replace('_', ' ').title())
+                if status == 'blocked':
+                    status_cell.fill = blocked_fill
+                else:
+                    status_cell.fill = progress_fill
+                
+                row += 1
+    
+    if row == 2:
+        ws4.cell(row=2, column=1, value="No issues or blockers identified").font = Font(italic=True, color="666666")
+        ws4.merge_cells('A2:D2')
+    
+    ws4.column_dimensions['A'].width = 10
+    ws4.column_dimensions['B'].width = 45
+    ws4.column_dimensions['C'].width = 50
+    ws4.column_dimensions['D'].width = 12
     
     # Save to bytes
     output = io.BytesIO()
