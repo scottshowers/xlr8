@@ -19,6 +19,7 @@ const COLORS = {
 
 const NAV_ITEMS = [
   { path: '/workspace', label: 'Workspace', icon: '💬' },
+  { path: '/projects', label: 'Projects', icon: '🏢' },
   { path: '/data', label: 'Data', icon: '📁' },
   { path: '/data-model', label: 'Data Model', icon: '🔗' },
   { path: '/playbooks', label: 'Playbooks', icon: '📋' },
