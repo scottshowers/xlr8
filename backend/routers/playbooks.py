@@ -69,7 +69,17 @@ async def get_year_end_structure():
     
     # Try to find and parse the Year-End doc from Global Data
     try:
-        from utils.playbook_parser import parse_year_end_checklist
+        try:
+            from utils.playbook_parser import parse_year_end_checklist
+        except ImportError as ie:
+            logger.error(f"Import failed - full error: {ie}")
+            logger.error(f"Trying to diagnose...")
+            try:
+                import docx
+                logger.info("docx module loads OK")
+            except ImportError as de:
+                logger.error(f"docx import failed: {de}")
+            raise ie
         
         # Look for Year-End doc in global data or known locations
         possible_paths = [
