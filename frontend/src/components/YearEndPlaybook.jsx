@@ -40,11 +40,16 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
   const [expanded, setExpanded] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState(null); // 'success' | 'error' | null
+  const [uploadStatus, setUploadStatus] = useState(null);
   const [notes, setNotes] = useState(progress?.notes || '');
   const [localStatus, setLocalStatus] = useState(progress?.status || 'not_started');
   const [localDocsFound, setLocalDocsFound] = useState(progress?.documents_found || []);
   const fileInputRef = React.useRef(null);
+  
+  // Safety check - if no action, don't render
+  if (!action) {
+    return null;
+  }
   
   // Sync local docs with progress prop
   React.useEffect(() => {
@@ -94,7 +99,6 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
     try {
       const jobIds = [];
       
-      // Upload all files
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const formData = new FormData();
@@ -110,31 +114,27 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
         }
       }
       
-      // Switch to processing state
       setUploading(false);
       setUploadStatus('processing');
       
-      // Poll until all jobs complete
       const pollJobs = async () => {
         let allComplete = false;
         let attempts = 0;
-        const maxAttempts = 60; // 2 minutes max
+        const maxAttempts = 60;
         
         while (!allComplete && attempts < maxAttempts) {
-          await new Promise(r => setTimeout(r, 2000)); // Wait 2 seconds
+          await new Promise(r => setTimeout(r, 2000));
           attempts++;
           
           try {
             const jobsRes = await api.get('/jobs');
             const jobs = jobsRes.data?.jobs || [];
             
-            // Check if all our jobs are done
             const ourJobs = jobs.filter(j => jobIds.includes(j.id));
             allComplete = ourJobs.length > 0 && ourJobs.every(j => 
               j.status === 'completed' || j.status === 'failed'
             );
             
-            // Check for failures
             const failed = ourJobs.filter(j => j.status === 'failed');
             if (failed.length > 0) {
               setUploadStatus('error');
@@ -147,13 +147,11 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
         }
         
         if (allComplete) {
-          // All done - now scan
           setUploadStatus('scanning');
           await handleScan();
           setUploadStatus('success');
           setTimeout(() => setUploadStatus(null), 2000);
         } else {
-          // Timed out
           setUploadStatus(null);
         }
       };
@@ -199,7 +197,6 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
     }
   };
 
-  // Determine upload button state
   const getUploadButtonContent = () => {
     if (uploading) return '⏳ Uploading...';
     if (uploadStatus === 'processing') return '⏳ Processing...';
@@ -429,16 +426,15 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
 
   return (
     <div style={styles.card}>
-      {/* Header - always visible */}
       <div style={styles.header} onClick={() => setExpanded(!expanded)}>
-        <span style={styles.actionId}>{action.action_id}</span>
+        <span style={styles.actionId}>{action.action_id || '?'}</span>
         <div style={styles.content}>
-          <div style={styles.description}>{action.description}</div>
+          <div style={styles.description}>{action.description || 'No description'}</div>
           <div style={styles.meta}>
             {action.due_date && (
               <span style={styles.dueDate}>📅 Due: {action.due_date}</span>
             )}
-            <span style={styles.actionType}>{action.action_type}</span>
+            <span style={styles.actionType}>{action.action_type || 'unknown'}</span>
             {localDocsFound.length > 0 && (
               <span style={{ fontSize: '0.75rem', color: COLORS.grassGreen }}>
                 ✓ {localDocsFound.length} doc{localDocsFound.length > 1 ? 's' : ''} found
@@ -450,10 +446,8 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
         <span style={styles.expandIcon}>{expanded ? '▲' : '▼'}</span>
       </div>
 
-      {/* Expanded content */}
       {expanded && (
         <div style={styles.expandedContent}>
-          {/* Reports Needed */}
           {reportsNeeded.length > 0 && (
             <div style={styles.section}>
               <div style={styles.sectionTitle}>Reports Needed</div>
@@ -463,7 +457,6 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
             </div>
           )}
 
-          {/* Upload & Scan Buttons */}
           <div style={styles.section}>
             <div style={styles.buttonRow}>
               <input
@@ -491,7 +484,6 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
             </div>
           </div>
 
-          {/* Documents Found */}
           {localDocsFound.length > 0 && (
             <div style={styles.section}>
               <div style={styles.sectionTitle}>Documents Found ({localDocsFound.length})</div>
@@ -503,7 +495,6 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
             </div>
           )}
 
-          {/* Findings */}
           {findings && (
             <div style={styles.section}>
               <div style={styles.sectionTitle}>AI Findings</div>
@@ -532,7 +523,6 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
             </div>
           )}
 
-          {/* Status Selection */}
           <div style={styles.section}>
             <div style={styles.sectionTitle}>Status</div>
             <div style={styles.statusSelect}>
@@ -548,7 +538,6 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
             </div>
           </div>
 
-          {/* Notes */}
           <div style={styles.section}>
             <div style={styles.sectionTitle}>Consultant Notes</div>
             <textarea
@@ -566,16 +555,25 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
   );
 }
 
-// Step Accordion Component
+// Step Accordion Component - WITH FULL SAFETY CHECKS
 function StepAccordion({ step, progress, projectId, onUpdate }) {
   const [expanded, setExpanded] = useState(true);
   
-  const actions = step?.actions || [];
+  // CRITICAL: Safety check FIRST before any property access
+  if (!step) {
+    console.warn('[StepAccordion] Received undefined step, skipping render');
+    return null;
+  }
+  
+  const actions = step.actions || [];
   const completedCount = actions.filter(a => 
-    progress[a.action_id]?.status === 'complete' || progress[a.action_id]?.status === 'na'
+    a && (progress[a.action_id]?.status === 'complete' || progress[a.action_id]?.status === 'na')
   ).length;
   const totalCount = actions.length;
-  const allComplete = completedCount === totalCount;
+  const allComplete = totalCount > 0 && completedCount === totalCount;
+
+  // Safe phase check - MUST be after null check
+  const isBefore = step.phase === 'before_final_payroll';
 
   const styles = {
     container: {
@@ -621,8 +619,8 @@ function StepAccordion({ step, progress, projectId, onUpdate }) {
       borderRadius: '4px',
       fontWeight: '600',
       textTransform: 'uppercase',
-      background: step.phase === 'before_final_payroll' ? '#dbeafe' : '#fae8ff',
-      color: step.phase === 'before_final_payroll' ? '#1e40af' : '#86198f',
+      background: isBefore ? '#dbeafe' : '#fae8ff',
+      color: isBefore ? '#1e40af' : '#86198f',
     },
     expandIcon: {
       fontSize: '1.25rem',
@@ -637,10 +635,10 @@ function StepAccordion({ step, progress, projectId, onUpdate }) {
   return (
     <div style={styles.container}>
       <div style={styles.header} onClick={() => setExpanded(!expanded)}>
-        <div style={styles.stepNumber}>{step.step_number}</div>
-        <div style={styles.stepName}>{step.step_name}</div>
+        <div style={styles.stepNumber}>{step.step_number || '?'}</div>
+        <div style={styles.stepName}>{step.step_name || 'Unknown Step'}</div>
         <span style={styles.phaseBadge}>
-          {step.phase === 'before_final_payroll' ? 'Before Final' : 'After Final'}
+          {isBefore ? 'Before Final' : 'After Final'}
         </span>
         <span style={styles.progressText}>
           {completedCount}/{totalCount} {allComplete && '✓'}
@@ -650,7 +648,7 @@ function StepAccordion({ step, progress, projectId, onUpdate }) {
       
       {expanded && (
         <div style={styles.actionsContainer}>
-          {actions.map(action => (
+          {actions.map(action => action ? (
             <ActionCard
               key={action.action_id}
               action={action}
@@ -659,7 +657,7 @@ function StepAccordion({ step, progress, projectId, onUpdate }) {
               projectId={projectId}
               onUpdate={onUpdate}
             />
-          ))}
+          ) : null)}
         </div>
       )}
     </div>
@@ -674,6 +672,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   const [exporting, setExporting] = useState(false);
   const [activePhase, setActivePhase] = useState('all');
 
+  // SAFETY: Only load if project exists
   useEffect(() => {
     if (project?.id) {
       loadPlaybook();
@@ -683,7 +682,6 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   const loadPlaybook = async () => {
     setLoading(true);
     try {
-      // Load structure and progress in parallel
       const [structRes, progressRes] = await Promise.all([
         api.get('/playbooks/year-end/structure'),
         api.get(`/playbooks/year-end/progress/${project.id}`)
@@ -725,7 +723,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
     setExporting(true);
     try {
       const res = await api.get(
-        `/playbooks/year-end/export/${project.id}?customer_name=${encodeURIComponent(customerName)}`,
+        `/playbooks/year-end/export/${project.id}?customer_name=${encodeURIComponent(customerName || 'Customer')}`,
         { responseType: 'blob' }
       );
       
@@ -735,7 +733,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${customerName.replace(/[^a-zA-Z0-9]/g, '_')}_Year_End_Progress.xlsx`;
+      link.download = `${(customerName || 'Customer').replace(/[^a-zA-Z0-9]/g, '_')}_Year_End_Progress.xlsx`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -873,20 +871,22 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
     }),
     loadingState: {
       display: 'flex',
+      flexDirection: 'column',
       justifyContent: 'center',
       alignItems: 'center',
       minHeight: '300px',
       color: COLORS.textLight,
+      gap: '1rem',
     },
   };
 
-  // Safety check - if no project, show error
+  // SAFETY CHECK: If no project, show error
   if (!project?.id) {
     return (
       <div style={styles.container}>
         <div style={styles.loadingState}>
           <span>Error: No project selected. Please go back and select a project.</span>
-          <button style={{ marginTop: '1rem', padding: '0.5rem 1rem' }} onClick={onClose}>← Back</button>
+          <button style={styles.backBtn} onClick={onClose}>← Back</button>
         </div>
       </div>
     );
@@ -909,7 +909,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
         <div style={styles.titleSection}>
           <h1 style={styles.title}>📅 Year-End Checklist</h1>
           <p style={styles.subtitle}>
-            {customerName} → {projectName}
+            {customerName || 'Customer'} → {projectName || 'Project'}
           </p>
         </div>
         <div style={styles.headerActions}>
@@ -967,7 +967,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       {/* Steps */}
       {filteredSteps.map(step => (
         <StepAccordion
-          key={step.step_number}
+          key={step.step_number || Math.random()}
           step={step}
           progress={progress}
           projectId={project.id}
