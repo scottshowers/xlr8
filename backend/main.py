@@ -65,8 +65,8 @@ else:
 
 # Register playbooks router if available
 if PLAYBOOKS_AVAILABLE:
-    app.include_router(playbooks.router)  # No prefix - router has /playbooks built in
-    logger.info("Playbooks router registered")
+    app.include_router(playbooks.router, prefix="/api")  # Frontend expects /api/playbooks/...
+    logger.info("Playbooks router registered at /api/playbooks")
 else:
     logger.warning("Playbooks router not available")
 
