@@ -764,6 +764,85 @@ async def refresh_year_end_structure():
     }
 
 
+@router.get("/year-end/debug-duckdb")
+async def debug_duckdb():
+    """
+    Debug endpoint to see what's in DuckDB _schema_metadata.
+    Call: GET /playbooks/year-end/debug-duckdb
+    """
+    import duckdb
+    
+    DUCKDB_PATH = "/data/structured_data.duckdb"
+    
+    result = {
+        "duckdb_exists": os.path.exists(DUCKDB_PATH),
+        "duckdb_path": DUCKDB_PATH,
+        "all_tables": [],
+        "global_tables": [],
+        "year_end_tables": [],
+        "schema_metadata_exists": False,
+        "raw_metadata": []
+    }
+    
+    if not os.path.exists(DUCKDB_PATH):
+        return result
+    
+    try:
+        conn = duckdb.connect(DUCKDB_PATH, read_only=True)
+        
+        # Check what tables exist
+        try:
+            tables = conn.execute("SHOW TABLES").fetchall()
+            result["all_tables"] = [t[0] for t in tables]
+            result["schema_metadata_exists"] = "_schema_metadata" in result["all_tables"]
+        except Exception as e:
+            result["tables_error"] = str(e)
+        
+        # If schema_metadata exists, query it
+        if result["schema_metadata_exists"]:
+            try:
+                # Get ALL metadata entries
+                all_rows = conn.execute("""
+                    SELECT project, file_name, sheet_name, table_name, row_count, is_current
+                    FROM _schema_metadata
+                    ORDER BY project, file_name, sheet_name
+                """).fetchall()
+                
+                result["raw_metadata"] = [
+                    {
+                        "project": row[0],
+                        "file_name": row[1],
+                        "sheet_name": row[2],
+                        "table_name": row[3],
+                        "row_count": row[4],
+                        "is_current": row[5]
+                    }
+                    for row in all_rows
+                ]
+                
+                # Filter for global
+                for row in result["raw_metadata"]:
+                    proj = (row["project"] or "").lower()
+                    if 'global' in proj:
+                        result["global_tables"].append(row)
+                
+                # Filter for year-end keywords
+                for row in result["raw_metadata"]:
+                    fn = (row["file_name"] or "").lower()
+                    if 'year' in fn or 'checklist' in fn or 'pro_pay' in fn:
+                        result["year_end_tables"].append(row)
+                        
+            except Exception as e:
+                result["query_error"] = str(e)
+        
+        conn.close()
+        
+    except Exception as e:
+        result["connection_error"] = str(e)
+    
+    return result
+
+
 def get_default_year_end_structure() -> Dict[str, Any]:
     """Default Year-End structure if doc not available."""
     return {
