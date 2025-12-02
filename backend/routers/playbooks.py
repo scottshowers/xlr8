@@ -70,7 +70,7 @@ async def get_year_end_structure():
     # Try to find and parse the Year-End doc from Global Data
     try:
         try:
-            from utils.playbook_parser import parse_year_end_checklist
+            from backend.utils.playbook_parser import parse_year_end_checklist
         except ImportError as ie:
             logger.error(f"Import failed - full error: {ie}")
             logger.error(f"Trying to diagnose...")
@@ -924,7 +924,7 @@ async def upload_playbook_definition(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="File must be a .docx document")
     
     try:
-        from utils.playbook_parser import parse_year_end_checklist
+        from backend.utils.playbook_parser import parse_year_end_checklist
         import tempfile
         
         # Save to temp file
