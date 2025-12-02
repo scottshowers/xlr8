@@ -377,11 +377,20 @@ async def scan_for_action(project_id: str, action_id: str):
                 # Match by project_id or project name
                 if doc_project == project_id or doc_project == project_id[:8]:
                     filename = metadata.get("source", metadata.get("filename", "Unknown"))
+                    chunk_content = all_results.get("documents", [])[i] if all_results.get("documents") else ""
+                    
                     if filename not in project_docs:
                         project_docs[filename] = {
                             "metadata": metadata,
-                            "content": all_results.get("documents", [])[i] if all_results.get("documents") else ""
+                            "chunks": [chunk_content],  # Store as list
+                            "content": chunk_content
                         }
+                    else:
+                        # Aggregate chunks (up to 10 per doc for context)
+                        if len(project_docs[filename]["chunks"]) < 10:
+                            project_docs[filename]["chunks"].append(chunk_content)
+                            # Combine for richer content
+                            project_docs[filename]["content"] = "\n\n".join(project_docs[filename]["chunks"])
             
             logger.info(f"[SCAN] Found {len(project_docs)} unique docs in project {project_id}")
             
@@ -403,8 +412,9 @@ async def scan_for_action(project_id: str, action_id: str):
                                 "query": report_name,
                                 "match_type": "filename"
                             })
-                            all_content.append(cleaned[:1000])
-                            logger.info(f"[SCAN] Filename match: '{filename}' for report '{report_name}'")
+                            # Pass more content to AI (up to 3000 chars per doc)
+                            all_content.append(f"[FILE: {filename}]\n{cleaned[:3000]}")
+                            logger.info(f"[SCAN] Filename match: '{filename}' for report '{report_name}' ({len(doc_data.get('chunks', []))} chunks)")
             
         except Exception as e:
             logger.warning(f"[SCAN] Filename matching failed: {e}")
@@ -492,7 +502,7 @@ async def extract_findings_for_action(action: Dict, content: List[str]) -> Optio
         
         client = Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
         
-        combined = "\n---\n".join(content)
+        combined = "\n\n---\n\n".join(content)
         
         prompt = f"""Analyze these document excerpts for Year-End Checklist action:
 
@@ -500,12 +510,14 @@ Action: {action['action_id']} - {action.get('description', '')}
 Reports Needed: {', '.join(action.get('reports_needed', []))}
 
 <documents>
-{combined[:4000]}
+{combined[:8000]}
 </documents>
+
+Important: Each document section is labeled with [FILE: filename]. Check which reports from "Reports Needed" are actually present in the excerpts.
 
 Extract relevant findings as JSON:
 {{
-    "complete": true/false (is there enough info to mark this action complete?),
+    "complete": true/false (are ALL required reports present with sufficient info?),
     "key_values": {{"label": "value"}} (specific values found, e.g., FEIN, state count, rate),
     "issues": ["list of concerns or missing items"],
     "summary": "1-2 sentence summary of what was found"
