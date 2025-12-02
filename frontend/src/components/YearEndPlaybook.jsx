@@ -56,17 +56,17 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
   const { overall_risk, summary_text, stats, issues, recommendations, conflicts, review_flags, high_risk_actions } = summary;
   
   const riskColors = {
-    high: { bg: '#fee2e2', border: '#fecaca', text: '#dc2626' },
-    medium: { bg: '#fef3c7', border: '#fcd34d', text: '#d97706' },
-    low: { bg: '#d1fae5', border: '#86efac', text: '#059669' }
+    high: { text: '#dc2626' },
+    medium: { text: '#d97706' },
+    low: { text: '#059669' }
   };
   
-  const riskStyle = riskColors[overall_risk] || riskColors.low;
+  const riskTextColor = riskColors[overall_risk]?.text || '#059669';
   
   return (
     <div style={{
-      background: riskStyle.bg,
-      border: `1px solid ${riskStyle.border}`,
+      background: '#f8faf8',
+      border: '1px solid #e1e8ed',
       borderRadius: '12px',
       marginBottom: '1rem',
       overflow: 'hidden'
@@ -86,7 +86,7 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
             {overall_risk === 'high' ? '🚨' : overall_risk === 'medium' ? '⚠️' : '✅'}
           </span>
           <div>
-            <div style={{ fontWeight: '600', color: riskStyle.text }}>
+            <div style={{ fontWeight: '600', color: COLORS.text }}>
               AI Analysis Summary
             </div>
             <div style={{ fontSize: '0.85rem', color: COLORS.textLight }}>
@@ -104,7 +104,7 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
       </div>
       
       {expanded && (
-        <div style={{ padding: '0 1rem 1rem', borderTop: `1px solid ${riskStyle.border}` }}>
+        <div style={{ padding: '0 1rem 1rem', borderTop: '1px solid #e1e8ed' }}>
           {/* High Risk Actions */}
           {high_risk_actions?.length > 0 && (
             <div style={{ marginTop: '0.75rem' }}>
