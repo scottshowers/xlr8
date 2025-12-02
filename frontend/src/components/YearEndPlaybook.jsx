@@ -35,6 +35,13 @@ const STATUS_OPTIONS = [
   { value: 'blocked', label: 'Blocked', color: '#dc2626', bg: '#fee2e2' },
 ];
 
+// Tooltip type configuration
+const TOOLTIP_TYPES = {
+  best_practice: { icon: '⭐', label: 'Best Practice', color: '#eab308', bg: '#fef9c3' },
+  mandatory: { icon: '🚨', label: 'Mandatory', color: '#dc2626', bg: '#fee2e2' },
+  hint: { icon: '💡', label: 'Helpful Hint', color: '#3b82f6', bg: '#dbeafe' },
+};
+
 // Action dependencies - which actions inherit from which
 const ACTION_DEPENDENCIES = {
   "2B": ["2A"], "2C": ["2A"], "2E": ["2A"],
@@ -83,7 +90,7 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <span style={{ fontSize: '1.5rem' }}>
-            {overall_risk === 'high' ? '🚨' : overall_risk === 'medium' ? '⚠️' : '✅'}
+            {overall_risk === 'high' ? '🔴' : overall_risk === 'medium' ? '🟡' : '🟢'}
           </span>
           <div>
             <div style={{ fontWeight: '600', color: COLORS.text }}>
@@ -425,8 +432,310 @@ function DocumentChecklistSidebar({ checklist, collapsed, onToggle }) {
   );
 }
 
+// =============================================================================
+// TOOLTIP COMPONENTS
+// =============================================================================
+
+// Tooltip Modal for Adding/Editing
+function TooltipModal({ isOpen, onClose, onSave, actionId, existingTooltip }) {
+  const [tooltipType, setTooltipType] = useState(existingTooltip?.tooltip_type || 'hint');
+  const [title, setTitle] = useState(existingTooltip?.title || '');
+  const [content, setContent] = useState(existingTooltip?.content || '');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (existingTooltip) {
+      setTooltipType(existingTooltip.tooltip_type || 'hint');
+      setTitle(existingTooltip.title || '');
+      setContent(existingTooltip.content || '');
+    } else {
+      setTooltipType('hint');
+      setTitle('');
+      setContent('');
+    }
+  }, [existingTooltip, isOpen]);
+
+  if (!isOpen) return null;
+
+  const handleSave = async () => {
+    if (!content.trim()) return;
+    setSaving(true);
+    try {
+      await onSave({
+        action_id: actionId,
+        tooltip_type: tooltipType,
+        title: title.trim() || null,
+        content: content.trim()
+      });
+      onClose();
+    } catch (e) {
+      console.error('Failed to save tooltip:', e);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0, left: 0, right: 0, bottom: 0,
+      background: 'rgba(0,0,0,0.5)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000
+    }}>
+      <div style={{
+        background: 'white',
+        borderRadius: '12px',
+        padding: '1.5rem',
+        width: '90%',
+        maxWidth: '500px',
+        maxHeight: '90vh',
+        overflow: 'auto'
+      }}>
+        <h3 style={{ margin: '0 0 1rem', color: COLORS.text }}>
+          {existingTooltip ? 'Edit' : 'Add'} Note for {actionId}
+        </h3>
+
+        {/* Type Selection */}
+        <div style={{ marginBottom: '1rem' }}>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', fontSize: '0.9rem' }}>
+            Type
+          </label>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            {Object.entries(TOOLTIP_TYPES).map(([key, config]) => (
+              <button
+                key={key}
+                onClick={() => setTooltipType(key)}
+                style={{
+                  padding: '0.5rem 1rem',
+                  border: tooltipType === key ? `2px solid ${config.color}` : '2px solid #e1e8ed',
+                  borderRadius: '8px',
+                  background: tooltipType === key ? config.bg : 'white',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.4rem'
+                }}
+              >
+                <span>{config.icon}</span>
+                <span>{config.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Title (optional) */}
+        <div style={{ marginBottom: '1rem' }}>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', fontSize: '0.9rem' }}>
+            Title (optional)
+          </label>
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Brief title..."
+            style={{
+              width: '100%',
+              padding: '0.5rem',
+              border: '1px solid #e1e8ed',
+              borderRadius: '6px',
+              fontSize: '0.9rem'
+            }}
+          />
+        </div>
+
+        {/* Content */}
+        <div style={{ marginBottom: '1rem' }}>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', fontSize: '0.9rem' }}>
+            Content *
+          </label>
+          <textarea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            placeholder="Enter your note, best practice, or guidance..."
+            rows={4}
+            style={{
+              width: '100%',
+              padding: '0.5rem',
+              border: '1px solid #e1e8ed',
+              borderRadius: '6px',
+              fontSize: '0.9rem',
+              resize: 'vertical'
+            }}
+          />
+        </div>
+
+        {/* Buttons */}
+        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+          <button
+            onClick={onClose}
+            style={{
+              padding: '0.5rem 1rem',
+              border: '1px solid #e1e8ed',
+              borderRadius: '6px',
+              background: 'white',
+              cursor: 'pointer'
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={!content.trim() || saving}
+            style={{
+              padding: '0.5rem 1rem',
+              border: 'none',
+              borderRadius: '6px',
+              background: content.trim() ? COLORS.grassGreen : '#ccc',
+              color: 'white',
+              cursor: content.trim() ? 'pointer' : 'not-allowed'
+            }}
+          >
+            {saving ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Tooltip Display - Shows icons and handles hover/click
+function TooltipDisplay({ tooltips, onEdit, onDelete, isAdmin }) {
+  const [activeTooltip, setActiveTooltip] = useState(null);
+
+  if (!tooltips || tooltips.length === 0) return null;
+
+  return (
+    <div style={{ display: 'flex', gap: '0.3rem', marginLeft: '0.5rem' }}>
+      {tooltips.map((tip, idx) => {
+        const config = TOOLTIP_TYPES[tip.tooltip_type] || TOOLTIP_TYPES.hint;
+        const isActive = activeTooltip === idx;
+
+        return (
+          <div key={tip.id || idx} style={{ position: 'relative' }}>
+            <span
+              onClick={(e) => {
+                e.stopPropagation();
+                setActiveTooltip(isActive ? null : idx);
+              }}
+              style={{ 
+                cursor: 'pointer', 
+                fontSize: '1rem',
+                filter: 'drop-shadow(0 1px 1px rgba(0,0,0,0.1))'
+              }}
+              title={config.label}
+            >
+              {config.icon}
+            </span>
+
+            {/* Tooltip Popover */}
+            {isActive && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  marginTop: '0.5rem',
+                  background: 'white',
+                  border: `2px solid ${config.color}`,
+                  borderRadius: '8px',
+                  padding: '0.75rem',
+                  minWidth: '250px',
+                  maxWidth: '350px',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                  zIndex: 100
+                }}
+              >
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '0.4rem',
+                  marginBottom: '0.5rem',
+                  color: config.color,
+                  fontWeight: '600',
+                  fontSize: '0.85rem'
+                }}>
+                  <span>{config.icon}</span>
+                  <span>{tip.title || config.label}</span>
+                </div>
+                <div style={{ 
+                  fontSize: '0.85rem', 
+                  color: COLORS.text,
+                  lineHeight: '1.4',
+                  whiteSpace: 'pre-wrap'
+                }}>
+                  {tip.content}
+                </div>
+                
+                {isAdmin && (
+                  <div style={{ 
+                    display: 'flex', 
+                    gap: '0.5rem', 
+                    marginTop: '0.75rem',
+                    paddingTop: '0.5rem',
+                    borderTop: '1px solid #e1e8ed'
+                  }}>
+                    <button
+                      onClick={() => onEdit(tip)}
+                      style={{
+                        fontSize: '0.75rem',
+                        padding: '0.25rem 0.5rem',
+                        border: '1px solid #e1e8ed',
+                        borderRadius: '4px',
+                        background: 'white',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => onDelete(tip.id)}
+                      style={{
+                        fontSize: '0.75rem',
+                        padding: '0.25rem 0.5rem',
+                        border: '1px solid #fee2e2',
+                        borderRadius: '4px',
+                        background: '#fee2e2',
+                        color: '#dc2626',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
+
+                {/* Close X */}
+                <button
+                  onClick={() => setActiveTooltip(null)}
+                  style={{
+                    position: 'absolute',
+                    top: '0.25rem',
+                    right: '0.5rem',
+                    border: 'none',
+                    background: 'none',
+                    cursor: 'pointer',
+                    fontSize: '1rem',
+                    color: '#999'
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // Action Card Component
-function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
+function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltips, isAdmin, onAddTooltip, onEditTooltip, onDeleteTooltip }) {
   const [expanded, setExpanded] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -818,6 +1127,39 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
     <div style={styles.card}>
       <div style={styles.header} onClick={() => setExpanded(!expanded)}>
         <span style={styles.actionId}>{action.action_id || '?'}</span>
+        
+        {/* Tooltip icons */}
+        <TooltipDisplay 
+          tooltips={tooltips} 
+          onEdit={onEditTooltip}
+          onDelete={onDeleteTooltip}
+          isAdmin={isAdmin}
+        />
+        
+        {/* Admin add button */}
+        {isAdmin && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onAddTooltip(action.action_id);
+            }}
+            style={{
+              marginLeft: '0.3rem',
+              padding: '0 0.4rem',
+              border: '1px dashed #ccc',
+              borderRadius: '4px',
+              background: 'transparent',
+              cursor: 'pointer',
+              fontSize: '0.9rem',
+              color: '#999',
+              lineHeight: '1.2'
+            }}
+            title="Add note"
+          >
+            +
+          </button>
+        )}
+        
         <div style={styles.content}>
           <div style={styles.description}>{action.description || 'No description'}</div>
           <div style={styles.meta}>
@@ -1065,7 +1407,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
 }
 
 // Step Accordion Component - WITH FULL SAFETY CHECKS
-function StepAccordion({ step, progress, projectId, onUpdate }) {
+function StepAccordion({ step, progress, projectId, onUpdate, tooltipsByAction, isAdmin, onAddTooltip, onEditTooltip, onDeleteTooltip }) {
   const [expanded, setExpanded] = useState(true);
   
   // CRITICAL: Safety check FIRST before any property access
@@ -1165,6 +1507,11 @@ function StepAccordion({ step, progress, projectId, onUpdate }) {
               progress={progress[action.action_id] || {}}
               projectId={projectId}
               onUpdate={onUpdate}
+              tooltips={tooltipsByAction[action.action_id] || []}
+              isAdmin={isAdmin}
+              onAddTooltip={onAddTooltip}
+              onEditTooltip={onEditTooltip}
+              onDeleteTooltip={onDeleteTooltip}
             />
           ) : null)}
         </div>
@@ -1188,6 +1535,15 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   const [aiSummary, setAiSummary] = useState(null);
   const [summaryExpanded, setSummaryExpanded] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  
+  // TOOLTIPS: State for consultant-driven notes
+  const [tooltipsByAction, setTooltipsByAction] = useState({});
+  const [tooltipModalOpen, setTooltipModalOpen] = useState(false);
+  const [tooltipModalActionId, setTooltipModalActionId] = useState(null);
+  const [editingTooltip, setEditingTooltip] = useState(null);
+  
+  // TODO: Replace with actual auth check
+  const isAdmin = true;
 
   // SAFETY: Only load if project exists
   useEffect(() => {
@@ -1195,6 +1551,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       loadPlaybook();
       loadDocChecklist();
       loadAiSummary();
+      loadTooltips();
     }
   }, [project]);
   
@@ -1244,6 +1601,52 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       setAiSummary(res.data);
     } catch (err) {
       console.error('Failed to load AI summary:', err);
+    }
+  };
+  
+  // TOOLTIP FUNCTIONS
+  const loadTooltips = async () => {
+    try {
+      const res = await api.get('/playbooks/tooltips/bulk/year-end-2025');
+      setTooltipsByAction(res.data?.tooltips_by_action || {});
+    } catch (err) {
+      console.error('Failed to load tooltips:', err);
+    }
+  };
+  
+  const handleAddTooltip = (actionId) => {
+    setTooltipModalActionId(actionId);
+    setEditingTooltip(null);
+    setTooltipModalOpen(true);
+  };
+  
+  const handleEditTooltip = (tooltip) => {
+    setTooltipModalActionId(tooltip.action_id);
+    setEditingTooltip(tooltip);
+    setTooltipModalOpen(true);
+  };
+  
+  const handleSaveTooltip = async (data) => {
+    try {
+      if (editingTooltip) {
+        await api.put(`/playbooks/tooltips/${editingTooltip.id}`, data);
+      } else {
+        await api.post('/playbooks/tooltips', data);
+      }
+      await loadTooltips();
+    } catch (err) {
+      console.error('Failed to save tooltip:', err);
+      throw err;
+    }
+  };
+  
+  const handleDeleteTooltip = async (tooltipId) => {
+    if (!window.confirm('Delete this note?')) return;
+    try {
+      await api.delete(`/playbooks/tooltips/${tooltipId}`);
+      await loadTooltips();
+    } catch (err) {
+      console.error('Failed to delete tooltip:', err);
     }
   };
   
@@ -1651,6 +2054,11 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
             progress={progress}
             projectId={project.id}
             onUpdate={handleUpdate}
+            tooltipsByAction={tooltipsByAction}
+            isAdmin={isAdmin}
+            onAddTooltip={handleAddTooltip}
+            onEditTooltip={handleEditTooltip}
+            onDeleteTooltip={handleDeleteTooltip}
           />
         ))}
       </div>
@@ -1660,6 +2068,18 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
         checklist={docChecklist} 
         collapsed={sidebarCollapsed} 
         onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} 
+      />
+      
+      {/* Tooltip Add/Edit Modal */}
+      <TooltipModal
+        isOpen={tooltipModalOpen}
+        onClose={() => {
+          setTooltipModalOpen(false);
+          setEditingTooltip(null);
+        }}
+        onSave={handleSaveTooltip}
+        actionId={tooltipModalActionId}
+        existingTooltip={editingTooltip}
       />
     </div>
   );
