@@ -512,6 +512,52 @@ def process_file_background(
             except Exception as e:
                 logger.warning(f"[BACKGROUND] Auto-scan failed (non-critical): {e}")
         
+        # Step 7: Check if this is a Year-End Checklist file for Global Library
+        if project == "Global/Universal" or project_id == "Global/Universal":
+            ProcessingJobModel.update_progress(job_id, 98, "Checking for playbook file...")
+            try:
+                filename_lower = filename.lower()
+                is_year_end_file = (
+                    ('year' in filename_lower and 'end' in filename_lower) or
+                    'year-end' in filename_lower or
+                    'yearend' in filename_lower or
+                    ('checklist' in filename_lower and 'pay' in filename_lower)
+                ) and filename_lower.endswith(('.xlsx', '.xls', '.xlsm', '.docx'))
+                
+                if is_year_end_file:
+                    logger.info(f"[BACKGROUND] Detected Year-End Checklist file: {filename}")
+                    
+                    # Save the original file to /data/global/ for parsing
+                    global_dir = '/data/global'
+                    os.makedirs(global_dir, exist_ok=True)
+                    
+                    # Save a copy of the file
+                    global_file_path = os.path.join(global_dir, filename)
+                    
+                    # Re-read original file if we still have it
+                    if file_path and os.path.exists(file_path):
+                        import shutil
+                        shutil.copy2(file_path, global_file_path)
+                        logger.info(f"[BACKGROUND] Saved Year-End file to: {global_file_path}")
+                    
+                    # Trigger structure refresh
+                    try:
+                        for module_path in ['routers.playbooks', 'backend.routers.playbooks', 'playbooks']:
+                            try:
+                                module = __import__(module_path, fromlist=['invalidate_year_end_cache'])
+                                invalidate_func = getattr(module, 'invalidate_year_end_cache', None)
+                                if invalidate_func:
+                                    invalidate_func()
+                                    logger.info(f"[BACKGROUND] Invalidated Year-End structure cache")
+                                    break
+                            except ImportError:
+                                continue
+                    except Exception as e:
+                        logger.warning(f"[BACKGROUND] Could not invalidate cache: {e}")
+                        
+            except Exception as e:
+                logger.warning(f"[BACKGROUND] Year-End file detection failed (non-critical): {e}")
+        
         # Step 7: Complete!
         ProcessingJobModel.complete(job_id, {
             'filename': filename,
