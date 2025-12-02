@@ -570,10 +570,11 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
 function StepAccordion({ step, progress, projectId, onUpdate }) {
   const [expanded, setExpanded] = useState(true);
   
-  const completedCount = step.actions.filter(a => 
+  const actions = step?.actions || [];
+  const completedCount = actions.filter(a => 
     progress[a.action_id]?.status === 'complete' || progress[a.action_id]?.status === 'na'
   ).length;
-  const totalCount = step.actions.length;
+  const totalCount = actions.length;
   const allComplete = completedCount === totalCount;
 
   const styles = {
@@ -649,7 +650,7 @@ function StepAccordion({ step, progress, projectId, onUpdate }) {
       
       {expanded && (
         <div style={styles.actionsContainer}>
-          {step.actions.map(action => (
+          {actions.map(action => (
             <ActionCard
               key={action.action_id}
               action={action}
@@ -674,7 +675,9 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   const [activePhase, setActivePhase] = useState('all');
 
   useEffect(() => {
-    loadPlaybook();
+    if (project?.id) {
+      loadPlaybook();
+    }
   }, [project]);
 
   const loadPlaybook = async () => {
@@ -876,6 +879,18 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       color: COLORS.textLight,
     },
   };
+
+  // Safety check - if no project, show error
+  if (!project?.id) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.loadingState}>
+          <span>Error: No project selected. Please go back and select a project.</span>
+          <button style={{ marginTop: '1rem', padding: '0.5rem 1rem' }} onClick={onClose}>← Back</button>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
