@@ -37,6 +37,8 @@ const STATUS_OPTIONS = [
 
 // Action Card Component
 function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
+  console.log('[YE-DEBUG] ActionCard rendering:', action?.action_id);
+  
   const [expanded, setExpanded] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -568,10 +570,13 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
 
 // Step Accordion Component
 function StepAccordion({ step, progress, projectId, onUpdate }) {
+  console.log('[YE-DEBUG] StepAccordion rendering step:', step?.step_number);
+  
   const [expanded, setExpanded] = useState(true);
   
   // Defensive: ensure actions is always an array
   const actions = step?.actions || [];
+  console.log('[YE-DEBUG] Step', step?.step_number, 'has', actions.length, 'actions');
   
   const completedCount = actions.filter(a => 
     progress[a.action_id]?.status === 'complete' || progress[a.action_id]?.status === 'na'
@@ -670,6 +675,8 @@ function StepAccordion({ step, progress, projectId, onUpdate }) {
 
 // Main Component
 export default function YearEndPlaybook({ project, projectName, customerName, onClose }) {
+  console.log('[YE-DEBUG] Component mounting with props:', { project, projectName, customerName });
+  
   const [structure, setStructure] = useState(null);
   const [progress, setProgress] = useState({});
   const [loading, setLoading] = useState(true);
@@ -677,10 +684,12 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   const [activePhase, setActivePhase] = useState('all');
 
   useEffect(() => {
+    console.log('[YE-DEBUG] useEffect triggered, project:', project);
     loadPlaybook();
   }, [project]);
 
   const loadPlaybook = async () => {
+    console.log('[YE-DEBUG] loadPlaybook starting');
     setLoading(true);
     try {
       // Load structure and progress in parallel
@@ -689,12 +698,18 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
         api.get(`/playbooks/year-end/progress/${project.id}`)
       ]);
       
+      console.log('[YE-DEBUG] API responses received');
+      console.log('[YE-DEBUG] structRes.data:', JSON.stringify(structRes.data, null, 2).slice(0, 500));
+      console.log('[YE-DEBUG] progressRes.data:', JSON.stringify(progressRes.data, null, 2).slice(0, 500));
+      
       setStructure(structRes.data);
       setProgress(progressRes.data?.progress || {});
+      console.log('[YE-DEBUG] State updated');
     } catch (err) {
-      console.error('Failed to load playbook:', err);
+      console.error('[YE-DEBUG] Failed to load playbook:', err);
     } finally {
       setLoading(false);
+      console.log('[YE-DEBUG] Loading complete');
     }
   };
 
@@ -881,6 +896,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   };
 
   if (loading) {
+    console.log('[YE-DEBUG] Rendering loading state');
     return (
       <div style={styles.container}>
         <div style={styles.loadingState}>
@@ -889,6 +905,10 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       </div>
     );
   }
+
+  console.log('[YE-DEBUG] Rendering main content');
+  console.log('[YE-DEBUG] filteredSteps count:', filteredSteps.length);
+  console.log('[YE-DEBUG] filteredSteps:', filteredSteps.map(s => ({ step_number: s.step_number, actions_count: s.actions?.length })));
 
   return (
     <div style={styles.container}>
