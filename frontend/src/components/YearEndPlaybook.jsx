@@ -65,8 +65,8 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
   
   return (
     <div style={{
-      background: '#f8faf8',
-      border: '1px solid #e1e8ed',
+      background: '#e8ede8',
+      border: '1px solid #c5d1c5',
       borderRadius: '12px',
       marginBottom: '1rem',
       overflow: 'hidden'
@@ -87,7 +87,7 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
           </span>
           <div>
             <div style={{ fontWeight: '600', color: COLORS.text }}>
-              AI Analysis Summary
+              Analysis Summary (AI Assisted)
             </div>
             <div style={{ fontSize: '0.85rem', color: COLORS.textLight }}>
               {summary_text || 'No issues detected'}
