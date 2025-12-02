@@ -659,8 +659,8 @@ export default function DashboardPage() {
                 <span style={styles.actionLabel}>Upload Files</span>
               </Link>
               <Link to="/workspace" style={styles.actionCard('#F3E5F5')}>
-                <span style={styles.actionIcon}>🤖</span>
-                <span style={styles.actionLabel}>AI Assistant</span>
+                <span style={styles.actionIcon}>🐄</span>
+                <span style={styles.actionLabel}>AI Assist</span>
               </Link>
               <Link to="/playbooks" style={styles.actionCard('#FFF3E0')}>
                 <span style={styles.actionIcon}>📋</span>
@@ -697,7 +697,7 @@ export default function DashboardPage() {
                   </div>
                   <div style={styles.activityContent}>
                     <div style={styles.activityName}>
-                      {job.filename || job.job_type || 'Processing job'}
+                      {job.input_data?.filename || job.filename || job.job_type || 'Processing job'}
                     </div>
                     <div style={styles.activityMeta}>
                       {job.job_type} • {new Date(job.created_at).toLocaleDateString()}
