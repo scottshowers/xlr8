@@ -463,15 +463,20 @@ async def upload_file(
     file_path = None
     
     try:
-        # Look up project UUID from project name
+        # Look up project UUID from project name OR project ID
         project_id = None
-        if project and project not in ['global', '__GLOBAL__', '']:
+        if project and project not in ['global', '__GLOBAL__', 'GLOBAL', '']:
             projects = ProjectModel.get_all(status='active')
+            # Try to match by name first
             matching_project = next((p for p in projects if p.get('name') == project), None)
+            
+            # If not found by name, try by ID (frontend may send UUID directly)
+            if not matching_project:
+                matching_project = next((p for p in projects if p.get('id') == project), None)
             
             if matching_project:
                 project_id = matching_project['id']
-                logger.info(f"Found project UUID: {project_id}")
+                logger.info(f"Found project UUID: {project_id} for project: {project}")
         
         # Create job record FIRST (so we have job_id)
         job = ProcessingJobModel.create(
