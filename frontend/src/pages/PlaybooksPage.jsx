@@ -11,10 +11,11 @@
  * - Output structure (workbook format)
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useProject } from '../context/ProjectContext';
 import { useNavigate } from 'react-router-dom';
 import YearEndPlaybook from '../components/YearEndPlaybook';
+import api from '../services/api';
 
 // Brand Colors
 const COLORS = {
@@ -91,7 +92,7 @@ const PLAYBOOKS = [
 ];
 
 // Playbook Card Component
-function PlaybookCard({ playbook, onRun, isActive }) {
+function PlaybookCard({ playbook, onRun, isActive, hasProgress }) {
   const styles = {
     card: {
       background: 'white',
@@ -198,7 +199,15 @@ function PlaybookCard({ playbook, onRun, isActive }) {
         e.currentTarget.style.transform = 'translateY(0)';
       }}
     >
-      {playbook.hasRunner && <span style={styles.activeBadge}>LIVE</span>}
+      {playbook.hasRunner && (
+        <span style={{
+          ...styles.activeBadge,
+          background: hasProgress ? '#FFEB9C' : '#C6EFCE',
+          color: hasProgress ? '#9C6500' : '#006600',
+        }}>
+          {hasProgress ? 'IN PROGRESS' : 'LIVE'}
+        </span>
+      )}
       
       <div style={styles.header}>
         <div style={styles.icon}>{playbook.icon}</div>
@@ -222,7 +231,7 @@ function PlaybookCard({ playbook, onRun, isActive }) {
           style={styles.button} 
           onClick={() => onRun(playbook)}
         >
-          {playbook.hasRunner ? 'Kickoff →' : 'Coming Soon'}
+          {playbook.hasRunner ? (hasProgress ? 'Continue →' : 'Kickoff →') : 'Coming Soon'}
         </button>
       </div>
     </div>
@@ -326,6 +335,24 @@ export default function PlaybooksPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [activePlaybook, setActivePlaybook] = useState(null);
+  const [playbookProgress, setPlaybookProgress] = useState({}); // {playbookId: hasProgress}
+
+  // Check if user has started any playbooks
+  useEffect(() => {
+    if (activeProject?.id) {
+      // Check year-end progress
+      api.get(`/playbooks/year-end/progress/${activeProject.id}`)
+        .then(res => {
+          const progress = res.data?.progress || {};
+          const hasStarted = Object.keys(progress).length > 0;
+          setPlaybookProgress(prev => ({ ...prev, 'year-end-checklist': hasStarted }));
+        })
+        .catch(() => {
+          // No progress yet
+          setPlaybookProgress(prev => ({ ...prev, 'year-end-checklist': false }));
+        });
+    }
+  }, [activeProject?.id]);
 
   if (loading) {
     return (
@@ -474,6 +501,7 @@ export default function PlaybooksPage() {
             playbook={playbook} 
             onRun={handleRunPlaybook}
             isActive={playbook.hasRunner}
+            hasProgress={playbookProgress[playbook.id] || false}
           />
         ))}
       </div>
