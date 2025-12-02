@@ -1712,9 +1712,14 @@ async def get_document_checklist(project_id: str):
         # Check for active processing jobs
         processing_jobs = []
         try:
-            jobs = ProcessingJobModel.get_pending_jobs(project_id=project_id)
-            for job in jobs:
-                if job.get("status") in ["pending", "processing"]:
+            # Get all recent jobs and filter for pending/processing
+            all_jobs = ProcessingJobModel.get_all(limit=20)
+            for job in all_jobs:
+                job_status = job.get("status", "")
+                job_project = job.get("input_data", {}).get("project_id", "")
+                
+                # Filter for this project and pending/processing status
+                if job_status in ["pending", "processing"] and job_project == project_id:
                     processing_jobs.append({
                         "filename": job.get("input_data", {}).get("filename", "Unknown"),
                         "progress": job.get("progress", 0),
