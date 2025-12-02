@@ -843,7 +843,77 @@ async def debug_duckdb():
     return result
 
 
-def get_default_year_end_structure() -> Dict[str, Any]:
+@router.get("/year-end/debug-table-data")
+async def debug_table_data():
+    """
+    Debug endpoint to see actual column names and sample data from Year-End tables.
+    """
+    import duckdb
+    
+    DUCKDB_PATH = "/data/structured_data.duckdb"
+    
+    result = {
+        "before_final_payroll": {"columns": [], "sample_rows": [], "error": None},
+        "after_final_payroll": {"columns": [], "sample_rows": [], "error": None}
+    }
+    
+    if not os.path.exists(DUCKDB_PATH):
+        return {"error": "DuckDB not found"}
+    
+    try:
+        conn = duckdb.connect(DUCKDB_PATH, read_only=True)
+        
+        # Query Before Final Payroll table
+        try:
+            # Get columns
+            cols = conn.execute("""
+                SELECT column_name FROM information_schema.columns 
+                WHERE table_name = 'global__pro_pay_yearend_checklist_usa_payment_services_worksheet_1__before_final_payroll'
+            """).fetchall()
+            result["before_final_payroll"]["columns"] = [c[0] for c in cols]
+            
+            # Get sample data
+            rows = conn.execute("""
+                SELECT * FROM global__pro_pay_yearend_checklist_usa_payment_services_worksheet_1__before_final_payroll
+                LIMIT 10
+            """).fetchall()
+            
+            # Convert to list of dicts
+            col_names = result["before_final_payroll"]["columns"]
+            result["before_final_payroll"]["sample_rows"] = [
+                {col_names[i]: str(row[i])[:200] for i in range(len(col_names))} 
+                for row in rows
+            ]
+        except Exception as e:
+            result["before_final_payroll"]["error"] = str(e)
+        
+        # Query After Final Payroll table
+        try:
+            cols = conn.execute("""
+                SELECT column_name FROM information_schema.columns 
+                WHERE table_name = 'global__pro_pay_yearend_checklist_usa_payment_services_worksheet_1__after_final_payroll'
+            """).fetchall()
+            result["after_final_payroll"]["columns"] = [c[0] for c in cols]
+            
+            rows = conn.execute("""
+                SELECT * FROM global__pro_pay_yearend_checklist_usa_payment_services_worksheet_1__after_final_payroll
+                LIMIT 10
+            """).fetchall()
+            
+            col_names = result["after_final_payroll"]["columns"]
+            result["after_final_payroll"]["sample_rows"] = [
+                {col_names[i]: str(row[i])[:200] for i in range(len(col_names))} 
+                for row in rows
+            ]
+        except Exception as e:
+            result["after_final_payroll"]["error"] = str(e)
+        
+        conn.close()
+        
+    except Exception as e:
+        result["connection_error"] = str(e)
+    
+    return result
     """Default Year-End structure if doc not available."""
     return {
         "playbook_id": "year-end-2025",
