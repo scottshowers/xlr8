@@ -1433,3 +1433,245 @@ async def upload_playbook_definition(file: UploadFile = File(...)):
     except Exception as e:
         logger.exception(f"Failed to parse playbook: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# AUTO-SCAN FUNCTIONALITY - Triggered on file upload
+# ============================================================================
+
+# Report keywords mapped to action IDs
+REPORT_TO_ACTIONS = {
+    "company tax verification": ["2A", "2B", "2C"],
+    "company master profile": ["2A", "2B", "2C"],
+    "tax verification": ["2A", "2B", "2C"],
+    "master profile": ["2A", "2B", "2C"],
+    "workers compensation": ["2D"],
+    "workers comp": ["2D"],
+    "risk rates": ["2D"],
+    "earnings tax": ["2F"],
+    "earnings code": ["2F"],
+    "deduction tax": ["2G"],
+    "deduction code": ["2G"],
+    "benefit code": ["2G"],
+    "year-end validation": ["3A", "3B", "3C", "3D"],
+    "ye validation": ["3A", "3B", "3C", "3D"],
+    "ssn": ["3A"],
+    "social security": ["3A"],
+    "qtd analysis": ["11B"],
+    "quarter-to-date": ["11B"],
+    "arrears": ["5D"],
+    "outstanding check": ["5C"],
+    "check recon": ["5C"],
+    "w-2": ["6A", "6B", "6C"],
+    "1099": ["1C", "14A", "14B", "14C"],
+}
+
+
+def match_filename_to_actions(filename: str) -> List[str]:
+    """
+    Match an uploaded filename to relevant playbook actions.
+    Returns list of action IDs that should be scanned.
+    """
+    filename_lower = filename.lower()
+    matched_actions = set()
+    
+    for keyword, actions in REPORT_TO_ACTIONS.items():
+        if keyword in filename_lower:
+            matched_actions.update(actions)
+            logger.info(f"[AUTO-SCAN] Filename '{filename}' matched keyword '{keyword}' -> actions {actions}")
+    
+    return list(matched_actions)
+
+
+def get_dependent_actions(action_ids: List[str]) -> List[str]:
+    """
+    Get all actions that depend on the given actions.
+    Returns the original actions plus their dependents.
+    """
+    all_actions = set(action_ids)
+    
+    # Find dependents
+    for dependent_id, parent_ids in ACTION_DEPENDENCIES.items():
+        if any(parent in action_ids for parent in parent_ids):
+            all_actions.add(dependent_id)
+            logger.info(f"[AUTO-SCAN] Adding dependent action {dependent_id} (depends on {parent_ids})")
+    
+    return list(all_actions)
+
+
+def get_scan_order(action_ids: List[str]) -> List[str]:
+    """
+    Order actions so parents are scanned before dependents.
+    """
+    # Define a priority based on action number
+    def action_priority(action_id: str) -> int:
+        # Extract numeric part
+        try:
+            num_part = ''.join(filter(str.isdigit, action_id))
+            letter_part = ''.join(filter(str.isalpha, action_id))
+            return int(num_part) * 100 + ord(letter_part.upper()) - ord('A')
+        except:
+            return 999
+    
+    return sorted(action_ids, key=action_priority)
+
+
+@router.post("/year-end/auto-scan/{project_id}")
+async def auto_scan_for_file(project_id: str, filename: str):
+    """
+    Automatically scan relevant playbook actions when a file is uploaded.
+    
+    1. Match filename to relevant actions
+    2. Add dependent actions
+    3. Scan in correct order (parents before children)
+    4. Return results
+    """
+    logger.info(f"[AUTO-SCAN] Starting auto-scan for '{filename}' in project {project_id}")
+    
+    # Step 1: Match filename to actions
+    matched_actions = match_filename_to_actions(filename)
+    
+    if not matched_actions:
+        logger.info(f"[AUTO-SCAN] No matching actions found for '{filename}'")
+        return {
+            "success": True,
+            "filename": filename,
+            "matched_actions": [],
+            "scanned_actions": [],
+            "message": "No playbook actions matched this file"
+        }
+    
+    # Step 2: Add dependent actions
+    all_actions = get_dependent_actions(matched_actions)
+    
+    # Step 3: Order correctly
+    scan_order = get_scan_order(all_actions)
+    
+    logger.info(f"[AUTO-SCAN] Will scan {len(scan_order)} actions in order: {scan_order}")
+    
+    # Step 4: Scan each action
+    results = []
+    for action_id in scan_order:
+        try:
+            logger.info(f"[AUTO-SCAN] Scanning action {action_id}...")
+            result = await scan_for_action(project_id, action_id)
+            results.append({
+                "action_id": action_id,
+                "success": True,
+                "found": result.get("found", False),
+                "documents": len(result.get("documents", [])),
+                "status": result.get("suggested_status", "not_started")
+            })
+            logger.info(f"[AUTO-SCAN] Action {action_id} complete: {result.get('suggested_status', 'unknown')}")
+        except Exception as e:
+            logger.error(f"[AUTO-SCAN] Action {action_id} failed: {e}")
+            results.append({
+                "action_id": action_id,
+                "success": False,
+                "error": str(e)
+            })
+    
+    return {
+        "success": True,
+        "filename": filename,
+        "matched_actions": matched_actions,
+        "scanned_actions": scan_order,
+        "results": results
+    }
+
+
+def trigger_auto_scan_sync(project_id: str, filename: str):
+    """
+    Synchronous wrapper to trigger auto-scan from background threads.
+    Uses asyncio to run the async function.
+    """
+    import asyncio
+    
+    try:
+        # Try to get existing event loop
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # If loop is already running, create a new task
+            # This happens when called from within an async context
+            asyncio.create_task(auto_scan_for_file(project_id, filename))
+            logger.info(f"[AUTO-SCAN] Queued auto-scan task for '{filename}'")
+        else:
+            # Run in the existing loop
+            loop.run_until_complete(auto_scan_for_file(project_id, filename))
+    except RuntimeError:
+        # No event loop, create a new one
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(auto_scan_for_file(project_id, filename))
+        finally:
+            loop.close()
+    except Exception as e:
+        logger.error(f"[AUTO-SCAN] Failed to trigger auto-scan: {e}")
+
+
+@router.post("/year-end/scan-all/{project_id}")
+async def scan_all_actions(project_id: str):
+    """
+    Scan ALL playbook actions that have reports_needed defined.
+    Useful for initial analysis or full refresh.
+    
+    Scans in dependency order (parents before children).
+    """
+    logger.info(f"[SCAN-ALL] Starting full playbook scan for project {project_id}")
+    
+    # Get structure
+    structure = await get_year_end_structure()
+    
+    # Collect all actions with reports_needed
+    actions_to_scan = []
+    for step in structure.get('steps', []):
+        for action in step.get('actions', []):
+            if action.get('reports_needed'):
+                actions_to_scan.append(action['action_id'])
+    
+    # Also add actions that inherit from others (they don't need their own reports)
+    for dependent_id in ACTION_DEPENDENCIES.keys():
+        if dependent_id not in actions_to_scan:
+            actions_to_scan.append(dependent_id)
+    
+    # Order by dependencies
+    scan_order = get_scan_order(actions_to_scan)
+    
+    logger.info(f"[SCAN-ALL] Will scan {len(scan_order)} actions: {scan_order}")
+    
+    results = []
+    successful = 0
+    failed = 0
+    
+    for action_id in scan_order:
+        try:
+            logger.info(f"[SCAN-ALL] Scanning action {action_id}...")
+            result = await scan_for_action(project_id, action_id)
+            results.append({
+                "action_id": action_id,
+                "success": True,
+                "found": result.get("found", False),
+                "documents": len(result.get("documents", [])),
+                "status": result.get("suggested_status", "not_started")
+            })
+            successful += 1
+        except Exception as e:
+            logger.error(f"[SCAN-ALL] Action {action_id} failed: {e}")
+            results.append({
+                "action_id": action_id,
+                "success": False,
+                "error": str(e)
+            })
+            failed += 1
+    
+    logger.info(f"[SCAN-ALL] Complete: {successful} successful, {failed} failed")
+    
+    return {
+        "success": True,
+        "project_id": project_id,
+        "total_actions": len(scan_order),
+        "successful": successful,
+        "failed": failed,
+        "results": results
+    }
