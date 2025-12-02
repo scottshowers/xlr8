@@ -2405,8 +2405,200 @@ async def upload_playbook_definition(file: UploadFile = File(...)):
 
 
 # ============================================================================
-# AUTO-SCAN FUNCTIONALITY - Triggered on file upload
+# TOOLTIP SYSTEM - Consultant-driven tips and notes
 # ============================================================================
+
+class TooltipCreate(BaseModel):
+    action_id: str
+    tooltip_type: str  # 'best_practice', 'mandatory', 'hint'
+    title: Optional[str] = None
+    content: str
+    display_order: Optional[int] = 0
+
+class TooltipUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    tooltip_type: Optional[str] = None
+    display_order: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+def get_supabase():
+    """Get Supabase client"""
+    try:
+        from utils.supabase_client import get_supabase_client
+        return get_supabase_client()
+    except Exception as e:
+        logger.error(f"Failed to get Supabase client: {e}")
+        return None
+
+
+@router.get("/tooltips/{action_id}")
+async def get_tooltips_for_action(action_id: str, playbook_id: str = "year-end-2025"):
+    """Get all active tooltips for a specific action"""
+    supabase = get_supabase()
+    if not supabase:
+        return {"tooltips": [], "error": "Database not available"}
+    
+    try:
+        response = supabase.table('playbook_tooltips') \
+            .select('*') \
+            .eq('playbook_id', playbook_id) \
+            .eq('action_id', action_id) \
+            .eq('is_active', True) \
+            .order('display_order') \
+            .execute()
+        
+        return {"tooltips": response.data or []}
+    except Exception as e:
+        logger.error(f"Failed to get tooltips: {e}")
+        return {"tooltips": [], "error": str(e)}
+
+
+@router.get("/tooltips")
+async def get_all_tooltips(playbook_id: str = "year-end-2025", include_inactive: bool = False):
+    """Get all tooltips for a playbook (for admin view)"""
+    supabase = get_supabase()
+    if not supabase:
+        return {"tooltips": [], "error": "Database not available"}
+    
+    try:
+        query = supabase.table('playbook_tooltips') \
+            .select('*') \
+            .eq('playbook_id', playbook_id)
+        
+        if not include_inactive:
+            query = query.eq('is_active', True)
+        
+        response = query.order('action_id').order('display_order').execute()
+        
+        return {"tooltips": response.data or []}
+    except Exception as e:
+        logger.error(f"Failed to get tooltips: {e}")
+        return {"tooltips": [], "error": str(e)}
+
+
+@router.post("/tooltips")
+async def create_tooltip(tooltip: TooltipCreate):
+    """Create a new tooltip (admin only)"""
+    supabase = get_supabase()
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    # Validate tooltip_type
+    valid_types = ['best_practice', 'mandatory', 'hint']
+    if tooltip.tooltip_type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"Invalid tooltip_type. Must be one of: {valid_types}")
+    
+    try:
+        data = {
+            "playbook_id": "year-end-2025",
+            "action_id": tooltip.action_id.upper(),
+            "tooltip_type": tooltip.tooltip_type,
+            "title": tooltip.title,
+            "content": tooltip.content,
+            "display_order": tooltip.display_order or 0,
+            "is_active": True
+        }
+        
+        response = supabase.table('playbook_tooltips').insert(data).execute()
+        
+        return {"success": True, "tooltip": response.data[0] if response.data else None}
+    except Exception as e:
+        logger.error(f"Failed to create tooltip: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/tooltips/{tooltip_id}")
+async def update_tooltip(tooltip_id: str, tooltip: TooltipUpdate):
+    """Update an existing tooltip (admin only)"""
+    supabase = get_supabase()
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    try:
+        # Build update data (only include non-None fields)
+        data = {}
+        if tooltip.title is not None:
+            data["title"] = tooltip.title
+        if tooltip.content is not None:
+            data["content"] = tooltip.content
+        if tooltip.tooltip_type is not None:
+            valid_types = ['best_practice', 'mandatory', 'hint']
+            if tooltip.tooltip_type not in valid_types:
+                raise HTTPException(status_code=400, detail=f"Invalid tooltip_type. Must be one of: {valid_types}")
+            data["tooltip_type"] = tooltip.tooltip_type
+        if tooltip.display_order is not None:
+            data["display_order"] = tooltip.display_order
+        if tooltip.is_active is not None:
+            data["is_active"] = tooltip.is_active
+        
+        if not data:
+            raise HTTPException(status_code=400, detail="No fields to update")
+        
+        response = supabase.table('playbook_tooltips') \
+            .update(data) \
+            .eq('id', tooltip_id) \
+            .execute()
+        
+        return {"success": True, "tooltip": response.data[0] if response.data else None}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update tooltip: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/tooltips/{tooltip_id}")
+async def delete_tooltip(tooltip_id: str):
+    """Delete a tooltip (admin only) - soft delete by setting is_active=False"""
+    supabase = get_supabase()
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    try:
+        # Soft delete
+        response = supabase.table('playbook_tooltips') \
+            .update({"is_active": False}) \
+            .eq('id', tooltip_id) \
+            .execute()
+        
+        return {"success": True, "deleted": tooltip_id}
+    except Exception as e:
+        logger.error(f"Failed to delete tooltip: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/tooltips/bulk/{playbook_id}")
+async def get_tooltips_bulk(playbook_id: str = "year-end-2025"):
+    """
+    Get all tooltips grouped by action_id for efficient frontend loading.
+    Returns: { "2A": [...tooltips], "3B": [...tooltips], ... }
+    """
+    supabase = get_supabase()
+    if not supabase:
+        return {"tooltips_by_action": {}, "error": "Database not available"}
+    
+    try:
+        response = supabase.table('playbook_tooltips') \
+            .select('*') \
+            .eq('playbook_id', playbook_id) \
+            .eq('is_active', True) \
+            .order('display_order') \
+            .execute()
+        
+        # Group by action_id
+        by_action = {}
+        for tip in (response.data or []):
+            action_id = tip['action_id']
+            if action_id not in by_action:
+                by_action[action_id] = []
+            by_action[action_id].append(tip)
+        
+        return {"tooltips_by_action": by_action}
+    except Exception as e:
+        logger.error(f"Failed to get tooltips bulk: {e}")
+        return {"tooltips_by_action": {}, "error": str(e)}
 
 def build_report_to_actions(structure: dict) -> dict:
     """
