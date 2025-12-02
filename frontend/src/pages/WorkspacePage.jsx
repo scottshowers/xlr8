@@ -19,7 +19,7 @@ function SelectProjectPrompt() {
       textAlign: 'center',
       padding: '2rem',
     }}>
-      <div style={{ fontSize: '3rem', marginBottom: '1rem', opacity: 0.6 }}>🐄</div>
+      <div style={{ fontSize: '3rem', marginBottom: '1rem', opacity: 0.6 }}>🎯</div>
       <h2 style={{
         fontFamily: "'Sora', sans-serif",
         fontSize: '1.25rem',
@@ -33,7 +33,7 @@ function SelectProjectPrompt() {
         maxWidth: '350px',
         lineHeight: '1.5',
       }}>
-        Choose a project from the selector above to chat with Bessie.
+        Choose a project from the selector above to get started.
       </p>
     </div>
   );
@@ -46,15 +46,19 @@ export default function WorkspacePage() {
     header: { marginBottom: '1rem' },
     title: {
       fontFamily: "'Sora', sans-serif",
-      fontSize: '1.75rem',
+      fontSize: '1.5rem',
       fontWeight: '700',
       color: '#2a3441',
       margin: 0,
       display: 'flex',
       alignItems: 'center',
-      gap: '0.5rem',
+      gap: '0.75rem',
     },
-    subtitle: { color: '#5f6c7b', marginTop: '0.25rem' },
+    projectLabel: {
+      fontSize: '1rem',
+      fontWeight: '500',
+      color: '#5f6c7b',
+    },
     container: {
       background: 'white',
       borderRadius: '16px',
@@ -72,10 +76,7 @@ export default function WorkspacePage() {
     return (
       <div>
         <div style={styles.header}>
-          <h1 style={styles.title}>
-            AI Assist
-          </h1>
-          <p style={styles.subtitle}>Chat with Bessie about your implementation.</p>
+          <h1 style={styles.title}>AI Assist</h1>
         </div>
         <div style={styles.container}>
           <SelectProjectPrompt />
@@ -88,12 +89,11 @@ export default function WorkspacePage() {
     <div>
       <div style={styles.header}>
         <h1 style={styles.title}>
-          <span>🐄</span>
           AI Assist
+          <span style={styles.projectLabel}>
+            {customerName ? `${customerName} • ` : ''}{projectName || 'Project'}
+          </span>
         </h1>
-        <p style={styles.subtitle}>
-          {customerName ? `${customerName} • ` : ''}{projectName || 'Project'}
-        </p>
       </div>
       <div style={styles.container}>
         <Chat />
