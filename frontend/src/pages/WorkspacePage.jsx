@@ -73,7 +73,6 @@ export default function WorkspacePage() {
       <div>
         <div style={styles.header}>
           <h1 style={styles.title}>
-            <span>🐄</span>
             AI Assist
           </h1>
           <p style={styles.subtitle}>Chat with Bessie about your implementation.</p>
