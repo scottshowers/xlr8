@@ -337,6 +337,15 @@ class RAGHandler:
                     logger.info(f"[CHUNK] Strategy used: {first_meta.get('strategy', 'unknown')}")
                     logger.info(f"[CHUNK] Avg chunk size: {sum(len(c['text']) for c in chunk_dicts) / len(chunk_dicts):.0f} chars")
                 
+                # ✅ SANITY CHECK: Detect when Universal Chunker fails to properly chunk
+                # If document is large (>5000 chars) but only produced 1-2 chunks,
+                # the Universal Chunker likely treated it as a single unit (e.g., giant table)
+                avg_chunk_size = len(text) / len(chunks) if chunks else 0
+                if len(text) > 5000 and len(chunks) <= 2 and avg_chunk_size > 4000:
+                    logger.warning(f"[CHUNK] SANITY CHECK FAILED: {len(text)} chars produced only {len(chunks)} chunks")
+                    logger.warning(f"[CHUNK] Avg chunk size {avg_chunk_size:.0f} chars is too large - forcing basic chunking")
+                    raise ValueError("Chunks too large - forcing basic chunking fallback")
+                
                 return chunks
                 
             except Exception as e:
