@@ -702,6 +702,22 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
     }));
   };
 
+  const handleReset = async () => {
+    if (!window.confirm('Reset all progress for this playbook? This cannot be undone.')) {
+      return;
+    }
+    
+    try {
+      await api.delete(`/playbooks/year-end/progress/${project.id}`);
+      setProgress({});
+      alert('Progress reset. Refreshing...');
+      window.location.reload();
+    } catch (err) {
+      console.error('Reset failed:', err);
+      alert('Failed to reset progress');
+    }
+  };
+
   const handleExport = async () => {
     setExporting(true);
     try {
@@ -778,6 +794,15 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       border: '1px solid #e1e8ed',
       borderRadius: '8px',
       color: COLORS.textLight,
+      fontWeight: '600',
+      cursor: 'pointer',
+    },
+    resetBtn: {
+      padding: '0.5rem 1rem',
+      background: '#fee2e2',
+      border: '1px solid #fecaca',
+      borderRadius: '8px',
+      color: '#dc2626',
       fontWeight: '600',
       cursor: 'pointer',
     },
@@ -875,6 +900,13 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
         <div style={styles.headerActions}>
           <button style={styles.backBtn} onClick={onClose}>
             ← Back
+          </button>
+          <button 
+            style={styles.resetBtn} 
+            onClick={handleReset}
+            title="Reset all progress for this project"
+          >
+            🔄 Reset
           </button>
           <button style={styles.exportBtn} onClick={handleExport} disabled={exporting}>
             {exporting ? '⏳ Exporting...' : '📥 Export Progress'}
