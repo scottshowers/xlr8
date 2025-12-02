@@ -1330,6 +1330,49 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       setAnalyzing(false);
     }
   };
+  
+  const handleRefreshStructure = async () => {
+    if (!window.confirm('Refresh playbook structure from Global Library and re-analyze all documents? This may take 1-2 minutes.')) {
+      return;
+    }
+    
+    setAnalyzing(true);
+    
+    try {
+      // Step 1: Refresh structure
+      const structRes = await api.post('/playbooks/year-end/refresh-structure');
+      
+      if (!structRes.data.success) {
+        alert('Failed to refresh structure');
+        setAnalyzing(false);
+        return;
+      }
+      
+      const actionCount = structRes.data.total_actions || 0;
+      const sourceFile = structRes.data.source_file || 'source file';
+      
+      // Reload structure
+      await loadPlaybook();
+      
+      // Step 2: Re-analyze all actions
+      const scanRes = await api.post(`/playbooks/year-end/scan-all/${project.id}`);
+      const results = scanRes.data;
+      
+      // Reload all data
+      await refreshAll();
+      
+      const successful = results.successful || 0;
+      const failed = results.failed || 0;
+      
+      alert(`Structure refreshed (${actionCount} actions from ${sourceFile}) and re-analyzed: ${successful} successful, ${failed} failed.`);
+      
+    } catch (err) {
+      console.error('Refresh and analyze failed:', err);
+      alert('Failed to refresh structure. Check that Year-End Checklist is in Global Library.');
+    } finally {
+      setAnalyzing(false);
+    }
+  };
 
   // Calculate progress stats
   const totalActions = structure?.total_actions || 0;
@@ -1409,6 +1452,18 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
     analyzeAllBtn: {
       padding: '0.5rem 1rem',
       background: analyzing ? '#9ca3af' : '#3b82f6',
+      border: 'none',
+      borderRadius: '8px',
+      color: 'white',
+      fontWeight: '600',
+      cursor: analyzing ? 'not-allowed' : 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.5rem',
+    },
+    refreshStructureBtn: {
+      padding: '0.5rem 1rem',
+      background: analyzing ? '#9ca3af' : '#8b5cf6',
       border: 'none',
       borderRadius: '8px',
       color: 'white',
@@ -1518,6 +1573,14 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
               ← Back
             </button>
             <button 
+              style={styles.refreshStructureBtn} 
+              onClick={handleRefreshStructure}
+              disabled={analyzing}
+              title="Refresh playbook structure from Global Library and re-analyze all documents"
+            >
+              {analyzing ? '⏳ Refreshing...' : '🔄 Refresh & Analyze'}
+            </button>
+            <button 
               style={styles.analyzeAllBtn} 
               onClick={handleAnalyzeAll}
               disabled={analyzing}
@@ -1530,7 +1593,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
               onClick={handleReset}
               title="Reset all progress for this project"
             >
-              🔄 Reset
+              🗑️ Reset
             </button>
             <button style={styles.exportBtn} onClick={handleExport} disabled={exporting}>
               {exporting ? '⏳ Exporting...' : '📥 Export Progress'}
