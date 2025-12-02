@@ -316,6 +316,20 @@ async def update_progress(project_id: str, action_id: str, update: ActionUpdate)
     return {"success": True, "action_id": action_id, "status": update.status}
 
 
+@router.delete("/year-end/progress/{project_id}")
+async def reset_progress(project_id: str):
+    """Reset all progress for a project's year-end checklist."""
+    global PLAYBOOK_PROGRESS
+    
+    if project_id in PLAYBOOK_PROGRESS:
+        del PLAYBOOK_PROGRESS[project_id]
+        save_progress(PLAYBOOK_PROGRESS)
+        logger.info(f"Reset year-end progress for project {project_id}")
+        return {"success": True, "message": f"Progress reset for project {project_id}"}
+    else:
+        return {"success": True, "message": "No progress to reset"}
+
+
 # ============================================================================
 # SCAN ENDPOINT - Search docs for action-relevant content
 # ============================================================================
