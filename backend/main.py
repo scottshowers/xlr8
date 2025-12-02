@@ -22,8 +22,11 @@ except ImportError:
 try:
     from backend.routers import playbooks
     PLAYBOOKS_AVAILABLE = True
-except ImportError:
+except Exception as e:
     PLAYBOOKS_AVAILABLE = False
+    import traceback
+    print(f"ERROR: Playbooks router import failed: {e}")
+    print(traceback.format_exc())
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -62,7 +65,7 @@ else:
 
 # Register playbooks router if available
 if PLAYBOOKS_AVAILABLE:
-    app.include_router(playbooks.router, prefix="/api", tags=["playbooks"])
+    app.include_router(playbooks.router)  # No prefix - router has /playbooks built in
     logger.info("Playbooks router registered")
 else:
     logger.warning("Playbooks router not available")
@@ -76,7 +79,8 @@ async def health():
         return {
             "status": "healthy",
             "chromadb": "connected",
-            "vacuum_available": VACUUM_AVAILABLE
+            "vacuum_available": VACUUM_AVAILABLE,
+            "playbooks_available": PLAYBOOKS_AVAILABLE
         }
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}
