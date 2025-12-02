@@ -94,6 +94,8 @@ export default function Status() {
       case 'completed': return <CheckCircle className="w-5 h-5 text-green-500" />
       case 'failed': return <XCircle className="w-5 h-5 text-red-500" />
       case 'processing': return <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
+      case 'queued': 
+      case 'pending': return <Clock className="w-5 h-5 text-yellow-500" />
       default: return <Clock className="w-5 h-5 text-gray-400" />
     }
   }
@@ -103,6 +105,8 @@ export default function Status() {
       case 'completed': return 'bg-green-100 text-green-800'
       case 'failed': return 'bg-red-100 text-red-800'
       case 'processing': return 'bg-blue-100 text-blue-800'
+      case 'queued':
+      case 'pending': return 'bg-yellow-100 text-yellow-800'
       default: return 'bg-gray-100 text-gray-800'
     }
   }
@@ -351,8 +355,8 @@ export default function Status() {
                         )}
                       </button>
                     )}
-                    {/* Delete button for completed/failed jobs */}
-                    {(job.status === 'completed' || job.status === 'failed') && (
+                    {/* Delete button for completed/failed/queued/pending jobs */}
+                    {(job.status === 'completed' || job.status === 'failed' || job.status === 'queued' || job.status === 'pending') && (
                       <button
                         onClick={() => deleteJob(job.id)}
                         disabled={deletingJob === job.id}
