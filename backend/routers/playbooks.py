@@ -30,12 +30,36 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/playbooks", tags=["playbooks"])
 
-# In-memory progress storage (will move to DuckDB later)
-# Structure: {project_id: {action_id: {status, findings, notes, updated_at}}}
-PLAYBOOK_PROGRESS = {}
+# Persistent progress storage location
+PROGRESS_FILE = "/data/playbook_progress.json"
 
 # Cached playbook structure
 PLAYBOOK_CACHE = {}
+
+
+def load_progress() -> Dict:
+    """Load progress from persistent storage."""
+    try:
+        if os.path.exists(PROGRESS_FILE):
+            with open(PROGRESS_FILE, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        logger.warning(f"Could not load progress file: {e}")
+    return {}
+
+
+def save_progress(progress: Dict):
+    """Save progress to persistent storage."""
+    try:
+        os.makedirs(os.path.dirname(PROGRESS_FILE), exist_ok=True)
+        with open(PROGRESS_FILE, 'w') as f:
+            json.dump(progress, f, indent=2, default=str)
+    except Exception as e:
+        logger.error(f"Could not save progress file: {e}")
+
+
+# Load existing progress on startup
+PLAYBOOK_PROGRESS = load_progress()
 
 
 class ActionUpdate(BaseModel):
@@ -286,6 +310,9 @@ async def update_progress(project_id: str, action_id: str, update: ActionUpdate)
         "updated_at": datetime.now().isoformat()
     }
     
+    # Persist to file
+    save_progress(PLAYBOOK_PROGRESS)
+    
     return {"success": True, "action_id": action_id, "status": update.status}
 
 
@@ -392,6 +419,9 @@ async def scan_for_action(project_id: str, action_id: str):
             "last_scan": datetime.now().isoformat(),
             "notes": PLAYBOOK_PROGRESS.get(project_id, {}).get(action_id, {}).get("notes")
         }
+        
+        # Persist to file
+        save_progress(PLAYBOOK_PROGRESS)
         
         return {
             "found": len(unique_docs) > 0,
