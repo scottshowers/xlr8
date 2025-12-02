@@ -2424,13 +2424,30 @@ class TooltipUpdate(BaseModel):
 
 
 def get_supabase():
-    """Get Supabase client"""
+    """Get Supabase client - try multiple import paths"""
     try:
-        from utils.supabase_client import get_supabase_client
-        return get_supabase_client()
+        # Try the standard import
+        from utils.supabase_client import get_supabase as _get_supabase
+        return _get_supabase()
+    except ImportError:
+        try:
+            # Fallback: try direct supabase client
+            from utils.supabase_client import supabase
+            return supabase
+        except ImportError:
+            try:
+                # Fallback 2: try creating client directly
+                import os
+                from supabase import create_client
+                url = os.getenv("SUPABASE_URL")
+                key = os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+                if url and key:
+                    return create_client(url, key)
+            except Exception as e:
+                logger.error(f"All Supabase import methods failed: {e}")
     except Exception as e:
         logger.error(f"Failed to get Supabase client: {e}")
-        return None
+    return None
 
 
 @router.get("/tooltips/{action_id}")
