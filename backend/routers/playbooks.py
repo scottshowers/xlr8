@@ -1206,8 +1206,9 @@ async def scan_for_action(project_id: str, action_id: str):
         
         # =====================================================================
         # DEPENDENT ACTION HANDLING - Skip redundant scan, provide guidance
+        # Actions with parent_actions should NOT get their own full scan
         # =====================================================================
-        if parent_actions and not reports_needed:
+        if parent_actions:
             logger.info(f"[SCAN] Action {action_id} is DEPENDENT on {parent_actions} - using guidance mode")
             return await handle_dependent_action(project_id, action_id, action, parent_actions)
         
@@ -1419,6 +1420,7 @@ async def handle_dependent_action(
     parent_findings = []
     parent_docs = []
     all_parents_complete = True
+    primary_parent = parent_actions[0] if parent_actions else None
     
     for parent_id in parent_actions:
         parent_data = progress.get(parent_id, {})
@@ -1435,7 +1437,7 @@ async def handle_dependent_action(
     # Get action-specific guidance
     guidance = DEPENDENT_ACTION_GUIDANCE.get(action_id, f"Review findings from action(s) {', '.join(parent_actions)} and complete the tasks for this action.")
     
-    # Build findings for this dependent action
+    # Build findings for this dependent action - ONLY show new/unique info
     findings = {
         "complete": all_parents_complete,  # Only complete if parents are complete
         "is_dependent": True,
@@ -1444,14 +1446,15 @@ async def handle_dependent_action(
         "key_values": {},
         "issues": [],
         "recommendations": [],
-        "summary": f"This action uses data from {', '.join(parent_actions)}. {'' if all_parents_complete else 'Complete parent action(s) first.'}"
+        "summary": f"Please see {primary_parent} response for document analysis. This action applies findings from {primary_parent}.",
+        "risk_level": "low"
     }
     
-    # Copy key issues from parents
-    for pf in parent_findings:
-        if pf["findings"].get("issues"):
-            for issue in pf["findings"]["issues"][:2]:  # Just top 2 issues per parent
-                findings["issues"].append(f"[From {pf['action_id']}] {issue}")
+    # DON'T copy issues/values from parent - just reference parent action
+    # Only add action-specific notes if they exist
+    if not all_parents_complete:
+        findings["summary"] = f"Waiting on {primary_parent} to complete. Please scan {primary_parent} first."
+        findings["issues"] = [f"Complete {primary_parent} before proceeding with {action_id}."]
     
     # Determine status
     if all_parents_complete:
@@ -1479,7 +1482,7 @@ async def handle_dependent_action(
     
     return {
         "found": len(parent_docs) > 0,
-        "documents": [{"filename": d, "match_type": "inherited", "snippet": f"From {', '.join(parent_actions)}"} for d in set(parent_docs)],
+        "documents": [{"filename": d, "match_type": "inherited", "snippet": f"From {primary_parent}"} for d in set(parent_docs)],
         "findings": findings,
         "suggested_status": suggested_status,
         "inherited_from": parent_actions,
@@ -1502,6 +1505,29 @@ async def detect_conflicts(project_id: str, action_id: str, new_findings: Option
     # Check against all other actions for conflicting values
     critical_fields = ["fein", "company_name", "federal_futa_rate"]
     
+    def normalize_value(field: str, value: str) -> str:
+        """Normalize values for comparison to avoid false positives"""
+        if not value:
+            return ""
+        val = str(value).strip()
+        
+        # FEIN: remove dashes, spaces, just keep digits
+        if "fein" in field.lower() or "ein" in field.lower():
+            return ''.join(c for c in val if c.isdigit())
+        
+        # Percentages: normalize to consistent decimal
+        if "rate" in field.lower() or "%" in val:
+            try:
+                # Remove % sign and convert to float
+                cleaned = val.replace('%', '').strip()
+                num = float(cleaned)
+                # Round to 4 decimal places for comparison
+                return f"{num:.4f}"
+            except (ValueError, TypeError):
+                pass
+        
+        return val.lower()
+    
     for other_action_id, other_progress in progress.items():
         if other_action_id == action_id:
             continue
@@ -1513,25 +1539,30 @@ async def detect_conflicts(project_id: str, action_id: str, new_findings: Option
             # Normalize field names for comparison
             new_val = None
             other_val = None
+            new_val_raw = None
+            other_val_raw = None
             
             for k, v in new_values.items():
                 if field.lower() in k.lower():
-                    new_val = str(v).strip()
+                    new_val_raw = str(v).strip()
+                    new_val = normalize_value(field, new_val_raw)
                     break
             
             for k, v in other_values.items():
                 if field.lower() in k.lower():
-                    other_val = str(v).strip()
+                    other_val_raw = str(v).strip()
+                    other_val = normalize_value(field, other_val_raw)
                     break
             
+            # Compare normalized values
             if new_val and other_val and new_val != other_val:
                 conflicts.append({
                     "field": field,
                     "action_1": action_id,
-                    "value_1": new_val,
+                    "value_1": new_val_raw,
                     "action_2": other_action_id,
-                    "value_2": other_val,
-                    "message": f"Conflicting {field}: '{new_val}' (from {action_id}) vs '{other_val}' (from {other_action_id})"
+                    "value_2": other_val_raw,
+                    "message": f"Conflicting {field}: '{new_val_raw}' (from {action_id}) vs '{other_val_raw}' (from {other_action_id})"
                 })
                 logger.warning(f"[CONFLICT] {conflicts[-1]['message']}")
     
