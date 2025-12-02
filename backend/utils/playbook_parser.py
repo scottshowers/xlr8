@@ -6,8 +6,9 @@ READS FROM DUCKDB - Not from original Excel files.
 The Excel file has been processed into DuckDB tables. This parser:
 1. Finds the Year-End Checklist tables in DuckDB (project='GLOBAL')
 2. Reads the data from each sheet/table
-3. Parses Action ID (Column A) and Description (Column B)
-4. Returns structured playbook data
+3. Decrypts encrypted description column
+4. Parses Action ID and Description
+5. Returns structured playbook data
 
 Author: XLR8 Team
 """
@@ -16,12 +17,58 @@ import os
 import re
 import json
 import logging
+import base64
 from typing import List, Dict, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 # DuckDB path (must match structured_data_handler.py)
 DUCKDB_PATH = "/data/structured_data.duckdb"
+ENCRYPTION_KEY_PATH = "/data/.encryption_key_v2"
+
+
+def get_encryption_key() -> Optional[bytes]:
+    """Load the encryption key for decrypting PII fields."""
+    try:
+        if os.path.exists(ENCRYPTION_KEY_PATH):
+            with open(ENCRYPTION_KEY_PATH, 'rb') as f:
+                return f.read()
+        else:
+            logger.warning(f"[PARSER] Encryption key not found at {ENCRYPTION_KEY_PATH}")
+            return None
+    except Exception as e:
+        logger.error(f"[PARSER] Failed to load encryption key: {e}")
+        return None
+
+
+def decrypt_value(encrypted_value: str, key: bytes) -> str:
+    """
+    Decrypt an ENC256: prefixed value.
+    Format: ENC256: + base64(nonce + ciphertext + tag)
+    Uses AES-256-GCM
+    """
+    if not encrypted_value or not encrypted_value.startswith('ENC256:'):
+        return encrypted_value
+    
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        
+        # Remove prefix and decode
+        encoded = encrypted_value[7:]  # Remove "ENC256:"
+        data = base64.b64decode(encoded)
+        
+        # Extract components (nonce=12 bytes, tag=16 bytes at end)
+        nonce = data[:12]
+        ciphertext_with_tag = data[12:]
+        
+        # Decrypt
+        aesgcm = AESGCM(key)
+        plaintext = aesgcm.decrypt(nonce, ciphertext_with_tag, None)
+        
+        return plaintext.decode('utf-8')
+    except Exception as e:
+        logger.warning(f"[PARSER] Decryption failed: {e}")
+        return encrypted_value  # Return as-is if decryption fails
 
 
 def get_duckdb_connection():
@@ -29,58 +76,28 @@ def get_duckdb_connection():
     try:
         import duckdb
         
-        logger.info(f"[PARSER] Checking DuckDB at: {DUCKDB_PATH}")
-        
         if os.path.exists(DUCKDB_PATH):
-            logger.info(f"[PARSER] DuckDB file exists, size: {os.path.getsize(DUCKDB_PATH)} bytes")
             conn = duckdb.connect(DUCKDB_PATH, read_only=True)
-            logger.info(f"[PARSER] DuckDB connection successful")
             return conn
         else:
             logger.warning(f"[PARSER] DuckDB not found at {DUCKDB_PATH}")
-            # Check alternative paths
-            alt_paths = [
-                "/app/data/structured_data.duckdb",
-                "./data/structured_data.duckdb",
-                "/data/duckdb/structured_data.duckdb"
-            ]
-            for alt in alt_paths:
-                if os.path.exists(alt):
-                    logger.info(f"[PARSER] Found DuckDB at alternative path: {alt}")
-                    return duckdb.connect(alt, read_only=True)
-            
-            logger.warning(f"[PARSER] DuckDB not found at any known location")
             return None
     except Exception as e:
         logger.error(f"[PARSER] Failed to connect to DuckDB: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
         return None
 
 
 def find_year_end_tables() -> List[Dict[str, Any]]:
     """
     Find Year-End Checklist tables in DuckDB.
-    
-    Searches _schema_metadata for:
-    - project = 'GLOBAL' (or variations)
-    - file_name contains year-end keywords
-    
-    Returns list of table info dicts.
+    Returns list of table info for Before/After Final Payroll sheets.
     """
     conn = get_duckdb_connection()
     if not conn:
         return []
     
     try:
-        # First, let's see what projects exist
-        try:
-            projects = conn.execute("SELECT DISTINCT project FROM _schema_metadata").fetchall()
-            logger.info(f"[PARSER] Available projects in DuckDB: {[p[0] for p in projects]}")
-        except Exception as e:
-            logger.warning(f"[PARSER] Could not list projects: {e}")
-        
-        # Search for global year-end tables - be VERY flexible
+        # Get the specific year-end tables we know exist
         result = conn.execute("""
             SELECT 
                 project,
@@ -91,36 +108,13 @@ def find_year_end_tables() -> List[Dict[str, Any]]:
                 row_count
             FROM _schema_metadata
             WHERE is_current = TRUE
+            AND LOWER(project) = 'global'
             AND (
-                -- Match Global project (case-insensitive)
-                LOWER(project) = 'global' 
-                OR LOWER(project) = '__global__'
-                OR LOWER(project) LIKE '%global%'
-                -- Also check if file looks like Year-End regardless of project
-                OR (
-                    LOWER(file_name) LIKE '%year%end%'
-                    OR LOWER(file_name) LIKE '%year-end%'
-                    OR LOWER(file_name) LIKE '%yearend%'
-                    OR LOWER(file_name) LIKE '%checklist%'
-                    OR LOWER(file_name) LIKE '%pro_pay%'
-                    OR LOWER(file_name) LIKE '%pro-pay%'
-                )
+                LOWER(sheet_name) LIKE '%before%payroll%'
+                OR LOWER(sheet_name) LIKE '%after%payroll%'
             )
             ORDER BY sheet_name
         """).fetchall()
-        
-        if not result:
-            # Fallback: just get ALL tables and log them
-            logger.warning("[PARSER] No Year-End tables found with filters, checking all tables...")
-            all_tables = conn.execute("""
-                SELECT project, file_name, sheet_name, table_name, row_count
-                FROM _schema_metadata
-                WHERE is_current = TRUE
-                LIMIT 20
-            """).fetchall()
-            logger.info(f"[PARSER] Sample of ALL tables in DuckDB:")
-            for t in all_tables:
-                logger.info(f"[PARSER]   project={t[0]}, file={t[1]}, sheet={t[2]}")
         
         tables = []
         for row in result:
@@ -134,16 +128,14 @@ def find_year_end_tables() -> List[Dict[str, Any]]:
                 'row_count': row_count
             })
         
-        logger.info(f"[PARSER] Found {len(tables)} Year-End Checklist tables in DuckDB")
+        logger.info(f"[PARSER] Found {len(tables)} Year-End tables")
         for t in tables:
-            logger.info(f"[PARSER]   - {t['sheet_name']}: {t['table_name']} ({t['row_count']} rows)")
+            logger.info(f"[PARSER]   - {t['sheet_name']}: {t['row_count']} rows")
         
         return tables
         
     except Exception as e:
         logger.error(f"[PARSER] Error finding Year-End tables: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
         return []
     finally:
         conn.close()
@@ -153,29 +145,38 @@ def parse_year_end_from_duckdb() -> Dict[str, Any]:
     """
     Parse Year-End Checklist from DuckDB tables.
     
-    Returns structured playbook data with FULL descriptions.
+    Column mapping (based on actual data):
+    - Column 0 (due_date): Actually the Action ID (1A, 1B, etc.)
+    - Column 1 (long name): Description (ENCRYPTED)
+    - Column 2 (unnamed_2): Due Date
+    - Column 3 (unnamed_3): Action Type (Required/Recommended)
+    - Column 4 (unnamed_4): Quarter-End flag
+    - Column 5 (unnamed_5): Completed flag
     """
     tables = find_year_end_tables()
     
     if not tables:
-        logger.warning("[PARSER] No Year-End Checklist tables found in DuckDB")
+        logger.warning("[PARSER] No Year-End tables found")
         return get_default_structure()
     
     conn = get_duckdb_connection()
     if not conn:
         return get_default_structure()
     
+    # Load encryption key for decrypting descriptions
+    encryption_key = get_encryption_key()
+    if not encryption_key:
+        logger.warning("[PARSER] No encryption key - descriptions may be encrypted")
+    
     try:
         all_actions = []
         file_name = tables[0]['file_name'] if tables else 'unknown'
         
-        # Process each sheet/table
         for table_info in tables:
             table_name = table_info['table_name']
             sheet_name = table_info['sheet_name']
-            columns = table_info['columns']
             
-            logger.info(f"[PARSER] Processing table: {table_name} (sheet: {sheet_name})")
+            logger.info(f"[PARSER] Processing: {sheet_name}")
             
             # Determine phase from sheet name
             sheet_lower = sheet_name.lower()
@@ -186,89 +187,94 @@ def parse_year_end_from_duckdb() -> Dict[str, Any]:
             else:
                 phase = 'general'
             
-            # Get column names for the table
-            col_names = []
-            for col in columns:
-                if isinstance(col, dict):
-                    col_names.append(col.get('name', col.get('original', 'unknown')))
-                else:
-                    col_names.append(str(col))
-            
-            logger.info(f"[PARSER] Columns: {col_names[:5]}...")
-            
-            # Find action and description columns
-            action_col = find_column_by_pattern(col_names, ['action', 'step', 'item', 'id'])
-            desc_col = find_column_by_pattern(col_names, ['description', 'desc', 'detail', 'task', 'activity'])
-            due_col = find_column_by_pattern(col_names, ['due', 'date', 'deadline'])
-            
-            # If no matches, assume first two columns
-            if not action_col and len(col_names) >= 1:
-                action_col = col_names[0]
-            if not desc_col and len(col_names) >= 2:
-                desc_col = col_names[1]
-            
-            if not action_col or not desc_col:
-                logger.warning(f"[PARSER] Could not identify columns in {table_name}")
-                continue
-            
-            logger.info(f"[PARSER] Using columns: action={action_col}, desc={desc_col}, due={due_col}")
-            
-            # Query table data
+            # Query all rows - we'll filter in Python
             try:
-                # Build safe query (columns might have special chars)
-                safe_action = f'"{action_col}"'
-                safe_desc = f'"{desc_col}"'
-                safe_due = f'"{due_col}"' if due_col else 'NULL'
+                rows = conn.execute(f'SELECT * FROM "{table_name}"').fetchall()
                 
-                query = f'SELECT {safe_action}, {safe_desc}, {safe_due} as due_date FROM "{table_name}"'
-                rows = conn.execute(query).fetchall()
+                # Get column names
+                col_info = conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
+                col_names = [c[1] for c in col_info]
                 
-                logger.info(f"[PARSER] Retrieved {len(rows)} rows from {table_name}")
+                logger.info(f"[PARSER] {len(rows)} rows, columns: {col_names[:3]}...")
+                
+                # Find the description column (it's the one with the super long name)
+                desc_col_idx = None
+                for i, name in enumerate(col_names):
+                    if len(name) > 50 or 'due_date_is_listed' in name.lower():
+                        desc_col_idx = i
+                        break
+                
+                if desc_col_idx is None and len(col_names) > 1:
+                    desc_col_idx = 1  # Default to second column
+                
+                logger.info(f"[PARSER] Description column index: {desc_col_idx}")
                 
                 for row in rows:
-                    action_id = str(row[0]).strip() if row[0] else ''
-                    description = str(row[1]).strip() if row[1] else ''
-                    due_date = str(row[2]).strip() if row[2] and str(row[2]).strip() not in ['None', 'nan', ''] else None
+                    # Column 0 is Action ID
+                    action_id_raw = str(row[0]).strip() if row[0] else ''
                     
                     # Skip header rows and empty rows
-                    if not action_id or action_id.lower() in ['action', 'step', 'item', 'nan', 'none', '']:
+                    if not action_id_raw:
                         continue
-                    if not description or description.lower() in ['description', 'nan', 'none', '']:
+                    if action_id_raw.lower() in ['action', 'action type', 'quarter-end', 'completed', 'due date', 'type']:
+                        continue
+                    if action_id_raw.lower().startswith('step '):
+                        continue
+                    if action_id_raw.lower().startswith('if a due date'):
                         continue
                     
-                    # Validate action_id format (should be like 1A, 2B, 10A, etc.)
-                    action_id_clean = re.sub(r'\s+', '', action_id)
+                    # Validate action_id format (1A, 2B, 10A, etc.)
+                    action_id_clean = re.sub(r'\s+', '', action_id_raw)
                     if not re.match(r'^\d+[A-Za-z]$', action_id_clean):
                         continue
                     
-                    # Parse step number from action_id
+                    # Get description (may be encrypted)
+                    description_raw = str(row[desc_col_idx]).strip() if desc_col_idx and row[desc_col_idx] else ''
+                    
+                    # Decrypt if needed
+                    if description_raw.startswith('ENC256:') and encryption_key:
+                        description = decrypt_value(description_raw, encryption_key)
+                    else:
+                        description = description_raw
+                    
+                    if not description or description.startswith('ENC256:'):
+                        logger.warning(f"[PARSER] No description for {action_id_clean}")
+                        continue
+                    
+                    # Get other fields
+                    due_date = None
+                    action_type = 'recommended'
+                    quarter_end = False
+                    
+                    # unnamed_2 = Due Date
+                    if len(row) > 2 and row[2]:
+                        due_str = str(row[2]).strip()
+                        if due_str and due_str != '—' and due_str != '-':
+                            due_date = due_str
+                    
+                    # unnamed_3 = Action Type
+                    if len(row) > 3 and row[3]:
+                        type_str = str(row[3]).strip().lower()
+                        if 'required' in type_str:
+                            action_type = 'required'
+                    
+                    # unnamed_4 = Quarter-End
+                    if len(row) > 4 and row[4]:
+                        qe_str = str(row[4]).strip().lower()
+                        if 'quarter' in qe_str:
+                            quarter_end = True
+                    
+                    # Parse step number
                     step_num = ''.join(c for c in action_id_clean if c.isdigit())
                     
-                    # Override phase based on step number if not determined by sheet
-                    if phase == 'general':
-                        try:
-                            phase = 'before_final_payroll' if int(step_num) <= 8 else 'after_final_payroll'
-                        except:
-                            phase = 'before_final_payroll'
-                    
-                    # Determine action type from description
-                    action_type = "recommended"
-                    if "required" in description.lower()[:200]:
-                        action_type = "required"
-                    
-                    # Check if quarter-end action
-                    quarter_end = "quarter" in description.lower()
-                    
-                    # Extract report names mentioned
+                    # Extract report names and keywords
                     reports_needed = extract_report_names(description)
-                    
-                    # Extract keywords for document matching
                     keywords = extract_keywords(description)
                     
                     all_actions.append({
                         'action_id': action_id_clean.upper(),
                         'step': step_num,
-                        'description': description,  # FULL TEXT - NO TRUNCATION
+                        'description': description,
                         'due_date': due_date,
                         'action_type': action_type,
                         'quarter_end': quarter_end,
@@ -279,32 +285,19 @@ def parse_year_end_from_duckdb() -> Dict[str, Any]:
                     })
                     
             except Exception as e:
-                logger.error(f"[PARSER] Error querying table {table_name}: {e}")
+                logger.error(f"[PARSER] Error processing {table_name}: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
                 continue
         
-        logger.info(f"[PARSER] Extracted {len(all_actions)} total actions from DuckDB")
+        logger.info(f"[PARSER] Extracted {len(all_actions)} actions from DuckDB")
         
-        # Deduplicate actions (same action might appear in multiple sheets)
-        seen_actions = {}
-        unique_actions = []
-        for action in all_actions:
-            aid = action['action_id']
-            if aid not in seen_actions:
-                seen_actions[aid] = action
-                unique_actions.append(action)
-            else:
-                # Keep longer description
-                if len(action['description']) > len(seen_actions[aid]['description']):
-                    seen_actions[aid] = action
-                    for i, ua in enumerate(unique_actions):
-                        if ua['action_id'] == aid:
-                            unique_actions[i] = action
-                            break
-        
-        logger.info(f"[PARSER] After deduplication: {len(unique_actions)} unique actions")
+        if not all_actions:
+            logger.warning("[PARSER] No actions extracted, using default")
+            return get_default_structure()
         
         # Build step structure
-        return build_playbook_structure(unique_actions, file_name)
+        return build_playbook_structure(all_actions, file_name)
         
     except Exception as e:
         logger.exception(f"[PARSER] Error parsing Year-End from DuckDB: {e}")
@@ -313,21 +306,9 @@ def parse_year_end_from_duckdb() -> Dict[str, Any]:
         conn.close()
 
 
-def find_column_by_pattern(columns: List[str], patterns: List[str]) -> Optional[str]:
-    """Find a column that matches any of the patterns"""
-    for col in columns:
-        col_lower = col.lower()
-        for pattern in patterns:
-            if pattern in col_lower:
-                return col
-    return None
-
-
 def build_playbook_structure(actions: List[Dict], source_file: str) -> Dict[str, Any]:
     """Build the final playbook structure from parsed actions"""
     
-    # Extract step headers from actions
-    step_headers = {}
     steps = []
     seen_steps = set()
     
@@ -335,14 +316,9 @@ def build_playbook_structure(actions: List[Dict], source_file: str) -> Dict[str,
         step_num = action['step']
         if step_num not in seen_steps:
             seen_steps.add(step_num)
-            
-            # Generate step name based on step number
-            step_name = get_step_name(step_num)
-            step_headers[step_num] = step_name
-            
             steps.append({
                 'step_number': step_num,
-                'step_name': step_name,
+                'step_name': get_step_name(step_num),
                 'phase': action['phase'],
                 'actions': []
             })
@@ -375,15 +351,17 @@ def get_step_name(step_num: str) -> str:
     """Get descriptive step name based on step number"""
     step_names = {
         '1': 'Get Ready',
-        '2': 'Verify Company & Tax Information',
-        '3': 'Verify Employee Information',
+        '2': 'Review and Update Company Information',
+        '3': 'Review and Update Employee Information',
         '4': 'Process Final Payroll',
         '5': 'Year-End Adjustments',
-        '6': 'Benefits & ACA',
+        '6': 'Benefits & ACA Reporting',
         '7': 'Generate Tax Forms',
         '8': 'Submit & File',
-        '9': 'Post Year-End',
-        '10': 'New Year Setup',
+        '9': 'Update Employee Form Delivery Options',
+        '10': 'Update Employee Tax Withholding Elections',
+        '11': 'Update Year-End Tax Codes',
+        '12': 'Post Year-End Cleanup',
     }
     return step_names.get(step_num, f'Step {step_num}')
 
@@ -420,6 +398,7 @@ def extract_report_names(text: str) -> List[str]:
         matches = re.findall(pattern, text, re.IGNORECASE)
         reports.extend(matches)
     
+    # Deduplicate
     seen = set()
     unique_reports = []
     for r in reports:
@@ -476,10 +455,10 @@ def get_default_structure() -> Dict[str, Any]:
                     {
                         'action_id': '1A',
                         'step': '1',
-                        'description': 'Create an internal year-end team with representation from relevant departments (Payroll, HR, Accounting, Finance, IT). Assign roles and responsibilities for year-end tasks.',
+                        'description': 'Create an internal year-end team with representation from relevant departments (Payroll, HR, Accounting, Finance, IT). Assign roles and responsibilities.',
                         'due_date': None,
                         'action_type': 'recommended',
-                        'quarter_end': False,
+                        'quarter_end': True,
                         'reports_needed': [],
                         'keywords': ['team', 'internal'],
                         'phase': 'before_final_payroll',
@@ -489,7 +468,7 @@ def get_default_structure() -> Dict[str, Any]:
             },
             {
                 'step_number': '2',
-                'step_name': 'Verify Company & Tax Information',
+                'step_name': 'Review and Update Company Information',
                 'phase': 'before_final_payroll',
                 'actions': [
                     {
@@ -514,7 +493,7 @@ def get_default_structure() -> Dict[str, Any]:
 
 
 # =============================================================================
-# LEGACY SUPPORT - File-based parsing (fallback if DuckDB not available)
+# MAIN ENTRY POINT
 # =============================================================================
 
 def parse_year_end_checklist(file_path: str = None) -> Dict[str, Any]:
@@ -522,156 +501,16 @@ def parse_year_end_checklist(file_path: str = None) -> Dict[str, Any]:
     Parse Year-End Checklist.
     
     PRIMARY: Read from DuckDB (structured data already loaded)
-    FALLBACK: Read from file if DuckDB doesn't have it
+    FALLBACK: Default structure if DuckDB doesn't have it
     
     This function is called by playbooks.py
     """
-    # First, try DuckDB (preferred - data is already there)
-    logger.info("[PARSER] Attempting to parse from DuckDB...")
+    logger.info("[PARSER] Parsing Year-End Checklist from DuckDB...")
     result = parse_year_end_from_duckdb()
     
     if result.get('source_type') != 'fallback' and result.get('total_actions', 0) > 2:
-        logger.info(f"[PARSER] Successfully parsed {result['total_actions']} actions from DuckDB")
+        logger.info(f"[PARSER] SUCCESS: {result['total_actions']} actions from DuckDB")
         return result
     
-    # Fallback: try to read from file
-    if file_path:
-        logger.info(f"[PARSER] DuckDB parse incomplete, trying file: {file_path}")
-        
-        if not os.path.exists(file_path):
-            logger.warning("[PARSER] File not found, using default structure")
-            return get_default_structure()
-        
-        file_ext = os.path.splitext(file_path)[1].lower()
-        
-        if file_ext in ['.xlsx', '.xls', '.xlsm']:
-            return parse_excel_file(file_path)
-        elif file_ext == '.docx':
-            return parse_docx_file(file_path)
-    
-    logger.warning("[PARSER] No valid source found, using default structure")
+    logger.warning("[PARSER] DuckDB parse failed, using default structure")
     return get_default_structure()
-
-
-def parse_excel_file(file_path: str) -> Dict[str, Any]:
-    """Parse Excel file directly (fallback)"""
-    try:
-        import pandas as pd
-        
-        xl = pd.ExcelFile(file_path)
-        sheet_names = xl.sheet_names
-        logger.info(f"[PARSER] Reading Excel with {len(sheet_names)} sheets")
-        
-        all_actions = []
-        
-        for sheet_name in sheet_names:
-            df = pd.read_excel(file_path, sheet_name=sheet_name)
-            
-            if df.empty or len(df.columns) < 2:
-                continue
-            
-            # Assume first column is Action, second is Description
-            action_col = df.columns[0]
-            desc_col = df.columns[1]
-            
-            sheet_lower = sheet_name.lower()
-            if 'before' in sheet_lower:
-                phase = 'before_final_payroll'
-            elif 'after' in sheet_lower:
-                phase = 'after_final_payroll'
-            else:
-                phase = 'general'
-            
-            for idx, row in df.iterrows():
-                action_id = str(row[action_col]).strip() if pd.notna(row[action_col]) else ''
-                description = str(row[desc_col]).strip() if pd.notna(row[desc_col]) else ''
-                
-                if not action_id or action_id.lower() in ['action', 'nan', 'none', '']:
-                    continue
-                if not description or description.lower() in ['description', 'nan', 'none', '']:
-                    continue
-                
-                action_id_clean = re.sub(r'\s+', '', action_id)
-                if not re.match(r'^\d+[A-Za-z]$', action_id_clean):
-                    continue
-                
-                step_num = ''.join(c for c in action_id_clean if c.isdigit())
-                
-                if phase == 'general':
-                    try:
-                        phase = 'before_final_payroll' if int(step_num) <= 8 else 'after_final_payroll'
-                    except:
-                        phase = 'before_final_payroll'
-                
-                all_actions.append({
-                    'action_id': action_id_clean.upper(),
-                    'step': step_num,
-                    'description': description,
-                    'due_date': None,
-                    'action_type': 'required' if 'required' in description.lower()[:200] else 'recommended',
-                    'quarter_end': 'quarter' in description.lower(),
-                    'reports_needed': extract_report_names(description),
-                    'keywords': extract_keywords(description),
-                    'phase': phase,
-                    'source_sheet': sheet_name
-                })
-        
-        return build_playbook_structure(all_actions, os.path.basename(file_path))
-        
-    except Exception as e:
-        logger.error(f"[PARSER] Excel parsing failed: {e}")
-        return get_default_structure()
-
-
-def parse_docx_file(file_path: str) -> Dict[str, Any]:
-    """Parse DOCX file (legacy fallback)"""
-    try:
-        from docx import Document
-        
-        doc = Document(file_path)
-        all_actions = []
-        
-        for table in doc.tables:
-            if len(table.rows) < 2:
-                continue
-            
-            header_cells = [cell.text.strip() for cell in table.rows[0].cells]
-            
-            if 'Action' not in header_cells or 'Description' not in header_cells:
-                continue
-            
-            action_idx = header_cells.index('Action')
-            desc_idx = header_cells.index('Description')
-            
-            for row in table.rows[1:]:
-                cells = row.cells
-                action_id = cells[action_idx].text.strip()
-                description = cells[desc_idx].text.strip()
-                
-                if not action_id or not description:
-                    continue
-                
-                action_id_clean = re.sub(r'\s+', '', action_id)
-                if not re.match(r'^\d+[A-Za-z]$', action_id_clean):
-                    continue
-                
-                step_num = ''.join(c for c in action_id_clean if c.isdigit())
-                
-                all_actions.append({
-                    'action_id': action_id_clean.upper(),
-                    'step': step_num,
-                    'description': description,
-                    'due_date': None,
-                    'action_type': 'required' if 'required' in description.lower()[:200] else 'recommended',
-                    'quarter_end': 'quarter' in description.lower(),
-                    'reports_needed': extract_report_names(description),
-                    'keywords': extract_keywords(description),
-                    'phase': 'before_final_payroll' if int(step_num) <= 8 else 'after_final_payroll',
-                    'source_sheet': 'docx'
-                })
-        
-        return build_playbook_structure(all_actions, os.path.basename(file_path))
-        
-    except Exception as e:
-        logger.error(f"[PARSER] DOCX parsing failed: {e}")
-        return get_default_structure()
