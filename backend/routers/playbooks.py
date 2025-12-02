@@ -58,113 +58,90 @@ def invalidate_year_end_cache():
 # =============================================================================
 # ACTION DEPENDENCIES - Which actions inherit from which
 # =============================================================================
-# Key = action that inherits, Value = list of parent actions to pull from
-ACTION_DEPENDENCIES = {
-    # Step 2: Company Information
-    "2B": ["2A"],  # Update company info - uses Company Tax Verification & Master Profile from 2A
-    "2C": ["2A"],  # Update tax codes - uses same docs from 2A
-    "2E": ["2A"],  # MWR review - uses company data from 2A
-    "2H": ["2F", "2G"],  # Special overrides - needs earnings (2F) and deductions (2G)
-    "2J": ["2G"],  # Healthcare W-2 - uses deduction data from 2G
-    "2K": ["2G"],  # Healthcare new year - uses deduction data from 2G
-    "2L": ["2G", "2J"],  # Healthcare ALE - uses deductions and healthcare config
-    
-    # Step 3: Employee Information
-    "3B": ["3A"],  # SSN updates - uses Year-End Validation from 3A
-    "3C": ["3A"],  # Name/address updates - uses same validation report
-    "3D": ["3A"],  # Deceased employees - uses validation data
-    
-    # Step 5: Pre-Close
-    "5B": ["5A"],  # Third party sick pay - uses earnings review from 5A
-    "5E": ["5C", "5D"],  # Reconciliation - needs check recon and arrears
-    
-    # Step 6: Post-Close
-    "6B": ["6A"],  # W-2 adjustments - uses W-2 preview from 6A
-    "6C": ["6A"],  # W-2 review - uses same preview data
-}
+# DYNAMIC DEPENDENCIES - Built from structure, not hardcoded
+# =============================================================================
+# Dependencies are inferred at runtime based on:
+# 1. Actions WITHOUT reports_needed depend on prior action in same step WITH reports_needed
+# 2. Actions that reference similar keywords/reports are grouped
 
-# =============================================================================
-# REVERSE DEPENDENCIES - Which actions are impacted when this action changes
-# =============================================================================
-# Built automatically from ACTION_DEPENDENCIES
+def build_action_dependencies(structure: dict) -> dict:
+    """
+    Dynamically build action dependencies from the playbook structure.
+    
+    Logic: Within each step, actions without reports_needed depend on 
+    the first action in that step that HAS reports_needed.
+    """
+    dependencies = {}
+    
+    for step in structure.get('steps', []):
+        actions = step.get('actions', [])
+        
+        # Find the first action with reports_needed (the "primary" action)
+        primary_action = None
+        for action in actions:
+            if action.get('reports_needed'):
+                primary_action = action['action_id']
+                break
+        
+        if not primary_action:
+            continue
+            
+        # All other actions in this step without reports_needed depend on primary
+        for action in actions:
+            action_id = action['action_id']
+            if action_id != primary_action and not action.get('reports_needed'):
+                dependencies[action_id] = [primary_action]
+    
+    return dependencies
+
+
+def build_reverse_dependencies(dependencies: dict) -> dict:
+    """Build reverse lookup: which actions are impacted when this action changes"""
+    reverse = {}
+    for dependent, parents in dependencies.items():
+        for parent in parents:
+            if parent not in reverse:
+                reverse[parent] = []
+            reverse[parent].append(dependent)
+    return reverse
+
+
+def build_required_documents(structure: dict) -> dict:
+    """
+    Dynamically build required documents list from structure.
+    Groups actions by their reports_needed.
+    """
+    documents = {}
+    
+    for step in structure.get('steps', []):
+        for action in step.get('actions', []):
+            reports = action.get('reports_needed', [])
+            action_id = action['action_id']
+            
+            for report in reports:
+                # Normalize report name
+                report_key = report.strip()
+                if not report_key:
+                    continue
+                    
+                if report_key not in documents:
+                    documents[report_key] = {
+                        "actions": [],
+                        "keywords": [report_key.lower()],
+                        "required": action.get('action_type') == 'required',
+                        "description": f"Report needed for Year-End processing"
+                    }
+                
+                if action_id not in documents[report_key]["actions"]:
+                    documents[report_key]["actions"].append(action_id)
+    
+    return documents
+
+
+# Placeholder - will be populated when structure is loaded
+ACTION_DEPENDENCIES = {}
 REVERSE_DEPENDENCIES = {}
-for dependent, parents in ACTION_DEPENDENCIES.items():
-    for parent in parents:
-        if parent not in REVERSE_DEPENDENCIES:
-            REVERSE_DEPENDENCIES[parent] = []
-        REVERSE_DEPENDENCIES[parent].append(dependent)
-
-# =============================================================================
-# REQUIRED DOCUMENTS - All reports needed for the playbook
-# =============================================================================
-REQUIRED_DOCUMENTS = {
-    "Company Tax Verification": {
-        "actions": ["2A", "2B", "2C"],
-        "keywords": ["company tax verification", "tax verification"],
-        "required": True,
-        "description": "Lists all company tax codes, rates, and registration IDs"
-    },
-    "Company Master Profile": {
-        "actions": ["2A", "2B", "2C"],
-        "keywords": ["company master profile", "master profile"],
-        "required": True,
-        "description": "Company setup details including FEIN, addresses, and legal names"
-    },
-    "Workers Compensation Risk Rates": {
-        "actions": ["2D"],
-        "keywords": ["workers comp", "risk rates", "wc rates"],
-        "required": False,
-        "description": "Workers comp class codes and rates by state"
-    },
-    "Earnings Tax Categories": {
-        "actions": ["2F"],
-        "keywords": ["earnings tax", "earnings categories"],
-        "required": False,
-        "description": "Earnings codes mapped to tax categories for W-2 reporting"
-    },
-    "Earnings Codes": {
-        "actions": ["2F"],
-        "keywords": ["earnings codes", "earnings code"],
-        "required": False,
-        "description": "List of all earnings codes and their configuration"
-    },
-    "Deduction Tax Categories": {
-        "actions": ["2G"],
-        "keywords": ["deduction tax", "deduction categories"],
-        "required": False,
-        "description": "Deduction codes mapped to tax categories"
-    },
-    "Deduction Codes": {
-        "actions": ["2G"],
-        "keywords": ["deduction codes", "deduction code", "benefit codes"],
-        "required": False,
-        "description": "List of all deduction/benefit codes"
-    },
-    "Year-End Validation Report": {
-        "actions": ["3A", "3B", "3C", "3D"],
-        "keywords": ["year-end validation", "ye validation", "year end validation"],
-        "required": True,
-        "description": "Employee SSN validation and W-2 readiness check"
-    },
-    "Outstanding Checks Report": {
-        "actions": ["5C"],
-        "keywords": ["outstanding check", "check recon", "uncashed"],
-        "required": False,
-        "description": "List of uncashed/outstanding payroll checks"
-    },
-    "Arrears Report": {
-        "actions": ["5D"],
-        "keywords": ["arrears", "arrears balance"],
-        "required": False,
-        "description": "Employee deduction arrears balances"
-    },
-    "QTD Analysis Report": {
-        "actions": ["11B"],
-        "keywords": ["qtd analysis", "quarter-to-date"],
-        "required": True,
-        "description": "Quarter-to-date tax reconciliation report"
-    },
-}
+REQUIRED_DOCUMENTS = {}
 
 # =============================================================================
 # ACTION-SPECIFIC GUIDANCE - For dependent actions (no scan, just guidance)
@@ -690,8 +667,9 @@ async def get_year_end_structure():
     FALLBACK: Reads from file if DuckDB doesn't have it
     
     Auto-caches for performance.
+    Also builds dynamic dependencies from the structure.
     """
-    global PLAYBOOK_CACHE, PLAYBOOK_FILE_INFO
+    global PLAYBOOK_CACHE, PLAYBOOK_FILE_INFO, ACTION_DEPENDENCIES, REVERSE_DEPENDENCIES, REQUIRED_DOCUMENTS, REPORT_TO_ACTIONS
     
     # Check cache first
     if 'year-end-2025' in PLAYBOOK_CACHE:
@@ -721,6 +699,14 @@ async def get_year_end_structure():
         
         logger.info("[STRUCTURE] Parsing Year-End Checklist...")
         structure = parse_year_end_checklist()
+        
+        # BUILD DYNAMIC DEPENDENCIES from the structure
+        ACTION_DEPENDENCIES = build_action_dependencies(structure)
+        REVERSE_DEPENDENCIES = build_reverse_dependencies(ACTION_DEPENDENCIES)
+        REQUIRED_DOCUMENTS = build_required_documents(structure)
+        REPORT_TO_ACTIONS = build_report_to_actions(structure)
+        
+        logger.info(f"[STRUCTURE] Built {len(ACTION_DEPENDENCIES)} dependencies, {len(REQUIRED_DOCUMENTS)} document types, {len(REPORT_TO_ACTIONS)} keyword mappings")
         
         # Cache the result
         PLAYBOOK_CACHE['year-end-2025'] = structure
@@ -2422,39 +2408,55 @@ async def upload_playbook_definition(file: UploadFile = File(...)):
 # AUTO-SCAN FUNCTIONALITY - Triggered on file upload
 # ============================================================================
 
-# Report keywords mapped to action IDs
-REPORT_TO_ACTIONS = {
-    "company tax verification": ["2A", "2B", "2C"],
-    "company master profile": ["2A", "2B", "2C"],
-    "tax verification": ["2A", "2B", "2C"],
-    "master profile": ["2A", "2B", "2C"],
-    "workers compensation": ["2D"],
-    "workers comp": ["2D"],
-    "risk rates": ["2D"],
-    "earnings tax": ["2F"],
-    "earnings code": ["2F"],
-    "deduction tax": ["2G"],
-    "deduction code": ["2G"],
-    "benefit code": ["2G"],
-    "year-end validation": ["3A", "3B", "3C", "3D"],
-    "ye validation": ["3A", "3B", "3C", "3D"],
-    "ssn": ["3A"],
-    "social security": ["3A"],
-    "qtd analysis": ["11B"],
-    "quarter-to-date": ["11B"],
-    "arrears": ["5D"],
-    "outstanding check": ["5C"],
-    "check recon": ["5C"],
-    "w-2": ["6A", "6B", "6C"],
-    "1099": ["1C", "14A", "14B", "14C"],
-}
+def build_report_to_actions(structure: dict) -> dict:
+    """
+    Dynamically build keyword-to-action mappings from structure.
+    Maps report keywords to actions that need those reports.
+    """
+    mapping = {}
+    
+    for step in structure.get('steps', []):
+        for action in step.get('actions', []):
+            action_id = action['action_id']
+            
+            # Add mappings for reports_needed
+            for report in action.get('reports_needed', []):
+                report_lower = report.lower().strip()
+                if report_lower:
+                    if report_lower not in mapping:
+                        mapping[report_lower] = []
+                    if action_id not in mapping[report_lower]:
+                        mapping[report_lower].append(action_id)
+            
+            # Add mappings for keywords
+            for keyword in action.get('keywords', []):
+                keyword_lower = keyword.lower().strip()
+                if keyword_lower:
+                    if keyword_lower not in mapping:
+                        mapping[keyword_lower] = []
+                    if action_id not in mapping[keyword_lower]:
+                        mapping[keyword_lower].append(action_id)
+    
+    return mapping
+
+# Placeholder - built when structure loads
+REPORT_TO_ACTIONS = {}
 
 
-def match_filename_to_actions(filename: str) -> List[str]:
+def match_filename_to_actions(filename: str, structure: dict = None) -> List[str]:
     """
     Match an uploaded filename to relevant playbook actions.
     Returns list of action IDs that should be scanned.
+    
+    Dynamically builds mapping if not cached.
     """
+    global REPORT_TO_ACTIONS
+    
+    # Build mapping if empty and structure provided
+    if not REPORT_TO_ACTIONS and structure:
+        REPORT_TO_ACTIONS = build_report_to_actions(structure)
+        logger.info(f"[AUTO-SCAN] Built {len(REPORT_TO_ACTIONS)} keyword mappings")
+    
     filename_lower = filename.lower()
     matched_actions = set()
     
@@ -2511,8 +2513,11 @@ async def auto_scan_for_file(project_id: str, filename: str):
     """
     logger.info(f"[AUTO-SCAN] Starting auto-scan for '{filename}' in project {project_id}")
     
-    # Step 1: Match filename to actions
-    matched_actions = match_filename_to_actions(filename)
+    # Get structure first to build dynamic mappings
+    structure = await get_year_end_structure()
+    
+    # Step 1: Match filename to actions (pass structure for dynamic mapping)
+    matched_actions = match_filename_to_actions(filename, structure)
     
     if not matched_actions:
         logger.info(f"[AUTO-SCAN] No matching actions found for '{filename}'")
@@ -2608,14 +2613,17 @@ async def scan_all_actions(project_id: str):
     
     # Collect all actions with reports_needed
     actions_to_scan = []
+    all_action_ids = set()  # Track all valid action IDs from structure
+    
     for step in structure.get('steps', []):
         for action in step.get('actions', []):
+            all_action_ids.add(action['action_id'])
             if action.get('reports_needed'):
                 actions_to_scan.append(action['action_id'])
     
-    # Also add actions that inherit from others (they don't need their own reports)
+    # Also add dependent actions - but ONLY if they exist in the structure
     for dependent_id in ACTION_DEPENDENCIES.keys():
-        if dependent_id not in actions_to_scan:
+        if dependent_id in all_action_ids and dependent_id not in actions_to_scan:
             actions_to_scan.append(dependent_id)
     
     # Order by dependencies
