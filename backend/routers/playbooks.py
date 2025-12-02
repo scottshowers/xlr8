@@ -405,12 +405,12 @@ async def scan_for_action(project_id: str, action_id: str):
         # STEP 3: Always do semantic search to get document content for AI analysis
         queries = reports_needed + [action.get('description', '')[:100]]
         
-        for query in queries[:5]:
+        for query in queries[:8]:
                 try:
                     results = rag.search(
                         collection_name="documents",
                         query=query,
-                        n_results=5,
+                        n_results=15,
                         project_id=project_id
                     )
                     if results:
@@ -422,7 +422,7 @@ async def scan_for_action(project_id: str, action_id: str):
                                     metadata = result.get('metadata', {})
                                     filename = metadata.get('source', metadata.get('filename', 'Unknown'))
                                     # Add content for AI analysis
-                                    all_content.append(f"[FILE: {filename}]\n{cleaned[:1500]}")
+                                    all_content.append(f"[FILE: {filename}]\n{cleaned[:3000]}")
                                     # Add to found_docs if not already there
                                     if filename not in seen_files:
                                         seen_files.add(filename)
@@ -446,7 +446,7 @@ async def scan_for_action(project_id: str, action_id: str):
             
             # Use Claude to extract specific findings if we have content
             if all_content:
-                findings = await extract_findings_for_action(action, all_content[:5])
+                findings = await extract_findings_for_action(action, all_content[:15])
                 if findings and findings.get('complete'):
                     suggested_status = "complete"
         
@@ -494,7 +494,7 @@ Action: {action['action_id']} - {action.get('description', '')}
 Reports Needed: {', '.join(action.get('reports_needed', []))}
 
 <documents>
-{combined[:8000]}
+{combined[:20000]}
 </documents>
 
 Important: Each document section is labeled with [FILE: filename]. Check which reports from "Reports Needed" are actually present in the excerpts.
