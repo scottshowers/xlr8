@@ -357,63 +357,97 @@ async def scan_for_action(project_id: str, action_id: str):
         if not action:
             raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
         
-        # Build search queries
-        queries = []
-        
-        # Use reports needed
-        queries.extend(action.get('reports_needed', []))
-        
-        # Use keywords
-        keywords = action.get('keywords', [])
-        if keywords:
-            queries.append(' '.join(keywords[:4]))
-        
-        # Add action-specific queries
-        queries.append(action.get('description', '')[:100])
+        # Get reports needed for this action
+        reports_needed = action.get('reports_needed', [])
         
         # Search for documents
         rag = RAGHandler()
         found_docs = []
         all_content = []
-        
-        for query in queries[:5]:
-            try:
-                results = rag.search(
-                    collection_name="documents",
-                    query=query,
-                    n_results=3,
-                    project_id=project_id
-                )
-                if results:
-                    for result in results:
-                        doc = result.get('document', '')
-                        if doc and len(doc) > 50:
-                            # Clean encrypted content
-                            cleaned = re.sub(r'ENC256:[A-Za-z0-9+/=]+', '[ENCRYPTED]', doc)
-                            if cleaned.count('[ENCRYPTED]') < 10:
-                                metadata = result.get('metadata', {})
-                                found_docs.append({
-                                    "filename": metadata.get('source', metadata.get('filename', 'Unknown')),
-                                    "snippet": cleaned[:300],
-                                    "query": query
-                                })
-                                all_content.append(cleaned[:1000])
-            except Exception as e:
-                logger.warning(f"Query failed: {e}")
-        
-        # Deduplicate by filename
         seen_files = set()
-        unique_docs = []
-        for doc in found_docs:
-            if doc['filename'] not in seen_files:
-                seen_files.add(doc['filename'])
-                unique_docs.append(doc)
+        
+        # STEP 1: Get ALL project documents to do filename matching
+        try:
+            collection = rag.client.get_or_create_collection(name="documents")
+            all_results = collection.get(include=["metadatas", "documents"], limit=500)
+            
+            project_docs = {}  # filename -> {metadata, content}
+            for i, metadata in enumerate(all_results.get("metadatas", [])):
+                doc_project = metadata.get("project_id") or metadata.get("project", "")
+                # Match by project_id or project name
+                if doc_project == project_id or doc_project == project_id[:8]:
+                    filename = metadata.get("source", metadata.get("filename", "Unknown"))
+                    if filename not in project_docs:
+                        project_docs[filename] = {
+                            "metadata": metadata,
+                            "content": all_results.get("documents", [])[i] if all_results.get("documents") else ""
+                        }
+            
+            logger.info(f"[SCAN] Found {len(project_docs)} unique docs in project {project_id}")
+            
+            # STEP 2: Match by filename - check if any report name appears in filename
+            for report_name in reports_needed:
+                report_keywords = report_name.lower().split()
+                for filename, doc_data in project_docs.items():
+                    filename_lower = filename.lower()
+                    # Check if report keywords appear in filename
+                    matches = sum(1 for kw in report_keywords if kw in filename_lower)
+                    if matches >= len(report_keywords) - 1:  # Allow 1 word missing
+                        if filename not in seen_files:
+                            seen_files.add(filename)
+                            content = doc_data.get("content", "")
+                            cleaned = re.sub(r'ENC256:[A-Za-z0-9+/=]+', '[ENCRYPTED]', content)
+                            found_docs.append({
+                                "filename": filename,
+                                "snippet": cleaned[:300],
+                                "query": report_name,
+                                "match_type": "filename"
+                            })
+                            all_content.append(cleaned[:1000])
+                            logger.info(f"[SCAN] Filename match: '{filename}' for report '{report_name}'")
+            
+        except Exception as e:
+            logger.warning(f"[SCAN] Filename matching failed: {e}")
+        
+        # STEP 3: Supplement with semantic search if we haven't found all reports
+        if len(found_docs) < len(reports_needed):
+            queries = reports_needed + [action.get('description', '')[:100]]
+            
+            for query in queries[:5]:
+                try:
+                    results = rag.search(
+                        collection_name="documents",
+                        query=query,
+                        n_results=5,  # Increased from 3
+                        project_id=project_id
+                    )
+                    if results:
+                        for result in results:
+                            doc = result.get('document', '')
+                            if doc and len(doc) > 50:
+                                cleaned = re.sub(r'ENC256:[A-Za-z0-9+/=]+', '[ENCRYPTED]', doc)
+                                if cleaned.count('[ENCRYPTED]') < 10:
+                                    metadata = result.get('metadata', {})
+                                    filename = metadata.get('source', metadata.get('filename', 'Unknown'))
+                                    if filename not in seen_files:
+                                        seen_files.add(filename)
+                                        found_docs.append({
+                                            "filename": filename,
+                                            "snippet": cleaned[:300],
+                                            "query": query,
+                                            "match_type": "semantic"
+                                        })
+                                        all_content.append(cleaned[:1000])
+                except Exception as e:
+                    logger.warning(f"Query failed: {e}")
+        
+        logger.info(f"[SCAN] Total unique docs found: {len(found_docs)}")
         
         # Determine findings and suggested status
         findings = None
         suggested_status = "not_started"
         
-        if unique_docs:
+        if found_docs:
             suggested_status = "in_progress"
             
             # Use Claude to extract specific findings if we have content
@@ -429,7 +463,7 @@ async def scan_for_action(project_id: str, action_id: str):
         PLAYBOOK_PROGRESS[project_id][action_id] = {
             "status": PLAYBOOK_PROGRESS.get(project_id, {}).get(action_id, {}).get("status", suggested_status),
             "findings": findings,
-            "documents_found": [d['filename'] for d in unique_docs],
+            "documents_found": [d['filename'] for d in found_docs],
             "last_scan": datetime.now().isoformat(),
             "notes": PLAYBOOK_PROGRESS.get(project_id, {}).get(action_id, {}).get("notes")
         }
@@ -438,8 +472,8 @@ async def scan_for_action(project_id: str, action_id: str):
         save_progress(PLAYBOOK_PROGRESS)
         
         return {
-            "found": len(unique_docs) > 0,
-            "documents": unique_docs,
+            "found": len(found_docs) > 0,
+            "documents": found_docs,
             "findings": findings,
             "suggested_status": suggested_status
         }
