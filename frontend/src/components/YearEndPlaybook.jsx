@@ -604,68 +604,116 @@ function TooltipModal({ isOpen, onClose, onSave, actionId, existingTooltip }) {
 // Tooltip Display - Shows icons and handles hover/click
 function TooltipDisplay({ tooltips, onEdit, onDelete, isAdmin }) {
   const [activeTooltip, setActiveTooltip] = useState(null);
+  const [hoveredIdx, setHoveredIdx] = useState(null);
+  const [popoverPosition, setPopoverPosition] = useState({ top: 0, left: 0 });
+  const iconRefs = React.useRef({});
 
   if (!tooltips || tooltips.length === 0) return null;
 
-  return (
-    <div style={{ display: 'flex', gap: '0.3rem', marginLeft: '0.5rem' }}>
-      {tooltips.map((tip, idx) => {
-        const config = TOOLTIP_TYPES[tip.tooltip_type] || TOOLTIP_TYPES.hint;
-        const isActive = activeTooltip === idx;
+  const handleIconClick = (e, idx) => {
+    e.stopPropagation();
+    if (activeTooltip === idx) {
+      setActiveTooltip(null);
+    } else {
+      // Calculate position relative to viewport
+      const rect = iconRefs.current[idx]?.getBoundingClientRect();
+      if (rect) {
+        setPopoverPosition({
+          top: rect.bottom + 8,
+          left: Math.max(20, Math.min(rect.left - 150, window.innerWidth - 370))
+        });
+      }
+      setActiveTooltip(idx);
+    }
+  };
 
-        return (
-          <div key={tip.id || idx} style={{ position: 'relative' }}>
+  // Close on click outside
+  React.useEffect(() => {
+    const handleClickOutside = () => setActiveTooltip(null);
+    if (activeTooltip !== null) {
+      document.addEventListener('click', handleClickOutside);
+      return () => document.removeEventListener('click', handleClickOutside);
+    }
+  }, [activeTooltip]);
+
+  return (
+    <>
+      <div style={{ display: 'flex', gap: '0.4rem', marginLeft: '0.5rem' }}>
+        {tooltips.map((tip, idx) => {
+          const config = TOOLTIP_TYPES[tip.tooltip_type] || TOOLTIP_TYPES.hint;
+          const isActive = activeTooltip === idx;
+          const isHovered = hoveredIdx === idx;
+
+          return (
             <span
-              onClick={(e) => {
-                e.stopPropagation();
-                setActiveTooltip(isActive ? null : idx);
-              }}
+              key={tip.id || idx}
+              ref={el => iconRefs.current[idx] = el}
+              onClick={(e) => handleIconClick(e, idx)}
+              onMouseEnter={() => setHoveredIdx(idx)}
+              onMouseLeave={() => setHoveredIdx(null)}
               style={{ 
                 cursor: 'pointer', 
-                fontSize: '1rem',
-                filter: 'drop-shadow(0 1px 1px rgba(0,0,0,0.1))'
+                fontSize: '1.1rem',
+                transition: 'all 0.2s ease',
+                transform: isHovered ? 'scale(1.3)' : 'scale(1)',
+                filter: isHovered 
+                  ? `drop-shadow(0 0 6px ${config.color})`
+                  : 'drop-shadow(0 1px 2px rgba(0,0,0,0.2))',
+                animation: tip.is_unread ? 'pulse 2s infinite' : 'none',
               }}
-              title={config.label}
+              title={`${config.label}: Click to view`}
             >
               {config.icon}
             </span>
+          );
+        })}
+      </div>
 
-            {/* Tooltip Popover */}
-            {isActive && (
-              <div
-                onClick={(e) => e.stopPropagation()}
-                style={{
-                  position: 'absolute',
-                  top: '100%',
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  marginTop: '0.5rem',
-                  background: 'white',
-                  border: `2px solid ${config.color}`,
-                  borderRadius: '8px',
-                  padding: '0.75rem',
-                  minWidth: '250px',
-                  maxWidth: '350px',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                  zIndex: 100
-                }}
-              >
+      {/* Popover Portal - Fixed position, won't clip */}
+      {activeTooltip !== null && tooltips[activeTooltip] && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: 'fixed',
+            top: popoverPosition.top,
+            left: popoverPosition.left,
+            background: 'white',
+            border: `2px solid ${(TOOLTIP_TYPES[tooltips[activeTooltip].tooltip_type] || TOOLTIP_TYPES.hint).color}`,
+            borderRadius: '10px',
+            padding: '1rem',
+            width: '340px',
+            maxHeight: '400px',
+            overflowY: 'auto',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+            zIndex: 9999
+          }}
+        >
+          {(() => {
+            const tip = tooltips[activeTooltip];
+            const config = TOOLTIP_TYPES[tip.tooltip_type] || TOOLTIP_TYPES.hint;
+            return (
+              <>
                 <div style={{ 
                   display: 'flex', 
                   alignItems: 'center', 
-                  gap: '0.4rem',
-                  marginBottom: '0.5rem',
-                  color: config.color,
-                  fontWeight: '600',
-                  fontSize: '0.85rem'
+                  gap: '0.5rem',
+                  marginBottom: '0.75rem',
+                  paddingBottom: '0.5rem',
+                  borderBottom: `1px solid ${config.color}40`
                 }}>
-                  <span>{config.icon}</span>
-                  <span>{tip.title || config.label}</span>
+                  <span style={{ fontSize: '1.3rem' }}>{config.icon}</span>
+                  <span style={{ 
+                    color: config.color,
+                    fontWeight: '700',
+                    fontSize: '0.95rem'
+                  }}>
+                    {tip.title || config.label}
+                  </span>
                 </div>
                 <div style={{ 
-                  fontSize: '0.85rem', 
+                  fontSize: '0.9rem', 
                   color: COLORS.text,
-                  lineHeight: '1.4',
+                  lineHeight: '1.5',
                   whiteSpace: 'pre-wrap'
                 }}>
                   {tip.content}
@@ -675,28 +723,28 @@ function TooltipDisplay({ tooltips, onEdit, onDelete, isAdmin }) {
                   <div style={{ 
                     display: 'flex', 
                     gap: '0.5rem', 
-                    marginTop: '0.75rem',
-                    paddingTop: '0.5rem',
+                    marginTop: '1rem',
+                    paddingTop: '0.75rem',
                     borderTop: '1px solid #e1e8ed'
                   }}>
                     <button
-                      onClick={() => onEdit(tip)}
+                      onClick={() => { onEdit(tip); setActiveTooltip(null); }}
                       style={{
-                        fontSize: '0.75rem',
-                        padding: '0.25rem 0.5rem',
+                        fontSize: '0.8rem',
+                        padding: '0.35rem 0.75rem',
                         border: '1px solid #e1e8ed',
                         borderRadius: '4px',
                         background: 'white',
                         cursor: 'pointer'
                       }}
                     >
-                      Edit
+                      ✏️ Edit
                     </button>
                     <button
-                      onClick={() => onDelete(tip.id)}
+                      onClick={() => { onDelete(tip.id); setActiveTooltip(null); }}
                       style={{
-                        fontSize: '0.75rem',
-                        padding: '0.25rem 0.5rem',
+                        fontSize: '0.8rem',
+                        padding: '0.35rem 0.75rem',
                         border: '1px solid #fee2e2',
                         borderRadius: '4px',
                         background: '#fee2e2',
@@ -704,7 +752,7 @@ function TooltipDisplay({ tooltips, onEdit, onDelete, isAdmin }) {
                         cursor: 'pointer'
                       }}
                     >
-                      Delete
+                      🗑️ Delete
                     </button>
                   </div>
                 )}
@@ -714,23 +762,32 @@ function TooltipDisplay({ tooltips, onEdit, onDelete, isAdmin }) {
                   onClick={() => setActiveTooltip(null)}
                   style={{
                     position: 'absolute',
-                    top: '0.25rem',
-                    right: '0.5rem',
+                    top: '0.5rem',
+                    right: '0.75rem',
                     border: 'none',
                     background: 'none',
                     cursor: 'pointer',
-                    fontSize: '1rem',
-                    color: '#999'
+                    fontSize: '1.2rem',
+                    color: '#999',
+                    padding: '0.25rem'
                   }}
                 >
                   ×
                 </button>
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
+              </>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* CSS Animation for pulse */}
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
+      `}</style>
+    </>
   );
 }
 
