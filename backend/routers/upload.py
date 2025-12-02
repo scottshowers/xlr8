@@ -381,6 +381,44 @@ def process_file_background(
                     except Exception as e:
                         logger.warning(f"[BACKGROUND] Could not save metadata: {e}")
                 
+                # Register in document registry
+                try:
+                    from utils.database.models import DocumentRegistryModel
+                    
+                    # Detect usage type
+                    filename_lower = filename.lower()
+                    is_global = project.lower() in ['global', '__global__', 'global/universal']
+                    
+                    # Check if this is a playbook source file
+                    is_playbook = any(kw in filename_lower for kw in ['year-end', 'yearend', 'year_end', 'checklist'])
+                    
+                    if is_playbook and is_global:
+                        usage_type = DocumentRegistryModel.USAGE_PLAYBOOK_SOURCE
+                    elif is_global:
+                        usage_type = DocumentRegistryModel.USAGE_TEMPLATE
+                    else:
+                        usage_type = DocumentRegistryModel.USAGE_STRUCTURED_DATA
+                    
+                    DocumentRegistryModel.register(
+                        filename=filename,
+                        file_type=file_ext,
+                        storage_type=DocumentRegistryModel.STORAGE_DUCKDB,
+                        usage_type=usage_type,
+                        project_id=project_id if not is_global else None,
+                        is_global=is_global,
+                        duckdb_tables=result.get('tables_created', []),
+                        row_count=total_rows,
+                        sheet_count=tables_created,
+                        metadata={
+                            'project_name': project,
+                            'functional_area': functional_area,
+                            'file_size': file_size
+                        }
+                    )
+                    logger.info(f"[BACKGROUND] Registered document in registry: {filename} ({usage_type})")
+                except Exception as e:
+                    logger.warning(f"[BACKGROUND] Could not register document: {e}")
+                
                 # Cleanup
                 ProcessingJobModel.update_progress(job_id, 90, "Cleaning up...")
                 if file_path and os.path.exists(file_path):
@@ -479,6 +517,32 @@ def process_file_background(
             except Exception as e:
                 logger.warning(f"[BACKGROUND] Could not save to documents table: {e}")
         
+        # Register in document registry
+        try:
+            from utils.database.models import DocumentRegistryModel
+            
+            is_global = project.lower() in ['global', '__global__', 'global/universal']
+            
+            DocumentRegistryModel.register(
+                filename=filename,
+                file_type=file_ext,
+                storage_type=DocumentRegistryModel.STORAGE_CHROMADB,
+                usage_type=DocumentRegistryModel.USAGE_RAG_KNOWLEDGE,
+                project_id=project_id if not is_global else None,
+                is_global=is_global,
+                chromadb_collection='documents',
+                chunk_count=len(text) // 1000,  # Approximate
+                metadata={
+                    'project_name': project,
+                    'functional_area': functional_area,
+                    'file_size': file_size,
+                    'text_length': len(text)
+                }
+            )
+            logger.info(f"[BACKGROUND] Registered document in registry: {filename}")
+        except Exception as e:
+            logger.warning(f"[BACKGROUND] Could not register document: {e}")
+        
         # Step 5: Cleanup
         ProcessingJobModel.update_progress(job_id, 96, "Cleaning up...")
         
@@ -513,7 +577,11 @@ def process_file_background(
                 logger.warning(f"[BACKGROUND] Auto-scan failed (non-critical): {e}")
         
         # Step 7: Check if this is a Year-End Checklist file for Global Library
-        if project == "Global/Universal" or project_id == "Global/Universal":
+        project_lower = (project or "").lower()
+        is_global_project = project_lower in ['global', 'global/universal', '__global__'] or \
+                           (project_id or "").lower() in ['global', 'global/universal', '__global__']
+        
+        if is_global_project:
             ProcessingJobModel.update_progress(job_id, 98, "Checking for playbook file...")
             try:
                 filename_lower = filename.lower()
