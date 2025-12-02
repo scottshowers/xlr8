@@ -77,8 +77,18 @@ def get_duckdb_connection():
         import duckdb
         
         if os.path.exists(DUCKDB_PATH):
-            conn = duckdb.connect(DUCKDB_PATH, read_only=True)
-            return conn
+            # Try without read_only first (matches structured_data_handler)
+            try:
+                conn = duckdb.connect(DUCKDB_PATH)
+                return conn
+            except Exception as e1:
+                # If that fails, try read_only
+                try:
+                    conn = duckdb.connect(DUCKDB_PATH, read_only=True)
+                    return conn
+                except Exception as e2:
+                    logger.error(f"[PARSER] Both connection modes failed: {e1}, {e2}")
+                    return None
         else:
             logger.warning(f"[PARSER] DuckDB not found at {DUCKDB_PATH}")
             return None
