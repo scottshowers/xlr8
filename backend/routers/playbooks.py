@@ -36,6 +36,329 @@ PROGRESS_FILE = "/data/playbook_progress.json"
 # Cached playbook structure
 PLAYBOOK_CACHE = {}
 
+# =============================================================================
+# ACTION DEPENDENCIES - Which actions inherit from which
+# =============================================================================
+# Key = action that inherits, Value = list of parent actions to pull from
+ACTION_DEPENDENCIES = {
+    # Step 2: Company Information
+    "2B": ["2A"],  # Update company info - uses Company Tax Verification & Master Profile from 2A
+    "2C": ["2A"],  # Update tax codes - uses same docs from 2A
+    "2E": ["2A"],  # MWR review - uses company data from 2A
+    "2H": ["2F", "2G"],  # Special overrides - needs earnings (2F) and deductions (2G)
+    "2J": ["2G"],  # Healthcare W-2 - uses deduction data from 2G
+    "2K": ["2G"],  # Healthcare new year - uses deduction data from 2G
+    "2L": ["2G", "2J"],  # Healthcare ALE - uses deductions and healthcare config
+    
+    # Step 3: Employee Information
+    "3B": ["3A"],  # SSN updates - uses Year-End Validation from 3A
+    "3C": ["3A"],  # Name/address updates - uses same validation report
+    "3D": ["3A"],  # Deceased employees - uses validation data
+    
+    # Step 5: Pre-Close
+    "5B": ["5A"],  # Third party sick pay - uses earnings review from 5A
+    "5E": ["5C", "5D"],  # Reconciliation - needs check recon and arrears
+    
+    # Step 6: Post-Close
+    "6B": ["6A"],  # W-2 adjustments - uses W-2 preview from 6A
+    "6C": ["6A"],  # W-2 review - uses same preview data
+}
+
+# =============================================================================
+# CONSULTATIVE AI CONTEXT - Benchmarks, red flags, and expert guidance
+# =============================================================================
+CONSULTATIVE_PROMPTS = {
+    "2A": """
+CONSULTANT ANALYSIS - Apply your UKG/Payroll expertise:
+
+1. FEIN VALIDATION:
+   - Valid format: XX-XXXXXXX (9 digits with hyphen after 2)
+   - Flag if missing or malformed
+
+2. MULTI-STATE COMPLEXITY:
+   - 1-5 states: Standard complexity
+   - 6-15 states: Moderate complexity - ensure all state registrations current
+   - 15+ states: High complexity - recommend dedicated state tax review
+   
+3. TAX RATE BENCHMARKS (flag if outside ranges):
+   - Federal FUTA: Should be 0.6% (after credit)
+   - State SUI: Typically 1-6%, new employers often 2.7-3.4%
+   - SUI >8%: Flag as HIGH - may indicate claims history issues
+   - SUI <1%: Flag as VERY LOW - verify this is correct
+   
+4. COMMON ISSUES TO FLAG:
+   - Missing state registrations for states with employees
+   - Tax codes without associated rates
+   - Expired tax IDs or pending registrations
+   - Company name mismatches between systems
+   
+5. YEAR-END READINESS:
+   - Are all W-2 reporting fields properly configured?
+   - Any states requiring special W-2 formats (PA, IN localities)?
+""",
+
+    "2B": """
+CONSULTANT ANALYSIS - Company Information Updates:
+
+INHERITED CONTEXT: Use findings from 2A (Company Tax Verification & Master Profile)
+
+1. CRITICAL FIELDS FOR W-2:
+   - Legal company name (must match IRS records exactly)
+   - DBA/Trade name if applicable
+   - Address (affects state reporting)
+   - FEIN (cannot be changed after W-2s filed)
+
+2. THINGS TO VERIFY:
+   - Has company had any M&A activity? Name changes?
+   - Is the address current for tax correspondence?
+   - Any new states added mid-year that need setup?
+
+3. DEADLINE AWARENESS:
+   - Company info changes should be completed BEFORE final payroll
+   - Some changes require IRS notification (Form 8822-B)
+""",
+
+    "2C": """
+CONSULTANT ANALYSIS - Tax Code Updates:
+
+INHERITED CONTEXT: Use findings from 2A (Company Tax Verification & Master Profile)
+
+1. PRIORITY ITEMS:
+   - Any tax codes flagged in 2A with unusual rates
+   - New state registrations needed
+   - Rate changes effective for new year
+
+2. 2025 TAX CHANGES TO WATCH:
+   - Social Security wage base: Check if updated
+   - State-specific changes (many states adjust SUI rates annually)
+   - Local tax jurisdiction changes
+
+3. COMMON ERRORS:
+   - Forgetting to update experience-rated SUI for new year
+   - Missing local tax codes for remote workers
+   - Incorrect tax categories affecting W-2 boxes
+""",
+
+    "2D": """
+CONSULTANT ANALYSIS - Workers Compensation:
+
+1. RATE BENCHMARKS BY INDUSTRY:
+   - Office/Clerical (8810): 0.10% - 0.50%
+   - Sales Outside (8742): 0.30% - 1.00%
+   - Manufacturing: 2.00% - 8.00%
+   - Construction: 5.00% - 15.00%
+   - Healthcare: 1.50% - 4.00%
+   
+2. EXPERIENCE MODIFICATION (MOD) FACTOR:
+   - 1.00 = Industry average
+   - < 0.85 = Excellent safety record (discount)
+   - 0.85 - 1.00 = Good
+   - 1.00 - 1.25 = Below average (surcharge)
+   - > 1.25 = Poor - flag for safety review
+   
+3. RED FLAGS:
+   - Class codes that don't match actual job duties
+   - Missing class codes for job types
+   - Rates significantly different from prior year (>20% change)
+   - Governing class code mismatch
+   
+4. YEAR-END TASKS:
+   - Verify all class codes still accurate
+   - Check for rate changes effective 1/1
+   - Reconcile estimated vs actual payroll for audit
+""",
+
+    "2F": """
+CONSULTANT ANALYSIS - Earnings Tax Categories:
+
+1. W-2 BOX MAPPING (verify correct):
+   - Regular wages → Box 1, 3, 5
+   - Tips → Box 1, 7 (allocated tips Box 8)
+   - Group Term Life >$50k → Box 1, 12 Code C
+   - 401k deferrals → Box 12 Code D (reduces Box 1)
+   - HSA employer contributions → Box 12 Code W
+   
+2. COMMON MISCONFIGURATIONS:
+   - Bonus/commission not flagged as supplemental
+   - Fringe benefits missing imputed income setup
+   - Relocation expenses (taxable since 2018)
+   - Gift cards/awards not flowing to W-2
+   
+3. STATE-SPECIFIC ISSUES:
+   - PA: Some fringe benefits taxed differently
+   - NJ: Disability insurance handling
+   - CA: SDI considerations
+   
+4. RECONCILIATION CHECK:
+   - Do QTD totals tie to 941s?
+   - Any earning codes with zero YTD that seem unusual?
+""",
+
+    "2G": """
+CONSULTANT ANALYSIS - Deduction Tax Categories:
+
+1. PRE-TAX vs POST-TAX (critical for W-2):
+   - 401k/403b: Pre-tax (Box 12 Code D/E)
+   - Roth 401k: Post-tax but Box 12 Code AA
+   - Section 125 (Cafeteria): Pre-tax (reduces Box 1)
+   - HSA: Pre-tax (Box 12 Code W)
+   - After-tax deductions: Do NOT reduce Box 1
+   
+2. COMMON ERRORS:
+   - Medical premiums not set as Section 125
+   - Roth contributions coded wrong
+   - Garnishments affecting wrong tax boxes
+   - Employer HSA contributions missing from Box 12
+   
+3. ACA COMPLIANCE (Box 12 Code DD):
+   - Employer + employee medical cost must be reported
+   - Threshold: 250+ W-2s in prior year
+   - Common miss: Not including employer portion
+   
+4. LIMITS TO VERIFY (2025):
+   - 401k: $23,500 ($31,000 catch-up if 50+)
+   - HSA: $4,300 single / $8,550 family
+   - FSA: $3,300
+   - Dependent Care: $5,000
+""",
+
+    "3A": """
+CONSULTANT ANALYSIS - SSN Validation:
+
+1. SSN FORMAT ISSUES:
+   - Must be 9 digits, XXX-XX-XXXX
+   - Cannot start with 9 (except ITIN)
+   - Cannot be 000-XX-XXXX or XXX-00-XXXX
+   - ITINs (9XX) need special handling for W-2
+   
+2. IRS MATCHING:
+   - SSA matches SSN + Name combination
+   - Middle name/initial issues cause mismatches
+   - Suffix (Jr, Sr, III) must match SSA records
+   - Hyphenated names: Check SSA has same format
+   
+3. ACTION PRIORITIES:
+   - ITIN holders: May need name control review
+   - Applied for/Pending: Must resolve before W-2
+   - Deceased employees: Verify final W-2 handling
+   
+4. PENALTIES:
+   - $50/W-2 for incorrect SSN/name (up to $500k/year)
+   - First-year safe harbor if good faith effort made
+   
+5. REMEDIATION:
+   - Send Form W-9 to employee for correction
+   - Document attempts to obtain correct info
+""",
+
+    "5C": """
+CONSULTANT ANALYSIS - Outstanding Checks:
+
+1. STALE-DATED CHECKS:
+   - Typically >6 months old
+   - Must be voided and wages added back
+   - W-2 impact: Wages reportable when check issued, not cashed
+   
+2. ESCHEATMENT/UNCLAIMED PROPERTY:
+   - State-specific holding periods (1-5 years typically)
+   - Must report to state of employee's last known address
+   - Deadline varies by state (usually March-November)
+   
+3. YEAR-END ACTIONS:
+   - Identify all checks outstanding >90 days
+   - Attempt employee contact for checks >6 months
+   - Document escheatment status for checks meeting threshold
+   
+4. COMMON ISSUES:
+   - Direct deposit rejects sitting as uncashed
+   - Terminated employees with final checks unclaimed
+   - Address issues preventing delivery
+""",
+
+    "5D": """
+CONSULTANT ANALYSIS - Arrears Balances:
+
+1. ARREARS IMPACT:
+   - Unpaid deductions affect W-2 reporting
+   - Pre-tax arrears: Employee owes less tax on W-2
+   - Post-tax arrears: No W-2 impact but company owed money
+   
+2. COLLECTION PRIORITY:
+   - 401k arrears: Must collect to meet ADP/ACP testing
+   - Benefit arrears: Impacts coverage eligibility
+   - Garnishment arrears: Legal obligation to collect
+   
+3. YEAR-END DECISIONS:
+   - Write off uncollectible amounts?
+   - Impact on benefit elections for new year?
+   - Any retroactive adjustments needed?
+   
+4. COMMON SCENARIOS:
+   - Leave of absence with unpaid benefit premiums
+   - Commission-only periods with no deductions taken
+   - Terminated employees with benefit arrears
+""",
+
+    "DEFAULT": """
+CONSULTANT ANALYSIS:
+
+1. Review the uploaded documents for completeness
+2. Identify any data quality issues or gaps
+3. Flag items requiring customer clarification
+4. Note any year-end compliance concerns
+5. Recommend specific actions to take
+"""
+}
+
+# =============================================================================
+# DEPENDENCY HELPER FUNCTIONS
+# =============================================================================
+
+def get_parent_actions(action_id: str) -> List[str]:
+    """Get list of parent actions this action depends on."""
+    return ACTION_DEPENDENCIES.get(action_id, [])
+
+
+def get_inherited_data(project_id: str, action_id: str) -> Dict[str, Any]:
+    """Get documents and findings from parent actions."""
+    parents = get_parent_actions(action_id)
+    if not parents:
+        return {"documents": [], "findings": [], "content": []}
+    
+    inherited_docs = []
+    inherited_findings = []
+    inherited_content = []
+    
+    progress = PLAYBOOK_PROGRESS.get(project_id, {})
+    
+    for parent_id in parents:
+        parent_progress = progress.get(parent_id, {})
+        
+        # Get documents from parent
+        parent_docs = parent_progress.get("documents_found", [])
+        inherited_docs.extend(parent_docs)
+        
+        # Get findings from parent
+        parent_findings = parent_progress.get("findings")
+        if parent_findings:
+            inherited_findings.append({
+                "action_id": parent_id,
+                "findings": parent_findings
+            })
+            
+            # Add summary as context for AI
+            if parent_findings.get("summary"):
+                inherited_content.append(f"[FROM ACTION {parent_id}]: {parent_findings['summary']}")
+            if parent_findings.get("key_values"):
+                for k, v in parent_findings["key_values"].items():
+                    inherited_content.append(f"[FROM {parent_id}] {k}: {v}")
+    
+    return {
+        "documents": list(set(inherited_docs)),  # Dedupe
+        "findings": inherited_findings,
+        "content": inherited_content
+    }
+
 
 def load_progress() -> Dict:
     """Load progress from persistent storage."""
@@ -338,7 +661,11 @@ async def reset_progress(project_id: str):
 async def scan_for_action(project_id: str, action_id: str):
     """
     Scan project documents for content relevant to a specific action.
-    Returns findings and suggested status.
+    
+    ENHANCED FEATURES:
+    - Inherits documents/findings from parent actions (no re-upload needed)
+    - Uses consultative AI with industry benchmarks
+    - Provides actionable recommendations
     """
     try:
         from utils.rag_handler import RAGHandler
@@ -360,11 +687,39 @@ async def scan_for_action(project_id: str, action_id: str):
         # Get reports needed for this action
         reports_needed = action.get('reports_needed', [])
         
+        # =====================================================================
+        # CHECK FOR INHERITED DATA FROM PARENT ACTIONS
+        # =====================================================================
+        inherited = get_inherited_data(project_id, action_id)
+        inherited_docs = inherited["documents"]
+        inherited_findings = inherited["findings"]
+        inherited_content = inherited["content"]
+        
+        parent_actions = get_parent_actions(action_id)
+        
+        if parent_actions:
+            logger.info(f"[SCAN] Action {action_id} inherits from: {parent_actions}")
+            logger.info(f"[SCAN] Inherited {len(inherited_docs)} docs, {len(inherited_findings)} findings sets")
+        
         # Search for documents
         rag = RAGHandler()
         found_docs = []
         all_content = []
         seen_files = set()
+        
+        # Add inherited docs to found docs (they're already uploaded)
+        for doc_name in inherited_docs:
+            if doc_name not in seen_files:
+                seen_files.add(doc_name)
+                found_docs.append({
+                    "filename": doc_name,
+                    "snippet": f"Inherited from action {', '.join(parent_actions)}",
+                    "query": "inherited",
+                    "match_type": "inherited"
+                })
+        
+        # Add inherited context to all_content for AI
+        all_content.extend(inherited_content)
         
         # STEP 1: Get project document filenames from ChromaDB metadata
         try:
@@ -402,8 +757,11 @@ async def scan_for_action(project_id: str, action_id: str):
         except Exception as e:
             logger.warning(f"[SCAN] Filename matching failed: {e}")
         
-        # STEP 3: Always do semantic search to get document content for AI analysis
+        # STEP 3: Semantic search - also search for inherited doc content
+        # Build queries from: reports needed + action description + inherited doc names
         queries = reports_needed + [action.get('description', '')[:100]]
+        if inherited_docs:
+            queries.extend(inherited_docs[:3])  # Also search for content from inherited docs
         
         for query in queries[:8]:
                 try:
@@ -441,12 +799,20 @@ async def scan_for_action(project_id: str, action_id: str):
         findings = None
         suggested_status = "not_started"
         
-        if found_docs:
+        # If we have docs OR inherited findings, we can analyze
+        has_data = len(found_docs) > 0 or len(inherited_findings) > 0
+        
+        if has_data:
             suggested_status = "in_progress"
             
-            # Use Claude to extract specific findings if we have content
-            if all_content:
-                findings = await extract_findings_for_action(action, all_content[:15])
+            # Use Claude with CONSULTATIVE context
+            if all_content or inherited_findings:
+                findings = await extract_findings_consultative(
+                    action=action,
+                    content=all_content[:15],
+                    inherited_findings=inherited_findings,
+                    action_id=action_id
+                )
                 if findings and findings.get('complete'):
                     suggested_status = "complete"
         
@@ -458,6 +824,7 @@ async def scan_for_action(project_id: str, action_id: str):
             "status": PLAYBOOK_PROGRESS.get(project_id, {}).get(action_id, {}).get("status", suggested_status),
             "findings": findings,
             "documents_found": [d['filename'] for d in found_docs],
+            "inherited_from": parent_actions if parent_actions else None,
             "last_scan": datetime.now().isoformat(),
             "notes": PLAYBOOK_PROGRESS.get(project_id, {}).get(action_id, {}).get("notes")
         }
@@ -469,7 +836,8 @@ async def scan_for_action(project_id: str, action_id: str):
             "found": len(found_docs) > 0,
             "documents": found_docs,
             "findings": findings,
-            "suggested_status": suggested_status
+            "suggested_status": suggested_status,
+            "inherited_from": parent_actions if parent_actions else None
         }
         
     except HTTPException:
@@ -479,8 +847,21 @@ async def scan_for_action(project_id: str, action_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def extract_findings_for_action(action: Dict, content: List[str]) -> Optional[Dict]:
-    """Use Claude to extract specific findings from document content."""
+async def extract_findings_consultative(
+    action: Dict, 
+    content: List[str], 
+    inherited_findings: List[Dict],
+    action_id: str
+) -> Optional[Dict]:
+    """
+    Use Claude to extract findings WITH CONSULTATIVE ANALYSIS.
+    
+    Includes:
+    - Industry benchmarks and comparisons
+    - Red flag detection
+    - Proactive recommendations
+    - Inherited findings from parent actions
+    """
     try:
         from anthropic import Anthropic
         
@@ -488,30 +869,67 @@ async def extract_findings_for_action(action: Dict, content: List[str]) -> Optio
         
         combined = "\n\n---\n\n".join(content)
         
-        prompt = f"""Analyze these document excerpts for Year-End Checklist action:
+        # Get action-specific consultative context
+        consultative_context = CONSULTATIVE_PROMPTS.get(action_id, CONSULTATIVE_PROMPTS["DEFAULT"])
+        
+        # Build inherited findings context
+        inherited_context = ""
+        if inherited_findings:
+            inherited_parts = []
+            for inf in inherited_findings:
+                parent_id = inf.get("action_id", "unknown")
+                parent_findings = inf.get("findings", {})
+                inherited_parts.append(f"""
+--- Inherited from Action {parent_id} ---
+Summary: {parent_findings.get('summary', 'N/A')}
+Key Values: {json.dumps(parent_findings.get('key_values', {}), indent=2)}
+Issues: {parent_findings.get('issues', [])}
+""")
+            inherited_context = "\n".join(inherited_parts)
+        
+        prompt = f"""You are a senior UKG implementation consultant performing Year-End analysis.
 
-Action: {action['action_id']} - {action.get('description', '')}
-Reports Needed: {', '.join(action.get('reports_needed', []))}
+ACTION: {action['action_id']} - {action.get('description', '')}
+REPORTS NEEDED: {', '.join(action.get('reports_needed', []))}
+
+{f'''
+INHERITED DATA FROM PREVIOUS ACTIONS:
+{inherited_context}
+''' if inherited_context else ''}
 
 <documents>
 {combined[:20000]}
 </documents>
 
-Important: Each document section is labeled with [FILE: filename]. Check which reports from "Reports Needed" are actually present in the excerpts.
+{consultative_context}
 
-Extract relevant findings as JSON:
+Based on the documents and your UKG/Payroll expertise, provide:
+
+1. EXTRACT key data values found (FEIN, rates, states, etc.)
+2. COMPARE to benchmarks where applicable (flag HIGH/LOW/UNUSUAL)
+3. IDENTIFY risks, issues, or items needing attention
+4. RECOMMEND specific actions the customer should take
+5. ASSESS completeness - can this action be marked complete?
+
+Return as JSON:
 {{
-    "complete": true/false (are ALL required reports present with sufficient info?),
-    "key_values": {{"label": "value"}} (specific values found, e.g., FEIN, state count, rate),
-    "issues": ["list of concerns or missing items"],
-    "summary": "1-2 sentence summary of what was found"
+    "complete": true/false,
+    "key_values": {{"label": "value"}},
+    "issues": ["list of concerns - be specific"],
+    "recommendations": ["specific actions to take"],
+    "risk_level": "low|medium|high",
+    "summary": "2-3 sentence consultative summary with specific observations"
 }}
+
+Be specific and actionable. Reference actual values from the documents.
+If rates are high/low compared to benchmarks, say so explicitly.
+If data is missing, specify exactly what's needed.
 
 Return ONLY valid JSON."""
 
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=1000,
+            max_tokens=1500,
             temperature=0,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -529,6 +947,12 @@ Return ONLY valid JSON."""
     except Exception as e:
         logger.error(f"Failed to extract findings: {e}")
         return None
+
+
+# Keep original function for backward compatibility
+async def extract_findings_for_action(action: Dict, content: List[str]) -> Optional[Dict]:
+    """Legacy function - redirects to consultative version."""
+    return await extract_findings_consultative(action, content, [], action['action_id'])
 
 
 # ============================================================================
