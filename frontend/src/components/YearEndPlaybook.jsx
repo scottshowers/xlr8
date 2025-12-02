@@ -90,27 +90,80 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
     setUploadStatus(null);
     
     try {
+      const jobIds = [];
+      
+      // Upload all files
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const formData = new FormData();
         formData.append('file', file);
         formData.append('project', projectId);
         
-        await api.post('/upload', formData, {
+        const res = await api.post('/upload', formData, {
           headers: { 'Content-Type': 'multipart/form-data' }
         });
+        
+        if (res.data?.job_id) {
+          jobIds.push(res.data.job_id);
+        }
       }
       
-      setUploadStatus('success');
-      // Clear success after 5 seconds - user should click Scan when processing completes
-      setTimeout(() => setUploadStatus(null), 5000);
+      // Switch to processing state
+      setUploading(false);
+      setUploadStatus('processing');
+      
+      // Poll until all jobs complete
+      const pollJobs = async () => {
+        let allComplete = false;
+        let attempts = 0;
+        const maxAttempts = 60; // 2 minutes max
+        
+        while (!allComplete && attempts < maxAttempts) {
+          await new Promise(r => setTimeout(r, 2000)); // Wait 2 seconds
+          attempts++;
+          
+          try {
+            const jobsRes = await api.get('/jobs');
+            const jobs = jobsRes.data?.jobs || [];
+            
+            // Check if all our jobs are done
+            const ourJobs = jobs.filter(j => jobIds.includes(j.id));
+            allComplete = ourJobs.length > 0 && ourJobs.every(j => 
+              j.status === 'completed' || j.status === 'failed'
+            );
+            
+            // Check for failures
+            const failed = ourJobs.filter(j => j.status === 'failed');
+            if (failed.length > 0) {
+              setUploadStatus('error');
+              setTimeout(() => setUploadStatus(null), 3000);
+              return;
+            }
+          } catch (err) {
+            console.error('Job poll failed:', err);
+          }
+        }
+        
+        if (allComplete) {
+          // All done - now scan
+          setUploadStatus('scanning');
+          await handleScan();
+          setUploadStatus('success');
+          setTimeout(() => setUploadStatus(null), 2000);
+        } else {
+          // Timed out
+          setUploadStatus(null);
+        }
+      };
+      
+      pollJobs();
       
     } catch (err) {
       console.error('Upload failed:', err);
       setUploadStatus('error');
       setTimeout(() => setUploadStatus(null), 3000);
-    } finally {
       setUploading(false);
+    } finally {
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -147,7 +200,9 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
   // Determine upload button state
   const getUploadButtonContent = () => {
     if (uploading) return '⏳ Uploading...';
-    if (uploadStatus === 'success') return '✓ Queued - Click Scan';
+    if (uploadStatus === 'processing') return '⏳ Processing...';
+    if (uploadStatus === 'scanning') return '🔍 Scanning...';
+    if (uploadStatus === 'success') return '✓ Done!';
     if (uploadStatus === 'error') return '✗ Failed';
     return (
       <>
@@ -165,6 +220,9 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
     }
     if (uploadStatus === 'error') {
       return { ...styles.uploadBtn, background: '#FFC7CE', color: '#9C0006' };
+    }
+    if (uploadStatus === 'processing' || uploadStatus === 'scanning') {
+      return { ...styles.uploadBtn, background: '#FFEB9C', color: '#9C6500' };
     }
     return styles.uploadBtn;
   };
@@ -417,7 +475,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
               <button 
                 style={getUploadButtonStyle()} 
                 onClick={(e) => { e.stopPropagation(); handleUploadClick(); }}
-                disabled={uploading || scanning}
+                disabled={uploading || scanning || uploadStatus === 'processing' || uploadStatus === 'scanning'}
               >
                 {getUploadButtonContent()}
               </button>
