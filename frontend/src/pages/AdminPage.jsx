@@ -3,15 +3,18 @@
  * 
  * Tabs:
  * - System Monitor: System health and status
+ * - Personas: AI persona management
  * - Settings: System configuration
  */
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import PersonaManagement from '../components/PersonaManagement';
 
 // Tab definitions
 const TABS = [
   { id: 'system', label: 'System Monitor', icon: '🔮', link: '/system' },
+  { id: 'personas', label: 'Personas', icon: '🎭' },
   { id: 'settings', label: 'Settings', icon: '⚙️' },
 ];
 
@@ -51,6 +54,7 @@ export default function AdminPage() {
 
   const renderTabContent = () => {
     switch (activeTab) {
+      case 'personas': return <PersonaManagement />;
       case 'settings': return <SettingsTab />;
       default: return null;
     }
