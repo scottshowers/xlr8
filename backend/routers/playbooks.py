@@ -366,69 +366,51 @@ async def scan_for_action(project_id: str, action_id: str):
         all_content = []
         seen_files = set()
         
-        # STEP 1: Get ALL project documents to do filename matching
+        # STEP 1: Get project document filenames from ChromaDB metadata
         try:
             collection = rag.client.get_or_create_collection(name="documents")
-            all_results = collection.get(include=["metadatas", "documents"], limit=500)
+            all_results = collection.get(include=["metadatas"], limit=1000)
             
-            project_docs = {}  # filename -> {metadata, content}
-            for i, metadata in enumerate(all_results.get("metadatas", [])):
+            project_files = set()  # Just track filenames
+            for metadata in all_results.get("metadatas", []):
                 doc_project = metadata.get("project_id") or metadata.get("project", "")
-                # Match by project_id or project name
                 if doc_project == project_id or doc_project == project_id[:8]:
                     filename = metadata.get("source", metadata.get("filename", "Unknown"))
-                    chunk_content = all_results.get("documents", [])[i] if all_results.get("documents") else ""
-                    
-                    if filename not in project_docs:
-                        project_docs[filename] = {
-                            "metadata": metadata,
-                            "chunks": [chunk_content],  # Store as list
-                            "content": chunk_content
-                        }
-                    else:
-                        # Aggregate chunks (up to 10 per doc for context)
-                        if len(project_docs[filename]["chunks"]) < 10:
-                            project_docs[filename]["chunks"].append(chunk_content)
-                            # Combine for richer content
-                            project_docs[filename]["content"] = "\n\n".join(project_docs[filename]["chunks"])
+                    project_files.add(filename)
             
-            logger.info(f"[SCAN] Found {len(project_docs)} unique docs in project {project_id}")
+            logger.info(f"[SCAN] Found {len(project_files)} unique files in project {project_id}: {list(project_files)}")
             
             # STEP 2: Match by filename - check if any report name appears in filename
             for report_name in reports_needed:
                 report_keywords = report_name.lower().split()
-                for filename, doc_data in project_docs.items():
+                for filename in project_files:
                     filename_lower = filename.lower()
                     # Check if report keywords appear in filename
                     matches = sum(1 for kw in report_keywords if kw in filename_lower)
                     if matches >= len(report_keywords) - 1:  # Allow 1 word missing
                         if filename not in seen_files:
                             seen_files.add(filename)
-                            content = doc_data.get("content", "")
-                            cleaned = re.sub(r'ENC256:[A-Za-z0-9+/=]+', '[ENCRYPTED]', content)
                             found_docs.append({
                                 "filename": filename,
-                                "snippet": cleaned[:300],
+                                "snippet": f"Matched report: {report_name}",
                                 "query": report_name,
                                 "match_type": "filename"
                             })
-                            # Pass more content to AI (up to 3000 chars per doc)
-                            all_content.append(f"[FILE: {filename}]\n{cleaned[:3000]}")
-                            logger.info(f"[SCAN] Filename match: '{filename}' for report '{report_name}' ({len(doc_data.get('chunks', []))} chunks)")
+                            all_content.append(f"[FILE: {filename}] - matches required report: {report_name}")
+                            logger.info(f"[SCAN] Filename match: '{filename}' for report '{report_name}'")
             
         except Exception as e:
             logger.warning(f"[SCAN] Filename matching failed: {e}")
         
-        # STEP 3: Supplement with semantic search if we haven't found all reports
-        if len(found_docs) < len(reports_needed):
-            queries = reports_needed + [action.get('description', '')[:100]]
-            
-            for query in queries[:5]:
+        # STEP 3: Always do semantic search to get document content for AI analysis
+        queries = reports_needed + [action.get('description', '')[:100]]
+        
+        for query in queries[:5]:
                 try:
                     results = rag.search(
                         collection_name="documents",
                         query=query,
-                        n_results=5,  # Increased from 3
+                        n_results=5,
                         project_id=project_id
                     )
                     if results:
@@ -439,6 +421,9 @@ async def scan_for_action(project_id: str, action_id: str):
                                 if cleaned.count('[ENCRYPTED]') < 10:
                                     metadata = result.get('metadata', {})
                                     filename = metadata.get('source', metadata.get('filename', 'Unknown'))
+                                    # Add content for AI analysis
+                                    all_content.append(f"[FILE: {filename}]\n{cleaned[:1500]}")
+                                    # Add to found_docs if not already there
                                     if filename not in seen_files:
                                         seen_files.add(filename)
                                         found_docs.append({
@@ -447,7 +432,6 @@ async def scan_for_action(project_id: str, action_id: str):
                                             "query": query,
                                             "match_type": "semantic"
                                         })
-                                        all_content.append(cleaned[:1000])
                 except Exception as e:
                     logger.warning(f"Query failed: {e}")
         
