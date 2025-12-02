@@ -341,9 +341,19 @@ class RAGHandler:
                 # If document is large (>5000 chars) but only produced 1-2 chunks,
                 # the Universal Chunker likely treated it as a single unit (e.g., giant table)
                 avg_chunk_size = len(text) / len(chunks) if chunks else 0
-                if len(text) > 5000 and len(chunks) <= 2 and avg_chunk_size > 4000:
-                    logger.warning(f"[CHUNK] SANITY CHECK FAILED: {len(text)} chars produced only {len(chunks)} chunks")
-                    logger.warning(f"[CHUNK] Avg chunk size {avg_chunk_size:.0f} chars is too large - forcing basic chunking")
+                
+                # More aggressive check for PDFs - they should ALWAYS be chunked finely
+                is_pdf = file_type.lower() == 'pdf'
+                min_expected_chunks = max(2, len(text) // 2000) if is_pdf else 2
+                
+                if len(text) > 3000 and len(chunks) < min_expected_chunks:
+                    logger.warning(f"[CHUNK] SANITY CHECK FAILED: {len(text)} chars produced only {len(chunks)} chunks (expected >= {min_expected_chunks})")
+                    logger.warning(f"[CHUNK] File type: {file_type}, forcing basic chunking")
+                    raise ValueError("Too few chunks - forcing basic chunking fallback")
+                
+                if len(text) > 5000 and avg_chunk_size > 3000:
+                    logger.warning(f"[CHUNK] SANITY CHECK FAILED: Avg chunk size {avg_chunk_size:.0f} chars is too large")
+                    logger.warning(f"[CHUNK] Forcing basic chunking for better retrieval")
                     raise ValueError("Chunks too large - forcing basic chunking fallback")
                 
                 return chunks
@@ -363,6 +373,11 @@ class RAGHandler:
             chunk_size = 2000
             chunk_overlap = 200
             logger.info(f"[CHUNK] Using EXCEL mode: {chunk_size} chars, {chunk_overlap} overlap")
+        elif file_type == 'pdf':
+            # PDFs need smaller chunks for better retrieval - reports have dense info
+            chunk_size = 1200
+            chunk_overlap = 150
+            logger.info(f"[CHUNK] Using PDF mode: {chunk_size} chars, {chunk_overlap} overlap")
         else:
             chunk_size = self.chunk_size
             chunk_overlap = self.chunk_overlap
