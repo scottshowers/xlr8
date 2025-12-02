@@ -266,6 +266,7 @@ def process_file_background(
     """
     try:
         logger.info(f"[BACKGROUND] Starting processing for job {job_id}")
+        logger.info(f"[BACKGROUND] project={project}, project_id={project_id}")
         
         file_ext = filename.split('.')[-1].lower()
         
@@ -364,6 +365,9 @@ def process_file_background(
         
         if project_id:
             metadata["project_id"] = project_id
+            logger.info(f"[BACKGROUND] ✓ Metadata includes project_id: {project_id}")
+        else:
+            logger.warning(f"[BACKGROUND] ✗ No project_id in metadata!")
         
         if functional_area:
             metadata["functional_area"] = functional_area
@@ -465,18 +469,29 @@ async def upload_file(
     try:
         # Look up project UUID from project name OR project ID
         project_id = None
+        logger.info(f"[UPLOAD] Received project value: '{project}'")
+        
         if project and project not in ['global', '__GLOBAL__', 'GLOBAL', '']:
             projects = ProjectModel.get_all(status='active')
+            logger.info(f"[UPLOAD] Found {len(projects)} active projects")
+            
             # Try to match by name first
             matching_project = next((p for p in projects if p.get('name') == project), None)
+            logger.info(f"[UPLOAD] Match by name: {matching_project is not None}")
             
             # If not found by name, try by ID (frontend may send UUID directly)
             if not matching_project:
                 matching_project = next((p for p in projects if p.get('id') == project), None)
+                logger.info(f"[UPLOAD] Match by ID: {matching_project is not None}")
             
             if matching_project:
                 project_id = matching_project['id']
-                logger.info(f"Found project UUID: {project_id} for project: {project}")
+                logger.info(f"[UPLOAD] ✓ Found project UUID: {project_id} for input: {project}")
+            else:
+                logger.warning(f"[UPLOAD] ✗ No project found for: {project}")
+                # Log available projects for debugging
+                for p in projects[:3]:
+                    logger.info(f"[UPLOAD] Available: id={p.get('id')}, name={p.get('name')}")
         
         # Create job record FIRST (so we have job_id)
         job = ProcessingJobModel.create(
