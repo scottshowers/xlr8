@@ -36,6 +36,25 @@ PROGRESS_FILE = "/data/playbook_progress.json"
 # Cached playbook structure
 PLAYBOOK_CACHE = {}
 
+# Track file modification time for auto-refresh
+PLAYBOOK_FILE_INFO = {}
+
+
+def invalidate_year_end_cache():
+    """
+    Invalidate the Year-End structure cache.
+    Called when a new Year-End Checklist is uploaded to Global Library.
+    """
+    global PLAYBOOK_CACHE, PLAYBOOK_FILE_INFO
+    
+    if 'year-end-2025' in PLAYBOOK_CACHE:
+        del PLAYBOOK_CACHE['year-end-2025']
+        logger.info("[CACHE] Year-End structure cache invalidated")
+    
+    if 'year-end-2025' in PLAYBOOK_FILE_INFO:
+        del PLAYBOOK_FILE_INFO['year-end-2025']
+        logger.info("[CACHE] Year-End file info cleared")
+
 # =============================================================================
 # ACTION DEPENDENCIES - Which actions inherit from which
 # =============================================================================
@@ -666,39 +685,210 @@ class ScanResult(BaseModel):
 async def get_year_end_structure():
     """
     Get the parsed Year-End Checklist structure.
-    Parses from Global Data if available, otherwise uses cached/default.
+    Dynamically searches Global Library for Year-End Checklist file.
+    Auto-refreshes if source file has changed.
     """
-    global PLAYBOOK_CACHE
+    global PLAYBOOK_CACHE, PLAYBOOK_FILE_INFO
     
-    # Check if we have it cached
+    # Check if we have it cached AND file hasn't changed
     if 'year-end-2025' in PLAYBOOK_CACHE:
-        return PLAYBOOK_CACHE['year-end-2025']
+        # Verify file hasn't been modified
+        cached_info = PLAYBOOK_FILE_INFO.get('year-end-2025', {})
+        cached_path = cached_info.get('path')
+        cached_mtime = cached_info.get('mtime')
+        
+        if cached_path and os.path.exists(cached_path):
+            current_mtime = os.path.getmtime(cached_path)
+            if cached_mtime == current_mtime:
+                # File unchanged, use cache
+                return PLAYBOOK_CACHE['year-end-2025']
+            else:
+                # File changed, invalidate cache
+                logger.info(f"[STRUCTURE] Source file modified, refreshing cache")
+                invalidate_year_end_cache()
+        elif not cached_path:
+            # No path tracked, use cache but try to find file for future validation
+            return PLAYBOOK_CACHE['year-end-2025']
     
-    # Try to find and parse the Year-End doc from Global Data
+    # Try to find and parse the Year-End doc from Global Library
     try:
         from backend.utils.playbook_parser import parse_year_end_checklist
         
-        # Look for Year-End doc in global data or known locations
-        possible_paths = [
-            '/data/global/2025_UKG_Pro_Pay_US_Year_End_Checklist_Payment_Services.docx',
-            '/data/uploads/global/2025_UKG_Pro_Pay_US_Year_End_Checklist_Payment_Services.docx',
-            '/app/data/global/year_end_checklist.docx',
+        # STEP 1: Search Global Library in ChromaDB for Year-End Checklist
+        year_end_path = await find_year_end_file_in_global_library()
+        
+        if year_end_path and os.path.exists(year_end_path):
+            logger.info(f"[STRUCTURE] Found Year-End file in Global Library: {year_end_path}")
+            structure = parse_year_end_checklist(year_end_path)
+            
+            # Cache with file info for version tracking
+            PLAYBOOK_CACHE['year-end-2025'] = structure
+            PLAYBOOK_FILE_INFO['year-end-2025'] = {
+                'path': year_end_path,
+                'mtime': os.path.getmtime(year_end_path),
+                'parsed_at': datetime.now().isoformat()
+            }
+            
+            logger.info(f"[STRUCTURE] Loaded {structure.get('total_actions', 0)} actions")
+            return structure
+        
+        # STEP 2: Fallback - check common filesystem paths
+        fallback_paths = [
+            '/data/global/',
+            '/data/uploads/global/',
+            '/data/uploads/',
+            '/app/data/global/',
         ]
         
-        for path in possible_paths:
-            if os.path.exists(path):
-                logger.info(f"Parsing Year-End doc from: {path}")
-                structure = parse_year_end_checklist(path)
-                PLAYBOOK_CACHE['year-end-2025'] = structure
-                return structure
+        for base_path in fallback_paths:
+            if os.path.exists(base_path):
+                for filename in os.listdir(base_path):
+                    filename_lower = filename.lower()
+                    if ('year' in filename_lower and 'end' in filename_lower) or \
+                       ('year-end' in filename_lower) or \
+                       ('yearend' in filename_lower) or \
+                       ('checklist' in filename_lower and 'pay' in filename_lower):
+                        if filename_lower.endswith(('.xlsx', '.xls', '.xlsm', '.docx')):
+                            full_path = os.path.join(base_path, filename)
+                            logger.info(f"[STRUCTURE] Found Year-End file via filesystem scan: {full_path}")
+                            structure = parse_year_end_checklist(full_path)
+                            
+                            # Cache with file info
+                            PLAYBOOK_CACHE['year-end-2025'] = structure
+                            PLAYBOOK_FILE_INFO['year-end-2025'] = {
+                                'path': full_path,
+                                'mtime': os.path.getmtime(full_path),
+                                'parsed_at': datetime.now().isoformat()
+                            }
+                            
+                            logger.info(f"[STRUCTURE] Loaded {structure.get('total_actions', 0)} actions")
+                            return structure
         
         # If no file found, return default structure
-        logger.warning("Year-End doc not found, using default structure")
+        logger.warning("[STRUCTURE] Year-End doc not found in Global Library or filesystem, using default structure")
         return get_default_year_end_structure()
         
     except Exception as e:
-        logger.error(f"Error parsing Year-End doc: {e}")
+        logger.exception(f"[STRUCTURE] Error parsing Year-End doc: {e}")
         return get_default_year_end_structure()
+
+
+async def find_year_end_file_in_global_library() -> Optional[str]:
+    """
+    Search the Global Library (ChromaDB) for Year-End Checklist file.
+    Returns the file path if found.
+    """
+    try:
+        from utils.rag_handler import RAGHandler
+        
+        rag = RAGHandler()
+        collection = rag.client.get_or_create_collection(name="documents")
+        
+        # Get all Global/Universal documents
+        results = collection.get(
+            where={"project_id": "Global/Universal"},
+            include=["metadatas"]
+        )
+        
+        if not results or not results.get("metadatas"):
+            logger.info("[STRUCTURE] No Global/Universal documents found in ChromaDB")
+            return None
+        
+        # Search for Year-End Checklist file
+        year_end_keywords = ['year-end', 'yearend', 'year_end', 'checklist', 'pro_pay', 'pro-pay']
+        
+        for metadata in results["metadatas"]:
+            filename = metadata.get("filename", metadata.get("source", "")).lower()
+            
+            # Check if this is the Year-End Checklist
+            matches = sum(1 for kw in year_end_keywords if kw in filename)
+            if matches >= 2 or ('year' in filename and 'end' in filename):
+                # Prefer Excel over DOCX
+                if filename.endswith(('.xlsx', '.xls', '.xlsm')):
+                    # Try to find the actual file path
+                    file_path = find_file_path(metadata)
+                    if file_path:
+                        logger.info(f"[STRUCTURE] Found Excel Year-End file: {filename}")
+                        return file_path
+        
+        # Second pass - check for DOCX if no Excel found
+        for metadata in results["metadatas"]:
+            filename = metadata.get("filename", metadata.get("source", "")).lower()
+            matches = sum(1 for kw in year_end_keywords if kw in filename)
+            if matches >= 2 or ('year' in filename and 'end' in filename):
+                if filename.endswith('.docx'):
+                    file_path = find_file_path(metadata)
+                    if file_path:
+                        logger.info(f"[STRUCTURE] Found DOCX Year-End file: {filename}")
+                        return file_path
+        
+        logger.info("[STRUCTURE] No Year-End Checklist found in Global Library")
+        return None
+        
+    except Exception as e:
+        logger.error(f"[STRUCTURE] Error searching Global Library: {e}")
+        return None
+
+
+def find_file_path(metadata: Dict) -> Optional[str]:
+    """
+    Given document metadata, find the actual file path on disk.
+    """
+    filename = metadata.get("filename", metadata.get("source", ""))
+    
+    if not filename:
+        return None
+    
+    # Common locations to check
+    possible_locations = [
+        f"/data/global/{filename}",
+        f"/data/uploads/global/{filename}",
+        f"/data/uploads/{filename}",
+        f"/app/data/global/{filename}",
+        f"/app/uploads/{filename}",
+        # Also check with original path if stored
+        metadata.get("file_path", ""),
+        metadata.get("path", ""),
+    ]
+    
+    for path in possible_locations:
+        if path and os.path.exists(path):
+            return path
+    
+    # Try to find by scanning directories
+    search_dirs = ['/data/global', '/data/uploads/global', '/data/uploads', '/app/data']
+    for search_dir in search_dirs:
+        if os.path.exists(search_dir):
+            for root, dirs, files in os.walk(search_dir):
+                for f in files:
+                    if f == filename or f.lower() == filename.lower():
+                        return os.path.join(root, f)
+    
+    return None
+
+
+@router.post("/year-end/refresh-structure")
+async def refresh_year_end_structure():
+    """
+    Force re-parse of Year-End Checklist structure.
+    Clears cache and re-reads from Global Library.
+    """
+    global PLAYBOOK_CACHE
+    
+    # Clear cache
+    if 'year-end-2025' in PLAYBOOK_CACHE:
+        del PLAYBOOK_CACHE['year-end-2025']
+        logger.info("[STRUCTURE] Cleared Year-End structure cache")
+    
+    # Re-parse
+    structure = await get_year_end_structure()
+    
+    return {
+        "success": True,
+        "message": "Structure refreshed from Global Library",
+        "total_actions": structure.get('total_actions', 0),
+        "source_file": structure.get('source_file', 'default')
+    }
 
 
 def get_default_year_end_structure() -> Dict[str, Any]:
