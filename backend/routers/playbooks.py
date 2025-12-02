@@ -788,7 +788,7 @@ async def debug_duckdb():
         return result
     
     try:
-        conn = duckdb.connect(DUCKDB_PATH, read_only=True)
+        conn = duckdb.connect(DUCKDB_PATH)
         
         # Check what tables exist
         try:
@@ -861,7 +861,7 @@ async def debug_table_data():
         return {"error": "DuckDB not found"}
     
     try:
-        conn = duckdb.connect(DUCKDB_PATH, read_only=True)
+        conn = duckdb.connect(DUCKDB_PATH)
         
         # Query Before Final Payroll table
         try:
