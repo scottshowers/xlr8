@@ -453,3 +453,250 @@ def complete_job(job_id: str, result_data: dict = None) -> bool:
 def fail_job(job_id: str, error: str) -> bool:
     """Shortcut to fail job"""
     return ProcessingJobModel.fail(job_id, error)
+
+
+class DocumentRegistryModel:
+    """
+    Document Registry - Central source of truth for all uploaded files.
+    
+    Tracks:
+    - Where files are stored (DuckDB, ChromaDB, filesystem)
+    - What type of file it is (structured data, RAG knowledge, playbook source, etc.)
+    - Project association (or Global)
+    - Original file preservation status
+    
+    This enables features to find the right data without guessing.
+    """
+    
+    # Storage type constants
+    STORAGE_DUCKDB = 'duckdb'
+    STORAGE_CHROMADB = 'chromadb'
+    STORAGE_FILESYSTEM = 'filesystem'
+    
+    # Usage type constants
+    USAGE_STRUCTURED_DATA = 'structured_data'      # Excel/CSV data tables
+    USAGE_RAG_KNOWLEDGE = 'rag_knowledge'          # PDF/DOCX for semantic search
+    USAGE_PLAYBOOK_SOURCE = 'playbook_source'      # Year-End Checklist, etc.
+    USAGE_TEMPLATE = 'template'                    # Config templates
+    USAGE_CUSTOMER_DATA = 'customer_data'          # Employee loads, etc.
+    
+    @staticmethod
+    def register(
+        filename: str,
+        file_type: str,
+        storage_type: str,
+        usage_type: str,
+        project_id: str = None,
+        is_global: bool = False,
+        original_file_path: str = None,
+        duckdb_tables: List[str] = None,
+        chromadb_collection: str = None,
+        chunk_count: int = None,
+        row_count: int = None,
+        sheet_count: int = None,
+        metadata: dict = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Register a document in the central registry.
+        
+        Args:
+            filename: Original filename
+            file_type: Extension (xlsx, pdf, docx, csv, etc.)
+            storage_type: Where data is stored (duckdb, chromadb, filesystem)
+            usage_type: How the file is used (structured_data, rag_knowledge, playbook_source, etc.)
+            project_id: Associated project UUID (None for global)
+            is_global: True if this is a global/universal document
+            original_file_path: Path to preserved original file (if kept)
+            duckdb_tables: List of DuckDB table names (if structured)
+            chromadb_collection: ChromaDB collection name (if RAG)
+            chunk_count: Number of chunks (if RAG)
+            row_count: Total rows (if structured)
+            sheet_count: Number of sheets (if Excel)
+            metadata: Additional metadata JSON
+        
+        Returns:
+            Created registry entry or None if failed
+        """
+        supabase = get_supabase()
+        if not supabase:
+            return None
+        
+        try:
+            data = {
+                'filename': filename,
+                'file_type': file_type,
+                'storage_type': storage_type,
+                'usage_type': usage_type,
+                'project_id': project_id,
+                'is_global': is_global,
+                'original_file_path': original_file_path,
+                'duckdb_tables': duckdb_tables or [],
+                'chromadb_collection': chromadb_collection,
+                'chunk_count': chunk_count,
+                'row_count': row_count,
+                'sheet_count': sheet_count,
+                'metadata': metadata or {}
+            }
+            
+            response = supabase.table('document_registry').insert(data).execute()
+            return response.data[0] if response.data else None
+        
+        except Exception as e:
+            print(f"Error registering document: {e}")
+            return None
+    
+    @staticmethod
+    def find(
+        usage_type: str = None,
+        storage_type: str = None,
+        project_id: str = None,
+        is_global: bool = None,
+        filename_contains: str = None,
+        file_type: str = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Find documents in the registry.
+        
+        Args:
+            usage_type: Filter by usage type
+            storage_type: Filter by storage type
+            project_id: Filter by project
+            is_global: Filter by global flag
+            filename_contains: Filter by filename substring (case-insensitive)
+            file_type: Filter by file extension
+        
+        Returns:
+            List of matching registry entries
+        """
+        supabase = get_supabase()
+        if not supabase:
+            return []
+        
+        try:
+            query = supabase.table('document_registry').select('*')
+            
+            if usage_type:
+                query = query.eq('usage_type', usage_type)
+            if storage_type:
+                query = query.eq('storage_type', storage_type)
+            if project_id:
+                query = query.eq('project_id', project_id)
+            if is_global is not None:
+                query = query.eq('is_global', is_global)
+            if file_type:
+                query = query.eq('file_type', file_type)
+            if filename_contains:
+                query = query.ilike('filename', f'%{filename_contains}%')
+            
+            response = query.order('created_at', desc=True).execute()
+            return response.data if response.data else []
+        
+        except Exception as e:
+            print(f"Error finding documents: {e}")
+            return []
+    
+    @staticmethod
+    def find_playbook_source(playbook_type: str = 'year-end') -> Optional[Dict[str, Any]]:
+        """
+        Find the source file for a specific playbook.
+        
+        Args:
+            playbook_type: Type of playbook ('year-end', etc.)
+        
+        Returns:
+            Registry entry for the playbook source file, or None
+        """
+        supabase = get_supabase()
+        if not supabase:
+            return None
+        
+        try:
+            # Look for playbook source files
+            results = DocumentRegistryModel.find(
+                usage_type=DocumentRegistryModel.USAGE_PLAYBOOK_SOURCE,
+                is_global=True
+            )
+            
+            if not results:
+                # Fallback: search by filename pattern in global structured data
+                results = DocumentRegistryModel.find(
+                    storage_type=DocumentRegistryModel.STORAGE_DUCKDB,
+                    is_global=True
+                )
+            
+            # Filter by playbook type keywords
+            keywords = {
+                'year-end': ['year-end', 'yearend', 'year_end', 'checklist'],
+            }.get(playbook_type, [playbook_type])
+            
+            for entry in results:
+                filename_lower = entry.get('filename', '').lower()
+                if any(kw in filename_lower for kw in keywords):
+                    return entry
+            
+            return None
+        
+        except Exception as e:
+            print(f"Error finding playbook source: {e}")
+            return None
+    
+    @staticmethod
+    def get_by_filename(filename: str, project_id: str = None) -> Optional[Dict[str, Any]]:
+        """Get registry entry by exact filename"""
+        supabase = get_supabase()
+        if not supabase:
+            return None
+        
+        try:
+            query = supabase.table('document_registry').select('*').eq('filename', filename)
+            
+            if project_id:
+                query = query.eq('project_id', project_id)
+            
+            response = query.execute()
+            return response.data[0] if response.data else None
+        
+        except Exception as e:
+            print(f"Error getting document: {e}")
+            return None
+    
+    @staticmethod
+    def update(registry_id: str, **kwargs) -> Optional[Dict[str, Any]]:
+        """Update a registry entry"""
+        supabase = get_supabase()
+        if not supabase:
+            return None
+        
+        try:
+            kwargs['updated_at'] = datetime.utcnow().isoformat()
+            response = supabase.table('document_registry').update(kwargs).eq('id', registry_id).execute()
+            return response.data[0] if response.data else None
+        
+        except Exception as e:
+            print(f"Error updating document registry: {e}")
+            return None
+    
+    @staticmethod
+    def delete(registry_id: str) -> bool:
+        """Delete a registry entry"""
+        supabase = get_supabase()
+        if not supabase:
+            return False
+        
+        try:
+            supabase.table('document_registry').delete().eq('id', registry_id).execute()
+            return True
+        
+        except Exception as e:
+            print(f"Error deleting document registry: {e}")
+            return False
+    
+    @staticmethod
+    def get_all_global() -> List[Dict[str, Any]]:
+        """Get all global documents"""
+        return DocumentRegistryModel.find(is_global=True)
+    
+    @staticmethod
+    def get_by_project(project_id: str) -> List[Dict[str, Any]]:
+        """Get all documents for a project"""
+        return DocumentRegistryModel.find(project_id=project_id)
