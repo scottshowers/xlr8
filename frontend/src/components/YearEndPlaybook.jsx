@@ -102,13 +102,8 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
       }
       
       setUploadStatus('success');
-      
-      // Wait briefly for ChromaDB indexing, then scan
-      setTimeout(async () => {
-        await handleScan();
-        // Clear success status after scan completes
-        setTimeout(() => setUploadStatus(null), 2000);
-      }, 1500);
+      // Clear success after 5 seconds - user should click Scan when processing completes
+      setTimeout(() => setUploadStatus(null), 5000);
       
     } catch (err) {
       console.error('Upload failed:', err);
@@ -152,7 +147,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
   // Determine upload button state
   const getUploadButtonContent = () => {
     if (uploading) return '⏳ Uploading...';
-    if (uploadStatus === 'success') return '✓ Uploaded!';
+    if (uploadStatus === 'success') return '✓ Queued - Click Scan';
     if (uploadStatus === 'error') return '✗ Failed';
     return (
       <>
