@@ -46,15 +46,15 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
   const [localDocsFound, setLocalDocsFound] = useState(progress?.documents_found || []);
   const fileInputRef = React.useRef(null);
   
-  // Safety check - if no action, don't render
-  if (!action) {
-    return null;
-  }
-  
-  // Sync local docs with progress prop
+  // Sync local docs with progress prop - MUST be before any conditional returns
   React.useEffect(() => {
     setLocalDocsFound(progress?.documents_found || []);
   }, [progress?.documents_found]);
+  
+  // Safety check - if no action, don't render (AFTER all hooks)
+  if (!action) {
+    return null;
+  }
   
   const findings = progress?.findings;
   const reportsNeeded = action.reports_needed || [];
@@ -495,27 +495,33 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
             </div>
           )}
 
-          {findings && (
+          {findings && typeof findings === 'object' && (
             <div style={styles.section}>
               <div style={styles.sectionTitle}>AI Findings</div>
               <div style={styles.findingsBox}>
                 {findings.summary && (
-                  <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.85rem' }}>{findings.summary}</p>
+                  <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.85rem' }}>
+                    {typeof findings.summary === 'string' ? findings.summary : JSON.stringify(findings.summary)}
+                  </p>
                 )}
-                {findings.key_values && Object.keys(findings.key_values).length > 0 && (
+                {findings.key_values && typeof findings.key_values === 'object' && !Array.isArray(findings.key_values) && Object.keys(findings.key_values).length > 0 && (
                   <div style={{ marginBottom: '0.5rem' }}>
                     {Object.entries(findings.key_values).map(([key, val]) => (
                       <div key={key} style={styles.keyValue}>
-                        <span style={styles.keyLabel}>{key}:</span>
-                        <span style={styles.keyVal}>{val}</span>
+                        <span style={styles.keyLabel}>{String(key)}:</span>
+                        <span style={styles.keyVal}>
+                          {val === null || val === undefined ? '-' : (typeof val === 'object' ? JSON.stringify(val) : String(val))}
+                        </span>
                       </div>
                     ))}
                   </div>
                 )}
-                {findings.issues?.length > 0 && (
+                {Array.isArray(findings.issues) && findings.issues.length > 0 && (
                   <ul style={styles.issuesList}>
                     {findings.issues.map((issue, i) => (
-                      <li key={i} style={styles.issue}>⚠️ {issue}</li>
+                      <li key={i} style={styles.issue}>
+                        ⚠️ {typeof issue === 'string' ? issue : JSON.stringify(issue)}
+                      </li>
                     ))}
                   </ul>
                 )}
