@@ -14,6 +14,7 @@ Author: XLR8 Team
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
 from typing import Optional
+from datetime import datetime
 import sys
 import os
 import json
@@ -360,7 +361,8 @@ def process_file_background(
             "project": project,
             "filename": filename,
             "file_type": file_ext,
-            "source": filename
+            "source": filename,
+            "upload_date": datetime.now().isoformat()
         }
         
         if project_id:
