@@ -60,9 +60,72 @@ def extract_text(file_path: str) -> str:
     
     try:
         if ext == 'pdf':
-            with open(file_path, 'rb') as f:
-                pdf = PyPDF2.PdfReader(f)
-                return "\n".join([p.extract_text() or '' for p in pdf.pages])
+            # ENHANCED PDF EXTRACTION - try multiple methods
+            text = ""
+            pages_extracted = 0
+            
+            # Method 1: Try pdfplumber first (best for tables and structured PDFs)
+            try:
+                import pdfplumber
+                logger.info("[PDF] Trying pdfplumber extraction...")
+                with pdfplumber.open(file_path) as pdf:
+                    page_texts = []
+                    for i, page in enumerate(pdf.pages):
+                        page_text = page.extract_text() or ''
+                        if page_text.strip():
+                            page_texts.append(f"--- Page {i+1} ---\n{page_text}")
+                            pages_extracted += 1
+                    text = "\n\n".join(page_texts)
+                    logger.info(f"[PDF] pdfplumber extracted {pages_extracted} pages, {len(text)} chars")
+            except Exception as e:
+                logger.warning(f"[PDF] pdfplumber failed: {e}")
+            
+            # Method 2: If pdfplumber got little/no content, try PyMuPDF
+            if len(text) < 500:
+                try:
+                    import fitz  # PyMuPDF
+                    logger.info("[PDF] Trying PyMuPDF extraction...")
+                    doc = fitz.open(file_path)
+                    page_texts = []
+                    for i, page in enumerate(doc):
+                        page_text = page.get_text()
+                        if page_text.strip():
+                            page_texts.append(f"--- Page {i+1} ---\n{page_text}")
+                            pages_extracted += 1
+                    doc.close()
+                    fitz_text = "\n\n".join(page_texts)
+                    if len(fitz_text) > len(text):
+                        text = fitz_text
+                        logger.info(f"[PDF] PyMuPDF extracted {pages_extracted} pages, {len(text)} chars")
+                except Exception as e:
+                    logger.warning(f"[PDF] PyMuPDF failed: {e}")
+            
+            # Method 3: Fallback to PyPDF2 if others failed
+            if len(text) < 500:
+                try:
+                    logger.info("[PDF] Trying PyPDF2 extraction...")
+                    with open(file_path, 'rb') as f:
+                        pdf = PyPDF2.PdfReader(f)
+                        page_texts = []
+                        for i, page in enumerate(pdf.pages):
+                            page_text = page.extract_text() or ''
+                            if page_text.strip():
+                                page_texts.append(f"--- Page {i+1} ---\n{page_text}")
+                                pages_extracted += 1
+                        pypdf_text = "\n\n".join(page_texts)
+                        if len(pypdf_text) > len(text):
+                            text = pypdf_text
+                            logger.info(f"[PDF] PyPDF2 extracted {pages_extracted} pages, {len(text)} chars")
+                except Exception as e:
+                    logger.warning(f"[PDF] PyPDF2 failed: {e}")
+            
+            # Final check
+            if len(text) < 100:
+                logger.error(f"[PDF] All extraction methods failed or returned minimal text ({len(text)} chars)")
+            else:
+                logger.info(f"[PDF] Final extraction: {len(text)} chars from {pages_extracted} pages")
+            
+            return text
         
         elif ext == 'docx':
             doc = docx.Document(file_path)
