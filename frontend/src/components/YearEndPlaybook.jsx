@@ -61,8 +61,10 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
     setScanning(true);
     try {
       const res = await api.post(`/playbooks/year-end/scan/${projectId}/${action.action_id}`);
+      console.log('[SCAN] Response:', res.data);
       if (res.data) {
         const newDocs = res.data.documents?.map(d => d.filename) || [];
+        console.log('[SCAN] Found docs:', newDocs);
         setLocalDocsFound(newDocs);
         setLocalStatus(res.data.suggested_status);
         onUpdate(action.action_id, {
