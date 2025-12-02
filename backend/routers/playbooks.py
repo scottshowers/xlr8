@@ -412,7 +412,7 @@ async def extract_findings_for_action(action: Dict, content: List[str]) -> Optio
     try:
         from anthropic import Anthropic
         
-        client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        client = Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
         
         combined = "\n---\n".join(content)
         
