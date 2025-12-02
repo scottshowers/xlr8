@@ -489,7 +489,30 @@ def process_file_background(
             except Exception as e:
                 logger.warning(f"[BACKGROUND] Could not delete temp file: {e}")
         
-        # Step 6: Complete!
+        # Step 6: Auto-scan playbook actions for this file
+        if project_id:
+            ProcessingJobModel.update_progress(job_id, 97, "Updating playbook analysis...")
+            try:
+                # Try multiple import paths
+                trigger_auto_scan_sync = None
+                for module_path in ['routers.playbooks', 'backend.routers.playbooks', 'playbooks']:
+                    try:
+                        module = __import__(module_path, fromlist=['trigger_auto_scan_sync'])
+                        trigger_auto_scan_sync = getattr(module, 'trigger_auto_scan_sync', None)
+                        if trigger_auto_scan_sync:
+                            break
+                    except ImportError:
+                        continue
+                
+                if trigger_auto_scan_sync:
+                    trigger_auto_scan_sync(project_id, filename)
+                    logger.info(f"[BACKGROUND] Triggered auto-scan for playbook actions")
+                else:
+                    logger.warning(f"[BACKGROUND] Auto-scan function not found in any module path")
+            except Exception as e:
+                logger.warning(f"[BACKGROUND] Auto-scan failed (non-critical): {e}")
+        
+        # Step 7: Complete!
         ProcessingJobModel.complete(job_id, {
             'filename': filename,
             'characters': len(text),
