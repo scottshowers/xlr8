@@ -914,6 +914,45 @@ async def debug_table_data():
         result["connection_error"] = str(e)
     
     return result
+
+
+@router.get("/year-end/debug-parser")
+async def debug_parser():
+    """
+    Debug endpoint to test the parser directly and see any errors.
+    """
+    import traceback
+    
+    result = {
+        "success": False,
+        "error": None,
+        "traceback": None,
+        "structure": None,
+        "encryption_key_exists": False,
+        "duckdb_exists": False
+    }
+    
+    # Check prerequisites
+    result["duckdb_exists"] = os.path.exists("/data/structured_data.duckdb")
+    result["encryption_key_exists"] = os.path.exists("/data/.encryption_key_v2")
+    
+    try:
+        from backend.utils.playbook_parser import parse_year_end_checklist
+        
+        structure = parse_year_end_checklist()
+        result["success"] = True
+        result["structure"] = {
+            "total_actions": structure.get("total_actions", 0),
+            "source_type": structure.get("source_type", "unknown"),
+            "source_file": structure.get("source_file", "unknown"),
+            "step_count": len(structure.get("steps", [])),
+            "first_action": structure.get("steps", [{}])[0].get("actions", [{}])[0] if structure.get("steps") else None
+        }
+    except Exception as e:
+        result["error"] = str(e)
+        result["traceback"] = traceback.format_exc()
+    
+    return result
     """Default Year-End structure if doc not available."""
     return {
         "playbook_id": "year-end-2025",
