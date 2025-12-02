@@ -271,6 +271,7 @@ function StatusTab({ project }) {
 
 // ==================== DATA MANAGEMENT TAB ====================
 function DataManagementTab() {
+  const { projects } = useProject();
   const [structuredData, setStructuredData] = useState(null);
   const [documents, setDocuments] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -281,6 +282,18 @@ function DataManagementTab() {
   const [semanticTypes, setSemanticTypes] = useState([]);
   const [expandedMappings, setExpandedMappings] = useState(null);
   const [pendingChanges, setPendingChanges] = useState({});
+
+  // Helper to get project name from ID or name
+  const getProjectDisplay = (projectValue) => {
+    if (!projectValue) return 'Unknown';
+    if (projectValue === 'GLOBAL' || projectValue === 'global' || projectValue === 'Global/Universal') return 'GLOBAL';
+    // Check if it's a UUID (has dashes and is 36 chars)
+    if (projectValue.length === 36 && projectValue.includes('-')) {
+      const found = projects.find(p => p.id === projectValue);
+      return found ? found.name : projectValue.slice(0, 8) + '...';
+    }
+    return projectValue;
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -529,7 +542,7 @@ function DataManagementTab() {
                       {getMappingBadge(file)}
                       <span style={{ color: '#999', marginLeft: '8px', fontSize: '0.75rem' }}>{expandedFile === file.filename ? '▼' : '▶'}</span>
                     </td>
-                    <td style={styles.td}><span style={styles.projectBadge}>{file.project}</span></td>
+                    <td style={styles.td}><span style={styles.projectBadge}>{getProjectDisplay(file.project)}</span></td>
                     <td style={{ ...styles.td, textAlign: 'center' }}>{file.sheets?.length || 0}</td>
                     <td style={{ ...styles.td, textAlign: 'center' }}>{file.total_rows?.toLocaleString()}</td>
                     <td style={{ ...styles.td, textAlign: 'center', fontSize: '0.75rem', color: '#666' }}>
@@ -709,7 +722,7 @@ function DataManagementTab() {
                     <span>{doc.filename?.endsWith('.pdf') ? '📕' : '📘'} </span>
                     <strong>{doc.filename}</strong>
                   </td>
-                  <td style={styles.td}><span style={styles.projectBadge}>{doc.project || 'Unknown'}</span></td>
+                  <td style={styles.td}><span style={styles.projectBadge}>{getProjectDisplay(doc.project)}</span></td>
                   <td style={{ ...styles.td, textAlign: 'center' }}>{doc.chunks}</td>
                   <td style={{ ...styles.td, textAlign: 'center' }}>
                     <button onClick={() => deleteDocument(doc.filename)} disabled={deleting === `doc:${doc.filename}`} style={styles.deleteBtn}>
