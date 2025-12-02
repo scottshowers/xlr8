@@ -74,11 +74,18 @@ async def get_year_end_structure():
         except ImportError as ie:
             logger.error(f"Import failed - full error: {ie}")
             logger.error(f"Trying to diagnose...")
+            # Check what's in utils folder
+            import sys
+            logger.error(f"Python path: {sys.path[:3]}")
             try:
-                import docx
-                logger.info("docx module loads OK")
-            except ImportError as de:
-                logger.error(f"docx import failed: {de}")
+                import utils
+                logger.error(f"utils package location: {utils.__file__}")
+                logger.error(f"utils dir contents: {dir(utils)}")
+            except Exception as ue:
+                logger.error(f"Can't import utils package: {ue}")
+            # Check if file exists
+            for check_path in ['/app/backend/utils/playbook_parser.py', '/app/utils/playbook_parser.py', 'utils/playbook_parser.py']:
+                logger.error(f"Checking {check_path}: {os.path.exists(check_path)}")
             raise ie
         
         # Look for Year-End doc in global data or known locations
