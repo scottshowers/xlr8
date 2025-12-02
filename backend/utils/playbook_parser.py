@@ -28,13 +28,33 @@ def get_duckdb_connection():
     """Get DuckDB connection"""
     try:
         import duckdb
+        
+        logger.info(f"[PARSER] Checking DuckDB at: {DUCKDB_PATH}")
+        
         if os.path.exists(DUCKDB_PATH):
-            return duckdb.connect(DUCKDB_PATH, read_only=True)
+            logger.info(f"[PARSER] DuckDB file exists, size: {os.path.getsize(DUCKDB_PATH)} bytes")
+            conn = duckdb.connect(DUCKDB_PATH, read_only=True)
+            logger.info(f"[PARSER] DuckDB connection successful")
+            return conn
         else:
             logger.warning(f"[PARSER] DuckDB not found at {DUCKDB_PATH}")
+            # Check alternative paths
+            alt_paths = [
+                "/app/data/structured_data.duckdb",
+                "./data/structured_data.duckdb",
+                "/data/duckdb/structured_data.duckdb"
+            ]
+            for alt in alt_paths:
+                if os.path.exists(alt):
+                    logger.info(f"[PARSER] Found DuckDB at alternative path: {alt}")
+                    return duckdb.connect(alt, read_only=True)
+            
+            logger.warning(f"[PARSER] DuckDB not found at any known location")
             return None
     except Exception as e:
         logger.error(f"[PARSER] Failed to connect to DuckDB: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return None
 
 
@@ -53,8 +73,14 @@ def find_year_end_tables() -> List[Dict[str, Any]]:
         return []
     
     try:
-        # Search for global year-end tables
-        # Try multiple project name variations
+        # First, let's see what projects exist
+        try:
+            projects = conn.execute("SELECT DISTINCT project FROM _schema_metadata").fetchall()
+            logger.info(f"[PARSER] Available projects in DuckDB: {[p[0] for p in projects]}")
+        except Exception as e:
+            logger.warning(f"[PARSER] Could not list projects: {e}")
+        
+        # Search for global year-end tables - be VERY flexible
         result = conn.execute("""
             SELECT 
                 project,
@@ -66,18 +92,35 @@ def find_year_end_tables() -> List[Dict[str, Any]]:
             FROM _schema_metadata
             WHERE is_current = TRUE
             AND (
+                -- Match Global project (case-insensitive)
                 LOWER(project) = 'global' 
                 OR LOWER(project) = '__global__'
                 OR LOWER(project) LIKE '%global%'
-            )
-            AND (
-                LOWER(file_name) LIKE '%year%end%'
-                OR LOWER(file_name) LIKE '%year-end%'
-                OR LOWER(file_name) LIKE '%yearend%'
-                OR LOWER(file_name) LIKE '%checklist%'
+                -- Also check if file looks like Year-End regardless of project
+                OR (
+                    LOWER(file_name) LIKE '%year%end%'
+                    OR LOWER(file_name) LIKE '%year-end%'
+                    OR LOWER(file_name) LIKE '%yearend%'
+                    OR LOWER(file_name) LIKE '%checklist%'
+                    OR LOWER(file_name) LIKE '%pro_pay%'
+                    OR LOWER(file_name) LIKE '%pro-pay%'
+                )
             )
             ORDER BY sheet_name
         """).fetchall()
+        
+        if not result:
+            # Fallback: just get ALL tables and log them
+            logger.warning("[PARSER] No Year-End tables found with filters, checking all tables...")
+            all_tables = conn.execute("""
+                SELECT project, file_name, sheet_name, table_name, row_count
+                FROM _schema_metadata
+                WHERE is_current = TRUE
+                LIMIT 20
+            """).fetchall()
+            logger.info(f"[PARSER] Sample of ALL tables in DuckDB:")
+            for t in all_tables:
+                logger.info(f"[PARSER]   project={t[0]}, file={t[1]}, sheet={t[2]}")
         
         tables = []
         for row in result:
@@ -99,6 +142,8 @@ def find_year_end_tables() -> List[Dict[str, Any]]:
         
     except Exception as e:
         logger.error(f"[PARSER] Error finding Year-End tables: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return []
     finally:
         conn.close()
