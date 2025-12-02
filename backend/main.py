@@ -85,6 +85,65 @@ async def health():
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}
 
+
+@app.get("/api/debug/ollama")
+async def debug_ollama():
+    """Test Ollama connectivity from Railway"""
+    import requests
+    from requests.auth import HTTPBasicAuth
+    import os
+    
+    ollama_url = os.getenv("LLM_ENDPOINT", "http://178.156.190.64:11435")
+    username = os.getenv("LLM_USERNAME", "xlr8")
+    password = os.getenv("LLM_PASSWORD", "Argyle76226#")
+    
+    result = {
+        "ollama_url": ollama_url,
+        "tests": {}
+    }
+    
+    # Test 1: Check if server responds
+    try:
+        resp = requests.get(f"{ollama_url}/api/tags", auth=HTTPBasicAuth(username, password), timeout=10)
+        result["tests"]["tags_endpoint"] = {
+            "status_code": resp.status_code,
+            "response": resp.text[:500] if resp.status_code == 200 else resp.text
+        }
+    except Exception as e:
+        result["tests"]["tags_endpoint"] = {"error": str(e)}
+    
+    # Test 2: Try embedding endpoint
+    try:
+        resp = requests.post(
+            f"{ollama_url}/api/embeddings",
+            json={"model": "nomic-embed-text", "prompt": "test"},
+            auth=HTTPBasicAuth(username, password),
+            timeout=30
+        )
+        result["tests"]["embeddings_endpoint"] = {
+            "status_code": resp.status_code,
+            "response": resp.text[:500] if len(resp.text) < 500 else f"Response size: {len(resp.text)} chars"
+        }
+    except Exception as e:
+        result["tests"]["embeddings_endpoint"] = {"error": str(e)}
+    
+    # Test 3: Try alternate embed endpoint
+    try:
+        resp = requests.post(
+            f"{ollama_url}/api/embed",
+            json={"model": "nomic-embed-text", "input": "test"},
+            auth=HTTPBasicAuth(username, password),
+            timeout=30
+        )
+        result["tests"]["embed_endpoint"] = {
+            "status_code": resp.status_code,
+            "response": resp.text[:500] if len(resp.text) < 500 else f"Response size: {len(resp.text)} chars"
+        }
+    except Exception as e:
+        result["tests"]["embed_endpoint"] = {"error": str(e)}
+    
+    return result
+
 # Serve frontend
 frontend_path = Path("/app/frontend/dist")
 if frontend_path.exists():
