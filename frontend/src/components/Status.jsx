@@ -152,6 +152,20 @@ export default function Status() {
     return `${mb.toFixed(2)} MB`
   }
 
+  // Helper to get project name from ID or name
+  const getProjectDisplay = (projectValue) => {
+    if (!projectValue) return '-'
+    if (projectValue === '__GLOBAL__' || projectValue === 'GLOBAL' || projectValue === 'global' || projectValue === 'Global/Universal') {
+      return '🌐 Global'
+    }
+    // Check if it's a UUID (has dashes and is 36 chars)
+    if (projectValue.length === 36 && projectValue.includes('-')) {
+      const found = projects.find(p => p.id === projectValue)
+      return found ? found.name : projectValue.slice(0, 8) + '...'
+    }
+    return projectValue
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -250,11 +264,11 @@ export default function Status() {
                     </td>
                     <td className="px-4 py-3">
                       <span className={`text-sm px-2 py-1 rounded ${
-                        doc.project === '__GLOBAL__' 
+                        doc.project === '__GLOBAL__' || doc.project === 'GLOBAL' || doc.project === 'Global/Universal'
                           ? 'bg-purple-100 text-purple-700' 
                           : 'bg-blue-100 text-blue-700'
                       }`}>
-                        {doc.project === '__GLOBAL__' ? '🌐 Global' : doc.project}
+                        {getProjectDisplay(doc.project)}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">{doc.functional_area || '-'}</td>
@@ -302,7 +316,7 @@ export default function Status() {
                     <div className="flex-1">
                       <p className="font-medium">{job.input_data?.filename || 'Processing...'}</p>
                       <div className="flex items-center gap-3 mt-1">
-                        <p className="text-sm text-gray-500">{job.project_id || '-'}</p>
+                        <p className="text-sm text-gray-500">{getProjectDisplay(job.project_id)}</p>
                         {job.created_at && (
                           <p className="text-xs text-gray-400 flex items-center gap-1">
                             <Calendar className="w-3 h-3" />
