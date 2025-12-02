@@ -65,6 +65,266 @@ ACTION_DEPENDENCIES = {
 }
 
 # =============================================================================
+# REVERSE DEPENDENCIES - Which actions are impacted when this action changes
+# =============================================================================
+# Built automatically from ACTION_DEPENDENCIES
+REVERSE_DEPENDENCIES = {}
+for dependent, parents in ACTION_DEPENDENCIES.items():
+    for parent in parents:
+        if parent not in REVERSE_DEPENDENCIES:
+            REVERSE_DEPENDENCIES[parent] = []
+        REVERSE_DEPENDENCIES[parent].append(dependent)
+
+# =============================================================================
+# REQUIRED DOCUMENTS - All reports needed for the playbook
+# =============================================================================
+REQUIRED_DOCUMENTS = {
+    "Company Tax Verification": {
+        "actions": ["2A", "2B", "2C"],
+        "keywords": ["company tax verification", "tax verification"],
+        "required": True,
+        "description": "Lists all company tax codes, rates, and registration IDs"
+    },
+    "Company Master Profile": {
+        "actions": ["2A", "2B", "2C"],
+        "keywords": ["company master profile", "master profile"],
+        "required": True,
+        "description": "Company setup details including FEIN, addresses, and legal names"
+    },
+    "Workers Compensation Risk Rates": {
+        "actions": ["2D"],
+        "keywords": ["workers comp", "risk rates", "wc rates"],
+        "required": False,
+        "description": "Workers comp class codes and rates by state"
+    },
+    "Earnings Tax Categories": {
+        "actions": ["2F"],
+        "keywords": ["earnings tax", "earnings categories"],
+        "required": False,
+        "description": "Earnings codes mapped to tax categories for W-2 reporting"
+    },
+    "Earnings Codes": {
+        "actions": ["2F"],
+        "keywords": ["earnings codes", "earnings code"],
+        "required": False,
+        "description": "List of all earnings codes and their configuration"
+    },
+    "Deduction Tax Categories": {
+        "actions": ["2G"],
+        "keywords": ["deduction tax", "deduction categories"],
+        "required": False,
+        "description": "Deduction codes mapped to tax categories"
+    },
+    "Deduction Codes": {
+        "actions": ["2G"],
+        "keywords": ["deduction codes", "deduction code", "benefit codes"],
+        "required": False,
+        "description": "List of all deduction/benefit codes"
+    },
+    "Year-End Validation Report": {
+        "actions": ["3A", "3B", "3C", "3D"],
+        "keywords": ["year-end validation", "ye validation", "year end validation"],
+        "required": True,
+        "description": "Employee SSN validation and W-2 readiness check"
+    },
+    "Outstanding Checks Report": {
+        "actions": ["5C"],
+        "keywords": ["outstanding check", "check recon", "uncashed"],
+        "required": False,
+        "description": "List of uncashed/outstanding payroll checks"
+    },
+    "Arrears Report": {
+        "actions": ["5D"],
+        "keywords": ["arrears", "arrears balance"],
+        "required": False,
+        "description": "Employee deduction arrears balances"
+    },
+    "QTD Analysis Report": {
+        "actions": ["11B"],
+        "keywords": ["qtd analysis", "quarter-to-date"],
+        "required": True,
+        "description": "Quarter-to-date tax reconciliation report"
+    },
+}
+
+# =============================================================================
+# ACTION-SPECIFIC GUIDANCE - For dependent actions (no scan, just guidance)
+# =============================================================================
+DEPENDENT_ACTION_GUIDANCE = {
+    "2B": """
+**Action 2B - Update Company Information**
+
+Based on the findings from Action 2A, review and update:
+
+1. **Legal Company Name** - Must match IRS records exactly for W-2 filing
+2. **DBA/Trade Name** - Update if changed during the year
+3. **Company Address** - Verify current for tax correspondence
+4. **FEIN** - Cannot be changed after W-2s are filed - verify NOW
+
+⚠️ **Deadline**: Complete before final payroll run
+
+**What to check in UKG:**
+- Menu > Company > Company Setup
+- Verify each field matches the Tax Verification report
+""",
+    "2C": """
+**Action 2C - Update Tax Code Information**
+
+Based on the findings from Action 2A, review and update tax codes:
+
+1. **State Tax Registrations** - Ensure all states with employees have active registrations
+2. **Tax Rates** - Update any rates that changed (especially SUI rates for new year)
+3. **Tax IDs** - Verify state and local tax IDs are current
+
+⚠️ **Common Issues:**
+- Missing local tax codes for remote workers
+- Outdated SUI rates (many states change annually)
+- Pending registrations not completed
+
+**What to check in UKG:**
+- Menu > Company > Tax Codes
+- Run Tax Code Audit report
+""",
+    "2E": """
+**Action 2E - Multiple Worksite Reporting (MWR)**
+
+Based on company data from Action 2A:
+
+1. **Verify MWR Setup** - If required, ensure worksite codes are properly assigned
+2. **Employee Assignments** - Check employees are assigned to correct worksites
+3. **BLS Reporting** - Confirm quarterly MWR data is accurate
+
+**When is MWR Required?**
+- Companies with 10+ employees in most states
+- Required for Bureau of Labor Statistics reporting
+""",
+    "2H": """
+**Action 2H - Special Tax Category Overrides**
+
+Based on earnings (2F) and deductions (2G) analysis:
+
+1. **Employee-Level Overrides** - Review any employee-specific tax category changes
+2. **Company-Level Overrides** - Check company code tax category exceptions
+3. **Verify Necessity** - Ensure overrides are still needed for current year
+
+⚠️ **Risk**: Incorrect overrides cause W-2 errors
+""",
+    "2J": """
+**Action 2J - Healthcare W-2 Tax Categories**
+
+Based on deduction analysis from Action 2G:
+
+1. **Box 12 Code DD** - Verify employer + employee healthcare costs report correctly
+2. **Section 125** - Confirm cafeteria plan deductions are pre-tax
+3. **HSA Contributions** - Check Box 12 Code W setup
+
+**ACA Requirement**: Employers with 250+ prior year W-2s must report healthcare costs
+""",
+    "2K": """
+**Action 2K - Healthcare Benefits for New Year**
+
+Based on deduction data from Action 2G:
+
+1. **New Rates** - Update benefit deduction amounts for new plan year
+2. **New Plans** - Add any new benefit options
+3. **Effective Dates** - Ensure new rates start on correct date (usually 1/1)
+
+**Common Issue**: Forgetting to update rates causes over/under deductions in January
+""",
+    "2L": """
+**Action 2L - ALE Healthcare Reporting**
+
+Based on deduction (2G) and healthcare (2J) data:
+
+1. **ALE Status** - Verify if company qualifies as Applicable Large Employer (50+ FTE)
+2. **1095-C Data** - Review employee healthcare offer/enrollment data
+3. **YTD Amounts** - Verify employer contribution amounts are accurate
+
+**Deadline**: 1095-C forms due to employees by March 2
+""",
+    "3B": """
+**Action 3B - SSN Corrections**
+
+Based on Year-End Validation from Action 3A:
+
+1. **Invalid SSNs** - Contact employees with flagged SSNs
+2. **Send W-9** - Request corrected information via Form W-9
+3. **Update UKG** - Enter corrected SSNs before W-2 processing
+
+⚠️ **Penalty**: $50/W-2 for incorrect SSN (up to $500k/year)
+""",
+    "3C": """
+**Action 3C - Name/Address Updates**
+
+Based on Year-End Validation from Action 3A:
+
+1. **Name Mismatches** - Compare to SSA records (must match exactly)
+2. **Address Updates** - Verify current addresses for W-2 delivery
+3. **Deceased Employees** - Special W-2 handling required
+
+**W-2 Delivery**: Invalid addresses = returned W-2s = penalties
+""",
+    "3D": """
+**Action 3D - Deceased Employee Processing**
+
+Based on validation data from Action 3A:
+
+1. **Final W-2** - Issue to estate or surviving spouse
+2. **Box Changes** - Some boxes handled differently for deceased
+3. **1099 Consideration** - Payments after death may require 1099
+
+**IRS Rule**: W-2 wages paid in year of death; 1099 for payments after
+""",
+    "5B": """
+**Action 5B - Third-Party Sick Pay**
+
+Based on earnings review from Action 5A:
+
+1. **Identify TPSP** - Flag any third-party sick pay payments
+2. **W-2 Reporting** - Verify Box 13 "Third-party sick pay" checkbox
+3. **Tax Withholding** - Confirm taxes were handled correctly
+
+**Common Issue**: TPSP not flagged = incorrect W-2 reporting
+""",
+    "5E": """
+**Action 5E - Pre-Close Reconciliation**
+
+Based on check reconciliation (5C) and arrears (5D):
+
+1. **Resolve Outstanding Items** - Clear old checks and arrears before close
+2. **Document Decisions** - Note any write-offs or waivers
+3. **Final Verification** - Ensure all adjustments posted
+
+**Goal**: Clean slate before final payroll
+""",
+    "6B": """
+**Action 6B - W-2 Adjustments**
+
+Based on W-2 preview from Action 6A:
+
+1. **Correction Entries** - Process any needed adjustments
+2. **Verify Changes** - Re-run preview to confirm fixes
+3. **Document Reasons** - Note why adjustments were made
+
+⚠️ **Timing**: Must complete before W-2 finalization deadline
+""",
+    "6C": """
+**Action 6C - Final W-2 Review**
+
+Based on W-2 preview from Action 6A:
+
+1. **Sample Testing** - Review W-2s for sample of employees
+2. **Box Totals** - Verify totals tie to quarterly reports
+3. **Sign-Off** - Get manager/customer approval before filing
+
+**Checklist**:
+- [ ] Box 1 ties to 941 wages
+- [ ] Box 2 ties to 941 withholding  
+- [ ] State wages match state returns
+""",
+}
+
+# =============================================================================
 # CONSULTATIVE AI CONTEXT - Benchmarks, red flags, and expert guidance
 # =============================================================================
 CONSULTATIVE_PROMPTS = {
@@ -664,8 +924,11 @@ async def scan_for_action(project_id: str, action_id: str):
     
     ENHANCED FEATURES:
     - Inherits documents/findings from parent actions (no re-upload needed)
+    - For DEPENDENT actions: Skip redundant scan, provide guidance only
     - Uses consultative AI with industry benchmarks
-    - Provides actionable recommendations
+    - Detects conflicts with existing data
+    - Flags impacted actions when new data arrives
+    - Auto-completes when all conditions met
     """
     try:
         from utils.rag_handler import RAGHandler
@@ -687,15 +950,23 @@ async def scan_for_action(project_id: str, action_id: str):
         # Get reports needed for this action
         reports_needed = action.get('reports_needed', [])
         
+        # Get parent actions
+        parent_actions = get_parent_actions(action_id)
+        
         # =====================================================================
-        # CHECK FOR INHERITED DATA FROM PARENT ACTIONS
+        # DEPENDENT ACTION HANDLING - Skip redundant scan, provide guidance
+        # =====================================================================
+        if parent_actions and not reports_needed:
+            logger.info(f"[SCAN] Action {action_id} is DEPENDENT on {parent_actions} - using guidance mode")
+            return await handle_dependent_action(project_id, action_id, action, parent_actions)
+        
+        # =====================================================================
+        # STANDARD SCAN FOR ACTIONS WITH REPORTS_NEEDED
         # =====================================================================
         inherited = get_inherited_data(project_id, action_id)
         inherited_docs = inherited["documents"]
         inherited_findings = inherited["findings"]
         inherited_content = inherited["content"]
-        
-        parent_actions = get_parent_actions(action_id)
         
         if parent_actions:
             logger.info(f"[SCAN] Action {action_id} inherits from: {parent_actions}")
@@ -813,20 +1084,49 @@ async def scan_for_action(project_id: str, action_id: str):
                     inherited_findings=inherited_findings,
                     action_id=action_id
                 )
-                if findings and findings.get('complete'):
-                    suggested_status = "complete"
+                
+                # AUTO-COMPLETE: If findings show complete and no high-risk issues
+                if findings:
+                    if findings.get('complete') and findings.get('risk_level') != 'high':
+                        suggested_status = "complete"
+                        logger.info(f"[SCAN] Action {action_id} AUTO-COMPLETED (complete=True, risk != high)")
+        
+        # =====================================================================
+        # CONFLICT DETECTION - Check for inconsistencies
+        # =====================================================================
+        conflicts = await detect_conflicts(project_id, action_id, findings)
+        if conflicts:
+            findings = findings or {}
+            findings['conflicts'] = conflicts
+            if suggested_status == "complete":
+                suggested_status = "in_progress"  # Don't auto-complete if conflicts exist
+                logger.info(f"[SCAN] Conflicts detected - downgrading status to in_progress")
+        
+        # =====================================================================
+        # IMPACT FLAGGING - Flag dependent actions if this data changes
+        # =====================================================================
+        await flag_impacted_actions(project_id, action_id, findings)
         
         # Update progress with scan results
         if project_id not in PLAYBOOK_PROGRESS:
             PLAYBOOK_PROGRESS[project_id] = {}
         
+        # Preserve existing status if user manually set it, unless auto-completing
+        existing_status = PLAYBOOK_PROGRESS.get(project_id, {}).get(action_id, {}).get("status")
+        if existing_status and existing_status != "not_started":
+            # Keep user's manual status unless we're auto-completing
+            final_status = existing_status
+        else:
+            final_status = suggested_status
+        
         PLAYBOOK_PROGRESS[project_id][action_id] = {
-            "status": PLAYBOOK_PROGRESS.get(project_id, {}).get(action_id, {}).get("status", suggested_status),
+            "status": final_status,
             "findings": findings,
             "documents_found": [d['filename'] for d in found_docs],
             "inherited_from": parent_actions if parent_actions else None,
             "last_scan": datetime.now().isoformat(),
-            "notes": PLAYBOOK_PROGRESS.get(project_id, {}).get(action_id, {}).get("notes")
+            "notes": PLAYBOOK_PROGRESS.get(project_id, {}).get(action_id, {}).get("notes"),
+            "review_flag": None  # Clear review flag after scan
         }
         
         # Persist to file
@@ -836,8 +1136,9 @@ async def scan_for_action(project_id: str, action_id: str):
             "found": len(found_docs) > 0,
             "documents": found_docs,
             "findings": findings,
-            "suggested_status": suggested_status,
-            "inherited_from": parent_actions if parent_actions else None
+            "suggested_status": final_status,
+            "inherited_from": parent_actions if parent_actions else None,
+            "conflicts": conflicts
         }
         
     except HTTPException:
@@ -845,6 +1146,180 @@ async def scan_for_action(project_id: str, action_id: str):
     except Exception as e:
         logger.exception(f"Scan failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def handle_dependent_action(
+    project_id: str, 
+    action_id: str, 
+    action: Dict, 
+    parent_actions: List[str]
+) -> Dict:
+    """
+    Handle scan request for a DEPENDENT action.
+    Instead of redundant scanning, provides:
+    - Reference to parent action findings
+    - Action-specific guidance
+    - Appropriate status based on parent completion
+    """
+    logger.info(f"[DEPENDENT] Handling dependent action {action_id}")
+    
+    # Get parent progress
+    progress = PLAYBOOK_PROGRESS.get(project_id, {})
+    parent_findings = []
+    parent_docs = []
+    all_parents_complete = True
+    
+    for parent_id in parent_actions:
+        parent_data = progress.get(parent_id, {})
+        if parent_data.get("findings"):
+            parent_findings.append({
+                "action_id": parent_id,
+                "findings": parent_data["findings"]
+            })
+        if parent_data.get("documents_found"):
+            parent_docs.extend(parent_data["documents_found"])
+        if parent_data.get("status") != "complete":
+            all_parents_complete = False
+    
+    # Get action-specific guidance
+    guidance = DEPENDENT_ACTION_GUIDANCE.get(action_id, f"Review findings from action(s) {', '.join(parent_actions)} and complete the tasks for this action.")
+    
+    # Build findings for this dependent action
+    findings = {
+        "complete": all_parents_complete,  # Only complete if parents are complete
+        "is_dependent": True,
+        "parent_actions": parent_actions,
+        "guidance": guidance,
+        "key_values": {},
+        "issues": [],
+        "recommendations": [],
+        "summary": f"This action uses data from {', '.join(parent_actions)}. {'' if all_parents_complete else 'Complete parent action(s) first.'}"
+    }
+    
+    # Copy key issues from parents
+    for pf in parent_findings:
+        if pf["findings"].get("issues"):
+            for issue in pf["findings"]["issues"][:2]:  # Just top 2 issues per parent
+                findings["issues"].append(f"[From {pf['action_id']}] {issue}")
+    
+    # Determine status
+    if all_parents_complete:
+        suggested_status = "in_progress"  # Ready to work on
+    else:
+        suggested_status = "blocked"  # Waiting on parents
+    
+    # Update progress
+    if project_id not in PLAYBOOK_PROGRESS:
+        PLAYBOOK_PROGRESS[project_id] = {}
+    
+    existing = PLAYBOOK_PROGRESS.get(project_id, {}).get(action_id, {})
+    
+    PLAYBOOK_PROGRESS[project_id][action_id] = {
+        "status": existing.get("status") or suggested_status,
+        "findings": findings,
+        "documents_found": list(set(parent_docs)),  # Inherited docs
+        "inherited_from": parent_actions,
+        "last_scan": datetime.now().isoformat(),
+        "notes": existing.get("notes"),
+        "is_dependent": True
+    }
+    
+    save_progress(PLAYBOOK_PROGRESS)
+    
+    return {
+        "found": len(parent_docs) > 0,
+        "documents": [{"filename": d, "match_type": "inherited", "snippet": f"From {', '.join(parent_actions)}"} for d in set(parent_docs)],
+        "findings": findings,
+        "suggested_status": suggested_status,
+        "inherited_from": parent_actions,
+        "is_dependent": True
+    }
+
+
+async def detect_conflicts(project_id: str, action_id: str, new_findings: Optional[Dict]) -> List[Dict]:
+    """
+    Detect conflicts between new findings and existing data.
+    Returns list of conflict objects.
+    """
+    if not new_findings or not new_findings.get("key_values"):
+        return []
+    
+    conflicts = []
+    progress = PLAYBOOK_PROGRESS.get(project_id, {})
+    new_values = new_findings.get("key_values", {})
+    
+    # Check against all other actions for conflicting values
+    critical_fields = ["fein", "company_name", "federal_futa_rate"]
+    
+    for other_action_id, other_progress in progress.items():
+        if other_action_id == action_id:
+            continue
+        
+        other_findings = other_progress.get("findings", {})
+        other_values = other_findings.get("key_values", {})
+        
+        for field in critical_fields:
+            # Normalize field names for comparison
+            new_val = None
+            other_val = None
+            
+            for k, v in new_values.items():
+                if field.lower() in k.lower():
+                    new_val = str(v).strip()
+                    break
+            
+            for k, v in other_values.items():
+                if field.lower() in k.lower():
+                    other_val = str(v).strip()
+                    break
+            
+            if new_val and other_val and new_val != other_val:
+                conflicts.append({
+                    "field": field,
+                    "action_1": action_id,
+                    "value_1": new_val,
+                    "action_2": other_action_id,
+                    "value_2": other_val,
+                    "message": f"Conflicting {field}: '{new_val}' (from {action_id}) vs '{other_val}' (from {other_action_id})"
+                })
+                logger.warning(f"[CONFLICT] {conflicts[-1]['message']}")
+    
+    return conflicts
+
+
+async def flag_impacted_actions(project_id: str, action_id: str, new_findings: Optional[Dict]):
+    """
+    When an action's data changes, flag dependent actions for review.
+    Changes their status from 'complete' to 'in_progress' if they were marked complete.
+    """
+    if not new_findings:
+        return
+    
+    # Get actions that depend on this one
+    impacted = REVERSE_DEPENDENCIES.get(action_id, [])
+    if not impacted:
+        return
+    
+    progress = PLAYBOOK_PROGRESS.get(project_id, {})
+    
+    for dependent_id in impacted:
+        dependent_progress = progress.get(dependent_id, {})
+        
+        # If dependent was marked complete, flag it for review
+        if dependent_progress.get("status") == "complete":
+            logger.info(f"[IMPACT] Flagging action {dependent_id} for review (impacted by {action_id})")
+            
+            PLAYBOOK_PROGRESS[project_id][dependent_id] = {
+                **dependent_progress,
+                "status": "in_progress",  # Downgrade from complete
+                "review_flag": {
+                    "reason": f"New data in {action_id} may affect this action",
+                    "flagged_at": datetime.now().isoformat(),
+                    "triggered_by": action_id
+                }
+            }
+    
+    save_progress(PLAYBOOK_PROGRESS)
 
 
 async def extract_findings_consultative(
@@ -953,6 +1428,227 @@ Return ONLY valid JSON."""
 async def extract_findings_for_action(action: Dict, content: List[str]) -> Optional[Dict]:
     """Legacy function - redirects to consultative version."""
     return await extract_findings_consultative(action, content, [], action['action_id'])
+
+
+# ============================================================================
+# DOCUMENT CHECKLIST ENDPOINT - Shows all required docs and upload status
+# ============================================================================
+
+@router.get("/year-end/document-checklist/{project_id}")
+async def get_document_checklist(project_id: str):
+    """
+    Get the document checklist with real-time upload status.
+    Shows which reports are needed, uploaded, and processing.
+    """
+    try:
+        from utils.rag_handler import RAGHandler
+        from utils.database.models import ProcessingJobModel
+        
+        # Get all project files from ChromaDB
+        rag = RAGHandler()
+        collection = rag.client.get_or_create_collection(name="documents")
+        all_results = collection.get(include=["metadatas"], limit=1000)
+        
+        # Build set of uploaded filenames
+        uploaded_files = set()
+        for metadata in all_results.get("metadatas", []):
+            doc_project = metadata.get("project_id") or metadata.get("project", "")
+            if doc_project == project_id or doc_project == project_id[:8]:
+                filename = metadata.get("source", metadata.get("filename", ""))
+                if filename:
+                    uploaded_files.add(filename.lower())
+        
+        # Check for active processing jobs
+        processing_jobs = []
+        try:
+            jobs = ProcessingJobModel.get_pending_jobs(project_id=project_id)
+            for job in jobs:
+                if job.get("status") in ["pending", "processing"]:
+                    processing_jobs.append({
+                        "filename": job.get("input_data", {}).get("filename", "Unknown"),
+                        "progress": job.get("progress", 0),
+                        "message": job.get("status_message", "Processing..."),
+                        "job_id": job.get("id")
+                    })
+        except Exception as e:
+            logger.warning(f"Could not fetch processing jobs: {e}")
+        
+        # Build checklist
+        checklist = []
+        for doc_name, doc_info in REQUIRED_DOCUMENTS.items():
+            # Check if this doc is uploaded (fuzzy match on keywords)
+            is_uploaded = False
+            matched_file = None
+            
+            for uploaded in uploaded_files:
+                for keyword in doc_info["keywords"]:
+                    if keyword in uploaded:
+                        is_uploaded = True
+                        matched_file = uploaded
+                        break
+                if is_uploaded:
+                    break
+            
+            # Check if currently processing
+            is_processing = False
+            processing_info = None
+            for job in processing_jobs:
+                job_filename = job["filename"].lower()
+                for keyword in doc_info["keywords"]:
+                    if keyword in job_filename:
+                        is_processing = True
+                        processing_info = job
+                        break
+                if is_processing:
+                    break
+            
+            checklist.append({
+                "document_name": doc_name,
+                "description": doc_info["description"],
+                "required": doc_info["required"],
+                "actions": doc_info["actions"],
+                "status": "processing" if is_processing else ("uploaded" if is_uploaded else "missing"),
+                "matched_file": matched_file,
+                "processing_info": processing_info
+            })
+        
+        # Sort: required first, then by status (missing, processing, uploaded)
+        status_order = {"missing": 0, "processing": 1, "uploaded": 2}
+        checklist.sort(key=lambda x: (not x["required"], status_order.get(x["status"], 3)))
+        
+        # Calculate stats
+        total_required = sum(1 for d in checklist if d["required"])
+        uploaded_required = sum(1 for d in checklist if d["required"] and d["status"] == "uploaded")
+        total_uploaded = sum(1 for d in checklist if d["status"] == "uploaded")
+        total_processing = sum(1 for d in checklist if d["status"] == "processing")
+        
+        return {
+            "project_id": project_id,
+            "checklist": checklist,
+            "stats": {
+                "total_documents": len(checklist),
+                "total_required": total_required,
+                "uploaded_required": uploaded_required,
+                "total_uploaded": total_uploaded,
+                "total_processing": total_processing,
+                "total_missing": len(checklist) - total_uploaded - total_processing,
+                "required_complete": uploaded_required == total_required
+            },
+            "processing_jobs": processing_jobs
+        }
+        
+    except Exception as e:
+        logger.exception(f"Document checklist failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# AI SUMMARY DASHBOARD - Consolidated view of all issues and recommendations
+# ============================================================================
+
+@router.get("/year-end/summary/{project_id}")
+async def get_ai_summary(project_id: str):
+    """
+    Get consolidated AI summary across all scanned actions.
+    Aggregates issues, recommendations, and key values.
+    """
+    progress = PLAYBOOK_PROGRESS.get(project_id, {})
+    
+    # Aggregate data
+    all_issues = []
+    all_recommendations = []
+    all_key_values = {}
+    all_conflicts = []
+    actions_with_flags = []
+    high_risk_actions = []
+    
+    for action_id, action_progress in progress.items():
+        findings = action_progress.get("findings", {})
+        if not findings:
+            continue
+        
+        # Collect issues with action context
+        for issue in findings.get("issues", []):
+            all_issues.append({
+                "action_id": action_id,
+                "issue": issue,
+                "risk_level": findings.get("risk_level", "medium")
+            })
+        
+        # Collect recommendations
+        for rec in findings.get("recommendations", []):
+            all_recommendations.append({
+                "action_id": action_id,
+                "recommendation": rec
+            })
+        
+        # Collect key values (dedupe by key)
+        for key, value in findings.get("key_values", {}).items():
+            if key not in all_key_values:
+                all_key_values[key] = {"value": value, "source": action_id}
+        
+        # Collect conflicts
+        for conflict in findings.get("conflicts", []):
+            all_conflicts.append(conflict)
+        
+        # Track review flags
+        if action_progress.get("review_flag"):
+            actions_with_flags.append({
+                "action_id": action_id,
+                "flag": action_progress["review_flag"]
+            })
+        
+        # Track high risk
+        if findings.get("risk_level") == "high":
+            high_risk_actions.append({
+                "action_id": action_id,
+                "summary": findings.get("summary", "")
+            })
+    
+    # Sort issues by risk level
+    risk_order = {"high": 0, "medium": 1, "low": 2}
+    all_issues.sort(key=lambda x: risk_order.get(x["risk_level"], 3))
+    
+    # Calculate overall risk
+    if high_risk_actions:
+        overall_risk = "high"
+    elif any(i["risk_level"] == "medium" for i in all_issues):
+        overall_risk = "medium"
+    else:
+        overall_risk = "low"
+    
+    # Generate summary text
+    summary_parts = []
+    if high_risk_actions:
+        summary_parts.append(f"⚠️ {len(high_risk_actions)} high-risk action(s) need attention")
+    if all_conflicts:
+        summary_parts.append(f"❗ {len(all_conflicts)} data conflict(s) detected")
+    if actions_with_flags:
+        summary_parts.append(f"🔄 {len(actions_with_flags)} action(s) flagged for review")
+    
+    total_complete = sum(1 for p in progress.values() if p.get("status") == "complete")
+    total_in_progress = sum(1 for p in progress.values() if p.get("status") == "in_progress")
+    
+    return {
+        "project_id": project_id,
+        "overall_risk": overall_risk,
+        "summary_text": " | ".join(summary_parts) if summary_parts else "No critical issues detected",
+        "stats": {
+            "actions_scanned": len(progress),
+            "actions_complete": total_complete,
+            "actions_in_progress": total_in_progress,
+            "total_issues": len(all_issues),
+            "total_recommendations": len(all_recommendations),
+            "total_conflicts": len(all_conflicts),
+            "actions_flagged": len(actions_with_flags)
+        },
+        "issues": all_issues[:20],  # Top 20
+        "recommendations": all_recommendations[:15],  # Top 15
+        "key_values": all_key_values,
+        "conflicts": all_conflicts,
+        "review_flags": actions_with_flags,
+        "high_risk_actions": high_risk_actions
+    }
 
 
 # ============================================================================
