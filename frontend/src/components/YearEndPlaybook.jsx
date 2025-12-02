@@ -47,6 +47,384 @@ const ACTION_DEPENDENCIES = {
 // Get parent actions for an action
 const getParentActions = (actionId) => ACTION_DEPENDENCIES[actionId] || [];
 
+// =============================================================================
+// AI SUMMARY DASHBOARD COMPONENT
+// =============================================================================
+function AISummaryDashboard({ summary, expanded, onToggle }) {
+  if (!summary) return null;
+  
+  const { overall_risk, summary_text, stats, issues, recommendations, conflicts, review_flags, high_risk_actions } = summary;
+  
+  const riskColors = {
+    high: { bg: '#fee2e2', border: '#fecaca', text: '#dc2626' },
+    medium: { bg: '#fef3c7', border: '#fcd34d', text: '#d97706' },
+    low: { bg: '#d1fae5', border: '#86efac', text: '#059669' }
+  };
+  
+  const riskStyle = riskColors[overall_risk] || riskColors.low;
+  
+  return (
+    <div style={{
+      background: riskStyle.bg,
+      border: `1px solid ${riskStyle.border}`,
+      borderRadius: '12px',
+      marginBottom: '1rem',
+      overflow: 'hidden'
+    }}>
+      <div 
+        onClick={onToggle}
+        style={{
+          padding: '1rem',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          cursor: 'pointer'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <span style={{ fontSize: '1.5rem' }}>
+            {overall_risk === 'high' ? '🚨' : overall_risk === 'medium' ? '⚠️' : '✅'}
+          </span>
+          <div>
+            <div style={{ fontWeight: '600', color: riskStyle.text }}>
+              AI Analysis Summary
+            </div>
+            <div style={{ fontSize: '0.85rem', color: COLORS.textLight }}>
+              {summary_text || 'No issues detected'}
+            </div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <div style={{ textAlign: 'right', fontSize: '0.8rem' }}>
+            <div><strong>{stats?.actions_scanned || 0}</strong> scanned</div>
+            <div><strong>{stats?.total_issues || 0}</strong> issues</div>
+          </div>
+          <span style={{ fontSize: '1.2rem' }}>{expanded ? '▼' : '▶'}</span>
+        </div>
+      </div>
+      
+      {expanded && (
+        <div style={{ padding: '0 1rem 1rem', borderTop: `1px solid ${riskStyle.border}` }}>
+          {/* High Risk Actions */}
+          {high_risk_actions?.length > 0 && (
+            <div style={{ marginTop: '0.75rem' }}>
+              <div style={{ fontWeight: '600', color: '#dc2626', marginBottom: '0.5rem' }}>
+                🚨 High Risk Actions:
+              </div>
+              {high_risk_actions.map((action, i) => (
+                <div key={i} style={{ 
+                  background: 'white', 
+                  padding: '0.5rem', 
+                  borderRadius: '6px', 
+                  marginBottom: '0.25rem',
+                  fontSize: '0.85rem'
+                }}>
+                  <strong>{action.action_id}:</strong> {action.summary}
+                </div>
+              ))}
+            </div>
+          )}
+          
+          {/* Conflicts */}
+          {conflicts?.length > 0 && (
+            <div style={{ marginTop: '0.75rem' }}>
+              <div style={{ fontWeight: '600', color: '#dc2626', marginBottom: '0.5rem' }}>
+                ❗ Data Conflicts:
+              </div>
+              {conflicts.map((conflict, i) => (
+                <div key={i} style={{ 
+                  background: 'white', 
+                  padding: '0.5rem', 
+                  borderRadius: '6px', 
+                  marginBottom: '0.25rem',
+                  fontSize: '0.85rem'
+                }}>
+                  {conflict.message}
+                </div>
+              ))}
+            </div>
+          )}
+          
+          {/* Review Flags */}
+          {review_flags?.length > 0 && (
+            <div style={{ marginTop: '0.75rem' }}>
+              <div style={{ fontWeight: '600', color: '#d97706', marginBottom: '0.5rem' }}>
+                🔄 Actions Needing Review:
+              </div>
+              {review_flags.map((flag, i) => (
+                <div key={i} style={{ 
+                  background: 'white', 
+                  padding: '0.5rem', 
+                  borderRadius: '6px', 
+                  marginBottom: '0.25rem',
+                  fontSize: '0.85rem'
+                }}>
+                  <strong>{flag.action_id}:</strong> {flag.flag?.reason}
+                </div>
+              ))}
+            </div>
+          )}
+          
+          {/* Top Issues */}
+          {issues?.length > 0 && (
+            <div style={{ marginTop: '0.75rem' }}>
+              <div style={{ fontWeight: '600', color: COLORS.text, marginBottom: '0.5rem' }}>
+                ⚠️ Issues ({issues.length}):
+              </div>
+              <div style={{ maxHeight: '150px', overflow: 'auto' }}>
+                {issues.slice(0, 10).map((issue, i) => (
+                  <div key={i} style={{ 
+                    background: 'white', 
+                    padding: '0.5rem', 
+                    borderRadius: '6px', 
+                    marginBottom: '0.25rem',
+                    fontSize: '0.8rem',
+                    display: 'flex',
+                    gap: '0.5rem'
+                  }}>
+                    <span style={{ 
+                      background: issue.risk_level === 'high' ? '#fee2e2' : '#fef3c7',
+                      padding: '0.1rem 0.4rem',
+                      borderRadius: '4px',
+                      fontSize: '0.7rem',
+                      fontWeight: '600'
+                    }}>
+                      {issue.action_id}
+                    </span>
+                    <span>{issue.issue}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          
+          {/* Top Recommendations */}
+          {recommendations?.length > 0 && (
+            <div style={{ marginTop: '0.75rem' }}>
+              <div style={{ fontWeight: '600', color: '#059669', marginBottom: '0.5rem' }}>
+                ✅ Recommendations ({recommendations.length}):
+              </div>
+              <div style={{ maxHeight: '120px', overflow: 'auto' }}>
+                {recommendations.slice(0, 8).map((rec, i) => (
+                  <div key={i} style={{ 
+                    background: 'white', 
+                    padding: '0.5rem', 
+                    borderRadius: '6px', 
+                    marginBottom: '0.25rem',
+                    fontSize: '0.8rem'
+                  }}>
+                    <span style={{ 
+                      background: '#d1fae5',
+                      padding: '0.1rem 0.4rem',
+                      borderRadius: '4px',
+                      fontSize: '0.7rem',
+                      fontWeight: '600',
+                      marginRight: '0.5rem'
+                    }}>
+                      {rec.action_id}
+                    </span>
+                    {rec.recommendation}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =============================================================================
+// DOCUMENT CHECKLIST SIDEBAR COMPONENT
+// =============================================================================
+function DocumentChecklistSidebar({ checklist, collapsed, onToggle }) {
+  if (!checklist) return null;
+  
+  const { checklist: docs, stats, processing_jobs } = checklist;
+  
+  const getStatusIcon = (status) => {
+    switch (status) {
+      case 'uploaded': return '✅';
+      case 'processing': return '⏳';
+      case 'missing': return '❌';
+      default: return '❓';
+    }
+  };
+  
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'uploaded': return '#059669';
+      case 'processing': return '#d97706';
+      case 'missing': return '#dc2626';
+      default: return '#6b7280';
+    }
+  };
+  
+  if (collapsed) {
+    return (
+      <div 
+        onClick={onToggle}
+        style={{
+          position: 'fixed',
+          right: 0,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          background: stats?.required_complete ? '#d1fae5' : '#fef3c7',
+          padding: '1rem 0.5rem',
+          borderRadius: '8px 0 0 8px',
+          cursor: 'pointer',
+          writingMode: 'vertical-rl',
+          textOrientation: 'mixed',
+          fontWeight: '600',
+          fontSize: '0.85rem',
+          boxShadow: '-2px 0 8px rgba(0,0,0,0.1)'
+        }}
+      >
+        📄 Documents ({stats?.total_uploaded || 0}/{stats?.total_documents || 0})
+      </div>
+    );
+  }
+  
+  return (
+    <div style={{
+      position: 'fixed',
+      right: 0,
+      top: '100px',
+      width: '280px',
+      maxHeight: 'calc(100vh - 150px)',
+      background: 'white',
+      borderRadius: '12px 0 0 12px',
+      boxShadow: '-4px 0 16px rgba(0,0,0,0.1)',
+      overflow: 'hidden',
+      zIndex: 100
+    }}>
+      {/* Header */}
+      <div style={{
+        padding: '1rem',
+        background: stats?.required_complete ? '#d1fae5' : '#fef3c7',
+        borderBottom: '1px solid #e1e8ed',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center'
+      }}>
+        <div>
+          <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>📄 Document Checklist</div>
+          <div style={{ fontSize: '0.75rem', color: COLORS.textLight }}>
+            {stats?.total_uploaded || 0} of {stats?.total_documents || 0} uploaded
+          </div>
+        </div>
+        <button 
+          onClick={onToggle}
+          style={{
+            background: 'none',
+            border: 'none',
+            fontSize: '1.2rem',
+            cursor: 'pointer'
+          }}
+        >
+          ✕
+        </button>
+      </div>
+      
+      {/* Progress bar */}
+      <div style={{ padding: '0.5rem 1rem', background: '#f9fafb' }}>
+        <div style={{
+          height: '8px',
+          background: '#e1e8ed',
+          borderRadius: '4px',
+          overflow: 'hidden'
+        }}>
+          <div style={{
+            height: '100%',
+            width: `${((stats?.total_uploaded || 0) / (stats?.total_documents || 1)) * 100}%`,
+            background: stats?.required_complete ? COLORS.grassGreen : '#d97706',
+            borderRadius: '4px',
+            transition: 'width 0.3s ease'
+          }} />
+        </div>
+      </div>
+      
+      {/* Processing jobs */}
+      {processing_jobs?.length > 0 && (
+        <div style={{ padding: '0.5rem 1rem', background: '#fffbeb', borderBottom: '1px solid #fcd34d' }}>
+          <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#d97706', marginBottom: '0.25rem' }}>
+            ⏳ Processing:
+          </div>
+          {processing_jobs.map((job, i) => (
+            <div key={i} style={{ fontSize: '0.75rem', marginBottom: '0.25rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>{job.filename?.slice(0, 25)}{job.filename?.length > 25 ? '...' : ''}</span>
+                <span>{job.progress || 0}%</span>
+              </div>
+              <div style={{
+                height: '4px',
+                background: '#fcd34d',
+                borderRadius: '2px',
+                overflow: 'hidden'
+              }}>
+                <div style={{
+                  height: '100%',
+                  width: `${job.progress || 0}%`,
+                  background: '#d97706',
+                  transition: 'width 0.3s ease'
+                }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      
+      {/* Document list */}
+      <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 350px)' }}>
+        {docs?.map((doc, i) => (
+          <div 
+            key={i}
+            style={{
+              padding: '0.75rem 1rem',
+              borderBottom: '1px solid #f3f4f6',
+              display: 'flex',
+              gap: '0.5rem',
+              alignItems: 'flex-start'
+            }}
+          >
+            <span style={{ fontSize: '1rem' }}>{getStatusIcon(doc.status)}</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ 
+                fontWeight: doc.required ? '600' : '400',
+                fontSize: '0.8rem',
+                color: getStatusColor(doc.status)
+              }}>
+                {doc.document_name}
+                {doc.required && <span style={{ color: '#dc2626' }}> *</span>}
+              </div>
+              <div style={{ fontSize: '0.7rem', color: COLORS.textLight }}>
+                {doc.status === 'uploaded' && doc.matched_file 
+                  ? `✓ ${doc.matched_file.slice(0, 30)}${doc.matched_file.length > 30 ? '...' : ''}`
+                  : doc.status === 'processing'
+                  ? 'Processing...'
+                  : `Actions: ${doc.actions?.join(', ')}`
+                }
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      
+      {/* Required indicator */}
+      <div style={{ 
+        padding: '0.5rem 1rem', 
+        background: '#f9fafb', 
+        borderTop: '1px solid #e1e8ed',
+        fontSize: '0.7rem',
+        color: COLORS.textLight 
+      }}>
+        <span style={{ color: '#dc2626' }}>*</span> = Required document
+      </div>
+    </div>
+  );
+}
+
 // Action Card Component
 function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
   const [expanded, setExpanded] = useState(false);
@@ -547,6 +925,45 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
               <span>Using data from action{progress.inherited_from.length > 1 ? 's' : ''}: <strong>{progress.inherited_from.join(', ')}</strong></span>
             </div>
           )}
+          
+          {/* Show review flag warning if action was impacted by new data */}
+          {progress?.review_flag && (
+            <div style={{ 
+              background: '#fef3c7', 
+              padding: '0.75rem', 
+              borderRadius: '6px', 
+              marginBottom: '0.75rem',
+              fontSize: '0.85rem',
+              color: '#92400e',
+              border: '1px solid #fcd34d'
+            }}>
+              <div style={{ fontWeight: '600', marginBottom: '0.25rem' }}>
+                🔄 Review Recommended
+              </div>
+              <div>{progress.review_flag.reason}</div>
+              <div style={{ fontSize: '0.75rem', marginTop: '0.25rem', color: '#b45309' }}>
+                Triggered by update to action {progress.review_flag.triggered_by}
+              </div>
+            </div>
+          )}
+          
+          {/* Show guidance for dependent actions */}
+          {findings?.is_dependent && findings?.guidance && (
+            <div style={styles.section}>
+              <div style={styles.sectionTitle}>📋 Action Guidance</div>
+              <div style={{
+                background: '#f0f9ff',
+                border: '1px solid #bae6fd',
+                borderRadius: '8px',
+                padding: '1rem',
+                fontSize: '0.85rem',
+                lineHeight: '1.6',
+                whiteSpace: 'pre-wrap'
+              }}>
+                {findings.guidance}
+              </div>
+            </div>
+          )}
 
           {findings && typeof findings === 'object' && (
             <div style={styles.section}>
@@ -765,13 +1182,35 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeProgress, setAnalyzeProgress] = useState({ current: 0, total: 0 });
   const [activePhase, setActivePhase] = useState('all');
+  
+  // NEW: Document checklist and AI summary state
+  const [docChecklist, setDocChecklist] = useState(null);
+  const [aiSummary, setAiSummary] = useState(null);
+  const [summaryExpanded, setSummaryExpanded] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // SAFETY: Only load if project exists
   useEffect(() => {
     if (project?.id) {
       loadPlaybook();
+      loadDocChecklist();
+      loadAiSummary();
     }
   }, [project]);
+  
+  // Poll for processing jobs updates
+  useEffect(() => {
+    if (!project?.id) return;
+    
+    const interval = setInterval(() => {
+      // Only poll if there are processing jobs
+      if (docChecklist?.processing_jobs?.length > 0) {
+        loadDocChecklist();
+      }
+    }, 3000); // Poll every 3 seconds
+    
+    return () => clearInterval(interval);
+  }, [project?.id, docChecklist?.processing_jobs?.length]);
 
   const loadPlaybook = async () => {
     setLoading(true);
@@ -788,6 +1227,29 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
     } finally {
       setLoading(false);
     }
+  };
+  
+  const loadDocChecklist = async () => {
+    try {
+      const res = await api.get(`/playbooks/year-end/document-checklist/${project.id}`);
+      setDocChecklist(res.data);
+    } catch (err) {
+      console.error('Failed to load document checklist:', err);
+    }
+  };
+  
+  const loadAiSummary = async () => {
+    try {
+      const res = await api.get(`/playbooks/year-end/summary/${project.id}`);
+      setAiSummary(res.data);
+    } catch (err) {
+      console.error('Failed to load AI summary:', err);
+    }
+  };
+  
+  // Refresh all data
+  const refreshAll = async () => {
+    await Promise.all([loadPlaybook(), loadDocChecklist(), loadAiSummary()]);
   };
 
   const handleUpdate = (actionId, updates) => {
@@ -850,9 +1312,8 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       const res = await api.post(`/playbooks/year-end/scan-all/${project.id}`);
       const results = res.data;
       
-      // Reload progress to show updated findings
-      const progressRes = await api.get(`/playbooks/year-end/progress/${project.id}`);
-      setProgress(progressRes.data.progress || {});
+      // Reload all data to show updated findings
+      await refreshAll();
       
       const successful = results.successful || 0;
       const failed = results.failed || 0;
@@ -1041,85 +1502,102 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   }
 
   return (
-    <div style={styles.container}>
-      {/* Header */}
-      <div style={styles.header}>
-        <div style={styles.titleSection}>
-          <h1 style={styles.title}>📅 Year-End Checklist</h1>
-          <p style={styles.subtitle}>
-            {customerName || 'Customer'} → {projectName || 'Project'}
-          </p>
+    <div style={{ display: 'flex' }}>
+      {/* Main Content */}
+      <div style={{ ...styles.container, marginRight: sidebarCollapsed ? '40px' : '300px', transition: 'margin-right 0.3s ease' }}>
+        {/* Header */}
+        <div style={styles.header}>
+          <div style={styles.titleSection}>
+            <h1 style={styles.title}>📅 Year-End Checklist</h1>
+            <p style={styles.subtitle}>
+              {customerName || 'Customer'} → {projectName || 'Project'}
+            </p>
+          </div>
+          <div style={styles.headerActions}>
+            <button style={styles.backBtn} onClick={onClose}>
+              ← Back
+            </button>
+            <button 
+              style={styles.analyzeAllBtn} 
+              onClick={handleAnalyzeAll}
+              disabled={analyzing}
+              title="Analyze all uploaded documents for the entire playbook"
+            >
+              {analyzing ? '⏳ Analyzing...' : '🔍 Analyze All'}
+            </button>
+            <button 
+              style={styles.resetBtn} 
+              onClick={handleReset}
+              title="Reset all progress for this project"
+            >
+              🔄 Reset
+            </button>
+            <button style={styles.exportBtn} onClick={handleExport} disabled={exporting}>
+              {exporting ? '⏳ Exporting...' : '📥 Export Progress'}
+            </button>
+          </div>
         </div>
-        <div style={styles.headerActions}>
-          <button style={styles.backBtn} onClick={onClose}>
-            ← Back
-          </button>
-          <button 
-            style={styles.analyzeAllBtn} 
-            onClick={handleAnalyzeAll}
-            disabled={analyzing}
-            title="Analyze all uploaded documents for the entire playbook"
-          >
-            {analyzing ? '⏳ Analyzing...' : '🔍 Analyze All'}
-          </button>
-          <button 
-            style={styles.resetBtn} 
-            onClick={handleReset}
-            title="Reset all progress for this project"
-          >
-            🔄 Reset
-          </button>
-          <button style={styles.exportBtn} onClick={handleExport} disabled={exporting}>
-            {exporting ? '⏳ Exporting...' : '📥 Export Progress'}
-          </button>
-        </div>
-      </div>
-
-      {/* Progress Card */}
-      <div style={styles.progressCard}>
-        <div style={styles.progressBar}>
-          <div style={styles.progressFill} />
-        </div>
-        <div style={styles.progressStats}>
-          <span style={styles.progressText}>
-            {completedActions} of {totalActions} actions complete
-          </span>
-          <span style={styles.progressPercent}>{progressPercent}%</span>
-        </div>
-      </div>
-
-      {/* Phase Filter */}
-      <div style={styles.phaseFilter}>
-        <button 
-          style={styles.phaseBtn(activePhase === 'all')} 
-          onClick={() => setActivePhase('all')}
-        >
-          All Steps
-        </button>
-        <button 
-          style={styles.phaseBtn(activePhase === 'before_final_payroll')} 
-          onClick={() => setActivePhase('before_final_payroll')}
-        >
-          Before Final Payroll
-        </button>
-        <button 
-          style={styles.phaseBtn(activePhase === 'after_final_payroll')} 
-          onClick={() => setActivePhase('after_final_payroll')}
-        >
-          After Final Payroll
-        </button>
-      </div>
-
-      {/* Steps */}
-      {filteredSteps.map(step => (
-        <StepAccordion
-          key={step.step_number || Math.random()}
-          step={step}
-          progress={progress}
-          projectId={project.id}
-          onUpdate={handleUpdate}
+        
+        {/* AI Summary Dashboard */}
+        <AISummaryDashboard 
+          summary={aiSummary} 
+          expanded={summaryExpanded} 
+          onToggle={() => setSummaryExpanded(!summaryExpanded)} 
         />
-      ))}
+
+        {/* Progress Card */}
+        <div style={styles.progressCard}>
+          <div style={styles.progressBar}>
+            <div style={styles.progressFill} />
+          </div>
+          <div style={styles.progressStats}>
+            <span style={styles.progressText}>
+              {completedActions} of {totalActions} actions complete
+            </span>
+            <span style={styles.progressPercent}>{progressPercent}%</span>
+          </div>
+        </div>
+
+        {/* Phase Filter */}
+        <div style={styles.phaseFilter}>
+          <button 
+            style={styles.phaseBtn(activePhase === 'all')} 
+            onClick={() => setActivePhase('all')}
+          >
+            All Steps
+          </button>
+          <button 
+            style={styles.phaseBtn(activePhase === 'before_final_payroll')} 
+            onClick={() => setActivePhase('before_final_payroll')}
+          >
+            Before Final Payroll
+          </button>
+          <button 
+            style={styles.phaseBtn(activePhase === 'after_final_payroll')} 
+            onClick={() => setActivePhase('after_final_payroll')}
+          >
+            After Final Payroll
+          </button>
+        </div>
+
+        {/* Steps */}
+        {filteredSteps.map(step => (
+          <StepAccordion
+            key={step.step_number || Math.random()}
+            step={step}
+            progress={progress}
+            projectId={project.id}
+            onUpdate={handleUpdate}
+          />
+        ))}
+      </div>
+      
+      {/* Document Checklist Sidebar */}
+      <DocumentChecklistSidebar 
+        checklist={docChecklist} 
+        collapsed={sidebarCollapsed} 
+        onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} 
+      />
     </div>
   );
 }
