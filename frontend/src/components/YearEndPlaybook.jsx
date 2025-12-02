@@ -35,6 +35,18 @@ const STATUS_OPTIONS = [
   { value: 'blocked', label: 'Blocked', color: '#dc2626', bg: '#fee2e2' },
 ];
 
+// Action dependencies - which actions inherit from which
+const ACTION_DEPENDENCIES = {
+  "2B": ["2A"], "2C": ["2A"], "2E": ["2A"],
+  "2H": ["2F", "2G"], "2J": ["2G"], "2K": ["2G"], "2L": ["2G", "2J"],
+  "3B": ["3A"], "3C": ["3A"], "3D": ["3A"],
+  "5B": ["5A"], "5E": ["5C", "5D"],
+  "6B": ["6A"], "6C": ["6A"],
+};
+
+// Get parent actions for an action
+const getParentActions = (actionId) => ACTION_DEPENDENCIES[actionId] || [];
+
 // Action Card Component
 function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
   const [expanded, setExpanded] = useState(false);
@@ -457,6 +469,29 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
             </div>
           )}
 
+          {/* Show dependency info if this action inherits from others */}
+          {(() => {
+            const parents = getParentActions(action.action_id);
+            if (parents.length > 0 && reportsNeeded.length === 0) {
+              return (
+                <div style={{
+                  background: '#eff6ff',
+                  border: '1px solid #bfdbfe',
+                  padding: '0.6rem 0.75rem',
+                  borderRadius: '6px',
+                  marginBottom: '0.75rem',
+                  fontSize: '0.8rem',
+                  color: '#1e40af',
+                }}>
+                  <span style={{ marginRight: '0.5rem' }}>💡</span>
+                  <strong>No upload needed</strong> - This action uses data from action{parents.length > 1 ? 's' : ''} {parents.join(', ')}. 
+                  Click "Scan Documents" to analyze.
+                </div>
+              );
+            }
+            return null;
+          })()}
+
           <div style={styles.section}>
             <div style={styles.buttonRow}>
               <input
@@ -495,17 +530,53 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
             </div>
           )}
 
+          {/* Show inherited indicator if applicable */}
+          {progress?.inherited_from && progress.inherited_from.length > 0 && (
+            <div style={{ 
+              background: '#e0f2fe', 
+              padding: '0.5rem 0.75rem', 
+              borderRadius: '6px', 
+              marginBottom: '0.75rem',
+              fontSize: '0.8rem',
+              color: '#0369a1',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem'
+            }}>
+              <span>🔗</span>
+              <span>Using data from action{progress.inherited_from.length > 1 ? 's' : ''}: <strong>{progress.inherited_from.join(', ')}</strong></span>
+            </div>
+          )}
+
           {findings && typeof findings === 'object' && (
             <div style={styles.section}>
-              <div style={styles.sectionTitle}>AI Findings</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={styles.sectionTitle}>AI Analysis</div>
+                {findings.risk_level && (
+                  <span style={{
+                    padding: '0.2rem 0.6rem',
+                    borderRadius: '12px',
+                    fontSize: '0.7rem',
+                    fontWeight: '600',
+                    textTransform: 'uppercase',
+                    background: findings.risk_level === 'high' ? '#fee2e2' : 
+                               findings.risk_level === 'medium' ? '#fef3c7' : '#d1fae5',
+                    color: findings.risk_level === 'high' ? '#dc2626' : 
+                           findings.risk_level === 'medium' ? '#d97706' : '#059669',
+                  }}>
+                    {findings.risk_level} risk
+                  </span>
+                )}
+              </div>
               <div style={styles.findingsBox}>
                 {findings.summary && (
-                  <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.85rem' }}>
+                  <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.85rem', lineHeight: '1.5' }}>
                     {typeof findings.summary === 'string' ? findings.summary : JSON.stringify(findings.summary)}
                   </p>
                 )}
                 {findings.key_values && typeof findings.key_values === 'object' && !Array.isArray(findings.key_values) && Object.keys(findings.key_values).length > 0 && (
-                  <div style={{ marginBottom: '0.5rem' }}>
+                  <div style={{ marginBottom: '0.75rem' }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#374151', marginBottom: '0.3rem' }}>Key Values:</div>
                     {Object.entries(findings.key_values).map(([key, val]) => (
                       <div key={key} style={styles.keyValue}>
                         <span style={styles.keyLabel}>{String(key)}:</span>
@@ -517,13 +588,28 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate }) {
                   </div>
                 )}
                 {Array.isArray(findings.issues) && findings.issues.length > 0 && (
-                  <ul style={styles.issuesList}>
-                    {findings.issues.map((issue, i) => (
-                      <li key={i} style={styles.issue}>
-                        ⚠️ {typeof issue === 'string' ? issue : JSON.stringify(issue)}
-                      </li>
-                    ))}
-                  </ul>
+                  <div style={{ marginBottom: '0.75rem' }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#dc2626', marginBottom: '0.3rem' }}>⚠️ Issues to Address:</div>
+                    <ul style={styles.issuesList}>
+                      {findings.issues.map((issue, i) => (
+                        <li key={i} style={styles.issue}>
+                          {typeof issue === 'string' ? issue : JSON.stringify(issue)}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {Array.isArray(findings.recommendations) && findings.recommendations.length > 0 && (
+                  <div style={{ marginBottom: '0.5rem' }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#059669', marginBottom: '0.3rem' }}>✅ Recommendations:</div>
+                    <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.8rem' }}>
+                      {findings.recommendations.map((rec, i) => (
+                        <li key={i} style={{ marginBottom: '0.3rem', color: '#065f46' }}>
+                          {typeof rec === 'string' ? rec : JSON.stringify(rec)}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
               </div>
             </div>
@@ -676,6 +762,8 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   const [progress, setProgress] = useState({});
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeProgress, setAnalyzeProgress] = useState({ current: 0, total: 0 });
   const [activePhase, setActivePhase] = useState('all');
 
   // SAFETY: Only load if project exists
@@ -750,6 +838,38 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
     }
   };
 
+  const handleAnalyzeAll = async () => {
+    if (!window.confirm('Analyze all documents for this playbook? This may take 1-2 minutes.')) {
+      return;
+    }
+    
+    setAnalyzing(true);
+    setAnalyzeProgress({ current: 0, total: 0 });
+    
+    try {
+      const res = await api.post(`/playbooks/year-end/scan-all/${project.id}`);
+      const results = res.data;
+      
+      // Reload progress to show updated findings
+      const progressRes = await api.get(`/playbooks/year-end/progress/${project.id}`);
+      setProgress(progressRes.data.progress || {});
+      
+      const successful = results.successful || 0;
+      const failed = results.failed || 0;
+      
+      if (failed > 0) {
+        alert(`Analysis complete: ${successful} actions analyzed, ${failed} failed. Some actions may need manual review.`);
+      } else {
+        alert(`Analysis complete: ${successful} actions analyzed successfully!`);
+      }
+    } catch (err) {
+      console.error('Analyze all failed:', err);
+      alert('Analysis failed. Please try again.');
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
   // Calculate progress stats
   const totalActions = structure?.total_actions || 0;
   const completedActions = Object.values(progress).filter(p => 
@@ -821,6 +941,18 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       color: 'white',
       fontWeight: '600',
       cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.5rem',
+    },
+    analyzeAllBtn: {
+      padding: '0.5rem 1rem',
+      background: analyzing ? '#9ca3af' : '#3b82f6',
+      border: 'none',
+      borderRadius: '8px',
+      color: 'white',
+      fontWeight: '600',
+      cursor: analyzing ? 'not-allowed' : 'pointer',
       display: 'flex',
       alignItems: 'center',
       gap: '0.5rem',
@@ -921,6 +1053,14 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
         <div style={styles.headerActions}>
           <button style={styles.backBtn} onClick={onClose}>
             ← Back
+          </button>
+          <button 
+            style={styles.analyzeAllBtn} 
+            onClick={handleAnalyzeAll}
+            disabled={analyzing}
+            title="Analyze all uploaded documents for the entire playbook"
+          >
+            {analyzing ? '⏳ Analyzing...' : '🔍 Analyze All'}
           </button>
           <button 
             style={styles.resetBtn} 
