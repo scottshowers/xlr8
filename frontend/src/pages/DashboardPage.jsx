@@ -659,7 +659,7 @@ export default function DashboardPage() {
                 <span style={styles.actionLabel}>Upload Files</span>
               </Link>
               <Link to="/workspace" style={styles.actionCard('#F3E5F5')}>
-                <span style={styles.actionIcon}>🐄</span>
+                <span style={styles.actionIcon}>🐮</span>
                 <span style={styles.actionLabel}>AI Assist</span>
               </Link>
               <Link to="/playbooks" style={styles.actionCard('#FFF3E0')}>
