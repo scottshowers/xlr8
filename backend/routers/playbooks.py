@@ -31,6 +31,75 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/playbooks", tags=["playbooks"])
 
+
+# =============================================================================
+# PII SANITIZATION - Redact sensitive data before sending to Claude
+# =============================================================================
+
+class PIISanitizer:
+    """
+    Sanitizes PII from text before sending to Claude.
+    Redacts SSN, phone, email, DOB, and converts salaries to ranges.
+    """
+    
+    SSN_PATTERN = r'\b\d{3}[-\s]?\d{2}[-\s]?\d{4}\b'
+    PHONE_PATTERN = r'\b(?:\+1[-\s]?)?\(?\d{3}\)?[-\s]?\d{3}[-\s]?\d{4}\b'
+    EMAIL_PATTERN = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+    DOB_PATTERN = r'\b(?:0?[1-9]|1[0-2])[/-](?:0?[1-9]|[12]\d|3[01])[/-](?:19|20)\d{2}\b'
+    SALARY_PATTERN = r'\$[\d,]+(?:\.\d{2})?'
+    BANK_ACCOUNT_PATTERN = r'\b\d{8,17}\b(?=.*(?:account|acct|routing|aba))'
+    
+    def __init__(self):
+        self.redaction_count = 0
+    
+    def _salary_to_range(self, match) -> str:
+        try:
+            amount = float(match.group(0).replace('$', '').replace(',', ''))
+            if amount < 30000: return "[under $30K]"
+            elif amount < 50000: return "[$30K-50K]"
+            elif amount < 75000: return "[$50K-75K]"
+            elif amount < 100000: return "[$75K-100K]"
+            elif amount < 150000: return "[$100K-150K]"
+            else: return "[$150K+]"
+        except:
+            return "[SALARY]"
+    
+    def sanitize(self, text: str) -> str:
+        """Remove PII patterns from text before sending to Claude."""
+        if not text:
+            return text
+        
+        self.redaction_count = 0
+        result = text
+        
+        # Redact patterns
+        patterns = [
+            (self.SSN_PATTERN, '[SSN-REDACTED]'),
+            (self.PHONE_PATTERN, '[PHONE-REDACTED]'),
+            (self.EMAIL_PATTERN, '[EMAIL-REDACTED]'),
+            (self.DOB_PATTERN, '[DOB-REDACTED]'),
+            (self.BANK_ACCOUNT_PATTERN, '[ACCOUNT-REDACTED]'),
+        ]
+        
+        for pattern, replacement in patterns:
+            matches = re.findall(pattern, result, re.IGNORECASE)
+            if matches:
+                self.redaction_count += len(matches)
+                result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
+        
+        # Convert salaries to ranges (preserves context while hiding exact amounts)
+        result = re.sub(self.SALARY_PATTERN, self._salary_to_range, result)
+        
+        return result
+    
+    def get_redaction_count(self) -> int:
+        return self.redaction_count
+
+
+# Global sanitizer instance
+_pii_sanitizer = PIISanitizer()
+
+
 # Persistent progress storage location
 PROGRESS_FILE = "/data/playbook_progress.json"
 
@@ -1686,22 +1755,41 @@ async def search_duckdb_for_action(
 # ============================================================================
 
 @router.post("/year-end/scan/{project_id}/{action_id}")
-async def scan_for_action(project_id: str, action_id: str):
+async def scan_for_action(project_id: str, action_id: str, force_refresh: bool = False):
     """
     Scan project documents for content relevant to a specific action.
     
     ENHANCED FEATURES:
+    - CACHING: Returns cached findings if docs haven't changed (instant)
     - Inherits documents/findings from parent actions (no re-upload needed)
     - For DEPENDENT actions: Skip redundant scan, provide guidance only
     - Uses consultative AI with industry benchmarks
     - Detects conflicts with existing data
     - Flags impacted actions when new data arrives
     - Auto-completes when all conditions met
+    
+    Args:
+        force_refresh: If True, skip cache and re-analyze
     """
-    logger.warning(f"[SCAN] >>> Starting scan for project={project_id}, action={action_id}")
+    logger.warning(f"[SCAN] >>> Starting scan for project={project_id}, action={action_id}, force={force_refresh}")
     
     try:
         from utils.rag_handler import RAGHandler
+        import hashlib
+        
+        # =====================================================================
+        # CACHE CHECK - Return cached findings if docs haven't changed
+        # =====================================================================
+        if not force_refresh:
+            progress = PLAYBOOK_PROGRESS.get(project_id, {})
+            action_progress = progress.get(action_id, {})
+            cached_findings = action_progress.get('findings')
+            cached_doc_hash = action_progress.get('doc_hash')
+            
+            if cached_findings and cached_doc_hash:
+                logger.warning(f"[SCAN] Found cached findings for {action_id}, checking if docs changed...")
+                # This is a quick check - if hash matches, return cached instantly
+                # We'll compute current hash after getting docs below
         
         # Get action details from structure
         structure = await get_year_end_structure()
@@ -1912,6 +2000,33 @@ async def scan_for_action(project_id: str, action_id: str):
         
         logger.warning(f"[SCAN] Total matched sources (ChromaDB + DuckDB): {len(found_docs)}")
         
+        # =====================================================================
+        # CACHE CHECK - Skip Claude if docs haven't changed
+        # =====================================================================
+        current_doc_list = sorted([d['filename'] for d in found_docs])
+        current_doc_hash = hashlib.md5(json.dumps(current_doc_list).encode()).hexdigest()[:12]
+        
+        if not force_refresh:
+            progress = PLAYBOOK_PROGRESS.get(project_id, {})
+            action_progress = progress.get(action_id, {})
+            cached_findings = action_progress.get('findings')
+            cached_doc_hash = action_progress.get('doc_hash')
+            
+            if cached_findings and cached_doc_hash == current_doc_hash:
+                logger.warning(f"[SCAN] ⚡ CACHE HIT - returning cached findings for {action_id}")
+                return {
+                    "found": len(found_docs) > 0,
+                    "documents": found_docs,
+                    "findings": cached_findings,
+                    "suggested_status": action_progress.get('status', 'in_progress'),
+                    "inherited_from": action_progress.get('inherited_from'),
+                    "conflicts": cached_findings.get('conflicts', []),
+                    "cached": True
+                }
+            else:
+                if cached_findings:
+                    logger.warning(f"[SCAN] Cache MISS - docs changed (old={cached_doc_hash}, new={current_doc_hash})")
+        
         # Determine findings and suggested status
         findings = None
         suggested_status = "not_started"
@@ -1972,6 +2087,7 @@ async def scan_for_action(project_id: str, action_id: str):
             "status": final_status,
             "findings": findings,
             "documents_found": [d['filename'] for d in found_docs],
+            "doc_hash": current_doc_hash,  # For cache validation
             "inherited_from": parent_actions if parent_actions else None,
             "last_scan": datetime.now().isoformat(),
             "notes": PLAYBOOK_PROGRESS.get(project_id, {}).get(action_id, {}).get("notes"),
@@ -2233,6 +2349,12 @@ async def extract_findings_consultative(
         
         combined = "\n\n---\n\n".join(content)
         
+        # SANITIZE PII before sending to Claude
+        sanitized_content = _pii_sanitizer.sanitize(combined)
+        redaction_count = _pii_sanitizer.get_redaction_count()
+        if redaction_count > 0:
+            logger.warning(f"[AI] Sanitized {redaction_count} PII patterns from content")
+        
         # Get action-specific consultative context
         consultative_context = CONSULTATIVE_PROMPTS.get(action_id, CONSULTATIVE_PROMPTS["DEFAULT"])
         
@@ -2262,7 +2384,7 @@ INHERITED DATA FROM PREVIOUS ACTIONS:
 ''' if inherited_context else ''}
 
 <documents>
-{combined[:20000]}
+{sanitized_content[:20000]}
 </documents>
 
 {consultative_context}
@@ -2273,7 +2395,8 @@ Based on the documents and your UKG/Payroll expertise, provide:
 2. COMPARE to benchmarks where applicable (flag HIGH/LOW/UNUSUAL)
 3. IDENTIFY risks, issues, or items needing attention
 4. RECOMMEND specific actions the customer should take
-5. ASSESS completeness - can this action be marked complete?
+5. PROVIDE step-by-step guidance for completing THIS SPECIFIC ACTION
+6. ASSESS completeness - can this action be marked complete?
 
 Return as JSON:
 {{
@@ -2281,9 +2404,16 @@ Return as JSON:
     "key_values": {{"label": "value"}},
     "issues": ["list of concerns - be specific"],
     "recommendations": ["specific actions to take"],
+    "guidance": ["Step 1: ...", "Step 2: ...", "Step 3: ..."],
     "risk_level": "low|medium|high",
     "summary": "2-3 sentence consultative summary with specific observations"
 }}
+
+IMPORTANT for guidance field:
+- Provide 3-5 concrete steps the consultant should take to complete THIS action
+- Be specific to THIS action ({action['action_id']}) - not general advice
+- Reference specific values or documents where relevant
+- If this action depends on data from previous actions, focus on what's NEW for this step
 
 Be specific and actionable. Reference actual values from the documents.
 If rates are high/low compared to benchmarks, say so explicitly.
