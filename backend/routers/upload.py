@@ -545,7 +545,7 @@ def process_file_background(
                         DocumentRegistryModel.register(
                             filename=filename,
                             file_type='pdf',
-                            storage_type=DocumentRegistryModel.STORAGE_BOTH,  # DuckDB + ChromaDB
+                            storage_type=DocumentRegistryModel.STORAGE_DUCKDB,  # Primary storage
                             usage_type=DocumentRegistryModel.USAGE_STRUCTURED_DATA,
                             project_id=project_id,
                             is_global=project.lower() in ['global', '__global__'],
@@ -692,7 +692,7 @@ def process_file_background(
                 filename=filename,
                 file_type=file_ext,
                 storage_type=DocumentRegistryModel.STORAGE_CHROMADB,
-                usage_type=DocumentRegistryModel.USAGE_NARRATIVE,
+                usage_type=DocumentRegistryModel.USAGE_RAG_KNOWLEDGE,
                 project_id=project_id if not is_global else None,
                 is_global=is_global,
                 chunk_count=len(text) // 500,  # Approximate
@@ -800,11 +800,16 @@ async def upload_file(
         logger.info(f"[UPLOAD] Saved {file.filename} ({file_size} bytes) to {file_path}")
         
         # Create job record
-        job_id = ProcessingJobModel.create(
+        job_result = ProcessingJobModel.create(
             job_type='upload',
             project_id=project_id,
             input_data={'filename': file.filename, 'functional_area': functional_area, 'project_name': project}
         )
+        
+        if not job_result:
+            raise HTTPException(status_code=500, detail="Failed to create processing job")
+        
+        job_id = job_result['id']
         
         logger.info(f"[UPLOAD] Created job {job_id} for project_id={project_id}")
         
