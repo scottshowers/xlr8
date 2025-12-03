@@ -123,6 +123,9 @@ class SmartPDFAnalyzer:
                 # Calculate metrics
                 table_ratio = len(table_pages) / total_pages if total_pages > 0 else 0
                 
+                logger.warning(f"[SMART-PDF] Pages analyzed: {total_pages}, Table pages: {len(table_pages)}, Table ratio: {table_ratio:.2f}")
+                logger.warning(f"[SMART-PDF] Total tables found: {len(all_tables)}")
+                
                 # Check column consistency (same table structure across pages)
                 column_consistent = False
                 if column_signatures:
@@ -151,6 +154,8 @@ class SmartPDFAnalyzer:
                     recommendation = 'both'
                 else:
                     recommendation = 'chromadb'
+                
+                logger.warning(f"[SMART-PDF] Decision: is_tabular={is_tabular}, is_text={is_text}, is_mixed={is_mixed} -> {recommendation}")
                 
                 # Combine tables if they have consistent structure
                 combined_df = None
@@ -202,8 +207,10 @@ class SmartPDFAnalyzer:
         }
         
         try:
-            # Try to extract tables
+            # Try to extract tables using pdfplumber's built-in detection
             tables = page.extract_tables()
+            
+            logger.warning(f"[SMART-PDF] Page {page_num}: pdfplumber found {len(tables) if tables else 0} raw tables")
             
             if tables:
                 for table in tables:
@@ -219,6 +226,14 @@ class SmartPDFAnalyzer:
             
             # Extract text
             text = page.extract_text() or ''
+            
+            # FALLBACK: If no tables found, try to detect columnar structure in text
+            if not result['has_table'] and text:
+                columnar_df = self._detect_columnar_text(text, page_num)
+                if columnar_df is not None and len(columnar_df) >= 3:  # At least 3 data rows
+                    result['tables'].append(columnar_df)
+                    result['has_table'] = True
+                    logger.warning(f"[SMART-PDF] Page {page_num}: Detected columnar text -> {len(columnar_df)} rows")
             
             # Check if text is substantial (not just table leftovers)
             # Remove numbers and punctuation to check for real text
@@ -238,6 +253,82 @@ class SmartPDFAnalyzer:
             logger.debug(f"[SMART-PDF] Page {page_num} analysis error: {e}")
         
         return result
+    
+    def _detect_columnar_text(self, text: str, page_num: int) -> Optional[pd.DataFrame]:
+        """
+        Detect columnar/tabular data in plain text.
+        
+        Works for:
+        - Space-aligned columns (fixed width)
+        - Tab-separated data
+        - Consistent field patterns
+        """
+        lines = text.strip().split('\n')
+        if len(lines) < 3:  # Need header + at least 2 data rows
+            return None
+        
+        # Strategy 1: Detect by consistent whitespace positions
+        # Find lines that look like data rows (contain numbers)
+        data_lines = []
+        potential_header = None
+        
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Check if line has numeric content (likely a data row)
+            has_numbers = bool(re.search(r'\d+\.?\d*', line))
+            
+            # Check if line has multiple "columns" (separated by 2+ spaces or tabs)
+            parts = re.split(r'\s{2,}|\t', line)
+            parts = [p.strip() for p in parts if p.strip()]
+            
+            if len(parts) >= 3:  # At least 3 columns
+                if has_numbers:
+                    data_lines.append((i, parts))
+                elif potential_header is None and i < 5:  # Likely header in first few lines
+                    potential_header = (i, parts)
+        
+        if len(data_lines) < 3:  # Not enough data rows
+            return None
+        
+        # Check column count consistency
+        col_counts = [len(parts) for _, parts in data_lines]
+        most_common_cols = max(set(col_counts), key=col_counts.count)
+        
+        # Filter to rows with consistent column count
+        consistent_rows = [(i, parts) for i, parts in data_lines if len(parts) == most_common_cols]
+        
+        if len(consistent_rows) < 3:
+            return None
+        
+        # Build DataFrame
+        try:
+            data = [parts for _, parts in consistent_rows]
+            
+            # Determine headers
+            if potential_header and len(potential_header[1]) == most_common_cols:
+                headers = potential_header[1]
+            else:
+                # Use first consistent row as header if it looks like text
+                first_row = data[0]
+                if all(not re.match(r'^[\d.,\-]+$', cell) for cell in first_row):
+                    headers = first_row
+                    data = data[1:]
+                else:
+                    headers = [f'Col_{i+1}' for i in range(most_common_cols)]
+            
+            if len(data) < 2:
+                return None
+            
+            df = pd.DataFrame(data, columns=headers)
+            logger.warning(f"[SMART-PDF] Page {page_num}: Columnar detection found {len(df)} rows x {len(df.columns)} cols")
+            return df
+            
+        except Exception as e:
+            logger.debug(f"[SMART-PDF] Columnar parsing failed: {e}")
+            return None
     
     def _clean_table(self, raw_table: List[List]) -> Optional[pd.DataFrame]:
         """Clean up a raw table and convert to DataFrame."""
