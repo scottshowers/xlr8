@@ -18,6 +18,7 @@ import json
 import io
 import os
 import re
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -2807,22 +2808,164 @@ def trigger_auto_scan_sync(project_id: str, filename: str):
         logger.error(f"[AUTO-SCAN] Failed to trigger auto-scan: {e}")
 
 
-@router.post("/year-end/scan-all/{project_id}")
-async def scan_all_actions(project_id: str):
-    """
-    Scan ALL playbook actions that have reports_needed defined.
-    Useful for initial analysis or full refresh.
+# =============================================================================
+# NON-BLOCKING SCAN-ALL WITH STATUS POLLING
+# =============================================================================
+
+# Scan job tracking
+class _ScanJobStatus:
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    TIMEOUT = "timeout"
+    CANCELLED = "cancelled"
+
+class _PlaybookScanJob:
+    """Tracks a scan-all job with progress updates"""
     
-    Scans in dependency order (parents before children).
+    def __init__(self, job_id: str, project_id: str, actions: list):
+        self.job_id = job_id
+        self.project_id = project_id
+        self.status = _ScanJobStatus.PENDING
+        self.actions = actions
+        self.total = len(actions)
+        self.completed = 0
+        self.current_action = None
+        self.progress = 0
+        self.message = "Initializing..."
+        self.results = []
+        self.errors = []
+        self.started_at = None
+        self.completed_at = None
+        self.created_at = datetime.now()
+        self.timeout_seconds = 600  # 10 minutes
+        self._lock = threading.Lock()
+    
+    def start(self):
+        with self._lock:
+            self.status = _ScanJobStatus.RUNNING
+            self.started_at = datetime.now()
+            self.message = "Scan started..."
+    
+    def update(self, action_id: str, message: str = None):
+        with self._lock:
+            self.current_action = action_id
+            self.progress = int((self.completed / self.total) * 100) if self.total > 0 else 0
+            self.message = message or f"Scanning {action_id}..."
+    
+    def action_done(self, action_id: str, result: dict):
+        with self._lock:
+            self.completed += 1
+            self.results.append({"action_id": action_id, "success": True, **result})
+            self.progress = int((self.completed / self.total) * 100)
+            self.message = f"Completed {self.completed}/{self.total}"
+    
+    def action_failed(self, action_id: str, error: str):
+        with self._lock:
+            self.completed += 1
+            self.errors.append({"action_id": action_id, "error": error})
+            self.results.append({"action_id": action_id, "success": False, "error": error})
+            self.progress = int((self.completed / self.total) * 100)
+    
+    def complete(self, message: str = None):
+        with self._lock:
+            self.status = _ScanJobStatus.COMPLETED
+            self.completed_at = datetime.now()
+            self.progress = 100
+            successful = len([r for r in self.results if r.get('success')])
+            self.message = message or f"Complete: {successful}/{self.total} successful"
+    
+    def fail(self, error: str):
+        with self._lock:
+            self.status = _ScanJobStatus.FAILED
+            self.completed_at = datetime.now()
+            self.message = error
+    
+    def timeout(self):
+        with self._lock:
+            self.status = _ScanJobStatus.TIMEOUT
+            self.completed_at = datetime.now()
+            self.message = f"Timeout after {self.timeout_seconds}s"
+    
+    def cancel(self):
+        with self._lock:
+            self.status = _ScanJobStatus.CANCELLED
+            self.completed_at = datetime.now()
+            self.message = "Cancelled by user"
+    
+    def is_timed_out(self) -> bool:
+        with self._lock:
+            if self.started_at and self.status == _ScanJobStatus.RUNNING:
+                return (datetime.now() - self.started_at).total_seconds() > self.timeout_seconds
+            return False
+    
+    def to_dict(self) -> dict:
+        with self._lock:
+            successful = len([r for r in self.results if r.get('success', False)])
+            return {
+                "job_id": self.job_id,
+                "project_id": self.project_id,
+                "status": self.status,
+                "total_actions": self.total,
+                "completed_actions": self.completed,
+                "successful": successful,
+                "failed": len(self.errors),
+                "current_action": self.current_action,
+                "progress_percent": self.progress,
+                "message": self.message,
+                "started_at": self.started_at.isoformat() if self.started_at else None,
+                "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+                "created_at": self.created_at.isoformat(),
+                "results": self.results if self.status in [_ScanJobStatus.COMPLETED, _ScanJobStatus.FAILED, _ScanJobStatus.TIMEOUT] else [],
+                "errors": self.errors
+            }
+
+# Global job storage
+_scan_jobs: Dict[str, _PlaybookScanJob] = {}
+_scan_jobs_lock = threading.Lock()
+
+def _get_scan_job(job_id: str):
+    with _scan_jobs_lock:
+        return _scan_jobs.get(job_id)
+
+def _cleanup_old_scan_jobs():
+    """Remove jobs older than 1 hour"""
+    from datetime import timedelta
+    with _scan_jobs_lock:
+        cutoff = datetime.now() - timedelta(hours=1)
+        to_delete = [jid for jid, job in _scan_jobs.items() if job.completed_at and job.completed_at < cutoff]
+        for jid in to_delete:
+            del _scan_jobs[jid]
+
+
+@router.post("/year-end/scan-all/{project_id}")
+async def scan_all_actions(project_id: str, timeout: int = 600):
     """
-    logger.info(f"[SCAN-ALL] Starting full playbook scan for project {project_id}")
+    Start scanning ALL playbook actions for a project.
+    
+    Returns job_id immediately - poll /scan-all/status/{job_id} for progress.
+    
+    NO MORE FREEZING! Always shows status.
+    
+    Args:
+        project_id: Project to scan
+        timeout: Max seconds before timeout (default 600 = 10 min)
+    
+    Returns:
+        job_id for status polling
+    """
+    import uuid as uuid_mod
+    import asyncio as asyncio_mod
+    
+    logger.info(f"[SCAN-ALL] Starting non-blocking scan for project {project_id}")
     
     # Get structure
     structure = await get_year_end_structure()
     
-    # Collect all actions with reports_needed
+    # Collect actions to scan
     actions_to_scan = []
-    all_action_ids = set()  # Track all valid action IDs from structure
+    all_action_ids = set()
     
     for step in structure.get('steps', []):
         for action in step.get('actions', []):
@@ -2830,48 +2973,130 @@ async def scan_all_actions(project_id: str):
             if action.get('reports_needed'):
                 actions_to_scan.append(action['action_id'])
     
-    # Also add dependent actions - but ONLY if they exist in the structure
-    for dependent_id in ACTION_DEPENDENCIES.keys():
+    # Add dependent actions that exist in structure
+    dependencies = build_action_dependencies(structure)
+    for dependent_id in dependencies.keys():
         if dependent_id in all_action_ids and dependent_id not in actions_to_scan:
             actions_to_scan.append(dependent_id)
     
     # Order by dependencies
     scan_order = get_scan_order(actions_to_scan)
     
-    logger.info(f"[SCAN-ALL] Will scan {len(scan_order)} actions: {scan_order}")
+    if not scan_order:
+        return {"success": True, "message": "No actions to scan", "job_id": None}
     
-    results = []
-    successful = 0
-    failed = 0
+    # Create job
+    job_id = str(uuid_mod.uuid4())
+    job = _PlaybookScanJob(job_id, project_id, scan_order)
+    job.timeout_seconds = timeout
     
-    for action_id in scan_order:
+    with _scan_jobs_lock:
+        _scan_jobs[job_id] = job
+    
+    # Background thread function
+    def run_scan():
         try:
-            logger.info(f"[SCAN-ALL] Scanning action {action_id}...")
-            result = await scan_for_action(project_id, action_id)
-            results.append({
-                "action_id": action_id,
-                "success": True,
-                "found": result.get("found", False),
-                "documents": len(result.get("documents", [])),
-                "status": result.get("suggested_status", "not_started")
-            })
-            successful += 1
+            job.start()
+            
+            # Create event loop for async calls
+            loop = asyncio_mod.new_event_loop()
+            asyncio_mod.set_event_loop(loop)
+            
+            for action_id in job.actions:
+                # Check timeout
+                if job.is_timed_out():
+                    logger.warning(f"[SCAN-ALL] Job {job_id} timed out")
+                    job.timeout()
+                    return
+                
+                # Check cancelled
+                if job.status == _ScanJobStatus.CANCELLED:
+                    return
+                
+                try:
+                    job.update(action_id, f"Scanning {action_id}...")
+                    
+                    # Run the scan
+                    result = loop.run_until_complete(scan_for_action(project_id, action_id))
+                    
+                    job.action_done(action_id, {
+                        "found": result.get("found", False),
+                        "documents": len(result.get("documents", [])),
+                        "status": result.get("suggested_status", "not_started")
+                    })
+                    
+                except Exception as e:
+                    logger.error(f"[SCAN-ALL] Action {action_id} failed: {e}")
+                    job.action_failed(action_id, str(e))
+            
+            loop.close()
+            job.complete()
+            logger.info(f"[SCAN-ALL] Job {job_id} completed")
+            
         except Exception as e:
-            logger.error(f"[SCAN-ALL] Action {action_id} failed: {e}")
-            results.append({
-                "action_id": action_id,
-                "success": False,
-                "error": str(e)
-            })
-            failed += 1
+            logger.error(f"[SCAN-ALL] Job {job_id} failed: {e}")
+            job.fail(str(e))
     
-    logger.info(f"[SCAN-ALL] Complete: {successful} successful, {failed} failed")
+    thread = threading.Thread(target=run_scan, daemon=True)
+    thread.start()
+    
+    logger.info(f"[SCAN-ALL] Created job {job_id} with {len(scan_order)} actions")
     
     return {
         "success": True,
+        "job_id": job_id,
         "project_id": project_id,
         "total_actions": len(scan_order),
-        "successful": successful,
-        "failed": failed,
-        "results": results
+        "actions": scan_order,
+        "message": f"Scan started for {len(scan_order)} actions",
+        "poll_url": f"/playbooks/year-end/scan-all/status/{job_id}"
     }
+
+
+@router.get("/year-end/scan-all/status/{job_id}")
+async def get_scan_status(job_id: str):
+    """
+    Get status of a scan-all job.
+    
+    Poll this every 1-2 seconds for live updates.
+    """
+    job = _get_scan_job(job_id)
+    
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    return job.to_dict()
+
+
+@router.post("/year-end/scan-all/cancel/{job_id}")
+async def cancel_scan(job_id: str):
+    """Cancel a running scan-all job."""
+    job = _get_scan_job(job_id)
+    
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    if job.status != _ScanJobStatus.RUNNING:
+        return {"success": False, "message": f"Cannot cancel job in status: {job.status}"}
+    
+    job.cancel()
+    
+    return {
+        "success": True,
+        "message": "Scan cancelled",
+        "completed_actions": job.completed,
+        "total_actions": job.total
+    }
+
+
+@router.get("/year-end/scan-all/jobs/{project_id}")
+async def list_scan_jobs(project_id: str, limit: int = 10):
+    """List recent scan jobs for a project."""
+    _cleanup_old_scan_jobs()
+    
+    with _scan_jobs_lock:
+        project_jobs = [job.to_dict() for job in _scan_jobs.values() if job.project_id == project_id]
+    
+    project_jobs.sort(key=lambda j: j['created_at'], reverse=True)
+    
+    return {"project_id": project_id, "jobs": project_jobs[:limit]}
