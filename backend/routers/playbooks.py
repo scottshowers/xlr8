@@ -1637,12 +1637,14 @@ async def search_duckdb_for_action(
                     FROM _pdf_tables
                     WHERE project_id = ? OR project_id LIKE ?
                 """, [project_id, f"{project_id[:8]}%"]).fetchall()
-            logger.warning(f"[DUCKDB-SCAN] Found {len(pdf_tables)} PDF-derived tables")
-        except:
+            logger.warning(f"[DUCKDB-SCAN] Found {len(pdf_tables)} PDF-derived tables: {[t[0] for t in pdf_tables]}")
+        except Exception as e:
+            logger.warning(f"[DUCKDB-SCAN] Error getting PDF tables: {e}")
             pdf_tables = []
         
         # Score and select relevant tables
         relevant_tables = []
+        all_table_scores = []  # Track ALL tables for debugging
         
         for table in tables:
             table_name, file_name, sheet_name, project, columns_json, row_count = table
@@ -1658,6 +1660,8 @@ async def search_duckdb_for_action(
             
             # Score by keyword matches
             score = sum(1 for kw in keywords if kw in searchable)
+            matched_kws = [kw for kw in keywords if kw in searchable]
+            all_table_scores.append(f"{table_name}: score={score}, matched={matched_kws[:3]}")
             
             if score > 0:
                 relevant_tables.append({
@@ -1675,6 +1679,8 @@ async def search_duckdb_for_action(
             table_name, source_file, row_count = pdf_table
             searchable = f"{table_name} {source_file}".lower()
             score = sum(1 for kw in keywords if kw in searchable)
+            matched_kws = [kw for kw in keywords if kw in searchable]
+            all_table_scores.append(f"PDF:{table_name}: score={score}, matched={matched_kws[:3]}")
             
             if score > 0:
                 relevant_tables.append({
@@ -1686,6 +1692,9 @@ async def search_duckdb_for_action(
                     'score': score,
                     'source_type': 'pdf'
                 })
+        
+        # Log ALL table scores for debugging
+        logger.warning(f"[DUCKDB-SCAN] All table scores: {all_table_scores}")
         
         # Sort by score and take top 5
         relevant_tables.sort(key=lambda x: x['score'], reverse=True)
