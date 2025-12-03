@@ -73,6 +73,7 @@ async def debug_features():
     import os
     
     results = {
+        "version": "2025-12-03-v3-debug-logging",  # Update this when deploying
         "smart_pdf_available": SMART_PDF_AVAILABLE,
         "structured_handler_available": STRUCTURED_HANDLER_AVAILABLE,
         "openpyxl_available": OPENPYXL_AVAILABLE,
@@ -448,9 +449,10 @@ def process_file_background(
     """
     try:
         logger.info(f"[BACKGROUND] Starting processing for job {job_id}")
-        logger.info(f"[BACKGROUND] project={project}, project_id={project_id}")
+        logger.info(f"[BACKGROUND] filename={filename}, project={project}, project_id={project_id}")
         
         file_ext = filename.split('.')[-1].lower()
+        logger.info(f"[BACKGROUND] Detected file extension: '{file_ext}'")
         
         # ROUTE 1: STRUCTURED DATA (Excel/CSV) → DuckDB
         if file_ext in ['xlsx', 'xls', 'csv'] and STRUCTURED_HANDLER_AVAILABLE:
@@ -565,6 +567,8 @@ def process_file_background(
         # =================================================================
         # ROUTE 1.5: SMART PDF ROUTING - Check if PDF is tabular
         # =================================================================
+        logger.info(f"[BACKGROUND] Route check: file_ext='{file_ext}', SMART_PDF_AVAILABLE={SMART_PDF_AVAILABLE}")
+        
         if file_ext == 'pdf' and SMART_PDF_AVAILABLE:
             ProcessingJobModel.update_progress(job_id, 5, "Analyzing PDF structure...")
             logger.info(f"[BACKGROUND] Using smart PDF analyzer for {filename}")
