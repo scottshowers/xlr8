@@ -756,3 +756,207 @@ async def delete_relationship(project: str, rel: RelationshipDelete):
     except Exception as e:
         logger.error(f"Failed to delete relationship: {e}")
         raise HTTPException(500, str(e))
+
+
+# =============================================================================
+# CHROMADB CLEANUP ENDPOINTS
+# =============================================================================
+
+@router.get("/status/chromadb/audit")
+async def audit_chromadb():
+    """
+    Audit ChromaDB contents vs Supabase registry.
+    Shows orphaned documents that exist in ChromaDB but not in registry.
+    """
+    try:
+        from utils.rag_handler import RAGHandler
+        
+        rag = RAGHandler()
+        collection = rag.client.get_or_create_collection(name="documents")
+        
+        # Get all ChromaDB documents
+        all_chroma = collection.get(include=["metadatas"], limit=10000)
+        chroma_docs = {}
+        
+        for i, metadata in enumerate(all_chroma.get("metadatas", [])):
+            doc_id = all_chroma["ids"][i] if all_chroma.get("ids") else f"unknown_{i}"
+            filename = metadata.get("source", metadata.get("filename", "Unknown"))
+            project = metadata.get("project_id", metadata.get("project", "unknown"))
+            
+            key = f"{project}::{filename}"
+            if key not in chroma_docs:
+                chroma_docs[key] = {
+                    "filename": filename,
+                    "project": project,
+                    "chunk_ids": [],
+                    "chunk_count": 0
+                }
+            chroma_docs[key]["chunk_ids"].append(doc_id)
+            chroma_docs[key]["chunk_count"] += 1
+        
+        # Get Supabase registry
+        registry_files = set()
+        try:
+            from utils.database.models import DocumentModel
+            docs = DocumentModel.get_all(limit=1000)
+            for doc in docs:
+                filename = doc.get("filename", "")
+                project = doc.get("project_id", "")
+                registry_files.add(f"{project}::{filename}")
+        except Exception as e:
+            logger.warning(f"Could not fetch Supabase registry: {e}")
+        
+        # Find orphans (in ChromaDB but not in registry)
+        orphans = []
+        registered = []
+        
+        for key, info in chroma_docs.items():
+            if key not in registry_files:
+                orphans.append(info)
+            else:
+                registered.append(info)
+        
+        return {
+            "total_chroma_files": len(chroma_docs),
+            "total_chroma_chunks": sum(d["chunk_count"] for d in chroma_docs.values()),
+            "registered_files": len(registered),
+            "orphaned_files": len(orphans),
+            "orphans": orphans[:50],  # Limit response size
+            "registered": [{"filename": r["filename"], "project": r["project"], "chunks": r["chunk_count"]} for r in registered[:50]]
+        }
+        
+    except Exception as e:
+        logger.exception(f"ChromaDB audit failed: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.delete("/status/chromadb/purge-orphans")
+async def purge_chromadb_orphans():
+    """
+    Delete orphaned documents from ChromaDB.
+    Only deletes docs that are NOT in Supabase registry.
+    """
+    try:
+        from utils.rag_handler import RAGHandler
+        
+        # First run audit
+        audit = await audit_chromadb()
+        orphans = audit.get("orphans", [])
+        
+        if not orphans:
+            return {"status": "success", "message": "No orphans to delete", "deleted": 0}
+        
+        rag = RAGHandler()
+        collection = rag.client.get_or_create_collection(name="documents")
+        
+        deleted_count = 0
+        deleted_files = []
+        
+        for orphan in orphans:
+            chunk_ids = orphan.get("chunk_ids", [])
+            if chunk_ids:
+                try:
+                    # Delete in batches
+                    for i in range(0, len(chunk_ids), 100):
+                        batch = chunk_ids[i:i+100]
+                        collection.delete(ids=batch)
+                    deleted_count += len(chunk_ids)
+                    deleted_files.append(orphan.get("filename"))
+                    logger.warning(f"[CHROMADB] Deleted {len(chunk_ids)} chunks for orphan: {orphan.get('filename')}")
+                except Exception as e:
+                    logger.warning(f"[CHROMADB] Failed to delete orphan {orphan.get('filename')}: {e}")
+        
+        return {
+            "status": "success",
+            "deleted_chunks": deleted_count,
+            "deleted_files": deleted_files,
+            "message": f"Purged {len(deleted_files)} orphaned files ({deleted_count} chunks)"
+        }
+        
+    except Exception as e:
+        logger.exception(f"ChromaDB purge failed: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.delete("/status/chromadb/purge-project/{project_id}")
+async def purge_chromadb_project(project_id: str):
+    """
+    Delete ALL ChromaDB documents for a specific project.
+    Use with caution!
+    """
+    try:
+        from utils.rag_handler import RAGHandler
+        
+        rag = RAGHandler()
+        collection = rag.client.get_or_create_collection(name="documents")
+        
+        # Get all docs for this project
+        all_chroma = collection.get(include=["metadatas"], limit=10000)
+        
+        ids_to_delete = []
+        for i, metadata in enumerate(all_chroma.get("metadatas", [])):
+            doc_project = metadata.get("project_id", metadata.get("project", ""))
+            if doc_project == project_id or doc_project == project_id[:8]:
+                ids_to_delete.append(all_chroma["ids"][i])
+        
+        if not ids_to_delete:
+            return {"status": "success", "message": f"No documents found for project {project_id}", "deleted": 0}
+        
+        # Delete in batches
+        for i in range(0, len(ids_to_delete), 100):
+            batch = ids_to_delete[i:i+100]
+            collection.delete(ids=batch)
+        
+        logger.warning(f"[CHROMADB] Purged {len(ids_to_delete)} chunks for project {project_id}")
+        
+        return {
+            "status": "success",
+            "deleted_chunks": len(ids_to_delete),
+            "project_id": project_id,
+            "message": f"Purged all {len(ids_to_delete)} chunks for project"
+        }
+        
+    except Exception as e:
+        logger.exception(f"ChromaDB project purge failed: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.delete("/status/chromadb/purge-all")
+async def purge_chromadb_all(confirm: str = None):
+    """
+    Delete ALL documents from ChromaDB.
+    Requires confirm=YES parameter.
+    """
+    if confirm != "YES":
+        raise HTTPException(400, "Must pass confirm=YES to purge all ChromaDB data")
+    
+    try:
+        from utils.rag_handler import RAGHandler
+        
+        rag = RAGHandler()
+        collection = rag.client.get_or_create_collection(name="documents")
+        
+        # Get count before
+        all_chroma = collection.get(limit=10000)
+        total_before = len(all_chroma.get("ids", []))
+        
+        if total_before == 0:
+            return {"status": "success", "message": "ChromaDB already empty", "deleted": 0}
+        
+        # Delete in batches
+        ids = all_chroma.get("ids", [])
+        for i in range(0, len(ids), 100):
+            batch = ids[i:i+100]
+            collection.delete(ids=batch)
+        
+        logger.warning(f"[CHROMADB] PURGED ALL - {total_before} chunks deleted")
+        
+        return {
+            "status": "success",
+            "deleted_chunks": total_before,
+            "message": f"Purged ALL {total_before} chunks from ChromaDB"
+        }
+        
+    except Exception as e:
+        logger.exception(f"ChromaDB full purge failed: {e}")
+        raise HTTPException(500, str(e))
