@@ -73,7 +73,7 @@ async def debug_features():
     import os
     
     results = {
-        "version": "2025-12-03-v5-more-debug",  # Update this when deploying
+        "version": "2025-12-03-v7-columnar-fallback",  # Update this when deploying
         "smart_pdf_available": SMART_PDF_AVAILABLE,
         "structured_handler_available": STRUCTURED_HANDLER_AVAILABLE,
         "openpyxl_available": OPENPYXL_AVAILABLE,
