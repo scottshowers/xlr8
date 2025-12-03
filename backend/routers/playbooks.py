@@ -1735,8 +1735,9 @@ async def scan_for_action(project_id: str, action_id: str):
         except Exception as e:
             logger.warning(f"[SCAN] Filename matching failed: {e}")
         
-        # STEP 3: Semantic search - also search for inherited doc content
-        # Build queries from: reports needed + action description + inherited doc names
+        # STEP 3: Semantic search - get content for AI analysis
+        # Note: We DON'T add to found_docs here - only use for AI context
+        # found_docs should only contain docs that match reports_needed keywords
         queries = reports_needed + [action.get('description', '')[:100]]
         if inherited_docs:
             queries.extend(inherited_docs[:3])  # Also search for content from inherited docs
@@ -1760,17 +1761,24 @@ async def scan_for_action(project_id: str, action_id: str):
                                 if cleaned.count('[ENCRYPTED]') < 10:
                                     metadata = result.get('metadata', {})
                                     filename = metadata.get('source', metadata.get('filename', 'Unknown'))
-                                    # Add content for AI analysis
+                                    # Add content for AI analysis (always)
                                     all_content.append(f"[FILE: {filename}]\n{cleaned[:3000]}")
-                                    # Add to found_docs if not already there
+                                    
+                                    # Only add to found_docs if filename matches a report_needed
                                     if filename not in seen_files:
-                                        seen_files.add(filename)
-                                        found_docs.append({
-                                            "filename": filename,
-                                            "snippet": cleaned[:300],
-                                            "query": query,
-                                            "match_type": "semantic"
-                                        })
+                                        filename_lower = filename.lower()
+                                        for report_name in reports_needed:
+                                            report_keywords = report_name.lower().split()
+                                            matches = sum(1 for kw in report_keywords if kw in filename_lower)
+                                            if matches >= len(report_keywords) - 1:  # Allow 1 word missing
+                                                seen_files.add(filename)
+                                                found_docs.append({
+                                                    "filename": filename,
+                                                    "snippet": cleaned[:300],
+                                                    "query": report_name,
+                                                    "match_type": "semantic"
+                                                })
+                                                break
                 except Exception as e:
                     logger.warning(f"Query failed: {e}")
         
@@ -1785,21 +1793,32 @@ async def scan_for_action(project_id: str, action_id: str):
             logger.warning(f"[SCAN] DuckDB returned {len(duckdb_content)} content chunks")
             all_content.extend(duckdb_content)
             
-            # Add DuckDB sources to found_docs
+            # Add DuckDB sources to found_docs only if they match reports_needed
             for content in duckdb_content:
                 # Extract table name from content header
                 if content.startswith("[DUCKDB TABLE:"):
                     table_name = content.split("]")[0].replace("[DUCKDB TABLE: ", "")
                     if table_name not in seen_files:
-                        seen_files.add(table_name)
-                        found_docs.append({
-                            "filename": f"📊 {table_name}",
-                            "snippet": content[:300],
-                            "query": "structured_data",
-                            "match_type": "duckdb"
-                        })
+                        # Check if table name matches any report_needed keyword
+                        table_lower = table_name.lower()
+                        matched_report = None
+                        for report_name in reports_needed:
+                            report_keywords = report_name.lower().split()
+                            matches = sum(1 for kw in report_keywords if kw in table_lower)
+                            if matches >= len(report_keywords) - 1:
+                                matched_report = report_name
+                                break
+                        
+                        if matched_report:
+                            seen_files.add(table_name)
+                            found_docs.append({
+                                "filename": f"📊 {table_name}",
+                                "snippet": content[:300],
+                                "query": matched_report,
+                                "match_type": "duckdb"
+                            })
         
-        logger.warning(f"[SCAN] Total sources (ChromaDB + DuckDB): {len(found_docs)}")
+        logger.warning(f"[SCAN] Total matched sources (ChromaDB + DuckDB): {len(found_docs)}")
         
         # Determine findings and suggested status
         findings = None
