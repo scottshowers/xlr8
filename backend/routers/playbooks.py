@@ -2040,19 +2040,29 @@ async def scan_for_action(project_id: str, action_id: str, force_refresh: bool =
         logger.warning(f"[SCAN] Total unique docs from ChromaDB: {len(found_docs)}")
         
         # =====================================================================
-        # STEP 4: Search DuckDB for structured data
-        # This is the key integration - get actual table data, not just vectors
+        # STEP 4: Search DuckDB for structured data FIRST (higher priority)
+        # DuckDB has COMPLETE data, ChromaDB may have truncated PDF chunks
         # =====================================================================
+        duckdb_files_with_full_data = set()  # Track files we got complete data for
         duckdb_content = await search_duckdb_for_action(project_id, action, reports_needed)
         if duckdb_content:
-            logger.warning(f"[SCAN] DuckDB returned {len(duckdb_content)} content chunks")
-            all_content.extend(duckdb_content)
+            logger.warning(f"[SCAN] DuckDB returned {len(duckdb_content)} content chunks - PRIORITIZING over PDF chunks")
             
-            # Add DuckDB sources to found_docs only if they match reports_needed
+            # INSERT at beginning so Claude sees complete data first
+            all_content = duckdb_content + all_content
+            
+            # Track which files we have full DuckDB data for
             for content in duckdb_content:
-                # Extract table name from content header
                 if content.startswith("[DUCKDB TABLE:"):
                     table_name = content.split("]")[0].replace("[DUCKDB TABLE: ", "")
+                    # Extract source filename from content if present
+                    if "Source:" in content:
+                        source_line = [l for l in content.split('\n') if l.startswith('Source:')]
+                        if source_line:
+                            source_file = source_line[0].replace('Source:', '').strip().split('/')[0].strip()
+                            duckdb_files_with_full_data.add(source_file.lower())
+                    duckdb_files_with_full_data.add(table_name.lower())
+                    
                     if table_name not in seen_files:
                         # Check if table name matches any report_needed keyword
                         table_lower = table_name.lower()
@@ -2072,6 +2082,30 @@ async def scan_for_action(project_id: str, action_id: str, force_refresh: bool =
                                 "query": matched_report,
                                 "match_type": "duckdb"
                             })
+            
+            logger.warning(f"[SCAN] Files with full DuckDB data (skip PDF chunks): {duckdb_files_with_full_data}")
+            
+            # REMOVE truncated ChromaDB content for files we have full DuckDB data
+            if duckdb_files_with_full_data:
+                original_count = len(all_content)
+                filtered_content = []
+                for c in all_content:
+                    # Keep DuckDB content
+                    if c.startswith("[DUCKDB TABLE:"):
+                        filtered_content.append(c)
+                        continue
+                    # Check if this ChromaDB content is for a file we have DuckDB data for
+                    skip = False
+                    for duckdb_file in duckdb_files_with_full_data:
+                        if duckdb_file in c.lower()[:200]:  # Check header area
+                            skip = True
+                            break
+                    if not skip:
+                        filtered_content.append(c)
+                
+                if len(filtered_content) < original_count:
+                    logger.warning(f"[SCAN] Removed {original_count - len(filtered_content)} truncated PDF chunks (using DuckDB instead)")
+                    all_content = filtered_content
         
         logger.warning(f"[SCAN] Total matched sources (ChromaDB + DuckDB): {len(found_docs)}")
         
