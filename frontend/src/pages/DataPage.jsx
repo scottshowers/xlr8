@@ -925,15 +925,33 @@ function DataManagementTab() {
           <div style={{ 
             marginBottom: '1rem', 
             padding: '0.75rem', 
-            background: chromaAudit.orphaned_files > 0 ? '#fef3c7' : '#d1fae5', 
+            background: chromaAudit.registry_error ? '#fef2f2' : (chromaAudit.orphaned_files > 0 ? '#fef3c7' : '#d1fae5'), 
             borderRadius: '8px',
             fontSize: '0.85rem'
           }}>
-            <strong>Audit Results:</strong> {chromaAudit.registered_files} registered, {chromaAudit.orphaned_files} orphaned
-            {chromaAudit.orphaned_files > 0 && (
-              <span style={{ marginLeft: '0.5rem', color: '#92400e' }}>
-                (Orphans: {chromaAudit.orphans?.slice(0, 3).map(o => o.filename).join(', ')}{chromaAudit.orphans?.length > 3 ? '...' : ''})
-              </span>
+            {chromaAudit.registry_error ? (
+              <>
+                <strong style={{ color: '#b91c1c' }}>⚠️ Registry Not Setup:</strong>{' '}
+                <span style={{ color: '#7f1d1d' }}>{chromaAudit.registry_error}</span>
+                <div style={{ marginTop: '0.5rem' }}>
+                  <a 
+                    href="/api/status/document-registry/setup-sql" 
+                    target="_blank" 
+                    style={{ color: '#2563eb', textDecoration: 'underline' }}
+                  >
+                    Get SQL to create table →
+                  </a>
+                </div>
+              </>
+            ) : (
+              <>
+                <strong>Audit Results:</strong> {chromaAudit.registered_files} registered, {chromaAudit.orphaned_files} orphaned
+                {chromaAudit.orphaned_files > 0 && (
+                  <span style={{ marginLeft: '0.5rem', color: '#92400e' }}>
+                    (Orphans: {chromaAudit.orphans?.slice(0, 3).map(o => o.filename).join(', ')}{chromaAudit.orphans?.length > 3 ? '...' : ''})
+                  </span>
+                )}
+              </>
             )}
           </div>
         )}
