@@ -267,6 +267,222 @@ class DocumentModel:
             return 0
 
 
+class DocumentRegistryModel:
+    """
+    Document Registry - tracks ALL uploaded files in ChromaDB/DuckDB
+    
+    This is the source of truth for what documents SHOULD exist.
+    Used by audit to detect orphans (docs in ChromaDB not in registry).
+    
+    IMPORTANT: Requires 'document_registry' table in Supabase.
+    See create_table_sql() for schema.
+    """
+    
+    # Storage type constants
+    STORAGE_CHROMADB = 'chromadb'
+    STORAGE_DUCKDB = 'duckdb'
+    STORAGE_BOTH = 'both'
+    
+    # Usage type constants
+    USAGE_RAG_KNOWLEDGE = 'rag_knowledge'      # PDFs, docs for RAG search
+    USAGE_STRUCTURED_DATA = 'structured_data'  # Excel/CSV in DuckDB
+    USAGE_PLAYBOOK = 'playbook'                # Year-end checklist etc.
+    
+    @staticmethod
+    def create_table_sql() -> str:
+        """Returns SQL to create the document_registry table in Supabase"""
+        return """
+        CREATE TABLE IF NOT EXISTS document_registry (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            filename TEXT NOT NULL,
+            file_type TEXT,
+            storage_type TEXT DEFAULT 'chromadb',
+            usage_type TEXT DEFAULT 'rag_knowledge',
+            project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+            is_global BOOLEAN DEFAULT FALSE,
+            chunk_count INTEGER DEFAULT 0,
+            file_size INTEGER,
+            metadata JSONB DEFAULT '{}',
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+        
+        CREATE INDEX IF NOT EXISTS idx_doc_registry_project ON document_registry(project_id);
+        CREATE INDEX IF NOT EXISTS idx_doc_registry_filename ON document_registry(filename);
+        CREATE INDEX IF NOT EXISTS idx_doc_registry_global ON document_registry(is_global);
+        """
+    
+    @staticmethod
+    def register(filename: str, file_type: str = None, storage_type: str = 'chromadb',
+                usage_type: str = 'rag_knowledge', project_id: str = None,
+                is_global: bool = False, chunk_count: int = 0, 
+                file_size: int = None, metadata: dict = None) -> Optional[Dict[str, Any]]:
+        """
+        Register a document in the registry.
+        Call this after successfully adding to ChromaDB/DuckDB.
+        """
+        supabase = get_supabase()
+        if not supabase:
+            return None
+        
+        try:
+            data = {
+                'filename': filename,
+                'file_type': file_type,
+                'storage_type': storage_type,
+                'usage_type': usage_type,
+                'project_id': project_id,
+                'is_global': is_global,
+                'chunk_count': chunk_count,
+                'file_size': file_size,
+                'metadata': metadata or {}
+            }
+            
+            # Remove None values to let DB use defaults
+            data = {k: v for k, v in data.items() if v is not None}
+            
+            response = supabase.table('document_registry').insert(data).execute()
+            return response.data[0] if response.data else None
+        
+        except Exception as e:
+            print(f"Error registering document: {e}")
+            return None
+    
+    @staticmethod
+    def get_all(limit: int = 1000) -> List[Dict[str, Any]]:
+        """Get all registered documents"""
+        supabase = get_supabase()
+        if not supabase:
+            return []
+        
+        try:
+            response = supabase.table('document_registry') \
+                .select('*') \
+                .order('created_at', desc=True) \
+                .limit(limit) \
+                .execute()
+            
+            return response.data if response.data else []
+        
+        except Exception as e:
+            print(f"Error getting document registry: {e}")
+            return []
+    
+    @staticmethod
+    def get_by_project(project_id: str = None, include_global: bool = True) -> List[Dict[str, Any]]:
+        """Get documents for a project (optionally including global)"""
+        supabase = get_supabase()
+        if not supabase:
+            return []
+        
+        try:
+            if project_id:
+                if include_global:
+                    # Get project docs + global docs
+                    response = supabase.table('document_registry') \
+                        .select('*') \
+                        .or_(f'project_id.eq.{project_id},is_global.eq.true') \
+                        .order('created_at', desc=True) \
+                        .execute()
+                else:
+                    response = supabase.table('document_registry') \
+                        .select('*') \
+                        .eq('project_id', project_id) \
+                        .order('created_at', desc=True) \
+                        .execute()
+            else:
+                # Just global docs
+                response = supabase.table('document_registry') \
+                    .select('*') \
+                    .eq('is_global', True) \
+                    .order('created_at', desc=True) \
+                    .execute()
+            
+            return response.data if response.data else []
+        
+        except Exception as e:
+            print(f"Error getting documents by project: {e}")
+            return []
+    
+    @staticmethod
+    def find_by_filename(filename: str, project_id: str = None) -> Optional[Dict[str, Any]]:
+        """Find a document by filename (and optionally project)"""
+        supabase = get_supabase()
+        if not supabase:
+            return None
+        
+        try:
+            query = supabase.table('document_registry').select('*').eq('filename', filename)
+            
+            if project_id:
+                query = query.eq('project_id', project_id)
+            
+            response = query.limit(1).execute()
+            return response.data[0] if response.data else None
+        
+        except Exception as e:
+            print(f"Error finding document: {e}")
+            return None
+    
+    @staticmethod
+    def unregister(filename: str, project_id: str = None) -> bool:
+        """Remove a document from the registry (call when deleting from ChromaDB)"""
+        supabase = get_supabase()
+        if not supabase:
+            return False
+        
+        try:
+            query = supabase.table('document_registry').delete().eq('filename', filename)
+            
+            if project_id:
+                query = query.eq('project_id', project_id)
+            else:
+                query = query.is_('project_id', 'null')
+            
+            query.execute()
+            return True
+        
+        except Exception as e:
+            print(f"Error unregistering document: {e}")
+            return False
+    
+    @staticmethod
+    def update_chunk_count(filename: str, chunk_count: int, project_id: str = None) -> bool:
+        """Update the chunk count for a document"""
+        supabase = get_supabase()
+        if not supabase:
+            return False
+        
+        try:
+            query = supabase.table('document_registry') \
+                .update({'chunk_count': chunk_count, 'updated_at': datetime.utcnow().isoformat()}) \
+                .eq('filename', filename)
+            
+            if project_id:
+                query = query.eq('project_id', project_id)
+            
+            query.execute()
+            return True
+        
+        except Exception as e:
+            print(f"Error updating chunk count: {e}")
+            return False
+    
+    @staticmethod
+    def table_exists() -> bool:
+        """Check if the document_registry table exists"""
+        supabase = get_supabase()
+        if not supabase:
+            return False
+        
+        try:
+            # Try a simple query - if table doesn't exist, this will fail
+            supabase.table('document_registry').select('id').limit(1).execute()
+            return True
+        except Exception:
+            return False
+
+
 class ChatHistoryModel:
     """Chat history database operations"""
     
