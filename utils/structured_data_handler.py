@@ -1,3577 +1,2498 @@
 """
-Playbooks Router v2 - Interactive Year-End Checklist
+Structured Data Handler - DuckDB Storage for Excel/CSV
+=======================================================
 
-Endpoints:
-- GET /playbooks/year-end/structure - Get parsed playbook structure
-- GET /playbooks/year-end/progress/{project_id} - Get progress for project
-- POST /playbooks/year-end/progress/{project_id} - Update action status
-- POST /playbooks/year-end/scan/{project_id}/{action_id} - Scan docs for action
-- GET /playbooks/year-end/export/{project_id} - Export current state as XLSX
+Stores tabular data in DuckDB for fast SQL queries.
+Each project gets isolated tables. Cross-sheet joins supported.
+
+SECURITY FEATURES:
+- Field-level encryption for PII (SSN, DOB, etc.)
+- Encryption at rest using AES-256-GCM (authenticated encryption)
+
+VERSIONING FEATURES:
+- Load versioning for comparison
+- Diff detection (new, changed, deleted records)
+
+Author: XLR8 Team
 """
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
-from fastapi.responses import StreamingResponse, JSONResponse
-from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
-import logging
-import json
-import io
 import os
 import re
-import threading
+import json
+import logging
+import pandas as pd
+import duckdb
+from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime
-from pathlib import Path
+import hashlib
+import base64
 
-# Excel generation
-import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
+# Encryption imports
+try:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.fernet import Fernet  # Keep for backward compatibility
+    import base64
+    ENCRYPTION_AVAILABLE = True
+except ImportError:
+    ENCRYPTION_AVAILABLE = False
+    logging.warning("cryptography not installed - PII encryption disabled. Run: pip install cryptography")
+
+# Openpyxl for colored header detection
+try:
+    from openpyxl import load_workbook
+    OPENPYXL_AVAILABLE = True
+except ImportError:
+    OPENPYXL_AVAILABLE = False
+    logging.warning("openpyxl not installed - colored header detection disabled")
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/playbooks", tags=["playbooks"])
+# DuckDB storage location
+DUCKDB_PATH = "/data/structured_data.duckdb"
+ENCRYPTION_KEY_PATH = "/data/.encryption_key_v2"  # New path for AES-256 key
 
-# Persistent progress storage location
-PROGRESS_FILE = "/data/playbook_progress.json"
+# PII field patterns to encrypt
+PII_PATTERNS = [
+    r'ssn', r'social.*sec', r'social_security',
+    r'tax.*id', r'tin',
+    r'bank.*account', r'routing.*number', r'account.*number',
+    r'credit.*card', r'card.*number',
+    r'passport', r'license.*number', r'driver.*lic',
+    r'salary', r'pay.*rate', r'wage', r'compensation',
+    r'dob', r'date.*birth', r'birth.*date', r'birthdate',
+]
 
-# Cached playbook structure
-PLAYBOOK_CACHE = {}
 
-# Track file modification time for auto-refresh
-PLAYBOOK_FILE_INFO = {}
+# =========================================================================
+# INFERENCE JOB QUEUE - processes one file at a time to avoid overload
+# =========================================================================
+import queue
+import threading
 
+_inference_queue = queue.Queue()
+_inference_worker_started = False
+_inference_lock = threading.Lock()
 
-# ============================================================================
-# CHROMADB CLEANUP - Remove orphaned documents
-# ============================================================================
-
-@router.get("/cleanup/chromadb-status")
-async def get_chromadb_cleanup_status():
-    """
-    Get status of ChromaDB documents vs Supabase registry.
-    Shows what would be cleaned up.
-    """
-    try:
-        from utils.rag_handler import RAGHandler
-        from utils.database.models import DocumentModel
-        
-        rag = RAGHandler()
-        collection = rag.client.get_or_create_collection(name="documents")
-        
-        # Get all ChromaDB docs
-        all_chroma = collection.get(include=["metadatas"], limit=10000)
-        chroma_ids = set(all_chroma.get("ids", []))
-        chroma_files = {}
-        
-        for i, meta in enumerate(all_chroma.get("metadatas", [])):
-            filename = meta.get("source", meta.get("filename", "unknown"))
-            project = meta.get("project_id", meta.get("project", "unknown"))
-            key = f"{project}::{filename}"
-            if key not in chroma_files:
-                chroma_files[key] = {"count": 0, "ids": []}
-            chroma_files[key]["count"] += 1
-            chroma_files[key]["ids"].append(all_chroma["ids"][i])
-        
-        # Get all Supabase registered docs
+def _inference_worker():
+    """Background worker that processes inference jobs one at a time"""
+    logger.info("[INFERENCE_QUEUE] Worker started")
+    while True:
         try:
-            supabase_docs = DocumentModel.get_all(limit=1000)
-            supabase_files = set()
-            for doc in supabase_docs:
-                filename = doc.get("filename", "")
-                project = doc.get("project_id", "")
-                supabase_files.add(f"{project}::{filename}")
-        except Exception as e:
-            logger.warning(f"Could not get Supabase docs: {e}")
-            supabase_files = set()
-        
-        # Find orphans (in ChromaDB but not in Supabase)
-        orphan_keys = set(chroma_files.keys()) - supabase_files
-        orphan_count = sum(chroma_files[k]["count"] for k in orphan_keys)
-        
-        return {
-            "chromadb_total_chunks": len(chroma_ids),
-            "chromadb_unique_files": len(chroma_files),
-            "supabase_registered": len(supabase_files),
-            "orphan_files": len(orphan_keys),
-            "orphan_chunks": orphan_count,
-            "orphan_details": [
-                {"file": k, "chunks": chroma_files[k]["count"]} 
-                for k in list(orphan_keys)[:20]  # Limit to first 20
-            ]
-        }
-        
-    except Exception as e:
-        logger.exception(f"Cleanup status failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/cleanup/chromadb-purge")
-async def purge_chromadb_orphans(dry_run: bool = True):
-    """
-    Purge orphaned documents from ChromaDB.
-    
-    Args:
-        dry_run: If True, only report what would be deleted. If False, actually delete.
-    """
-    try:
-        from utils.rag_handler import RAGHandler
-        from utils.database.models import DocumentModel
-        
-        rag = RAGHandler()
-        collection = rag.client.get_or_create_collection(name="documents")
-        
-        # Get all ChromaDB docs
-        all_chroma = collection.get(include=["metadatas"], limit=10000)
-        
-        # Build file -> chunk IDs mapping
-        chroma_files = {}
-        for i, meta in enumerate(all_chroma.get("metadatas", [])):
-            filename = meta.get("source", meta.get("filename", "unknown"))
-            project = meta.get("project_id", meta.get("project", "unknown"))
-            key = f"{project}::{filename}"
-            if key not in chroma_files:
-                chroma_files[key] = []
-            chroma_files[key].append(all_chroma["ids"][i])
-        
-        # Get Supabase registered docs
-        try:
-            supabase_docs = DocumentModel.get_all(limit=1000)
-            supabase_files = set()
-            for doc in supabase_docs:
-                filename = doc.get("filename", "")
-                project = doc.get("project_id", "")
-                supabase_files.add(f"{project}::{filename}")
-        except:
-            supabase_files = set()
-        
-        # Find orphans
-        orphan_keys = set(chroma_files.keys()) - supabase_files
-        
-        # Collect all orphan chunk IDs
-        orphan_ids = []
-        for key in orphan_keys:
-            orphan_ids.extend(chroma_files[key])
-        
-        result = {
-            "dry_run": dry_run,
-            "orphan_files": len(orphan_keys),
-            "orphan_chunks": len(orphan_ids),
-            "files_to_delete": list(orphan_keys)[:50],  # Show first 50
-            "deleted": False
-        }
-        
-        if not dry_run and orphan_ids:
-            # Actually delete
-            try:
-                # ChromaDB delete in batches
-                batch_size = 100
-                for i in range(0, len(orphan_ids), batch_size):
-                    batch = orphan_ids[i:i+batch_size]
-                    collection.delete(ids=batch)
-                
-                result["deleted"] = True
-                result["message"] = f"Deleted {len(orphan_ids)} orphan chunks from {len(orphan_keys)} files"
-                logger.warning(f"[CLEANUP] Purged {len(orphan_ids)} orphan chunks")
-                
-            except Exception as e:
-                result["error"] = str(e)
-                logger.error(f"[CLEANUP] Purge failed: {e}")
-        else:
-            result["message"] = f"Would delete {len(orphan_ids)} chunks from {len(orphan_keys)} files"
-        
-        return result
-        
-    except Exception as e:
-        logger.exception(f"Purge failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/cleanup/chromadb-purge-project/{project_id}")
-async def purge_project_chromadb(project_id: str):
-    """
-    Purge ALL ChromaDB documents for a specific project.
-    Use with caution - deletes everything for that project.
-    """
-    try:
-        from utils.rag_handler import RAGHandler
-        
-        rag = RAGHandler()
-        collection = rag.client.get_or_create_collection(name="documents")
-        
-        # Get all docs for this project
-        all_chroma = collection.get(include=["metadatas"], limit=10000)
-        
-        ids_to_delete = []
-        for i, meta in enumerate(all_chroma.get("metadatas", [])):
-            doc_project = meta.get("project_id", meta.get("project", ""))
-            if doc_project == project_id or doc_project == project_id[:8]:
-                ids_to_delete.append(all_chroma["ids"][i])
-        
-        if ids_to_delete:
-            batch_size = 100
-            for i in range(0, len(ids_to_delete), batch_size):
-                batch = ids_to_delete[i:i+batch_size]
-                collection.delete(ids=batch)
-        
-        logger.warning(f"[CLEANUP] Purged {len(ids_to_delete)} chunks for project {project_id}")
-        
-        return {
-            "success": True,
-            "project_id": project_id,
-            "chunks_deleted": len(ids_to_delete)
-        }
-        
-    except Exception as e:
-        logger.exception(f"Project purge failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-def invalidate_year_end_cache():
-    """
-    Invalidate the Year-End structure cache.
-    Called when a new Year-End Checklist is uploaded to Global Library.
-    """
-    global PLAYBOOK_CACHE, PLAYBOOK_FILE_INFO
-    
-    if 'year-end-2025' in PLAYBOOK_CACHE:
-        del PLAYBOOK_CACHE['year-end-2025']
-        logger.info("[CACHE] Year-End structure cache invalidated")
-    
-    if 'year-end-2025' in PLAYBOOK_FILE_INFO:
-        del PLAYBOOK_FILE_INFO['year-end-2025']
-        logger.info("[CACHE] Year-End file info cleared")
-
-# =============================================================================
-# ACTION DEPENDENCIES - Which actions inherit from which
-# =============================================================================
-# DYNAMIC DEPENDENCIES - Built from structure, not hardcoded
-# =============================================================================
-# Dependencies are inferred at runtime based on:
-# 1. Actions WITHOUT reports_needed depend on prior action in same step WITH reports_needed
-# 2. Actions that reference similar keywords/reports are grouped
-
-def build_action_dependencies(structure: dict) -> dict:
-    """
-    Dynamically build action dependencies from the playbook structure.
-    
-    Logic: Within each step, actions without reports_needed depend on 
-    the first action in that step that HAS reports_needed.
-    """
-    dependencies = {}
-    
-    for step in structure.get('steps', []):
-        actions = step.get('actions', [])
-        
-        # Find the first action with reports_needed (the "primary" action)
-        primary_action = None
-        for action in actions:
-            if action.get('reports_needed'):
-                primary_action = action['action_id']
+            job = _inference_queue.get(timeout=60)  # Wait up to 60s for job
+            if job is None:  # Poison pill
                 break
-        
-        if not primary_action:
-            continue
             
-        # All other actions in this step without reports_needed depend on primary
-        for action in actions:
-            action_id = action['action_id']
-            if action_id != primary_action and not action.get('reports_needed'):
-                dependencies[action_id] = [primary_action]
-    
-    return dependencies
-
-
-def build_reverse_dependencies(dependencies: dict) -> dict:
-    """Build reverse lookup: which actions are impacted when this action changes"""
-    reverse = {}
-    for dependent, parents in dependencies.items():
-        for parent in parents:
-            if parent not in reverse:
-                reverse[parent] = []
-            reverse[parent].append(dependent)
-    return reverse
-
-
-def build_required_documents(structure: dict) -> dict:
-    """
-    Dynamically build required documents list from structure.
-    Groups actions by their reports_needed.
-    """
-    documents = {}
-    
-    for step in structure.get('steps', []):
-        for action in step.get('actions', []):
-            reports = action.get('reports_needed', [])
-            action_id = action['action_id']
+            handler, job_id, project, file_name, tables_info = job
+            logger.info(f"[INFERENCE_QUEUE] Processing job {job_id} for {file_name} ({len(tables_info)} tables)")
             
-            for report in reports:
-                # Normalize report name
-                report_key = report.strip()
-                if not report_key:
-                    continue
-                    
-                if report_key not in documents:
-                    documents[report_key] = {
-                        "actions": [],
-                        "keywords": [report_key.lower()],
-                        "required": action.get('action_type') == 'required',
-                        "description": f"Report needed for Year-End processing"
-                    }
-                
-                if action_id not in documents[report_key]["actions"]:
-                    documents[report_key]["actions"].append(action_id)
-    
-    return documents
-
-
-# Placeholder - will be populated when structure is loaded
-ACTION_DEPENDENCIES = {}
-REVERSE_DEPENDENCIES = {}
-REQUIRED_DOCUMENTS = {}
-
-# =============================================================================
-# ACTION-SPECIFIC GUIDANCE - For dependent actions (no scan, just guidance)
-# =============================================================================
-DEPENDENT_ACTION_GUIDANCE = {
-    "2B": """
-**Action 2B - Update Company Information**
-
-Based on the findings from Action 2A, review and update:
-
-1. **Legal Company Name** - Must match IRS records exactly for W-2 filing
-2. **DBA/Trade Name** - Update if changed during the year
-3. **Company Address** - Verify current for tax correspondence
-4. **FEIN** - Cannot be changed after W-2s are filed - verify NOW
-
-⚠️ **Deadline**: Complete before final payroll run
-
-**What to check in UKG:**
-- Menu > Company > Company Setup
-- Verify each field matches the Tax Verification report
-""",
-    "2C": """
-**Action 2C - Update Tax Code Information**
-
-Based on the findings from Action 2A, review and update tax codes:
-
-1. **State Tax Registrations** - Ensure all states with employees have active registrations
-2. **Tax Rates** - Update any rates that changed (especially SUI rates for new year)
-3. **Tax IDs** - Verify state and local tax IDs are current
-
-⚠️ **Common Issues:**
-- Missing local tax codes for remote workers
-- Outdated SUI rates (many states change annually)
-- Pending registrations not completed
-
-**What to check in UKG:**
-- Menu > Company > Tax Codes
-- Run Tax Code Audit report
-""",
-    "2E": """
-**Action 2E - Multiple Worksite Reporting (MWR)**
-
-Based on company data from Action 2A:
-
-1. **Verify MWR Setup** - If required, ensure worksite codes are properly assigned
-2. **Employee Assignments** - Check employees are assigned to correct worksites
-3. **BLS Reporting** - Confirm quarterly MWR data is accurate
-
-**When is MWR Required?**
-- Companies with 10+ employees in most states
-- Required for Bureau of Labor Statistics reporting
-""",
-    "2H": """
-**Action 2H - Special Tax Category Overrides**
-
-Based on earnings (2F) and deductions (2G) analysis:
-
-1. **Employee-Level Overrides** - Review any employee-specific tax category changes
-2. **Company-Level Overrides** - Check company code tax category exceptions
-3. **Verify Necessity** - Ensure overrides are still needed for current year
-
-⚠️ **Risk**: Incorrect overrides cause W-2 errors
-""",
-    "2J": """
-**Action 2J - Healthcare W-2 Tax Categories**
-
-Based on deduction analysis from Action 2G:
-
-1. **Box 12 Code DD** - Verify employer + employee healthcare costs report correctly
-2. **Section 125** - Confirm cafeteria plan deductions are pre-tax
-3. **HSA Contributions** - Check Box 12 Code W setup
-
-**ACA Requirement**: Employers with 250+ prior year W-2s must report healthcare costs
-""",
-    "2K": """
-**Action 2K - Healthcare Benefits for New Year**
-
-Based on deduction data from Action 2G:
-
-1. **New Rates** - Update benefit deduction amounts for new plan year
-2. **New Plans** - Add any new benefit options
-3. **Effective Dates** - Ensure new rates start on correct date (usually 1/1)
-
-**Common Issue**: Forgetting to update rates causes over/under deductions in January
-""",
-    "2L": """
-**Action 2L - ALE Healthcare Reporting**
-
-Based on deduction (2G) and healthcare (2J) data:
-
-1. **ALE Status** - Verify if company qualifies as Applicable Large Employer (50+ FTE)
-2. **1095-C Data** - Review employee healthcare offer/enrollment data
-3. **YTD Amounts** - Verify employer contribution amounts are accurate
-
-**Deadline**: 1095-C forms due to employees by March 2
-""",
-    "3B": """
-**Action 3B - SSN Corrections**
-
-Based on Year-End Validation from Action 3A:
-
-1. **Invalid SSNs** - Contact employees with flagged SSNs
-2. **Send W-9** - Request corrected information via Form W-9
-3. **Update UKG** - Enter corrected SSNs before W-2 processing
-
-⚠️ **Penalty**: $50/W-2 for incorrect SSN (up to $500k/year)
-""",
-    "3C": """
-**Action 3C - Name/Address Updates**
-
-Based on Year-End Validation from Action 3A:
-
-1. **Name Mismatches** - Compare to SSA records (must match exactly)
-2. **Address Updates** - Verify current addresses for W-2 delivery
-3. **Deceased Employees** - Special W-2 handling required
-
-**W-2 Delivery**: Invalid addresses = returned W-2s = penalties
-""",
-    "3D": """
-**Action 3D - Deceased Employee Processing**
-
-Based on validation data from Action 3A:
-
-1. **Final W-2** - Issue to estate or surviving spouse
-2. **Box Changes** - Some boxes handled differently for deceased
-3. **1099 Consideration** - Payments after death may require 1099
-
-**IRS Rule**: W-2 wages paid in year of death; 1099 for payments after
-""",
-    "5B": """
-**Action 5B - Third-Party Sick Pay**
-
-Based on earnings review from Action 5A:
-
-1. **Identify TPSP** - Flag any third-party sick pay payments
-2. **W-2 Reporting** - Verify Box 13 "Third-party sick pay" checkbox
-3. **Tax Withholding** - Confirm taxes were handled correctly
-
-**Common Issue**: TPSP not flagged = incorrect W-2 reporting
-""",
-    "5E": """
-**Action 5E - Pre-Close Reconciliation**
-
-Based on check reconciliation (5C) and arrears (5D):
-
-1. **Resolve Outstanding Items** - Clear old checks and arrears before close
-2. **Document Decisions** - Note any write-offs or waivers
-3. **Final Verification** - Ensure all adjustments posted
-
-**Goal**: Clean slate before final payroll
-""",
-    "6B": """
-**Action 6B - W-2 Adjustments**
-
-Based on W-2 preview from Action 6A:
-
-1. **Correction Entries** - Process any needed adjustments
-2. **Verify Changes** - Re-run preview to confirm fixes
-3. **Document Reasons** - Note why adjustments were made
-
-⚠️ **Timing**: Must complete before W-2 finalization deadline
-""",
-    "6C": """
-**Action 6C - Final W-2 Review**
-
-Based on W-2 preview from Action 6A:
-
-1. **Sample Testing** - Review W-2s for sample of employees
-2. **Box Totals** - Verify totals tie to quarterly reports
-3. **Sign-Off** - Get manager/customer approval before filing
-
-**Checklist**:
-- [ ] Box 1 ties to 941 wages
-- [ ] Box 2 ties to 941 withholding  
-- [ ] State wages match state returns
-""",
-}
-
-# =============================================================================
-# CONSULTATIVE AI CONTEXT - Benchmarks, red flags, and expert guidance
-# =============================================================================
-CONSULTATIVE_PROMPTS = {
-    "2A": """
-CONSULTANT ANALYSIS - Apply your UKG/Payroll expertise:
-
-1. FEIN VALIDATION:
-   - Valid format: XX-XXXXXXX (9 digits with hyphen after 2)
-   - Flag if missing or malformed
-
-2. MULTI-STATE COMPLEXITY:
-   - 1-5 states: Standard complexity
-   - 6-15 states: Moderate complexity - ensure all state registrations current
-   - 15+ states: High complexity - recommend dedicated state tax review
-   
-3. TAX RATE BENCHMARKS (flag if outside ranges):
-   - Federal FUTA: Should be 0.6% (after credit)
-   - State SUI: Typically 1-6%, new employers often 2.7-3.4%
-   - SUI >8%: Flag as HIGH - may indicate claims history issues
-   - SUI <1%: Flag as VERY LOW - verify this is correct
-   
-4. COMMON ISSUES TO FLAG:
-   - Missing state registrations for states with employees
-   - Tax codes without associated rates
-   - Expired tax IDs or pending registrations
-   - Company name mismatches between systems
-   
-5. YEAR-END READINESS:
-   - Are all W-2 reporting fields properly configured?
-   - Any states requiring special W-2 formats (PA, IN localities)?
-""",
-
-    "2B": """
-CONSULTANT ANALYSIS - Company Information Updates:
-
-INHERITED CONTEXT: Use findings from 2A (Company Tax Verification & Master Profile)
-
-1. CRITICAL FIELDS FOR W-2:
-   - Legal company name (must match IRS records exactly)
-   - DBA/Trade name if applicable
-   - Address (affects state reporting)
-   - FEIN (cannot be changed after W-2s filed)
-
-2. THINGS TO VERIFY:
-   - Has company had any M&A activity? Name changes?
-   - Is the address current for tax correspondence?
-   - Any new states added mid-year that need setup?
-
-3. DEADLINE AWARENESS:
-   - Company info changes should be completed BEFORE final payroll
-   - Some changes require IRS notification (Form 8822-B)
-""",
-
-    "2C": """
-CONSULTANT ANALYSIS - Tax Code Updates:
-
-INHERITED CONTEXT: Use findings from 2A (Company Tax Verification & Master Profile)
-
-1. PRIORITY ITEMS:
-   - Any tax codes flagged in 2A with unusual rates
-   - New state registrations needed
-   - Rate changes effective for new year
-
-2. 2025 TAX CHANGES TO WATCH:
-   - Social Security wage base: Check if updated
-   - State-specific changes (many states adjust SUI rates annually)
-   - Local tax jurisdiction changes
-
-3. COMMON ERRORS:
-   - Forgetting to update experience-rated SUI for new year
-   - Missing local tax codes for remote workers
-   - Incorrect tax categories affecting W-2 boxes
-""",
-
-    "2D": """
-CONSULTANT ANALYSIS - Workers Compensation:
-
-1. RATE BENCHMARKS BY INDUSTRY:
-   - Office/Clerical (8810): 0.10% - 0.50%
-   - Sales Outside (8742): 0.30% - 1.00%
-   - Manufacturing: 2.00% - 8.00%
-   - Construction: 5.00% - 15.00%
-   - Healthcare: 1.50% - 4.00%
-   
-2. EXPERIENCE MODIFICATION (MOD) FACTOR:
-   - 1.00 = Industry average
-   - < 0.85 = Excellent safety record (discount)
-   - 0.85 - 1.00 = Good
-   - 1.00 - 1.25 = Below average (surcharge)
-   - > 1.25 = Poor - flag for safety review
-   
-3. RED FLAGS:
-   - Class codes that don't match actual job duties
-   - Missing class codes for job types
-   - Rates significantly different from prior year (>20% change)
-   - Governing class code mismatch
-   
-4. YEAR-END TASKS:
-   - Verify all class codes still accurate
-   - Check for rate changes effective 1/1
-   - Reconcile estimated vs actual payroll for audit
-""",
-
-    "2F": """
-CONSULTANT ANALYSIS - Earnings Tax Categories:
-
-1. W-2 BOX MAPPING (verify correct):
-   - Regular wages → Box 1, 3, 5
-   - Tips → Box 1, 7 (allocated tips Box 8)
-   - Group Term Life >$50k → Box 1, 12 Code C
-   - 401k deferrals → Box 12 Code D (reduces Box 1)
-   - HSA employer contributions → Box 12 Code W
-   
-2. COMMON MISCONFIGURATIONS:
-   - Bonus/commission not flagged as supplemental
-   - Fringe benefits missing imputed income setup
-   - Relocation expenses (taxable since 2018)
-   - Gift cards/awards not flowing to W-2
-   
-3. STATE-SPECIFIC ISSUES:
-   - PA: Some fringe benefits taxed differently
-   - NJ: Disability insurance handling
-   - CA: SDI considerations
-   
-4. RECONCILIATION CHECK:
-   - Do QTD totals tie to 941s?
-   - Any earning codes with zero YTD that seem unusual?
-""",
-
-    "2G": """
-CONSULTANT ANALYSIS - Deduction Tax Categories:
-
-1. PRE-TAX vs POST-TAX (critical for W-2):
-   - 401k/403b: Pre-tax (Box 12 Code D/E)
-   - Roth 401k: Post-tax but Box 12 Code AA
-   - Section 125 (Cafeteria): Pre-tax (reduces Box 1)
-   - HSA: Pre-tax (Box 12 Code W)
-   - After-tax deductions: Do NOT reduce Box 1
-   
-2. COMMON ERRORS:
-   - Medical premiums not set as Section 125
-   - Roth contributions coded wrong
-   - Garnishments affecting wrong tax boxes
-   - Employer HSA contributions missing from Box 12
-   
-3. ACA COMPLIANCE (Box 12 Code DD):
-   - Employer + employee medical cost must be reported
-   - Threshold: 250+ W-2s in prior year
-   - Common miss: Not including employer portion
-   
-4. LIMITS TO VERIFY (2025):
-   - 401k: $23,500 ($31,000 catch-up if 50+)
-   - HSA: $4,300 single / $8,550 family
-   - FSA: $3,300
-   - Dependent Care: $5,000
-""",
-
-    "3A": """
-CONSULTANT ANALYSIS - SSN Validation:
-
-1. SSN FORMAT ISSUES:
-   - Must be 9 digits, XXX-XX-XXXX
-   - Cannot start with 9 (except ITIN)
-   - Cannot be 000-XX-XXXX or XXX-00-XXXX
-   - ITINs (9XX) need special handling for W-2
-   
-2. IRS MATCHING:
-   - SSA matches SSN + Name combination
-   - Middle name/initial issues cause mismatches
-   - Suffix (Jr, Sr, III) must match SSA records
-   - Hyphenated names: Check SSA has same format
-   
-3. ACTION PRIORITIES:
-   - ITIN holders: May need name control review
-   - Applied for/Pending: Must resolve before W-2
-   - Deceased employees: Verify final W-2 handling
-   
-4. PENALTIES:
-   - $50/W-2 for incorrect SSN/name (up to $500k/year)
-   - First-year safe harbor if good faith effort made
-   
-5. REMEDIATION:
-   - Send Form W-9 to employee for correction
-   - Document attempts to obtain correct info
-""",
-
-    "5C": """
-CONSULTANT ANALYSIS - Outstanding Checks:
-
-1. STALE-DATED CHECKS:
-   - Typically >6 months old
-   - Must be voided and wages added back
-   - W-2 impact: Wages reportable when check issued, not cashed
-   
-2. ESCHEATMENT/UNCLAIMED PROPERTY:
-   - State-specific holding periods (1-5 years typically)
-   - Must report to state of employee's last known address
-   - Deadline varies by state (usually March-November)
-   
-3. YEAR-END ACTIONS:
-   - Identify all checks outstanding >90 days
-   - Attempt employee contact for checks >6 months
-   - Document escheatment status for checks meeting threshold
-   
-4. COMMON ISSUES:
-   - Direct deposit rejects sitting as uncashed
-   - Terminated employees with final checks unclaimed
-   - Address issues preventing delivery
-""",
-
-    "5D": """
-CONSULTANT ANALYSIS - Arrears Balances:
-
-1. ARREARS IMPACT:
-   - Unpaid deductions affect W-2 reporting
-   - Pre-tax arrears: Employee owes less tax on W-2
-   - Post-tax arrears: No W-2 impact but company owed money
-   
-2. COLLECTION PRIORITY:
-   - 401k arrears: Must collect to meet ADP/ACP testing
-   - Benefit arrears: Impacts coverage eligibility
-   - Garnishment arrears: Legal obligation to collect
-   
-3. YEAR-END DECISIONS:
-   - Write off uncollectible amounts?
-   - Impact on benefit elections for new year?
-   - Any retroactive adjustments needed?
-   
-4. COMMON SCENARIOS:
-   - Leave of absence with unpaid benefit premiums
-   - Commission-only periods with no deductions taken
-   - Terminated employees with benefit arrears
-""",
-
-    "DEFAULT": """
-CONSULTANT ANALYSIS:
-
-1. Review the uploaded documents for completeness
-2. Identify any data quality issues or gaps
-3. Flag items requiring customer clarification
-4. Note any year-end compliance concerns
-5. Recommend specific actions to take
-"""
-}
-
-# =============================================================================
-# DEPENDENCY HELPER FUNCTIONS
-# =============================================================================
-
-def get_parent_actions(action_id: str) -> List[str]:
-    """Get list of parent actions this action depends on."""
-    return ACTION_DEPENDENCIES.get(action_id, [])
-
-
-def get_inherited_data(project_id: str, action_id: str) -> Dict[str, Any]:
-    """Get documents and findings from parent actions."""
-    parents = get_parent_actions(action_id)
-    if not parents:
-        return {"documents": [], "findings": [], "content": []}
-    
-    inherited_docs = []
-    inherited_findings = []
-    inherited_content = []
-    
-    progress = PLAYBOOK_PROGRESS.get(project_id, {})
-    
-    for parent_id in parents:
-        parent_progress = progress.get(parent_id, {})
-        
-        # Get documents from parent
-        parent_docs = parent_progress.get("documents_found", [])
-        inherited_docs.extend(parent_docs)
-        
-        # Get findings from parent
-        parent_findings = parent_progress.get("findings")
-        if parent_findings:
-            inherited_findings.append({
-                "action_id": parent_id,
-                "findings": parent_findings
-            })
-            
-            # Add summary as context for AI
-            if parent_findings.get("summary"):
-                inherited_content.append(f"[FROM ACTION {parent_id}]: {parent_findings['summary']}")
-            if parent_findings.get("key_values"):
-                for k, v in parent_findings["key_values"].items():
-                    inherited_content.append(f"[FROM {parent_id}] {k}: {v}")
-    
-    return {
-        "documents": list(set(inherited_docs)),  # Dedupe
-        "findings": inherited_findings,
-        "content": inherited_content
-    }
-
-
-def load_progress() -> Dict:
-    """Load progress from persistent storage."""
-    try:
-        if os.path.exists(PROGRESS_FILE):
-            with open(PROGRESS_FILE, 'r') as f:
-                return json.load(f)
-    except Exception as e:
-        logger.warning(f"Could not load progress file: {e}")
-    return {}
-
-
-def save_progress(progress: Dict):
-    """Save progress to persistent storage."""
-    try:
-        os.makedirs(os.path.dirname(PROGRESS_FILE), exist_ok=True)
-        with open(PROGRESS_FILE, 'w') as f:
-            json.dump(progress, f, indent=2, default=str)
-    except Exception as e:
-        logger.error(f"Could not save progress file: {e}")
-
-
-# Load existing progress on startup
-PLAYBOOK_PROGRESS = load_progress()
-
-
-class ActionUpdate(BaseModel):
-    status: str  # not_started, in_progress, complete, na, blocked
-    notes: Optional[str] = None
-    findings: Optional[Dict[str, Any]] = None
-
-
-class ScanResult(BaseModel):
-    found: bool
-    documents: List[Dict[str, Any]]
-    findings: Optional[Dict[str, Any]]
-    suggested_status: str
-
-
-# ============================================================================
-# STRUCTURE ENDPOINT - Get playbook definition
-# ============================================================================
-
-@router.get("/year-end/structure")
-async def get_year_end_structure():
-    """
-    Get the parsed Year-End Checklist structure.
-    
-    PRIMARY: Reads from DuckDB (Global structured data)
-    FALLBACK: Reads from file if DuckDB doesn't have it
-    
-    Auto-caches for performance.
-    Also builds dynamic dependencies from the structure.
-    """
-    global PLAYBOOK_CACHE, PLAYBOOK_FILE_INFO, ACTION_DEPENDENCIES, REVERSE_DEPENDENCIES, REQUIRED_DOCUMENTS, REPORT_TO_ACTIONS
-    
-    # Check cache first
-    if 'year-end-2025' in PLAYBOOK_CACHE:
-        cached = PLAYBOOK_CACHE['year-end-2025']
-        # If it came from DuckDB, trust it (no file to check)
-        if cached.get('source_type') == 'duckdb':
-            return cached
-        
-        # If from file, check if file changed
-        cached_info = PLAYBOOK_FILE_INFO.get('year-end-2025', {})
-        cached_path = cached_info.get('path')
-        cached_mtime = cached_info.get('mtime')
-        
-        if cached_path and os.path.exists(cached_path):
-            current_mtime = os.path.getmtime(cached_path)
-            if cached_mtime == current_mtime:
-                return cached
-            else:
-                logger.info(f"[STRUCTURE] Source file modified, refreshing cache")
-                invalidate_year_end_cache()
-        else:
-            return cached
-    
-    # Parse from DuckDB (primary) or file (fallback)
-    try:
-        from backend.utils.playbook_parser import parse_year_end_checklist
-        
-        logger.info("[STRUCTURE] Parsing Year-End Checklist...")
-        structure = parse_year_end_checklist()
-        
-        # BUILD DYNAMIC DEPENDENCIES from the structure
-        ACTION_DEPENDENCIES = build_action_dependencies(structure)
-        REVERSE_DEPENDENCIES = build_reverse_dependencies(ACTION_DEPENDENCIES)
-        REQUIRED_DOCUMENTS = build_required_documents(structure)
-        REPORT_TO_ACTIONS = build_report_to_actions(structure)
-        
-        logger.info(f"[STRUCTURE] Built {len(ACTION_DEPENDENCIES)} dependencies, {len(REQUIRED_DOCUMENTS)} document types, {len(REPORT_TO_ACTIONS)} keyword mappings")
-        
-        # Cache the result
-        PLAYBOOK_CACHE['year-end-2025'] = structure
-        PLAYBOOK_FILE_INFO['year-end-2025'] = {
-            'source_type': structure.get('source_type', 'unknown'),
-            'parsed_at': datetime.now().isoformat()
-        }
-        
-        logger.info(f"[STRUCTURE] Loaded {structure.get('total_actions', 0)} actions from {structure.get('source_type', 'unknown')}")
-        return structure
-        
-    except Exception as e:
-        logger.exception(f"[STRUCTURE] Error parsing Year-End doc: {e}")
-        return get_default_year_end_structure()
-
-
-@router.post("/year-end/refresh-structure")
-async def refresh_year_end_structure():
-    """
-    Force re-parse of Year-End Checklist structure.
-    Clears cache and re-reads from DuckDB.
-    """
-    global PLAYBOOK_CACHE, PLAYBOOK_FILE_INFO
-    
-    # Clear cache
-    if 'year-end-2025' in PLAYBOOK_CACHE:
-        del PLAYBOOK_CACHE['year-end-2025']
-    if 'year-end-2025' in PLAYBOOK_FILE_INFO:
-        del PLAYBOOK_FILE_INFO['year-end-2025']
-    logger.info("[STRUCTURE] Cleared Year-End structure cache")
-    
-    # Re-parse
-    structure = await get_year_end_structure()
-    
-    return {
-        "success": True,
-        "message": f"Structure refreshed from {structure.get('source_type', 'unknown')}",
-        "total_actions": structure.get('total_actions', 0),
-        "source_file": structure.get('source_file', 'default'),
-        "source_type": structure.get('source_type', 'unknown')
-    }
-
-
-@router.get("/year-end/debug-duckdb")
-async def debug_duckdb():
-    """
-    Debug endpoint to see what's in DuckDB _schema_metadata.
-    Call: GET /playbooks/year-end/debug-duckdb
-    """
-    import duckdb
-    
-    DUCKDB_PATH = "/data/structured_data.duckdb"
-    
-    result = {
-        "duckdb_exists": os.path.exists(DUCKDB_PATH),
-        "duckdb_path": DUCKDB_PATH,
-        "all_tables": [],
-        "global_tables": [],
-        "year_end_tables": [],
-        "schema_metadata_exists": False,
-        "raw_metadata": []
-    }
-    
-    if not os.path.exists(DUCKDB_PATH):
-        return result
-    
-    try:
-        conn = duckdb.connect(DUCKDB_PATH)
-        
-        # Check what tables exist
-        try:
-            tables = conn.execute("SHOW TABLES").fetchall()
-            result["all_tables"] = [t[0] for t in tables]
-            result["schema_metadata_exists"] = "_schema_metadata" in result["all_tables"]
-        except Exception as e:
-            result["tables_error"] = str(e)
-        
-        # If schema_metadata exists, query it
-        if result["schema_metadata_exists"]:
             try:
-                # Get ALL metadata entries
-                all_rows = conn.execute("""
-                    SELECT project, file_name, sheet_name, table_name, row_count, is_current
-                    FROM _schema_metadata
-                    ORDER BY project, file_name, sheet_name
-                """).fetchall()
-                
-                result["raw_metadata"] = [
-                    {
-                        "project": row[0],
-                        "file_name": row[1],
-                        "sheet_name": row[2],
-                        "table_name": row[3],
-                        "row_count": row[4],
-                        "is_current": row[5]
-                    }
-                    for row in all_rows
-                ]
-                
-                # Filter for global
-                for row in result["raw_metadata"]:
-                    proj = (row["project"] or "").lower()
-                    if 'global' in proj:
-                        result["global_tables"].append(row)
-                
-                # Filter for year-end keywords
-                for row in result["raw_metadata"]:
-                    fn = (row["file_name"] or "").lower()
-                    if 'year' in fn or 'checklist' in fn or 'pro_pay' in fn:
-                        result["year_end_tables"].append(row)
-                        
+                handler.run_inference_for_file(job_id, project, file_name, tables_info)
             except Exception as e:
-                result["query_error"] = str(e)
-        
-        conn.close()
-        
-    except Exception as e:
-        result["connection_error"] = str(e)
-    
-    return result
-
-
-@router.post("/year-end/set-current-file")
-async def set_current_year_end_file(filename: str):
-    """
-    Manually set which Year-End file should be current.
-    
-    This sets is_current=FALSE for all other files and is_current=TRUE for the specified file.
-    
-    Use: POST /api/playbooks/year-end/set-current-file?filename=Pro_Pay_Year-End_Checklist...xlsx
-    """
-    import duckdb
-    
-    DUCKDB_PATH = "/data/structured_data.duckdb"
-    
-    if not os.path.exists(DUCKDB_PATH):
-        raise HTTPException(404, "DuckDB not found")
-    
-    try:
-        conn = duckdb.connect(DUCKDB_PATH)
-        
-        # First, set ALL year-end files to is_current = FALSE
-        conn.execute("""
-            UPDATE _schema_metadata 
-            SET is_current = FALSE 
-            WHERE LOWER(project) = 'global'
-            AND (
-                LOWER(file_name) LIKE '%year%end%'
-                OR LOWER(file_name) LIKE '%checklist%'
-                OR LOWER(file_name) LIKE '%pro_pay%'
-            )
-        """)
-        
-        # Now set the specified file to is_current = TRUE
-        result = conn.execute("""
-            UPDATE _schema_metadata 
-            SET is_current = TRUE 
-            WHERE file_name = ?
-            RETURNING file_name, sheet_name, table_name
-        """, [filename]).fetchall()
-        
-        conn.commit()
-        conn.close()
-        
-        if not result:
-            # Try partial match
-            conn = duckdb.connect(DUCKDB_PATH)
-            result = conn.execute("""
-                UPDATE _schema_metadata 
-                SET is_current = TRUE 
-                WHERE LOWER(file_name) LIKE ?
-                RETURNING file_name, sheet_name, table_name
-            """, [f"%{filename.lower()}%"]).fetchall()
-            conn.commit()
-            conn.close()
-        
-        # Clear the playbook cache to force refresh
-        global PLAYBOOK_CACHE
-        PLAYBOOK_CACHE.clear()
-        
-        logger.warning(f"[SET-CURRENT] Set {filename} as current, updated {len(result)} tables")
-        
-        return {
-            "status": "success",
-            "filename": filename,
-            "tables_updated": len(result),
-            "tables": [{"file": r[0], "sheet": r[1], "table": r[2]} for r in result],
-            "message": f"Set {filename} as current Year-End file. Run 'Refresh & Analyze' to reload."
-        }
-        
-    except Exception as e:
-        logger.error(f"[SET-CURRENT] Failed: {e}")
-        raise HTTPException(500, str(e))
-
-
-@router.get("/year-end/debug-table-data")
-async def debug_table_data():
-    """
-    Debug endpoint to see actual column names and sample data from Year-End tables.
-    """
-    import duckdb
-    
-    DUCKDB_PATH = "/data/structured_data.duckdb"
-    
-    result = {
-        "before_final_payroll": {"columns": [], "sample_rows": [], "error": None},
-        "after_final_payroll": {"columns": [], "sample_rows": [], "error": None}
-    }
-    
-    if not os.path.exists(DUCKDB_PATH):
-        return {"error": "DuckDB not found"}
-    
-    try:
-        conn = duckdb.connect(DUCKDB_PATH)
-        
-        # Query Before Final Payroll table
-        try:
-            # Get columns
-            cols = conn.execute("""
-                SELECT column_name FROM information_schema.columns 
-                WHERE table_name = 'global__pro_pay_yearend_checklist_usa_payment_services_worksheet_1__before_final_payroll'
-            """).fetchall()
-            result["before_final_payroll"]["columns"] = [c[0] for c in cols]
+                logger.error(f"[INFERENCE_QUEUE] Job {job_id} failed: {e}")
             
-            # Get sample data
-            rows = conn.execute("""
-                SELECT * FROM global__pro_pay_yearend_checklist_usa_payment_services_worksheet_1__before_final_payroll
-                LIMIT 10
-            """).fetchall()
+            _inference_queue.task_done()
             
-            # Convert to list of dicts
-            col_names = result["before_final_payroll"]["columns"]
-            result["before_final_payroll"]["sample_rows"] = [
-                {col_names[i]: str(row[i])[:200] for i in range(len(col_names))} 
-                for row in rows
-            ]
+        except queue.Empty:
+            # No jobs, just keep waiting
+            continue
         except Exception as e:
-            result["before_final_payroll"]["error"] = str(e)
+            logger.error(f"[INFERENCE_QUEUE] Worker error: {e}")
+
+def _ensure_worker_started():
+    """Start the worker thread if not already running"""
+    global _inference_worker_started
+    with _inference_lock:
+        if not _inference_worker_started:
+            worker = threading.Thread(target=_inference_worker, daemon=True)
+            worker.start()
+            _inference_worker_started = True
+            logger.info("[INFERENCE_QUEUE] Worker thread initialized")
+
+def queue_inference_job(handler, job_id: str, project: str, file_name: str, tables_info: list):
+    """Add an inference job to the queue"""
+    _ensure_worker_started()
+    _inference_queue.put((handler, job_id, project, file_name, tables_info))
+    queue_size = _inference_queue.qsize()
+    logger.info(f"[INFERENCE_QUEUE] Queued job {job_id}, queue size: {queue_size}")
+
+
+class FieldEncryptor:
+    """
+    Handles field-level encryption for PII data using AES-256-GCM.
+    
+    - AES-256-GCM: Authenticated encryption with 256-bit key
+    - 96-bit random nonce per encryption
+    - Format: "ENC256:" + base64(nonce + ciphertext + tag)
+    - Backward compatible: can still decrypt old "ENC:" Fernet data
+    
+    Future KMS integration point: Replace _get_key() method
+    """
+    
+    def __init__(self, key_path: str = ENCRYPTION_KEY_PATH):
+        self.key_path = key_path
+        self.aesgcm = None
+        self.fernet = None  # For backward compatibility
         
-        # Query After Final Payroll table
+        if ENCRYPTION_AVAILABLE:
+            self._init_encryption()
+    
+    def _init_encryption(self):
+        """Initialize or load AES-256 encryption key"""
         try:
-            cols = conn.execute("""
-                SELECT column_name FROM information_schema.columns 
-                WHERE table_name = 'global__pro_pay_yearend_checklist_usa_payment_services_worksheet_1__after_final_payroll'
-            """).fetchall()
-            result["after_final_payroll"]["columns"] = [c[0] for c in cols]
+            key = self._get_key()
+            self.aesgcm = AESGCM(key)
+            logger.info("AES-256-GCM encryption initialized successfully")
             
-            rows = conn.execute("""
-                SELECT * FROM global__pro_pay_yearend_checklist_usa_payment_services_worksheet_1__after_final_payroll
-                LIMIT 10
-            """).fetchall()
-            
-            col_names = result["after_final_payroll"]["columns"]
-            result["after_final_payroll"]["sample_rows"] = [
-                {col_names[i]: str(row[i])[:200] for i in range(len(col_names))} 
-                for row in rows
-            ]
-        except Exception as e:
-            result["after_final_payroll"]["error"] = str(e)
-        
-        conn.close()
-        
-    except Exception as e:
-        result["connection_error"] = str(e)
-    
-    return result
-
-
-@router.get("/year-end/debug-parser")
-async def debug_parser():
-    """
-    Debug endpoint to test the parser directly and see any errors.
-    """
-    import traceback
-    
-    result = {
-        "success": False,
-        "error": None,
-        "traceback": None,
-        "structure": None,
-        "encryption_key_exists": False,
-        "duckdb_exists": False
-    }
-    
-    # Check prerequisites
-    result["duckdb_exists"] = os.path.exists("/data/structured_data.duckdb")
-    result["encryption_key_exists"] = os.path.exists("/data/.encryption_key_v2")
-    
-    try:
-        from backend.utils.playbook_parser import parse_year_end_checklist
-        
-        structure = parse_year_end_checklist()
-        result["success"] = True
-        result["structure"] = {
-            "total_actions": structure.get("total_actions", 0),
-            "source_type": structure.get("source_type", "unknown"),
-            "source_file": structure.get("source_file", "unknown"),
-            "step_count": len(structure.get("steps", [])),
-            "first_action": structure.get("steps", [{}])[0].get("actions", [{}])[0] if structure.get("steps") else None
-        }
-    except Exception as e:
-        result["error"] = str(e)
-        result["traceback"] = traceback.format_exc()
-    
-    return result
-    """Default Year-End structure if doc not available."""
-    return {
-        "playbook_id": "year-end-2025",
-        "title": "UKG Pro Pay U.S. Year-End Checklist: Payment Services",
-        "steps": [
-            {
-                "step_number": "1",
-                "step_name": "Get Ready",
-                "phase": "before_final_payroll",
-                "actions": [
-                    {"action_id": "1A", "description": "Create an internal year-end team with representation from relevant departments (Payroll, HR, Accounting, Finance, IT)", "due_date": None, "action_type": "recommended", "keywords": ["team", "internal"], "reports_needed": []},
-                    {"action_id": "1B", "description": "If you do not use UKG Pro Print Services, order federal Forms W-2, 1099-MISC, 1099-NEC, and 1099-R from the IRS or office supply store", "due_date": None, "action_type": "recommended", "keywords": ["forms", "print"], "reports_needed": []},
-                    {"action_id": "1C", "description": "Confirm the Transmittal Control Code (TCC) for Form 1099 electronic filing or apply for an Information Returns TCC from the IRS", "due_date": "11/01/2025", "action_type": "required", "keywords": ["tcc", "1099"], "reports_needed": []},
-                ]
-            },
-            {
-                "step_number": "2",
-                "step_name": "Review and Update Company Information",
-                "phase": "before_final_payroll",
-                "actions": [
-                    {"action_id": "2A", "description": "Review company and tax code information using the Company Tax Verification and Company Master Profile reports", "due_date": None, "action_type": "required", "keywords": ["tax", "fein", "company"], "reports_needed": ["Company Tax Verification", "Company Master Profile"]},
-                    {"action_id": "2B", "description": "Update company information and tax reporting details listed on the completed Company Tax Verification report", "due_date": None, "action_type": "required", "keywords": ["tax", "company"], "reports_needed": []},
-                    {"action_id": "2C", "description": "Update any tax code information listed on the completed Company Tax Verification report and Company Master Profile report", "due_date": None, "action_type": "required", "keywords": ["tax code"], "reports_needed": []},
-                    {"action_id": "2D", "description": "Review workers' compensation company information using the Workers' Compensation Risk Rates standard report", "due_date": None, "action_type": "recommended", "keywords": ["workers comp", "risk rates"], "reports_needed": ["Workers Compensation Risk Rates"]},
-                    {"action_id": "2E", "description": "Review company or tax group multiple worksite reporting (MWR) information", "due_date": None, "action_type": "recommended", "keywords": ["mwr", "worksite"], "reports_needed": []},
-                    {"action_id": "2F", "description": "Review earnings codes to make sure they are assigned the correct earnings tax categories", "due_date": None, "action_type": "recommended", "keywords": ["earnings", "tax categories"], "reports_needed": ["Earnings Tax Categories", "Earnings Codes"]},
-                    {"action_id": "2G", "description": "Review deduction/benefit codes to make sure they are assigned the correct deduction tax categories", "due_date": None, "action_type": "recommended", "keywords": ["deduction", "benefit", "tax categories"], "reports_needed": ["Deduction Tax Categories", "Deduction Codes"]},
-                    {"action_id": "2H", "description": "Review any special earnings or deduction tax category overrides by employee or company code", "due_date": None, "action_type": "recommended", "keywords": ["special", "override"], "reports_needed": []},
-                    {"action_id": "2J", "description": "Review healthcare benefit deductions to make sure they have the correct tax categories for W-2 reporting", "due_date": None, "action_type": "recommended", "keywords": ["healthcare", "w-2"], "reports_needed": []},
-                    {"action_id": "2K", "description": "Review and update healthcare benefit deductions effective for the new year", "due_date": None, "action_type": "recommended", "keywords": ["healthcare", "benefit"], "reports_needed": []},
-                    {"action_id": "2L", "description": "Verify employee and employer healthcare year-to-date amounts for Applicable Large Employer (ALE) reporting", "due_date": None, "action_type": "recommended", "keywords": ["healthcare", "ale", "ytd"], "reports_needed": []},
-                ]
-            },
-            {
-                "step_number": "3",
-                "step_name": "Review and Update Employee Information",
-                "phase": "before_final_payroll",
-                "actions": [
-                    {"action_id": "3A", "description": "Review employees' Social Security Numbers (SSNs) using the Year-End Validation Report", "due_date": None, "action_type": "required", "keywords": ["ssn", "social security"], "reports_needed": ["Year-End Validation"]},
-                    {"action_id": "3B", "description": "Review employees' addresses using the Year-End Validation Report", "due_date": None, "action_type": "required", "keywords": ["address"], "reports_needed": ["Year-End Validation"]},
-                    {"action_id": "3C", "description": "Review employees with Form W-2 Box 13 reporting for statutory employees and retirement plan participants", "due_date": None, "action_type": "recommended", "keywords": ["w-2", "box 13", "statutory"], "reports_needed": []},
-                ]
-            },
-            {
-                "step_number": "4",
-                "step_name": "Generate Employee Forms",
-                "phase": "before_final_payroll",
-                "actions": [
-                    {"action_id": "4A", "description": "Import gross receipts and process tip allocations for tipped employees", "due_date": None, "action_type": "recommended", "keywords": ["tips", "gross receipts"], "reports_needed": []},
-                    {"action_id": "4B", "description": "Generate year-end employee forms from the Employee Tax Forms page", "due_date": None, "action_type": "required", "keywords": ["w-2", "forms"], "reports_needed": []},
-                ]
-            },
-            {
-                "step_number": "5",
-                "step_name": "Balance and Reconcile Pay Data",
-                "phase": "before_final_payroll",
-                "actions": [
-                    {"action_id": "5A", "description": "Create an off-cycle payroll (adjustment payroll) to process corrections before closing the year", "due_date": None, "action_type": "recommended", "keywords": ["adjustment", "off-cycle"], "reports_needed": []},
-                    {"action_id": "5B", "description": "Review negative wages using the W-2 Negative Wage Report", "due_date": None, "action_type": "required", "keywords": ["negative", "wages", "w-2"], "reports_needed": ["W-2 Negative Wage"]},
-                    {"action_id": "5C", "description": "Review non-reconciled checks, including manual and voided checks, using the Outstanding Checks Report", "due_date": None, "action_type": "required", "keywords": ["outstanding", "checks", "voided"], "reports_needed": ["Outstanding Checks"]},
-                    {"action_id": "5D", "description": "Review employees with outstanding arrears balances using the Arrears Report", "due_date": None, "action_type": "required", "keywords": ["arrears", "outstanding"], "reports_needed": ["Arrears"]},
-                    {"action_id": "5E", "description": "Review and reconcile payroll data with general ledger", "due_date": None, "action_type": "recommended", "keywords": ["reconcile", "gl", "ledger"], "reports_needed": []},
-                ]
-            },
-            {
-                "step_number": "6",
-                "step_name": "Close the Quarter and Year",
-                "phase": "before_final_payroll",
-                "actions": [
-                    {"action_id": "6A", "description": "Pay Puerto Rico employees a Christmas Bonus per the Puerto Rico Act", "due_date": "Before last payroll", "action_type": "required", "keywords": ["puerto rico", "christmas bonus"], "reports_needed": []},
-                    {"action_id": "6B", "description": "Process and close the last regular payroll of the year", "due_date": "12/29/2025 12:00 p.m.", "action_type": "required", "keywords": ["final payroll", "close"], "reports_needed": []},
-                    {"action_id": "6C", "description": "Post current-quarter Q4 adjustments (such as third-party sick pay) before quarter close", "due_date": "12/29/2025 12:00 p.m.", "action_type": "required", "keywords": ["q4", "adjustment", "third party sick"], "reports_needed": []},
-                ]
-            },
-            {
-                "step_number": "7",
-                "step_name": "Review Employee Forms",
-                "phase": "after_final_payroll",
-                "actions": [
-                    {"action_id": "7A", "description": "Review Form W-2 information using standard reports and validation tools", "due_date": None, "action_type": "required", "keywords": ["w-2", "review"], "reports_needed": []},
-                    {"action_id": "7B", "description": "Review Forms W-2 for U.S. territories (Puerto Rico, Virgin Islands, Guam)", "due_date": None, "action_type": "recommended", "keywords": ["w-2", "territories"], "reports_needed": []},
-                    {"action_id": "7C", "description": "Review Forms 1099-MISC, 1099-NEC, and 1099-R information", "due_date": None, "action_type": "required", "keywords": ["1099"], "reports_needed": []},
-                ]
-            },
-            {
-                "step_number": "8",
-                "step_name": "Prepare for Next Year",
-                "phase": "after_final_payroll",
-                "actions": [
-                    {"action_id": "8A", "description": "Add federal bank holidays for the new year from the Holiday Calendar page", "due_date": None, "action_type": "recommended", "keywords": ["holiday", "calendar"], "reports_needed": []},
-                    {"action_id": "8B", "description": "Configure next year's time off and accrual settings for UKG Pro Time solutions", "due_date": None, "action_type": "recommended", "keywords": ["time off", "accrual"], "reports_needed": []},
-                    {"action_id": "8C", "description": "Extend processing calendars for each active pay group", "due_date": None, "action_type": "required", "keywords": ["calendar", "pay group"], "reports_needed": []},
-                    {"action_id": "8D", "description": "Update goal amounts for earnings and deductions with annual limits", "due_date": "After last payroll, before first payroll of new year", "action_type": "required", "keywords": ["goal", "limit", "annual"], "reports_needed": []},
-                ]
-            },
-            {
-                "step_number": "9",
-                "step_name": "Update Employee Form Delivery Options",
-                "phase": "after_final_payroll",
-                "actions": [
-                    {"action_id": "9A", "description": "Encourage employees to opt in to paperless delivery of W-2 forms", "due_date": None, "action_type": "recommended", "keywords": ["paperless", "electronic"], "reports_needed": []},
-                    {"action_id": "9B", "description": "Provide employees with the ability to import their W-2 data to tax preparation software", "due_date": None, "action_type": "recommended", "keywords": ["import", "tax software"], "reports_needed": []},
-                ]
-            },
-            {
-                "step_number": "10",
-                "step_name": "Update Employee Tax Withholding Elections",
-                "phase": "after_final_payroll",
-                "actions": [
-                    {"action_id": "10A", "description": "For employees who claimed exempt on their federal W-4, remind them to submit a new W-4 form", "due_date": None, "action_type": "required", "keywords": ["exempt", "w-4"], "reports_needed": []},
-                    {"action_id": "10B", "description": "For employees with expiring tax withholding elections, update their records", "due_date": "02/15/2026", "action_type": "required", "keywords": ["withholding", "expiring"], "reports_needed": []},
-                ]
-            },
-            {
-                "step_number": "11",
-                "step_name": "Finalize Employee Forms and Quarterly Reporting",
-                "phase": "after_final_payroll",
-                "actions": [
-                    {"action_id": "11A", "description": "Finalize employee federal Forms W-2, 1099, and W-2c from the Employee Tax Forms page", "due_date": "01/07/2026 5:00 p.m. ET", "action_type": "required", "keywords": ["finalize", "w-2"], "reports_needed": []},
-                    {"action_id": "11B", "description": "Review the Quarter-to-Date (QTD) Analysis Report before quarterly close", "due_date": "01/08/2026", "action_type": "required", "keywords": ["qtd", "quarterly"], "reports_needed": ["QTD Analysis"]},
-                    {"action_id": "11C", "description": "UKG Pro Payment Services begins cash collection as scheduled", "due_date": "01/13/2026", "action_type": "required", "keywords": ["cash collection"], "reports_needed": []},
-                ]
-            },
-            {
-                "step_number": "12",
-                "step_name": "Print Forms",
-                "phase": "after_final_payroll",
-                "actions": [
-                    {"action_id": "12A", "description": "Approve W-2 forms for printing if Payment Services does not automatically approve", "due_date": "01/16/2026 11:59 p.m.", "action_type": "required", "keywords": ["approve", "print", "w-2"], "reports_needed": []},
-                    {"action_id": "12B", "description": "Approve 1099 forms for filing if Payment Services does not automatically approve", "due_date": None, "action_type": "required", "keywords": ["approve", "1099"], "reports_needed": []},
-                    {"action_id": "12C", "description": "Create PDF print files for Forms W-2 for U.S. territories", "due_date": "01/16/2026 11:59 p.m.", "action_type": "recommended", "keywords": ["pdf", "territories"], "reports_needed": []},
-                ]
-            },
-            {
-                "step_number": "13",
-                "step_name": "Distribute Employee Forms",
-                "phase": "after_final_payroll",
-                "actions": [
-                    {"action_id": "13A", "description": "Distribute electronic and paper federal Forms W-2 to employees", "due_date": "02/02/2026", "action_type": "required", "keywords": ["distribute", "w-2"], "reports_needed": []},
-                    {"action_id": "13B", "description": "Distribute Forms W-2 for U.S. territories to employees", "due_date": "02/02/2026", "action_type": "required", "keywords": ["distribute", "territories"], "reports_needed": []},
-                    {"action_id": "13C", "description": "Distribute electronic and paper Forms 1099-NEC to recipients", "due_date": "02/02/2026", "action_type": "required", "keywords": ["distribute", "1099-nec"], "reports_needed": []},
-                    {"action_id": "13D", "description": "Distribute Forms 1099-MISC and 1099-R to recipients", "due_date": "02/02/2026", "action_type": "required", "keywords": ["distribute", "1099"], "reports_needed": []},
-                ]
-            },
-            {
-                "step_number": "14",
-                "step_name": "File Employee and Employer Forms",
-                "phase": "after_final_payroll",
-                "actions": [
-                    {"action_id": "14A", "description": "File Form 1099-NEC electronic files with the IRS", "due_date": "02/02/2026", "action_type": "required", "keywords": ["file", "1099-nec", "irs"], "reports_needed": []},
-                    {"action_id": "14B", "description": "File Form 1099-MISC electronic files with the IRS", "due_date": "03/31/2026", "action_type": "required", "keywords": ["file", "1099-misc", "irs"], "reports_needed": []},
-                    {"action_id": "14C", "description": "File Form 1099-R electronic files with the IRS", "due_date": "03/31/2026", "action_type": "required", "keywords": ["file", "1099-r", "irs"], "reports_needed": []},
-                    {"action_id": "14D", "description": "File Form 945 electronically or send to the IRS", "due_date": "02/02/2026", "action_type": "required", "keywords": ["file", "945", "irs"], "reports_needed": []},
-                ]
-            },
-        ],
-        "total_actions": 55,
-        "source_file": "default_structure"
-    }
-
-
-# ============================================================================
-# PROGRESS ENDPOINTS - Track completion status
-# ============================================================================
-
-@router.get("/year-end/progress/{project_id}")
-async def get_progress(project_id: str):
-    """Get playbook progress for a project."""
-    if project_id not in PLAYBOOK_PROGRESS:
-        PLAYBOOK_PROGRESS[project_id] = {}
-    
-    return {
-        "project_id": project_id,
-        "progress": PLAYBOOK_PROGRESS[project_id],
-        "updated_at": datetime.now().isoformat()
-    }
-
-
-@router.post("/year-end/progress/{project_id}/{action_id}")
-async def update_progress(project_id: str, action_id: str, update: ActionUpdate):
-    """Update status for a specific action."""
-    if project_id not in PLAYBOOK_PROGRESS:
-        PLAYBOOK_PROGRESS[project_id] = {}
-    
-    PLAYBOOK_PROGRESS[project_id][action_id] = {
-        "status": update.status,
-        "notes": update.notes,
-        "findings": update.findings,
-        "updated_at": datetime.now().isoformat()
-    }
-    
-    # Persist to file
-    save_progress(PLAYBOOK_PROGRESS)
-    
-    return {"success": True, "action_id": action_id, "status": update.status}
-
-
-@router.delete("/year-end/progress/{project_id}")
-async def reset_progress(project_id: str):
-    """Reset all progress for a project's year-end checklist."""
-    global PLAYBOOK_PROGRESS
-    
-    if project_id in PLAYBOOK_PROGRESS:
-        del PLAYBOOK_PROGRESS[project_id]
-        save_progress(PLAYBOOK_PROGRESS)
-        logger.info(f"Reset year-end progress for project {project_id}")
-        return {"success": True, "message": f"Progress reset for project {project_id}"}
-    else:
-        return {"success": True, "message": "No progress to reset"}
-
-
-# ============================================================================
-# DUCKDB STRUCTURED DATA SEARCH
-# ============================================================================
-
-async def search_duckdb_for_action(
-    project_id: str, 
-    action: Dict, 
-    reports_needed: List[str]
-) -> List[str]:
-    """
-    Search DuckDB structured data for content relevant to an action.
-    
-    This searches:
-    1. Tables in the project's DuckDB data
-    2. Tables in GLOBAL (shared reference data)
-    3. PDF-derived tables
-    
-    Returns list of formatted content strings for AI analysis.
-    """
-    import duckdb
-    
-    DUCKDB_PATH = "/data/structured_data.duckdb"
-    
-    if not os.path.exists(DUCKDB_PATH):
-        logger.warning("[DUCKDB-SCAN] DuckDB file not found")
-        return []
-    
-    content_chunks = []
-    
-    try:
-        conn = duckdb.connect(DUCKDB_PATH, read_only=True)
-        
-        # Build search keywords from action
-        keywords = []
-        
-        # Add reports_needed as keywords
-        for report in reports_needed:
-            keywords.extend(report.lower().split())
-        
-        # Add keywords from action description
-        action_desc = action.get('description', '').lower()
-        key_terms = ['tax', 'earnings', 'deduction', 'w-2', 'w2', '1099', 'workers comp', 
-                     'benefits', 'healthcare', 'fein', 'company', 'employee', 'payroll',
-                     'rate', 'code', 'withholding', 'fica', 'suta', 'futa']
-        for term in key_terms:
-            if term in action_desc:
-                keywords.append(term)
-        
-        # Also add action-specific keywords
-        action_keywords = action.get('keywords', [])
-        keywords.extend(action_keywords)
-        
-        # Dedupe
-        keywords = list(set(keywords))
-        logger.warning(f"[DUCKDB-SCAN] Searching with keywords: {keywords[:10]}")
-        
-        # Find matching tables from _schema_metadata
-        try:
-            # Get tables for this project OR global
-            tables_query = """
-                SELECT DISTINCT 
-                    table_name, 
-                    file_name, 
-                    sheet_name, 
-                    project,
-                    columns,
-                    row_count
-                FROM _schema_metadata 
-                WHERE is_current = TRUE
-                AND (
-                    LOWER(project) = LOWER(?)
-                    OR LOWER(project) = 'global'
-                    OR LOWER(project) LIKE ?
-                )
-            """
-            tables = conn.execute(tables_query, [project_id, f"{project_id[:8]}%"]).fetchall()
-            logger.warning(f"[DUCKDB-SCAN] Found {len(tables)} tables for project")
-            
-        except Exception as e:
-            logger.warning(f"[DUCKDB-SCAN] Schema query failed: {e}")
-            tables = []
-        
-        # Also check PDF tables
-        try:
-            pdf_tables = conn.execute("""
-                SELECT table_name, source_file, row_count
-                FROM _pdf_tables
-                WHERE project_id = ? OR project_id LIKE ?
-            """, [project_id, f"{project_id[:8]}%"]).fetchall()
-            logger.warning(f"[DUCKDB-SCAN] Found {len(pdf_tables)} PDF-derived tables")
-        except:
-            pdf_tables = []
-        
-        # Score and select relevant tables
-        relevant_tables = []
-        
-        for table in tables:
-            table_name, file_name, sheet_name, project, columns_json, row_count = table
-            
-            # Build searchable text
-            searchable = f"{file_name} {sheet_name} {table_name}".lower()
-            if columns_json:
+            # Also init Fernet for backward compatibility with old data
+            old_key_path = "/data/.encryption_key"
+            if os.path.exists(old_key_path):
                 try:
-                    columns = json.loads(columns_json) if isinstance(columns_json, str) else columns_json
-                    searchable += " " + " ".join(str(c).lower() for c in columns)
+                    with open(old_key_path, 'rb') as f:
+                        fernet_key = f.read()
+                    self.fernet = Fernet(fernet_key)
+                    logger.info("Fernet backward compatibility enabled")
                 except:
                     pass
-            
-            # Score by keyword matches
-            score = sum(1 for kw in keywords if kw in searchable)
-            
-            if score > 0:
-                relevant_tables.append({
-                    'table_name': table_name,
-                    'file_name': file_name,
-                    'sheet_name': sheet_name,
-                    'project': project,
-                    'row_count': row_count,
-                    'score': score,
-                    'source_type': 'excel'
-                })
+                    
+        except Exception as e:
+            logger.error(f"Encryption initialization failed: {e}")
+            self.aesgcm = None
+    
+    def _get_key(self) -> bytes:
+        """
+        Get or generate AES-256 key (32 bytes).
         
-        # Add PDF tables
-        for pdf_table in pdf_tables:
-            table_name, source_file, row_count = pdf_table
-            searchable = f"{table_name} {source_file}".lower()
-            score = sum(1 for kw in keywords if kw in searchable)
+        Future KMS integration: Override this method to fetch from KMS
+        Example:
+            def _get_key(self):
+                import boto3
+                kms = boto3.client('kms')
+                response = kms.generate_data_key(KeyId='alias/pii-key', KeySpec='AES_256')
+                return response['Plaintext']
+        """
+        if os.path.exists(self.key_path):
+            with open(self.key_path, 'rb') as f:
+                key = f.read()
+                if len(key) != 32:
+                    raise ValueError("Invalid key length, expected 32 bytes")
+                return key
+        else:
+            # Generate new 256-bit key
+            key = os.urandom(32)
+            os.makedirs(os.path.dirname(self.key_path), exist_ok=True)
+            with open(self.key_path, 'wb') as f:
+                f.write(key)
+            os.chmod(self.key_path, 0o600)  # Restrict permissions
+            logger.info("Generated new AES-256 encryption key")
+            return key
+    
+    def is_pii_column(self, column_name: str) -> bool:
+        """Check if column likely contains PII"""
+        col_lower = column_name.lower()
+        for pattern in PII_PATTERNS:
+            if re.search(pattern, col_lower):
+                return True
+        return False
+    
+    def encrypt(self, value: Any) -> str:
+        """Encrypt a value using AES-256-GCM"""
+        if not self.aesgcm or value is None or pd.isna(value):
+            return value
+        
+        try:
+            # Convert to string and encode
+            val_bytes = str(value).encode('utf-8')
             
-            if score > 0:
-                relevant_tables.append({
-                    'table_name': table_name,
-                    'file_name': source_file,
-                    'sheet_name': 'PDF Extract',
-                    'project': project_id,
-                    'row_count': row_count,
-                    'score': score,
-                    'source_type': 'pdf'
-                })
-        
-        # Sort by score and take top 5
-        relevant_tables.sort(key=lambda x: x['score'], reverse=True)
-        relevant_tables = relevant_tables[:5]
-        
-        logger.warning(f"[DUCKDB-SCAN] Selected {len(relevant_tables)} relevant tables")
-        
-        # Query each relevant table and format content
-        for table_info in relevant_tables:
-            table_name = table_info['table_name']
+            # Generate random 96-bit nonce (12 bytes)
+            nonce = os.urandom(12)
             
+            # Encrypt (returns ciphertext + 16-byte auth tag)
+            ciphertext = self.aesgcm.encrypt(nonce, val_bytes, None)
+            
+            # Combine: nonce + ciphertext (includes tag)
+            encrypted_data = nonce + ciphertext
+            
+            # Base64 encode and prefix
+            encoded = base64.b64encode(encrypted_data).decode('utf-8')
+            return f"ENC256:{encoded}"
+            
+        except Exception as e:
+            logger.warning(f"Encryption failed for value: {e}")
+            return value
+    
+    def decrypt(self, value: Any) -> str:
+        """Decrypt a value (handles both AES-256-GCM and legacy Fernet)"""
+        if value is None or pd.isna(value):
+            return value
+        
+        try:
+            val_str = str(value)
+            
+            # Handle AES-256-GCM encrypted values
+            if val_str.startswith("ENC256:"):
+                if not self.aesgcm:
+                    return value
+                    
+                encoded = val_str[7:]  # Remove "ENC256:" prefix
+                encrypted_data = base64.b64decode(encoded)
+                
+                # Extract nonce (first 12 bytes) and ciphertext+tag (rest)
+                nonce = encrypted_data[:12]
+                ciphertext = encrypted_data[12:]
+                
+                # Decrypt
+                plaintext = self.aesgcm.decrypt(nonce, ciphertext, None)
+                return plaintext.decode('utf-8')
+            
+            # Handle legacy Fernet encrypted values (backward compatibility)
+            elif val_str.startswith("ENC:"):
+                if not self.fernet:
+                    logger.warning("Legacy encrypted data found but Fernet not available")
+                    return value
+                    
+                encrypted_data = val_str[4:].encode()
+                decrypted = self.fernet.decrypt(encrypted_data)
+                return decrypted.decode()
+            
+            # Not encrypted
+            return value
+            
+        except Exception as e:
+            logger.warning(f"Decryption failed: {e}")
+            return value
+    
+    def encrypt_dataframe(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
+        """Encrypt PII columns in a DataFrame"""
+        encrypted_cols = []
+        df = df.copy()
+        
+        for col in df.columns:
+            if self.is_pii_column(col):
+                df[col] = df[col].apply(self.encrypt)
+                encrypted_cols.append(col)
+                logger.info(f"Encrypted PII column: {col} (AES-256-GCM)")
+        
+        return df, encrypted_cols
+    
+    def decrypt_dataframe(self, df: pd.DataFrame, encrypted_cols: List[str] = None) -> pd.DataFrame:
+        """Decrypt PII columns in a DataFrame"""
+        df = df.copy()
+        
+        # If no encrypted_cols specified, check all columns for ENC prefix
+        if encrypted_cols is None:
+            encrypted_cols = []
+            for col in df.columns:
+                if df[col].dtype == object:
+                    sample = df[col].dropna().head(1)
+                    if len(sample) > 0:
+                        sample_val = str(sample.iloc[0])
+                        if sample_val.startswith("ENC256:") or sample_val.startswith("ENC:"):
+                            encrypted_cols.append(col)
+        
+        for col in encrypted_cols:
+            if col in df.columns:
+                df[col] = df[col].apply(self.decrypt)
+        
+        return df
+
+
+class StructuredDataHandler:
+    """
+    Handles structured data storage and querying via DuckDB.
+    
+    Features:
+    - Auto-detect schema from Excel/CSV
+    - Project isolation (table prefixes)
+    - Cross-sheet joins via common keys (Employee ID, etc.)
+    - Natural language to SQL translation
+    - Export results to Excel/CSV
+    - PII encryption at rest
+    - Load versioning and comparison
+    """
+    
+    def __init__(self, db_path: str = DUCKDB_PATH):
+        """Initialize DuckDB connection and create required directories"""
+        # Create all required directories
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        os.makedirs("/data/exports", exist_ok=True)
+        
+        self.db_path = db_path
+        self.conn = duckdb.connect(db_path)
+        self.encryptor = FieldEncryptor()
+        self._init_metadata_table()
+        logger.info(f"StructuredDataHandler initialized with {db_path}")
+    
+    def _init_metadata_table(self):
+        """Create metadata table to track schemas and versions"""
+        try:
+            # Try to drop old tables if they have incompatible schema
+            # This handles upgrades from old versions
             try:
-                # Get sample data (limit rows to avoid huge content)
-                row_limit = min(50, table_info.get('row_count', 50))
+                # Check if old schema exists (with PRIMARY KEY constraint)
+                result = self.conn.execute("""
+                    SELECT COUNT(*) FROM information_schema.columns 
+                    WHERE table_name = '_schema_metadata'
+                """).fetchone()
                 
-                # Get column names
-                col_info = conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
-                col_names = [c[1] for c in col_info]
+                if result and result[0] > 0:
+                    # Table exists - check if it has the old schema by trying an insert
+                    # If it fails, we need to recreate
+                    logger.info("Metadata tables exist, checking compatibility...")
+            except:
+                pass
+            
+            # Create sequences for auto-increment
+            self.conn.execute("""
+                CREATE SEQUENCE IF NOT EXISTS schema_metadata_seq START 1
+            """)
+            
+            self.conn.execute("""
+                CREATE SEQUENCE IF NOT EXISTS load_versions_seq START 1
+            """)
+            
+            # Create metadata table (will be no-op if already exists with same schema)
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS _schema_metadata (
+                    id INTEGER DEFAULT nextval('schema_metadata_seq'),
+                    project VARCHAR NOT NULL,
+                    file_name VARCHAR NOT NULL,
+                    sheet_name VARCHAR NOT NULL,
+                    table_name VARCHAR NOT NULL,
+                    columns JSON,
+                    row_count INTEGER,
+                    likely_keys JSON,
+                    encrypted_columns JSON,
+                    version INTEGER DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    is_current BOOLEAN DEFAULT TRUE
+                )
+            """)
+            
+            # Load versions table for tracking
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS _load_versions (
+                    id INTEGER DEFAULT nextval('load_versions_seq'),
+                    project VARCHAR NOT NULL,
+                    file_name VARCHAR NOT NULL,
+                    version INTEGER NOT NULL,
+                    row_count INTEGER,
+                    checksum VARCHAR,
+                    loaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    notes VARCHAR
+                )
+            """)
+            
+            # Table relationships for JOINs
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS _table_relationships (
+                    id INTEGER,
+                    project VARCHAR NOT NULL,
+                    source_table VARCHAR NOT NULL,
+                    source_columns JSON NOT NULL,
+                    target_table VARCHAR NOT NULL,
+                    target_columns JSON NOT NULL,
+                    relationship_type VARCHAR DEFAULT 'foreign_key',
+                    confidence FLOAT DEFAULT 1.0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Column semantic mappings (Claude-inferred + human overrides)
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS _column_mappings (
+                    id INTEGER,
+                    project VARCHAR NOT NULL,
+                    file_name VARCHAR NOT NULL,
+                    table_name VARCHAR NOT NULL,
+                    original_column VARCHAR NOT NULL,
+                    semantic_type VARCHAR NOT NULL,
+                    confidence FLOAT DEFAULT 0.5,
+                    is_override BOOLEAN DEFAULT FALSE,
+                    needs_review BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Mapping inference job status
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS _mapping_jobs (
+                    id VARCHAR PRIMARY KEY,
+                    project VARCHAR NOT NULL,
+                    file_name VARCHAR NOT NULL,
+                    status VARCHAR DEFAULT 'pending',
+                    total_tables INTEGER DEFAULT 0,
+                    completed_tables INTEGER DEFAULT 0,
+                    mappings_found INTEGER DEFAULT 0,
+                    needs_review_count INTEGER DEFAULT 0,
+                    error_message VARCHAR,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            self.conn.commit()
+            logger.info("Metadata tables initialized successfully")
+            
+        except Exception as e:
+            logger.warning(f"Metadata table init issue: {e}, attempting to recreate...")
+            try:
+                # Drop and recreate if there's a conflict
+                self.conn.execute("DROP TABLE IF EXISTS _schema_metadata")
+                self.conn.execute("DROP TABLE IF EXISTS _load_versions")
+                self.conn.execute("DROP SEQUENCE IF EXISTS schema_metadata_seq")
+                self.conn.execute("DROP SEQUENCE IF EXISTS load_versions_seq")
+                self.conn.commit()
                 
-                # Query data
-                rows = conn.execute(f'SELECT * FROM "{table_name}" LIMIT {row_limit}').fetchall()
-                
-                if not rows:
+                # Recursive call to create fresh
+                self._init_metadata_table()
+            except Exception as e2:
+                logger.error(f"Failed to recreate metadata tables: {e2}")
+    
+    def _sanitize_name(self, name: str) -> str:
+        """Sanitize table/column names for SQL"""
+        # Remove special chars, replace spaces with underscores
+        sanitized = re.sub(r'[^\w\s]', '', str(name))
+        sanitized = re.sub(r'\s+', '_', sanitized.strip())
+        sanitized = sanitized.lower()
+        # Ensure it doesn't start with a number
+        if sanitized and sanitized[0].isdigit():
+            sanitized = 'col_' + sanitized
+        return sanitized or 'unnamed'
+    
+    def _split_horizontal_tables(self, file_path: str, sheet_name: str) -> List[Tuple[str, pd.DataFrame]]:
+        """
+        Detect and split horizontally arranged tables within a single sheet.
+        Tables are separated by blank columns.
+        
+        Returns: List of (sub_table_name, dataframe) tuples
+        """
+        try:
+            # Read raw sheet without header to detect structure
+            raw_df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
+            
+            if raw_df.empty:
+                return []
+            
+            # Find blank columns (all cells are NaN or empty)
+            blank_cols = []
+            for col_idx in range(len(raw_df.columns)):
+                col_data = raw_df.iloc[:, col_idx]
+                # Check if column is entirely blank
+                is_blank = col_data.isna().all() or (col_data.astype(str).str.strip() == '').all()
+                if is_blank:
+                    blank_cols.append(col_idx)
+            
+            # If no blank columns or less than 2 column groups, no split needed
+            if not blank_cols:
+                return []
+            
+            # Find column groups (consecutive non-blank columns)
+            all_cols = set(range(len(raw_df.columns)))
+            non_blank_cols = sorted(all_cols - set(blank_cols))
+            
+            if not non_blank_cols:
+                return []
+            
+            # Group consecutive columns
+            groups = []
+            current_group = [non_blank_cols[0]]
+            
+            for col_idx in non_blank_cols[1:]:
+                if col_idx == current_group[-1] + 1:
+                    current_group.append(col_idx)
+                else:
+                    if len(current_group) >= 2:  # Need at least 2 columns for a valid table
+                        groups.append(current_group)
+                    current_group = [col_idx]
+            
+            if len(current_group) >= 2:
+                groups.append(current_group)
+            
+            # If only one group, no horizontal split needed
+            if len(groups) <= 1:
+                return []
+            
+            logger.info(f"Sheet '{sheet_name}': Found {len(groups)} horizontal tables")
+            
+            # Extract each table group
+            result = []
+            for group_cols in groups:
+                try:
+                    # Extract columns for this group
+                    sub_df = raw_df.iloc[:, group_cols].copy()
+                    
+                    # Use first row as header
+                    sub_df.columns = sub_df.iloc[0].fillna('').astype(str).tolist()
+                    sub_df = sub_df.iloc[1:]  # Remove header row from data
+                    
+                    # Drop empty rows
+                    sub_df = sub_df.dropna(how='all')
+                    
+                    if sub_df.empty or len(sub_df.columns) < 2:
+                        continue
+                    
+                    # Get table name from first column header (e.g., "Benefit Change Reasons")
+                    first_header = str(sub_df.columns[0]).strip()
+                    if first_header and first_header.lower() not in ['unnamed', '', 'nan']:
+                        # Try to extract a meaningful name
+                        sub_table_name = first_header.split('\n')[0][:50]  # First 50 chars, first line
+                    else:
+                        sub_table_name = f"section_{len(result) + 1}"
+                    
+                    result.append((sub_table_name, sub_df))
+                    logger.info(f"  - Extracted: '{sub_table_name}' ({len(sub_df)} rows, {len(sub_df.columns)} cols)")
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to extract column group: {e}")
                     continue
-                
-                # Format as readable content for AI
-                content = f"[DUCKDB TABLE: {table_name}]\n"
-                content += f"Source: {table_info['file_name']} / {table_info['sheet_name']}\n"
-                content += f"Columns: {', '.join(col_names)}\n"
-                content += f"Total Rows: {table_info['row_count']}\n"
-                content += "-" * 40 + "\n"
-                
-                # Add header row
-                content += " | ".join(str(c)[:20] for c in col_names) + "\n"
-                content += "-" * 40 + "\n"
-                
-                # Add data rows (decrypt if needed)
-                for row in rows[:30]:  # Limit to 30 rows for AI context
-                    row_values = []
-                    for val in row:
-                        val_str = str(val) if val is not None else ""
-                        # Check for encrypted values
-                        if val_str.startswith("ENC256:"):
-                            val_str = "[ENCRYPTED]"
-                        row_values.append(val_str[:25])  # Truncate long values
-                    content += " | ".join(row_values) + "\n"
-                
-                content_chunks.append(content)
-                logger.warning(f"[DUCKDB-SCAN] Added table {table_name} ({len(rows)} rows)")
-                
-            except Exception as e:
-                logger.warning(f"[DUCKDB-SCAN] Failed to query {table_name}: {e}")
+            
+            return result
+            
+        except Exception as e:
+            logger.warning(f"Horizontal table detection failed for '{sheet_name}': {e}")
+            return []
+    
+    def _generate_table_name(self, project: str, file_name: str, sheet_name: str) -> str:
+        """Generate unique table name for a sheet"""
+        project_clean = self._sanitize_name(project)
+        file_clean = self._sanitize_name(file_name.rsplit('.', 1)[0])  # Remove extension
+        sheet_clean = self._sanitize_name(sheet_name)
+        return f"{project_clean}__{file_clean}__{sheet_clean}"
+    
+    def _detect_column_types(self, df: pd.DataFrame) -> Dict[str, str]:
+        """Detect SQL types for DataFrame columns"""
+        type_map = {}
+        for col in df.columns:
+            sample = df[col].dropna()
+            if len(sample) == 0:
+                type_map[col] = 'VARCHAR'
                 continue
+            
+            # Check if it's numeric
+            if pd.api.types.is_numeric_dtype(sample):
+                if pd.api.types.is_integer_dtype(sample):
+                    type_map[col] = 'INTEGER'
+                else:
+                    type_map[col] = 'DOUBLE'
+            # Check if it's datetime
+            elif pd.api.types.is_datetime64_any_dtype(sample):
+                type_map[col] = 'TIMESTAMP'
+            else:
+                # Try to detect dates in string format
+                try:
+                    pd.to_datetime(sample.head(10), errors='raise')
+                    type_map[col] = 'DATE'
+                except:
+                    type_map[col] = 'VARCHAR'
         
-        conn.close()
+        return type_map
+    
+    def _detect_key_columns(self, df: pd.DataFrame) -> List[str]:
+        """Detect likely key/join columns (Employee ID, SSN, etc.)"""
+        key_patterns = [
+            r'emp.*id', r'employee.*id', r'ee.*id', r'worker.*id',
+            r'ssn', r'social.*sec',
+            r'badge', r'payroll.*id', r'person.*id',
+            r'^id$', r'.*_id$'
+        ]
         
-    except Exception as e:
-        logger.warning(f"[DUCKDB-SCAN] DuckDB search failed: {e}")
-        import traceback
-        logger.warning(traceback.format_exc())
-    
-    return content_chunks
-
-
-# ============================================================================
-# SCAN ENDPOINT - Search docs for action-relevant content
-# ============================================================================
-
-@router.post("/year-end/scan/{project_id}/{action_id}")
-async def scan_for_action(project_id: str, action_id: str):
-    """
-    Scan project documents for content relevant to a specific action.
-    
-    ENHANCED FEATURES:
-    - Inherits documents/findings from parent actions (no re-upload needed)
-    - For DEPENDENT actions: Skip redundant scan, provide guidance only
-    - Uses consultative AI with industry benchmarks
-    - Detects conflicts with existing data
-    - Flags impacted actions when new data arrives
-    - Auto-completes when all conditions met
-    """
-    logger.warning(f"[SCAN] >>> Starting scan for project={project_id}, action={action_id}")
-    
-    try:
-        from utils.rag_handler import RAGHandler
-        
-        # Get action details from structure
-        structure = await get_year_end_structure()
-        logger.warning(f"[SCAN] Got structure with {structure.get('total_actions', 0)} actions")
-        action = None
-        for step in structure.get('steps', []):
-            for a in step.get('actions', []):
-                if a['action_id'] == action_id:
-                    action = a
+        likely_keys = []
+        for col in df.columns:
+            col_lower = col.lower()
+            for pattern in key_patterns:
+                if re.search(pattern, col_lower):
+                    # Verify it has mostly unique values
+                    unique_ratio = df[col].nunique() / len(df) if len(df) > 0 else 0
+                    if unique_ratio > 0.5:  # At least 50% unique
+                        likely_keys.append(col)
                     break
-            if action:
+        
+        return likely_keys
+    
+    def detect_relationships(self, project: str) -> List[Dict[str, Any]]:
+        """
+        Detect relationships between tables in a project.
+        
+        UKG KEY CONCEPT: Composite key of company_code + employee_number
+        (Same employee number can exist in different companies)
+        
+        Returns list of detected relationships.
+        """
+        relationships = []
+        
+        try:
+            # Get all tables for this project
+            tables_result = self.conn.execute("""
+                SELECT table_name, sheet_name, columns
+                FROM _schema_metadata
+                WHERE project = ? AND is_current = TRUE
+            """, [project]).fetchall()
+            
+            if not tables_result:
+                return relationships
+            
+            # Build column map: table_name -> set of columns
+            table_columns = {}
+            for table_name, sheet_name, columns_json in tables_result:
+                try:
+                    columns = json.loads(columns_json) if columns_json else []
+                    col_names = [c.get('name', c) if isinstance(c, dict) else c for c in columns]
+                    table_columns[table_name] = {
+                        'sheet': sheet_name,
+                        'columns': set(col_names),
+                        'column_list': col_names
+                    }
+                except:
+                    continue
+            
+            # UKG Composite Key Patterns (priority order)
+            ukg_key_patterns = [
+                # Composite: company + employee (most important for UKG)
+                (['company_code', 'employee_number'], 'ukg_composite'),
+                (['company', 'employee_number'], 'ukg_composite'),
+                (['co_code', 'ee_number'], 'ukg_composite'),
+                
+                # Single key fallbacks
+                (['employee_number'], 'employee_key'),
+                (['employee_id'], 'employee_key'),
+                (['ee_number'], 'employee_key'),
+            ]
+            
+            # Find tables with employee data (not config tables)
+            employee_tables = []
+            for table_name, info in table_columns.items():
+                cols_lower = {c.lower() for c in info['columns']}
+                
+                # Must have employee-related columns
+                has_employee_col = any(
+                    'employee' in c or 'ee_' in c or 'emp_' in c 
+                    for c in cols_lower
+                )
+                
+                if has_employee_col:
+                    employee_tables.append(table_name)
+            
+            logger.info(f"[RELATIONSHIPS] Found {len(employee_tables)} employee data tables")
+            
+            # For each pair of employee tables, find matching key columns
+            processed_pairs = set()
+            
+            for source_table in employee_tables:
+                source_info = table_columns[source_table]
+                source_cols_lower = {c.lower(): c for c in source_info['columns']}
+                
+                for target_table in employee_tables:
+                    if source_table == target_table:
+                        continue
+                    
+                    # Avoid duplicate pairs
+                    pair_key = tuple(sorted([source_table, target_table]))
+                    if pair_key in processed_pairs:
+                        continue
+                    processed_pairs.add(pair_key)
+                    
+                    target_info = table_columns[target_table]
+                    target_cols_lower = {c.lower(): c for c in target_info['columns']}
+                    
+                    # Try each key pattern
+                    for key_cols, key_type in ukg_key_patterns:
+                        # Check if both tables have all key columns
+                        source_matches = []
+                        target_matches = []
+                        
+                        for key_col in key_cols:
+                            # Find matching column in source (fuzzy match)
+                            source_match = None
+                            for col_lower, col_orig in source_cols_lower.items():
+                                if key_col in col_lower or col_lower in key_col:
+                                    source_match = col_orig
+                                    break
+                            
+                            # Find matching column in target
+                            target_match = None
+                            for col_lower, col_orig in target_cols_lower.items():
+                                if key_col in col_lower or col_lower in key_col:
+                                    target_match = col_orig
+                                    break
+                            
+                            if source_match and target_match:
+                                source_matches.append(source_match)
+                                target_matches.append(target_match)
+                        
+                        # If all key columns found in both tables, we have a relationship
+                        if len(source_matches) == len(key_cols) and len(target_matches) == len(key_cols):
+                            relationship = {
+                                'source_table': source_table,
+                                'source_sheet': source_info['sheet'],
+                                'source_columns': source_matches,
+                                'target_table': target_table,
+                                'target_sheet': target_info['sheet'],
+                                'target_columns': target_matches,
+                                'key_type': key_type,
+                                'confidence': 1.0 if key_type == 'ukg_composite' else 0.8
+                            }
+                            relationships.append(relationship)
+                            
+                            logger.info(f"[RELATIONSHIPS] Found: {source_info['sheet']}.{source_matches} -> {target_info['sheet']}.{target_matches} ({key_type})")
+                            break  # Use first matching pattern (highest priority)
+            
+            # Store relationships in database
+            if relationships:
+                # Clear old relationships for this project
+                self.conn.execute("""
+                    DELETE FROM _table_relationships WHERE project = ?
+                """, [project])
+                
+                # Insert new relationships
+                for rel in relationships:
+                    self.conn.execute("""
+                        INSERT INTO _table_relationships 
+                        (id, project, source_table, source_columns, target_table, target_columns, relationship_type, confidence)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, [
+                        len(relationships),
+                        project,
+                        rel['source_table'],
+                        json.dumps(rel['source_columns']),
+                        rel['target_table'],
+                        json.dumps(rel['target_columns']),
+                        rel['key_type'],
+                        rel['confidence']
+                    ])
+                
+                self.conn.commit()
+                logger.info(f"[RELATIONSHIPS] Stored {len(relationships)} relationships for project {project}")
+            
+            return relationships
+            
+        except Exception as e:
+            logger.error(f"[RELATIONSHIPS] Detection failed: {e}")
+            return []
+    
+    def get_relationships(self, project: str) -> List[Dict[str, Any]]:
+        """Get stored relationships for a project"""
+        try:
+            result = self.conn.execute("""
+                SELECT source_table, source_columns, target_table, target_columns, 
+                       relationship_type, confidence
+                FROM _table_relationships
+                WHERE project = ?
+            """, [project]).fetchall()
+            
+            relationships = []
+            for row in result:
+                relationships.append({
+                    'source_table': row[0],
+                    'source_columns': json.loads(row[1]) if row[1] else [],
+                    'target_table': row[2],
+                    'target_columns': json.loads(row[3]) if row[3] else [],
+                    'relationship_type': row[4],
+                    'confidence': row[5]
+                })
+            
+            return relationships
+        except Exception as e:
+            logger.warning(f"Failed to get relationships: {e}")
+            return []
+    
+    # =========================================================================
+    # COLUMN MAPPING METHODS (Claude-inferred + human override)
+    # =========================================================================
+    
+    def infer_column_mappings(self, project: str, file_name: str, table_name: str, 
+                               columns: List[str], sample_data: List[Dict]) -> List[Dict]:
+        """
+        Use Claude to infer semantic meaning of columns.
+        
+        Args:
+            project: Project name
+            file_name: Source file name
+            table_name: DuckDB table name
+            columns: List of column names
+            sample_data: First few rows of data
+            
+        Returns:
+            List of mapping dicts with confidence scores
+        """
+        mappings = []
+        
+        try:
+            # Prepare sample data string
+            sample_str = ""
+            for i, row in enumerate(sample_data[:5]):
+                sample_str += f"Row {i+1}: {row}\n"
+            
+            # Build prompt for Claude
+            prompt = f"""Analyze these column names and sample data to identify semantic types.
+
+COLUMN NAMES:
+{columns}
+
+SAMPLE DATA:
+{sample_str}
+
+For each column, identify if it matches one of these semantic types:
+- employee_number: Employee ID/number (unique identifier for employees)
+- company_code: Company/organization code
+- employment_status_code: Employment status (A=Active, T=Terminated, L=Leave, etc.)
+- earning_code: Earning type codes
+- deduction_code: Deduction/benefit codes
+- job_code: Job/position codes
+- department_code: Department/org unit codes
+- amount: Monetary amounts (pay, deductions, etc.)
+- rate: Pay rates (hourly, salary)
+- effective_date: Date fields for effective dates
+- start_date: Start dates
+- end_date: End dates
+- employee_name: Employee name field
+- NONE: Does not match any semantic type
+
+Respond with JSON array only, no explanation:
+[
+  {{"column": "column_name", "semantic_type": "type_or_NONE", "confidence": 0.0-1.0}},
+  ...
+]
+
+Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely matches, below 0.7 for uncertain."""
+
+            # Call Claude for inference
+            import anthropic
+            import os
+            
+            api_key = os.environ.get('ANTHROPIC_API_KEY') or os.environ.get('CLAUDE_API_KEY')
+            if not api_key:
+                logger.warning("[MAPPINGS] No API key available for inference")
+                return self._fallback_column_inference(columns)
+            
+            client = anthropic.Anthropic(api_key=api_key)
+            response = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=2000,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            
+            response_text = response.content[0].text.strip()
+            
+            # Parse JSON response
+            # Handle markdown code blocks
+            if "```json" in response_text:
+                response_text = response_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in response_text:
+                response_text = response_text.split("```")[1].split("```")[0].strip()
+            
+            inferred = json.loads(response_text)
+            
+            # Store mappings
+            for item in inferred:
+                col = item.get('column', '')
+                sem_type = item.get('semantic_type', 'NONE')
+                confidence = item.get('confidence', 0.5)
+                
+                if sem_type and sem_type != 'NONE':
+                    needs_review = confidence < 0.85
+                    
+                    mapping = {
+                        'project': project,
+                        'file_name': file_name,
+                        'table_name': table_name,
+                        'original_column': col,
+                        'semantic_type': sem_type,
+                        'confidence': confidence,
+                        'is_override': False,
+                        'needs_review': needs_review
+                    }
+                    mappings.append(mapping)
+                    
+                    # Store in database
+                    self._store_column_mapping(mapping)
+            
+            logger.info(f"[MAPPINGS] Inferred {len(mappings)} semantic mappings for {table_name}")
+            return mappings
+            
+        except Exception as e:
+            logger.warning(f"[MAPPINGS] Claude inference failed: {e}, using fallback")
+            return self._fallback_column_inference(columns, project, file_name, table_name)
+    
+    def _fallback_column_inference(self, columns: List[str], project: str = None, 
+                                    file_name: str = None, table_name: str = None) -> List[Dict]:
+        """Pattern-based fallback when Claude is unavailable"""
+        mappings = []
+        
+        patterns = {
+            'employee_number': [r'employee.*num', r'emp.*num', r'ee.*num', r'emp.*id', r'employee.*id', r'^emp_no$', r'^ee_id$'],
+            'company_code': [r'company.*code', r'co.*code', r'comp.*code', r'home.*company'],
+            'employment_status_code': [r'employment.*status', r'emp.*status', r'status.*code'],
+            'earning_code': [r'earning.*code', r'earn.*code'],
+            'deduction_code': [r'deduction.*code', r'ded.*code', r'benefit.*code'],
+            'job_code': [r'job.*code', r'position.*code'],
+            'department_code': [r'dept.*code', r'department.*code', r'org.*level'],
+            'amount': [r'amount', r'amt$', r'_amt$'],
+            'rate': [r'rate$', r'pay.*rate', r'hourly.*rate', r'salary'],
+            'effective_date': [r'effective.*date', r'eff.*date'],
+            'employee_name': [r'^name$', r'employee.*name', r'emp.*name', r'full.*name']
+        }
+        
+        for col in columns:
+            col_lower = col.lower()
+            for sem_type, pattern_list in patterns.items():
+                for pattern in pattern_list:
+                    if re.search(pattern, col_lower):
+                        mapping = {
+                            'project': project,
+                            'file_name': file_name,
+                            'table_name': table_name,
+                            'original_column': col,
+                            'semantic_type': sem_type,
+                            'confidence': 0.7,  # Lower confidence for pattern matching
+                            'is_override': False,
+                            'needs_review': True
+                        }
+                        mappings.append(mapping)
+                        
+                        if project and file_name and table_name:
+                            self._store_column_mapping(mapping)
+                        break
+                else:
+                    continue
                 break
         
-        if not action:
-            raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
-        
-        # Get reports needed for this action
-        reports_needed = action.get('reports_needed', [])
-        
-        # Get parent actions
-        parent_actions = get_parent_actions(action_id)
-        
-        # =====================================================================
-        # DEPENDENT ACTION HANDLING - Skip redundant scan, provide guidance
-        # Actions with parent_actions should NOT get their own full scan
-        # =====================================================================
-        if parent_actions:
-            logger.info(f"[SCAN] Action {action_id} is DEPENDENT on {parent_actions} - using guidance mode")
-            return await handle_dependent_action(project_id, action_id, action, parent_actions)
-        
-        # =====================================================================
-        # STANDARD SCAN FOR ACTIONS WITH REPORTS_NEEDED
-        # =====================================================================
-        inherited = get_inherited_data(project_id, action_id)
-        inherited_docs = inherited["documents"]
-        inherited_findings = inherited["findings"]
-        inherited_content = inherited["content"]
-        
-        if parent_actions:
-            logger.info(f"[SCAN] Action {action_id} inherits from: {parent_actions}")
-            logger.info(f"[SCAN] Inherited {len(inherited_docs)} docs, {len(inherited_findings)} findings sets")
-        
-        # Search for documents
-        rag = RAGHandler()
-        found_docs = []
-        all_content = []
-        seen_files = set()
-        
-        # Add inherited docs to found docs (they're already uploaded)
-        for doc_name in inherited_docs:
-            if doc_name not in seen_files:
-                seen_files.add(doc_name)
-                found_docs.append({
-                    "filename": doc_name,
-                    "snippet": f"Inherited from action {', '.join(parent_actions)}",
-                    "query": "inherited",
-                    "match_type": "inherited"
-                })
-        
-        # Add inherited context to all_content for AI
-        all_content.extend(inherited_content)
-        
-        # STEP 1: Get project document filenames from ChromaDB metadata
+        return mappings
+    
+    def _store_column_mapping(self, mapping: Dict):
+        """Store a single column mapping in database"""
         try:
-            collection = rag.client.get_or_create_collection(name="documents")
-            all_results = collection.get(include=["metadatas"], limit=1000)
+            # Check if mapping already exists
+            existing = self.conn.execute("""
+                SELECT id FROM _column_mappings 
+                WHERE project = ? AND table_name = ? AND original_column = ?
+            """, [mapping['project'], mapping['table_name'], mapping['original_column']]).fetchone()
             
-            project_files = set()  # Just track filenames
-            total_docs_in_chroma = len(all_results.get("metadatas", []))
-            logger.warning(f"[SCAN] ChromaDB has {total_docs_in_chroma} total docs")
-            
-            for metadata in all_results.get("metadatas", []):
-                doc_project = metadata.get("project_id") or metadata.get("project", "")
-                if doc_project == project_id or doc_project == project_id[:8]:
-                    filename = metadata.get("source", metadata.get("filename", "Unknown"))
-                    project_files.add(filename)
-            
-            logger.warning(f"[SCAN] Found {len(project_files)} files for project {project_id}: {list(project_files)}")
-            
-            # STEP 2: Match by filename - check if any report name appears in filename
-            logger.warning(f"[SCAN] Reports needed: {reports_needed}")
-            for report_name in reports_needed:
-                report_keywords = report_name.lower().split()
-                for filename in project_files:
-                    filename_lower = filename.lower()
-                    # Check if report keywords appear in filename
-                    matches = sum(1 for kw in report_keywords if kw in filename_lower)
-                    if matches >= len(report_keywords) - 1:  # Allow 1 word missing
-                        if filename not in seen_files:
-                            seen_files.add(filename)
-                            found_docs.append({
-                                "filename": filename,
-                                "snippet": f"Matched report: {report_name}",
-                                "query": report_name,
-                                "match_type": "filename"
-                            })
-                            all_content.append(f"[FILE: {filename}] - matches required report: {report_name}")
-                            logger.warning(f"[SCAN] ✓ Filename match: '{filename}' for report '{report_name}'")
-            
-        except Exception as e:
-            logger.warning(f"[SCAN] Filename matching failed: {e}")
-        
-        # STEP 3: Semantic search - also search for inherited doc content
-        # Build queries from: reports needed + action description + inherited doc names
-        queries = reports_needed + [action.get('description', '')[:100]]
-        if inherited_docs:
-            queries.extend(inherited_docs[:3])  # Also search for content from inherited docs
-        
-        logger.warning(f"[SCAN] Running semantic search with {len(queries)} queries")
-        
-        for query in queries[:8]:
-                try:
-                    results = rag.search(
-                        collection_name="documents",
-                        query=query,
-                        n_results=15,
-                        project_id=project_id
-                    )
-                    logger.warning(f"[SCAN] Query '{query[:30]}...' returned {len(results) if results else 0} results")
-                    if results:
-                        for result in results:
-                            doc = result.get('document', '')
-                            if doc and len(doc) > 50:
-                                cleaned = re.sub(r'ENC256:[A-Za-z0-9+/=]+', '[ENCRYPTED]', doc)
-                                if cleaned.count('[ENCRYPTED]') < 10:
-                                    metadata = result.get('metadata', {})
-                                    filename = metadata.get('source', metadata.get('filename', 'Unknown'))
-                                    # Add content for AI analysis
-                                    all_content.append(f"[FILE: {filename}]\n{cleaned[:3000]}")
-                                    # Add to found_docs if not already there
-                                    if filename not in seen_files:
-                                        seen_files.add(filename)
-                                        found_docs.append({
-                                            "filename": filename,
-                                            "snippet": cleaned[:300],
-                                            "query": query,
-                                            "match_type": "semantic"
-                                        })
-                except Exception as e:
-                    logger.warning(f"Query failed: {e}")
-        
-        logger.warning(f"[SCAN] Total unique docs from ChromaDB: {len(found_docs)}")
-        
-        # =====================================================================
-        # STEP 4: Search DuckDB for structured data
-        # This is the key integration - get actual table data, not just vectors
-        # =====================================================================
-        duckdb_content = await search_duckdb_for_action(project_id, action, reports_needed)
-        if duckdb_content:
-            logger.warning(f"[SCAN] DuckDB returned {len(duckdb_content)} content chunks")
-            all_content.extend(duckdb_content)
-            
-            # Add DuckDB sources to found_docs
-            for content in duckdb_content:
-                # Extract table name from content header
-                if content.startswith("[DUCKDB TABLE:"):
-                    table_name = content.split("]")[0].replace("[DUCKDB TABLE: ", "")
-                    if table_name not in seen_files:
-                        seen_files.add(table_name)
-                        found_docs.append({
-                            "filename": f"📊 {table_name}",
-                            "snippet": content[:300],
-                            "query": "structured_data",
-                            "match_type": "duckdb"
-                        })
-        
-        logger.warning(f"[SCAN] Total sources (ChromaDB + DuckDB): {len(found_docs)}")
-        
-        # Determine findings and suggested status
-        findings = None
-        suggested_status = "not_started"
-        
-        # If we have docs OR inherited findings, we can analyze
-        has_data = len(found_docs) > 0 or len(inherited_findings) > 0
-        logger.warning(f"[SCAN] has_data={has_data}, found_docs={len(found_docs)}, inherited_findings={len(inherited_findings)}")
-        
-        if has_data:
-            suggested_status = "in_progress"
-            
-            # Use Claude with CONSULTATIVE context
-            if all_content or inherited_findings:
-                logger.warning(f"[SCAN] Calling AI analysis with {len(all_content)} content chunks")
-                findings = await extract_findings_consultative(
-                    action=action,
-                    content=all_content[:15],
-                    inherited_findings=inherited_findings,
-                    action_id=action_id
-                )
-                logger.warning(f"[SCAN] AI analysis returned: {type(findings)}, complete={findings.get('complete') if findings else 'None'}")
-                
-                # AUTO-COMPLETE: If findings show complete and no high-risk issues
-                if findings:
-                    if findings.get('complete') and findings.get('risk_level') != 'high':
-                        suggested_status = "complete"
-                        logger.warning(f"[SCAN] Action {action_id} AUTO-COMPLETED")
-        
-        # =====================================================================
-        # CONFLICT DETECTION - Check for inconsistencies
-        # =====================================================================
-        conflicts = await detect_conflicts(project_id, action_id, findings)
-        if conflicts:
-            findings = findings or {}
-            findings['conflicts'] = conflicts
-            if suggested_status == "complete":
-                suggested_status = "in_progress"  # Don't auto-complete if conflicts exist
-                logger.info(f"[SCAN] Conflicts detected - downgrading status to in_progress")
-        
-        # =====================================================================
-        # IMPACT FLAGGING - Flag dependent actions if this data changes
-        # =====================================================================
-        await flag_impacted_actions(project_id, action_id, findings)
-        
-        # Update progress with scan results
-        if project_id not in PLAYBOOK_PROGRESS:
-            PLAYBOOK_PROGRESS[project_id] = {}
-        
-        # Preserve existing status if user manually set it, unless auto-completing
-        existing_status = PLAYBOOK_PROGRESS.get(project_id, {}).get(action_id, {}).get("status")
-        if existing_status and existing_status != "not_started":
-            # Keep user's manual status unless we're auto-completing
-            final_status = existing_status
-        else:
-            final_status = suggested_status
-        
-        PLAYBOOK_PROGRESS[project_id][action_id] = {
-            "status": final_status,
-            "findings": findings,
-            "documents_found": [d['filename'] for d in found_docs],
-            "inherited_from": parent_actions if parent_actions else None,
-            "last_scan": datetime.now().isoformat(),
-            "notes": PLAYBOOK_PROGRESS.get(project_id, {}).get(action_id, {}).get("notes"),
-            "review_flag": None  # Clear review flag after scan
-        }
-        
-        # Persist to file
-        save_progress(PLAYBOOK_PROGRESS)
-        
-        return {
-            "found": len(found_docs) > 0,
-            "documents": found_docs,
-            "findings": findings,
-            "suggested_status": final_status,
-            "inherited_from": parent_actions if parent_actions else None,
-            "conflicts": conflicts
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"Scan failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-async def handle_dependent_action(
-    project_id: str, 
-    action_id: str, 
-    action: Dict, 
-    parent_actions: List[str]
-) -> Dict:
-    """
-    Handle scan request for a DEPENDENT action.
-    Instead of redundant scanning, provides:
-    - Reference to parent action findings
-    - Action-specific guidance
-    - Appropriate status based on parent completion
-    """
-    logger.info(f"[DEPENDENT] Handling dependent action {action_id}")
-    
-    # Get parent progress
-    progress = PLAYBOOK_PROGRESS.get(project_id, {})
-    parent_findings = []
-    parent_docs = []
-    all_parents_complete = True
-    primary_parent = parent_actions[0] if parent_actions else None
-    
-    for parent_id in parent_actions:
-        parent_data = progress.get(parent_id, {})
-        if parent_data.get("findings"):
-            parent_findings.append({
-                "action_id": parent_id,
-                "findings": parent_data["findings"]
-            })
-        if parent_data.get("documents_found"):
-            parent_docs.extend(parent_data["documents_found"])
-        if parent_data.get("status") != "complete":
-            all_parents_complete = False
-    
-    # Get action-specific guidance
-    guidance = DEPENDENT_ACTION_GUIDANCE.get(action_id, f"Review findings from action(s) {', '.join(parent_actions)} and complete the tasks for this action.")
-    
-    # Build findings for this dependent action - ONLY show new/unique info
-    findings = {
-        "complete": all_parents_complete,  # Only complete if parents are complete
-        "is_dependent": True,
-        "parent_actions": parent_actions,
-        "guidance": guidance,
-        "key_values": {},
-        "issues": [],
-        "recommendations": [],
-        "summary": f"Please see {primary_parent} response for document analysis. This action applies findings from {primary_parent}.",
-        "risk_level": "low"
-    }
-    
-    # DON'T copy issues/values from parent - just reference parent action
-    # Only add action-specific notes if they exist
-    if not all_parents_complete:
-        findings["summary"] = f"Waiting on {primary_parent} to complete. Please scan {primary_parent} first."
-        findings["issues"] = [f"Complete {primary_parent} before proceeding with {action_id}."]
-    
-    # Determine status
-    if all_parents_complete:
-        suggested_status = "in_progress"  # Ready to work on
-    else:
-        suggested_status = "blocked"  # Waiting on parents
-    
-    # Update progress
-    if project_id not in PLAYBOOK_PROGRESS:
-        PLAYBOOK_PROGRESS[project_id] = {}
-    
-    existing = PLAYBOOK_PROGRESS.get(project_id, {}).get(action_id, {})
-    
-    PLAYBOOK_PROGRESS[project_id][action_id] = {
-        "status": existing.get("status") or suggested_status,
-        "findings": findings,
-        "documents_found": list(set(parent_docs)),  # Inherited docs
-        "inherited_from": parent_actions,
-        "last_scan": datetime.now().isoformat(),
-        "notes": existing.get("notes"),
-        "is_dependent": True
-    }
-    
-    save_progress(PLAYBOOK_PROGRESS)
-    
-    return {
-        "found": len(parent_docs) > 0,
-        "documents": [{"filename": d, "match_type": "inherited", "snippet": f"From {primary_parent}"} for d in set(parent_docs)],
-        "findings": findings,
-        "suggested_status": suggested_status,
-        "inherited_from": parent_actions,
-        "is_dependent": True
-    }
-
-
-async def detect_conflicts(project_id: str, action_id: str, new_findings: Optional[Dict]) -> List[Dict]:
-    """
-    Detect conflicts between new findings and existing data.
-    Returns list of conflict objects.
-    """
-    if not new_findings or not new_findings.get("key_values"):
-        return []
-    
-    conflicts = []
-    progress = PLAYBOOK_PROGRESS.get(project_id, {})
-    new_values = new_findings.get("key_values", {})
-    
-    # Check against all other actions for conflicting values
-    critical_fields = ["fein", "company_name", "federal_futa_rate"]
-    
-    def normalize_value(field: str, value: str) -> str:
-        """Normalize values for comparison to avoid false positives"""
-        if not value:
-            return ""
-        val = str(value).strip()
-        
-        # FEIN: remove dashes, spaces, just keep digits
-        if "fein" in field.lower() or "ein" in field.lower():
-            return ''.join(c for c in val if c.isdigit())
-        
-        # Percentages: normalize to consistent decimal
-        if "rate" in field.lower() or "%" in val:
-            try:
-                # Remove % sign and convert to float
-                cleaned = val.replace('%', '').strip()
-                num = float(cleaned)
-                # Round to 4 decimal places for comparison
-                return f"{num:.4f}"
-            except (ValueError, TypeError):
-                pass
-        
-        return val.lower()
-    
-    for other_action_id, other_progress in progress.items():
-        if other_action_id == action_id:
-            continue
-        
-        other_findings = other_progress.get("findings") or {}
-        if not other_findings:
-            continue
-        other_values = other_findings.get("key_values") or {}
-        
-        for field in critical_fields:
-            # Normalize field names for comparison
-            new_val = None
-            other_val = None
-            new_val_raw = None
-            other_val_raw = None
-            
-            for k, v in new_values.items():
-                if field.lower() in k.lower():
-                    new_val_raw = str(v).strip()
-                    new_val = normalize_value(field, new_val_raw)
-                    break
-            
-            for k, v in other_values.items():
-                if field.lower() in k.lower():
-                    other_val_raw = str(v).strip()
-                    other_val = normalize_value(field, other_val_raw)
-                    break
-            
-            # Compare normalized values
-            if new_val and other_val and new_val != other_val:
-                conflicts.append({
-                    "field": field,
-                    "action_1": action_id,
-                    "value_1": new_val_raw,
-                    "action_2": other_action_id,
-                    "value_2": other_val_raw,
-                    "message": f"Conflicting {field}: '{new_val_raw}' (from {action_id}) vs '{other_val_raw}' (from {other_action_id})"
-                })
-                logger.warning(f"[CONFLICT] {conflicts[-1]['message']}")
-    
-    return conflicts
-
-
-async def flag_impacted_actions(project_id: str, action_id: str, new_findings: Optional[Dict]):
-    """
-    When an action's data changes, flag dependent actions for review.
-    Changes their status from 'complete' to 'in_progress' if they were marked complete.
-    """
-    if not new_findings:
-        return
-    
-    # Get actions that depend on this one
-    impacted = REVERSE_DEPENDENCIES.get(action_id, [])
-    if not impacted:
-        return
-    
-    progress = PLAYBOOK_PROGRESS.get(project_id, {})
-    
-    for dependent_id in impacted:
-        dependent_progress = progress.get(dependent_id, {})
-        
-        # If dependent was marked complete, flag it for review
-        if dependent_progress.get("status") == "complete":
-            logger.info(f"[IMPACT] Flagging action {dependent_id} for review (impacted by {action_id})")
-            
-            PLAYBOOK_PROGRESS[project_id][dependent_id] = {
-                **dependent_progress,
-                "status": "in_progress",  # Downgrade from complete
-                "review_flag": {
-                    "reason": f"New data in {action_id} may affect this action",
-                    "flagged_at": datetime.now().isoformat(),
-                    "triggered_by": action_id
-                }
-            }
-    
-    save_progress(PLAYBOOK_PROGRESS)
-
-
-async def extract_findings_consultative(
-    action: Dict, 
-    content: List[str], 
-    inherited_findings: List[Dict],
-    action_id: str
-) -> Optional[Dict]:
-    """
-    Use Claude to extract findings WITH CONSULTATIVE ANALYSIS.
-    
-    Includes:
-    - Industry benchmarks and comparisons
-    - Red flag detection
-    - Proactive recommendations
-    - Inherited findings from parent actions
-    """
-    logger.warning(f"[AI] Starting extract_findings_consultative for {action_id}")
-    
-    try:
-        from anthropic import Anthropic
-        
-        api_key = os.getenv("CLAUDE_API_KEY")
-        if not api_key:
-            logger.warning(f"[AI] No CLAUDE_API_KEY found - skipping AI analysis")
-            return None
-        
-        logger.warning(f"[AI] Using API key: {api_key[:8]}...")
-        client = Anthropic(api_key=api_key)
-        
-        combined = "\n\n---\n\n".join(content)
-        
-        # Get action-specific consultative context
-        consultative_context = CONSULTATIVE_PROMPTS.get(action_id, CONSULTATIVE_PROMPTS["DEFAULT"])
-        
-        # Build inherited findings context
-        inherited_context = ""
-        if inherited_findings:
-            inherited_parts = []
-            for inf in inherited_findings:
-                parent_id = inf.get("action_id", "unknown")
-                parent_findings = inf.get("findings", {})
-                inherited_parts.append(f"""
---- Inherited from Action {parent_id} ---
-Summary: {parent_findings.get('summary', 'N/A')}
-Key Values: {json.dumps(parent_findings.get('key_values', {}), indent=2)}
-Issues: {parent_findings.get('issues', [])}
-""")
-            inherited_context = "\n".join(inherited_parts)
-        
-        prompt = f"""You are a senior UKG implementation consultant performing Year-End analysis.
-
-ACTION: {action['action_id']} - {action.get('description', '')}
-REPORTS NEEDED: {', '.join(action.get('reports_needed', []))}
-
-{f'''
-INHERITED DATA FROM PREVIOUS ACTIONS:
-{inherited_context}
-''' if inherited_context else ''}
-
-<documents>
-{combined[:20000]}
-</documents>
-
-{consultative_context}
-
-Based on the documents and your UKG/Payroll expertise, provide:
-
-1. EXTRACT key data values found (FEIN, rates, states, etc.)
-2. COMPARE to benchmarks where applicable (flag HIGH/LOW/UNUSUAL)
-3. IDENTIFY risks, issues, or items needing attention
-4. RECOMMEND specific actions the customer should take
-5. ASSESS completeness - can this action be marked complete?
-
-Return as JSON:
-{{
-    "complete": true/false,
-    "key_values": {{"label": "value"}},
-    "issues": ["list of concerns - be specific"],
-    "recommendations": ["specific actions to take"],
-    "risk_level": "low|medium|high",
-    "summary": "2-3 sentence consultative summary with specific observations"
-}}
-
-Be specific and actionable. Reference actual values from the documents.
-If rates are high/low compared to benchmarks, say so explicitly.
-If data is missing, specify exactly what's needed.
-
-Return ONLY valid JSON."""
-
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1500,
-            temperature=0,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        
-        logger.warning(f"[AI] Got response from Claude API")
-        
-        text = response.content[0].text.strip()
-        # Clean markdown
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-        text = text.strip()
-        
-        result = json.loads(text)
-        logger.warning(f"[AI] Parsed findings: complete={result.get('complete')}, risk={result.get('risk_level')}")
-        return result
-        
-    except Exception as e:
-        logger.warning(f"[AI] Failed to extract findings: {e}")
-        import traceback
-        logger.warning(traceback.format_exc())
-        return None
-
-
-# Keep original function for backward compatibility
-async def extract_findings_for_action(action: Dict, content: List[str]) -> Optional[Dict]:
-    """Legacy function - redirects to consultative version."""
-    return await extract_findings_consultative(action, content, [], action['action_id'])
-
-
-# ============================================================================
-# DOCUMENT CHECKLIST ENDPOINT - Shows all required docs and upload status
-# ============================================================================
-
-@router.get("/year-end/document-checklist/{project_id}")
-async def get_document_checklist(project_id: str):
-    """
-    Get document checklist per step based on Step_Documents sheet.
-    Shows which documents are uploaded vs missing for each step.
-    """
-    try:
-        from utils.rag_handler import RAGHandler
-        from utils.playbook_parser import match_documents_to_step
-        
-        # Get structure (which now includes required_documents per step)
-        structure = await get_year_end_structure()
-        
-        # Get all project files from ChromaDB
-        rag = RAGHandler()
-        collection = rag.client.get_or_create_collection(name="documents")
-        all_results = collection.get(include=["metadatas"], limit=1000)
-        
-        # Build list of uploaded filenames
-        uploaded_files = []
-        for metadata in all_results.get("metadatas", []):
-            doc_project = metadata.get("project_id") or metadata.get("project", "")
-            if doc_project == project_id or doc_project == project_id[:8]:
-                filename = metadata.get("source", metadata.get("filename", ""))
-                if filename and filename not in uploaded_files:
-                    uploaded_files.append(filename)
-        
-        # Build checklist per step
-        step_checklists = []
-        total_matched = 0
-        total_missing = 0
-        total_required_matched = 0
-        total_required_missing = 0
-        
-        for step in structure.get('steps', []):
-            step_docs = step.get('required_documents', [])
-            if not step_docs:
-                continue
-            
-            # Match documents for this step
-            match_result = match_documents_to_step(step_docs, uploaded_files)
-            
-            step_checklists.append({
-                'step_number': step.get('step_number'),
-                'step_name': step.get('step_name'),
-                'matched': match_result['matched'],
-                'missing': match_result['missing'],
-                'stats': match_result['stats']
-            })
-            
-            total_matched += match_result['stats']['matched']
-            total_missing += match_result['stats']['missing']
-            total_required_matched += match_result['stats']['required_matched']
-            total_required_missing += match_result['stats']['required_missing']
-        
-        return {
-            "project_id": project_id,
-            "has_step_documents": structure.get('has_step_documents', False),
-            "uploaded_files": uploaded_files,
-            "step_checklists": step_checklists,
-            "stats": {
-                "total_uploaded": len(uploaded_files),
-                "total_matched": total_matched,
-                "total_missing": total_missing,
-                "required_matched": total_required_matched,
-                "required_missing": total_required_missing
-            }
-        }
-        
-    except Exception as e:
-        logger.exception(f"Document checklist failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ============================================================================
-# AI SUMMARY DASHBOARD - Consolidated view of all issues and recommendations
-# ============================================================================
-
-@router.get("/year-end/summary/{project_id}")
-async def get_ai_summary(project_id: str):
-    """
-    Get consolidated AI summary across all scanned actions.
-    Aggregates issues, recommendations, and key values.
-    """
-    progress = PLAYBOOK_PROGRESS.get(project_id, {})
-    
-    # Aggregate data
-    all_issues = []
-    all_recommendations = []
-    all_key_values = {}
-    all_conflicts = []
-    actions_with_flags = []
-    high_risk_actions = []
-    
-    for action_id, action_progress in progress.items():
-        findings = action_progress.get("findings", {})
-        if not findings:
-            continue
-        
-        # Collect issues with action context
-        for issue in findings.get("issues", []):
-            all_issues.append({
-                "action_id": action_id,
-                "issue": issue,
-                "risk_level": findings.get("risk_level", "medium")
-            })
-        
-        # Collect recommendations
-        for rec in findings.get("recommendations", []):
-            all_recommendations.append({
-                "action_id": action_id,
-                "recommendation": rec
-            })
-        
-        # Collect key values (dedupe by key)
-        for key, value in findings.get("key_values", {}).items():
-            if key not in all_key_values:
-                all_key_values[key] = {"value": value, "source": action_id}
-        
-        # Collect conflicts
-        for conflict in findings.get("conflicts", []):
-            all_conflicts.append(conflict)
-        
-        # Track review flags
-        if action_progress.get("review_flag"):
-            actions_with_flags.append({
-                "action_id": action_id,
-                "flag": action_progress["review_flag"]
-            })
-        
-        # Track high risk
-        if findings.get("risk_level") == "high":
-            high_risk_actions.append({
-                "action_id": action_id,
-                "summary": findings.get("summary", "")
-            })
-    
-    # Sort issues by risk level
-    risk_order = {"high": 0, "medium": 1, "low": 2}
-    all_issues.sort(key=lambda x: risk_order.get(x["risk_level"], 3))
-    
-    # Calculate overall risk
-    if high_risk_actions:
-        overall_risk = "high"
-    elif any(i["risk_level"] == "medium" for i in all_issues):
-        overall_risk = "medium"
-    else:
-        overall_risk = "low"
-    
-    # Generate summary text
-    summary_parts = []
-    if high_risk_actions:
-        summary_parts.append(f"⚠️ {len(high_risk_actions)} high-risk action(s) need attention")
-    if all_conflicts:
-        summary_parts.append(f"❗ {len(all_conflicts)} data conflict(s) detected")
-    if actions_with_flags:
-        summary_parts.append(f"🔄 {len(actions_with_flags)} action(s) flagged for review")
-    
-    total_complete = sum(1 for p in progress.values() if p.get("status") == "complete")
-    total_in_progress = sum(1 for p in progress.values() if p.get("status") == "in_progress")
-    
-    return {
-        "project_id": project_id,
-        "overall_risk": overall_risk,
-        "summary_text": " | ".join(summary_parts) if summary_parts else "No critical issues detected",
-        "stats": {
-            "actions_scanned": len(progress),
-            "actions_complete": total_complete,
-            "actions_in_progress": total_in_progress,
-            "total_issues": len(all_issues),
-            "total_recommendations": len(all_recommendations),
-            "total_conflicts": len(all_conflicts),
-            "actions_flagged": len(actions_with_flags)
-        },
-        "issues": all_issues[:20],  # Top 20
-        "recommendations": all_recommendations[:15],  # Top 15
-        "key_values": all_key_values,
-        "conflicts": all_conflicts,
-        "review_flags": actions_with_flags,
-        "high_risk_actions": high_risk_actions
-    }
-
-
-# ============================================================================
-# EXPORT ENDPOINT - Generate current-state workbook
-# ============================================================================
-
-@router.get("/year-end/export/{project_id}")
-async def export_progress(project_id: str, customer_name: str = "Customer"):
-    """Export current playbook progress as XLSX matching the XLR8 template."""
-    
-    structure = await get_year_end_structure()
-    progress = PLAYBOOK_PROGRESS.get(project_id, {})
-    
-    wb = openpyxl.Workbook()
-    
-    # =========================================================================
-    # STYLES - Matching template exactly
-    # =========================================================================
-    header_font = Font(bold=True, size=11, color="FFFFFF")
-    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-    
-    section_font = Font(bold=True, size=11, color="000000")
-    section_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")  # Light green for step sections
-    
-    best_practice_fill = PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid")  # Light pink
-    
-    critical_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")  # Red tint
-    high_fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")  # Amber
-    medium_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")  # Light green
-    
-    complete_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-    in_progress_fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
-    not_started_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
-    blocked_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
-    
-    normal_font = Font(size=10, color="000000")
-    bold_font = Font(bold=True, size=10, color="000000")
-    title_font = Font(bold=True, size=14, color="000000")
-    
-    thin_border = Border(
-        left=Side(style='thin', color='CCCCCC'),
-        right=Side(style='thin', color='CCCCCC'),
-        top=Side(style='thin', color='CCCCCC'),
-        bottom=Side(style='thin', color='CCCCCC')
-    )
-    
-    wrap_align = Alignment(wrap_text=True, vertical='top')
-    center_align = Alignment(horizontal='center', vertical='center')
-    
-    # =========================================================================
-    # TAB 1: Before Final Payroll - Actions
-    # =========================================================================
-    ws1 = wb.active
-    ws1.title = "Before Final Payroll - Actions"
-    
-    # Headers (15 columns matching template)
-    headers = [
-        "Action ID", "Step", "Type", "Description", "Due Date", "Owner", "Quarter-End",
-        "Required Report(s)", "Report Uploaded?", "Report File Name(s)", "Analysis Tab",
-        "Status", "Key Findings", "Issues Flagged", "Resolution/Notes"
-    ]
-    widths = [10, 8, 12, 60, 25, 20, 12, 45, 15, 50, 25, 18, 60, 45, 35]
-    
-    for col, header in enumerate(headers, 1):
-        cell = ws1.cell(row=1, column=col, value=header)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.border = thin_border
-        cell.alignment = center_align
-    ws1.row_dimensions[1].height = 28.8
-    
-    for col, width in enumerate(widths, 1):
-        ws1.column_dimensions[get_column_letter(col)].width = width
-    
-    ws1.freeze_panes = 'A2'
-    
-    # Best practice row
-    row = 2
-    ws1.cell(row=row, column=1, value="Best Practice: Generate W-2's in the Year-End Validation process before closing final payroll")
-    ws1.merge_cells(start_row=row, start_column=1, end_row=row, end_column=15)
-    ws1.cell(row=row, column=1).font = bold_font
-    ws1.cell(row=row, column=1).fill = best_practice_fill
-    
-    row = 3
-    current_step = None
-    
-    # Collect all issues for Critical Issues tab
-    all_issues = []
-    
-    # Group actions by step and add section headers
-    for step in structure.get('steps', []):
-        if step.get('phase') != 'before_final_payroll':
-            continue
-            
-        step_num = step['step_number']
-        step_name = step['step_name']
-        
-        # Section header row
-        section_text = f"Step {step_num}: {step_name}"
-        ws1.cell(row=row, column=1, value=section_text)
-        ws1.merge_cells(start_row=row, start_column=1, end_row=row, end_column=15)
-        ws1.cell(row=row, column=1).font = section_font
-        ws1.cell(row=row, column=1).fill = section_fill
-        row += 1
-        
-        # Actions for this step
-        for action in step.get('actions', []):
-            action_id = action['action_id']
-            action_progress = progress.get(action_id, {})
-            
-            status = action_progress.get('status', 'not_started')
-            findings = action_progress.get('findings', {})
-            docs_found = action_progress.get('documents_found', [])
-            notes = action_progress.get('notes', '')
-            
-            # Determine analysis tab link
-            analysis_tab = None
-            if action_id.startswith('2D'):
-                analysis_tab = 'Step 2D - WC Rates'
-            elif action_id in ['2F', '2G', '2H']:
-                analysis_tab = f'Step {action_id}'
-            elif action_id == '2L':
-                analysis_tab = 'Step 2L - Healthcare Audit'
-            elif action_id == '5C':
-                analysis_tab = 'Step 5C - Check Recon'
-            elif action_id == '5D':
-                analysis_tab = 'Step 5D - Arrears'
-            elif action_id.startswith('2'):
-                analysis_tab = 'Step 2 - Analysis & Findings'
-            
-            # Row data
-            ws1.cell(row=row, column=1, value=action_id).font = bold_font
-            ws1.cell(row=row, column=2, value=f"Step {step_num}")
-            ws1.cell(row=row, column=3, value=action.get('action_type', 'Recommended').title())
-            ws1.cell(row=row, column=4, value=action.get('description', '')).alignment = wrap_align
-            ws1.cell(row=row, column=5, value=action.get('due_date', 'N/A') or 'N/A')
-            ws1.cell(row=row, column=6, value='')  # Owner - to be filled by consultant
-            ws1.cell(row=row, column=7, value='Yes' if action.get('quarter_end') else 'No')
-            ws1.cell(row=row, column=8, value=', '.join(action.get('reports_needed', [])) or 'N/A').alignment = wrap_align
-            ws1.cell(row=row, column=9, value='Yes' if docs_found else 'No')
-            ws1.cell(row=row, column=10, value=', '.join(docs_found[:3]) if docs_found else '').alignment = wrap_align
-            ws1.cell(row=row, column=11, value=analysis_tab or '')
-            
-            # Status with color
-            status_cell = ws1.cell(row=row, column=12, value=status.replace('_', ' ').title())
-            if status == 'complete':
-                status_cell.fill = complete_fill
-            elif status == 'in_progress':
-                status_cell.fill = in_progress_fill
-            elif status == 'blocked':
-                status_cell.fill = blocked_fill
+            if existing:
+                # Update existing (only if not an override)
+                self.conn.execute("""
+                    UPDATE _column_mappings 
+                    SET semantic_type = ?, confidence = ?, needs_review = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE project = ? AND table_name = ? AND original_column = ? AND is_override = FALSE
+                """, [
+                    mapping['semantic_type'],
+                    mapping['confidence'],
+                    mapping['needs_review'],
+                    mapping['project'],
+                    mapping['table_name'],
+                    mapping['original_column']
+                ])
             else:
-                status_cell.fill = not_started_fill
+                # Insert new
+                self.conn.execute("""
+                    INSERT INTO _column_mappings 
+                    (id, project, file_name, table_name, original_column, semantic_type, 
+                     confidence, is_override, needs_review)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    hash(f"{mapping['project']}_{mapping['table_name']}_{mapping['original_column']}") % 2147483647,
+                    mapping['project'],
+                    mapping['file_name'],
+                    mapping['table_name'],
+                    mapping['original_column'],
+                    mapping['semantic_type'],
+                    mapping['confidence'],
+                    mapping['is_override'],
+                    mapping['needs_review']
+                ])
             
-            # Findings
-            key_findings = findings.get('summary', '') if findings else ''
-            ws1.cell(row=row, column=13, value=key_findings).alignment = wrap_align
-            
-            # Issues
-            issues_text = ''
-            if findings and findings.get('issues'):
-                issues_text = '\n'.join(findings.get('issues', []))
-                # Collect for Critical Issues tab
-                for issue in findings.get('issues', []):
-                    all_issues.append({
-                        'action_id': action_id,
-                        'description': action.get('description', '')[:100],
-                        'issue': issue,
-                        'due_date': action.get('due_date', ''),
-                        'priority': 'HIGH'  # Default, could be smarter
-                    })
-            ws1.cell(row=row, column=14, value=issues_text).alignment = wrap_align
-            
-            # Notes
-            ws1.cell(row=row, column=15, value=notes or '').alignment = wrap_align
-            
-            # Apply borders
-            for col in range(1, 16):
-                ws1.cell(row=row, column=col).border = thin_border
-            
-            ws1.row_dimensions[row].height = 43.2
-            row += 1
-    
-    # =========================================================================
-    # TAB 2: Critical Issues Summary
-    # =========================================================================
-    ws2 = wb.create_sheet("Critical Issues Summary")
-    
-    issue_headers = ["Priority", "Issue", "Action ID", "Amount/Impact", "Action Required", "Owner", "Due Date", "Status"]
-    for col, header in enumerate(issue_headers, 1):
-        cell = ws2.cell(row=1, column=col, value=header)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.border = thin_border
-    
-    row = 2
-    for issue in all_issues:
-        priority = issue.get('priority', 'HIGH')
-        priority_text = f"🔴 CRITICAL" if priority == 'CRITICAL' else f"🟠 HIGH" if priority == 'HIGH' else "🟡 MEDIUM"
-        
-        ws2.cell(row=row, column=1, value=priority_text)
-        ws2.cell(row=row, column=2, value=issue.get('issue', '')).alignment = wrap_align
-        ws2.cell(row=row, column=3, value=issue.get('action_id', ''))
-        ws2.cell(row=row, column=4, value='')  # Amount/Impact - from findings
-        ws2.cell(row=row, column=5, value='Review and resolve').alignment = wrap_align
-        ws2.cell(row=row, column=6, value='')  # Owner
-        ws2.cell(row=row, column=7, value=issue.get('due_date', ''))
-        ws2.cell(row=row, column=8, value='Open')
-        
-        # Color row by priority
-        fill = critical_fill if priority == 'CRITICAL' else high_fill if priority == 'HIGH' else medium_fill
-        for col in range(1, 9):
-            ws2.cell(row=row, column=col).fill = fill
-            ws2.cell(row=row, column=col).border = thin_border
-        
-        row += 1
-    
-    if row == 2:
-        ws2.cell(row=2, column=1, value="No critical issues identified yet - run document scans to detect issues")
-        ws2.merge_cells('A2:H2')
-        ws2.cell(row=2, column=1).font = Font(italic=True, color="666666")
-    
-    ws2.column_dimensions['A'].width = 15
-    ws2.column_dimensions['B'].width = 50
-    ws2.column_dimensions['C'].width = 12
-    ws2.column_dimensions['D'].width = 25
-    ws2.column_dimensions['E'].width = 40
-    ws2.column_dimensions['F'].width = 20
-    ws2.column_dimensions['G'].width = 18
-    ws2.column_dimensions['H'].width = 12
-    
-    # =========================================================================
-    # TAB 3: Uploaded Files Reference
-    # =========================================================================
-    ws3 = wb.create_sheet("Uploaded Files Reference")
-    
-    file_headers = ["File Name", "File Type", "Step/Action", "Description", "Upload Date", "Records/Pages", "Analysis Tab", "Status"]
-    for col, header in enumerate(file_headers, 1):
-        cell = ws3.cell(row=1, column=col, value=header)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.border = thin_border
-    
-    # Collect all docs found across all actions
-    row = 2
-    seen_files = set()
-    for action_id, action_prog in progress.items():
-        docs = action_prog.get('documents_found', [])
-        for doc in docs:
-            if doc not in seen_files:
-                seen_files.add(doc)
-                ws3.cell(row=row, column=1, value=doc)
-                # Infer file type from extension
-                ext = doc.split('.')[-1].upper() if '.' in doc else 'Unknown'
-                ws3.cell(row=row, column=2, value=ext)
-                ws3.cell(row=row, column=3, value=action_id)
-                ws3.cell(row=row, column=4, value='')  # Description
-                ws3.cell(row=row, column=5, value=datetime.now().strftime('%m/%d/%Y'))
-                ws3.cell(row=row, column=6, value='')  # Records
-                ws3.cell(row=row, column=7, value='')  # Analysis tab
-                ws3.cell(row=row, column=8, value='Processed')
-                
-                for col in range(1, 9):
-                    ws3.cell(row=row, column=col).border = thin_border
-                row += 1
-    
-    if row == 2:
-        ws3.cell(row=2, column=1, value="No files uploaded yet - use Upload Document in the playbook to add files")
-        ws3.merge_cells('A2:H2')
-        ws3.cell(row=2, column=1).font = Font(italic=True, color="666666")
-    
-    ws3.column_dimensions['A'].width = 45
-    ws3.column_dimensions['B'].width = 12
-    ws3.column_dimensions['C'].width = 15
-    ws3.column_dimensions['D'].width = 40
-    ws3.column_dimensions['E'].width = 15
-    ws3.column_dimensions['F'].width = 15
-    ws3.column_dimensions['G'].width = 25
-    ws3.column_dimensions['H'].width = 12
-    
-    # =========================================================================
-    # TAB 4: Key Deadlines
-    # =========================================================================
-    ws4 = wb.create_sheet("Key Deadlines")
-    
-    deadline_headers = ["Date", "Day", "Deadline", "Related Actions", "Status"]
-    for col, header in enumerate(deadline_headers, 1):
-        cell = ws4.cell(row=1, column=col, value=header)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.border = thin_border
-    
-    # Extract deadlines from structure
-    deadlines = []
-    for step in structure.get('steps', []):
-        for action in step.get('actions', []):
-            due = action.get('due_date')
-            if due and due != 'N/A':
-                deadlines.append({
-                    'date': due,
-                    'action_id': action['action_id'],
-                    'description': action.get('description', '')[:60]
-                })
-    
-    row = 2
-    for dl in deadlines:
-        ws4.cell(row=row, column=1, value=dl['date'])
-        ws4.cell(row=row, column=2, value='')  # Day - would need date parsing
-        ws4.cell(row=row, column=3, value=dl['description'])
-        ws4.cell(row=row, column=4, value=dl['action_id'])
-        
-        # Check if action is complete
-        action_status = progress.get(dl['action_id'], {}).get('status', 'not_started')
-        status_text = 'Complete' if action_status == 'complete' else 'Upcoming'
-        ws4.cell(row=row, column=5, value=status_text)
-        
-        for col in range(1, 6):
-            ws4.cell(row=row, column=col).border = thin_border
-        row += 1
-    
-    ws4.column_dimensions['A'].width = 15
-    ws4.column_dimensions['B'].width = 8
-    ws4.column_dimensions['C'].width = 60
-    ws4.column_dimensions['D'].width = 20
-    ws4.column_dimensions['E'].width = 15
-    
-    # =========================================================================
-    # TAB 5: Step 2 - Analysis & Findings
-    # =========================================================================
-    ws5 = wb.create_sheet("Step 2 - Analysis & Findings")
-    
-    ws5.cell(row=1, column=1, value="STEP 2 - ANALYSIS & FINDINGS").font = title_font
-    ws5.cell(row=2, column=1, value="Company Tax Verification and Profile Analysis")
-    ws5.cell(row=3, column=1, value=f"Report Date: {datetime.now().strftime('%B %d, %Y')}")
-    
-    # Populate from Step 2 action findings
-    row = 5
-    ws5.cell(row=row, column=1, value="COMPANY INFORMATION").font = bold_font
-    row += 1
-    
-    # Pull from 2A findings if available
-    step2a_findings = progress.get('2A', {}).get('findings', {})
-    if step2a_findings:
-        key_vals = step2a_findings.get('key_values', {})
-        for label, value in key_vals.items():
-            ws5.cell(row=row, column=1, value=f"{label}:")
-            ws5.cell(row=row, column=2, value=str(value))
-            row += 1
-        
-        if step2a_findings.get('summary'):
-            row += 1
-            ws5.cell(row=row, column=1, value="SUMMARY").font = bold_font
-            row += 1
-            ws5.cell(row=row, column=1, value=step2a_findings.get('summary', ''))
-            row += 1
-        
-        if step2a_findings.get('issues'):
-            row += 1
-            ws5.cell(row=row, column=1, value="ISSUES IDENTIFIED").font = bold_font
-            row += 1
-            for issue in step2a_findings.get('issues', []):
-                ws5.cell(row=row, column=1, value=f"⚠️ {issue}")
-                row += 1
-    else:
-        ws5.cell(row=row, column=1, value="Run 'Scan Documents' on Step 2A to populate this analysis")
-        ws5.cell(row=row, column=1).font = Font(italic=True, color="666666")
-    
-    ws5.column_dimensions['A'].width = 40
-    ws5.column_dimensions['B'].width = 60
-    
-    # =========================================================================
-    # TAB 6-14: Step-specific analysis tabs (placeholders that grow)
-    # =========================================================================
-    analysis_tabs = [
-        ("Step 2D - WC Rates", "2D", "Workers Compensation Risk Rates Analysis"),
-        ("Step 2F - Earnings", "2F", "Earnings Code Analysis"),
-        ("Step 2F - Exceptions", "2F", "Earnings Tax Category Exceptions"),
-        ("Step 2F - Tax Categories", "2F", "Earnings Tax Categories"),
-        ("Step 2G - Deductions", "2G", "Deduction Code Analysis"),
-        ("Step 2G - US Ded Codes", "2G", "US Deduction Codes"),
-        ("Step 2L - Healthcare Audit", "2L", "Healthcare Benefits Audit"),
-        ("Step 5C - Check Recon", "5C", "Outstanding Checks Reconciliation"),
-        ("Step 5D - Arrears", "5D", "Arrears Analysis"),
-    ]
-    
-    for tab_name, action_id, title in analysis_tabs:
-        ws = wb.create_sheet(tab_name)
-        ws.cell(row=1, column=1, value=title.upper()).font = title_font
-        ws.cell(row=2, column=1, value=f"Report Date: {datetime.now().strftime('%B %d, %Y')}")
-        
-        action_findings = progress.get(action_id, {}).get('findings', {})
-        
-        row = 4
-        if action_findings:
-            if action_findings.get('summary'):
-                ws.cell(row=row, column=1, value="SUMMARY").font = bold_font
-                row += 1
-                ws.cell(row=row, column=1, value=action_findings.get('summary', ''))
-                row += 2
-            
-            key_vals = action_findings.get('key_values', {})
-            if key_vals:
-                ws.cell(row=row, column=1, value="KEY FINDINGS").font = bold_font
-                row += 1
-                for label, value in key_vals.items():
-                    ws.cell(row=row, column=1, value=f"{label}:")
-                    ws.cell(row=row, column=2, value=str(value))
-                    row += 1
-            
-            if action_findings.get('issues'):
-                row += 1
-                ws.cell(row=row, column=1, value="ISSUES").font = bold_font
-                row += 1
-                for issue in action_findings.get('issues', []):
-                    ws.cell(row=row, column=1, value=f"⚠️ {issue}")
-                    row += 1
-        else:
-            ws.cell(row=row, column=1, value=f"Run 'Scan Documents' on action {action_id} to populate this analysis")
-            ws.cell(row=row, column=1).font = Font(italic=True, color="666666")
-        
-        ws.column_dimensions['A'].width = 50
-        ws.column_dimensions['B'].width = 60
-    
-    # =========================================================================
-    # Save and return
-    # =========================================================================
-    output = io.BytesIO()
-    wb.save(output)
-    output.seek(0)
-    
-    filename = f"{customer_name.replace(' ', '_')}_Year_End_Checklist_{datetime.now().strftime('%Y%m%d')}.xlsx"
-    
-    return StreamingResponse(
-        output,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-    )
-
-
-# ============================================================================
-# UPLOAD PLAYBOOK DOC - Parse and cache new structure
-# ============================================================================
-
-@router.post("/year-end/upload-definition")
-async def upload_playbook_definition(file: UploadFile = File(...)):
-    """Upload a new Year-End Checklist document to parse as playbook definition."""
-    global PLAYBOOK_CACHE
-    
-    if not file.filename.endswith('.docx'):
-        raise HTTPException(status_code=400, detail="File must be a .docx document")
-    
-    try:
-        from backend.utils.playbook_parser import parse_year_end_checklist
-        import tempfile
-        
-        # Save to temp file
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.docx') as tmp:
-            content = await file.read()
-            tmp.write(content)
-            tmp_path = tmp.name
-        
-        # Parse
-        structure = parse_year_end_checklist(tmp_path)
-        
-        # Cache it
-        PLAYBOOK_CACHE['year-end-2025'] = structure
-        
-        # Clean up
-        os.unlink(tmp_path)
-        
-        return {
-            "success": True,
-            "title": structure['title'],
-            "total_actions": structure['total_actions'],
-            "steps": len(structure['steps'])
-        }
-        
-    except Exception as e:
-        logger.exception(f"Failed to parse playbook: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ============================================================================
-# TOOLTIP SYSTEM - Consultant-driven tips and notes
-# ============================================================================
-
-class TooltipCreate(BaseModel):
-    action_id: str
-    tooltip_type: str  # 'best_practice', 'mandatory', 'hint'
-    title: Optional[str] = None
-    content: str
-    display_order: Optional[int] = 0
-
-class TooltipUpdate(BaseModel):
-    title: Optional[str] = None
-    content: Optional[str] = None
-    tooltip_type: Optional[str] = None
-    display_order: Optional[int] = None
-    is_active: Optional[bool] = None
-
-
-def get_supabase():
-    """Get Supabase client - try multiple import paths"""
-    try:
-        # Try the standard import
-        from utils.supabase_client import get_supabase as _get_supabase
-        return _get_supabase()
-    except ImportError:
-        try:
-            # Fallback: try direct supabase client
-            from utils.supabase_client import supabase
-            return supabase
-        except ImportError:
-            try:
-                # Fallback 2: try creating client directly
-                import os
-                from supabase import create_client
-                url = os.getenv("SUPABASE_URL")
-                key = os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_ANON_KEY")
-                if url and key:
-                    return create_client(url, key)
-            except Exception as e:
-                logger.error(f"All Supabase import methods failed: {e}")
-    except Exception as e:
-        logger.error(f"Failed to get Supabase client: {e}")
-    return None
-
-
-@router.get("/tooltips/{action_id}")
-async def get_tooltips_for_action(action_id: str, playbook_id: str = "year-end-2025"):
-    """Get all active tooltips for a specific action"""
-    supabase = get_supabase()
-    if not supabase:
-        return {"tooltips": [], "error": "Database not available"}
-    
-    try:
-        response = supabase.table('playbook_tooltips') \
-            .select('*') \
-            .eq('playbook_id', playbook_id) \
-            .eq('action_id', action_id) \
-            .eq('is_active', True) \
-            .order('display_order') \
-            .execute()
-        
-        return {"tooltips": response.data or []}
-    except Exception as e:
-        logger.error(f"Failed to get tooltips: {e}")
-        return {"tooltips": [], "error": str(e)}
-
-
-@router.get("/tooltips")
-async def get_all_tooltips(playbook_id: str = "year-end-2025", include_inactive: bool = False):
-    """Get all tooltips for a playbook (for admin view)"""
-    supabase = get_supabase()
-    if not supabase:
-        return {"tooltips": [], "error": "Database not available"}
-    
-    try:
-        query = supabase.table('playbook_tooltips') \
-            .select('*') \
-            .eq('playbook_id', playbook_id)
-        
-        if not include_inactive:
-            query = query.eq('is_active', True)
-        
-        response = query.order('action_id').order('display_order').execute()
-        
-        return {"tooltips": response.data or []}
-    except Exception as e:
-        logger.error(f"Failed to get tooltips: {e}")
-        return {"tooltips": [], "error": str(e)}
-
-
-@router.post("/tooltips")
-async def create_tooltip(tooltip: TooltipCreate):
-    """Create a new tooltip (admin only)"""
-    supabase = get_supabase()
-    if not supabase:
-        raise HTTPException(status_code=503, detail="Database not available")
-    
-    # Validate tooltip_type
-    valid_types = ['best_practice', 'mandatory', 'hint']
-    if tooltip.tooltip_type not in valid_types:
-        raise HTTPException(status_code=400, detail=f"Invalid tooltip_type. Must be one of: {valid_types}")
-    
-    try:
-        data = {
-            "playbook_id": "year-end-2025",
-            "action_id": tooltip.action_id.upper(),
-            "tooltip_type": tooltip.tooltip_type,
-            "title": tooltip.title,
-            "content": tooltip.content,
-            "display_order": tooltip.display_order or 0,
-            "is_active": True
-        }
-        
-        response = supabase.table('playbook_tooltips').insert(data).execute()
-        
-        return {"success": True, "tooltip": response.data[0] if response.data else None}
-    except Exception as e:
-        logger.error(f"Failed to create tooltip: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.put("/tooltips/{tooltip_id}")
-async def update_tooltip(tooltip_id: str, tooltip: TooltipUpdate):
-    """Update an existing tooltip (admin only)"""
-    supabase = get_supabase()
-    if not supabase:
-        raise HTTPException(status_code=503, detail="Database not available")
-    
-    try:
-        # Build update data (only include non-None fields)
-        data = {}
-        if tooltip.title is not None:
-            data["title"] = tooltip.title
-        if tooltip.content is not None:
-            data["content"] = tooltip.content
-        if tooltip.tooltip_type is not None:
-            valid_types = ['best_practice', 'mandatory', 'hint']
-            if tooltip.tooltip_type not in valid_types:
-                raise HTTPException(status_code=400, detail=f"Invalid tooltip_type. Must be one of: {valid_types}")
-            data["tooltip_type"] = tooltip.tooltip_type
-        if tooltip.display_order is not None:
-            data["display_order"] = tooltip.display_order
-        if tooltip.is_active is not None:
-            data["is_active"] = tooltip.is_active
-        
-        if not data:
-            raise HTTPException(status_code=400, detail="No fields to update")
-        
-        response = supabase.table('playbook_tooltips') \
-            .update(data) \
-            .eq('id', tooltip_id) \
-            .execute()
-        
-        return {"success": True, "tooltip": response.data[0] if response.data else None}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to update tooltip: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.delete("/tooltips/{tooltip_id}")
-async def delete_tooltip(tooltip_id: str):
-    """Delete a tooltip (admin only) - soft delete by setting is_active=False"""
-    supabase = get_supabase()
-    if not supabase:
-        raise HTTPException(status_code=503, detail="Database not available")
-    
-    try:
-        # Soft delete
-        response = supabase.table('playbook_tooltips') \
-            .update({"is_active": False}) \
-            .eq('id', tooltip_id) \
-            .execute()
-        
-        return {"success": True, "deleted": tooltip_id}
-    except Exception as e:
-        logger.error(f"Failed to delete tooltip: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/tooltips/bulk/{playbook_id}")
-async def get_tooltips_bulk(playbook_id: str = "year-end-2025"):
-    """
-    Get all tooltips grouped by action_id for efficient frontend loading.
-    Returns: { "2A": [...tooltips], "3B": [...tooltips], ... }
-    """
-    supabase = get_supabase()
-    if not supabase:
-        return {"tooltips_by_action": {}, "error": "Database not available"}
-    
-    try:
-        response = supabase.table('playbook_tooltips') \
-            .select('*') \
-            .eq('playbook_id', playbook_id) \
-            .eq('is_active', True) \
-            .order('display_order') \
-            .execute()
-        
-        # Group by action_id
-        by_action = {}
-        for tip in (response.data or []):
-            action_id = tip['action_id']
-            if action_id not in by_action:
-                by_action[action_id] = []
-            by_action[action_id].append(tip)
-        
-        return {"tooltips_by_action": by_action}
-    except Exception as e:
-        logger.error(f"Failed to get tooltips bulk: {e}")
-        return {"tooltips_by_action": {}, "error": str(e)}
-
-def build_report_to_actions(structure: dict) -> dict:
-    """
-    Dynamically build keyword-to-action mappings from structure.
-    Maps report keywords to actions that need those reports.
-    """
-    mapping = {}
-    
-    for step in structure.get('steps', []):
-        for action in step.get('actions', []):
-            action_id = action['action_id']
-            
-            # Add mappings for reports_needed
-            for report in action.get('reports_needed', []):
-                report_lower = report.lower().strip()
-                if report_lower:
-                    if report_lower not in mapping:
-                        mapping[report_lower] = []
-                    if action_id not in mapping[report_lower]:
-                        mapping[report_lower].append(action_id)
-            
-            # Add mappings for keywords
-            for keyword in action.get('keywords', []):
-                keyword_lower = keyword.lower().strip()
-                if keyword_lower:
-                    if keyword_lower not in mapping:
-                        mapping[keyword_lower] = []
-                    if action_id not in mapping[keyword_lower]:
-                        mapping[keyword_lower].append(action_id)
-    
-    return mapping
-
-# Placeholder - built when structure loads
-REPORT_TO_ACTIONS = {}
-
-
-def match_filename_to_actions(filename: str, structure: dict = None) -> List[str]:
-    """
-    Match an uploaded filename to relevant playbook actions.
-    Returns list of action IDs that should be scanned.
-    
-    Dynamically builds mapping if not cached.
-    """
-    global REPORT_TO_ACTIONS
-    
-    # Build mapping if empty and structure provided
-    if not REPORT_TO_ACTIONS and structure:
-        REPORT_TO_ACTIONS = build_report_to_actions(structure)
-        logger.info(f"[AUTO-SCAN] Built {len(REPORT_TO_ACTIONS)} keyword mappings")
-    
-    filename_lower = filename.lower()
-    matched_actions = set()
-    
-    for keyword, actions in REPORT_TO_ACTIONS.items():
-        if keyword in filename_lower:
-            matched_actions.update(actions)
-            logger.info(f"[AUTO-SCAN] Filename '{filename}' matched keyword '{keyword}' -> actions {actions}")
-    
-    return list(matched_actions)
-
-
-def get_dependent_actions(action_ids: List[str]) -> List[str]:
-    """
-    Get all actions that depend on the given actions.
-    Returns the original actions plus their dependents.
-    """
-    all_actions = set(action_ids)
-    
-    # Find dependents
-    for dependent_id, parent_ids in ACTION_DEPENDENCIES.items():
-        if any(parent in action_ids for parent in parent_ids):
-            all_actions.add(dependent_id)
-            logger.info(f"[AUTO-SCAN] Adding dependent action {dependent_id} (depends on {parent_ids})")
-    
-    return list(all_actions)
-
-
-def get_scan_order(action_ids: List[str]) -> List[str]:
-    """
-    Order actions so parents are scanned before dependents.
-    """
-    # Define a priority based on action number
-    def action_priority(action_id: str) -> int:
-        # Extract numeric part
-        try:
-            num_part = ''.join(filter(str.isdigit, action_id))
-            letter_part = ''.join(filter(str.isalpha, action_id))
-            return int(num_part) * 100 + ord(letter_part.upper()) - ord('A')
-        except:
-            return 999
-    
-    return sorted(action_ids, key=action_priority)
-
-
-@router.post("/year-end/auto-scan/{project_id}")
-async def auto_scan_for_file(project_id: str, filename: str):
-    """
-    Automatically scan relevant playbook actions when a file is uploaded.
-    
-    1. Match filename to relevant actions
-    2. Add dependent actions
-    3. Scan in correct order (parents before children)
-    4. Return results
-    """
-    logger.info(f"[AUTO-SCAN] Starting auto-scan for '{filename}' in project {project_id}")
-    
-    # Get structure first to build dynamic mappings
-    structure = await get_year_end_structure()
-    
-    # Step 1: Match filename to actions (pass structure for dynamic mapping)
-    matched_actions = match_filename_to_actions(filename, structure)
-    
-    if not matched_actions:
-        logger.info(f"[AUTO-SCAN] No matching actions found for '{filename}'")
-        return {
-            "success": True,
-            "filename": filename,
-            "matched_actions": [],
-            "scanned_actions": [],
-            "message": "No playbook actions matched this file"
-        }
-    
-    # Step 2: Add dependent actions
-    all_actions = get_dependent_actions(matched_actions)
-    
-    # Step 3: Order correctly
-    scan_order = get_scan_order(all_actions)
-    
-    logger.info(f"[AUTO-SCAN] Will scan {len(scan_order)} actions in order: {scan_order}")
-    
-    # Step 4: Scan each action
-    results = []
-    for action_id in scan_order:
-        try:
-            logger.info(f"[AUTO-SCAN] Scanning action {action_id}...")
-            result = await scan_for_action(project_id, action_id)
-            results.append({
-                "action_id": action_id,
-                "success": True,
-                "found": result.get("found", False),
-                "documents": len(result.get("documents", [])),
-                "status": result.get("suggested_status", "not_started")
-            })
-            logger.info(f"[AUTO-SCAN] Action {action_id} complete: {result.get('suggested_status', 'unknown')}")
+            self.conn.commit()
         except Exception as e:
-            logger.error(f"[AUTO-SCAN] Action {action_id} failed: {e}")
-            results.append({
-                "action_id": action_id,
-                "success": False,
-                "error": str(e)
-            })
+            logger.warning(f"[MAPPINGS] Failed to store mapping: {e}")
     
-    return {
-        "success": True,
-        "filename": filename,
-        "matched_actions": matched_actions,
-        "scanned_actions": scan_order,
-        "results": results
-    }
-
-
-def trigger_auto_scan_sync(project_id: str, filename: str):
-    """
-    Synchronous wrapper to trigger auto-scan from background threads.
-    Uses asyncio to run the async function.
-    """
-    import asyncio
-    
-    try:
-        # Try to get existing event loop
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # If loop is already running, create a new task
-            # This happens when called from within an async context
-            asyncio.create_task(auto_scan_for_file(project_id, filename))
-            logger.info(f"[AUTO-SCAN] Queued auto-scan task for '{filename}'")
-        else:
-            # Run in the existing loop
-            loop.run_until_complete(auto_scan_for_file(project_id, filename))
-    except RuntimeError:
-        # No event loop, create a new one
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+    def get_column_mappings(self, project: str, file_name: str = None, 
+                            table_name: str = None) -> List[Dict]:
+        """
+        Get column mappings for a project/file/table.
+        
+        Args:
+            project: Project name (required)
+            file_name: Optional file filter
+            table_name: Optional table filter
+            
+        Returns:
+            List of mapping dicts
+        """
         try:
-            loop.run_until_complete(auto_scan_for_file(project_id, filename))
-        finally:
-            loop.close()
-    except Exception as e:
-        logger.error(f"[AUTO-SCAN] Failed to trigger auto-scan: {e}")
-
-
-# =============================================================================
-# NON-BLOCKING SCAN-ALL WITH STATUS POLLING
-# =============================================================================
-
-# Scan job tracking
-class _ScanJobStatus:
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    TIMEOUT = "timeout"
-    CANCELLED = "cancelled"
-
-class _PlaybookScanJob:
-    """Tracks a scan-all job with progress updates"""
+            query = "SELECT * FROM _column_mappings WHERE project = ?"
+            params = [project]
+            
+            if file_name:
+                query += " AND file_name = ?"
+                params.append(file_name)
+            
+            if table_name:
+                query += " AND table_name = ?"
+                params.append(table_name)
+            
+            query += " ORDER BY table_name, original_column"
+            
+            result = self.conn.execute(query, params).fetchall()
+            
+            mappings = []
+            for row in result:
+                mappings.append({
+                    'id': row[0],
+                    'project': row[1],
+                    'file_name': row[2],
+                    'table_name': row[3],
+                    'original_column': row[4],
+                    'semantic_type': row[5],
+                    'confidence': row[6],
+                    'is_override': row[7],
+                    'needs_review': row[8],
+                    'created_at': str(row[9]) if row[9] else None,
+                    'updated_at': str(row[10]) if row[10] else None
+                })
+            
+            return mappings
+            
+        except Exception as e:
+            logger.warning(f"[MAPPINGS] Failed to get mappings: {e}")
+            return []
     
-    def __init__(self, job_id: str, project_id: str, actions: list):
-        self.job_id = job_id
-        self.project_id = project_id
-        self.status = _ScanJobStatus.PENDING
-        self.actions = actions
-        self.total = len(actions)
-        self.completed = 0
-        self.current_action = None
-        self.progress = 0
-        self.message = "Initializing..."
-        self.results = []
-        self.errors = []
-        self.started_at = None
-        self.completed_at = None
-        self.created_at = datetime.now()
-        self.timeout_seconds = 600  # 10 minutes
-        self._lock = threading.Lock()
-    
-    def start(self):
-        with self._lock:
-            self.status = _ScanJobStatus.RUNNING
-            self.started_at = datetime.now()
-            self.message = "Scan started..."
-    
-    def update(self, action_id: str, message: str = None):
-        with self._lock:
-            self.current_action = action_id
-            self.progress = int((self.completed / self.total) * 100) if self.total > 0 else 0
-            self.message = message or f"Scanning {action_id}..."
-    
-    def action_done(self, action_id: str, result: dict):
-        with self._lock:
-            self.completed += 1
-            self.results.append({"action_id": action_id, "success": True, **result})
-            self.progress = int((self.completed / self.total) * 100)
-            self.message = f"Completed {self.completed}/{self.total}"
-    
-    def action_failed(self, action_id: str, error: str):
-        with self._lock:
-            self.completed += 1
-            self.errors.append({"action_id": action_id, "error": error})
-            self.results.append({"action_id": action_id, "success": False, "error": error})
-            self.progress = int((self.completed / self.total) * 100)
-    
-    def complete(self, message: str = None):
-        with self._lock:
-            self.status = _ScanJobStatus.COMPLETED
-            self.completed_at = datetime.now()
-            self.progress = 100
-            successful = len([r for r in self.results if r.get('success')])
-            self.message = message or f"Complete: {successful}/{self.total} successful"
-    
-    def fail(self, error: str):
-        with self._lock:
-            self.status = _ScanJobStatus.FAILED
-            self.completed_at = datetime.now()
-            self.message = error
-    
-    def timeout(self):
-        with self._lock:
-            self.status = _ScanJobStatus.TIMEOUT
-            self.completed_at = datetime.now()
-            self.message = f"Timeout after {self.timeout_seconds}s"
-    
-    def cancel(self):
-        with self._lock:
-            self.status = _ScanJobStatus.CANCELLED
-            self.completed_at = datetime.now()
-            self.message = "Cancelled by user"
-    
-    def is_timed_out(self) -> bool:
-        with self._lock:
-            if self.started_at and self.status == _ScanJobStatus.RUNNING:
-                return (datetime.now() - self.started_at).total_seconds() > self.timeout_seconds
+    def update_column_mapping(self, project: str, table_name: str, 
+                               original_column: str, semantic_type: str) -> bool:
+        """
+        Human override of a column mapping.
+        
+        Args:
+            project: Project name
+            table_name: Table name
+            original_column: Column to update
+            semantic_type: New semantic type (or 'NONE' to remove)
+            
+        Returns:
+            True if successful
+        """
+        try:
+            if semantic_type == 'NONE':
+                # Remove the mapping
+                self.conn.execute("""
+                    DELETE FROM _column_mappings 
+                    WHERE project = ? AND table_name = ? AND original_column = ?
+                """, [project, table_name, original_column])
+            else:
+                # Check if exists
+                existing = self.conn.execute("""
+                    SELECT id FROM _column_mappings 
+                    WHERE project = ? AND table_name = ? AND original_column = ?
+                """, [project, table_name, original_column]).fetchone()
+                
+                if existing:
+                    # Update with override flag
+                    self.conn.execute("""
+                        UPDATE _column_mappings 
+                        SET semantic_type = ?, confidence = 1.0, is_override = TRUE, 
+                            needs_review = FALSE, updated_at = CURRENT_TIMESTAMP
+                        WHERE project = ? AND table_name = ? AND original_column = ?
+                    """, [semantic_type, project, table_name, original_column])
+                else:
+                    # Insert new override
+                    self.conn.execute("""
+                        INSERT INTO _column_mappings 
+                        (id, project, file_name, table_name, original_column, semantic_type, 
+                         confidence, is_override, needs_review)
+                        VALUES (?, ?, '', ?, ?, ?, 1.0, TRUE, FALSE)
+                    """, [
+                        hash(f"{project}_{table_name}_{original_column}") % 2147483647,
+                        project,
+                        table_name,
+                        original_column,
+                        semantic_type
+                    ])
+            
+            self.conn.commit()
+            logger.info(f"[MAPPINGS] Updated {original_column} -> {semantic_type}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"[MAPPINGS] Failed to update mapping: {e}")
             return False
     
-    def to_dict(self) -> dict:
-        with self._lock:
-            successful = len([r for r in self.results if r.get('success', False)])
-            return {
-                "job_id": self.job_id,
-                "project_id": self.project_id,
-                "status": self.status,
-                "total_actions": self.total,
-                "completed_actions": self.completed,
-                "successful": successful,
-                "failed": len(self.errors),
-                "current_action": self.current_action,
-                "progress_percent": self.progress,
-                "message": self.message,
-                "started_at": self.started_at.isoformat() if self.started_at else None,
-                "completed_at": self.completed_at.isoformat() if self.completed_at else None,
-                "created_at": self.created_at.isoformat(),
-                "results": self.results if self.status in [_ScanJobStatus.COMPLETED, _ScanJobStatus.FAILED, _ScanJobStatus.TIMEOUT] else [],
-                "errors": self.errors
-            }
-
-# Global job storage
-_scan_jobs: Dict[str, _PlaybookScanJob] = {}
-_scan_jobs_lock = threading.Lock()
-
-def _get_scan_job(job_id: str):
-    with _scan_jobs_lock:
-        return _scan_jobs.get(job_id)
-
-def _cleanup_old_scan_jobs():
-    """Remove jobs older than 1 hour"""
-    from datetime import timedelta
-    with _scan_jobs_lock:
-        cutoff = datetime.now() - timedelta(hours=1)
-        to_delete = [jid for jid, job in _scan_jobs.items() if job.completed_at and job.completed_at < cutoff]
-        for jid in to_delete:
-            del _scan_jobs[jid]
-
-
-@router.post("/year-end/scan-all/{project_id}")
-async def scan_all_actions(project_id: str, timeout: int = 600):
-    """
-    Start scanning ALL playbook actions for a project.
-    
-    Returns job_id immediately - poll /scan-all/status/{job_id} for progress.
-    
-    NO MORE FREEZING! Always shows status.
-    
-    Args:
-        project_id: Project to scan
-        timeout: Max seconds before timeout (default 600 = 10 min)
-    
-    Returns:
-        job_id for status polling
-    """
-    import uuid as uuid_mod
-    import asyncio as asyncio_mod
-    
-    logger.info(f"[SCAN-ALL] Starting non-blocking scan for project {project_id}")
-    
-    # Get structure
-    structure = await get_year_end_structure()
-    
-    # Collect actions to scan
-    actions_to_scan = []
-    all_action_ids = set()
-    
-    for step in structure.get('steps', []):
-        for action in step.get('actions', []):
-            all_action_ids.add(action['action_id'])
-            if action.get('reports_needed'):
-                actions_to_scan.append(action['action_id'])
-    
-    # Add dependent actions that exist in structure
-    dependencies = build_action_dependencies(structure)
-    for dependent_id in dependencies.keys():
-        if dependent_id in all_action_ids and dependent_id not in actions_to_scan:
-            actions_to_scan.append(dependent_id)
-    
-    # Order by dependencies
-    scan_order = get_scan_order(actions_to_scan)
-    
-    if not scan_order:
-        return {"success": True, "message": "No actions to scan", "job_id": None}
-    
-    # Create job
-    job_id = str(uuid_mod.uuid4())
-    job = _PlaybookScanJob(job_id, project_id, scan_order)
-    job.timeout_seconds = timeout
-    
-    with _scan_jobs_lock:
-        _scan_jobs[job_id] = job
-    
-    # Background thread function
-    def run_scan():
+    def get_semantic_column(self, project: str, table_name: str, 
+                            semantic_type: str) -> Optional[str]:
+        """
+        Find which column maps to a semantic type.
+        Used by JOIN logic to find employee_number, company_code, etc.
+        
+        Args:
+            project: Project name
+            table_name: Table name
+            semantic_type: What we're looking for (e.g., 'employee_number')
+            
+        Returns:
+            Column name or None
+        """
         try:
-            job.start()
+            result = self.conn.execute("""
+                SELECT original_column FROM _column_mappings
+                WHERE project = ? AND table_name = ? AND semantic_type = ?
+                ORDER BY confidence DESC
+                LIMIT 1
+            """, [project, table_name, semantic_type]).fetchone()
             
-            # Create event loop for async calls
-            loop = asyncio_mod.new_event_loop()
-            asyncio_mod.set_event_loop(loop)
-            
-            for action_id in job.actions:
-                # Check timeout
-                if job.is_timed_out():
-                    logger.warning(f"[SCAN-ALL] Job {job_id} timed out")
-                    job.timeout()
-                    return
-                
-                # Check cancelled
-                if job.status == _ScanJobStatus.CANCELLED:
-                    return
-                
-                try:
-                    job.update(action_id, f"Scanning {action_id}...")
-                    
-                    # Run the scan
-                    result = loop.run_until_complete(scan_for_action(project_id, action_id))
-                    
-                    job.action_done(action_id, {
-                        "found": result.get("found", False),
-                        "documents": len(result.get("documents", [])),
-                        "status": result.get("suggested_status", "not_started")
-                    })
-                    
-                except Exception as e:
-                    logger.error(f"[SCAN-ALL] Action {action_id} failed: {e}")
-                    job.action_failed(action_id, str(e))
-            
-            loop.close()
-            job.complete()
-            logger.info(f"[SCAN-ALL] Job {job_id} completed")
+            return result[0] if result else None
             
         except Exception as e:
-            logger.error(f"[SCAN-ALL] Job {job_id} failed: {e}")
-            job.fail(str(e))
+            logger.warning(f"[MAPPINGS] Failed to get semantic column: {e}")
+            return None
     
-    thread = threading.Thread(target=run_scan, daemon=True)
-    thread.start()
+    def get_mappings_needing_review(self, project: str) -> List[Dict]:
+        """Get all mappings flagged for review"""
+        try:
+            result = self.conn.execute("""
+                SELECT * FROM _column_mappings 
+                WHERE project = ? AND needs_review = TRUE
+                ORDER BY confidence ASC, table_name, original_column
+            """, [project]).fetchall()
+            
+            mappings = []
+            for row in result:
+                mappings.append({
+                    'id': row[0],
+                    'project': row[1],
+                    'file_name': row[2],
+                    'table_name': row[3],
+                    'original_column': row[4],
+                    'semantic_type': row[5],
+                    'confidence': row[6],
+                    'is_override': row[7],
+                    'needs_review': row[8]
+                })
+            
+            return mappings
+            
+        except Exception as e:
+            logger.warning(f"[MAPPINGS] Failed to get review items: {e}")
+            return []
     
-    logger.info(f"[SCAN-ALL] Created job {job_id} with {len(scan_order)} actions")
+    # =========================================================================
+    # MAPPING JOB MANAGEMENT (Background inference tracking)
+    # =========================================================================
     
-    return {
-        "success": True,
-        "job_id": job_id,
-        "project_id": project_id,
-        "total_actions": len(scan_order),
-        "actions": scan_order,
-        "message": f"Scan started for {len(scan_order)} actions",
-        "poll_url": f"/playbooks/year-end/scan-all/status/{job_id}"
-    }
+    def create_mapping_job(self, job_id: str, project: str, file_name: str, 
+                           total_tables: int) -> Dict:
+        """Create a new mapping inference job"""
+        try:
+            self.conn.execute("""
+                INSERT INTO _mapping_jobs 
+                (id, project, file_name, status, total_tables, completed_tables, 
+                 mappings_found, needs_review_count)
+                VALUES (?, ?, ?, 'running', ?, 0, 0, 0)
+            """, [job_id, project, file_name, total_tables])
+            self.conn.commit()
+            
+            return {
+                'id': job_id,
+                'project': project,
+                'file_name': file_name,
+                'status': 'running',
+                'total_tables': total_tables
+            }
+        except Exception as e:
+            logger.error(f"[MAPPING_JOB] Failed to create job: {e}")
+            return None
+    
+    def update_mapping_job(self, job_id: str, completed_tables: int = None,
+                           mappings_found: int = None, needs_review_count: int = None,
+                           status: str = None, error_message: str = None):
+        """Update mapping job progress"""
+        try:
+            updates = ["updated_at = CURRENT_TIMESTAMP"]
+            params = []
+            
+            if completed_tables is not None:
+                updates.append("completed_tables = ?")
+                params.append(completed_tables)
+            if mappings_found is not None:
+                updates.append("mappings_found = ?")
+                params.append(mappings_found)
+            if needs_review_count is not None:
+                updates.append("needs_review_count = ?")
+                params.append(needs_review_count)
+            if status is not None:
+                updates.append("status = ?")
+                params.append(status)
+            if error_message is not None:
+                updates.append("error_message = ?")
+                params.append(error_message)
+            
+            params.append(job_id)
+            
+            self.conn.execute(f"""
+                UPDATE _mapping_jobs 
+                SET {', '.join(updates)}
+                WHERE id = ?
+            """, params)
+            self.conn.commit()
+            
+        except Exception as e:
+            logger.warning(f"[MAPPING_JOB] Failed to update job: {e}")
+    
+    def get_mapping_job_status(self, job_id: str = None, project: str = None, 
+                                file_name: str = None) -> Optional[Dict]:
+        """Get mapping job status by ID or project/file"""
+        try:
+            if job_id:
+                result = self.conn.execute("""
+                    SELECT * FROM _mapping_jobs WHERE id = ?
+                """, [job_id]).fetchone()
+            elif project and file_name:
+                result = self.conn.execute("""
+                    SELECT * FROM _mapping_jobs 
+                    WHERE project = ? AND file_name = ?
+                    ORDER BY created_at DESC LIMIT 1
+                """, [project, file_name]).fetchone()
+            else:
+                return None
+            
+            if result:
+                return {
+                    'id': result[0],
+                    'project': result[1],
+                    'file_name': result[2],
+                    'status': result[3],
+                    'total_tables': result[4],
+                    'completed_tables': result[5],
+                    'mappings_found': result[6],
+                    'needs_review_count': result[7],
+                    'error_message': result[8],
+                    'created_at': str(result[9]) if result[9] else None,
+                    'updated_at': str(result[10]) if result[10] else None
+                }
+            return None
+            
+        except Exception as e:
+            logger.warning(f"[MAPPING_JOB] Failed to get status: {e}")
+            return None
+    
+    def get_file_mapping_summary(self, project: str, file_name: str) -> Dict:
+        """Get mapping summary for a file (for UI display)"""
+        try:
+            # Get job status
+            job = self.get_mapping_job_status(project=project, file_name=file_name)
+            
+            # Get actual mapping counts
+            mapping_result = self.conn.execute("""
+                SELECT 
+                    COUNT(*) as total,
+                    SUM(CASE WHEN needs_review = TRUE THEN 1 ELSE 0 END) as needs_review
+                FROM _column_mappings 
+                WHERE project = ? AND file_name = ?
+            """, [project, file_name]).fetchone()
+            
+            total_mappings = mapping_result[0] if mapping_result else 0
+            needs_review_count = mapping_result[1] if mapping_result else 0
+            
+            # Get all mappings for this file
+            mappings = self.get_column_mappings(project, file_name=file_name)
+            
+            return {
+                'status': job['status'] if job else ('complete' if total_mappings > 0 else 'none'),
+                'total_mappings': total_mappings,
+                'needs_review_count': needs_review_count,
+                'mappings': mappings,
+                'job': job
+            }
+            
+        except Exception as e:
+            logger.warning(f"[MAPPING_JOB] Failed to get summary: {e}")
+            return {'status': 'error', 'total_mappings': 0, 'needs_review_count': 0, 'mappings': []}
+    
+    def run_inference_for_file(self, job_id: str, project: str, file_name: str,
+                                tables_info: List[Dict]):
+        """
+        Run column inference for all tables in a file.
+        Called in background thread - uses separate DB connection for thread safety.
+        """
+        # Create separate connection for this thread
+        thread_conn = None
+        try:
+            thread_conn = duckdb.connect(self.db_path)
+            logger.info(f"[MAPPING_JOB] Started background inference with separate connection")
+            
+            total_mappings = 0
+            total_needs_review = 0
+            
+            for i, table_info in enumerate(tables_info):
+                table_name = table_info.get('table_name', '')
+                columns = table_info.get('columns', [])
+                sample_data = table_info.get('sample_data', [])
+                
+                logger.info(f"[MAPPING_JOB] Inferring {table_name} ({i+1}/{len(tables_info)})")
+                
+                # Run inference (uses thread connection)
+                mappings = self._infer_column_mappings_threaded(
+                    thread_conn=thread_conn,
+                    project=project,
+                    file_name=file_name,
+                    table_name=table_name,
+                    columns=columns,
+                    sample_data=sample_data
+                )
+                
+                # Count results
+                total_mappings += len(mappings)
+                total_needs_review += sum(1 for m in mappings if m.get('needs_review'))
+                
+                # Update progress (uses thread connection)
+                self._update_mapping_job_threaded(
+                    thread_conn,
+                    job_id,
+                    completed_tables=i + 1,
+                    mappings_found=total_mappings,
+                    needs_review_count=total_needs_review
+                )
+            
+            # Mark complete
+            self._update_mapping_job_threaded(thread_conn, job_id, status='complete')
+            logger.info(f"[MAPPING_JOB] Complete: {total_mappings} mappings, {total_needs_review} need review")
+            
+        except Exception as e:
+            logger.error(f"[MAPPING_JOB] Inference failed: {e}")
+            if thread_conn:
+                try:
+                    self._update_mapping_job_threaded(thread_conn, job_id, status='error', error_message=str(e))
+                except:
+                    pass
+        finally:
+            if thread_conn:
+                try:
+                    thread_conn.close()
+                    logger.info("[MAPPING_JOB] Closed background thread connection")
+                except:
+                    pass
+    
+    def _infer_column_mappings_threaded(self, thread_conn, project: str, file_name: str, 
+                                         table_name: str, columns: List[str], 
+                                         sample_data: List[Dict]) -> List[Dict]:
+        """Thread-safe version of infer_column_mappings using provided connection"""
+        mappings = []
+        
+        try:
+            # Prepare sample data string
+            sample_str = ""
+            for i, row in enumerate(sample_data[:5]):
+                sample_str += f"Row {i+1}: {row}\n"
+            
+            # Build prompt for Claude
+            prompt = f"""Analyze these column names and sample data to identify semantic types.
+
+COLUMN NAMES:
+{columns}
+
+SAMPLE DATA:
+{sample_str}
+
+For each column, identify if it matches one of these semantic types:
+- employee_number: Employee ID/number (unique identifier for employees)
+- company_code: Company/organization code
+- employment_status_code: Employment status (A=Active, T=Terminated, L=Leave, etc.)
+- earning_code: Earning type codes
+- deduction_code: Deduction/benefit codes
+- job_code: Job/position codes
+- department_code: Department/org unit codes
+- amount: Monetary amounts (pay, deductions, etc.)
+- rate: Pay rates (hourly, salary)
+- effective_date: Date fields for effective dates
+- start_date: Start dates
+- end_date: End dates
+- employee_name: Employee name field
+- NONE: Does not match any semantic type
+
+Respond with JSON array only, no explanation:
+[
+  {{"column": "column_name", "semantic_type": "type_or_NONE", "confidence": 0.0-1.0}},
+  ...
+]
+
+Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely matches, below 0.7 for uncertain."""
+
+            # Call Claude for inference
+            import anthropic
+            
+            api_key = os.environ.get('ANTHROPIC_API_KEY') or os.environ.get('CLAUDE_API_KEY')
+            if not api_key:
+                logger.warning("[MAPPINGS] No API key available for inference")
+                return self._fallback_column_inference_threaded(thread_conn, columns, project, file_name, table_name)
+            
+            client = anthropic.Anthropic(api_key=api_key)
+            response = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=2000,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            
+            response_text = response.content[0].text.strip()
+            
+            # Parse JSON response
+            if "```json" in response_text:
+                response_text = response_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in response_text:
+                response_text = response_text.split("```")[1].split("```")[0].strip()
+            
+            inferred = json.loads(response_text)
+            
+            # Store mappings using thread connection
+            for item in inferred:
+                col = item.get('column', '')
+                sem_type = item.get('semantic_type', 'NONE')
+                confidence = item.get('confidence', 0.5)
+                
+                if sem_type and sem_type != 'NONE':
+                    needs_review = confidence < 0.85
+                    
+                    mapping = {
+                        'project': project,
+                        'file_name': file_name,
+                        'table_name': table_name,
+                        'original_column': col,
+                        'semantic_type': sem_type,
+                        'confidence': confidence,
+                        'is_override': False,
+                        'needs_review': needs_review
+                    }
+                    mappings.append(mapping)
+                    
+                    # Store using thread connection
+                    self._store_column_mapping_threaded(thread_conn, mapping)
+            
+            logger.info(f"[MAPPINGS] Inferred {len(mappings)} semantic mappings for {table_name}")
+            return mappings
+            
+        except Exception as e:
+            logger.warning(f"[MAPPINGS] Claude inference failed: {e}, using fallback")
+            return self._fallback_column_inference_threaded(thread_conn, columns, project, file_name, table_name)
+    
+    def _fallback_column_inference_threaded(self, thread_conn, columns: List[str], 
+                                             project: str, file_name: str, table_name: str) -> List[Dict]:
+        """Thread-safe pattern-based fallback"""
+        mappings = []
+        
+        patterns = {
+            'employee_number': [r'employee.*num', r'emp.*num', r'ee.*num', r'emp.*id', r'employee.*id', r'^emp_no$', r'^ee_id$'],
+            'company_code': [r'company.*code', r'co.*code', r'comp.*code', r'home.*company'],
+            'employment_status_code': [r'employment.*status', r'emp.*status', r'status.*code'],
+            'earning_code': [r'earning.*code', r'earn.*code'],
+            'deduction_code': [r'deduction.*code', r'ded.*code', r'benefit.*code'],
+            'job_code': [r'job.*code', r'position.*code'],
+            'department_code': [r'dept.*code', r'department.*code', r'org.*level'],
+            'amount': [r'amount', r'amt$', r'_amt$'],
+            'rate': [r'rate$', r'pay.*rate', r'hourly.*rate', r'salary'],
+            'effective_date': [r'effective.*date', r'eff.*date'],
+            'employee_name': [r'^name$', r'employee.*name', r'emp.*name', r'full.*name']
+        }
+        
+        for col in columns:
+            col_lower = col.lower()
+            for sem_type, pattern_list in patterns.items():
+                for pattern in pattern_list:
+                    if re.search(pattern, col_lower):
+                        mapping = {
+                            'project': project,
+                            'file_name': file_name,
+                            'table_name': table_name,
+                            'original_column': col,
+                            'semantic_type': sem_type,
+                            'confidence': 0.7,
+                            'is_override': False,
+                            'needs_review': True
+                        }
+                        mappings.append(mapping)
+                        self._store_column_mapping_threaded(thread_conn, mapping)
+                        break
+                else:
+                    continue
+                break
+        
+        return mappings
+    
+    def _store_column_mapping_threaded(self, thread_conn, mapping: Dict):
+        """Thread-safe mapping storage"""
+        try:
+            # Check if mapping already exists
+            existing = thread_conn.execute("""
+                SELECT id FROM _column_mappings 
+                WHERE project = ? AND table_name = ? AND original_column = ?
+            """, [mapping['project'], mapping['table_name'], mapping['original_column']]).fetchone()
+            
+            if existing:
+                thread_conn.execute("""
+                    UPDATE _column_mappings 
+                    SET semantic_type = ?, confidence = ?, needs_review = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE project = ? AND table_name = ? AND original_column = ? AND is_override = FALSE
+                """, [
+                    mapping['semantic_type'],
+                    mapping['confidence'],
+                    mapping['needs_review'],
+                    mapping['project'],
+                    mapping['table_name'],
+                    mapping['original_column']
+                ])
+            else:
+                thread_conn.execute("""
+                    INSERT INTO _column_mappings 
+                    (id, project, file_name, table_name, original_column, semantic_type, 
+                     confidence, is_override, needs_review)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    hash(f"{mapping['project']}_{mapping['table_name']}_{mapping['original_column']}") % 2147483647,
+                    mapping['project'],
+                    mapping['file_name'],
+                    mapping['table_name'],
+                    mapping['original_column'],
+                    mapping['semantic_type'],
+                    mapping['confidence'],
+                    mapping['is_override'],
+                    mapping['needs_review']
+                ])
+            
+            thread_conn.commit()
+        except Exception as e:
+            logger.warning(f"[MAPPINGS] Failed to store mapping: {e}")
+    
+    def _update_mapping_job_threaded(self, thread_conn, job_id: str, completed_tables: int = None,
+                                      mappings_found: int = None, needs_review_count: int = None,
+                                      status: str = None, error_message: str = None):
+        """Thread-safe job update"""
+        try:
+            updates = ["updated_at = CURRENT_TIMESTAMP"]
+            params = []
+            
+            if completed_tables is not None:
+                updates.append("completed_tables = ?")
+                params.append(completed_tables)
+            if mappings_found is not None:
+                updates.append("mappings_found = ?")
+                params.append(mappings_found)
+            if needs_review_count is not None:
+                updates.append("needs_review_count = ?")
+                params.append(needs_review_count)
+            if status is not None:
+                updates.append("status = ?")
+                params.append(status)
+            if error_message is not None:
+                updates.append("error_message = ?")
+                params.append(error_message)
+            
+            params.append(job_id)
+            
+            thread_conn.execute(f"""
+                UPDATE _mapping_jobs 
+                SET {', '.join(updates)}
+                WHERE id = ?
+            """, params)
+            thread_conn.commit()
+        except Exception as e:
+            logger.warning(f"[MAPPING_JOB] Failed to update job: {e}")
+    
+    def _get_next_version(self, project: str, file_name: str) -> int:
+        """Get next version number for a file"""
+        result = self.conn.execute("""
+            SELECT COALESCE(MAX(version), 0) + 1 
+            FROM _load_versions 
+            WHERE project = ? AND file_name = ?
+        """, [project, file_name]).fetchone()
+        return result[0] if result else 1
+    
+    def _compute_checksum(self, df: pd.DataFrame) -> str:
+        """Compute checksum of DataFrame for change detection"""
+        # Use first 1000 rows for checksum (performance)
+        sample = df.head(1000)
+        data_str = sample.to_json()
+        return hashlib.md5(data_str.encode()).hexdigest()
+    
+    def store_excel(
+        self,
+        file_path: str,
+        project: str,
+        file_name: str,
+        encrypt_pii: bool = True,
+        keep_previous_version: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Store Excel file in DuckDB with encryption and versioning.
+        Each sheet becomes a table.
+        
+        Args:
+            file_path: Path to Excel file
+            project: Project name
+            file_name: Original filename
+            encrypt_pii: Whether to encrypt PII columns
+            keep_previous_version: Whether to keep previous version for comparison
+        
+        Returns schema info for Claude to use in queries.
+        """
+        results = {
+            'project': project,
+            'file_name': file_name,
+            'sheets': [],
+            'total_rows': 0,
+            'tables_created': [],
+            'encrypted_columns': [],
+            'version': 1
+        }
+        
+        try:
+            # Get version number
+            version = self._get_next_version(project, file_name)
+            results['version'] = version
+            
+            # =================================================================
+            # SPECIAL HANDLING FOR GLOBAL YEAR-END FILES
+            # When uploading a new Year-End file to GLOBAL, mark ALL other
+            # year-end files as not current (even with different filenames)
+            # =================================================================
+            if project.lower() == 'global':
+                file_lower = file_name.lower()
+                is_year_end = any(kw in file_lower for kw in ['year-end', 'year_end', 'yearend', 'checklist'])
+                
+                if is_year_end:
+                    logger.info(f"[STORE_EXCEL] Detected GLOBAL Year-End file: {file_name}")
+                    # Mark ALL other year-end files as not current
+                    self.conn.execute("""
+                        UPDATE _schema_metadata 
+                        SET is_current = FALSE 
+                        WHERE LOWER(project) = 'global'
+                        AND file_name != ?
+                        AND (
+                            LOWER(file_name) LIKE '%year-end%'
+                            OR LOWER(file_name) LIKE '%year_end%'
+                            OR LOWER(file_name) LIKE '%yearend%'
+                            OR LOWER(file_name) LIKE '%checklist%'
+                        )
+                    """, [file_name])
+                    logger.info(f"[STORE_EXCEL] Marked other Year-End files as not current")
+            
+            # If keeping previous version, rename old tables
+            if keep_previous_version and version > 1:
+                self._archive_previous_version(project, file_name, version - 1)
+            
+            # Read all sheets
+            excel_file = pd.ExcelFile(file_path)
+            
+            all_encrypted_cols = []
+            
+            for sheet_name in excel_file.sheet_names:
+                try:
+                    # =====================================================
+                    # CHECK FOR HORIZONTAL TABLES (tables side-by-side)
+                    # =====================================================
+                    horizontal_tables = self._split_horizontal_tables(file_path, sheet_name)
+                    
+                    if horizontal_tables:
+                        # Process each horizontal sub-table separately
+                        for sub_table_name, sub_df in horizontal_tables:
+                            try:
+                                # Sanitize column names
+                                sub_df.columns = [self._sanitize_name(str(c)) for c in sub_df.columns]
+                                
+                                # Handle duplicate column names
+                                seen = {}
+                                new_cols = []
+                                for col in sub_df.columns:
+                                    if col in seen:
+                                        seen[col] += 1
+                                        new_cols.append(f"{col}_{seen[col]}")
+                                    else:
+                                        seen[col] = 0
+                                        new_cols.append(col)
+                                sub_df.columns = new_cols
+                                
+                                # Force all columns to string
+                                for col in sub_df.columns:
+                                    sub_df[col] = sub_df[col].fillna('').astype(str)
+                                    sub_df[col] = sub_df[col].replace({'nan': '', 'None': '', 'NaT': ''})
+                                
+                                # Generate combined sheet name: "Change Reasons - Benefit Change Reasons"
+                                combined_sheet = f"{sheet_name} - {sub_table_name}"
+                                
+                                # Encrypt PII if needed
+                                encrypted_cols = []
+                                if encrypt_pii and self.encryptor.fernet:
+                                    sub_df, encrypted_cols = self.encryptor.encrypt_dataframe(sub_df)
+                                    all_encrypted_cols.extend(encrypted_cols)
+                                
+                                # Generate table name
+                                table_name = self._generate_table_name(project, file_name, combined_sheet)
+                                
+                                # Drop existing and create table
+                                self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+                                self.conn.register('temp_df', sub_df)
+                                self.conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM temp_df")
+                                self.conn.unregister('temp_df')
+                                
+                                # Store metadata
+                                columns_info = [
+                                    {'name': col, 'type': 'VARCHAR', 'encrypted': col in encrypted_cols}
+                                    for col in sub_df.columns
+                                ]
+                                
+                                self.conn.execute("""
+                                    INSERT INTO _schema_metadata 
+                                    (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys, encrypted_columns, version, is_current)
+                                    VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                                """, [
+                                    project,
+                                    file_name,
+                                    combined_sheet,
+                                    table_name,
+                                    json.dumps(columns_info),
+                                    len(sub_df),
+                                    json.dumps([]),
+                                    json.dumps(encrypted_cols),
+                                    version
+                                ])
+                                
+                                results['sheets'].append({
+                                    'name': combined_sheet,
+                                    'table_name': table_name,
+                                    'rows': len(sub_df),
+                                    'columns': list(sub_df.columns),
+                                    'encrypted_columns': encrypted_cols
+                                })
+                                results['total_rows'] += len(sub_df)
+                                results['tables_created'].append(table_name)
+                                
+                                logger.info(f"Created horizontal sub-table: {table_name} ({len(sub_df)} rows)")
+                                
+                            except Exception as sub_e:
+                                logger.error(f"Failed to process horizontal sub-table '{sub_table_name}': {sub_e}")
+                        
+                        # Skip normal processing for this sheet - we handled it horizontally
+                        continue
+                    
+                    # =====================================================
+                    # NORMAL SHEET PROCESSING (no horizontal split)
+                    # =====================================================
+                    # Read sheet - SMART HEADER DETECTION
+                    # Strategy: Look for colored (blue) header rows first, then fall back to text analysis
+                    df = None
+                    best_header_row = 0
+                    
+                    # Try to detect colored header row using openpyxl
+                    if OPENPYXL_AVAILABLE:
+                        try:
+                            wb = load_workbook(file_path, read_only=True, data_only=True)
+                            if sheet_name in wb.sheetnames:
+                                ws = wb[sheet_name]
+                                
+                                # Check first 15 rows for colored cells (headers are usually colored)
+                                for row_idx in range(1, 16):
+                                    colored_cells = 0
+                                    total_cells = 0
+                                    
+                                    for col_idx in range(1, min(20, ws.max_column + 1)):
+                                        try:
+                                            cell = ws.cell(row=row_idx, column=col_idx)
+                                            if cell.value is not None:
+                                                total_cells += 1
+                                                # Check if cell has fill color (not white/no fill)
+                                                if cell.fill and cell.fill.fgColor and cell.fill.fgColor.rgb:
+                                                    color = str(cell.fill.fgColor.rgb)
+                                                    # Skip white, no fill, or default
+                                                    if color not in ['00000000', 'FFFFFFFF', '00FFFFFF', None, 'None']:
+                                                        colored_cells += 1
+                                        except:
+                                            continue
+                                    
+                                    # If most cells in this row are colored, it's likely the header
+                                    if total_cells >= 3 and colored_cells >= total_cells * 0.5:
+                                        best_header_row = row_idx - 1  # pandas uses 0-based indexing
+                                        logger.info(f"Sheet '{sheet_name}': Detected colored header at row {row_idx}")
+                                        break
+                                
+                                wb.close()
+                        except Exception as e:
+                            logger.warning(f"Color detection failed for '{sheet_name}': {e}")
+                    
+                    # If no colored header found, try text-based detection
+                    if best_header_row == 0:
+                        min_unnamed = float('inf')
+                        for header_row in range(11):  # Try rows 0-10
+                            try:
+                                test_df = pd.read_excel(
+                                    file_path, 
+                                    sheet_name=sheet_name, 
+                                    header=header_row,
+                                    nrows=5
+                                )
+                                
+                                # Count unnamed columns
+                                unnamed_count = sum(1 for c in test_df.columns if str(c).startswith('Unnamed'))
+                                total_cols = len([c for c in test_df.columns if not str(c).startswith('Unnamed')])
+                                
+                                if total_cols < 2:
+                                    continue
+                                
+                                if unnamed_count < min_unnamed:
+                                    min_unnamed = unnamed_count
+                                    best_header_row = header_row
+                                    
+                                if unnamed_count == 0:
+                                    break
+                                    
+                            except:
+                                continue
+                    
+                    # Read with detected header row
+                    try:
+                        df = pd.read_excel(
+                            file_path, 
+                            sheet_name=sheet_name, 
+                            header=best_header_row
+                        )
+                        logger.info(f"Sheet '{sheet_name}': Using header row {best_header_row}")
+                    except Exception as e:
+                        logger.error(f"Failed to read sheet '{sheet_name}': {e}")
+                        continue
+                    
+                    if df is None or df.empty:
+                        logger.warning(f"Sheet '{sheet_name}' is empty, skipping")
+                        continue
+                    
+                    # Drop completely empty rows/columns
+                    df = df.dropna(how='all').dropna(axis=1, how='all')
+                    
+                    if df.empty:
+                        continue
+                    
+                    # Sanitize column names
+                    df.columns = [self._sanitize_name(str(c)) for c in df.columns]
+                    
+                    # Handle duplicate column names
+                    seen = {}
+                    new_cols = []
+                    for col in df.columns:
+                        if col in seen:
+                            seen[col] += 1
+                            new_cols.append(f"{col}_{seen[col]}")
+                        else:
+                            seen[col] = 0
+                            new_cols.append(col)
+                    df.columns = new_cols
+                    
+                    # FORCE ALL COLUMNS TO STRING to avoid DuckDB type inference issues
+                    # This prevents errors like "Could not convert 'Amount' to DOUBLE"
+                    for col in df.columns:
+                        # Convert to string, then replace NaN/None with empty string
+                        df[col] = df[col].fillna('').astype(str)
+                        # Replace string 'nan' and 'None' that result from conversion
+                        df[col] = df[col].replace({'nan': '', 'None': '', 'NaT': ''})
+                    
+                    # ENCRYPT PII COLUMNS
+                    encrypted_cols = []
+                    if encrypt_pii and self.encryptor.fernet:
+                        df, encrypted_cols = self.encryptor.encrypt_dataframe(df)
+                        all_encrypted_cols.extend(encrypted_cols)
+                        if encrypted_cols:
+                            logger.info(f"Encrypted {len(encrypted_cols)} PII columns in '{sheet_name}'")
+                    
+                    # Generate table name
+                    table_name = self._generate_table_name(project, file_name, sheet_name)
+                    
+                    # Drop existing current table if exists
+                    self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+                    
+                    # Create table from DataFrame - all VARCHAR columns
+                    self.conn.register('temp_df', df)
+                    self.conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM temp_df")
+                    self.conn.unregister('temp_df')
+                    
+                    # Detect key columns
+                    likely_keys = self._detect_key_columns(df)
+                    
+                    # Store metadata
+                    columns_info = [
+                        {'name': col, 'type': str(df[col].dtype), 'encrypted': col in encrypted_cols}
+                        for col in df.columns
+                    ]
+                    
+                    # Mark previous metadata as not current
+                    self.conn.execute("""
+                        UPDATE _schema_metadata 
+                        SET is_current = FALSE 
+                        WHERE project = ? AND file_name = ? AND sheet_name = ?
+                    """, [project, file_name, sheet_name])
+                    
+                    self.conn.execute("""
+                        INSERT INTO _schema_metadata 
+                        (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys, encrypted_columns, version, is_current)
+                        VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                    """, [
+                        project,
+                        file_name,
+                        sheet_name,
+                        table_name,
+                        json.dumps(columns_info),
+                        len(df),
+                        json.dumps(likely_keys),
+                        json.dumps(encrypted_cols),
+                        version
+                    ])
+                    
+                    sheet_info = {
+                        'sheet_name': sheet_name,
+                        'table_name': table_name,
+                        'columns': list(df.columns),
+                        'row_count': len(df),
+                        'likely_keys': likely_keys,
+                        'encrypted_columns': encrypted_cols,
+                        'sample_data': df.head(3).to_dict('records')
+                    }
+                    
+                    results['sheets'].append(sheet_info)
+                    results['total_rows'] += len(df)
+                    results['tables_created'].append(table_name)
+                    
+                    logger.info(f"Created table '{table_name}' with {len(df)} rows, {len(df.columns)} columns")
+                    
+                except Exception as e:
+                    logger.error(f"Error processing sheet '{sheet_name}': {e}")
+                    continue
+            
+            self.conn.commit()
+            logger.info(f"Stored {len(results['tables_created'])} tables from {file_name}")
+            
+            # Detect relationships after loading
+            try:
+                relationships = self.detect_relationships(project)
+                results['relationships'] = relationships
+                logger.info(f"Detected {len(relationships)} table relationships")
+            except Exception as rel_e:
+                logger.warning(f"Relationship detection failed: {rel_e}")
+                results['relationships'] = []
+            
+            # Start background column inference
+            try:
+                import uuid
+                
+                job_id = str(uuid.uuid4())[:8]
+                tables_info = results.get('sheets', [])
+                
+                if tables_info:
+                    # Create job record
+                    self.create_mapping_job(job_id, project, file_name, len(tables_info))
+                    results['mapping_job_id'] = job_id
+                    
+                    # Queue the job instead of starting a new thread
+                    queue_inference_job(self, job_id, project, file_name, tables_info)
+                    logger.info(f"[MAPPING] Queued inference job {job_id} for {file_name}")
+            except Exception as map_e:
+                logger.warning(f"[MAPPING] Failed to start inference: {map_e}")
+            
+        except Exception as e:
+            logger.error(f"Error storing Excel file: {e}")
+            raise
+        
+        return results
+    
+    def store_csv(
+        self,
+        file_path: str,
+        project: str,
+        file_name: str
+    ) -> Dict[str, Any]:
+        """Store CSV file in DuckDB"""
+        try:
+            df = pd.read_csv(file_path)
+            df = df.dropna(how='all').dropna(axis=1, how='all')
+            
+            # Sanitize column names
+            df.columns = [self._sanitize_name(str(c)) for c in df.columns]
+            
+            # FORCE ALL COLUMNS TO STRING to avoid type inference issues
+            for col in df.columns:
+                df[col] = df[col].fillna('').astype(str)
+                df[col] = df[col].replace({'nan': '', 'None': '', 'NaT': ''})
+            
+            table_name = self._generate_table_name(project, file_name, 'data')
+            
+            # Drop existing table
+            self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+            
+            # Create table
+            self.conn.register('temp_df', df)
+            self.conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM temp_df")
+            self.conn.unregister('temp_df')
+            
+            # Detect keys
+            likely_keys = self._detect_key_columns(df)
+            
+            # Store metadata
+            columns_info = [
+                {'name': col, 'type': str(df[col].dtype)}
+                for col in df.columns
+            ]
+            
+            self.conn.execute("""
+                INSERT INTO _schema_metadata 
+                (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys)
+                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                project, file_name, 'data', table_name,
+                json.dumps(columns_info), len(df), json.dumps(likely_keys)
+            ])
+            
+            self.conn.commit()
+            
+            return {
+                'project': project,
+                'file_name': file_name,
+                'table_name': table_name,
+                'columns': list(df.columns),
+                'row_count': len(df),
+                'likely_keys': likely_keys
+            }
+            
+        except Exception as e:
+            logger.error(f"Error storing CSV: {e}")
+            raise
+    
+    def get_schema_for_project(self, project: str) -> Dict[str, Any]:
+        """Get all table schemas for a project (for Claude to use)"""
+        try:
+            result = self.conn.execute("""
+                SELECT file_name, sheet_name, table_name, columns, row_count, likely_keys
+                FROM _schema_metadata
+                WHERE project = ? AND is_current = TRUE
+                ORDER BY file_name, sheet_name
+            """, [project]).fetchall()
+        except Exception as e:
+            # Handle case where is_current column doesn't exist (old schema)
+            logger.warning(f"Schema query failed, trying without is_current: {e}")
+            result = self.conn.execute("""
+                SELECT file_name, sheet_name, table_name, columns, row_count, likely_keys
+                FROM _schema_metadata
+                WHERE project = ?
+                ORDER BY file_name, sheet_name
+            """, [project]).fetchall()
+        
+        schema = {
+            'project': project,
+            'tables': []
+        }
+        
+        for row in result:
+            file_name, sheet_name, table_name, columns, row_count, likely_keys = row
+            schema['tables'].append({
+                'file': file_name,
+                'sheet': sheet_name,
+                'table_name': table_name,
+                'columns': json.loads(columns) if columns else [],
+                'row_count': row_count,
+                'likely_keys': json.loads(likely_keys) if likely_keys else []
+            })
+        
+        return schema
+    
+    def execute_query(self, sql: str) -> Tuple[List[Dict], List[str]]:
+        """
+        Execute SQL query and return results.
+        Returns (rows as dicts, column names)
+        """
+        try:
+            result = self.conn.execute(sql)
+            columns = [desc[0] for desc in result.description]
+            rows = [dict(zip(columns, row)) for row in result.fetchall()]
+            return rows, columns
+        except Exception as e:
+            logger.error(f"Query execution error: {e}")
+            raise
+    
+    def query_to_dataframe(self, sql: str) -> pd.DataFrame:
+        """Execute query and return as DataFrame (for Excel export)"""
+        return self.conn.execute(sql).fetchdf()
+    
+    def export_to_excel(self, sql: str, output_path: str) -> str:
+        """Execute query and export results to Excel"""
+        df = self.query_to_dataframe(sql)
+        df.to_excel(output_path, index=False)
+        return output_path
+    
+    def export_to_csv(self, sql: str, output_path: str) -> str:
+        """Execute query and export results to CSV"""
+        df = self.query_to_dataframe(sql)
+        df.to_csv(output_path, index=False)
+        return output_path
+    
+    def delete_project_data(self, project: str) -> int:
+        """Delete all tables for a project"""
+        # Get table names
+        tables = self.conn.execute("""
+            SELECT table_name FROM _schema_metadata WHERE project = ?
+        """, [project]).fetchall()
+        
+        count = 0
+        for (table_name,) in tables:
+            try:
+                self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+                count += 1
+            except Exception as e:
+                logger.warning(f"Could not drop table {table_name}: {e}")
+        
+        # Remove metadata
+        self.conn.execute("DELETE FROM _schema_metadata WHERE project = ?", [project])
+        self.conn.commit()
+        
+        logger.info(f"Deleted {count} tables for project '{project}'")
+        return count
+    
+    def get_table_sample(self, table_name: str, limit: int = 5, decrypt: bool = True) -> List[Dict]:
+        """Get sample rows from a table"""
+        try:
+            rows, cols = self.execute_query(f"SELECT * FROM {table_name} LIMIT {limit}")
+            
+            # Decrypt if needed
+            if decrypt and rows:
+                df = pd.DataFrame(rows)
+                df = self.encryptor.decrypt_dataframe(df)
+                rows = df.to_dict('records')
+            
+            return rows
+        except:
+            return []
+    
+    def _archive_previous_version(self, project: str, file_name: str, version: int):
+        """Archive tables from previous version"""
+        tables = self.conn.execute("""
+            SELECT table_name, sheet_name FROM _schema_metadata 
+            WHERE project = ? AND file_name = ? AND version = ?
+        """, [project, file_name, version]).fetchall()
+        
+        for table_name, sheet_name in tables:
+            archive_name = f"{table_name}_v{version}"
+            try:
+                # Rename table to archive name
+                self.conn.execute(f"ALTER TABLE {table_name} RENAME TO {archive_name}")
+                logger.info(f"Archived {table_name} → {archive_name}")
+            except Exception as e:
+                logger.warning(f"Could not archive {table_name}: {e}")
+    
+    def delete_file(self, project: str, file_name: str, delete_all_versions: bool = True) -> Dict[str, Any]:
+        """
+        Delete all data for a specific file from a project.
+        
+        Args:
+            project: Project name
+            file_name: Name of file to delete
+            delete_all_versions: If True, delete archived versions too
+            
+        Returns:
+            Summary of deleted tables
+        """
+        result = {
+            'project': project,
+            'file_name': file_name,
+            'tables_deleted': [],
+            'versions_deleted': []
+        }
+        
+        # Get all tables for this file
+        if delete_all_versions:
+            tables = self.conn.execute("""
+                SELECT table_name, version FROM _schema_metadata 
+                WHERE project = ? AND file_name = ?
+            """, [project, file_name]).fetchall()
+        else:
+            tables = self.conn.execute("""
+                SELECT table_name, version FROM _schema_metadata 
+                WHERE project = ? AND file_name = ? AND is_current = TRUE
+            """, [project, file_name]).fetchall()
+        
+        versions_deleted = set()
+        
+        for table_name, version in tables:
+            try:
+                self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+                result['tables_deleted'].append(table_name)
+                versions_deleted.add(version)
+                logger.info(f"Deleted table: {table_name}")
+            except Exception as e:
+                logger.warning(f"Could not delete table {table_name}: {e}")
+        
+        # Also try to drop archived tables (naming convention: tablename_v1, _v2, etc.)
+        if delete_all_versions:
+            for table_name, version in tables:
+                for v in range(1, 100):  # Check up to 100 versions
+                    archive_name = f"{table_name}_v{v}"
+                    try:
+                        self.conn.execute(f"DROP TABLE IF EXISTS {archive_name}")
+                    except:
+                        break
+        
+        # Delete metadata
+        if delete_all_versions:
+            self.conn.execute("""
+                DELETE FROM _schema_metadata WHERE project = ? AND file_name = ?
+            """, [project, file_name])
+            self.conn.execute("""
+                DELETE FROM _load_versions WHERE project = ? AND file_name = ?
+            """, [project, file_name])
+        else:
+            self.conn.execute("""
+                DELETE FROM _schema_metadata WHERE project = ? AND file_name = ? AND is_current = TRUE
+            """, [project, file_name])
+        
+        self.conn.commit()
+        
+        result['versions_deleted'] = list(versions_deleted)
+        logger.info(f"Deleted {len(result['tables_deleted'])} tables for {file_name}")
+        
+        return result
+    
+    def compare_versions(
+        self, 
+        project: str, 
+        file_name: str, 
+        sheet_name: str,
+        key_column: str,
+        version1: int = None,
+        version2: int = None
+    ) -> Dict[str, Any]:
+        """
+        Compare two versions of a file to find changes.
+        
+        Args:
+            project: Project name
+            file_name: File name
+            sheet_name: Sheet to compare
+            key_column: Column to use as unique key (e.g., 'employee_id')
+            version1: First version (default: previous version)
+            version2: Second version (default: current version)
+            
+        Returns:
+            Dict with added, removed, and changed records
+        """
+        # Get current and previous version numbers
+        versions = self.conn.execute("""
+            SELECT DISTINCT version FROM _schema_metadata 
+            WHERE project = ? AND file_name = ? AND sheet_name = ?
+            ORDER BY version DESC
+        """, [project, file_name, sheet_name]).fetchall()
+        
+        if len(versions) < 2:
+            return {
+                'error': 'Need at least 2 versions to compare',
+                'available_versions': [v[0] for v in versions]
+            }
+        
+        v2 = version2 or versions[0][0]  # Latest
+        v1 = version1 or versions[1][0]  # Previous
+        
+        # Get table names
+        table1_result = self.conn.execute("""
+            SELECT table_name FROM _schema_metadata 
+            WHERE project = ? AND file_name = ? AND sheet_name = ? AND version = ?
+        """, [project, file_name, sheet_name, v1]).fetchone()
+        
+        table2_result = self.conn.execute("""
+            SELECT table_name FROM _schema_metadata 
+            WHERE project = ? AND file_name = ? AND sheet_name = ? AND version = ?
+        """, [project, file_name, sheet_name, v2]).fetchone()
+        
+        if not table1_result or not table2_result:
+            # Try archived table names
+            base_table = self._generate_table_name(project, file_name, sheet_name)
+            table1 = f"{base_table}_v{v1}"
+            table2 = base_table  # Current is without version suffix
+        else:
+            table1 = table1_result[0] if v1 != versions[0][0] else f"{table1_result[0]}_v{v1}"
+            table2 = table2_result[0]
+        
+        result = {
+            'project': project,
+            'file_name': file_name,
+            'sheet_name': sheet_name,
+            'version1': v1,
+            'version2': v2,
+            'key_column': key_column,
+            'added': [],
+            'removed': [],
+            'changed': [],
+            'unchanged_count': 0
+        }
+        
+        try:
+            # Get data from both versions
+            df1 = self.query_to_dataframe(f"SELECT * FROM {table1}")
+            df2 = self.query_to_dataframe(f"SELECT * FROM {table2}")
+            
+            # Decrypt for comparison
+            df1 = self.encryptor.decrypt_dataframe(df1)
+            df2 = self.encryptor.decrypt_dataframe(df2)
+            
+            # Ensure key column exists
+            if key_column not in df1.columns or key_column not in df2.columns:
+                return {'error': f"Key column '{key_column}' not found in both versions"}
+            
+            # Set key as index
+            df1 = df1.set_index(key_column)
+            df2 = df2.set_index(key_column)
+            
+            # Find added (in v2 but not v1)
+            added_keys = set(df2.index) - set(df1.index)
+            result['added'] = df2.loc[list(added_keys)].reset_index().to_dict('records')
+            
+            # Find removed (in v1 but not v2)
+            removed_keys = set(df1.index) - set(df2.index)
+            result['removed'] = df1.loc[list(removed_keys)].reset_index().to_dict('records')
+            
+            # Find changed (in both but different)
+            common_keys = set(df1.index) & set(df2.index)
+            changed = []
+            unchanged = 0
+            
+            for key in common_keys:
+                row1 = df1.loc[key]
+                row2 = df2.loc[key]
+                
+                # Compare each column
+                differences = {}
+                for col in df1.columns:
+                    if col in df2.columns:
+                        val1 = row1[col] if not pd.isna(row1[col]) else None
+                        val2 = row2[col] if not pd.isna(row2[col]) else None
+                        
+                        if str(val1) != str(val2):
+                            differences[col] = {'old': val1, 'new': val2}
+                
+                if differences:
+                    changed.append({
+                        key_column: key,
+                        'changes': differences
+                    })
+                else:
+                    unchanged += 1
+            
+            result['changed'] = changed
+            result['unchanged_count'] = unchanged
+            
+            # Summary
+            result['summary'] = {
+                'total_v1': len(df1),
+                'total_v2': len(df2),
+                'added_count': len(result['added']),
+                'removed_count': len(result['removed']),
+                'changed_count': len(result['changed']),
+                'unchanged_count': unchanged
+            }
+            
+            logger.info(f"Compared {file_name}/{sheet_name}: +{len(result['added'])} -{len(result['removed'])} ~{len(result['changed'])}")
+            
+        except Exception as e:
+            logger.error(f"Comparison error: {e}")
+            result['error'] = str(e)
+        
+        return result
+    
+    def get_file_versions(self, project: str, file_name: str) -> List[Dict]:
+        """Get all versions of a file"""
+        versions = self.conn.execute("""
+            SELECT DISTINCT version, created_at, row_count
+            FROM _schema_metadata 
+            WHERE project = ? AND file_name = ?
+            ORDER BY version DESC
+        """, [project, file_name]).fetchall()
+        
+        return [
+            {'version': v[0], 'created_at': v[1], 'row_count': v[2]}
+            for v in versions
+        ]
+    
+    def list_files(self, project: str) -> List[Dict]:
+        """List all files in a project with version info"""
+        files = self.conn.execute("""
+            SELECT DISTINCT file_name, 
+                   MAX(version) as latest_version,
+                   SUM(row_count) as total_rows,
+                   MAX(created_at) as last_updated
+            FROM _schema_metadata 
+            WHERE project = ? AND is_current = TRUE
+            GROUP BY file_name
+            ORDER BY file_name
+        """, [project]).fetchall()
+        
+        return [
+            {
+                'file_name': f[0],
+                'latest_version': f[1],
+                'total_rows': f[2],
+                'last_updated': f[3]
+            }
+            for f in files
+        ]
+    
+    def reset_database(self) -> Dict[str, Any]:
+        """
+        Completely reset the database - drop all tables and recreate metadata.
+        USE WITH CAUTION - this deletes all data!
+        """
+        result = {
+            'tables_dropped': [],
+            'success': False
+        }
+        
+        try:
+            # Get all user tables (not metadata)
+            tables = self.conn.execute("""
+                SELECT table_name FROM information_schema.tables 
+                WHERE table_schema = 'main' 
+                AND table_name NOT LIKE '\\_%' ESCAPE '\\'
+            """).fetchall()
+            
+            for (table_name,) in tables:
+                try:
+                    self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+                    result['tables_dropped'].append(table_name)
+                except Exception as e:
+                    logger.warning(f"Could not drop {table_name}: {e}")
+            
+            # Drop metadata tables
+            self.conn.execute("DROP TABLE IF EXISTS _schema_metadata")
+            self.conn.execute("DROP TABLE IF EXISTS _load_versions")
+            self.conn.execute("DROP SEQUENCE IF EXISTS schema_metadata_seq")
+            self.conn.execute("DROP SEQUENCE IF EXISTS load_versions_seq")
+            self.conn.commit()
+            
+            # Recreate metadata tables
+            self._init_metadata_table()
+            
+            result['success'] = True
+            logger.info(f"Database reset: dropped {len(result['tables_dropped'])} tables")
+            
+        except Exception as e:
+            logger.error(f"Database reset failed: {e}")
+            result['error'] = str(e)
+        
+        return result
+    
+    def close(self):
+        """Close database connection"""
+        if self.conn:
+            self.conn.close()
 
 
-@router.get("/year-end/scan-all/status/{job_id}")
-async def get_scan_status(job_id: str):
-    """
-    Get status of a scan-all job.
-    
-    Poll this every 1-2 seconds for live updates.
-    """
-    job = _get_scan_job(job_id)
-    
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    
-    return job.to_dict()
+# Singleton instance
+_handler: Optional[StructuredDataHandler] = None
+
+def get_structured_handler() -> StructuredDataHandler:
+    """Get or create singleton handler"""
+    global _handler
+    if _handler is None:
+        _handler = StructuredDataHandler()
+    return _handler
 
 
-@router.post("/year-end/scan-all/cancel/{job_id}")
-async def cancel_scan(job_id: str):
-    """Cancel a running scan-all job."""
-    job = _get_scan_job(job_id)
-    
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    
-    if job.status != _ScanJobStatus.RUNNING:
-        return {"success": False, "message": f"Cannot cancel job in status: {job.status}"}
-    
-    job.cancel()
-    
-    return {
-        "success": True,
-        "message": "Scan cancelled",
-        "completed_actions": job.completed,
-        "total_actions": job.total
-    }
-
-
-@router.get("/year-end/scan-all/jobs/{project_id}")
-async def list_scan_jobs(project_id: str, limit: int = 10):
-    """List recent scan jobs for a project."""
-    _cleanup_old_scan_jobs()
-    
-    with _scan_jobs_lock:
-        project_jobs = [job.to_dict() for job in _scan_jobs.values() if job.project_id == project_id]
-    
-    project_jobs.sort(key=lambda j: j['created_at'], reverse=True)
-    
-    return {"project_id": project_id, "jobs": project_jobs[:limit]}
+def reset_structured_handler():
+    """Reset the singleton handler (forces reconnection)"""
+    global _handler
+    if _handler:
+        _handler.close()
+    _handler = None
