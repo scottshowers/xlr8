@@ -2288,6 +2288,20 @@ async def get_document_checklist(project_id: str):
         # Get structure (which now includes required_documents per step)
         structure = await get_year_end_structure()
         
+        # Get project name for matching (files might be stored with name instead of UUID)
+        project_name = None
+        try:
+            from utils.supabase_client import supabase
+            proj_result = supabase.table("projects").select("name, code").eq("id", project_id).execute()
+            if proj_result.data:
+                project_name = proj_result.data[0].get("name", "").upper()
+                project_code = proj_result.data[0].get("code", "").upper()
+            else:
+                project_code = None
+        except Exception as e:
+            logger.warning(f"Could not get project name: {e}")
+            project_code = None
+        
         # Get all project files from ChromaDB
         rag = RAGHandler()
         collection = rag.client.get_or_create_collection(name="documents")
@@ -2297,10 +2311,22 @@ async def get_document_checklist(project_id: str):
         uploaded_files = []
         for metadata in all_results.get("metadatas", []):
             doc_project = metadata.get("project_id") or metadata.get("project", "")
-            if doc_project == project_id or doc_project == project_id[:8]:
+            doc_project_upper = str(doc_project).upper()
+            
+            # Match by UUID, UUID prefix, project name, or project code
+            is_match = (
+                doc_project == project_id or 
+                doc_project == project_id[:8] or
+                (project_name and doc_project_upper == project_name) or
+                (project_code and doc_project_upper == project_code)
+            )
+            
+            if is_match:
                 filename = metadata.get("source", metadata.get("filename", ""))
                 if filename and filename not in uploaded_files:
                     uploaded_files.append(filename)
+        
+        logger.info(f"[DOC-CHECKLIST] Found {len(uploaded_files)} files for project {project_id} (name={project_name}, code={project_code})")
         
         # Build checklist per step
         step_checklists = []
@@ -2347,6 +2373,101 @@ async def get_document_checklist(project_id: str):
     except Exception as e:
         logger.exception(f"Document checklist failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class UpdateStepDocumentRequest(BaseModel):
+    step: str
+    old_keyword: str
+    new_keyword: str
+
+
+@router.put("/year-end/step-documents/keyword")
+async def update_step_document_keyword(request: UpdateStepDocumentRequest):
+    """
+    Update a keyword in the Step_Documents table.
+    Allows inline editing of document matching keywords.
+    """
+    import duckdb
+    
+    DUCKDB_PATH = "/data/structured_data.duckdb"
+    
+    if not os.path.exists(DUCKDB_PATH):
+        raise HTTPException(404, "DuckDB not found")
+    
+    try:
+        conn = duckdb.connect(DUCKDB_PATH)
+        
+        # Find the Step_Documents table
+        tables = conn.execute("""
+            SELECT table_name FROM _schema_metadata 
+            WHERE LOWER(sheet_name) LIKE '%step_documents%'
+            AND is_current = TRUE
+            AND LOWER(project) = 'global'
+        """).fetchall()
+        
+        if not tables:
+            raise HTTPException(404, "Step_Documents table not found")
+        
+        table_name = tables[0][0]
+        
+        # Get column names to find the right ones
+        col_info = conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
+        col_names = [c[1].lower() for c in col_info]
+        
+        # Find keyword column (might be named differently)
+        keyword_col = None
+        step_col = None
+        for col in col_names:
+            if 'keyword' in col:
+                keyword_col = col
+            if col == 'step' or col == 'step_number':
+                step_col = col
+        
+        if not keyword_col:
+            raise HTTPException(400, f"No keyword column found. Columns: {col_names}")
+        
+        # Update the keyword
+        if step_col:
+            result = conn.execute(f"""
+                UPDATE "{table_name}" 
+                SET "{keyword_col}" = ?
+                WHERE "{step_col}" = ? AND LOWER("{keyword_col}") = LOWER(?)
+                RETURNING *
+            """, [request.new_keyword, request.step, request.old_keyword]).fetchall()
+        else:
+            result = conn.execute(f"""
+                UPDATE "{table_name}" 
+                SET "{keyword_col}" = ?
+                WHERE LOWER("{keyword_col}") = LOWER(?)
+                RETURNING *
+            """, [request.new_keyword, request.old_keyword]).fetchall()
+        
+        conn.commit()
+        conn.close()
+        
+        if not result:
+            raise HTTPException(404, f"Keyword '{request.old_keyword}' not found in step {request.step}")
+        
+        # Clear playbook cache to reload structure
+        global PLAYBOOK_CACHE
+        if 'year-end-2025' in PLAYBOOK_CACHE:
+            del PLAYBOOK_CACHE['year-end-2025']
+        
+        logger.info(f"[STEP-DOCS] Updated keyword '{request.old_keyword}' → '{request.new_keyword}' for step {request.step}")
+        
+        return {
+            "success": True,
+            "step": request.step,
+            "old_keyword": request.old_keyword,
+            "new_keyword": request.new_keyword,
+            "message": f"Keyword updated. Refresh to see changes."
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[STEP-DOCS] Update failed: {e}")
+        raise HTTPException(500, str(e))
 
 
 # ============================================================================
