@@ -1,19 +1,16 @@
 """
-Async Upload Router for XLR8 - v2 with Smart PDF Processing
-============================================================
+Async Upload Router for XLR8
+============================
 
 FEATURES:
 - Returns immediately after file save (no timeout!)
-- Processes in background thread
+- Processes in QUEUED background thread (sequential, no overlap!)
 - Real-time status updates via job polling
 - Handles large files gracefully
 - Smart Excel parsing (detects blue/colored headers)
-- **NEW: Smart PDF table detection → DuckDB for SQL queries**
 
-CHANGES FROM v1:
-- Added smart_process_pdf_file() for tabular PDFs
-- PDFs with tables go to BOTH DuckDB (structured) AND ChromaDB (semantic)
-- Always shows status - no silent processing
+CHANGE LOG:
+- v2: Added job queue to prevent multi-file overlap/hang
 
 Author: XLR8 Team
 """
@@ -25,12 +22,12 @@ import sys
 import os
 import json
 import threading
+import queue
 import traceback
 import PyPDF2
 import docx
 import pandas as pd
 import logging
-import tempfile
 
 # Try to import openpyxl for smart Excel parsing
 try:
@@ -56,200 +53,111 @@ except ImportError:
     logger_temp = logging.getLogger(__name__)
     logger_temp.warning("Structured data handler not available - Excel/CSV will use RAG only")
 
-# NEW: Import smart PDF analyzer
-try:
-    from utils.smart_pdf_analyzer import SmartPDFAnalyzer, smart_process_pdf
-    SMART_PDF_AVAILABLE = True
-except ImportError:
-    SMART_PDF_AVAILABLE = False
-    # Will be created as part of this deployment
-
-# Import pdfplumber for table extraction
-try:
-    import pdfplumber
-    PDFPLUMBER_AVAILABLE = True
-except ImportError:
-    PDFPLUMBER_AVAILABLE = False
-
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
 # =============================================================================
-# SMART PDF TABLE EXTRACTION - NEW
+# JOB QUEUE - Prevents multi-file overlap and hangs
 # =============================================================================
-
-def analyze_pdf_for_tables(file_path: str) -> dict:
+class JobQueue:
     """
-    Analyze a PDF to detect if it contains tables.
+    Sequential job queue - processes one file at a time.
+    Solves: Multiple uploads hitting Ollama simultaneously → hangs
+    """
     
-    Returns:
-        {
-            'has_tables': bool,
-            'table_ratio': float (0-1),
-            'tables': [DataFrame, ...],
-            'combined_table': DataFrame or None,
-            'text_content': str,
-            'recommendation': 'duckdb' | 'chromadb' | 'both'
+    _instance = None
+    _lock = threading.Lock()
+    
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
+    
+    def __init__(self):
+        if self._initialized:
+            return
+            
+        self._queue = queue.Queue()
+        self._worker_thread = None
+        self._running = False
+        self._current_job_id = None
+        self._processed_count = 0
+        self._initialized = True
+        
+        self._start_worker()
+        logger.info("[JOB_QUEUE] Initialized sequential processing queue")
+    
+    def _start_worker(self):
+        """Start single worker thread"""
+        if self._worker_thread is None or not self._worker_thread.is_alive():
+            self._running = True
+            self._worker_thread = threading.Thread(
+                target=self._worker_loop,
+                daemon=True,
+                name="UploadQueueWorker"
+            )
+            self._worker_thread.start()
+    
+    def _worker_loop(self):
+        """Process jobs one at a time"""
+        while self._running:
+            try:
+                job = self._queue.get(timeout=1.0)
+            except queue.Empty:
+                continue
+            
+            job_id, func, args = job
+            self._current_job_id = job_id
+            
+            logger.info(f"[JOB_QUEUE] 🚀 Processing job {job_id} (queue size: {self._queue.qsize()})")
+            
+            try:
+                func(*args)
+                self._processed_count += 1
+            except Exception as e:
+                logger.error(f"[JOB_QUEUE] Job {job_id} failed: {e}")
+                logger.error(traceback.format_exc())
+            finally:
+                self._current_job_id = None
+                self._queue.task_done()
+    
+    def enqueue(self, job_id: str, func, args: tuple) -> dict:
+        """Add job to queue - returns immediately with position"""
+        position = self._queue.qsize() + 1
+        self._queue.put((job_id, func, args))
+        
+        logger.info(f"[JOB_QUEUE] 📥 Enqueued job {job_id} at position {position}")
+        
+        self._start_worker()  # Ensure worker is running
+        
+        return {
+            'queue_position': position,
+            'currently_processing': self._current_job_id,
+            'queue_size': position
         }
-    """
-    if not PDFPLUMBER_AVAILABLE:
-        logger.warning("[SMART-PDF] pdfplumber not available, skipping table detection")
-        return {'has_tables': False, 'recommendation': 'chromadb'}
     
-    try:
-        logger.info(f"[SMART-PDF] Analyzing PDF for tables: {file_path}")
-        
-        with pdfplumber.open(file_path) as pdf:
-            total_pages = len(pdf.pages)
-            if total_pages == 0:
-                return {'has_tables': False, 'recommendation': 'chromadb'}
-            
-            all_tables = []
-            table_pages = []
-            all_text = []
-            column_signatures = []
-            
-            for page_num, page in enumerate(pdf.pages, start=1):
-                # Extract tables
-                tables = page.extract_tables()
-                
-                if tables:
-                    for table in tables:
-                        if table and len(table) > 1:  # Has header + data
-                            try:
-                                # Clean up table
-                                headers = [str(h).strip() if h else f'Col_{i}' for i, h in enumerate(table[0])]
-                                data = table[1:]
-                                
-                                df = pd.DataFrame(data, columns=headers)
-                                df = df.dropna(how='all')
-                                
-                                # Remove duplicate header rows
-                                header_as_list = [str(h).lower().strip() for h in headers]
-                                mask = df.apply(lambda row: [str(v).lower().strip() if v else '' for v in row] != header_as_list, axis=1)
-                                df = df[mask]
-                                
-                                if len(df) > 0:
-                                    all_tables.append(df)
-                                    table_pages.append(page_num)
-                                    column_signatures.append(tuple(headers))
-                            except Exception as e:
-                                logger.debug(f"[SMART-PDF] Table parse error on page {page_num}: {e}")
-                
-                # Extract text
-                text = page.extract_text() or ''
-                if text.strip():
-                    all_text.append(f"--- Page {page_num} ---\n{text}")
-            
-            # Calculate metrics
-            table_ratio = len(table_pages) / total_pages if total_pages > 0 else 0
-            
-            # Check column consistency (same table structure across pages)
-            column_consistent = len(set(column_signatures)) == 1 if column_signatures else False
-            
-            # Try to combine tables if consistent structure
-            combined_table = None
-            if all_tables and column_consistent:
-                try:
-                    combined_table = pd.concat(all_tables, ignore_index=True)
-                    logger.info(f"[SMART-PDF] Combined {len(all_tables)} tables → {len(combined_table)} rows")
-                except Exception as e:
-                    logger.warning(f"[SMART-PDF] Could not combine tables: {e}")
-            
-            # Determine recommendation
-            if table_ratio > 0.5 or (table_ratio > 0.3 and column_consistent):
-                recommendation = 'duckdb'  # Primarily tabular
-            elif table_ratio > 0.1:
-                recommendation = 'both'    # Mixed content
-            else:
-                recommendation = 'chromadb'  # Primarily text
-            
-            result = {
-                'has_tables': len(all_tables) > 0,
-                'table_ratio': table_ratio,
-                'table_pages': table_pages,
-                'tables': all_tables,
-                'combined_table': combined_table,
-                'text_content': '\n\n'.join(all_text),
-                'total_rows': len(combined_table) if combined_table is not None else sum(len(t) for t in all_tables),
-                'recommendation': recommendation,
-                'column_consistent': column_consistent
-            }
-            
-            logger.info(f"[SMART-PDF] Analysis: {len(all_tables)} tables, {result['total_rows']} rows, recommendation={recommendation}")
-            
-            return result
-            
-    except Exception as e:
-        logger.error(f"[SMART-PDF] Analysis failed: {e}")
-        return {'has_tables': False, 'recommendation': 'chromadb', 'error': str(e)}
+    def get_status(self) -> dict:
+        """Get queue status for status endpoint"""
+        return {
+            'queue_size': self._queue.qsize(),
+            'currently_processing': self._current_job_id,
+            'processed_count': self._processed_count,
+            'worker_alive': self._worker_thread.is_alive() if self._worker_thread else False
+        }
 
 
-def store_pdf_tables_to_duckdb(
-    tables: list,
-    combined_table,  # DataFrame or None
-    project: str,
-    filename: str,
-    job_id: str
-) -> dict:
-    """
-    Store extracted PDF tables in DuckDB.
-    Uses temp CSV file since store_csv expects file path.
-    """
-    if not STRUCTURED_HANDLER_AVAILABLE:
-        return {'success': False, 'error': 'DuckDB handler not available'}
-    
-    try:
-        handler = get_structured_handler()
-        
-        # Use combined table if available
-        df = combined_table if combined_table is not None else (tables[0] if tables else None)
-        
-        if df is None or len(df) == 0:
-            return {'success': False, 'error': 'No table data to store'}
-        
-        ProcessingJobModel.update_progress(job_id, 40, f"Storing {len(df)} rows in DuckDB...")
-        
-        # Clean column names
-        df.columns = [str(c).strip().replace(' ', '_').replace('-', '_')[:50] for c in df.columns]
-        
-        # Convert all to string (safer for mixed types)
-        for col in df.columns:
-            df[col] = df[col].fillna('').astype(str)
-        
-        # Save to temp CSV
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
-            temp_path = f.name
-            df.to_csv(f, index=False)
-        
-        try:
-            # Use existing store_csv method
-            result = handler.store_csv(temp_path, project, filename.replace('.pdf', '_table'))
-            
-            ProcessingJobModel.update_progress(job_id, 50, f"✓ Stored {len(df)} rows as '{result.get('table_name', 'table')}'")
-            
-            return {
-                'success': True,
-                'tables_created': [result.get('table_name')],
-                'total_rows': len(df),
-                'columns': list(df.columns)
-            }
-        finally:
-            # Cleanup temp file
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-        
-    except Exception as e:
-        logger.error(f"[SMART-PDF] DuckDB storage failed: {e}")
-        return {'success': False, 'error': str(e)}
+# Singleton queue instance
+job_queue = JobQueue()
 
 
 # =============================================================================
-# EXISTING TEXT EXTRACTION (unchanged)
+# TEXT EXTRACTION
 # =============================================================================
-
 def extract_text(file_path: str) -> str:
     """Extract text from file based on extension"""
     ext = file_path.split('.')[-1].lower()
@@ -296,14 +204,14 @@ def extract_text(file_path: str) -> str:
                 except Exception as e:
                     logger.warning(f"[PDF] PyMuPDF failed: {e}")
             
-            # Method 3: Fall back to PyPDF2
+            # Method 3: Fallback to PyPDF2 if others failed
             if len(text) < 500:
                 try:
-                    logger.info("[PDF] Falling back to PyPDF2...")
+                    logger.info("[PDF] Trying PyPDF2 extraction...")
                     with open(file_path, 'rb') as f:
-                        reader = PyPDF2.PdfReader(f)
+                        pdf = PyPDF2.PdfReader(f)
                         page_texts = []
-                        for i, page in enumerate(reader.pages):
+                        for i, page in enumerate(pdf.pages):
                             page_text = page.extract_text() or ''
                             if page_text.strip():
                                 page_texts.append(f"--- Page {i+1} ---\n{page_text}")
@@ -315,22 +223,30 @@ def extract_text(file_path: str) -> str:
                 except Exception as e:
                     logger.warning(f"[PDF] PyPDF2 failed: {e}")
             
+            # Final check
+            if len(text) < 100:
+                logger.error(f"[PDF] All extraction methods failed or returned minimal text ({len(text)} chars)")
+            else:
+                logger.info(f"[PDF] Final extraction: {len(text)} chars from {pages_extracted} pages")
+            
             return text
         
+        elif ext == 'docx':
+            doc = docx.Document(file_path)
+            return "\n".join([p.text for p in doc.paragraphs])
+        
         elif ext in ['xlsx', 'xls']:
-            # Smart Excel extraction with colored header detection
+            # SMART EXCEL READER with header detection
             texts = []
             
             if not OPENPYXL_AVAILABLE:
-                # Fall back to pandas
+                # Fallback to simple pandas
+                logger.info("[EXCEL] Using pandas fallback")
                 excel = pd.ExcelFile(file_path)
                 for sheet in excel.sheet_names:
-                    try:
-                        df = pd.read_excel(file_path, sheet_name=sheet, header=1)
-                        df = df.dropna(how='all')
-                        texts.append(f"[SHEET: {sheet}]\n{df.to_string()}")
-                    except:
-                        texts.append(f"[SHEET: {sheet}]\nError reading sheet\n")
+                    df = pd.read_excel(file_path, sheet_name=sheet, header=1)
+                    df = df.dropna(how='all')
+                    texts.append(f"[SHEET: {sheet}]\n{df.to_string()}")
                 return "\n\n".join(texts)
             
             try:
@@ -340,29 +256,33 @@ def extract_text(file_path: str) -> str:
                     ws = wb[sheet_name]
                     sheet_texts = [f"[SHEET: {sheet_name}]"]
                     
-                    if ws.max_row is None or ws.max_row < 1:
-                        texts.append(f"[SHEET: {sheet_name}]\nEmpty Sheet\n")
-                        continue
-                    
-                    # Find header rows by looking for colored cells
+                    # Find header rows by color
                     header_rows = []
-                    for row_idx, row in enumerate(ws.iter_rows(min_row=1, max_row=min(20, ws.max_row)), start=1):
-                        colored_cell_count = 0
-                        non_empty_count = 0
+                    for row_idx, row in enumerate(ws.iter_rows(min_row=1, max_row=min(ws.max_row, 500)), start=1):
+                        colored_cells = 0
+                        non_empty = 0
                         
-                        for cell in row[:20]:  # Check first 20 columns
+                        for cell in row[:20]:
                             if cell.value and str(cell.value).strip():
-                                non_empty_count += 1
-                            if cell.fill and cell.fill.fgColor:
-                                color = cell.fill.fgColor
-                                if hasattr(color, 'rgb') and color.rgb and color.rgb != '00000000':
-                                    colored_cell_count += 1
+                                non_empty += 1
+                            try:
+                                if cell.fill and cell.fill.fgColor and cell.fill.patternType and cell.fill.patternType != 'none':
+                                    color = cell.fill.fgColor
+                                    if color.type == 'rgb' and color.rgb:
+                                        rgb = str(color.rgb).upper()
+                                        if rgb not in ['FFFFFFFF', '00FFFFFF', 'FFFFFF', '00000000']:
+                                            colored_cells += 1
+                                    elif color.type == 'theme' and color.theme is not None:
+                                        colored_cells += 1
+                                    elif color.type == 'indexed' and color.indexed not in [0, 64]:
+                                        colored_cells += 1
+                            except:
+                                pass
                         
-                        if colored_cell_count >= 3 and non_empty_count >= 3:
+                        if colored_cells >= 2 and non_empty >= 2:
                             header_rows.append(row_idx)
-                            logger.info(f"[EXCEL] Found header row at {row_idx} ({colored_cell_count} colored cells)")
                     
-                    # If no colored headers, use first row with data
+                    # Fallback: first row with data
                     if not header_rows:
                         for row_idx, row in enumerate(ws.iter_rows(min_row=1, max_row=10), start=1):
                             non_empty = sum(1 for cell in row[:20] if cell.value and str(cell.value).strip())
@@ -371,15 +291,12 @@ def extract_text(file_path: str) -> str:
                                 break
                     
                     if not header_rows:
-                        texts.append(f"[SHEET: {sheet_name}]\nNo Data Available\n")
+                        texts.append(f"[SHEET: {sheet_name}]\nNo Data\n")
                         continue
                     
-                    # Process each section
-                    for section_idx, header_row in enumerate(header_rows):
-                        if section_idx + 1 < len(header_rows):
-                            end_row = header_rows[section_idx + 1] - 1
-                        else:
-                            end_row = ws.max_row
+                    # Process sections
+                    for sec_idx, header_row in enumerate(header_rows):
+                        end_row = header_rows[sec_idx + 1] - 1 if sec_idx + 1 < len(header_rows) else ws.max_row
                         
                         headers = []
                         for cell in ws[header_row]:
@@ -395,9 +312,12 @@ def extract_text(file_path: str) -> str:
                         if not headers:
                             continue
                         
+                        if len(header_rows) > 1:
+                            sheet_texts.append(f"\n--- Section {sec_idx + 1} ---")
+                        
                         sheet_texts.append(f"Columns: {' | '.join(headers)}")
                         
-                        data_row_count = 0
+                        # Data rows
                         for row_idx in range(header_row + 1, min(end_row + 1, header_row + 1000)):
                             row_data = []
                             has_data = False
@@ -410,21 +330,23 @@ def extract_text(file_path: str) -> str:
                                     val_str = str(val).strip()
                                     if val_str and val_str.lower() not in ['none', 'nan', '']:
                                         has_data = True
-                                        row_data.append(f"{header}: {val_str}")
+                                        if header.startswith('Col'):
+                                            row_data.append(val_str)
+                                        else:
+                                            row_data.append(f"{header}: {val_str}")
                             
                             if has_data and row_data:
                                 sheet_texts.append(" | ".join(row_data))
-                                data_row_count += 1
                     
                     if len(sheet_texts) > 2:
                         texts.append("\n".join(sheet_texts))
                     else:
-                        texts.append(f"[SHEET: {sheet_name}]\nNo Data Available\n")
+                        texts.append(f"[SHEET: {sheet_name}]\nNo Data\n")
                 
                 wb.close()
                 
             except Exception as e:
-                logger.error(f"[EXCEL] openpyxl error: {e}, falling back to pandas")
+                logger.error(f"[EXCEL] openpyxl error: {e}")
                 excel = pd.ExcelFile(file_path)
                 texts = []
                 for sheet in excel.sheet_names:
@@ -433,7 +355,7 @@ def extract_text(file_path: str) -> str:
                         df = df.dropna(how='all')
                         texts.append(f"[SHEET: {sheet}]\n{df.to_string()}")
                     except:
-                        texts.append(f"[SHEET: {sheet}]\nError reading sheet\n")
+                        texts.append(f"[SHEET: {sheet}]\nError\n")
             
             return "\n\n".join(texts)
         
@@ -445,12 +367,7 @@ def extract_text(file_path: str) -> str:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 return f.read()
         
-        elif ext in ['doc', 'docx']:
-            doc = docx.Document(file_path)
-            return '\n'.join([para.text for para in doc.paragraphs])
-        
         else:
-            # Try as text
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 return f.read()
                 
@@ -460,9 +377,8 @@ def extract_text(file_path: str) -> str:
 
 
 # =============================================================================
-# BACKGROUND PROCESSING (UPDATED with smart PDF handling)
+# BACKGROUND PROCESSING
 # =============================================================================
-
 def process_file_background(
     job_id: str,
     file_path: str,
@@ -473,30 +389,24 @@ def process_file_background(
     file_size: int
 ):
     """
-    Background processing function - runs in separate thread
+    Background processing function - runs in job queue worker thread
     
-    This is where all the heavy lifting happens:
-    1. For Excel/CSV: Store in DuckDB (structured queries)
-    2. For PDFs with tables: Store tables in DuckDB + text in ChromaDB
-    3. For PDFs/Docs without tables: Extract text, chunk, embed in ChromaDB
-    4. Update job status throughout - NEVER silent
+    Routes:
+    1. Excel/CSV → DuckDB (structured queries)
+    2. PDFs/Docs → ChromaDB (vector search)
     """
     try:
-        logger.info(f"[BACKGROUND] Starting processing for job {job_id}")
-        logger.info(f"[BACKGROUND] project={project}, project_id={project_id}")
+        logger.info(f"[BACKGROUND] Starting job {job_id}")
         
         file_ext = filename.split('.')[-1].lower()
         
-        # =====================================================================
         # ROUTE 1: STRUCTURED DATA (Excel/CSV) → DuckDB
-        # =====================================================================
         if file_ext in ['xlsx', 'xls', 'csv'] and STRUCTURED_HANDLER_AVAILABLE:
-            ProcessingJobModel.update_progress(job_id, 10, "Detected tabular data - storing for SQL queries...")
+            ProcessingJobModel.update_progress(job_id, 10, "Storing tabular data...")
             
             try:
                 handler = get_structured_handler()
-                
-                ProcessingJobModel.update_progress(job_id, 20, "Parsing spreadsheet structure...")
+                ProcessingJobModel.update_progress(job_id, 20, "Parsing structure...")
                 
                 if file_ext == 'csv':
                     result = handler.store_csv(file_path, project, filename)
@@ -504,13 +414,10 @@ def process_file_background(
                     total_rows = result.get('row_count', 0)
                 else:
                     result = handler.store_excel(file_path, project, filename)
-                    tables_created = result.get('sheets_processed', 1)
+                    tables_created = len(result.get('tables_created', []))
                     total_rows = result.get('total_rows', 0)
                 
-                ProcessingJobModel.update_progress(
-                    job_id, 80,
-                    f"Created {tables_created} table(s) with {total_rows:,} total rows"
-                )
+                ProcessingJobModel.update_progress(job_id, 70, f"Created {tables_created} table(s)")
                 
                 # Save metadata
                 if project_id:
@@ -518,42 +425,44 @@ def process_file_background(
                         DocumentModel.create(
                             project_id=project_id,
                             name=filename,
-                            category=functional_area or 'Data',
+                            category=functional_area or 'Structured Data',
                             file_type=file_ext,
                             file_size=file_size,
-                            content=f"Structured data: {tables_created} tables, {total_rows} rows",
-                            metadata={
-                                'storage': 'duckdb',
-                                'tables_created': result.get('tables_created', []),
-                                'total_rows': total_rows
-                            }
+                            content=f"STRUCTURED DATA\nTables: {tables_created}\nRows: {total_rows}",
+                            metadata={'type': 'structured', 'storage': 'duckdb'}
                         )
                     except Exception as e:
-                        logger.warning(f"[BACKGROUND] Could not save metadata: {e}")
+                        logger.warning(f"Could not save metadata: {e}")
                 
-                # Register in document registry
+                # Register document
                 try:
                     from utils.database.models import DocumentRegistryModel
-                    
                     is_global = project.lower() in ['global', '__global__', 'global/universal']
+                    filename_lower = filename.lower()
+                    is_playbook = any(kw in filename_lower for kw in ['year-end', 'yearend', 'checklist'])
+                    
+                    usage_type = (
+                        DocumentRegistryModel.USAGE_PLAYBOOK_SOURCE if is_playbook and is_global
+                        else DocumentRegistryModel.USAGE_TEMPLATE if is_global
+                        else DocumentRegistryModel.USAGE_STRUCTURED_DATA
+                    )
                     
                     DocumentRegistryModel.register(
                         filename=filename,
                         file_type=file_ext,
                         storage_type=DocumentRegistryModel.STORAGE_DUCKDB,
-                        usage_type=DocumentRegistryModel.USAGE_STRUCTURED_DATA,
+                        usage_type=usage_type,
                         project_id=project_id if not is_global else None,
                         is_global=is_global,
                         duckdb_tables=result.get('tables_created', []),
                         row_count=total_rows,
                         sheet_count=tables_created,
-                        metadata={'project_name': project, 'functional_area': functional_area, 'file_size': file_size}
+                        metadata={'project_name': project, 'functional_area': functional_area}
                     )
                 except Exception as e:
-                    logger.warning(f"[BACKGROUND] Could not register document: {e}")
+                    logger.warning(f"Could not register: {e}")
                 
                 # Cleanup
-                ProcessingJobModel.update_progress(job_id, 90, "Cleaning up...")
                 if file_path and os.path.exists(file_path):
                     try:
                         os.remove(file_path)
@@ -564,112 +473,23 @@ def process_file_background(
                     'filename': filename,
                     'type': 'structured',
                     'tables_created': tables_created,
-                    'total_rows': total_rows,
-                    'project': project
+                    'total_rows': total_rows
                 })
-                
-                logger.info(f"[BACKGROUND] Structured data job {job_id} completed!")
                 return
                 
             except Exception as e:
-                logger.error(f"[BACKGROUND] Structured storage failed: {e}, falling back to RAG")
-                ProcessingJobModel.update_progress(job_id, 15, f"DuckDB storage failed, using text extraction...")
+                logger.error(f"Structured storage failed: {e}, falling back to RAG")
         
-        # =====================================================================
-        # ROUTE 2: PDF WITH TABLES → DuckDB + ChromaDB (NEW!)
-        # =====================================================================
-        if file_ext == 'pdf' and PDFPLUMBER_AVAILABLE and STRUCTURED_HANDLER_AVAILABLE:
-            ProcessingJobModel.update_progress(job_id, 10, "Analyzing PDF structure for tables...")
-            
-            analysis = analyze_pdf_for_tables(file_path)
-            
-            if analysis.get('has_tables') and analysis.get('recommendation') in ['duckdb', 'both']:
-                total_rows = analysis.get('total_rows', 0)
-                ProcessingJobModel.update_progress(
-                    job_id, 20, 
-                    f"Found {total_rows} rows of tabular data - storing in DuckDB..."
-                )
-                
-                # Store tables in DuckDB
-                duckdb_result = store_pdf_tables_to_duckdb(
-                    tables=analysis.get('tables', []),
-                    combined_table=analysis.get('combined_table'),
-                    project=project,
-                    filename=filename,
-                    job_id=job_id
-                )
-                
-                if duckdb_result.get('success'):
-                    logger.info(f"[BACKGROUND] PDF tables stored in DuckDB: {duckdb_result}")
-                    
-                    # If ONLY tables (not mixed), we're done
-                    if analysis.get('recommendation') == 'duckdb' and analysis.get('table_ratio', 0) > 0.7:
-                        ProcessingJobModel.update_progress(job_id, 90, "Registering document...")
-                        
-                        # Register
-                        try:
-                            from utils.database.models import DocumentRegistryModel
-                            is_global = project.lower() in ['global', '__global__', 'global/universal']
-                            
-                            DocumentRegistryModel.register(
-                                filename=filename,
-                                file_type='pdf',
-                                storage_type=DocumentRegistryModel.STORAGE_DUCKDB,
-                                usage_type=DocumentRegistryModel.USAGE_STRUCTURED_DATA,
-                                project_id=project_id if not is_global else None,
-                                is_global=is_global,
-                                duckdb_tables=duckdb_result.get('tables_created', []),
-                                row_count=duckdb_result.get('total_rows', 0),
-                                metadata={
-                                    'project_name': project,
-                                    'source': 'pdf_table_extraction',
-                                    'file_size': file_size
-                                }
-                            )
-                        except Exception as e:
-                            logger.warning(f"[BACKGROUND] Could not register: {e}")
-                        
-                        # Cleanup
-                        if file_path and os.path.exists(file_path):
-                            try:
-                                os.remove(file_path)
-                            except:
-                                pass
-                        
-                        ProcessingJobModel.complete(job_id, {
-                            'filename': filename,
-                            'type': 'pdf_tabular',
-                            'tables_created': duckdb_result.get('tables_created', []),
-                            'total_rows': duckdb_result.get('total_rows', 0),
-                            'storage': 'duckdb',
-                            'project': project
-                        })
-                        
-                        logger.info(f"[BACKGROUND] PDF table job {job_id} completed!")
-                        return
-                    
-                    # For 'both', continue to also add to ChromaDB
-                    ProcessingJobModel.update_progress(job_id, 55, "Also indexing text for semantic search...")
-                else:
-                    ProcessingJobModel.update_progress(
-                        job_id, 25, 
-                        f"Table storage failed ({duckdb_result.get('error')}), using text extraction..."
-                    )
-        
-        # =====================================================================
-        # ROUTE 3: UNSTRUCTURED DATA (PDF/Word/Text) → ChromaDB
-        # =====================================================================
-        ProcessingJobModel.update_progress(job_id, 30 if file_ext == 'pdf' else 5, "Extracting text from file...")
+        # ROUTE 2: UNSTRUCTURED DATA → ChromaDB
+        ProcessingJobModel.update_progress(job_id, 5, "Extracting text...")
         text = extract_text(file_path)
         
         if not text or len(text.strip()) < 10:
-            ProcessingJobModel.fail(job_id, "No text could be extracted from file")
+            ProcessingJobModel.fail(job_id, "No text extracted")
             return
         
-        logger.info(f"[BACKGROUND] Extracted {len(text)} characters")
-        ProcessingJobModel.update_progress(job_id, 35, f"Extracted {len(text):,} characters")
+        ProcessingJobModel.update_progress(job_id, 15, f"Extracted {len(text):,} chars")
         
-        # Prepare metadata
         metadata = {
             "project": project,
             "filename": filename,
@@ -677,24 +497,19 @@ def process_file_background(
             "source": filename,
             "upload_date": datetime.now().isoformat()
         }
-        
         if project_id:
             metadata["project_id"] = project_id
-        
         if functional_area:
             metadata["functional_area"] = functional_area
         
-        # Initialize RAG and process
-        ProcessingJobModel.update_progress(job_id, 40, "Initializing document processor...")
+        ProcessingJobModel.update_progress(job_id, 20, "Processing document...")
         
         def update_progress(current: int, total: int, message: str):
-            """Callback for RAG handler progress updates"""
-            overall_percent = 40 + int(current * 0.50)
-            ProcessingJobModel.update_progress(job_id, overall_percent, message)
+            percent = 20 + int(current * 0.70)
+            ProcessingJobModel.update_progress(job_id, percent, message)
         
         rag = RAGHandler()
-        
-        ProcessingJobModel.update_progress(job_id, 45, "Chunking document...")
+        ProcessingJobModel.update_progress(job_id, 25, "Chunking...")
         
         success = rag.add_document(
             collection_name="documents",
@@ -704,11 +519,11 @@ def process_file_background(
         )
         
         if not success:
-            ProcessingJobModel.fail(job_id, "Failed to add document to vector store")
+            ProcessingJobModel.fail(job_id, "Failed to add to vector store")
             return
         
-        # Save to documents table
-        ProcessingJobModel.update_progress(job_id, 92, "Saving to database...")
+        # Save to database
+        ProcessingJobModel.update_progress(job_id, 92, "Saving...")
         
         if project_id:
             try:
@@ -722,12 +537,11 @@ def process_file_background(
                     metadata=metadata
                 )
             except Exception as e:
-                logger.warning(f"[BACKGROUND] Could not save to documents table: {e}")
+                logger.warning(f"Could not save: {e}")
         
-        # Register in document registry
+        # Register document
         try:
             from utils.database.models import DocumentRegistryModel
-            
             is_global = project.lower() in ['global', '__global__', 'global/universal']
             
             DocumentRegistryModel.register(
@@ -739,149 +553,167 @@ def process_file_background(
                 is_global=is_global,
                 chromadb_collection='documents',
                 chunk_count=len(text) // 1000,
-                metadata={
-                    'project_name': project,
-                    'functional_area': functional_area,
-                    'file_size': file_size,
-                    'text_length': len(text)
-                }
+                metadata={'project_name': project, 'text_length': len(text)}
             )
         except Exception as e:
-            logger.warning(f"[BACKGROUND] Could not register document: {e}")
+            logger.warning(f"Could not register: {e}")
         
         # Cleanup
-        ProcessingJobModel.update_progress(job_id, 96, "Cleaning up...")
-        
         if file_path and os.path.exists(file_path):
             try:
                 os.remove(file_path)
             except:
                 pass
         
+        # Auto-scan playbook
+        if project_id:
+            ProcessingJobModel.update_progress(job_id, 97, "Updating playbook...")
+            try:
+                for module_path in ['routers.playbooks', 'backend.routers.playbooks', 'playbooks']:
+                    try:
+                        module = __import__(module_path, fromlist=['trigger_auto_scan_sync'])
+                        func = getattr(module, 'trigger_auto_scan_sync', None)
+                        if func:
+                            func(project_id, filename)
+                            break
+                    except ImportError:
+                        continue
+            except:
+                pass
+        
+        # Check for Year-End file in Global
+        project_lower = (project or "").lower()
+        is_global = project_lower in ['global', 'global/universal', '__global__']
+        
+        if is_global:
+            filename_lower = filename.lower()
+            is_year_end = (
+                ('year' in filename_lower and 'end' in filename_lower) or
+                'year-end' in filename_lower or 'yearend' in filename_lower
+            ) and filename_lower.endswith(('.xlsx', '.xls', '.xlsm', '.docx'))
+            
+            if is_year_end:
+                try:
+                    global_dir = '/data/global'
+                    os.makedirs(global_dir, exist_ok=True)
+                    if file_path and os.path.exists(file_path):
+                        import shutil
+                        shutil.copy2(file_path, os.path.join(global_dir, filename))
+                except:
+                    pass
+        
         ProcessingJobModel.complete(job_id, {
             'filename': filename,
-            'type': 'unstructured',
-            'chunks_created': len(text) // 1000,
-            'text_length': len(text),
+            'characters': len(text),
             'project': project
         })
         
-        logger.info(f"[BACKGROUND] RAG job {job_id} completed!")
-        
     except Exception as e:
-        logger.error(f"[BACKGROUND] Job {job_id} failed: {e}")
+        logger.error(f"Job {job_id} failed: {e}")
         logger.error(traceback.format_exc())
         ProcessingJobModel.fail(job_id, str(e))
+        
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except:
+                pass
 
 
 # =============================================================================
-# API ENDPOINTS (keep existing, add status polling)
+# API ENDPOINTS
 # =============================================================================
-
 @router.post("/upload")
 async def upload_file(
     file: UploadFile = File(...),
     project: str = Form(...),
-    project_id: Optional[str] = Form(None),
     functional_area: Optional[str] = Form(None)
 ):
     """
-    Upload a file for processing.
+    Upload endpoint - returns immediately, processes via job queue
     
-    Returns job_id immediately - poll /upload/status/{job_id} for progress.
+    CHANGE: Uses job queue instead of spawning threads
+    → No more overlap/hang with multiple files!
     """
+    file_path = None
+    
     try:
-        # Validate
-        if not file.filename:
-            raise HTTPException(status_code=400, detail="No file provided")
+        # Look up project UUID
+        project_id = None
         
-        # Create job FIRST so user sees immediate feedback
-        job_id = ProcessingJobModel.create(
+        if project and project not in ['global', '__GLOBAL__', 'GLOBAL', '']:
+            projects = ProjectModel.get_all(status='active')
+            matching = next((p for p in projects if p.get('name') == project), None)
+            if not matching:
+                matching = next((p for p in projects if p.get('id') == project), None)
+            if matching:
+                project_id = matching['id']
+        
+        # Create job record
+        job = ProcessingJobModel.create(
+            job_type='file_upload',
+            project_id=project,
             filename=file.filename,
-            project=project,
-            project_id=project_id
+            input_data={'filename': file.filename, 'functional_area': functional_area}
         )
         
-        logger.info(f"[UPLOAD] Created job {job_id} for {file.filename}")
-        ProcessingJobModel.update_progress(job_id, 1, "Receiving file...")
+        if not job:
+            raise HTTPException(status_code=500, detail="Failed to create job")
+        
+        job_id = job['id']
+        logger.info(f"[UPLOAD] Created job {job_id}")
         
         # Save file
-        upload_dir = "/data/uploads"
-        os.makedirs(upload_dir, exist_ok=True)
-        
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        safe_filename = file.filename.replace(' ', '_').replace('/', '_')
-        file_path = os.path.join(upload_dir, f"{timestamp}_{safe_filename}")
+        ProcessingJobModel.update_progress(job_id, 2, "Saving file...")
+        os.makedirs("/data/uploads", exist_ok=True)
+        file_path = f"/data/uploads/{job_id}_{file.filename}"
         
         content = await file.read()
         file_size = len(content)
         
-        with open(file_path, 'wb') as f:
+        with open(file_path, "wb") as f:
             f.write(content)
         
-        ProcessingJobModel.update_progress(job_id, 3, f"File saved ({file_size:,} bytes), starting processing...")
+        ProcessingJobModel.update_progress(job_id, 4, f"Saved ({file_size:,} bytes)")
         
-        # Start background processing
-        thread = threading.Thread(
-            target=process_file_background,
-            args=(job_id, file_path, file.filename, project, project_id, functional_area, file_size),
-            daemon=True
+        # =====================================================
+        # KEY CHANGE: Queue instead of thread.start()
+        # =====================================================
+        queue_info = job_queue.enqueue(
+            job_id,
+            process_file_background,
+            (job_id, file_path, file.filename, project, project_id, functional_area, file_size)
         )
-        thread.start()
         
-        return {
-            "success": True,
-            "job_id": job_id,
-            "message": f"Processing started for {file.filename}",
-            "poll_url": f"/upload/status/{job_id}"
-        }
-        
-    except Exception as e:
-        logger.error(f"[UPLOAD] Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/upload/status/{job_id}")
-async def get_upload_status(job_id: str):
-    """
-    Get status of an upload job.
-    
-    Poll this endpoint to track progress.
-    """
-    try:
-        job = ProcessingJobModel.get(job_id)
-        
-        if not job:
-            raise HTTPException(status_code=404, detail="Job not found")
+        # Update status with queue position
+        if queue_info['queue_position'] > 1:
+            ProcessingJobModel.update_progress(
+                job_id, 4, 
+                f"Queued at position {queue_info['queue_position']} (waiting for {queue_info['queue_position'] - 1} file(s))"
+            )
         
         return {
             "job_id": job_id,
-            "status": job.get('status', 'unknown'),
-            "progress": job.get('progress', 0),
-            "message": job.get('message', ''),
-            "filename": job.get('filename', ''),
-            "result": job.get('result'),
-            "error": job.get('error'),
-            "created_at": job.get('created_at'),
-            "updated_at": job.get('updated_at')
+            "status": "queued",
+            "message": f"File '{file.filename}' queued for processing",
+            "queue_position": queue_info['queue_position'],
+            "queue_size": queue_info['queue_size'],
+            "async": True
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"[STATUS] Error: {e}")
+        logger.error(f"Upload failed: {e}")
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except:
+                pass
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/upload/jobs")
-async def list_upload_jobs(
-    project_id: Optional[str] = None,
-    limit: int = 20
-):
-    """List recent upload jobs"""
-    try:
-        jobs = ProcessingJobModel.list_recent(project_id=project_id, limit=limit)
-        return {"jobs": jobs}
-    except Exception as e:
-        logger.error(f"[JOBS] Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+@router.get("/upload/queue-status")
+async def get_upload_queue_status():
+    """Get current upload queue status"""
+    return job_queue.get_status()
