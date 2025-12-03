@@ -1623,20 +1623,28 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                 {action.reports_needed.split(',').map((report, i) => {
                   const reportTrimmed = report.trim();
-                  const reportLower = reportTrimmed.toLowerCase();
+                  // Normalize: lowercase, replace separators
+                  const normalize = (s) => s.toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').replace(/\./g, ' ');
+                  const reportNorm = normalize(reportTrimmed);
+                  const reportWords = reportNorm.split(' ').filter(w => w.length > 0);
+                  
                   // Check if this report was found
-                  const found = localDocsFound.some(doc => {
-                    const docLower = doc.toLowerCase();
-                    const keywords = reportLower.split(' ');
-                    const matches = keywords.filter(kw => docLower.includes(kw)).length;
-                    return matches >= keywords.length - 1;
-                  });
-                  const matchedDoc = found ? localDocsFound.find(doc => {
-                    const docLower = doc.toLowerCase();
-                    const keywords = reportLower.split(' ');
-                    const matches = keywords.filter(kw => docLower.includes(kw)).length;
-                    return matches >= keywords.length - 1;
-                  }) : null;
+                  const matchDoc = (doc) => {
+                    const docNorm = normalize(doc);
+                    // Method 1: full keyword in filename
+                    if (docNorm.includes(reportNorm)) return true;
+                    // Method 2: all words appear
+                    if (reportWords.every(w => docNorm.includes(w))) return true;
+                    // Method 3: most words appear (allow 1 missing)
+                    if (reportWords.length > 1) {
+                      const matches = reportWords.filter(w => docNorm.includes(w)).length;
+                      if (matches >= reportWords.length - 1) return true;
+                    }
+                    return false;
+                  };
+                  
+                  const found = localDocsFound.some(matchDoc);
+                  const matchedDoc = found ? localDocsFound.find(matchDoc) : null;
                   
                   return (
                     <div key={i} style={{
