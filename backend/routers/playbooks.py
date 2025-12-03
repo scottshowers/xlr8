@@ -1015,6 +1015,79 @@ async def debug_duckdb():
     return result
 
 
+@router.post("/year-end/set-current-file")
+async def set_current_year_end_file(filename: str):
+    """
+    Manually set which Year-End file should be current.
+    
+    This sets is_current=FALSE for all other files and is_current=TRUE for the specified file.
+    
+    Use: POST /api/playbooks/year-end/set-current-file?filename=Pro_Pay_Year-End_Checklist...xlsx
+    """
+    import duckdb
+    
+    DUCKDB_PATH = "/data/structured_data.duckdb"
+    
+    if not os.path.exists(DUCKDB_PATH):
+        raise HTTPException(404, "DuckDB not found")
+    
+    try:
+        conn = duckdb.connect(DUCKDB_PATH)
+        
+        # First, set ALL year-end files to is_current = FALSE
+        conn.execute("""
+            UPDATE _schema_metadata 
+            SET is_current = FALSE 
+            WHERE LOWER(project) = 'global'
+            AND (
+                LOWER(file_name) LIKE '%year%end%'
+                OR LOWER(file_name) LIKE '%checklist%'
+                OR LOWER(file_name) LIKE '%pro_pay%'
+            )
+        """)
+        
+        # Now set the specified file to is_current = TRUE
+        result = conn.execute("""
+            UPDATE _schema_metadata 
+            SET is_current = TRUE 
+            WHERE file_name = ?
+            RETURNING file_name, sheet_name, table_name
+        """, [filename]).fetchall()
+        
+        conn.commit()
+        conn.close()
+        
+        if not result:
+            # Try partial match
+            conn = duckdb.connect(DUCKDB_PATH)
+            result = conn.execute("""
+                UPDATE _schema_metadata 
+                SET is_current = TRUE 
+                WHERE LOWER(file_name) LIKE ?
+                RETURNING file_name, sheet_name, table_name
+            """, [f"%{filename.lower()}%"]).fetchall()
+            conn.commit()
+            conn.close()
+        
+        # Clear the playbook cache to force refresh
+        global PLAYBOOK_CACHE
+        PLAYBOOK_CACHE.clear()
+        
+        logger.warning(f"[SET-CURRENT] Set {filename} as current, updated {len(result)} tables")
+        
+        return {
+            "status": "success",
+            "filename": filename,
+            "tables_updated": len(result),
+            "tables": [{"file": r[0], "sheet": r[1], "table": r[2]} for r in result],
+            "message": f"Set {filename} as current Year-End file. Run 'Refresh & Analyze' to reload."
+        }
+        
+    except Exception as e:
+        logger.error(f"[SET-CURRENT] Failed: {e}")
+        raise HTTPException(500, str(e))
+
+
 @router.get("/year-end/debug-table-data")
 async def debug_table_data():
     """
