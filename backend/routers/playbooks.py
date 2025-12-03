@@ -1938,7 +1938,10 @@ async def scan_for_action(project_id: str, action_id: str, force_refresh: bool =
                         logger.warning(f"[SCAN] ✓ Filename match: '{filename}' for report '{report_name}' ({matches}/{len(report_words)} words)")
                         
                         # FORCE RETRIEVE actual content for this matched file
+                        # Try multiple approaches since ChromaDB metadata can vary
+                        chunk_texts = []
                         try:
+                            # Approach 1: Exact match on "source"
                             file_chunks = collection.get(
                                 where={"source": filename},
                                 include=["documents", "metadatas"],
@@ -1946,14 +1949,40 @@ async def scan_for_action(project_id: str, action_id: str, force_refresh: bool =
                             )
                             if file_chunks and file_chunks.get('documents'):
                                 chunk_texts = file_chunks['documents']
+                                logger.warning(f"[SCAN] Found {len(chunk_texts)} chunks via source='{filename}'")
+                            
+                            # Approach 2: Try "filename" key if source didn't work
+                            if not chunk_texts:
+                                file_chunks = collection.get(
+                                    where={"filename": filename},
+                                    include=["documents", "metadatas"],
+                                    limit=50
+                                )
+                                if file_chunks and file_chunks.get('documents'):
+                                    chunk_texts = file_chunks['documents']
+                                    logger.warning(f"[SCAN] Found {len(chunk_texts)} chunks via filename='{filename}'")
+                            
+                            # Approach 3: Get all docs and filter by partial filename match
+                            if not chunk_texts:
+                                # Get a sample to check what metadata keys exist
+                                all_docs = collection.get(include=["documents", "metadatas"], limit=500)
+                                filename_lower = filename.lower()
+                                for i, meta in enumerate(all_docs.get('metadatas', [])):
+                                    source_val = str(meta.get('source', meta.get('filename', ''))).lower()
+                                    if filename_lower in source_val or source_val in filename_lower:
+                                        chunk_texts.append(all_docs['documents'][i])
+                                if chunk_texts:
+                                    logger.warning(f"[SCAN] Found {len(chunk_texts)} chunks via partial filename match")
+                            
+                            if chunk_texts:
                                 combined_content = "\n---\n".join(chunk_texts[:20])  # First 20 chunks
                                 # Clean encrypted values
                                 combined_content = re.sub(r'ENC256:[A-Za-z0-9+/=]+', '[ENCRYPTED]', combined_content)
                                 all_content.append(f"[FILE: {filename}]\n{combined_content[:8000]}")
                                 logger.warning(f"[SCAN] ✓ Force-retrieved {len(chunk_texts)} chunks for '{filename}'")
                             else:
-                                all_content.append(f"[FILE: {filename}] - matches required report: {report_name} (content not found)")
-                                logger.warning(f"[SCAN] ⚠ No chunks found for matched file '{filename}'")
+                                all_content.append(f"[FILE: {filename}] - matches required report: {report_name} (content not found in ChromaDB)")
+                                logger.warning(f"[SCAN] ⚠ No chunks found for matched file '{filename}' - tried all approaches")
                         except Exception as fetch_err:
                             logger.warning(f"[SCAN] Failed to force-retrieve content for '{filename}': {fetch_err}")
                             all_content.append(f"[FILE: {filename}] - matches required report: {report_name}")
