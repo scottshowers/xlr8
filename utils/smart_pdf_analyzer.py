@@ -229,6 +229,7 @@ class SmartPDFAnalyzer:
             
             # FALLBACK: If no tables found, try to detect columnar structure in text
             if not result['has_table'] and text:
+                logger.warning(f"[SMART-PDF] Page {page_num}: No tables found, trying columnar detection on {len(text)} chars...")
                 columnar_df = self._detect_columnar_text(text, page_num)
                 if columnar_df is not None and len(columnar_df) >= 3:  # At least 3 data rows
                     result['tables'].append(columnar_df)
@@ -264,8 +265,14 @@ class SmartPDFAnalyzer:
         - Consistent field patterns
         """
         lines = text.strip().split('\n')
+        logger.warning(f"[SMART-PDF] Page {page_num} columnar check: {len(lines)} lines in text")
+        
         if len(lines) < 3:  # Need header + at least 2 data rows
             return None
+        
+        # Log first few lines to see structure
+        for i, line in enumerate(lines[:5]):
+            logger.warning(f"[SMART-PDF] Page {page_num} line {i}: '{line[:100]}...' " if len(line) > 100 else f"[SMART-PDF] Page {page_num} line {i}: '{line}'")
         
         # Strategy 1: Detect by consistent whitespace positions
         # Find lines that look like data rows (contain numbers)
@@ -290,12 +297,16 @@ class SmartPDFAnalyzer:
                 elif potential_header is None and i < 5:  # Likely header in first few lines
                     potential_header = (i, parts)
         
+        logger.warning(f"[SMART-PDF] Page {page_num}: Found {len(data_lines)} potential data rows with 3+ columns")
+        
         if len(data_lines) < 3:  # Not enough data rows
             return None
         
         # Check column count consistency
         col_counts = [len(parts) for _, parts in data_lines]
         most_common_cols = max(set(col_counts), key=col_counts.count)
+        
+        logger.warning(f"[SMART-PDF] Page {page_num}: Most common column count: {most_common_cols}")
         
         # Filter to rows with consistent column count
         consistent_rows = [(i, parts) for i, parts in data_lines if len(parts) == most_common_cols]
@@ -323,11 +334,11 @@ class SmartPDFAnalyzer:
                 return None
             
             df = pd.DataFrame(data, columns=headers)
-            logger.warning(f"[SMART-PDF] Page {page_num}: Columnar detection found {len(df)} rows x {len(df.columns)} cols")
+            logger.warning(f"[SMART-PDF] Page {page_num}: Columnar detection SUCCESS - {len(df)} rows x {len(df.columns)} cols")
             return df
             
         except Exception as e:
-            logger.debug(f"[SMART-PDF] Columnar parsing failed: {e}")
+            logger.warning(f"[SMART-PDF] Page {page_num}: Columnar parsing failed: {e}")
             return None
     
     def _clean_table(self, raw_table: List[List]) -> Optional[pd.DataFrame]:
