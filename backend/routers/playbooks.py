@@ -2247,29 +2247,43 @@ async def get_document_checklist(project_id: str):
         from utils.rag_handler import RAGHandler
         
         # Inline function to avoid import issues
+        def normalize_text(text):
+            """Normalize text for matching - lowercase, replace separators with spaces"""
+            return text.lower().replace('_', ' ').replace('-', ' ').replace('.', ' ')
+        
         def match_documents_to_step(step_documents, uploaded_files):
             """Match uploaded files against step document requirements."""
             matched = []
             missing = []
             
+            # Pre-normalize all filenames
+            normalized_files = [(f, normalize_text(f)) for f in uploaded_files]
+            
             for doc in step_documents:
-                keyword = doc.get('keyword', '').lower()
+                keyword = doc.get('keyword', '')
                 if not keyword:
                     continue
                 
+                keyword_normalized = normalize_text(keyword)
+                keyword_words = keyword_normalized.split()
+                
                 # Check if any uploaded file matches this keyword
                 matched_file = None
-                for filename in uploaded_files:
-                    filename_lower = filename.lower()
-                    # Simple keyword matching
-                    if keyword in filename_lower:
+                for filename, filename_normalized in normalized_files:
+                    # Method 1: Full keyword appears in filename
+                    if keyword_normalized in filename_normalized:
                         matched_file = filename
                         break
-                    # Also check individual words for multi-word keywords
-                    keyword_words = keyword.split()
+                    
+                    # Method 2: All keyword words appear in filename
+                    if all(word in filename_normalized for word in keyword_words):
+                        matched_file = filename
+                        break
+                    
+                    # Method 3: Most keyword words appear (allow 1 missing)
                     if len(keyword_words) > 1:
-                        matches = sum(1 for w in keyword_words if w in filename_lower)
-                        if matches >= len(keyword_words) - 1:  # Allow 1 word missing
+                        matches = sum(1 for w in keyword_words if w in filename_normalized)
+                        if matches >= len(keyword_words) - 1:
                             matched_file = filename
                             break
                 
@@ -2309,22 +2323,30 @@ async def get_document_checklist(project_id: str):
         
         # Get project name for matching (files might be stored with name instead of UUID)
         project_name = None
+        project_code = None
         try:
-            from utils.supabase_client import supabase
+            from utils.supabase_client import get_supabase
+            supabase = get_supabase()
             proj_result = supabase.table("projects").select("name, code").eq("id", project_id).execute()
             if proj_result.data:
                 project_name = proj_result.data[0].get("name", "").upper()
                 project_code = proj_result.data[0].get("code", "").upper()
-            else:
-                project_code = None
         except Exception as e:
             logger.warning(f"Could not get project name: {e}")
-            project_code = None
         
         # Get all project files from ChromaDB
         rag = RAGHandler()
         collection = rag.client.get_or_create_collection(name="documents")
         all_results = collection.get(include=["metadatas"], limit=1000)
+        
+        # Debug: Log all unique projects in ChromaDB
+        all_projects_in_chroma = set()
+        for metadata in all_results.get("metadatas", []):
+            p = metadata.get("project_id") or metadata.get("project", "")
+            if p:
+                all_projects_in_chroma.add(str(p))
+        logger.warning(f"[DOC-CHECKLIST] All projects in ChromaDB: {all_projects_in_chroma}")
+        logger.warning(f"[DOC-CHECKLIST] Looking for project_id={project_id}, name={project_name}, code={project_code}")
         
         # Build list of uploaded filenames
         uploaded_files = []
@@ -2344,8 +2366,10 @@ async def get_document_checklist(project_id: str):
                 filename = metadata.get("source", metadata.get("filename", ""))
                 if filename and filename not in uploaded_files:
                     uploaded_files.append(filename)
+                    logger.warning(f"[DOC-CHECKLIST] ✓ Matched file: {filename} (project in metadata: {doc_project})")
         
-        logger.info(f"[DOC-CHECKLIST] Found {len(uploaded_files)} files for project {project_id} (name={project_name}, code={project_code})")
+        logger.warning(f"[DOC-CHECKLIST] Found {len(uploaded_files)} files for project {project_id} (name={project_name}, code={project_code})")
+        logger.warning(f"[DOC-CHECKLIST] Files: {uploaded_files}")
         
         # Build checklist per step
         step_checklists = []
@@ -2386,6 +2410,12 @@ async def get_document_checklist(project_id: str):
                 "total_missing": total_missing,
                 "required_matched": total_required_matched,
                 "required_missing": total_required_missing
+            },
+            "debug": {
+                "project_id": project_id,
+                "project_name": project_name,
+                "project_code": project_code,
+                "all_projects_in_chroma": list(all_projects_in_chroma)
             }
         }
         
