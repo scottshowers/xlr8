@@ -1893,6 +1893,7 @@ async def scan_for_action(project_id: str, action_id: str, force_refresh: bool =
             logger.warning(f"[SCAN] Found {len(project_files)} files for project {project_id} (name={project_name}): {list(project_files)}")
             
             # STEP 2: Match by filename - check if any report name appears in filename
+            # AND FORCE RETRIEVE CONTENT for matched files
             logger.warning(f"[SCAN] Reports needed: {reports_needed}")
             for report_name in reports_needed:
                 report_keywords = report_name.lower().split()
@@ -1909,8 +1910,28 @@ async def scan_for_action(project_id: str, action_id: str, force_refresh: bool =
                                 "query": report_name,
                                 "match_type": "filename"
                             })
-                            all_content.append(f"[FILE: {filename}] - matches required report: {report_name}")
                             logger.warning(f"[SCAN] ✓ Filename match: '{filename}' for report '{report_name}'")
+                            
+                            # FORCE RETRIEVE actual content for this matched file
+                            try:
+                                file_chunks = collection.get(
+                                    where={"source": filename},
+                                    include=["documents", "metadatas"],
+                                    limit=50
+                                )
+                                if file_chunks and file_chunks.get('documents'):
+                                    chunk_texts = file_chunks['documents']
+                                    combined_content = "\n---\n".join(chunk_texts[:20])  # First 20 chunks
+                                    # Clean encrypted values
+                                    combined_content = re.sub(r'ENC256:[A-Za-z0-9+/=]+', '[ENCRYPTED]', combined_content)
+                                    all_content.append(f"[FILE: {filename}]\n{combined_content[:8000]}")
+                                    logger.warning(f"[SCAN] ✓ Force-retrieved {len(chunk_texts)} chunks for '{filename}'")
+                                else:
+                                    all_content.append(f"[FILE: {filename}] - matches required report: {report_name} (content not found)")
+                                    logger.warning(f"[SCAN] ⚠ No chunks found for matched file '{filename}'")
+                            except Exception as fetch_err:
+                                logger.warning(f"[SCAN] Failed to force-retrieve content for '{filename}': {fetch_err}")
+                                all_content.append(f"[FILE: {filename}] - matches required report: {report_name}")
             
         except Exception as e:
             logger.warning(f"[SCAN] Filename matching failed: {e}")
