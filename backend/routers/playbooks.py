@@ -41,6 +41,191 @@ PLAYBOOK_CACHE = {}
 PLAYBOOK_FILE_INFO = {}
 
 
+# ============================================================================
+# CHROMADB CLEANUP - Remove orphaned documents
+# ============================================================================
+
+@router.get("/cleanup/chromadb-status")
+async def get_chromadb_cleanup_status():
+    """
+    Get status of ChromaDB documents vs Supabase registry.
+    Shows what would be cleaned up.
+    """
+    try:
+        from utils.rag_handler import RAGHandler
+        from utils.database.models import DocumentModel
+        
+        rag = RAGHandler()
+        collection = rag.client.get_or_create_collection(name="documents")
+        
+        # Get all ChromaDB docs
+        all_chroma = collection.get(include=["metadatas"], limit=10000)
+        chroma_ids = set(all_chroma.get("ids", []))
+        chroma_files = {}
+        
+        for i, meta in enumerate(all_chroma.get("metadatas", [])):
+            filename = meta.get("source", meta.get("filename", "unknown"))
+            project = meta.get("project_id", meta.get("project", "unknown"))
+            key = f"{project}::{filename}"
+            if key not in chroma_files:
+                chroma_files[key] = {"count": 0, "ids": []}
+            chroma_files[key]["count"] += 1
+            chroma_files[key]["ids"].append(all_chroma["ids"][i])
+        
+        # Get all Supabase registered docs
+        try:
+            supabase_docs = DocumentModel.get_all(limit=1000)
+            supabase_files = set()
+            for doc in supabase_docs:
+                filename = doc.get("filename", "")
+                project = doc.get("project_id", "")
+                supabase_files.add(f"{project}::{filename}")
+        except Exception as e:
+            logger.warning(f"Could not get Supabase docs: {e}")
+            supabase_files = set()
+        
+        # Find orphans (in ChromaDB but not in Supabase)
+        orphan_keys = set(chroma_files.keys()) - supabase_files
+        orphan_count = sum(chroma_files[k]["count"] for k in orphan_keys)
+        
+        return {
+            "chromadb_total_chunks": len(chroma_ids),
+            "chromadb_unique_files": len(chroma_files),
+            "supabase_registered": len(supabase_files),
+            "orphan_files": len(orphan_keys),
+            "orphan_chunks": orphan_count,
+            "orphan_details": [
+                {"file": k, "chunks": chroma_files[k]["count"]} 
+                for k in list(orphan_keys)[:20]  # Limit to first 20
+            ]
+        }
+        
+    except Exception as e:
+        logger.exception(f"Cleanup status failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/cleanup/chromadb-purge")
+async def purge_chromadb_orphans(dry_run: bool = True):
+    """
+    Purge orphaned documents from ChromaDB.
+    
+    Args:
+        dry_run: If True, only report what would be deleted. If False, actually delete.
+    """
+    try:
+        from utils.rag_handler import RAGHandler
+        from utils.database.models import DocumentModel
+        
+        rag = RAGHandler()
+        collection = rag.client.get_or_create_collection(name="documents")
+        
+        # Get all ChromaDB docs
+        all_chroma = collection.get(include=["metadatas"], limit=10000)
+        
+        # Build file -> chunk IDs mapping
+        chroma_files = {}
+        for i, meta in enumerate(all_chroma.get("metadatas", [])):
+            filename = meta.get("source", meta.get("filename", "unknown"))
+            project = meta.get("project_id", meta.get("project", "unknown"))
+            key = f"{project}::{filename}"
+            if key not in chroma_files:
+                chroma_files[key] = []
+            chroma_files[key].append(all_chroma["ids"][i])
+        
+        # Get Supabase registered docs
+        try:
+            supabase_docs = DocumentModel.get_all(limit=1000)
+            supabase_files = set()
+            for doc in supabase_docs:
+                filename = doc.get("filename", "")
+                project = doc.get("project_id", "")
+                supabase_files.add(f"{project}::{filename}")
+        except:
+            supabase_files = set()
+        
+        # Find orphans
+        orphan_keys = set(chroma_files.keys()) - supabase_files
+        
+        # Collect all orphan chunk IDs
+        orphan_ids = []
+        for key in orphan_keys:
+            orphan_ids.extend(chroma_files[key])
+        
+        result = {
+            "dry_run": dry_run,
+            "orphan_files": len(orphan_keys),
+            "orphan_chunks": len(orphan_ids),
+            "files_to_delete": list(orphan_keys)[:50],  # Show first 50
+            "deleted": False
+        }
+        
+        if not dry_run and orphan_ids:
+            # Actually delete
+            try:
+                # ChromaDB delete in batches
+                batch_size = 100
+                for i in range(0, len(orphan_ids), batch_size):
+                    batch = orphan_ids[i:i+batch_size]
+                    collection.delete(ids=batch)
+                
+                result["deleted"] = True
+                result["message"] = f"Deleted {len(orphan_ids)} orphan chunks from {len(orphan_keys)} files"
+                logger.warning(f"[CLEANUP] Purged {len(orphan_ids)} orphan chunks")
+                
+            except Exception as e:
+                result["error"] = str(e)
+                logger.error(f"[CLEANUP] Purge failed: {e}")
+        else:
+            result["message"] = f"Would delete {len(orphan_ids)} chunks from {len(orphan_keys)} files"
+        
+        return result
+        
+    except Exception as e:
+        logger.exception(f"Purge failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/cleanup/chromadb-purge-project/{project_id}")
+async def purge_project_chromadb(project_id: str):
+    """
+    Purge ALL ChromaDB documents for a specific project.
+    Use with caution - deletes everything for that project.
+    """
+    try:
+        from utils.rag_handler import RAGHandler
+        
+        rag = RAGHandler()
+        collection = rag.client.get_or_create_collection(name="documents")
+        
+        # Get all docs for this project
+        all_chroma = collection.get(include=["metadatas"], limit=10000)
+        
+        ids_to_delete = []
+        for i, meta in enumerate(all_chroma.get("metadatas", [])):
+            doc_project = meta.get("project_id", meta.get("project", ""))
+            if doc_project == project_id or doc_project == project_id[:8]:
+                ids_to_delete.append(all_chroma["ids"][i])
+        
+        if ids_to_delete:
+            batch_size = 100
+            for i in range(0, len(ids_to_delete), batch_size):
+                batch = ids_to_delete[i:i+batch_size]
+                collection.delete(ids=batch)
+        
+        logger.warning(f"[CLEANUP] Purged {len(ids_to_delete)} chunks for project {project_id}")
+        
+        return {
+            "success": True,
+            "project_id": project_id,
+            "chunks_deleted": len(ids_to_delete)
+        }
+        
+    except Exception as e:
+        logger.exception(f"Project purge failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 def invalidate_year_end_cache():
     """
     Invalidate the Year-End structure cache.
