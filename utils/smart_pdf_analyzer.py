@@ -66,7 +66,7 @@ def redact_pii(text: str) -> str:
 def get_llm_config() -> Dict[str, str]:
     """Get LLM configuration from environment."""
     return {
-        'url': os.getenv('LLM_INFERENCE_URL') or os.getenv('OLLAMA_URL') or os.getenv('RUNPOD_URL'),
+        'url': os.getenv('LLM_ENDPOINT') or os.getenv('LLM_INFERENCE_URL') or os.getenv('OLLAMA_URL') or os.getenv('RUNPOD_URL'),
         'username': os.getenv('LLM_USERNAME', ''),
         'password': os.getenv('LLM_PASSWORD', ''),
         'model': os.getenv('LLM_MODEL', 'llama3.1:8b-instruct-q8_0')
@@ -78,7 +78,7 @@ def call_llm(prompt: str, max_tokens: int = 4000) -> Optional[str]:
     config = get_llm_config()
     
     if not config['url']:
-        logger.error("[LLM] No LLM URL configured (set LLM_INFERENCE_URL, OLLAMA_URL, or RUNPOD_URL)")
+        logger.error("[LLM] No LLM URL configured (set LLM_ENDPOINT, LLM_INFERENCE_URL, OLLAMA_URL, or RUNPOD_URL)")
         return None
     
     url = f"{config['url'].rstrip('/')}/api/generate"
@@ -230,7 +230,7 @@ def parse_tabular_pdf_with_llm(text: str, columns: List[str]) -> List[Dict[str, 
     
     for page in pages:
         if len(current_chunk) + len(page) < max_chunk:
-            current_chunk += '--- PAGE ' + page if page else ''
+            current_chunk += ('--- PAGE ' + page if page else '')
         else:
             if current_chunk:
                 chunks.append(current_chunk)
