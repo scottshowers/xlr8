@@ -73,7 +73,7 @@ async def debug_features():
     import os
     
     results = {
-        "version": "2025-12-03-v4-warning-logs",  # Update this when deploying
+        "version": "2025-12-03-v5-more-debug",  # Update this when deploying
         "smart_pdf_available": SMART_PDF_AVAILABLE,
         "structured_handler_available": STRUCTURED_HANDLER_AVAILABLE,
         "openpyxl_available": OPENPYXL_AVAILABLE,
@@ -580,7 +580,9 @@ def process_file_background(
                         mapped = 5 + int(progress * 0.45)
                         ProcessingJobModel.update_progress(job_id, mapped, msg)
                     else:
-                        logger.info(f"[SMART-PDF] {msg}")
+                        logger.warning(f"[SMART-PDF] {msg}")
+                
+                logger.warning(f"[BACKGROUND] Calling process_pdf_intelligently...")
                 
                 # Run smart PDF analysis and routing
                 pdf_result = process_pdf_intelligently(
@@ -591,7 +593,10 @@ def process_file_background(
                     status_callback=status_callback
                 )
                 
-                logger.info(f"[BACKGROUND] Smart PDF result: {pdf_result.get('storage_used', [])}")
+                logger.warning(f"[BACKGROUND] Smart PDF result: success={pdf_result.get('success')}, storage={pdf_result.get('storage_used', [])}")
+                
+                if pdf_result.get('error'):
+                    logger.warning(f"[BACKGROUND] Smart PDF error: {pdf_result.get('error')}")
                 
                 # Check if DuckDB storage was successful
                 duckdb_success = 'duckdb' in pdf_result.get('storage_used', [])
@@ -658,18 +663,19 @@ def process_file_background(
                 # Continue with ChromaDB using extracted text
                 # (Fall through to ROUTE 2 below, but we already have text)
                 if text:
-                    logger.info(f"[BACKGROUND] Smart PDF: continuing to ChromaDB with {len(text)} chars")
+                    logger.warning(f"[BACKGROUND] Smart PDF: continuing to ChromaDB with {len(text)} chars")
                     ProcessingJobModel.update_progress(job_id, 50, f"Adding to semantic search ({len(text):,} chars)...")
                 
             except Exception as e:
-                logger.error(f"[BACKGROUND] Smart PDF analysis failed: {e}, falling back to basic extraction")
+                logger.warning(f"[BACKGROUND] !!! Smart PDF EXCEPTION: {e}")
                 import traceback
-                logger.error(traceback.format_exc())
+                logger.warning(traceback.format_exc())
                 text = None  # Force re-extraction below
         else:
             text = None
         
         # ROUTE 2: UNSTRUCTURED DATA (PDF/Word/Text) → ChromaDB
+        logger.warning(f"[BACKGROUND] Route 2 check: text is {'set' if text else 'None'}")
         if text is None:
             ProcessingJobModel.update_progress(job_id, 5, "Extracting text from file...")
             text = extract_text(file_path)
