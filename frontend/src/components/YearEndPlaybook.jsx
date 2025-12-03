@@ -1196,12 +1196,16 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
   
   const statusConfig = STATUS_OPTIONS.find(s => s.value === localStatus) || STATUS_OPTIONS[0];
 
-  const handleScan = async () => {
+  const handleScan = async (forceRefresh = true) => {
     setScanning(true);
     try {
-      const res = await api.post(`/playbooks/year-end/scan/${projectId}/${action.action_id}`);
+      // Always force refresh for now - caching can be re-enabled once content retrieval is stable
+      const res = await api.post(`/playbooks/year-end/scan/${projectId}/${action.action_id}?force_refresh=${forceRefresh}`);
       console.log('[SCAN] Response:', res.data);
       if (res.data) {
+        if (res.data.cached) {
+          console.log('[SCAN] ⚡ Using cached results');
+        }
         const newDocs = res.data.documents?.map(d => d.filename) || [];
         console.log('[SCAN] Found docs:', newDocs);
         setLocalDocsFound(newDocs);
