@@ -39,23 +39,21 @@ except ImportError:
 
 PII_PATTERNS = {
     'ssn': (r'\b\d{3}-\d{2}-\d{4}\b', '[SSN-REDACTED]'),
-    'ssn_no_dash': (r'\b(?<!\d)\d{9}(?!\d)\b', '[SSN-REDACTED]'),  # 9 digits not part of larger number
+    'ssn_no_dash': (r'\b(?<!\d)\d{9}(?!\d)\b', '[SSN-REDACTED]'),
     'ein': (r'\b\d{2}-\d{7}\b', '[EIN-REDACTED]'),
     'phone': (r'\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b', '[PHONE-REDACTED]'),
     'email': (r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '[EMAIL-REDACTED]'),
     'credit_card': (r'\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b', '[CC-REDACTED]'),
-    'dob_slash': (r'\b\d{1,2}/\d{1,2}/\d{2,4}\b', '[DATE-REDACTED]'),  # MM/DD/YYYY or MM/DD/YY
-    'dob_dash': (r'\b\d{1,2}-\d{1,2}-\d{2,4}\b', '[DATE-REDACTED]'),  # MM-DD-YYYY
+    'dob_slash': (r'\b\d{1,2}/\d{1,2}/\d{2,4}\b', '[DATE-REDACTED]'),
+    'dob_dash': (r'\b\d{1,2}-\d{1,2}-\d{2,4}\b', '[DATE-REDACTED]'),
 }
 
 def redact_pii(text: str) -> str:
     """Redact PII from text before sending to LLM."""
     redacted = text
-    
     for name, (pattern, replacement) in PII_PATTERNS.items():
         if replacement:
             redacted = re.sub(pattern, replacement, redacted)
-    
     return redacted
 
 
@@ -64,14 +62,10 @@ def redact_pii(text: str) -> str:
 # =============================================================================
 
 def repair_json_array(text: str) -> Optional[List[Dict]]:
-    """
-    Attempt to extract and repair a JSON array from LLM output.
-    Handles common issues: trailing commas, truncation, extra text.
-    """
+    """Attempt to extract and repair a JSON array from LLM output."""
     if not text:
         return None
     
-    # Try direct parse first
     try:
         result = json.loads(text)
         if isinstance(result, list):
@@ -79,12 +73,10 @@ def repair_json_array(text: str) -> Optional[List[Dict]]:
     except:
         pass
     
-    # Find array boundaries
     start_idx = text.find('[')
     if start_idx == -1:
         return None
     
-    # Find matching end bracket, handling nested structures
     depth = 0
     end_idx = -1
     in_string = False
@@ -110,13 +102,10 @@ def repair_json_array(text: str) -> Optional[List[Dict]]:
                 end_idx = i
                 break
     
-    # Extract the array portion
     if end_idx > start_idx:
         array_text = text[start_idx:end_idx + 1]
     else:
-        # No closing bracket - try to repair truncated array
         array_text = text[start_idx:]
-        # Remove incomplete trailing object
         last_complete = array_text.rfind('},')
         if last_complete > 0:
             array_text = array_text[:last_complete + 1] + ']'
@@ -125,17 +114,11 @@ def repair_json_array(text: str) -> Optional[List[Dict]]:
             if last_obj > 0:
                 array_text = array_text[:last_obj + 1] + ']'
     
-    # Clean up common issues
-    # Remove trailing commas before ]
     array_text = re.sub(r',\s*]', ']', array_text)
-    # Remove trailing commas before }
     array_text = re.sub(r',\s*}', '}', array_text)
-    # Fix single quotes to double quotes (careful with apostrophes)
-    # Only do this if there are no double quotes
     if '"' not in array_text and "'" in array_text:
         array_text = array_text.replace("'", '"')
     
-    # Try parsing cleaned version
     try:
         result = json.loads(array_text)
         if isinstance(result, list):
@@ -143,26 +126,18 @@ def repair_json_array(text: str) -> Optional[List[Dict]]:
     except json.JSONDecodeError:
         pass
     
-    # Last resort: extract individual objects
     return extract_json_objects(text)
 
 
 def extract_json_objects(text: str) -> List[Dict]:
-    """
-    Extract individual JSON objects from text when array parsing fails.
-    """
+    """Extract individual JSON objects from text when array parsing fails."""
     objects = []
-    
-    # Find all potential JSON objects
     pattern = r'\{[^{}]*\}'
     matches = re.findall(pattern, text)
     
     for match in matches:
         try:
-            # Clean up the match
-            cleaned = match
-            cleaned = re.sub(r',\s*}', '}', cleaned)  # Remove trailing commas
-            
+            cleaned = re.sub(r',\s*}', '}', match)
             obj = json.loads(cleaned)
             if isinstance(obj, dict) and len(obj) > 0:
                 objects.append(obj)
@@ -173,13 +148,10 @@ def extract_json_objects(text: str) -> List[Dict]:
 
 
 def repair_json_object(text: str) -> Optional[Dict]:
-    """
-    Attempt to extract and repair a JSON object from LLM output.
-    """
+    """Attempt to extract and repair a JSON object from LLM output."""
     if not text:
         return None
     
-    # Try direct parse first
     try:
         result = json.loads(text)
         if isinstance(result, dict):
@@ -187,12 +159,10 @@ def repair_json_object(text: str) -> Optional[Dict]:
     except:
         pass
     
-    # Find object in text
     start_idx = text.find('{')
     if start_idx == -1:
         return None
     
-    # Find matching end brace
     depth = 0
     end_idx = -1
     in_string = False
@@ -220,9 +190,7 @@ def repair_json_object(text: str) -> Optional[Dict]:
     
     if end_idx > start_idx:
         obj_text = text[start_idx:end_idx + 1]
-        # Clean up
         obj_text = re.sub(r',\s*}', '}', obj_text)
-        
         try:
             return json.loads(obj_text)
         except:
@@ -261,7 +229,7 @@ def call_llm(prompt: str, max_tokens: int = 4000) -> Optional[str]:
         "stream": False,
         "options": {
             "num_predict": max_tokens,
-            "temperature": 0.1  # Low temp for structured output
+            "temperature": 0.1
         }
     }
     
@@ -271,12 +239,7 @@ def call_llm(prompt: str, max_tokens: int = 4000) -> Optional[str]:
             auth = HTTPBasicAuth(config['username'], config['password'])
         
         logger.warning(f"[LLM] Calling {url} with model {config['model']}")
-        response = requests.post(
-            url,
-            json=payload,
-            auth=auth,
-            timeout=180  # 3 minutes for large parses
-        )
+        response = requests.post(url, json=payload, auth=auth, timeout=180)
         response.raise_for_status()
         
         result = response.json()
@@ -324,12 +287,7 @@ def extract_pdf_text(file_path: str) -> str:
 # =============================================================================
 
 def analyze_pdf_with_llm(text_sample: str) -> Dict[str, Any]:
-    """
-    Ask LLM to analyze PDF content and determine if it's tabular.
-    Returns structure info if tabular.
-    """
-    
-    # Redact PII before sending to LLM
+    """Ask LLM to analyze PDF content and determine if it's tabular."""
     redacted_sample = redact_pii(text_sample[:8000])
     
     prompt = f"""Analyze this text extracted from a PDF document.
@@ -368,7 +326,6 @@ JSON RESPONSE:"""
         logger.warning("[LLM] No response from LLM, defaulting to non-tabular")
         return {"is_tabular": False, "error": "No LLM response"}
     
-    # Parse JSON from response using repair utility
     result = repair_json_object(response)
     
     if result:
@@ -380,18 +337,11 @@ JSON RESPONSE:"""
 
 
 def parse_tabular_pdf_with_llm(text: str, columns: List[str]) -> List[Dict[str, str]]:
-    """
-    Ask LLM to parse tabular PDF text into structured rows.
-    """
-    
-    # Redact PII
+    """Ask LLM to parse tabular PDF text into structured rows."""
     redacted_text = redact_pii(text)
     
-    # Process in chunks if text is large
     max_chunk = 5000
     chunks = []
-    
-    # Split by page markers to keep pages together
     pages = redacted_text.split('--- PAGE ')
     current_chunk = ""
     
@@ -415,7 +365,6 @@ def parse_tabular_pdf_with_llm(text: str, columns: List[str]) -> List[Dict[str, 
     for chunk_num, chunk in enumerate(chunks):
         logger.warning(f"[LLM] Parsing chunk {chunk_num+1}/{len(chunks)} ({len(chunk)} chars)")
         
-        # Simplified prompt for better JSON compliance
         prompt = f"""Convert this data to a JSON array. Use these exact column names: {col_json}
 
 DATA:
@@ -432,15 +381,12 @@ OUTPUT:"""
         response = call_llm(prompt, max_tokens=8000)
         
         if response:
-            # Use robust JSON repair
             rows = repair_json_array(response)
             
             if rows:
-                # Filter to only dicts with at least one expected column
                 valid_rows = []
                 for row in rows:
                     if isinstance(row, dict):
-                        # Check if row has at least one of our expected columns
                         if any(col in row for col in columns):
                             valid_rows.append(row)
                 
@@ -471,28 +417,25 @@ def store_to_duckdb(rows: List[Dict], project: str, filename: str, project_id: s
     try:
         import duckdb
         
-        # Create DataFrame
         df = pd.DataFrame(rows)
         
         if df.empty:
             return {"success": False, "error": "DataFrame is empty"}
         
-        # Clean table name
         clean_project = re.sub(r'[^a-zA-Z0-9_]', '_', project)
         clean_filename = re.sub(r'[^a-zA-Z0-9_]', '_', filename.rsplit('.', 1)[0])
         table_name = f"{clean_project}__{clean_filename}"
         
-        # Connect to DuckDB
         db_path = os.getenv('DUCKDB_PATH', '/data/xlr8.duckdb')
         conn = duckdb.connect(db_path)
         
-        # Create/replace table
+        # Create/replace data table
         conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
         conn.execute(f'CREATE TABLE "{table_name}" AS SELECT * FROM df')
         
         row_count = conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
         
-        # Store metadata
+        # Store metadata - FIXED: Use DuckDB upsert syntax
         try:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS _pdf_tables (
@@ -505,12 +448,24 @@ def store_to_duckdb(rows: List[Dict], project: str, filename: str, project_id: s
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            
+            # DuckDB upsert syntax (not SQLite's INSERT OR REPLACE)
             conn.execute("""
-                INSERT OR REPLACE INTO _pdf_tables (table_name, source_file, project, project_id, row_count, columns)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO _pdf_tables (table_name, source_file, project, project_id, row_count, columns, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT (table_name) DO UPDATE SET
+                    source_file = EXCLUDED.source_file,
+                    project = EXCLUDED.project,
+                    project_id = EXCLUDED.project_id,
+                    row_count = EXCLUDED.row_count,
+                    columns = EXCLUDED.columns,
+                    created_at = CURRENT_TIMESTAMP
             """, [table_name, filename, project, project_id, row_count, json.dumps(list(df.columns))])
+            
+            logger.warning(f"[DUCKDB] Stored metadata for '{table_name}' in _pdf_tables")
+            
         except Exception as e:
-            logger.warning(f"[DUCKDB] Could not store metadata: {e}")
+            logger.error(f"[DUCKDB] Could not store metadata: {e}")
         
         conn.close()
         
@@ -541,16 +496,7 @@ def process_pdf_intelligently(
     project_id: str = None,
     status_callback=None
 ) -> Dict[str, Any]:
-    """
-    Smart PDF processing using LLM for analysis and parsing.
-    
-    Flow:
-    1. Extract text from PDF
-    2. Redact PII
-    3. Ask LLM: Is this tabular?
-    4. If yes: LLM parses to rows → DuckDB
-    5. Return text for ChromaDB either way
-    """
+    """Smart PDF processing using LLM for analysis and parsing."""
     
     result = {
         'success': False,
@@ -567,13 +513,12 @@ def process_pdf_intelligently(
         logger.warning(f"[SMART-PDF] {msg}")
     
     try:
-        # Step 1: Extract text
         update_status("Extracting text from PDF...", 10)
         text = extract_pdf_text(file_path)
         
         if not text or len(text.strip()) < 50:
             result['error'] = "Could not extract text from PDF"
-            result['success'] = True  # Still allow ChromaDB with whatever we got
+            result['success'] = True
             result['chromadb_result'] = {'text_content': text or '', 'text_length': len(text or '')}
             result['storage_used'].append('chromadb')
             return result
@@ -581,23 +526,19 @@ def process_pdf_intelligently(
         update_status(f"Extracted {len(text):,} characters", 20)
         result['chromadb_result'] = {'text_content': text, 'text_length': len(text)}
         
-        # Step 2: Analyze with LLM (PII is redacted inside the function)
         update_status("Analyzing PDF structure with AI...", 30)
         analysis = analyze_pdf_with_llm(text)
         result['analysis'] = analysis
         
-        # Step 3: If tabular, parse and store to DuckDB
         if analysis.get('is_tabular') and analysis.get('columns'):
             columns = analysis['columns']
             update_status(f"Detected tabular data with {len(columns)} columns, parsing...", 50)
             
-            # Parse with LLM
             rows = parse_tabular_pdf_with_llm(text, columns)
             
             if rows:
                 update_status(f"Parsed {len(rows)} rows, storing to DuckDB...", 70)
                 
-                # Store to DuckDB
                 duckdb_result = store_to_duckdb(rows, project, filename, project_id)
                 result['duckdb_result'] = duckdb_result
                 
@@ -611,7 +552,6 @@ def process_pdf_intelligently(
         else:
             update_status("PDF classified as narrative text (not tabular)", 50)
         
-        # Always include ChromaDB for semantic search
         result['storage_used'].append('chromadb')
         result['success'] = True
         
@@ -623,7 +563,6 @@ def process_pdf_intelligently(
         import traceback
         logger.error(traceback.format_exc())
         result['error'] = str(e)
-        # Still try to return text for ChromaDB
         if 'chromadb_result' not in result or not result['chromadb_result']:
             result['chromadb_result'] = {'text_content': '', 'text_length': 0}
         result['storage_used'].append('chromadb')
