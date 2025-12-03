@@ -1892,46 +1892,71 @@ async def scan_for_action(project_id: str, action_id: str, force_refresh: bool =
             
             logger.warning(f"[SCAN] Found {len(project_files)} files for project {project_id} (name={project_name}): {list(project_files)}")
             
+            def normalize_for_match(text):
+                """Remove punctuation, lowercase, split into words"""
+                import string
+                cleaned = text.lower().translate(str.maketrans('', '', string.punctuation))
+                return cleaned.replace('_', ' ').replace('-', ' ')
+            
+            def words_match(kw_word, filename_words):
+                """Check if keyword word matches any filename word (prefix in either direction)"""
+                for fw in filename_words:
+                    # Exact match
+                    if kw_word == fw:
+                        return True
+                    # Prefix match either direction: "comp" matches "compensation", "compensation" matches "comp"
+                    if kw_word.startswith(fw) or fw.startswith(kw_word):
+                        return True
+                    # First 4 chars match
+                    if len(kw_word) >= 4 and len(fw) >= 4 and kw_word[:4] == fw[:4]:
+                        return True
+                return False
+            
             # STEP 2: Match by filename - check if any report name appears in filename
             # AND FORCE RETRIEVE CONTENT for matched files
             logger.warning(f"[SCAN] Reports needed: {reports_needed}")
             for report_name in reports_needed:
-                report_keywords = report_name.lower().split()
+                report_normalized = normalize_for_match(report_name)
+                report_words = [w for w in report_normalized.split() if len(w) > 2]
+                
                 for filename in project_files:
-                    filename_lower = filename.lower()
-                    # Check if report keywords appear in filename
-                    matches = sum(1 for kw in report_keywords if kw in filename_lower)
-                    if matches >= len(report_keywords) - 1:  # Allow 1 word missing
-                        if filename not in seen_files:
-                            seen_files.add(filename)
-                            found_docs.append({
-                                "filename": filename,
-                                "snippet": f"Matched report: {report_name}",
-                                "query": report_name,
-                                "match_type": "filename"
-                            })
-                            logger.warning(f"[SCAN] ✓ Filename match: '{filename}' for report '{report_name}'")
-                            
-                            # FORCE RETRIEVE actual content for this matched file
-                            try:
-                                file_chunks = collection.get(
-                                    where={"source": filename},
-                                    include=["documents", "metadatas"],
-                                    limit=50
-                                )
-                                if file_chunks and file_chunks.get('documents'):
-                                    chunk_texts = file_chunks['documents']
-                                    combined_content = "\n---\n".join(chunk_texts[:20])  # First 20 chunks
-                                    # Clean encrypted values
-                                    combined_content = re.sub(r'ENC256:[A-Za-z0-9+/=]+', '[ENCRYPTED]', combined_content)
-                                    all_content.append(f"[FILE: {filename}]\n{combined_content[:8000]}")
-                                    logger.warning(f"[SCAN] ✓ Force-retrieved {len(chunk_texts)} chunks for '{filename}'")
-                                else:
-                                    all_content.append(f"[FILE: {filename}] - matches required report: {report_name} (content not found)")
-                                    logger.warning(f"[SCAN] ⚠ No chunks found for matched file '{filename}'")
-                            except Exception as fetch_err:
-                                logger.warning(f"[SCAN] Failed to force-retrieve content for '{filename}': {fetch_err}")
-                                all_content.append(f"[FILE: {filename}] - matches required report: {report_name}")
+                    filename_normalized = normalize_for_match(filename)
+                    filename_words = filename_normalized.split()
+                    
+                    # Count how many keyword words match filename words
+                    matches = sum(1 for kw in report_words if words_match(kw, filename_words))
+                    threshold = max(1, len(report_words) - 1)  # Allow 1 word missing
+                    
+                    if matches >= threshold and filename not in seen_files:
+                        seen_files.add(filename)
+                        found_docs.append({
+                            "filename": filename,
+                            "snippet": f"Matched report: {report_name}",
+                            "query": report_name,
+                            "match_type": "filename"
+                        })
+                        logger.warning(f"[SCAN] ✓ Filename match: '{filename}' for report '{report_name}' ({matches}/{len(report_words)} words)")
+                        
+                        # FORCE RETRIEVE actual content for this matched file
+                        try:
+                            file_chunks = collection.get(
+                                where={"source": filename},
+                                include=["documents", "metadatas"],
+                                limit=50
+                            )
+                            if file_chunks and file_chunks.get('documents'):
+                                chunk_texts = file_chunks['documents']
+                                combined_content = "\n---\n".join(chunk_texts[:20])  # First 20 chunks
+                                # Clean encrypted values
+                                combined_content = re.sub(r'ENC256:[A-Za-z0-9+/=]+', '[ENCRYPTED]', combined_content)
+                                all_content.append(f"[FILE: {filename}]\n{combined_content[:8000]}")
+                                logger.warning(f"[SCAN] ✓ Force-retrieved {len(chunk_texts)} chunks for '{filename}'")
+                            else:
+                                all_content.append(f"[FILE: {filename}] - matches required report: {report_name} (content not found)")
+                                logger.warning(f"[SCAN] ⚠ No chunks found for matched file '{filename}'")
+                        except Exception as fetch_err:
+                            logger.warning(f"[SCAN] Failed to force-retrieve content for '{filename}': {fetch_err}")
+                            all_content.append(f"[FILE: {filename}] - matches required report: {report_name}")
             
         except Exception as e:
             logger.warning(f"[SCAN] Filename matching failed: {e}")
@@ -1946,42 +1971,42 @@ async def scan_for_action(project_id: str, action_id: str, force_refresh: bool =
         logger.warning(f"[SCAN] Running semantic search with {len(queries)} queries")
         
         for query in queries[:8]:
-                try:
-                    results = rag.search(
-                        collection_name="documents",
-                        query=query,
-                        n_results=15,
-                        project_id=project_id
-                    )
-                    logger.warning(f"[SCAN] Query '{query[:30]}...' returned {len(results) if results else 0} results")
-                    if results:
-                        for result in results:
-                            doc = result.get('document', '')
-                            if doc and len(doc) > 50:
-                                cleaned = re.sub(r'ENC256:[A-Za-z0-9+/=]+', '[ENCRYPTED]', doc)
-                                if cleaned.count('[ENCRYPTED]') < 10:
-                                    metadata = result.get('metadata', {})
-                                    filename = metadata.get('source', metadata.get('filename', 'Unknown'))
-                                    # Add content for AI analysis (always)
-                                    all_content.append(f"[FILE: {filename}]\n{cleaned[:3000]}")
-                                    
-                                    # Only add to found_docs if filename matches a report_needed
-                                    if filename not in seen_files:
-                                        filename_lower = filename.lower()
-                                        for report_name in reports_needed:
-                                            report_keywords = report_name.lower().split()
-                                            matches = sum(1 for kw in report_keywords if kw in filename_lower)
-                                            if matches >= len(report_keywords) - 1:  # Allow 1 word missing
-                                                seen_files.add(filename)
-                                                found_docs.append({
-                                                    "filename": filename,
-                                                    "snippet": cleaned[:300],
-                                                    "query": report_name,
-                                                    "match_type": "semantic"
-                                                })
-                                                break
-                except Exception as e:
-                    logger.warning(f"Query failed: {e}")
+            try:
+                results = rag.search(
+                    collection_name="documents",
+                    query=query,
+                    n_results=15,
+                    project_id=project_id
+                )
+                logger.warning(f"[SCAN] Query '{query[:30]}...' returned {len(results) if results else 0} results")
+                if results:
+                    for result in results:
+                        doc = result.get('document', '')
+                        if doc and len(doc) > 50:
+                            cleaned = re.sub(r'ENC256:[A-Za-z0-9+/=]+', '[ENCRYPTED]', doc)
+                            if cleaned.count('[ENCRYPTED]') < 10:
+                                metadata = result.get('metadata', {})
+                                filename = metadata.get('source', metadata.get('filename', 'Unknown'))
+                                # Add content for AI analysis (always)
+                                all_content.append(f"[FILE: {filename}]\n{cleaned[:3000]}")
+                                
+                                # Only add to found_docs if filename matches a report_needed
+                                if filename not in seen_files:
+                                    filename_lower = filename.lower()
+                                    for report_name in reports_needed:
+                                        report_keywords = report_name.lower().split()
+                                        matches = sum(1 for kw in report_keywords if kw in filename_lower)
+                                        if matches >= len(report_keywords) - 1:  # Allow 1 word missing
+                                            seen_files.add(filename)
+                                            found_docs.append({
+                                                "filename": filename,
+                                                "snippet": cleaned[:300],
+                                                "query": report_name,
+                                                "match_type": "semantic"
+                                            })
+                                            break
+            except Exception as e:
+                logger.warning(f"Query failed: {e}")
         
         logger.warning(f"[SCAN] Total unique docs from ChromaDB: {len(found_docs)}")
         
@@ -2494,13 +2519,52 @@ async def get_document_checklist(project_id: str):
             """Normalize text for matching - lowercase, replace separators with spaces"""
             return text.lower().replace('_', ' ').replace('-', ' ').replace('.', ' ')
         
+        # Common abbreviation mappings for payroll/HR docs
+        ABBREVIATIONS = {
+            'wc': 'workers compensation',
+            'w2': 'w 2',
+            'w4': 'w 4',
+            'i9': 'i 9',
+            'pto': 'paid time off',
+            'fmla': 'family medical leave',
+            'ada': 'americans disabilities',
+            'eeo': 'equal employment',
+            'sui': 'state unemployment',
+            'futa': 'federal unemployment',
+            'suta': 'state unemployment',
+            'fica': 'social security medicare',
+            'sdi': 'state disability',
+            'tdi': 'temporary disability',
+            'hsa': 'health savings',
+            'fsa': 'flexible spending',
+            'cobra': 'continuation coverage',
+            'erisa': 'employee retirement',
+            'gl': 'general ledger',
+            'ee': 'employee',
+            'er': 'employer',
+            'ytd': 'year to date',
+            'mtd': 'month to date',
+            'qtd': 'quarter to date',
+        }
+        
+        def expand_abbreviations(text):
+            """Expand known abbreviations in text"""
+            words = text.lower().split()
+            expanded = []
+            for word in words:
+                if word in ABBREVIATIONS:
+                    expanded.append(ABBREVIATIONS[word])
+                else:
+                    expanded.append(word)
+            return ' '.join(expanded)
+        
         def match_documents_to_step(step_documents, uploaded_files):
             """Match uploaded files against step document requirements."""
             matched = []
             missing = []
             
-            # Pre-normalize all filenames
-            normalized_files = [(f, normalize_text(f)) for f in uploaded_files]
+            # Pre-normalize all filenames AND expand abbreviations
+            normalized_files = [(f, normalize_text(f), expand_abbreviations(normalize_text(f))) for f in uploaded_files]
             
             for doc in step_documents:
                 keyword = doc.get('keyword', '')
@@ -2508,7 +2572,9 @@ async def get_document_checklist(project_id: str):
                     continue
                 
                 keyword_normalized = normalize_text(keyword)
+                keyword_expanded = expand_abbreviations(keyword_normalized)
                 keyword_words = [w for w in keyword_normalized.split() if len(w) > 2]  # Skip tiny words
+                keyword_expanded_words = [w for w in keyword_expanded.split() if len(w) > 2]
                 
                 # Fuzzy word match helper
                 def fuzzy_word_match(kw_word, filename_text):
@@ -2528,7 +2594,7 @@ async def get_document_checklist(project_id: str):
                 
                 # Check if any uploaded file matches this keyword
                 matched_file = None
-                for filename, filename_normalized in normalized_files:
+                for filename, filename_normalized, filename_expanded in normalized_files:
                     # Method 1: Full keyword appears in filename
                     if keyword_normalized in filename_normalized:
                         matched_file = filename
@@ -2539,7 +2605,21 @@ async def get_document_checklist(project_id: str):
                         matched_file = filename
                         break
                     
-                    # Method 3: Fuzzy match - most words match with prefix/partial
+                    # Method 3: Abbreviation expansion match
+                    # "WC Risk Rates" expands to "workers compensation risk rates"
+                    # "Workers' Compensation Risk Rates" matches
+                    if keyword_expanded in filename_expanded or filename_expanded in keyword_expanded:
+                        matched_file = filename
+                        break
+                    
+                    # Method 4: Expanded keyword words match expanded filename
+                    if keyword_expanded_words:
+                        expanded_matches = sum(1 for w in keyword_expanded_words if w in filename_expanded)
+                        if expanded_matches >= len(keyword_expanded_words) - 1:
+                            matched_file = filename
+                            break
+                    
+                    # Method 5: Fuzzy match - most words match with prefix/partial
                     if keyword_words:
                         fuzzy_matches = sum(1 for w in keyword_words if fuzzy_word_match(w, filename_normalized))
                         # Allow 1 word to not match if we have multiple words
