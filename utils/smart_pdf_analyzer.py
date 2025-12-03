@@ -60,6 +60,178 @@ def redact_pii(text: str) -> str:
 
 
 # =============================================================================
+# JSON REPAIR UTILITIES
+# =============================================================================
+
+def repair_json_array(text: str) -> Optional[List[Dict]]:
+    """
+    Attempt to extract and repair a JSON array from LLM output.
+    Handles common issues: trailing commas, truncation, extra text.
+    """
+    if not text:
+        return None
+    
+    # Try direct parse first
+    try:
+        result = json.loads(text)
+        if isinstance(result, list):
+            return result
+    except:
+        pass
+    
+    # Find array boundaries
+    start_idx = text.find('[')
+    if start_idx == -1:
+        return None
+    
+    # Find matching end bracket, handling nested structures
+    depth = 0
+    end_idx = -1
+    in_string = False
+    escape_next = False
+    
+    for i, char in enumerate(text[start_idx:], start_idx):
+        if escape_next:
+            escape_next = False
+            continue
+        if char == '\\':
+            escape_next = True
+            continue
+        if char == '"' and not escape_next:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if char == '[':
+            depth += 1
+        elif char == ']':
+            depth -= 1
+            if depth == 0:
+                end_idx = i
+                break
+    
+    # Extract the array portion
+    if end_idx > start_idx:
+        array_text = text[start_idx:end_idx + 1]
+    else:
+        # No closing bracket - try to repair truncated array
+        array_text = text[start_idx:]
+        # Remove incomplete trailing object
+        last_complete = array_text.rfind('},')
+        if last_complete > 0:
+            array_text = array_text[:last_complete + 1] + ']'
+        else:
+            last_obj = array_text.rfind('}')
+            if last_obj > 0:
+                array_text = array_text[:last_obj + 1] + ']'
+    
+    # Clean up common issues
+    # Remove trailing commas before ]
+    array_text = re.sub(r',\s*]', ']', array_text)
+    # Remove trailing commas before }
+    array_text = re.sub(r',\s*}', '}', array_text)
+    # Fix single quotes to double quotes (careful with apostrophes)
+    # Only do this if there are no double quotes
+    if '"' not in array_text and "'" in array_text:
+        array_text = array_text.replace("'", '"')
+    
+    # Try parsing cleaned version
+    try:
+        result = json.loads(array_text)
+        if isinstance(result, list):
+            return result
+    except json.JSONDecodeError:
+        pass
+    
+    # Last resort: extract individual objects
+    return extract_json_objects(text)
+
+
+def extract_json_objects(text: str) -> List[Dict]:
+    """
+    Extract individual JSON objects from text when array parsing fails.
+    """
+    objects = []
+    
+    # Find all potential JSON objects
+    pattern = r'\{[^{}]*\}'
+    matches = re.findall(pattern, text)
+    
+    for match in matches:
+        try:
+            # Clean up the match
+            cleaned = match
+            cleaned = re.sub(r',\s*}', '}', cleaned)  # Remove trailing commas
+            
+            obj = json.loads(cleaned)
+            if isinstance(obj, dict) and len(obj) > 0:
+                objects.append(obj)
+        except:
+            continue
+    
+    return objects
+
+
+def repair_json_object(text: str) -> Optional[Dict]:
+    """
+    Attempt to extract and repair a JSON object from LLM output.
+    """
+    if not text:
+        return None
+    
+    # Try direct parse first
+    try:
+        result = json.loads(text)
+        if isinstance(result, dict):
+            return result
+    except:
+        pass
+    
+    # Find object in text
+    start_idx = text.find('{')
+    if start_idx == -1:
+        return None
+    
+    # Find matching end brace
+    depth = 0
+    end_idx = -1
+    in_string = False
+    escape_next = False
+    
+    for i, char in enumerate(text[start_idx:], start_idx):
+        if escape_next:
+            escape_next = False
+            continue
+        if char == '\\':
+            escape_next = True
+            continue
+        if char == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if char == '{':
+            depth += 1
+        elif char == '}':
+            depth -= 1
+            if depth == 0:
+                end_idx = i
+                break
+    
+    if end_idx > start_idx:
+        obj_text = text[start_idx:end_idx + 1]
+        # Clean up
+        obj_text = re.sub(r',\s*}', '}', obj_text)
+        
+        try:
+            return json.loads(obj_text)
+        except:
+            pass
+    
+    return None
+
+
+# =============================================================================
 # LLM CLIENT
 # =============================================================================
 
@@ -196,20 +368,15 @@ JSON RESPONSE:"""
         logger.warning("[LLM] No response from LLM, defaulting to non-tabular")
         return {"is_tabular": False, "error": "No LLM response"}
     
-    # Parse JSON from response
-    try:
-        # Find JSON object in response
-        json_match = re.search(r'\{[^{}]*\}', response, re.DOTALL)
-        if json_match:
-            result = json.loads(json_match.group())
-            logger.warning(f"[LLM] Analysis result: is_tabular={result.get('is_tabular')}, columns={result.get('columns', [])}")
-            return result
-        else:
-            logger.warning(f"[LLM] No JSON found in response: {response[:300]}")
-            return {"is_tabular": False, "error": "No JSON in response"}
-    except json.JSONDecodeError as e:
-        logger.warning(f"[LLM] JSON parse error: {e}")
-        return {"is_tabular": False, "error": str(e)}
+    # Parse JSON from response using repair utility
+    result = repair_json_object(response)
+    
+    if result:
+        logger.warning(f"[LLM] Analysis result: is_tabular={result.get('is_tabular')}, columns={result.get('columns', [])}")
+        return result
+    else:
+        logger.warning(f"[LLM] Could not parse JSON from response: {response[:300]}")
+        return {"is_tabular": False, "error": "Could not parse JSON"}
 
 
 def parse_tabular_pdf_with_llm(text: str, columns: List[str]) -> List[Dict[str, str]]:
@@ -248,40 +415,42 @@ def parse_tabular_pdf_with_llm(text: str, columns: List[str]) -> List[Dict[str, 
     for chunk_num, chunk in enumerate(chunks):
         logger.warning(f"[LLM] Parsing chunk {chunk_num+1}/{len(chunks)} ({len(chunk)} chars)")
         
-        prompt = f"""Parse this tabular data into JSON rows.
+        # Simplified prompt for better JSON compliance
+        prompt = f"""Convert this data to a JSON array. Use these exact column names: {col_json}
 
-EXPECTED COLUMNS: {col_json}
-
-DATA TO PARSE:
+DATA:
 {chunk}
 
-TASK: 
-1. Extract each data row as a JSON object
-2. Use the column names provided as keys
-3. Skip headers, page numbers, totals, and non-data lines
-4. Include ALL data rows you can find
+RULES:
+- Output ONLY a valid JSON array
+- Each row is an object with the column names as keys
+- Skip headers, totals, and non-data lines
+- Do not add any text before or after the JSON array
 
-Return ONLY a valid JSON array of objects. Example:
-[
-  {{{", ".join([f'"{col}": "value"' for col in columns[:3]])}}},
-  {{{", ".join([f'"{col}": "value"' for col in columns[:3]])}}}
-]
-
-JSON ARRAY:"""
+OUTPUT:"""
 
         response = call_llm(prompt, max_tokens=8000)
         
         if response:
-            try:
-                # Find JSON array in response
-                array_match = re.search(r'\[[\s\S]*\]', response)
-                if array_match:
-                    rows = json.loads(array_match.group())
-                    if isinstance(rows, list):
-                        all_rows.extend(rows)
-                        logger.warning(f"[LLM] Chunk {chunk_num+1}: parsed {len(rows)} rows")
-            except json.JSONDecodeError as e:
-                logger.warning(f"[LLM] Parse error on chunk {chunk_num+1}: {e}")
+            # Use robust JSON repair
+            rows = repair_json_array(response)
+            
+            if rows:
+                # Filter to only dicts with at least one expected column
+                valid_rows = []
+                for row in rows:
+                    if isinstance(row, dict):
+                        # Check if row has at least one of our expected columns
+                        if any(col in row for col in columns):
+                            valid_rows.append(row)
+                
+                if valid_rows:
+                    all_rows.extend(valid_rows)
+                    logger.warning(f"[LLM] Chunk {chunk_num+1}: parsed {len(valid_rows)} rows")
+                else:
+                    logger.warning(f"[LLM] Chunk {chunk_num+1}: no valid rows found")
+            else:
+                logger.warning(f"[LLM] Chunk {chunk_num+1}: could not parse JSON array")
     
     logger.warning(f"[LLM] Total rows parsed: {len(all_rows)}")
     return all_rows
