@@ -498,7 +498,11 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
 // =============================================================================
 // DOCUMENT CHECKLIST SIDEBAR COMPONENT
 // =============================================================================
-function DocumentChecklistSidebar({ checklist, collapsed, onToggle }) {
+function DocumentChecklistSidebar({ checklist, collapsed, onToggle, onKeywordUpdate }) {
+  const [editingDoc, setEditingDoc] = useState(null); // {step, keyword}
+  const [editValue, setEditValue] = useState('');
+  const [saving, setSaving] = useState(false);
+  
   if (!checklist) return null;
   
   const { 
@@ -517,13 +521,49 @@ function DocumentChecklistSidebar({ checklist, collapsed, onToggle }) {
     return `${truncated}.${ext}`;
   };
   
+  const handleEditClick = (step, keyword) => {
+    setEditingDoc({ step, keyword });
+    setEditValue(keyword);
+  };
+  
+  const handleSaveKeyword = async () => {
+    if (!editingDoc || !editValue.trim()) return;
+    
+    setSaving(true);
+    try {
+      const res = await api.put('/playbooks/year-end/step-documents/keyword', {
+        step: String(editingDoc.step),
+        old_keyword: editingDoc.keyword,
+        new_keyword: editValue.trim()
+      });
+      
+      if (res.data.success) {
+        setEditingDoc(null);
+        setEditValue('');
+        if (onKeywordUpdate) onKeywordUpdate();
+      } else {
+        alert('Failed to update keyword');
+      }
+    } catch (err) {
+      console.error('Update failed:', err);
+      alert('Failed to update: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setSaving(false);
+    }
+  };
+  
+  const handleCancelEdit = () => {
+    setEditingDoc(null);
+    setEditValue('');
+  };
+  
   const styles = {
     sidebar: {
       position: 'fixed',
       right: 0,
       top: 0,
       bottom: 0,
-      width: collapsed ? '40px' : '300px',
+      width: collapsed ? '40px' : '320px',
       background: 'white',
       borderLeft: '1px solid #e1e8ed',
       transition: 'width 0.3s ease',
@@ -584,6 +624,29 @@ function DocumentChecklistSidebar({ checklist, collapsed, onToggle }) {
       marginBottom: '0.25rem',
       border: `1px solid ${isMatched ? '#bbf7d0' : '#fecaca'}`,
     }),
+    editableKeyword: {
+      flex: 1,
+      cursor: 'pointer',
+      borderBottom: '1px dashed transparent',
+    },
+    editableKeywordHover: {
+      borderBottom: '1px dashed #9ca3af',
+    },
+    editInput: {
+      flex: 1,
+      padding: '0.2rem 0.3rem',
+      fontSize: '0.75rem',
+      border: '1px solid #3b82f6',
+      borderRadius: '3px',
+      outline: 'none',
+    },
+    editBtn: {
+      padding: '0.15rem 0.3rem',
+      fontSize: '0.65rem',
+      border: 'none',
+      borderRadius: '3px',
+      cursor: 'pointer',
+    },
     badge: (color, bg) => ({
       fontSize: '0.65rem',
       padding: '0.1rem 0.3rem',
@@ -598,6 +661,67 @@ function DocumentChecklistSidebar({ checklist, collapsed, onToggle }) {
       color: COLORS.textLight,
       fontSize: '0.85rem',
     }
+  };
+  
+  // Render a document item (editable)
+  const renderDocItem = (doc, isMatched, stepNumber) => {
+    const isEditing = editingDoc?.step === stepNumber && editingDoc?.keyword === doc.keyword;
+    
+    return (
+      <div 
+        key={`${stepNumber}-${doc.keyword}`} 
+        style={styles.docItem(isMatched)} 
+        title={isMatched ? doc.matched_file : doc.description}
+      >
+        <span>{isMatched ? '✅' : '❌'}</span>
+        
+        {isEditing ? (
+          <>
+            <input
+              type="text"
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              style={styles.editInput}
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSaveKeyword();
+                if (e.key === 'Escape') handleCancelEdit();
+              }}
+            />
+            <button 
+              onClick={handleSaveKeyword} 
+              disabled={saving}
+              style={{ ...styles.editBtn, background: '#10b981', color: 'white' }}
+            >
+              {saving ? '...' : '✓'}
+            </button>
+            <button 
+              onClick={handleCancelEdit}
+              style={{ ...styles.editBtn, background: '#e5e7eb', color: '#374151' }}
+            >
+              ✗
+            </button>
+          </>
+        ) : (
+          <>
+            <span 
+              style={styles.editableKeyword}
+              onClick={() => handleEditClick(stepNumber, doc.keyword)}
+              title="Click to edit keyword"
+              onMouseOver={(e) => e.target.style.borderBottom = '1px dashed #9ca3af'}
+              onMouseOut={(e) => e.target.style.borderBottom = '1px dashed transparent'}
+            >
+              {doc.keyword}
+            </span>
+            {doc.required && (
+              <span style={styles.badge(isMatched ? '#059669' : '#dc2626', isMatched ? '#d1fae5' : '#fee2e2')}>
+                REQ
+              </span>
+            )}
+          </>
+        )}
+      </div>
+    );
   };
   
   if (collapsed) {
@@ -648,7 +772,7 @@ function DocumentChecklistSidebar({ checklist, collapsed, onToggle }) {
     );
   }
   
-  // Step-based document checklist
+  // Step-based document checklist with editable keywords
   return (
     <div style={styles.sidebar}>
       <button style={styles.toggleBtn} onClick={onToggle}>▶</button>
@@ -663,6 +787,9 @@ function DocumentChecklistSidebar({ checklist, collapsed, onToggle }) {
             ⚠️ {stats.required_missing} required missing
           </div>
         )}
+        <div style={{ fontSize: '0.65rem', color: '#9ca3af', marginTop: '0.25rem', fontStyle: 'italic' }}>
+          Click keyword to edit
+        </div>
       </div>
       
       <div style={styles.content}>
@@ -679,22 +806,10 @@ function DocumentChecklistSidebar({ checklist, collapsed, onToggle }) {
             </div>
             
             {/* Matched docs */}
-            {step.matched.map((doc, j) => (
-              <div key={`m-${j}`} style={styles.docItem(true)} title={doc.matched_file}>
-                <span>✅</span>
-                <span style={{ flex: 1 }}>{doc.keyword}</span>
-                {doc.required && <span style={styles.badge('#059669', '#d1fae5')}>REQ</span>}
-              </div>
-            ))}
+            {step.matched.map((doc) => renderDocItem(doc, true, step.step_number))}
             
             {/* Missing docs */}
-            {step.missing.map((doc, j) => (
-              <div key={`x-${j}`} style={styles.docItem(false)} title={doc.description}>
-                <span>❌</span>
-                <span style={{ flex: 1 }}>{doc.keyword}</span>
-                {doc.required && <span style={styles.badge('#dc2626', '#fee2e2')}>REQ</span>}
-              </div>
-            ))}
+            {step.missing.map((doc) => renderDocItem(doc, false, step.step_number))}
           </div>
         ))}
         
@@ -2227,22 +2342,10 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
             >
               {analyzing 
                 ? (scanProgress 
-                    ? `⏳ Analyzing ${scanProgress.completed}/${scanProgress.total}...` 
+                    ? `⏳ Analyzing ${scanProgress.completed}/${scanProgress.total} (${scanProgress.current_action || '...'})` 
                     : '⏳ Refreshing...')
                 : '🔄 Refresh & Analyze'}
             </button>
-            
-            {/* Show current action being analyzed */}
-            {scanProgress && (
-              <span style={{ 
-                fontSize: '0.75rem', 
-                color: '#6b7280', 
-                marginLeft: '0.5rem',
-                fontStyle: 'italic'
-              }}>
-                {scanProgress.current_action}
-              </span>
-            )}
             
             {/* NEW: Non-blocking scan progress component */}
             <ScanAllProgress
@@ -2329,7 +2432,8 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       <DocumentChecklistSidebar 
         checklist={docChecklist} 
         collapsed={sidebarCollapsed} 
-        onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} 
+        onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+        onKeywordUpdate={loadDocChecklist}
       />
       
       {/* Tooltip Add/Edit Modal */}
