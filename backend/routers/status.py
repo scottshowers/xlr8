@@ -465,12 +465,17 @@ async def get_documents(project: Optional[str] = None, limit: int = 1000):
 async def delete_document(doc_id: str, filename: str = None, project: str = None):
     """Delete a document and its chunks from ChromaDB"""
     try:
-        # Try to get document info first
-        doc = DocumentModel.get_by_id(doc_id) if doc_id and doc_id != "null" else None
+        # Check if doc_id is a UUID or a filename
+        is_uuid = len(doc_id) == 36 and '-' in doc_id
         
-        actual_filename = filename
+        doc = None
+        if is_uuid:
+            doc = DocumentModel.get_by_id(doc_id)
+        
+        # Use filename from param, doc_id (if it's a filename), or from doc record
+        actual_filename = filename or (doc_id if not is_uuid else None)
         if doc:
-            actual_filename = doc.get("name", filename)
+            actual_filename = doc.get("name", actual_filename)
         
         # Delete from ChromaDB
         if actual_filename:
@@ -488,10 +493,20 @@ async def delete_document(doc_id: str, filename: str = None, project: str = None
             except Exception as ce:
                 logger.warning(f"ChromaDB deletion issue: {ce}")
         
-        # Delete from Supabase if we have an ID
+        # Delete from Supabase if we have a doc record
         if doc:
-            DocumentModel.delete(doc_id)
-            logger.info(f"Deleted document {doc_id} from Supabase")
+            DocumentModel.delete(doc.get("id"))
+            logger.info(f"Deleted document {doc.get('id')} from Supabase")
+        elif not is_uuid and actual_filename:
+            # Try to find and delete by filename
+            try:
+                from utils.database.supabase_client import get_supabase
+                supabase = get_supabase()
+                if supabase:
+                    supabase.table('documents').delete().eq('name', actual_filename).execute()
+                    logger.info(f"Deleted document by filename: {actual_filename}")
+            except Exception as db_e:
+                logger.warning(f"Could not delete from Supabase by filename: {db_e}")
         
         return {"success": True, "message": f"Document deleted"}
             
