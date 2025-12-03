@@ -1152,6 +1152,208 @@ async def reset_progress(project_id: str):
 
 
 # ============================================================================
+# DUCKDB STRUCTURED DATA SEARCH
+# ============================================================================
+
+async def search_duckdb_for_action(
+    project_id: str, 
+    action: Dict, 
+    reports_needed: List[str]
+) -> List[str]:
+    """
+    Search DuckDB structured data for content relevant to an action.
+    
+    This searches:
+    1. Tables in the project's DuckDB data
+    2. Tables in GLOBAL (shared reference data)
+    3. PDF-derived tables
+    
+    Returns list of formatted content strings for AI analysis.
+    """
+    import duckdb
+    
+    DUCKDB_PATH = "/data/structured_data.duckdb"
+    
+    if not os.path.exists(DUCKDB_PATH):
+        logger.warning("[DUCKDB-SCAN] DuckDB file not found")
+        return []
+    
+    content_chunks = []
+    
+    try:
+        conn = duckdb.connect(DUCKDB_PATH, read_only=True)
+        
+        # Build search keywords from action
+        keywords = []
+        
+        # Add reports_needed as keywords
+        for report in reports_needed:
+            keywords.extend(report.lower().split())
+        
+        # Add keywords from action description
+        action_desc = action.get('description', '').lower()
+        key_terms = ['tax', 'earnings', 'deduction', 'w-2', 'w2', '1099', 'workers comp', 
+                     'benefits', 'healthcare', 'fein', 'company', 'employee', 'payroll',
+                     'rate', 'code', 'withholding', 'fica', 'suta', 'futa']
+        for term in key_terms:
+            if term in action_desc:
+                keywords.append(term)
+        
+        # Also add action-specific keywords
+        action_keywords = action.get('keywords', [])
+        keywords.extend(action_keywords)
+        
+        # Dedupe
+        keywords = list(set(keywords))
+        logger.warning(f"[DUCKDB-SCAN] Searching with keywords: {keywords[:10]}")
+        
+        # Find matching tables from _schema_metadata
+        try:
+            # Get tables for this project OR global
+            tables_query = """
+                SELECT DISTINCT 
+                    table_name, 
+                    file_name, 
+                    sheet_name, 
+                    project,
+                    columns,
+                    row_count
+                FROM _schema_metadata 
+                WHERE is_current = TRUE
+                AND (
+                    LOWER(project) = LOWER(?)
+                    OR LOWER(project) = 'global'
+                    OR LOWER(project) LIKE ?
+                )
+            """
+            tables = conn.execute(tables_query, [project_id, f"{project_id[:8]}%"]).fetchall()
+            logger.warning(f"[DUCKDB-SCAN] Found {len(tables)} tables for project")
+            
+        except Exception as e:
+            logger.warning(f"[DUCKDB-SCAN] Schema query failed: {e}")
+            tables = []
+        
+        # Also check PDF tables
+        try:
+            pdf_tables = conn.execute("""
+                SELECT table_name, source_file, row_count
+                FROM _pdf_tables
+                WHERE project_id = ? OR project_id LIKE ?
+            """, [project_id, f"{project_id[:8]}%"]).fetchall()
+            logger.warning(f"[DUCKDB-SCAN] Found {len(pdf_tables)} PDF-derived tables")
+        except:
+            pdf_tables = []
+        
+        # Score and select relevant tables
+        relevant_tables = []
+        
+        for table in tables:
+            table_name, file_name, sheet_name, project, columns_json, row_count = table
+            
+            # Build searchable text
+            searchable = f"{file_name} {sheet_name} {table_name}".lower()
+            if columns_json:
+                try:
+                    columns = json.loads(columns_json) if isinstance(columns_json, str) else columns_json
+                    searchable += " " + " ".join(str(c).lower() for c in columns)
+                except:
+                    pass
+            
+            # Score by keyword matches
+            score = sum(1 for kw in keywords if kw in searchable)
+            
+            if score > 0:
+                relevant_tables.append({
+                    'table_name': table_name,
+                    'file_name': file_name,
+                    'sheet_name': sheet_name,
+                    'project': project,
+                    'row_count': row_count,
+                    'score': score,
+                    'source_type': 'excel'
+                })
+        
+        # Add PDF tables
+        for pdf_table in pdf_tables:
+            table_name, source_file, row_count = pdf_table
+            searchable = f"{table_name} {source_file}".lower()
+            score = sum(1 for kw in keywords if kw in searchable)
+            
+            if score > 0:
+                relevant_tables.append({
+                    'table_name': table_name,
+                    'file_name': source_file,
+                    'sheet_name': 'PDF Extract',
+                    'project': project_id,
+                    'row_count': row_count,
+                    'score': score,
+                    'source_type': 'pdf'
+                })
+        
+        # Sort by score and take top 5
+        relevant_tables.sort(key=lambda x: x['score'], reverse=True)
+        relevant_tables = relevant_tables[:5]
+        
+        logger.warning(f"[DUCKDB-SCAN] Selected {len(relevant_tables)} relevant tables")
+        
+        # Query each relevant table and format content
+        for table_info in relevant_tables:
+            table_name = table_info['table_name']
+            
+            try:
+                # Get sample data (limit rows to avoid huge content)
+                row_limit = min(50, table_info.get('row_count', 50))
+                
+                # Get column names
+                col_info = conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
+                col_names = [c[1] for c in col_info]
+                
+                # Query data
+                rows = conn.execute(f'SELECT * FROM "{table_name}" LIMIT {row_limit}').fetchall()
+                
+                if not rows:
+                    continue
+                
+                # Format as readable content for AI
+                content = f"[DUCKDB TABLE: {table_name}]\n"
+                content += f"Source: {table_info['file_name']} / {table_info['sheet_name']}\n"
+                content += f"Columns: {', '.join(col_names)}\n"
+                content += f"Total Rows: {table_info['row_count']}\n"
+                content += "-" * 40 + "\n"
+                
+                # Add header row
+                content += " | ".join(str(c)[:20] for c in col_names) + "\n"
+                content += "-" * 40 + "\n"
+                
+                # Add data rows (decrypt if needed)
+                for row in rows[:30]:  # Limit to 30 rows for AI context
+                    row_values = []
+                    for val in row:
+                        val_str = str(val) if val is not None else ""
+                        # Check for encrypted values
+                        if val_str.startswith("ENC256:"):
+                            val_str = "[ENCRYPTED]"
+                        row_values.append(val_str[:25])  # Truncate long values
+                    content += " | ".join(row_values) + "\n"
+                
+                content_chunks.append(content)
+                logger.warning(f"[DUCKDB-SCAN] Added table {table_name} ({len(rows)} rows)")
+                
+            except Exception as e:
+                logger.warning(f"[DUCKDB-SCAN] Failed to query {table_name}: {e}")
+                continue
+        
+        conn.close()
+        
+    except Exception as e:
+        logger.warning(f"[DUCKDB-SCAN] DuckDB search failed: {e}")
+        import traceback
+        logger.warning(traceback.format_exc())
+    
+    return content_chunks
+
+
+# ============================================================================
 # SCAN ENDPOINT - Search docs for action-relevant content
 # ============================================================================
 
@@ -1313,7 +1515,32 @@ async def scan_for_action(project_id: str, action_id: str):
                 except Exception as e:
                     logger.warning(f"Query failed: {e}")
         
-        logger.warning(f"[SCAN] Total unique docs found: {len(found_docs)}")
+        logger.warning(f"[SCAN] Total unique docs from ChromaDB: {len(found_docs)}")
+        
+        # =====================================================================
+        # STEP 4: Search DuckDB for structured data
+        # This is the key integration - get actual table data, not just vectors
+        # =====================================================================
+        duckdb_content = await search_duckdb_for_action(project_id, action, reports_needed)
+        if duckdb_content:
+            logger.warning(f"[SCAN] DuckDB returned {len(duckdb_content)} content chunks")
+            all_content.extend(duckdb_content)
+            
+            # Add DuckDB sources to found_docs
+            for content in duckdb_content:
+                # Extract table name from content header
+                if content.startswith("[DUCKDB TABLE:"):
+                    table_name = content.split("]")[0].replace("[DUCKDB TABLE: ", "")
+                    if table_name not in seen_files:
+                        seen_files.add(table_name)
+                        found_docs.append({
+                            "filename": f"📊 {table_name}",
+                            "snippet": content[:300],
+                            "query": "structured_data",
+                            "match_type": "duckdb"
+                        })
+        
+        logger.warning(f"[SCAN] Total sources (ChromaDB + DuckDB): {len(found_docs)}")
         
         # Determine findings and suggested status
         findings = None
