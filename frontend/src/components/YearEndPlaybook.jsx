@@ -1617,29 +1617,48 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
           </div>
 
           {/* Show matched and missing reports */}
-          {action.reports_needed && action.reports_needed.length > 0 && (
+          {action.reports_needed && (Array.isArray(action.reports_needed) ? action.reports_needed.length > 0 : action.reports_needed.length > 0) && (
             <div style={styles.section}>
               <div style={styles.sectionTitle}>Document Status</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                {action.reports_needed.split(',').map((report, i) => {
-                  const reportTrimmed = report.trim();
+                {(Array.isArray(action.reports_needed) 
+                  ? action.reports_needed 
+                  : action.reports_needed.split(',')
+                ).map((report, i) => {
+                  const reportTrimmed = String(report).trim();
                   // Normalize: lowercase, replace separators
                   const normalize = (s) => s.toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').replace(/\./g, ' ');
                   const reportNorm = normalize(reportTrimmed);
-                  const reportWords = reportNorm.split(' ').filter(w => w.length > 0);
+                  const reportWords = reportNorm.split(' ').filter(w => w.length > 2); // Skip tiny words
                   
-                  // Check if this report was found
+                  // Check if this report was found - with fuzzy matching
                   const matchDoc = (doc) => {
                     const docNorm = normalize(doc);
+                    
                     // Method 1: full keyword in filename
                     if (docNorm.includes(reportNorm)) return true;
-                    // Method 2: all words appear
+                    
+                    // Method 2: all words appear (exact)
                     if (reportWords.every(w => docNorm.includes(w))) return true;
-                    // Method 3: most words appear (allow 1 missing)
-                    if (reportWords.length > 1) {
-                      const matches = reportWords.filter(w => docNorm.includes(w)).length;
-                      if (matches >= reportWords.length - 1) return true;
-                    }
+                    
+                    // Method 3: fuzzy word matching (partial/prefix)
+                    // "workers" matches "worker", "comp" matches "compensation"
+                    const fuzzyMatch = (keyword, text) => {
+                      if (text.includes(keyword)) return true;
+                      // Check if keyword is prefix of any word in text
+                      const textWords = text.split(' ');
+                      for (const tw of textWords) {
+                        if (tw.startsWith(keyword) || keyword.startsWith(tw)) return true;
+                        // Also check if first 4 chars match (worker/workers, comp/compensation)
+                        if (keyword.length >= 4 && tw.length >= 4 && keyword.slice(0,4) === tw.slice(0,4)) return true;
+                      }
+                      return false;
+                    };
+                    
+                    // Check if most keyword words fuzzy-match
+                    const fuzzyMatches = reportWords.filter(w => fuzzyMatch(w, docNorm)).length;
+                    if (fuzzyMatches >= reportWords.length - 1 && fuzzyMatches > 0) return true;
+                    
                     return false;
                   };
                   
