@@ -151,6 +151,99 @@ def find_year_end_tables() -> List[Dict[str, Any]]:
         conn.close()
 
 
+def load_step_documents() -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Load Step_Documents sheet from DuckDB.
+    Returns dict: step_number -> list of {keyword, description, required}
+    
+    This sheet defines which documents are needed per step.
+    """
+    conn = get_duckdb_connection()
+    if not conn:
+        logger.warning("[PARSER] No DuckDB connection for Step_Documents")
+        return {}
+    
+    try:
+        # Find the Step_Documents table
+        result = conn.execute("""
+            SELECT table_name, columns
+            FROM _schema_metadata
+            WHERE is_current = TRUE
+            AND LOWER(project) = 'global'
+            AND LOWER(sheet_name) LIKE '%step_documents%'
+            LIMIT 1
+        """).fetchone()
+        
+        if not result:
+            logger.info("[PARSER] No Step_Documents sheet found - using legacy report extraction")
+            return {}
+        
+        table_name, columns_json = result
+        logger.info(f"[PARSER] Found Step_Documents table: {table_name}")
+        
+        # Read all rows
+        rows = conn.execute(f'SELECT * FROM "{table_name}"').fetchall()
+        
+        # Get column names
+        col_info = conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
+        col_names = [c[1].lower() for c in col_info]
+        
+        logger.info(f"[PARSER] Step_Documents columns: {col_names}")
+        
+        # Find column indices
+        step_idx = next((i for i, c in enumerate(col_names) if 'step' in c), 0)
+        keyword_idx = next((i for i, c in enumerate(col_names) if 'keyword' in c or 'document' in c), 1)
+        desc_idx = next((i for i, c in enumerate(col_names) if 'desc' in c), 2) if len(col_names) > 2 else None
+        req_idx = next((i for i, c in enumerate(col_names) if 'req' in c), 3) if len(col_names) > 3 else None
+        
+        # Build step -> documents mapping
+        step_docs = {}
+        
+        for row in rows:
+            try:
+                step = str(row[step_idx]).strip()
+                keyword = str(row[keyword_idx]).strip() if row[keyword_idx] else ''
+                
+                # Skip header rows or empty
+                if not step or not keyword:
+                    continue
+                if step.lower() in ['step', 'action']:
+                    continue
+                
+                # Normalize step number (remove any letters, take first number)
+                step_num = ''.join(c for c in step if c.isdigit())[:2]
+                if not step_num:
+                    continue
+                
+                description = str(row[desc_idx]).strip() if desc_idx and row[desc_idx] else ''
+                required = str(row[req_idx]).strip().lower() in ['yes', 'true', '1', 'y'] if req_idx and row[req_idx] else False
+                
+                if step_num not in step_docs:
+                    step_docs[step_num] = []
+                
+                step_docs[step_num].append({
+                    'keyword': keyword,
+                    'description': description,
+                    'required': required
+                })
+                
+            except Exception as e:
+                logger.warning(f"[PARSER] Error parsing Step_Documents row: {e}")
+                continue
+        
+        logger.info(f"[PARSER] Loaded Step_Documents: {len(step_docs)} steps with documents")
+        for step, docs in step_docs.items():
+            logger.info(f"[PARSER]   Step {step}: {len(docs)} document types")
+        
+        return step_docs
+        
+    except Exception as e:
+        logger.error(f"[PARSER] Error loading Step_Documents: {e}")
+        return {}
+    finally:
+        conn.close()
+
+
 def parse_year_end_from_duckdb() -> Dict[str, Any]:
     """
     Parse Year-End Checklist from DuckDB tables.
@@ -306,8 +399,11 @@ def parse_year_end_from_duckdb() -> Dict[str, Any]:
             logger.warning("[PARSER] No actions extracted, using default")
             return get_default_structure()
         
-        # Build step structure
-        return build_playbook_structure(all_actions, file_name)
+        # Load Step_Documents mapping
+        step_documents = load_step_documents()
+        
+        # Build step structure with document mappings
+        return build_playbook_structure(all_actions, file_name, step_documents)
         
     except Exception as e:
         logger.exception(f"[PARSER] Error parsing Year-End from DuckDB: {e}")
@@ -316,8 +412,10 @@ def parse_year_end_from_duckdb() -> Dict[str, Any]:
         conn.close()
 
 
-def build_playbook_structure(actions: List[Dict], source_file: str) -> Dict[str, Any]:
+def build_playbook_structure(actions: List[Dict], source_file: str, step_documents: Dict[str, List[Dict]] = None) -> Dict[str, Any]:
     """Build the final playbook structure from parsed actions"""
+    
+    step_documents = step_documents or {}
     
     steps = []
     seen_steps = set()
@@ -326,11 +424,16 @@ def build_playbook_structure(actions: List[Dict], source_file: str) -> Dict[str,
         step_num = action['step']
         if step_num not in seen_steps:
             seen_steps.add(step_num)
+            
+            # Get documents for this step from Step_Documents sheet
+            step_docs = step_documents.get(step_num, [])
+            
             steps.append({
                 'step_number': step_num,
                 'step_name': get_step_name(step_num),
                 'phase': action['phase'],
-                'actions': []
+                'actions': [],
+                'required_documents': step_docs  # NEW: documents needed for this step
             })
     
     # Add actions to their steps
@@ -353,7 +456,8 @@ def build_playbook_structure(actions: List[Dict], source_file: str) -> Dict[str,
         'steps': steps,
         'total_actions': len(actions),
         'source_file': source_file,
-        'source_type': 'duckdb'
+        'source_type': 'duckdb',
+        'has_step_documents': len(step_documents) > 0
     }
 
 
@@ -499,6 +603,81 @@ def get_default_structure() -> Dict[str, Any]:
         'total_actions': 2,
         'source_file': 'default_structure',
         'source_type': 'fallback'
+    }
+
+
+# =============================================================================
+# DOCUMENT MATCHING UTILITIES
+# =============================================================================
+
+def match_documents_to_step(step_documents: List[Dict], uploaded_files: List[str]) -> Dict[str, Any]:
+    """
+    Match uploaded files against step document requirements.
+    
+    Args:
+        step_documents: List of {keyword, description, required} from Step_Documents sheet
+        uploaded_files: List of actual uploaded filenames
+    
+    Returns:
+        {
+            'matched': [{keyword, description, required, matched_file}, ...],
+            'missing': [{keyword, description, required}, ...],
+            'stats': {total, matched, missing, required_matched, required_missing}
+        }
+    """
+    matched = []
+    missing = []
+    
+    for doc in step_documents:
+        keyword = doc.get('keyword', '').lower()
+        if not keyword:
+            continue
+        
+        # Check if any uploaded file matches this keyword
+        matched_file = None
+        for filename in uploaded_files:
+            filename_lower = filename.lower()
+            # Simple keyword matching
+            if keyword in filename_lower:
+                matched_file = filename
+                break
+            # Also check individual words for multi-word keywords
+            keyword_words = keyword.split()
+            if len(keyword_words) > 1:
+                matches = sum(1 for w in keyword_words if w in filename_lower)
+                if matches >= len(keyword_words) - 1:  # Allow 1 word missing
+                    matched_file = filename
+                    break
+        
+        doc_info = {
+            'keyword': doc.get('keyword'),
+            'description': doc.get('description', ''),
+            'required': doc.get('required', False)
+        }
+        
+        if matched_file:
+            doc_info['matched_file'] = matched_file
+            matched.append(doc_info)
+        else:
+            missing.append(doc_info)
+    
+    # Calculate stats
+    total = len(step_documents)
+    required_docs = [d for d in step_documents if d.get('required')]
+    required_matched = sum(1 for m in matched if m.get('required'))
+    required_missing = sum(1 for m in missing if m.get('required'))
+    
+    return {
+        'matched': matched,
+        'missing': missing,
+        'stats': {
+            'total': total,
+            'matched': len(matched),
+            'missing': len(missing),
+            'required_total': len(required_docs),
+            'required_matched': required_matched,
+            'required_missing': required_missing
+        }
     }
 
 
