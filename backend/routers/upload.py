@@ -64,6 +64,64 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+# =============================================================================
+# DEBUG ENDPOINT - Check what's available
+# =============================================================================
+@router.get("/upload/debug")
+async def debug_features():
+    """Debug endpoint to check what features are available"""
+    import os
+    
+    results = {
+        "smart_pdf_available": SMART_PDF_AVAILABLE,
+        "structured_handler_available": STRUCTURED_HANDLER_AVAILABLE,
+        "openpyxl_available": OPENPYXL_AVAILABLE,
+        "files_in_utils": [],
+        "import_errors": []
+    }
+    
+    # Check what files exist in /app/utils
+    try:
+        utils_path = "/app/utils"
+        if os.path.exists(utils_path):
+            results["files_in_utils"] = os.listdir(utils_path)
+        else:
+            results["files_in_utils"] = ["DIRECTORY NOT FOUND"]
+    except Exception as e:
+        results["files_in_utils"] = [f"ERROR: {e}"]
+    
+    # Try imports and capture specific errors
+    try:
+        from utils.smart_pdf_analyzer import process_pdf_intelligently
+        results["smart_pdf_import"] = "SUCCESS"
+    except ImportError as e:
+        results["smart_pdf_import"] = f"FAILED: {e}"
+        results["import_errors"].append(f"smart_pdf_analyzer: {e}")
+    except Exception as e:
+        results["smart_pdf_import"] = f"ERROR: {e}"
+        results["import_errors"].append(f"smart_pdf_analyzer: {e}")
+    
+    try:
+        from utils.structured_data_handler import get_structured_handler
+        results["structured_handler_import"] = "SUCCESS"
+    except ImportError as e:
+        results["structured_handler_import"] = f"FAILED: {e}"
+        results["import_errors"].append(f"structured_data_handler: {e}")
+    except Exception as e:
+        results["structured_handler_import"] = f"ERROR: {e}"
+        results["import_errors"].append(f"structured_data_handler: {e}")
+    
+    # Check pdfplumber
+    try:
+        import pdfplumber
+        results["pdfplumber_available"] = True
+    except ImportError:
+        results["pdfplumber_available"] = False
+        results["import_errors"].append("pdfplumber not installed")
+    
+    return results
+
+
 def extract_text(file_path: str) -> str:
     """Extract text from file based on extension"""
     ext = file_path.split('.')[-1].lower()
