@@ -1984,11 +1984,14 @@ async def scan_for_action(project_id: str, action_id: str, force_refresh: bool =
                                     logger.warning(f"[SCAN] Found {len(chunk_texts)} chunks via partial filename match")
                             
                             if chunk_texts:
-                                combined_content = "\n---\n".join(chunk_texts[:20])  # First 20 chunks
+                                # Use ALL chunks (up to 30) with higher char limit
+                                # 8000 was truncating important multi-page PDFs
+                                combined_content = "\n---\n".join(chunk_texts[:30])  # Up to 30 chunks
                                 # Clean encrypted values
                                 combined_content = re.sub(r'ENC256:[A-Za-z0-9+/=]+', '[ENCRYPTED]', combined_content)
-                                all_content.append(f"[FILE: {filename}]\n{combined_content[:8000]}")
-                                logger.warning(f"[SCAN] ✓ Force-retrieved {len(chunk_texts)} chunks for '{filename}'")
+                                # Increase limit to 25000 chars (~6000 tokens) - well within Claude's context
+                                all_content.append(f"[FILE: {filename}]\n{combined_content[:25000]}")
+                                logger.warning(f"[SCAN] ✓ Force-retrieved {len(chunk_texts)} chunks ({len(combined_content)} chars) for '{filename}'")
                             else:
                                 all_content.append(f"[FILE: {filename}] - matches required report: {report_name} (content not found in ChromaDB)")
                                 logger.warning(f"[SCAN] ⚠ No chunks found for matched file '{filename}' - tried all approaches")
@@ -2026,7 +2029,7 @@ async def scan_for_action(project_id: str, action_id: str, force_refresh: bool =
                                 metadata = result.get('metadata', {})
                                 filename = metadata.get('source', metadata.get('filename', 'Unknown'))
                                 # Add content for AI analysis (always)
-                                all_content.append(f"[FILE: {filename}]\n{cleaned[:3000]}")
+                                all_content.append(f"[FILE: {filename}]\n{cleaned[:5000]}")
                                 
                                 # Only add to found_docs if filename matches a report_needed
                                 if filename not in seen_files:
@@ -2502,7 +2505,7 @@ INHERITED DATA FROM PREVIOUS ACTIONS:
 ''' if inherited_context else ''}
 
 <documents>
-{sanitized_content[:20000]}
+{sanitized_content[:40000]}
 </documents>
 
 {consultative_context}
