@@ -1765,6 +1765,101 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
             </div>
           )}
 
+          {/* Show issues/concerns */}
+          {findings?.issues && findings.issues.length > 0 && (
+            <div style={styles.section}>
+              <div style={styles.sectionTitle}>⚠️ Issues Identified</div>
+              <div style={{ 
+                background: '#fef2f2', 
+                border: '1px solid #fecaca',
+                borderRadius: '6px',
+                padding: '0.5rem'
+              }}>
+                {findings.issues.map((issue, i) => (
+                  <div key={i} style={{
+                    fontSize: '0.85rem',
+                    color: '#991b1b',
+                    padding: '0.35rem 0',
+                    borderBottom: i < findings.issues.length - 1 ? '1px solid #fecaca' : 'none',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '0.5rem'
+                  }}>
+                    <span style={{ color: '#dc2626' }}>•</span>
+                    <span>{issue}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Show action-specific guidance */}
+          {findings?.guidance && findings.guidance.length > 0 && (
+            <div style={styles.section}>
+              <div style={styles.sectionTitle}>📋 Guidance for This Action</div>
+              <div style={{ 
+                background: '#f0fdf4', 
+                border: '1px solid #86efac',
+                borderRadius: '6px',
+                padding: '0.5rem'
+              }}>
+                {findings.guidance.map((step, i) => (
+                  <div key={i} style={{
+                    fontSize: '0.85rem',
+                    color: '#166534',
+                    padding: '0.35rem 0',
+                    borderBottom: i < findings.guidance.length - 1 ? '1px solid #bbf7d0' : 'none',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '0.5rem'
+                  }}>
+                    <span style={{ 
+                      background: '#16a34a', 
+                      color: 'white', 
+                      borderRadius: '50%', 
+                      width: '18px', 
+                      height: '18px', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'center',
+                      fontSize: '0.7rem',
+                      flexShrink: 0
+                    }}>{i + 1}</span>
+                    <span>{step}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Show recommendations */}
+          {findings?.recommendations && findings.recommendations.length > 0 && (
+            <div style={styles.section}>
+              <div style={styles.sectionTitle}>💡 Recommendations</div>
+              <div style={{ 
+                background: '#eff6ff', 
+                border: '1px solid #bfdbfe',
+                borderRadius: '6px',
+                padding: '0.5rem'
+              }}>
+                {findings.recommendations.map((rec, i) => (
+                  <div key={i} style={{
+                    fontSize: '0.85rem',
+                    color: '#1e40af',
+                    padding: '0.35rem 0',
+                    borderBottom: i < findings.recommendations.length - 1 ? '1px solid #bfdbfe' : 'none',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '0.5rem'
+                  }}>
+                    <span style={{ color: '#3b82f6' }}>→</span>
+                    <span>{rec}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div style={styles.section}>
             <div style={styles.sectionTitle}>Status</div>
             <div style={styles.statusSelect}>
