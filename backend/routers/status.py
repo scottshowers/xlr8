@@ -80,10 +80,22 @@ async def get_structured_data_status(project: Optional[str] = None):
             
             # ALSO query _pdf_tables for PDF-derived tables
             try:
-                pdf_result = handler.conn.execute("""
-                    SELECT table_name, source_file, project, project_id, row_count, columns, created_at
-                    FROM _pdf_tables
-                """).fetchall()
+                # First check if table exists
+                table_check = handler.conn.execute("""
+                    SELECT COUNT(*) FROM information_schema.tables 
+                    WHERE table_name = '_pdf_tables'
+                """).fetchone()
+                logger.warning(f"[STATUS] _pdf_tables exists: {table_check[0] > 0}")
+                
+                if table_check[0] > 0:
+                    pdf_result = handler.conn.execute("""
+                        SELECT table_name, source_file, project, project_id, row_count, columns, created_at
+                        FROM _pdf_tables
+                    """).fetchall()
+                    logger.warning(f"[STATUS] _pdf_tables has {len(pdf_result)} rows")
+                else:
+                    pdf_result = []
+                    logger.warning("[STATUS] _pdf_tables does not exist yet")
                 
                 pdf_count = 0
                 for row in pdf_result:
