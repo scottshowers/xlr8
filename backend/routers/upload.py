@@ -777,12 +777,25 @@ async def upload_file(
                 project_id = None
                 logger.info(f"[UPLOAD] Using GLOBAL project (no project_id)")
             else:
-                project_record = ProjectModel.get_by_name(project)
-                if project_record:
-                    project_id = project_record.get('id')
-                    logger.info(f"[UPLOAD] Found project '{project}' with id: {project_id}")
+                # Check if project is already a UUID (frontend might send ID directly)
+                import re
+                uuid_pattern = r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                if re.match(uuid_pattern, project.lower()):
+                    # It's a UUID - verify it exists and use it directly
+                    project_record = ProjectModel.get_by_id(project)
+                    if project_record:
+                        project_id = project
+                        logger.info(f"[UPLOAD] Using project UUID directly: {project_id}")
+                    else:
+                        logger.warning(f"[UPLOAD] Project UUID '{project}' not found in database")
                 else:
-                    logger.warning(f"[UPLOAD] Project '{project}' not found in database")
+                    # It's a name - look up by name
+                    project_record = ProjectModel.get_by_name(project)
+                    if project_record:
+                        project_id = project_record.get('id')
+                        logger.info(f"[UPLOAD] Found project '{project}' with id: {project_id}")
+                    else:
+                        logger.warning(f"[UPLOAD] Project '{project}' not found in database")
         except Exception as e:
             logger.warning(f"[UPLOAD] Could not look up project: {e}")
         
