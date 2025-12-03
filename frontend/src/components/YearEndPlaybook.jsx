@@ -501,9 +501,21 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
 function DocumentChecklistSidebar({ checklist, collapsed, onToggle }) {
   if (!checklist) return null;
   
-  const { uploaded = [], missing = [], processing_jobs = [] } = checklist;
-  const totalNeeded = uploaded.length + missing.length;
-  const percentComplete = totalNeeded > 0 ? Math.round((uploaded.length / totalNeeded) * 100) : 0;
+  const { 
+    has_step_documents = false, 
+    uploaded_files = [], 
+    step_checklists = [],
+    stats = {} 
+  } = checklist;
+  
+  // Truncate filename for display
+  const truncateFilename = (filename, maxLen = 24) => {
+    if (!filename || filename.length <= maxLen) return filename;
+    const ext = filename.split('.').pop();
+    const name = filename.slice(0, -(ext.length + 1));
+    const truncated = name.slice(0, maxLen - ext.length - 4) + '...';
+    return `${truncated}.${ext}`;
+  };
   
   const styles = {
     sidebar: {
@@ -511,7 +523,7 @@ function DocumentChecklistSidebar({ checklist, collapsed, onToggle }) {
       right: 0,
       top: 0,
       bottom: 0,
-      width: collapsed ? '40px' : '280px',
+      width: collapsed ? '40px' : '300px',
       background: 'white',
       borderLeft: '1px solid #e1e8ed',
       transition: 'width 0.3s ease',
@@ -543,50 +555,55 @@ function DocumentChecklistSidebar({ checklist, collapsed, onToggle }) {
     content: {
       flex: 1,
       overflow: 'auto',
-      padding: collapsed ? '0' : '1rem',
+      padding: collapsed ? '0' : '0.75rem',
     },
-    section: {
+    stepSection: {
       marginBottom: '1rem',
+      background: '#f8fafc',
+      borderRadius: '8px',
+      padding: '0.75rem',
+      border: '1px solid #e1e8ed',
     },
-    sectionTitle: {
+    stepHeader: {
       fontSize: '0.8rem',
       fontWeight: '600',
-      color: COLORS.textLight,
+      color: COLORS.text,
       marginBottom: '0.5rem',
-      textTransform: 'uppercase',
-      letterSpacing: '0.5px',
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
     },
-    docItem: (isUploaded) => ({
+    docItem: (isMatched) => ({
       display: 'flex',
       alignItems: 'center',
-      gap: '0.5rem',
-      padding: '0.4rem 0.5rem',
-      fontSize: '0.8rem',
-      background: isUploaded ? '#f0fdf4' : '#fef2f2',
+      gap: '0.4rem',
+      padding: '0.35rem 0.5rem',
+      fontSize: '0.75rem',
+      background: isMatched ? '#f0fdf4' : '#fef2f2',
       borderRadius: '4px',
       marginBottom: '0.25rem',
+      border: `1px solid ${isMatched ? '#bbf7d0' : '#fecaca'}`,
     }),
-    progressBar: {
-      height: '8px',
-      background: '#e1e8ed',
-      borderRadius: '4px',
-      overflow: 'hidden',
-      marginTop: '0.5rem',
-    },
-    progressFill: {
-      height: '100%',
-      background: COLORS.grassGreen,
-      borderRadius: '4px',
-      transition: 'width 0.3s ease',
-    },
+    badge: (color, bg) => ({
+      fontSize: '0.65rem',
+      padding: '0.1rem 0.3rem',
+      borderRadius: '3px',
+      background: bg,
+      color: color,
+      fontWeight: '500',
+    }),
+    emptyState: {
+      textAlign: 'center',
+      padding: '2rem 1rem',
+      color: COLORS.textLight,
+      fontSize: '0.85rem',
+    }
   };
   
   if (collapsed) {
     return (
       <div style={styles.sidebar}>
-        <button style={styles.toggleBtn} onClick={onToggle}>
-          ◀
-        </button>
+        <button style={styles.toggleBtn} onClick={onToggle}>◀</button>
         <div style={{ 
           writingMode: 'vertical-rl', 
           textOrientation: 'mixed',
@@ -595,94 +612,105 @@ function DocumentChecklistSidebar({ checklist, collapsed, onToggle }) {
           color: COLORS.textLight,
           fontWeight: '600'
         }}>
-          📋 Documents ({percentComplete}%)
+          📋 Docs ({stats.total_matched || 0}/{stats.total_matched + stats.total_missing || 0})
         </div>
       </div>
     );
   }
   
+  // If no Step_Documents sheet, show simple file list
+  if (!has_step_documents) {
+    return (
+      <div style={styles.sidebar}>
+        <button style={styles.toggleBtn} onClick={onToggle}>▶</button>
+        <div style={styles.header}>
+          <div style={{ fontWeight: '600', color: COLORS.text }}>📁 Project Files</div>
+          <div style={{ fontSize: '0.8rem', color: COLORS.textLight, marginTop: '0.25rem' }}>
+            {uploaded_files.length} file{uploaded_files.length !== 1 ? 's' : ''} uploaded
+          </div>
+        </div>
+        <div style={styles.content}>
+          {uploaded_files.length > 0 ? (
+            uploaded_files.map((file, i) => (
+              <div key={i} style={styles.docItem(true)} title={file}>
+                <span>📄</span>
+                <span style={{ flex: 1 }}>{truncateFilename(file)}</span>
+              </div>
+            ))
+          ) : (
+            <div style={styles.emptyState}>
+              <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📤</div>
+              <div>No files uploaded yet</div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+  
+  // Step-based document checklist
   return (
     <div style={styles.sidebar}>
-      <button style={styles.toggleBtn} onClick={onToggle}>
-        ▶
-      </button>
+      <button style={styles.toggleBtn} onClick={onToggle}>▶</button>
       
       <div style={styles.header}>
-        <div style={{ fontWeight: '600', color: COLORS.text, marginBottom: '0.25rem' }}>
-          📋 Document Checklist
+        <div style={{ fontWeight: '600', color: COLORS.text }}>📋 Document Checklist</div>
+        <div style={{ fontSize: '0.8rem', color: COLORS.textLight, marginTop: '0.25rem' }}>
+          {stats.total_matched || 0} of {(stats.total_matched || 0) + (stats.total_missing || 0)} matched
         </div>
-        <div style={{ fontSize: '0.85rem', color: COLORS.textLight }}>
-          {uploaded.length} of {totalNeeded} uploaded
-        </div>
-        <div style={styles.progressBar}>
-          <div style={{ ...styles.progressFill, width: `${percentComplete}%` }} />
-        </div>
+        {stats.required_missing > 0 && (
+          <div style={{ fontSize: '0.75rem', color: '#dc2626', marginTop: '0.25rem' }}>
+            ⚠️ {stats.required_missing} required missing
+          </div>
+        )}
       </div>
       
       <div style={styles.content}>
-        {/* Processing Jobs */}
-        {processing_jobs.length > 0 && (
-          <div style={styles.section}>
-            <div style={styles.sectionTitle}>⏳ Processing</div>
-            {processing_jobs.map((job, i) => (
-              <div key={i} style={{ 
-                ...styles.docItem(false), 
-                background: '#fef3c7',
-                animation: 'pulse 2s infinite'
-              }}>
-                <span>⏳</span>
-                <span style={{ flex: 1, fontSize: '0.75rem' }}>{job.filename}</span>
-                <span style={{ fontSize: '0.7rem', color: '#92400e' }}>{job.status}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        
-        {/* Uploaded */}
-        {uploaded.length > 0 && (
-          <div style={styles.section}>
-            <div style={styles.sectionTitle}>✅ Uploaded ({uploaded.length})</div>
-            {uploaded.map((doc, i) => (
-              <div key={i} style={styles.docItem(true)}>
+        {step_checklists.map((step, i) => (
+          <div key={i} style={styles.stepSection}>
+            <div style={styles.stepHeader}>
+              <span>Step {step.step_number}: {step.step_name?.slice(0, 20)}</span>
+              <span style={styles.badge(
+                step.stats.missing === 0 ? '#059669' : '#d97706',
+                step.stats.missing === 0 ? '#d1fae5' : '#fef3c7'
+              )}>
+                {step.stats.matched}/{step.stats.total}
+              </span>
+            </div>
+            
+            {/* Matched docs */}
+            {step.matched.map((doc, j) => (
+              <div key={`m-${j}`} style={styles.docItem(true)} title={doc.matched_file}>
                 <span>✅</span>
-                <span style={{ flex: 1, fontSize: '0.75rem' }}>{doc.doc_type}</span>
+                <span style={{ flex: 1 }}>{doc.keyword}</span>
+                {doc.required && <span style={styles.badge('#059669', '#d1fae5')}>REQ</span>}
+              </div>
+            ))}
+            
+            {/* Missing docs */}
+            {step.missing.map((doc, j) => (
+              <div key={`x-${j}`} style={styles.docItem(false)} title={doc.description}>
+                <span>❌</span>
+                <span style={{ flex: 1 }}>{doc.keyword}</span>
+                {doc.required && <span style={styles.badge('#dc2626', '#fee2e2')}>REQ</span>}
               </div>
             ))}
           </div>
-        )}
+        ))}
         
-        {/* Missing */}
-        {missing.length > 0 && (
-          <div style={styles.section}>
-            <div style={styles.sectionTitle}>❌ Missing ({missing.length})</div>
-            {missing.map((doc, i) => (
-              <div key={i} style={styles.docItem(false)}>
-                <span>❌</span>
-                <span style={{ flex: 1, fontSize: '0.75rem' }}>{doc.doc_type}</span>
-                <span style={{ 
-                  fontSize: '0.65rem', 
-                  background: '#fee2e2', 
-                  padding: '0.1rem 0.3rem', 
-                  borderRadius: '3px',
-                  color: '#991b1b'
-                }}>
-                  {doc.actions?.slice(0, 2).join(', ')}{doc.actions?.length > 2 ? '...' : ''}
-                </span>
-              </div>
-            ))}
+        {step_checklists.length === 0 && (
+          <div style={styles.emptyState}>
+            <div>No Step_Documents sheet found</div>
+            <div style={{ fontSize: '0.75rem', marginTop: '0.5rem' }}>
+              Add Step_Documents sheet to Year-End Excel
+            </div>
           </div>
         )}
       </div>
-      
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.6; }
-        }
-      `}</style>
     </div>
   );
 }
+
 
 // =============================================================================
 // TOOLTIP MODAL COMPONENT
@@ -1776,30 +1804,12 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       const res = await api.get(`/playbooks/year-end/document-checklist/${project.id}`);
       const data = res.data;
       
-      // Transform backend format to frontend format
-      const checklist = data.checklist || [];
-      
-      const uploaded = checklist
-        .filter(d => d.status === 'uploaded')
-        .map(d => ({ 
-          doc_type: d.document_name, 
-          actions: d.actions,
-          matched_file: d.matched_file 
-        }));
-      
-      const missing = checklist
-        .filter(d => d.status === 'missing')
-        .map(d => ({ 
-          doc_type: d.document_name, 
-          actions: d.actions,
-          required: d.required 
-        }));
-      
+      // New step-based format
       setDocChecklist({
-        uploaded,
-        missing,
-        processing_jobs: data.processing_jobs || [],
-        stats: data.stats
+        has_step_documents: data.has_step_documents || false,
+        uploaded_files: data.uploaded_files || [],
+        step_checklists: data.step_checklists || [],
+        stats: data.stats || {}
       });
     } catch (err) {
       console.error('Failed to load document checklist:', err);
@@ -2150,7 +2160,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   return (
     <div style={{ display: 'flex' }}>
       {/* Main Content */}
-      <div style={{ ...styles.container, marginRight: sidebarCollapsed ? '40px' : '300px', transition: 'margin-right 0.3s ease' }}>
+      <div style={{ ...styles.container, marginRight: sidebarCollapsed ? '40px' : '320px', transition: 'margin-right 0.3s ease' }}>
         {/* Header */}
         <div style={styles.header}>
           <div style={styles.titleSection}>
