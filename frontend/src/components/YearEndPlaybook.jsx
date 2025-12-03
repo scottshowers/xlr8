@@ -1774,7 +1774,33 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   const loadDocChecklist = async () => {
     try {
       const res = await api.get(`/playbooks/year-end/document-checklist/${project.id}`);
-      setDocChecklist(res.data);
+      const data = res.data;
+      
+      // Transform backend format to frontend format
+      const checklist = data.checklist || [];
+      
+      const uploaded = checklist
+        .filter(d => d.status === 'uploaded')
+        .map(d => ({ 
+          doc_type: d.document_name, 
+          actions: d.actions,
+          matched_file: d.matched_file 
+        }));
+      
+      const missing = checklist
+        .filter(d => d.status === 'missing')
+        .map(d => ({ 
+          doc_type: d.document_name, 
+          actions: d.actions,
+          required: d.required 
+        }));
+      
+      setDocChecklist({
+        uploaded,
+        missing,
+        processing_jobs: data.processing_jobs || [],
+        stats: data.stats
+      });
     } catch (err) {
       console.error('Failed to load document checklist:', err);
     }
