@@ -175,6 +175,41 @@ class DocumentModel:
             return None
     
     @staticmethod
+    def get_all(limit: int = 500) -> List[Dict[str, Any]]:
+        """Get all documents"""
+        supabase = get_supabase()
+        if not supabase:
+            return []
+        
+        try:
+            response = supabase.table('documents') \
+                .select('*') \
+                .order('created_at', desc=True) \
+                .limit(limit) \
+                .execute()
+            
+            return response.data if response.data else []
+        
+        except Exception as e:
+            print(f"Error getting all documents: {e}")
+            return []
+    
+    @staticmethod
+    def get_by_id(document_id: str) -> Optional[Dict[str, Any]]:
+        """Get document by ID"""
+        supabase = get_supabase()
+        if not supabase:
+            return None
+        
+        try:
+            response = supabase.table('documents').select('*').eq('id', document_id).execute()
+            return response.data[0] if response.data else None
+        
+        except Exception as e:
+            print(f"Error getting document: {e}")
+            return None
+    
+    @staticmethod
     def get_by_project(project_id: str, category: str = None) -> List[Dict[str, Any]]:
         """Get documents for a project"""
         supabase = get_supabase()
@@ -208,6 +243,28 @@ class DocumentModel:
         except Exception as e:
             print(f"Error deleting document: {e}")
             return False
+    
+    @staticmethod
+    def delete_all() -> int:
+        """Delete all documents - returns count deleted"""
+        supabase = get_supabase()
+        if not supabase:
+            return 0
+        
+        try:
+            # Get count first
+            count_response = supabase.table('documents').select('id', count='exact').execute()
+            count = count_response.count or 0
+            
+            # Delete all
+            if count > 0:
+                supabase.table('documents').delete().neq('id', '00000000-0000-0000-0000-000000000000').execute()
+            
+            return count
+        
+        except Exception as e:
+            print(f"Error deleting all documents: {e}")
+            return 0
 
 
 class ChatHistoryModel:
@@ -426,6 +483,43 @@ class ProcessingJobModel:
         except Exception as e:
             print(f"Error getting job: {e}")
             return None
+    
+    @staticmethod
+    def delete(job_id: str) -> bool:
+        """Delete a job"""
+        supabase = get_supabase()
+        if not supabase:
+            return False
+        
+        try:
+            supabase.table('processing_jobs').delete().eq('id', job_id).execute()
+            return True
+        
+        except Exception as e:
+            print(f"Error deleting job: {e}")
+            return False
+    
+    @staticmethod
+    def delete_all() -> int:
+        """Delete all jobs - returns count deleted"""
+        supabase = get_supabase()
+        if not supabase:
+            return 0
+        
+        try:
+            # Get count first
+            count_response = supabase.table('processing_jobs').select('id', count='exact').execute()
+            count = count_response.count or 0
+            
+            # Delete all
+            if count > 0:
+                supabase.table('processing_jobs').delete().neq('id', '00000000-0000-0000-0000-000000000000').execute()
+            
+            return count
+        
+        except Exception as e:
+            print(f"Error deleting all jobs: {e}")
+            return 0
 
 
 # Convenience functions
