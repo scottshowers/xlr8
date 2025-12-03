@@ -418,6 +418,19 @@ def store_to_duckdb(rows: List[Dict], project: str, filename: str, project_id: s
         import duckdb
         from datetime import datetime
         
+        # Use structured_data_handler's connection for consistency
+        try:
+            from utils.structured_data_handler import get_structured_handler
+            handler = get_structured_handler()
+            conn = handler.conn
+            db_path = "via structured_data_handler"
+        except Exception as handler_e:
+            logger.warning(f"[DUCKDB] Could not get structured_handler: {handler_e}, using direct connection")
+            db_path = os.getenv('DUCKDB_PATH', '/data/xlr8.duckdb')
+            conn = duckdb.connect(db_path)
+        
+        logger.warning(f"[DUCKDB] Using database: {db_path}")
+        
         df = pd.DataFrame(rows)
         
         if df.empty:
@@ -426,9 +439,6 @@ def store_to_duckdb(rows: List[Dict], project: str, filename: str, project_id: s
         clean_project = re.sub(r'[^a-zA-Z0-9_]', '_', project)
         clean_filename = re.sub(r'[^a-zA-Z0-9_]', '_', filename.rsplit('.', 1)[0])
         table_name = f"{clean_project}__{clean_filename}"
-        
-        db_path = os.getenv('DUCKDB_PATH', '/data/xlr8.duckdb')
-        conn = duckdb.connect(db_path)
         
         # Create/replace data table
         conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
@@ -462,7 +472,7 @@ def store_to_duckdb(rows: List[Dict], project: str, filename: str, project_id: s
         except Exception as e:
             logger.error(f"[DUCKDB] Could not store metadata: {e}")
         
-        conn.close()
+        # Don't close connection - it's shared via structured_data_handler
         
         logger.warning(f"[DUCKDB] Stored {row_count} rows to table '{table_name}'")
         
