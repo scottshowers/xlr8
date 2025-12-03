@@ -1428,8 +1428,6 @@ async def search_duckdb_for_action(
     
     Returns list of formatted content strings for AI analysis.
     """
-    import duckdb
-    
     DUCKDB_PATH = "/data/structured_data.duckdb"
     
     if not os.path.exists(DUCKDB_PATH):
@@ -1439,7 +1437,10 @@ async def search_duckdb_for_action(
     content_chunks = []
     
     try:
-        conn = duckdb.connect(DUCKDB_PATH, read_only=True)
+        # Use existing handler connection to avoid conflicts
+        from utils.structured_data_handler import get_structured_handler
+        handler = get_structured_handler()
+        conn = handler.conn
         
         # Build search keywords from action
         keywords = []
@@ -1601,7 +1602,7 @@ async def search_duckdb_for_action(
                 logger.warning(f"[DUCKDB-SCAN] Failed to query {table_name}: {e}")
                 continue
         
-        conn.close()
+        # Don't close - using shared handler connection
         
     except Exception as e:
         logger.warning(f"[DUCKDB-SCAN] DuckDB search failed: {e}")
