@@ -416,6 +416,7 @@ def store_to_duckdb(rows: List[Dict], project: str, filename: str, project_id: s
     
     try:
         import duckdb
+        from datetime import datetime
         
         df = pd.DataFrame(rows)
         
@@ -435,7 +436,7 @@ def store_to_duckdb(rows: List[Dict], project: str, filename: str, project_id: s
         
         row_count = conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
         
-        # Store metadata - FIXED: Use DuckDB upsert syntax
+        # Store metadata
         try:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS _pdf_tables (
@@ -445,21 +446,15 @@ def store_to_duckdb(rows: List[Dict], project: str, filename: str, project_id: s
                     project_id VARCHAR,
                     row_count INTEGER,
                     columns VARCHAR,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP DEFAULT now()
                 )
             """)
             
-            # DuckDB upsert syntax (not SQLite's INSERT OR REPLACE)
+            # Delete existing entry if any, then insert fresh
+            conn.execute("DELETE FROM _pdf_tables WHERE table_name = ?", [table_name])
             conn.execute("""
-                INSERT INTO _pdf_tables (table_name, source_file, project, project_id, row_count, columns, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT (table_name) DO UPDATE SET
-                    source_file = EXCLUDED.source_file,
-                    project = EXCLUDED.project,
-                    project_id = EXCLUDED.project_id,
-                    row_count = EXCLUDED.row_count,
-                    columns = EXCLUDED.columns,
-                    created_at = CURRENT_TIMESTAMP
+                INSERT INTO _pdf_tables (table_name, source_file, project, project_id, row_count, columns)
+                VALUES (?, ?, ?, ?, ?, ?)
             """, [table_name, filename, project, project_id, row_count, json.dumps(list(df.columns))])
             
             logger.warning(f"[DUCKDB] Stored metadata for '{table_name}' in _pdf_tables")
