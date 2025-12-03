@@ -7,9 +7,11 @@
  * - Tracks status (not started, in progress, complete, n/a)
  * - Consultant can add notes, override status
  * - Export current state anytime
+ * 
+ * UPDATED: Non-blocking scan-all with live progress (no more 20-min freezes!)
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import api from '../services/api';
 
 // Brand Colors
@@ -53,6 +55,257 @@ const ACTION_DEPENDENCIES = {
 
 // Get parent actions for an action
 const getParentActions = (actionId) => ACTION_DEPENDENCIES[actionId] || [];
+
+// =============================================================================
+// SCAN PROGRESS COMPONENT (Non-blocking with live updates)
+// =============================================================================
+const SCAN_STATUS_CONFIG = {
+  pending: { color: '#6b7280', bg: '#f3f4f6', icon: '⏳', label: 'Waiting...' },
+  running: { color: '#3b82f6', bg: '#dbeafe', icon: '🔄', label: 'Scanning...' },
+  completed: { color: '#10b981', bg: '#d1fae5', icon: '✅', label: 'Complete' },
+  failed: { color: '#ef4444', bg: '#fee2e2', icon: '❌', label: 'Failed' },
+  timeout: { color: '#f59e0b', bg: '#fef3c7', icon: '⏰', label: 'Timed Out' },
+  cancelled: { color: '#6b7280', bg: '#f3f4f6', icon: '🚫', label: 'Cancelled' },
+};
+
+function ScanAllProgress({ projectId, onComplete, onError, buttonText = "🔍 Analyze All", disabled = false }) {
+  const [jobId, setJobId] = useState(null);
+  const [status, setStatus] = useState(null);
+  const [isStarting, setIsStarting] = useState(false);
+  const pollIntervalRef = useRef(null);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+    };
+  }, []);
+
+  // Start the scan
+  const startScan = async () => {
+    if (!projectId) {
+      onError?.('No project selected');
+      return;
+    }
+
+    // Confirm before starting
+    if (!window.confirm('Analyze all documents for this playbook? This runs in the background - you can continue working.')) {
+      return;
+    }
+
+    setIsStarting(true);
+    setStatus(null);
+
+    try {
+      const response = await api.post(`/playbooks/year-end/scan-all/${projectId}`);
+      const data = response.data;
+      
+      if (!data.job_id) {
+        // No actions to scan or immediate response
+        setStatus({
+          status: 'completed',
+          message: data.message || 'No actions to scan',
+          progress_percent: 100,
+        });
+        onComplete?.([]);
+        setIsStarting(false);
+        return;
+      }
+
+      setJobId(data.job_id);
+
+      // Start polling
+      startPolling(data.job_id);
+
+    } catch (error) {
+      console.error('[SCAN] Start error:', error);
+      onError?.(error.message);
+      setStatus({
+        status: 'failed',
+        message: error.message || 'Failed to start scan',
+        progress_percent: 0,
+      });
+    } finally {
+      setIsStarting(false);
+    }
+  };
+
+  // Poll for status
+  const startPolling = useCallback((jid) => {
+    // Clear any existing interval
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+    }
+
+    const poll = async () => {
+      try {
+        const response = await api.get(`/playbooks/year-end/scan-all/status/${jid}`);
+        const data = response.data;
+        setStatus(data);
+
+        // Check if done
+        if (['completed', 'failed', 'timeout', 'cancelled'].includes(data.status)) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+
+          if (data.status === 'completed') {
+            onComplete?.(data.results || []);
+          } else if (data.status === 'failed') {
+            onError?.(data.message);
+          }
+        }
+      } catch (error) {
+        console.error('[SCAN] Poll error:', error);
+        // Don't stop polling on transient errors
+      }
+    };
+
+    // Poll immediately, then every 1.5 seconds
+    poll();
+    pollIntervalRef.current = setInterval(poll, 1500);
+  }, [onComplete, onError]);
+
+  // Cancel the scan
+  const cancelScan = async () => {
+    if (!jobId) return;
+
+    try {
+      await api.post(`/playbooks/year-end/scan-all/cancel/${jobId}`);
+    } catch (error) {
+      console.error('[SCAN] Cancel error:', error);
+    }
+  };
+
+  // Reset to start a new scan
+  const reset = () => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+    setJobId(null);
+    setStatus(null);
+  };
+
+  // Render
+  const isRunning = status?.status === 'running';
+  const isDone = ['completed', 'failed', 'timeout', 'cancelled'].includes(status?.status);
+  const config = SCAN_STATUS_CONFIG[status?.status] || SCAN_STATUS_CONFIG.pending;
+
+  // Show button when no active job
+  if (!jobId && !status) {
+    return (
+      <button 
+        onClick={startScan}
+        disabled={isStarting || !projectId || disabled}
+        style={{
+          padding: '0.5rem 1rem',
+          background: (isStarting || !projectId || disabled) ? '#9ca3af' : '#3b82f6',
+          border: 'none',
+          borderRadius: '8px',
+          color: 'white',
+          fontWeight: '600',
+          cursor: (isStarting || !projectId || disabled) ? 'not-allowed' : 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+        }}
+        title="Analyze all uploaded documents for the entire playbook"
+      >
+        {isStarting ? '⏳ Starting...' : buttonText}
+      </button>
+    );
+  }
+
+  // Show progress when running or done
+  return (
+    <div style={{ 
+      padding: '0.75rem', 
+      borderRadius: '8px', 
+      backgroundColor: config.bg, 
+      border: `2px solid ${config.color}`,
+      minWidth: '280px'
+    }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+        <span style={{ fontSize: '1.1rem' }}>{config.icon}</span>
+        <span style={{ fontWeight: 600, color: config.color, fontSize: '0.9rem' }}>{config.label}</span>
+        {isRunning && (
+          <button 
+            onClick={cancelScan} 
+            style={{
+              marginLeft: 'auto',
+              padding: '0.2rem 0.5rem',
+              backgroundColor: '#fee2e2',
+              color: '#ef4444',
+              border: '1px solid #ef4444',
+              borderRadius: '4px',
+              fontSize: '0.75rem',
+              cursor: 'pointer',
+            }}
+          >
+            Cancel
+          </button>
+        )}
+      </div>
+
+      {/* Progress Bar */}
+      <div style={{ height: '6px', backgroundColor: '#e5e7eb', borderRadius: '3px', overflow: 'hidden', marginBottom: '0.5rem' }}>
+        <div 
+          style={{
+            height: '100%',
+            width: `${status?.progress_percent || 0}%`,
+            backgroundColor: config.color,
+            transition: 'width 0.3s ease',
+            borderRadius: '3px',
+          }}
+        />
+      </div>
+
+      {/* Status Text */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#374151', marginBottom: '0.25rem' }}>
+        <span>{status?.message}</span>
+        <span style={{ fontWeight: 600 }}>{status?.progress_percent || 0}%</span>
+      </div>
+
+      {/* Current Action */}
+      {isRunning && status?.current_action && (
+        <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>
+          Currently: <strong>{status.current_action}</strong>
+        </div>
+      )}
+
+      {/* Stats */}
+      {status?.total_actions > 0 && (
+        <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.75rem', color: '#6b7280', flexWrap: 'wrap' }}>
+          <span>📋 {status.completed_actions || 0}/{status.total_actions}</span>
+          {status.successful > 0 && <span style={{ color: '#10b981' }}>✓ {status.successful} found</span>}
+          {status.failed > 0 && <span style={{ color: '#ef4444' }}>✗ {status.failed} errors</span>}
+        </div>
+      )}
+
+      {/* Done Actions */}
+      {isDone && (
+        <div style={{ marginTop: '0.5rem', display: 'flex', justifyContent: 'center' }}>
+          <button 
+            onClick={reset} 
+            style={{
+              padding: '0.35rem 0.75rem',
+              backgroundColor: 'white',
+              border: '1px solid #d1d5db',
+              borderRadius: '4px',
+              fontSize: '0.8rem',
+              cursor: 'pointer',
+            }}
+          >
+            🔄 Scan Again
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // =============================================================================
 // AI SUMMARY DASHBOARD COMPONENT
@@ -248,195 +501,192 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
 function DocumentChecklistSidebar({ checklist, collapsed, onToggle }) {
   if (!checklist) return null;
   
-  const { checklist: docs, stats, processing_jobs } = checklist;
+  const { uploaded = [], missing = [], processing_jobs = [] } = checklist;
+  const totalNeeded = uploaded.length + missing.length;
+  const percentComplete = totalNeeded > 0 ? Math.round((uploaded.length / totalNeeded) * 100) : 0;
   
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case 'uploaded': return '✅';
-      case 'processing': return '⏳';
-      case 'missing': return '❌';
-      default: return '❓';
-    }
-  };
-  
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'uploaded': return '#059669';
-      case 'processing': return '#d97706';
-      case 'missing': return '#dc2626';
-      default: return '#6b7280';
-    }
+  const styles = {
+    sidebar: {
+      position: 'fixed',
+      right: 0,
+      top: 0,
+      bottom: 0,
+      width: collapsed ? '40px' : '280px',
+      background: 'white',
+      borderLeft: '1px solid #e1e8ed',
+      transition: 'width 0.3s ease',
+      zIndex: 100,
+      display: 'flex',
+      flexDirection: 'column',
+    },
+    toggleBtn: {
+      position: 'absolute',
+      left: '-16px',
+      top: '50%',
+      transform: 'translateY(-50%)',
+      width: '32px',
+      height: '32px',
+      background: 'white',
+      border: '1px solid #e1e8ed',
+      borderRadius: '50%',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      boxShadow: '-2px 0 4px rgba(0,0,0,0.1)',
+    },
+    header: {
+      padding: '1rem',
+      borderBottom: '1px solid #e1e8ed',
+      background: '#f8fafc',
+    },
+    content: {
+      flex: 1,
+      overflow: 'auto',
+      padding: collapsed ? '0' : '1rem',
+    },
+    section: {
+      marginBottom: '1rem',
+    },
+    sectionTitle: {
+      fontSize: '0.8rem',
+      fontWeight: '600',
+      color: COLORS.textLight,
+      marginBottom: '0.5rem',
+      textTransform: 'uppercase',
+      letterSpacing: '0.5px',
+    },
+    docItem: (isUploaded) => ({
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.5rem',
+      padding: '0.4rem 0.5rem',
+      fontSize: '0.8rem',
+      background: isUploaded ? '#f0fdf4' : '#fef2f2',
+      borderRadius: '4px',
+      marginBottom: '0.25rem',
+    }),
+    progressBar: {
+      height: '8px',
+      background: '#e1e8ed',
+      borderRadius: '4px',
+      overflow: 'hidden',
+      marginTop: '0.5rem',
+    },
+    progressFill: {
+      height: '100%',
+      background: COLORS.grassGreen,
+      borderRadius: '4px',
+      transition: 'width 0.3s ease',
+    },
   };
   
   if (collapsed) {
     return (
-      <div 
-        onClick={onToggle}
-        style={{
-          position: 'fixed',
-          right: 0,
-          top: '50%',
-          transform: 'translateY(-50%)',
-          background: stats?.required_complete ? '#d1fae5' : '#fef3c7',
-          padding: '1rem 0.5rem',
-          borderRadius: '8px 0 0 8px',
-          cursor: 'pointer',
-          writingMode: 'vertical-rl',
+      <div style={styles.sidebar}>
+        <button style={styles.toggleBtn} onClick={onToggle}>
+          ◀
+        </button>
+        <div style={{ 
+          writingMode: 'vertical-rl', 
           textOrientation: 'mixed',
-          fontWeight: '600',
+          padding: '1rem 0.5rem',
           fontSize: '0.85rem',
-          boxShadow: '-2px 0 8px rgba(0,0,0,0.1)'
-        }}
-      >
-        📄 Documents ({stats?.total_uploaded || 0}/{stats?.total_documents || 0})
+          color: COLORS.textLight,
+          fontWeight: '600'
+        }}>
+          📋 Documents ({percentComplete}%)
+        </div>
       </div>
     );
   }
   
   return (
-    <div style={{
-      position: 'fixed',
-      right: 0,
-      top: '100px',
-      width: '280px',
-      maxHeight: 'calc(100vh - 150px)',
-      background: 'white',
-      borderRadius: '12px 0 0 12px',
-      boxShadow: '-4px 0 16px rgba(0,0,0,0.1)',
-      overflow: 'hidden',
-      zIndex: 100
-    }}>
-      {/* Header */}
-      <div style={{
-        padding: '1rem',
-        background: stats?.required_complete ? '#d1fae5' : '#fef3c7',
-        borderBottom: '1px solid #e1e8ed',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center'
-      }}>
-        <div>
-          <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>📄 Document Checklist</div>
-          <div style={{ fontSize: '0.75rem', color: COLORS.textLight }}>
-            {stats?.total_uploaded || 0} of {stats?.total_documents || 0} uploaded
-          </div>
-        </div>
-        <button 
-          onClick={onToggle}
-          style={{
-            background: 'none',
-            border: 'none',
-            fontSize: '1.2rem',
-            cursor: 'pointer'
-          }}
-        >
-          ✕
-        </button>
-      </div>
+    <div style={styles.sidebar}>
+      <button style={styles.toggleBtn} onClick={onToggle}>
+        ▶
+      </button>
       
-      {/* Progress bar */}
-      <div style={{ padding: '0.5rem 1rem', background: '#f9fafb' }}>
-        <div style={{
-          height: '8px',
-          background: '#e1e8ed',
-          borderRadius: '4px',
-          overflow: 'hidden'
-        }}>
-          <div style={{
-            height: '100%',
-            width: `${((stats?.total_uploaded || 0) / (stats?.total_documents || 1)) * 100}%`,
-            background: stats?.required_complete ? COLORS.grassGreen : '#d97706',
-            borderRadius: '4px',
-            transition: 'width 0.3s ease'
-          }} />
+      <div style={styles.header}>
+        <div style={{ fontWeight: '600', color: COLORS.text, marginBottom: '0.25rem' }}>
+          📋 Document Checklist
+        </div>
+        <div style={{ fontSize: '0.85rem', color: COLORS.textLight }}>
+          {uploaded.length} of {totalNeeded} uploaded
+        </div>
+        <div style={styles.progressBar}>
+          <div style={{ ...styles.progressFill, width: `${percentComplete}%` }} />
         </div>
       </div>
       
-      {/* Processing jobs */}
-      {processing_jobs?.length > 0 && (
-        <div style={{ padding: '0.5rem 1rem', background: '#fffbeb', borderBottom: '1px solid #fcd34d' }}>
-          <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#d97706', marginBottom: '0.25rem' }}>
-            ⏳ Processing:
-          </div>
-          {processing_jobs.map((job, i) => (
-            <div key={i} style={{ fontSize: '0.75rem', marginBottom: '0.25rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>{job.filename?.slice(0, 25)}{job.filename?.length > 25 ? '...' : ''}</span>
-                <span>{job.progress || 0}%</span>
-              </div>
-              <div style={{
-                height: '4px',
-                background: '#fcd34d',
-                borderRadius: '2px',
-                overflow: 'hidden'
+      <div style={styles.content}>
+        {/* Processing Jobs */}
+        {processing_jobs.length > 0 && (
+          <div style={styles.section}>
+            <div style={styles.sectionTitle}>⏳ Processing</div>
+            {processing_jobs.map((job, i) => (
+              <div key={i} style={{ 
+                ...styles.docItem(false), 
+                background: '#fef3c7',
+                animation: 'pulse 2s infinite'
               }}>
-                <div style={{
-                  height: '100%',
-                  width: `${job.progress || 0}%`,
-                  background: '#d97706',
-                  transition: 'width 0.3s ease'
-                }} />
+                <span>⏳</span>
+                <span style={{ flex: 1, fontSize: '0.75rem' }}>{job.filename}</span>
+                <span style={{ fontSize: '0.7rem', color: '#92400e' }}>{job.status}</span>
               </div>
-            </div>
-          ))}
-        </div>
-      )}
-      
-      {/* Document list */}
-      <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 350px)' }}>
-        {docs?.map((doc, i) => (
-          <div 
-            key={i}
-            style={{
-              padding: '0.75rem 1rem',
-              borderBottom: '1px solid #f3f4f6',
-              display: 'flex',
-              gap: '0.5rem',
-              alignItems: 'flex-start'
-            }}
-          >
-            <span style={{ fontSize: '1rem' }}>{getStatusIcon(doc.status)}</span>
-            <div style={{ flex: 1 }}>
-              <div style={{ 
-                fontWeight: doc.required ? '600' : '400',
-                fontSize: '0.8rem',
-                color: getStatusColor(doc.status)
-              }}>
-                {doc.document_name}
-                {doc.required && <span style={{ color: '#dc2626' }}> *</span>}
-              </div>
-              <div style={{ fontSize: '0.7rem', color: COLORS.textLight }}>
-                {doc.status === 'uploaded' && doc.matched_file 
-                  ? `✓ ${doc.matched_file.slice(0, 30)}${doc.matched_file.length > 30 ? '...' : ''}`
-                  : doc.status === 'processing'
-                  ? 'Processing...'
-                  : `Actions: ${doc.actions?.join(', ')}`
-                }
-              </div>
-            </div>
+            ))}
           </div>
-        ))}
+        )}
+        
+        {/* Uploaded */}
+        {uploaded.length > 0 && (
+          <div style={styles.section}>
+            <div style={styles.sectionTitle}>✅ Uploaded ({uploaded.length})</div>
+            {uploaded.map((doc, i) => (
+              <div key={i} style={styles.docItem(true)}>
+                <span>✅</span>
+                <span style={{ flex: 1, fontSize: '0.75rem' }}>{doc.doc_type}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        
+        {/* Missing */}
+        {missing.length > 0 && (
+          <div style={styles.section}>
+            <div style={styles.sectionTitle}>❌ Missing ({missing.length})</div>
+            {missing.map((doc, i) => (
+              <div key={i} style={styles.docItem(false)}>
+                <span>❌</span>
+                <span style={{ flex: 1, fontSize: '0.75rem' }}>{doc.doc_type}</span>
+                <span style={{ 
+                  fontSize: '0.65rem', 
+                  background: '#fee2e2', 
+                  padding: '0.1rem 0.3rem', 
+                  borderRadius: '3px',
+                  color: '#991b1b'
+                }}>
+                  {doc.actions?.slice(0, 2).join(', ')}{doc.actions?.length > 2 ? '...' : ''}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       
-      {/* Required indicator */}
-      <div style={{ 
-        padding: '0.5rem 1rem', 
-        background: '#f9fafb', 
-        borderTop: '1px solid #e1e8ed',
-        fontSize: '0.7rem',
-        color: COLORS.textLight 
-      }}>
-        <span style={{ color: '#dc2626' }}>*</span> = Required document
-      </div>
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.6; }
+        }
+      `}</style>
     </div>
   );
 }
 
 // =============================================================================
-// TOOLTIP COMPONENTS
+// TOOLTIP MODAL COMPONENT
 // =============================================================================
-
-// Tooltip Modal for Adding/Editing
 function TooltipModal({ isOpen, onClose, onSave, actionId, existingTooltip }) {
   const [tooltipType, setTooltipType] = useState(existingTooltip?.tooltip_type || 'hint');
   const [title, setTitle] = useState(existingTooltip?.title || '');
@@ -458,18 +708,22 @@ function TooltipModal({ isOpen, onClose, onSave, actionId, existingTooltip }) {
   if (!isOpen) return null;
 
   const handleSave = async () => {
-    if (!content.trim()) return;
+    if (!content.trim()) {
+      alert('Content is required');
+      return;
+    }
     setSaving(true);
     try {
       await onSave({
+        playbook_id: 'year-end-2025',
         action_id: actionId,
         tooltip_type: tooltipType,
         title: title.trim() || null,
-        content: content.trim()
+        content: content.trim(),
       });
       onClose();
-    } catch (e) {
-      console.error('Failed to save tooltip:', e);
+    } catch (err) {
+      alert('Failed to save note');
     } finally {
       setSaving(false);
     }
@@ -478,12 +732,15 @@ function TooltipModal({ isOpen, onClose, onSave, actionId, existingTooltip }) {
   return (
     <div style={{
       position: 'fixed',
-      top: 0, left: 0, right: 0, bottom: 0,
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
       background: 'rgba(0,0,0,0.5)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      zIndex: 1000
+      zIndex: 1000,
     }}>
       <div style={{
         background: 'white',
@@ -491,46 +748,43 @@ function TooltipModal({ isOpen, onClose, onSave, actionId, existingTooltip }) {
         padding: '1.5rem',
         width: '90%',
         maxWidth: '500px',
-        maxHeight: '90vh',
-        overflow: 'auto'
+        boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
       }}>
         <h3 style={{ margin: '0 0 1rem', color: COLORS.text }}>
-          {existingTooltip ? 'Edit' : 'Add'} Note for {actionId}
+          {existingTooltip ? 'Edit Note' : 'Add Note'} for {actionId}
         </h3>
-
+        
         {/* Type Selection */}
         <div style={{ marginBottom: '1rem' }}>
-          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', fontSize: '0.9rem' }}>
-            Type
-          </label>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <label style={{ fontSize: '0.85rem', fontWeight: '600', color: COLORS.textLight }}>Type</label>
+          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
             {Object.entries(TOOLTIP_TYPES).map(([key, config]) => (
               <button
                 key={key}
                 onClick={() => setTooltipType(key)}
                 style={{
-                  padding: '0.5rem 1rem',
-                  border: tooltipType === key ? `2px solid ${config.color}` : '2px solid #e1e8ed',
+                  flex: 1,
+                  padding: '0.5rem',
+                  border: `2px solid ${tooltipType === key ? config.color : '#e1e8ed'}`,
                   borderRadius: '8px',
                   background: tooltipType === key ? config.bg : 'white',
                   cursor: 'pointer',
                   display: 'flex',
+                  flexDirection: 'column',
                   alignItems: 'center',
-                  gap: '0.4rem'
+                  gap: '0.25rem',
                 }}
               >
-                <span>{config.icon}</span>
-                <span>{config.label}</span>
+                <span style={{ fontSize: '1.25rem' }}>{config.icon}</span>
+                <span style={{ fontSize: '0.75rem', fontWeight: '600' }}>{config.label}</span>
               </button>
             ))}
           </div>
         </div>
-
-        {/* Title (optional) */}
+        
+        {/* Title */}
         <div style={{ marginBottom: '1rem' }}>
-          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', fontSize: '0.9rem' }}>
-            Title (optional)
-          </label>
+          <label style={{ fontSize: '0.85rem', fontWeight: '600', color: COLORS.textLight }}>Title (optional)</label>
           <input
             type="text"
             value={title}
@@ -541,34 +795,35 @@ function TooltipModal({ isOpen, onClose, onSave, actionId, existingTooltip }) {
               padding: '0.5rem',
               border: '1px solid #e1e8ed',
               borderRadius: '6px',
-              fontSize: '0.9rem'
+              marginTop: '0.5rem',
+              fontSize: '0.9rem',
             }}
           />
         </div>
-
+        
         {/* Content */}
         <div style={{ marginBottom: '1rem' }}>
-          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', fontSize: '0.9rem' }}>
-            Content *
-          </label>
+          <label style={{ fontSize: '0.85rem', fontWeight: '600', color: COLORS.textLight }}>Content *</label>
           <textarea
             value={content}
             onChange={(e) => setContent(e.target.value)}
-            placeholder="Enter your note, best practice, or guidance..."
+            placeholder="Enter note content..."
             rows={4}
             style={{
               width: '100%',
               padding: '0.5rem',
               border: '1px solid #e1e8ed',
               borderRadius: '6px',
+              marginTop: '0.5rem',
               fontSize: '0.9rem',
-              resize: 'vertical'
+              resize: 'vertical',
+              fontFamily: 'inherit',
             }}
           />
         </div>
-
+        
         {/* Buttons */}
-        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
           <button
             onClick={onClose}
             style={{
@@ -576,21 +831,23 @@ function TooltipModal({ isOpen, onClose, onSave, actionId, existingTooltip }) {
               border: '1px solid #e1e8ed',
               borderRadius: '6px',
               background: 'white',
-              cursor: 'pointer'
+              cursor: 'pointer',
             }}
           >
             Cancel
           </button>
           <button
             onClick={handleSave}
-            disabled={!content.trim() || saving}
+            disabled={saving}
             style={{
               padding: '0.5rem 1rem',
               border: 'none',
               borderRadius: '6px',
-              background: content.trim() ? COLORS.grassGreen : '#ccc',
+              background: COLORS.grassGreen,
               color: 'white',
-              cursor: content.trim() ? 'pointer' : 'not-allowed'
+              fontWeight: '600',
+              cursor: saving ? 'not-allowed' : 'pointer',
+              opacity: saving ? 0.7 : 1,
             }}
           >
             {saving ? 'Saving...' : 'Save'}
@@ -601,67 +858,37 @@ function TooltipModal({ isOpen, onClose, onSave, actionId, existingTooltip }) {
   );
 }
 
-// Tooltip Display - Shows icons and handles hover/click
+// =============================================================================
+// TOOLTIP DISPLAY COMPONENT
+// =============================================================================
 function TooltipDisplay({ tooltips, onEdit, onDelete, isAdmin }) {
   const [activeTooltip, setActiveTooltip] = useState(null);
-  const [hoveredIdx, setHoveredIdx] = useState(null);
-  const [popoverPosition, setPopoverPosition] = useState({ top: 0, left: 0 });
-  const iconRefs = React.useRef({});
-
+  
   if (!tooltips || tooltips.length === 0) return null;
-
-  const handleIconClick = (e, idx) => {
-    e.stopPropagation();
-    if (activeTooltip === idx) {
-      setActiveTooltip(null);
-    } else {
-      // Calculate position relative to viewport
-      const rect = iconRefs.current[idx]?.getBoundingClientRect();
-      if (rect) {
-        setPopoverPosition({
-          top: rect.bottom + 8,
-          left: Math.max(20, Math.min(rect.left - 150, window.innerWidth - 370))
-        });
-      }
-      setActiveTooltip(idx);
-    }
-  };
-
-  // Close on click outside
-  React.useEffect(() => {
-    const handleClickOutside = () => setActiveTooltip(null);
-    if (activeTooltip !== null) {
-      document.addEventListener('click', handleClickOutside);
-      return () => document.removeEventListener('click', handleClickOutside);
-    }
-  }, [activeTooltip]);
-
+  
   return (
     <>
-      <div style={{ display: 'flex', gap: '0.4rem', marginLeft: '0.5rem' }}>
-        {tooltips.map((tip, idx) => {
+      {/* Icons */}
+      <div style={{ display: 'flex', gap: '0.3rem', marginLeft: '0.5rem' }}>
+        {tooltips.map((tip, i) => {
           const config = TOOLTIP_TYPES[tip.tooltip_type] || TOOLTIP_TYPES.hint;
-          const isActive = activeTooltip === idx;
-          const isHovered = hoveredIdx === idx;
-
+          const isActive = activeTooltip === i;
           return (
             <span
-              key={tip.id || idx}
-              ref={el => iconRefs.current[idx] = el}
-              onClick={(e) => handleIconClick(e, idx)}
-              onMouseEnter={() => setHoveredIdx(idx)}
-              onMouseLeave={() => setHoveredIdx(null)}
-              style={{ 
-                cursor: 'pointer', 
-                fontSize: '1.1rem',
-                transition: 'all 0.2s ease',
-                transform: isHovered ? 'scale(1.3)' : 'scale(1)',
-                filter: isHovered 
-                  ? `drop-shadow(0 0 6px ${config.color})`
-                  : 'drop-shadow(0 1px 2px rgba(0,0,0,0.2))',
-                animation: tip.is_unread ? 'pulse 2s infinite' : 'none',
+              key={tip.id || i}
+              onClick={(e) => {
+                e.stopPropagation();
+                setActiveTooltip(isActive ? null : i);
               }}
-              title={`${config.label}: Click to view`}
+              style={{
+                cursor: 'pointer',
+                fontSize: '1.1rem',
+                transform: isActive ? 'scale(1.3)' : 'scale(1)',
+                transition: 'transform 0.2s, filter 0.2s',
+                filter: isActive ? `drop-shadow(0 0 4px ${config.color})` : 'none',
+                animation: !isActive ? 'pulse 2s infinite' : 'none',
+              }}
+              title={config.label}
             >
               {config.icon}
             </span>
@@ -669,23 +896,31 @@ function TooltipDisplay({ tooltips, onEdit, onDelete, isAdmin }) {
         })}
       </div>
 
-      {/* Popover Portal - Fixed position, won't clip */}
+      {/* Popup */}
       {activeTooltip !== null && tooltips[activeTooltip] && (
         <div
           onClick={(e) => e.stopPropagation()}
           style={{
             position: 'fixed',
-            top: popoverPosition.top,
-            left: popoverPosition.left,
-            background: 'white',
-            border: `2px solid ${(TOOLTIP_TYPES[tooltips[activeTooltip].tooltip_type] || TOOLTIP_TYPES.hint).color}`,
-            borderRadius: '10px',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            zIndex: 1001,
+            minWidth: '280px',
+            maxWidth: '400px',
             padding: '1rem',
-            width: '340px',
-            maxHeight: '400px',
-            overflowY: 'auto',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
-            zIndex: 9999
+            borderRadius: '10px',
+            boxShadow: '0 10px 40px rgba(0,0,0,0.25)',
+            background: (() => {
+              const tip = tooltips[activeTooltip];
+              const config = TOOLTIP_TYPES[tip.tooltip_type] || TOOLTIP_TYPES.hint;
+              return config.bg;
+            })(),
+            border: (() => {
+              const tip = tooltips[activeTooltip];
+              const config = TOOLTIP_TYPES[tip.tooltip_type] || TOOLTIP_TYPES.hint;
+              return `2px solid ${config.color}`;
+            })(),
           }}
         >
           {(() => {
@@ -898,17 +1133,15 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
               return;
             }
           } catch (err) {
-            console.error('Job poll failed:', err);
+            console.error('Polling failed:', err);
           }
         }
         
         if (allComplete) {
           setUploadStatus('scanning');
           await handleScan();
-          setUploadStatus('success');
+          setUploadStatus('complete');
           setTimeout(() => setUploadStatus(null), 2000);
-        } else {
-          setUploadStatus(null);
         }
       };
       
@@ -916,70 +1149,72 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
       
     } catch (err) {
       console.error('Upload failed:', err);
+      setUploading(false);
       setUploadStatus('error');
       setTimeout(() => setUploadStatus(null), 3000);
-      setUploading(false);
-    } finally {
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
     }
+    
+    // Reset input
+    e.target.value = '';
   };
 
   const handleStatusChange = async (newStatus) => {
     setLocalStatus(newStatus);
     try {
-      await api.post(`/playbooks/year-end/progress/${projectId}/${action.action_id}`, {
-        status: newStatus,
-        notes: notes,
-        findings: findings
+      await api.put(`/playbooks/year-end/progress/${projectId}/${action.action_id}`, {
+        status: newStatus
       });
       onUpdate(action.action_id, { status: newStatus });
     } catch (err) {
-      console.error('Failed to update status:', err);
+      console.error('Status update failed:', err);
     }
   };
 
-  const handleNotesBlur = async () => {
+  const handleNotesChange = async () => {
     try {
-      await api.post(`/playbooks/year-end/progress/${projectId}/${action.action_id}`, {
-        status: localStatus,
-        notes: notes,
-        findings: findings
+      await api.put(`/playbooks/year-end/progress/${projectId}/${action.action_id}`, {
+        notes
       });
       onUpdate(action.action_id, { notes });
     } catch (err) {
-      console.error('Failed to save notes:', err);
+      console.error('Notes update failed:', err);
     }
+  };
+
+  // Helper functions for upload button styling
+  const getUploadButtonStyle = () => {
+    const baseStyle = {
+      padding: '0.5rem 1rem',
+      border: 'none',
+      borderRadius: '6px',
+      fontWeight: '600',
+      fontSize: '0.85rem',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.5rem',
+      transition: 'background 0.2s, color 0.2s',
+    };
+    
+    if (uploading || uploadStatus === 'processing' || uploadStatus === 'scanning') {
+      return { ...baseStyle, background: '#fef3c7', color: '#92400e', cursor: 'not-allowed' };
+    }
+    if (uploadStatus === 'complete') {
+      return { ...baseStyle, background: '#d1fae5', color: '#065f46' };
+    }
+    if (uploadStatus === 'error') {
+      return { ...baseStyle, background: '#fee2e2', color: '#991b1b' };
+    }
+    return { ...baseStyle, background: COLORS.clearwater, color: COLORS.text };
   };
 
   const getUploadButtonContent = () => {
     if (uploading) return '⏳ Uploading...';
     if (uploadStatus === 'processing') return '⏳ Processing...';
     if (uploadStatus === 'scanning') return '🔍 Scanning...';
-    if (uploadStatus === 'success') return '✓ Done!';
-    if (uploadStatus === 'error') return '✗ Failed';
-    return (
-      <>
-        📤 Upload Document
-        <span style={styles.docCount}>
-          {localDocsFound.length}/{expectedCount}
-        </span>
-      </>
-    );
-  };
-
-  const getUploadButtonStyle = () => {
-    if (uploadStatus === 'success') {
-      return { ...styles.uploadBtn, background: '#C6EFCE', color: '#006600' };
-    }
-    if (uploadStatus === 'error') {
-      return { ...styles.uploadBtn, background: '#FFC7CE', color: '#9C0006' };
-    }
-    if (uploadStatus === 'processing' || uploadStatus === 'scanning') {
-      return { ...styles.uploadBtn, background: '#FFEB9C', color: '#9C6500' };
-    }
-    return styles.uploadBtn;
+    if (uploadStatus === 'complete') return '✅ Complete!';
+    if (uploadStatus === 'error') return '❌ Error';
+    return '📤 Upload';
   };
 
   const styles = {
@@ -991,108 +1226,71 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
       overflow: 'hidden',
     },
     header: {
+      padding: '0.75rem 1rem',
       display: 'flex',
-      alignItems: 'flex-start',
-      padding: '1rem',
+      alignItems: 'center',
+      gap: '0.75rem',
       cursor: 'pointer',
-      gap: '1rem',
+      borderLeft: `4px solid ${statusConfig.color}`,
     },
     actionId: {
-      fontFamily: "'Ubuntu Mono', monospace",
       fontWeight: '700',
       fontSize: '0.9rem',
-      color: COLORS.text,
-      background: '#f0f4f7',
-      padding: '0.25rem 0.5rem',
-      borderRadius: '4px',
-      flexShrink: 0,
+      color: COLORS.turkishSea,
+      minWidth: '36px',
     },
     content: {
       flex: 1,
     },
     description: {
-      fontSize: '0.9rem',
+      fontWeight: '500',
       color: COLORS.text,
-      lineHeight: '1.4',
-      marginBottom: '0.5rem',
+      fontSize: '0.9rem',
     },
     meta: {
       display: 'flex',
-      gap: '1rem',
+      gap: '0.75rem',
+      marginTop: '0.25rem',
       flexWrap: 'wrap',
-      alignItems: 'center',
     },
     dueDate: {
       fontSize: '0.75rem',
-      color: '#dc2626',
-      fontWeight: '600',
+      color: COLORS.textLight,
     },
     actionType: {
       fontSize: '0.7rem',
       padding: '0.15rem 0.4rem',
-      borderRadius: '3px',
-      fontWeight: '600',
+      background: '#e0f2fe',
+      color: '#0369a1',
+      borderRadius: '4px',
       textTransform: 'uppercase',
-      background: action.action_type === 'required' ? '#fee2e2' : '#e0f2fe',
-      color: action.action_type === 'required' ? '#b91c1c' : '#0369a1',
     },
     statusBadge: {
       fontSize: '0.75rem',
-      padding: '0.25rem 0.5rem',
-      borderRadius: '4px',
-      fontWeight: '600',
+      padding: '0.3rem 0.6rem',
       background: statusConfig.bg,
       color: statusConfig.color,
-      marginLeft: 'auto',
+      borderRadius: '4px',
+      fontWeight: '600',
     },
     expandIcon: {
-      fontSize: '1.25rem',
+      fontSize: '0.9rem',
       color: COLORS.textLight,
-      transition: 'transform 0.2s',
-      transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
     },
     expandedContent: {
-      padding: '0 1rem 1rem 1rem',
+      padding: '1rem',
       borderTop: '1px solid #e1e8ed',
       background: '#fafbfc',
     },
     section: {
-      marginBottom: '1rem',
+      marginBottom: '0.75rem',
     },
     sectionTitle: {
-      fontSize: '0.75rem',
-      fontWeight: '700',
-      color: COLORS.textLight,
-      textTransform: 'uppercase',
-      marginBottom: '0.5rem',
-    },
-    findingsBox: {
-      background: findings?.complete ? '#d1fae5' : '#fef3c7',
-      border: `1px solid ${findings?.complete ? '#86efac' : '#fcd34d'}`,
-      borderRadius: '8px',
-      padding: '0.75rem',
-    },
-    keyValue: {
-      display: 'flex',
-      justifyContent: 'space-between',
-      fontSize: '0.85rem',
-      marginBottom: '0.25rem',
-    },
-    keyLabel: {
-      color: COLORS.textLight,
-    },
-    keyVal: {
+      fontSize: '0.8rem',
       fontWeight: '600',
-      color: COLORS.text,
-    },
-    issuesList: {
-      margin: '0.5rem 0 0 0',
-      paddingLeft: '1.25rem',
-    },
-    issue: {
-      fontSize: '0.85rem',
-      color: '#b91c1c',
-      marginBottom: '0.25rem',
+      color: COLORS.textLight,
+      marginBottom: '0.4rem',
+      textTransform: 'uppercase',
     },
     docsFound: {
       display: 'flex',
@@ -1136,20 +1334,6 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
       gap: '0.75rem',
       flexWrap: 'wrap',
     },
-    uploadBtn: {
-      padding: '0.5rem 1rem',
-      background: COLORS.clearwater,
-      color: COLORS.text,
-      border: 'none',
-      borderRadius: '6px',
-      fontWeight: '600',
-      fontSize: '0.85rem',
-      cursor: 'pointer',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.5rem',
-      transition: 'background 0.2s, color 0.2s',
-    },
     scanBtn: {
       padding: '0.5rem 1rem',
       background: COLORS.grassGreen,
@@ -1170,13 +1354,6 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
     },
     hiddenInput: {
       display: 'none',
-    },
-    docCount: {
-      fontSize: '0.7rem',
-      background: COLORS.turkishSea,
-      color: 'white',
-      padding: '0.1rem 0.4rem',
-      borderRadius: '10px',
     },
   };
 
@@ -1348,85 +1525,36 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
           
           {/* Show guidance for dependent actions */}
           {findings?.is_dependent && findings?.guidance && (
-            <div style={styles.section}>
-              <div style={styles.sectionTitle}>📋 Action Guidance</div>
-              <div style={{
-                background: '#f0f9ff',
-                border: '1px solid #bae6fd',
-                borderRadius: '8px',
-                padding: '1rem',
-                fontSize: '0.85rem',
-                lineHeight: '1.6',
-                whiteSpace: 'pre-wrap'
-              }}>
-                {findings.guidance}
+            <div style={{ 
+              background: '#f0fdf4', 
+              padding: '0.75rem', 
+              borderRadius: '6px', 
+              marginBottom: '0.75rem',
+              fontSize: '0.85rem',
+              color: '#166534',
+              border: '1px solid #86efac'
+            }}>
+              <div style={{ fontWeight: '600', marginBottom: '0.5rem' }}>
+                📋 Guidance for this action:
               </div>
+              <div style={{ whiteSpace: 'pre-wrap' }}>{findings.guidance}</div>
             </div>
           )}
 
-          {findings && typeof findings === 'object' && (
+          {/* Show findings summary */}
+          {findings?.summary && (
             <div style={styles.section}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={styles.sectionTitle}>AI Analysis</div>
-                {findings.risk_level && (
-                  <span style={{
-                    padding: '0.2rem 0.6rem',
-                    borderRadius: '12px',
-                    fontSize: '0.7rem',
-                    fontWeight: '600',
-                    textTransform: 'uppercase',
-                    background: findings.risk_level === 'high' ? '#fee2e2' : 
-                               findings.risk_level === 'medium' ? '#fef3c7' : '#d1fae5',
-                    color: findings.risk_level === 'high' ? '#dc2626' : 
-                           findings.risk_level === 'medium' ? '#d97706' : '#059669',
-                  }}>
-                    {findings.risk_level} risk
-                  </span>
-                )}
-              </div>
-              <div style={styles.findingsBox}>
-                {findings.summary && (
-                  <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.85rem', lineHeight: '1.5' }}>
-                    {typeof findings.summary === 'string' ? findings.summary : JSON.stringify(findings.summary)}
-                  </p>
-                )}
-                {findings.key_values && typeof findings.key_values === 'object' && !Array.isArray(findings.key_values) && Object.keys(findings.key_values).length > 0 && (
-                  <div style={{ marginBottom: '0.75rem' }}>
-                    <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#374151', marginBottom: '0.3rem' }}>Key Values:</div>
-                    {Object.entries(findings.key_values).map(([key, val]) => (
-                      <div key={key} style={styles.keyValue}>
-                        <span style={styles.keyLabel}>{String(key)}:</span>
-                        <span style={styles.keyVal}>
-                          {val === null || val === undefined ? '-' : (typeof val === 'object' ? JSON.stringify(val) : String(val))}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {Array.isArray(findings.issues) && findings.issues.length > 0 && (
-                  <div style={{ marginBottom: '0.75rem' }}>
-                    <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#dc2626', marginBottom: '0.3rem' }}>⚠️ Issues to Address:</div>
-                    <ul style={styles.issuesList}>
-                      {findings.issues.map((issue, i) => (
-                        <li key={i} style={styles.issue}>
-                          {typeof issue === 'string' ? issue : JSON.stringify(issue)}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {Array.isArray(findings.recommendations) && findings.recommendations.length > 0 && (
-                  <div style={{ marginBottom: '0.5rem' }}>
-                    <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#059669', marginBottom: '0.3rem' }}>✅ Recommendations:</div>
-                    <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.8rem' }}>
-                      {findings.recommendations.map((rec, i) => (
-                        <li key={i} style={{ marginBottom: '0.3rem', color: '#065f46' }}>
-                          {typeof rec === 'string' ? rec : JSON.stringify(rec)}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+              <div style={styles.sectionTitle}>Analysis Summary</div>
+              <div style={{ 
+                fontSize: '0.85rem', 
+                color: COLORS.text, 
+                background: '#f8fafc', 
+                padding: '0.5rem', 
+                borderRadius: '6px',
+                whiteSpace: 'pre-wrap',
+                lineHeight: '1.5'
+              }}>
+                {findings.summary}
               </div>
             </div>
           )}
@@ -1447,14 +1575,14 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
           </div>
 
           <div style={styles.section}>
-            <div style={styles.sectionTitle}>Consultant Notes</div>
+            <div style={styles.sectionTitle}>Notes</div>
             <textarea
               style={styles.notesArea}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              onBlur={handleNotesBlur}
+              onBlur={handleNotesChange}
+              placeholder="Add consultant notes..."
               onClick={(e) => e.stopPropagation()}
-              placeholder="Add notes, findings, or follow-up items..."
             />
           </div>
         </div>
@@ -1463,39 +1591,40 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
   );
 }
 
-// Step Accordion Component - WITH FULL SAFETY CHECKS
+// Step Accordion Component
 function StepAccordion({ step, progress, projectId, onUpdate, tooltipsByAction, isAdmin, onAddTooltip, onEditTooltip, onDeleteTooltip }) {
   const [expanded, setExpanded] = useState(true);
   
-  // CRITICAL: Safety check FIRST before any property access
+  // Safety check
   if (!step) {
-    console.warn('[StepAccordion] Received undefined step, skipping render');
     return null;
   }
   
   const actions = step.actions || [];
-  const completedCount = actions.filter(a => 
-    a && (progress[a.action_id]?.status === 'complete' || progress[a.action_id]?.status === 'na')
-  ).length;
+  const completedCount = actions.filter(a => {
+    const status = progress[a?.action_id]?.status;
+    return status === 'complete' || status === 'na';
+  }).length;
   const totalCount = actions.length;
   const allComplete = totalCount > 0 && completedCount === totalCount;
-
-  // Safe phase check - MUST be after null check
+  
   const isBefore = step.phase === 'before_final_payroll';
-
+  
   const styles = {
     container: {
-      marginBottom: '1.5rem',
+      background: 'white',
+      borderRadius: '12px',
+      marginBottom: '1rem',
+      border: '1px solid #e1e8ed',
+      overflow: 'hidden',
     },
     header: {
+      padding: '1rem',
       display: 'flex',
       alignItems: 'center',
-      padding: '1rem',
-      background: allComplete ? '#d1fae5' : 'white',
-      borderRadius: '12px',
-      border: '1px solid #e1e8ed',
-      cursor: 'pointer',
       gap: '1rem',
+      cursor: 'pointer',
+      background: allComplete ? '#f0fdf4' : 'white',
     },
     stepNumber: {
       fontFamily: "'Sora', sans-serif",
@@ -1584,7 +1713,6 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
-  const [analyzeProgress, setAnalyzeProgress] = useState({ current: 0, total: 0 });
   const [activePhase, setActivePhase] = useState('all');
   
   // NEW: Document checklist and AI summary state
@@ -1760,35 +1888,22 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
     }
   };
 
-  const handleAnalyzeAll = async () => {
-    if (!window.confirm('Analyze all documents for this playbook? This may take 1-2 minutes.')) {
-      return;
-    }
+  // NEW: Callback for when non-blocking scan completes
+  const handleScanComplete = async (results) => {
+    console.log('[SCAN-ALL] Complete:', results);
     
-    setAnalyzing(true);
-    setAnalyzeProgress({ current: 0, total: 0 });
+    // Reload all data to show updated findings
+    await refreshAll();
     
-    try {
-      const res = await api.post(`/playbooks/year-end/scan-all/${project.id}`);
-      const results = res.data;
-      
-      // Reload all data to show updated findings
-      await refreshAll();
-      
-      const successful = results.successful || 0;
-      const failed = results.failed || 0;
-      
-      if (failed > 0) {
-        alert(`Analysis complete: ${successful} actions analyzed, ${failed} failed. Some actions may need manual review.`);
-      } else {
-        alert(`Analysis complete: ${successful} actions analyzed successfully!`);
-      }
-    } catch (err) {
-      console.error('Analyze all failed:', err);
-      alert('Analysis failed. Please try again.');
-    } finally {
-      setAnalyzing(false);
-    }
+    const successful = results?.filter(r => r.found)?.length || 0;
+    const total = results?.length || 0;
+    
+    alert(`Analysis complete: Found data for ${successful} of ${total} actions!`);
+  };
+
+  const handleScanError = (error) => {
+    console.error('[SCAN-ALL] Error:', error);
+    alert('Analysis encountered an error. Some actions may need manual review.');
   };
   
   const handleRefreshStructure = async () => {
@@ -1814,7 +1929,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       // Reload structure
       await loadPlaybook();
       
-      // Step 2: Re-analyze all actions
+      // Step 2: Re-analyze all actions (this will now be non-blocking too)
       const scanRes = await api.post(`/playbooks/year-end/scan-all/${project.id}`);
       const results = scanRes.data;
       
@@ -1878,6 +1993,8 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
     headerActions: {
       display: 'flex',
       gap: '0.75rem',
+      flexWrap: 'wrap',
+      alignItems: 'flex-start',
     },
     backBtn: {
       padding: '0.5rem 1rem',
@@ -1905,18 +2022,6 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       color: 'white',
       fontWeight: '600',
       cursor: 'pointer',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.5rem',
-    },
-    analyzeAllBtn: {
-      padding: '0.5rem 1rem',
-      background: analyzing ? '#9ca3af' : '#3b82f6',
-      border: 'none',
-      borderRadius: '8px',
-      color: 'white',
-      fontWeight: '600',
-      cursor: analyzing ? 'not-allowed' : 'pointer',
       display: 'flex',
       alignItems: 'center',
       gap: '0.5rem',
@@ -2040,14 +2145,16 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
             >
               {analyzing ? '⏳ Refreshing...' : '🔄 Refresh & Analyze'}
             </button>
-            <button 
-              style={styles.analyzeAllBtn} 
-              onClick={handleAnalyzeAll}
+            
+            {/* NEW: Non-blocking scan progress component */}
+            <ScanAllProgress
+              projectId={project.id}
+              onComplete={handleScanComplete}
+              onError={handleScanError}
+              buttonText="🔍 Analyze All"
               disabled={analyzing}
-              title="Analyze all uploaded documents for the entire playbook"
-            >
-              {analyzing ? '⏳ Analyzing...' : '🔍 Analyze All'}
-            </button>
+            />
+            
             <button 
               style={styles.resetBtn} 
               onClick={handleReset}
