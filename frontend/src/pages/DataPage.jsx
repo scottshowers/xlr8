@@ -230,30 +230,28 @@ function VacuumTab() {
       <div style={styles.icon}>🧹</div>
       <h2 style={styles.title}>Vacuum Extract</h2>
       <p style={styles.description}>
-        Extract ALL data from complex files like PDF reports, payroll exports, and vendor files. 
-        Parse now, understand later, learn forever.
+        Extract data directly from UKG Pro using credentials. Pulls tax documents, 
+        pay statements, and other employee data automatically.
       </p>
-      
       <Link to="/vacuum" style={styles.button}>
-        🚀 Open Vacuum Extractor
+        🧹 Open Vacuum Extractor
       </Link>
-
       <div style={styles.featureGrid}>
         <div style={styles.feature}>
-          <span style={styles.featureIcon}>📤</span>
-          <span style={styles.featureText}>Upload PDF, Excel, or CSV files</span>
+          <span style={styles.featureIcon}>📋</span>
+          <span style={styles.featureText}>Tax documents (W-2, 1095-C)</span>
         </div>
         <div style={styles.feature}>
-          <span style={styles.featureIcon}>🔍</span>
-          <span style={styles.featureText}>Explore extracted tables</span>
+          <span style={styles.featureIcon}>💰</span>
+          <span style={styles.featureText}>Pay statements</span>
         </div>
         <div style={styles.feature}>
-          <span style={styles.featureIcon}>🗺️</span>
-          <span style={styles.featureText}>Map columns to standard fields</span>
+          <span style={styles.featureIcon}>👤</span>
+          <span style={styles.featureText}>Employee profiles</span>
         </div>
         <div style={styles.feature}>
-          <span style={styles.featureIcon}>🧠</span>
-          <span style={styles.featureText}>System learns your mappings</span>
+          <span style={styles.featureIcon}>🔐</span>
+          <span style={styles.featureText}>Secure credential handling</span>
         </div>
       </div>
     </div>
@@ -262,11 +260,7 @@ function VacuumTab() {
 
 // ==================== STATUS TAB ====================
 function StatusTab({ project }) {
-  return (
-    <div>
-      <Status selectedProject={project} />
-    </div>
-  );
+  return <Status />;
 }
 
 // ==================== DATA MANAGEMENT TAB ====================
@@ -282,6 +276,10 @@ function DataManagementTab() {
   const [semanticTypes, setSemanticTypes] = useState([]);
   const [expandedMappings, setExpandedMappings] = useState(null);
   const [pendingChanges, setPendingChanges] = useState({});
+  
+  // Bulk selection state
+  const [selectedDocs, setSelectedDocs] = useState(new Set());
+  const [selectedStructured, setSelectedStructured] = useState(new Set());
 
   // Helper to get project name from ID or name
   const getProjectDisplay = (projectValue) => {
@@ -449,6 +447,98 @@ function DataManagementTab() {
     finally { setDeleting(null); }
   };
 
+  // Bulk delete documents
+  const deleteSelectedDocs = async () => {
+    if (selectedDocs.size === 0) return;
+    if (!confirm(`Delete ${selectedDocs.size} selected document(s)? This cannot be undone.`)) return;
+    
+    setDeleting('bulk-docs');
+    let successCount = 0;
+    
+    for (const filename of selectedDocs) {
+      try {
+        await api.delete(`/status/documents/${encodeURIComponent(filename)}`);
+        successCount++;
+      } catch (e) {
+        console.error(`Failed to delete ${filename}:`, e);
+      }
+    }
+    
+    setSelectedDocs(new Set());
+    setDeleting(null);
+    showMessage(`Deleted ${successCount} document(s)`);
+    fetchData();
+  };
+  
+  // Bulk delete structured files
+  const deleteSelectedStructured = async () => {
+    if (selectedStructured.size === 0) return;
+    if (!confirm(`Delete ${selectedStructured.size} selected file(s)? This cannot be undone.`)) return;
+    
+    setDeleting('bulk-structured');
+    let successCount = 0;
+    
+    for (const key of selectedStructured) {
+      const [project, filename] = key.split('::');
+      try {
+        await api.delete(`/status/structured/${encodeURIComponent(project)}/${encodeURIComponent(filename)}`);
+        successCount++;
+      } catch (e) {
+        console.error(`Failed to delete ${filename}:`, e);
+      }
+    }
+    
+    setSelectedStructured(new Set());
+    setDeleting(null);
+    showMessage(`Deleted ${successCount} file(s)`);
+    fetchData();
+  };
+  
+  // Toggle document selection
+  const toggleDocSelection = (filename) => {
+    setSelectedDocs(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(filename)) {
+        newSet.delete(filename);
+      } else {
+        newSet.add(filename);
+      }
+      return newSet;
+    });
+  };
+  
+  // Toggle structured file selection
+  const toggleStructuredSelection = (project, filename) => {
+    const key = `${project}::${filename}`;
+    setSelectedStructured(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(key)) {
+        newSet.delete(key);
+      } else {
+        newSet.add(key);
+      }
+      return newSet;
+    });
+  };
+  
+  // Select all documents
+  const selectAllDocs = () => {
+    if (selectedDocs.size === documents?.documents?.length) {
+      setSelectedDocs(new Set());
+    } else {
+      setSelectedDocs(new Set(documents?.documents?.map(d => d.filename) || []));
+    }
+  };
+  
+  // Select all structured files
+  const selectAllStructured = () => {
+    if (selectedStructured.size === structuredData?.files?.length) {
+      setSelectedStructured(new Set());
+    } else {
+      setSelectedStructured(new Set(structuredData?.files?.map(f => `${f.project}::${f.filename}`) || []));
+    }
+  };
+
   const resetStructuredData = async () => {
     if (!confirm('⚠️ DELETE ALL STRUCTURED DATA? This cannot be undone!')) return;
     setDeleting('reset-structured');
@@ -470,6 +560,22 @@ function DataManagementTab() {
     } catch { showMessage('Failed to reset', 'error'); }
     finally { setDeleting(null); }
   };
+  
+  // Format date helper
+  const formatDate = (dateString) => {
+    if (!dateString) return '-';
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-US', { 
+        month: 'short', 
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch {
+      return '-';
+    }
+  };
 
   const styles = {
     title: { fontSize: '1.1rem', fontWeight: '700', color: '#2a3441', marginBottom: '0.5rem' },
@@ -484,10 +590,12 @@ function DataManagementTab() {
     td: { padding: '0.75rem 1rem', borderBottom: '1px solid #e1e8ed', fontSize: '0.9rem' },
     deleteBtn: { padding: '0.35rem 0.6rem', background: 'transparent', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '1rem' },
     dangerBtn: { padding: '0.5rem 1rem', fontSize: '0.85rem', background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: '6px', cursor: 'pointer' },
+    bulkBtn: { padding: '0.5rem 1rem', fontSize: '0.85rem', background: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: '6px', cursor: 'pointer', fontWeight: '600' },
     emptyState: { textAlign: 'center', padding: '2rem', color: '#5f6c7b' },
     projectBadge: { display: 'inline-block', padding: '0.2rem 0.6rem', fontSize: '0.75rem', background: '#dbeafe', color: '#1e40af', borderRadius: '999px' },
     expandedTd: { padding: '1rem', background: '#f9fafb' },
     sheetRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0.75rem', background: 'white', borderRadius: '6px', border: '1px solid #e5e7eb', marginBottom: '0.5rem', fontSize: '0.85rem' },
+    checkbox: { width: '16px', height: '16px', cursor: 'pointer', accentColor: '#3b82f6' },
   };
 
   if (loading) {
@@ -520,168 +628,200 @@ function DataManagementTab() {
             <p>No Excel/CSV files uploaded yet</p>
           </div>
         ) : (
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                <th style={styles.th}>File</th>
-                <th style={styles.th}>Project</th>
-                <th style={{ ...styles.th, textAlign: 'center' }}>Sheets</th>
-                <th style={{ ...styles.th, textAlign: 'center' }}>Rows</th>
-                <th style={{ ...styles.th, textAlign: 'center' }}>Loaded</th>
-                <th style={{ ...styles.th, textAlign: 'center' }}>🔒</th>
-                <th style={{ ...styles.th, textAlign: 'center' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {structuredData.files.map((file) => (
-                <React.Fragment key={`${file.project}::${file.filename}`}>
-                  <tr style={{ cursor: 'pointer' }} onClick={() => setExpandedFile(expandedFile === file.filename ? null : file.filename)}>
-                    <td style={styles.td}>
-                      <span>{file.filename.endsWith('.csv') ? '📄' : '📊'} </span>
-                      <strong>{file.filename}</strong>
-                      {getMappingBadge(file)}
-                      <span style={{ color: '#999', marginLeft: '8px', fontSize: '0.75rem' }}>{expandedFile === file.filename ? '▼' : '▶'}</span>
-                    </td>
-                    <td style={styles.td}><span style={styles.projectBadge}>{getProjectDisplay(file.project)}</span></td>
-                    <td style={{ ...styles.td, textAlign: 'center' }}>{file.sheets?.length || 0}</td>
-                    <td style={{ ...styles.td, textAlign: 'center' }}>{file.total_rows?.toLocaleString()}</td>
-                    <td style={{ ...styles.td, textAlign: 'center', fontSize: '0.75rem', color: '#666' }}>
-                      <div>{file.loaded_at ? new Date(file.loaded_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}</div>
-                      {(() => {
-                        const mapInfo = getMappingPercentage(file);
-                        if (!mapInfo) return null;
-                        if (mapInfo.status === 'processing') return <div style={{ color: '#3b82f6', fontSize: '0.65rem' }}>🔄 Analyzing...</div>;
-                        if (mapInfo.status === 'review') return <div style={{ color: '#f59e0b', fontSize: '0.65rem', fontWeight: '600' }}>⚠️ {mapInfo.count} to review</div>;
-                        if (mapInfo.status === 'ready') return <div style={{ color: '#22c55e', fontSize: '0.65rem', fontWeight: '600' }}>✅ Ready</div>;
-                        return null;
-                      })()}
-                    </td>
-                    <td style={{ ...styles.td, textAlign: 'center' }}>{file.has_encrypted ? '🔒' : '-'}</td>
-                    <td style={{ ...styles.td, textAlign: 'center' }}>
-                      <button onClick={(e) => { e.stopPropagation(); deleteStructuredFile(file.project, file.filename); }} disabled={deleting === `structured:${file.project}:${file.filename}`} style={styles.deleteBtn}>
-                        {deleting === `structured:${file.project}:${file.filename}` ? '⏳' : '🗑️'}
-                      </button>
-                    </td>
-                  </tr>
-                  {expandedFile === file.filename && (
-                    <tr>
-                      <td colSpan={7} style={styles.expandedTd}>
-                        <p style={{ fontSize: '0.7rem', fontWeight: '600', color: '#999', marginBottom: '0.5rem', letterSpacing: '0.05em' }}>SHEETS / TABLES:</p>
-                        {file.sheets?.map((sheet) => {
-                          const key = `${file.project}:${file.filename}`;
-                          const summary = mappingSummaries[key];
-                          const sheetMappings = summary?.mappings?.filter(m => m.table_name === sheet.table_name) || [];
-                          const needsReview = sheetMappings.filter(m => m.needs_review);
-                          const isExpanded = expandedMappings === sheet.table_name;
-                          
-                          return (
-                            <div key={sheet.table_name} style={{ marginBottom: '8px' }}>
-                              <div style={styles.sheetRow}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                  <strong>{sheet.sheet_name}</strong>
-                                  <span style={{ color: '#999', fontSize: '0.8rem' }}>({sheet.column_count} columns)</span>
-                                  {sheetMappings.length > 0 && (
-                                    <button 
-                                      onClick={(e) => { e.stopPropagation(); setExpandedMappings(isExpanded ? null : sheet.table_name); }}
-                                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.75rem', color: needsReview.length > 0 ? '#f59e0b' : '#3b82f6' }}
-                                    >
-                                      {needsReview.length > 0 ? `⚠️ ${needsReview.length} need review` : `🔗 ${sheetMappings.length} mappings`}
-                                      <span style={{ marginLeft: '4px' }}>{isExpanded ? '▼' : '▶'}</span>
-                                    </button>
-                                  )}
-                                </div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                  <span>{sheet.row_count?.toLocaleString()} rows</span>
-                                  {sheet.encrypted_columns?.length > 0 && (
-                                    <span style={{ color: '#22c55e', fontSize: '0.8rem' }}>🔒 {sheet.encrypted_columns.length} encrypted</span>
-                                  )}
-                                </div>
-                              </div>
-                              
-                              {isExpanded && sheetMappings.length > 0 && (
-                                <div style={{ marginLeft: '20px', marginTop: '8px', padding: '8px', background: '#f8fafc', borderRadius: '4px', fontSize: '0.8rem' }}>
-                                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '4px 12px', alignItems: 'center' }}>
-                                    <span style={{ fontWeight: '600', color: '#666', fontSize: '0.7rem' }}>COLUMN</span>
-                                    <span style={{ fontWeight: '600', color: '#666', fontSize: '0.7rem' }}>MAPPED TO</span>
-                                    <span style={{ fontWeight: '600', color: '#666', fontSize: '0.7rem' }}>CONF</span>
-                                    {sheetMappings.map((mapping) => {
-                                      const isPending = hasPendingChange(file.project, sheet.table_name, mapping.original_column);
-                                      const displayValue = getPendingValue(file.project, sheet.table_name, mapping.original_column, mapping.semantic_type);
-                                      
-                                      return (
-                                        <React.Fragment key={mapping.original_column}>
-                                          <span style={{ color: mapping.needs_review ? '#f59e0b' : '#333' }}>
-                                            {mapping.needs_review && '⚠️ '}{mapping.original_column}
-                                          </span>
-                                          <div style={{ position: 'relative' }}>
-                                            <input
-                                              type="text"
-                                              list={`semantic-types-${mapping.original_column}`}
-                                              value={semanticTypes.find(t => t.id === displayValue)?.label || displayValue}
-                                              onChange={(e) => {
-                                                const matchedType = semanticTypes.find(t => t.label.toLowerCase() === e.target.value.toLowerCase());
-                                                const newValue = matchedType ? matchedType.id : e.target.value;
-                                                updateMapping(file.project, sheet.table_name, mapping.original_column, newValue);
-                                              }}
-                                              onBlur={(e) => {
-                                                const matchedType = semanticTypes.find(t => t.label.toLowerCase() === e.target.value.toLowerCase());
-                                                if (matchedType) {
-                                                  updateMapping(file.project, sheet.table_name, mapping.original_column, matchedType.id);
-                                                }
-                                              }}
-                                              placeholder="Select or type..."
-                                              style={{ 
-                                                padding: '2px 4px', 
-                                                fontSize: '0.75rem', 
-                                                width: '140px',
-                                                border: isPending ? '2px solid #3b82f6' : mapping.needs_review ? '1px solid #f59e0b' : '1px solid #ddd',
-                                                borderRadius: '3px',
-                                                background: isPending ? '#dbeafe' : mapping.is_override ? '#e0f2fe' : '#fff'
-                                              }}
-                                            />
-                                            <datalist id={`semantic-types-${mapping.original_column}`}>
-                                              {semanticTypes.map(t => (
-                                                <option key={t.id} value={t.label} />
-                                              ))}
-                                            </datalist>
-                                          </div>
-                                          <span style={{ color: '#999', fontSize: '0.7rem' }}>
-                                            {isPending ? '✏️' : mapping.is_override ? '✓' : `${Math.round(mapping.confidence * 100)}%`}
-                                          </span>
-                                        </React.Fragment>
-                                      );
-                                    })}
-                                  </div>
-                                  
-                                  {Object.keys(pendingChanges).length > 0 && (
-                                    <div style={{ marginTop: '12px', paddingTop: '8px', borderTop: '1px solid #e5e7eb', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                                      <button
-                                        onClick={discardPendingChanges}
-                                        style={{ padding: '4px 12px', fontSize: '0.75rem', background: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer' }}
-                                      >
-                                        Discard ({Object.keys(pendingChanges).length})
-                                      </button>
-                                      <button
-                                        onClick={savePendingChanges}
-                                        disabled={deleting === 'saving-mappings'}
-                                        style={{ padding: '4px 12px', fontSize: '0.75rem', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: '600' }}
-                                      >
-                                        {deleting === 'saving-mappings' ? '⏳ Saving...' : `💾 Save Changes (${Object.keys(pendingChanges).length})`}
-                                      </button>
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
+          <>
+            {/* Bulk actions for structured */}
+            {selectedStructured.size > 0 && (
+              <div style={{ marginBottom: '1rem', padding: '0.75rem', background: '#fee2e2', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ color: '#b91c1c', fontWeight: '600' }}>{selectedStructured.size} file(s) selected</span>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button onClick={() => setSelectedStructured(new Set())} style={{ padding: '0.4rem 0.8rem', background: '#fff', border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }}>Clear</button>
+                  <button onClick={deleteSelectedStructured} disabled={deleting === 'bulk-structured'} style={styles.bulkBtn}>
+                    {deleting === 'bulk-structured' ? '⏳ Deleting...' : `🗑️ Delete ${selectedStructured.size} File(s)`}
+                  </button>
+                </div>
+              </div>
+            )}
+            
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  <th style={{ ...styles.th, width: '40px', textAlign: 'center' }}>
+                    <input 
+                      type="checkbox" 
+                      style={styles.checkbox}
+                      checked={selectedStructured.size === structuredData.files.length && structuredData.files.length > 0}
+                      onChange={selectAllStructured}
+                    />
+                  </th>
+                  <th style={styles.th}>File</th>
+                  <th style={styles.th}>Project</th>
+                  <th style={{ ...styles.th, textAlign: 'center' }}>Sheets</th>
+                  <th style={{ ...styles.th, textAlign: 'center' }}>Rows</th>
+                  <th style={{ ...styles.th, textAlign: 'center' }}>Loaded</th>
+                  <th style={{ ...styles.th, textAlign: 'center' }}>🔒</th>
+                  <th style={{ ...styles.th, textAlign: 'center' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {structuredData.files.map((file) => (
+                  <React.Fragment key={`${file.project}::${file.filename}`}>
+                    <tr style={{ cursor: 'pointer' }}>
+                      <td style={{ ...styles.td, textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                        <input 
+                          type="checkbox" 
+                          style={styles.checkbox}
+                          checked={selectedStructured.has(`${file.project}::${file.filename}`)}
+                          onChange={() => toggleStructuredSelection(file.project, file.filename)}
+                        />
+                      </td>
+                      <td style={styles.td} onClick={() => setExpandedFile(expandedFile === file.filename ? null : file.filename)}>
+                        <span>{file.source_type === 'pdf' ? '📕' : file.filename.endsWith('.csv') ? '📄' : '📊'} </span>
+                        <strong>{file.filename}</strong>
+                        {file.source_type === 'pdf' && <span style={{ marginLeft: '8px', fontSize: '0.7rem', background: '#fef3c7', color: '#92400e', padding: '2px 6px', borderRadius: '4px' }}>PDF</span>}
+                        {getMappingBadge(file)}
+                        <span style={{ color: '#999', marginLeft: '8px', fontSize: '0.75rem' }}>{expandedFile === file.filename ? '▼' : '▶'}</span>
+                      </td>
+                      <td style={styles.td}><span style={styles.projectBadge}>{getProjectDisplay(file.project)}</span></td>
+                      <td style={{ ...styles.td, textAlign: 'center' }}>{file.sheets?.length || 0}</td>
+                      <td style={{ ...styles.td, textAlign: 'center' }}>{file.total_rows?.toLocaleString()}</td>
+                      <td style={{ ...styles.td, textAlign: 'center', fontSize: '0.75rem', color: '#666' }}>
+                        <div>{file.loaded_at ? new Date(file.loaded_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}</div>
+                        {(() => {
+                          const mapInfo = getMappingPercentage(file);
+                          if (!mapInfo) return null;
+                          if (mapInfo.status === 'processing') return <div style={{ color: '#3b82f6', fontSize: '0.65rem' }}>🔄 Analyzing...</div>;
+                          if (mapInfo.status === 'review') return <div style={{ color: '#f59e0b', fontSize: '0.65rem', fontWeight: '600' }}>⚠️ {mapInfo.count} to review</div>;
+                          if (mapInfo.status === 'ready') return <div style={{ color: '#22c55e', fontSize: '0.65rem', fontWeight: '600' }}>✅ Ready</div>;
+                          return null;
+                        })()}
+                      </td>
+                      <td style={{ ...styles.td, textAlign: 'center' }}>{file.has_encrypted ? '🔒' : '-'}</td>
+                      <td style={{ ...styles.td, textAlign: 'center' }}>
+                        <button onClick={(e) => { e.stopPropagation(); deleteStructuredFile(file.project, file.filename); }} disabled={deleting === `structured:${file.project}:${file.filename}`} style={styles.deleteBtn}>
+                          {deleting === `structured:${file.project}:${file.filename}` ? '⏳' : '🗑️'}
+                        </button>
                       </td>
                     </tr>
-                  )}
-                </React.Fragment>
-              ))}
-            </tbody>
-          </table>
+                    {expandedFile === file.filename && (
+                      <tr>
+                        <td colSpan={8} style={styles.expandedTd}>
+                          <p style={{ fontSize: '0.7rem', fontWeight: '600', color: '#999', marginBottom: '0.5rem', letterSpacing: '0.05em' }}>SHEETS / TABLES:</p>
+                          {file.sheets?.map((sheet) => {
+                            const key = `${file.project}:${file.filename}`;
+                            const summary = mappingSummaries[key];
+                            const sheetMappings = summary?.mappings?.filter(m => m.table_name === sheet.table_name) || [];
+                            const needsReview = sheetMappings.filter(m => m.needs_review);
+                            const isExpanded = expandedMappings === sheet.table_name;
+                            
+                            return (
+                              <div key={sheet.table_name} style={{ marginBottom: '8px' }}>
+                                <div style={styles.sheetRow}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <strong>{sheet.sheet_name}</strong>
+                                    <span style={{ color: '#999', fontSize: '0.8rem' }}>({sheet.column_count} columns)</span>
+                                    {sheetMappings.length > 0 && (
+                                      <button 
+                                        onClick={(e) => { e.stopPropagation(); setExpandedMappings(isExpanded ? null : sheet.table_name); }}
+                                        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.75rem', color: needsReview.length > 0 ? '#f59e0b' : '#3b82f6' }}
+                                      >
+                                        {needsReview.length > 0 ? `⚠️ ${needsReview.length} need review` : `🔗 ${sheetMappings.length} mappings`}
+                                        <span style={{ marginLeft: '4px' }}>{isExpanded ? '▼' : '▶'}</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                    <span>{sheet.row_count?.toLocaleString()} rows</span>
+                                    {sheet.encrypted_columns?.length > 0 && (
+                                      <span style={{ color: '#22c55e', fontSize: '0.8rem' }}>🔒 {sheet.encrypted_columns.length} encrypted</span>
+                                    )}
+                                  </div>
+                                </div>
+                                
+                                {isExpanded && sheetMappings.length > 0 && (
+                                  <div style={{ marginLeft: '20px', marginTop: '8px', padding: '8px', background: '#f8fafc', borderRadius: '4px', fontSize: '0.8rem' }}>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '4px 12px', alignItems: 'center' }}>
+                                      <span style={{ fontWeight: '600', color: '#666', fontSize: '0.7rem' }}>COLUMN</span>
+                                      <span style={{ fontWeight: '600', color: '#666', fontSize: '0.7rem' }}>MAPPED TO</span>
+                                      <span style={{ fontWeight: '600', color: '#666', fontSize: '0.7rem' }}>CONF</span>
+                                      {sheetMappings.map((mapping) => {
+                                        const isPending = hasPendingChange(file.project, sheet.table_name, mapping.original_column);
+                                        const displayValue = getPendingValue(file.project, sheet.table_name, mapping.original_column, mapping.semantic_type);
+                                        
+                                        return (
+                                          <React.Fragment key={mapping.original_column}>
+                                            <span style={{ color: mapping.needs_review ? '#f59e0b' : '#333' }}>
+                                              {mapping.needs_review && '⚠️ '}{mapping.original_column}
+                                            </span>
+                                            <div style={{ position: 'relative' }}>
+                                              <input
+                                                type="text"
+                                                list={`semantic-types-${mapping.original_column}`}
+                                                value={semanticTypes.find(t => t.id === displayValue)?.label || displayValue}
+                                                onChange={(e) => {
+                                                  const matchedType = semanticTypes.find(t => t.label.toLowerCase() === e.target.value.toLowerCase());
+                                                  const newValue = matchedType ? matchedType.id : e.target.value;
+                                                  updateMapping(file.project, sheet.table_name, mapping.original_column, newValue);
+                                                }}
+                                                onBlur={(e) => {
+                                                  const matchedType = semanticTypes.find(t => t.label.toLowerCase() === e.target.value.toLowerCase());
+                                                  if (matchedType) {
+                                                    updateMapping(file.project, sheet.table_name, mapping.original_column, matchedType.id);
+                                                  }
+                                                }}
+                                                placeholder="Select or type..."
+                                                style={{ 
+                                                  padding: '2px 4px', 
+                                                  fontSize: '0.75rem', 
+                                                  width: '140px',
+                                                  border: isPending ? '2px solid #3b82f6' : mapping.needs_review ? '1px solid #f59e0b' : '1px solid #ddd',
+                                                  borderRadius: '3px',
+                                                  background: isPending ? '#dbeafe' : mapping.is_override ? '#e0f2fe' : '#fff'
+                                                }}
+                                              />
+                                              <datalist id={`semantic-types-${mapping.original_column}`}>
+                                                {semanticTypes.map(t => (
+                                                  <option key={t.id} value={t.label} />
+                                                ))}
+                                              </datalist>
+                                            </div>
+                                            <span style={{ color: '#999', fontSize: '0.7rem' }}>
+                                              {isPending ? '✏️' : mapping.is_override ? '✓' : `${Math.round(mapping.confidence * 100)}%`}
+                                            </span>
+                                          </React.Fragment>
+                                        );
+                                      })}
+                                    </div>
+                                    
+                                    {Object.keys(pendingChanges).length > 0 && (
+                                      <div style={{ marginTop: '12px', paddingTop: '8px', borderTop: '1px solid #e5e7eb', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                                        <button
+                                          onClick={discardPendingChanges}
+                                          style={{ padding: '4px 12px', fontSize: '0.75rem', background: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer' }}
+                                        >
+                                          Discard ({Object.keys(pendingChanges).length})
+                                        </button>
+                                        <button
+                                          onClick={savePendingChanges}
+                                          disabled={deleting === 'saving-mappings'}
+                                          style={{ padding: '4px 12px', fontSize: '0.75rem', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: '600' }}
+                                        >
+                                          {deleting === 'saving-mappings' ? '⏳ Saving...' : `💾 Save Changes (${Object.keys(pendingChanges).length})`}
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </>
         )}
 
         {structuredData?.files?.length > 0 && (
@@ -706,33 +846,68 @@ function DataManagementTab() {
             <p>No PDF/Word documents uploaded yet</p>
           </div>
         ) : (
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                <th style={styles.th}>Document</th>
-                <th style={styles.th}>Project</th>
-                <th style={{ ...styles.th, textAlign: 'center' }}>Chunks</th>
-                <th style={{ ...styles.th, textAlign: 'center' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {documents.documents.map((doc) => (
-                <tr key={doc.filename}>
-                  <td style={styles.td}>
-                    <span>{doc.filename?.endsWith('.pdf') ? '📕' : '📘'} </span>
-                    <strong>{doc.filename}</strong>
-                  </td>
-                  <td style={styles.td}><span style={styles.projectBadge}>{getProjectDisplay(doc.project)}</span></td>
-                  <td style={{ ...styles.td, textAlign: 'center' }}>{doc.chunks}</td>
-                  <td style={{ ...styles.td, textAlign: 'center' }}>
-                    <button onClick={() => deleteDocument(doc.filename)} disabled={deleting === `doc:${doc.filename}`} style={styles.deleteBtn}>
-                      {deleting === `doc:${doc.filename}` ? '⏳' : '🗑️'}
-                    </button>
-                  </td>
+          <>
+            {/* Bulk actions for documents */}
+            {selectedDocs.size > 0 && (
+              <div style={{ marginBottom: '1rem', padding: '0.75rem', background: '#fee2e2', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ color: '#b91c1c', fontWeight: '600' }}>{selectedDocs.size} document(s) selected</span>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button onClick={() => setSelectedDocs(new Set())} style={{ padding: '0.4rem 0.8rem', background: '#fff', border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }}>Clear</button>
+                  <button onClick={deleteSelectedDocs} disabled={deleting === 'bulk-docs'} style={styles.bulkBtn}>
+                    {deleting === 'bulk-docs' ? '⏳ Deleting...' : `🗑️ Delete ${selectedDocs.size} Doc(s)`}
+                  </button>
+                </div>
+              </div>
+            )}
+            
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  <th style={{ ...styles.th, width: '40px', textAlign: 'center' }}>
+                    <input 
+                      type="checkbox" 
+                      style={styles.checkbox}
+                      checked={selectedDocs.size === documents.documents.length && documents.documents.length > 0}
+                      onChange={selectAllDocs}
+                    />
+                  </th>
+                  <th style={styles.th}>Document</th>
+                  <th style={styles.th}>Project</th>
+                  <th style={{ ...styles.th, textAlign: 'center' }}>Chunks</th>
+                  <th style={{ ...styles.th, textAlign: 'center' }}>Uploaded</th>
+                  <th style={{ ...styles.th, textAlign: 'center' }}>Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {documents.documents.map((doc) => (
+                  <tr key={doc.filename || doc.id}>
+                    <td style={{ ...styles.td, textAlign: 'center' }}>
+                      <input 
+                        type="checkbox" 
+                        style={styles.checkbox}
+                        checked={selectedDocs.has(doc.filename)}
+                        onChange={() => toggleDocSelection(doc.filename)}
+                      />
+                    </td>
+                    <td style={styles.td}>
+                      <span>{doc.filename?.endsWith('.pdf') ? '📕' : '📘'} </span>
+                      <strong>{doc.filename}</strong>
+                    </td>
+                    <td style={styles.td}><span style={styles.projectBadge}>{getProjectDisplay(doc.project)}</span></td>
+                    <td style={{ ...styles.td, textAlign: 'center' }}>{doc.chunks}</td>
+                    <td style={{ ...styles.td, textAlign: 'center', fontSize: '0.8rem', color: '#666' }}>
+                      {formatDate(doc.upload_date)}
+                    </td>
+                    <td style={{ ...styles.td, textAlign: 'center' }}>
+                      <button onClick={() => deleteDocument(doc.filename)} disabled={deleting === `doc:${doc.filename}`} style={styles.deleteBtn}>
+                        {deleting === `doc:${doc.filename}` ? '⏳' : '🗑️'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
         )}
 
         {documents?.documents?.length > 0 && (
