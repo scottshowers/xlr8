@@ -1532,8 +1532,10 @@ async def detect_conflicts(project_id: str, action_id: str, new_findings: Option
         if other_action_id == action_id:
             continue
         
-        other_findings = other_progress.get("findings", {})
-        other_values = other_findings.get("key_values", {})
+        other_findings = other_progress.get("findings") or {}
+        if not other_findings:
+            continue
+        other_values = other_findings.get("key_values") or {}
         
         for field in critical_fields:
             # Normalize field names for comparison
