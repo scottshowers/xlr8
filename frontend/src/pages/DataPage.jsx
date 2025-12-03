@@ -280,6 +280,11 @@ function DataManagementTab() {
   // Bulk selection state
   const [selectedDocs, setSelectedDocs] = useState(new Set());
   const [selectedStructured, setSelectedStructured] = useState(new Set());
+  
+  // ChromaDB audit/cleanup state
+  const [chromaAudit, setChromaAudit] = useState(null);
+  const [chromaAuditing, setChromaAuditing] = useState(false);
+  const [chromaPurging, setChromaPurging] = useState(false);
 
   // Helper to get project name from ID or name
   const getProjectDisplay = (projectValue) => {
@@ -536,6 +541,45 @@ function DataManagementTab() {
       setSelectedStructured(new Set());
     } else {
       setSelectedStructured(new Set(structuredData?.files?.map(f => `${f.project}::${f.filename}`) || []));
+    }
+  };
+
+  // ChromaDB Audit - check for orphaned documents
+  const auditChromaDB = async () => {
+    setChromaAuditing(true);
+    try {
+      const res = await api.get('/status/chromadb/audit');
+      setChromaAudit(res.data);
+      if (res.data.orphaned_files === 0) {
+        setMessage({ type: 'success', text: `✓ ChromaDB clean: ${res.data.registered_files} files, no orphans` });
+      } else {
+        setMessage({ type: 'warning', text: `Found ${res.data.orphaned_files} orphaned files in ChromaDB` });
+      }
+    } catch (err) {
+      console.error('Audit failed:', err);
+      setMessage({ type: 'error', text: 'Audit failed: ' + err.message });
+    } finally {
+      setChromaAuditing(false);
+    }
+  };
+
+  // Purge orphaned ChromaDB documents
+  const purgeChromaOrphans = async () => {
+    if (!confirm(`Delete ${chromaAudit?.orphaned_files} orphaned documents from ChromaDB? This cannot be undone.`)) return;
+    
+    setChromaPurging(true);
+    try {
+      const res = await api.delete('/status/chromadb/purge-orphans');
+      setMessage({ type: 'success', text: res.data.message });
+      setChromaAudit(null);
+      // Refresh document list
+      const docsRes = await api.get('/status/documents');
+      setDocuments(docsRes.data);
+    } catch (err) {
+      console.error('Purge failed:', err);
+      setMessage({ type: 'error', text: 'Purge failed: ' + err.message });
+    } finally {
+      setChromaPurging(false);
     }
   };
 
@@ -836,9 +880,63 @@ function DataManagementTab() {
       {/* Documents Section */}
       <div style={styles.card}>
         <div style={styles.cardHeader}>
-          <h4 style={styles.cardTitle}>📄 Documents (ChromaDB)</h4>
-          <span style={styles.cardStats}>{documents?.total || 0} files • {documents?.total_chunks?.toLocaleString() || 0} chunks</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <h4 style={styles.cardTitle}>📄 Documents (ChromaDB)</h4>
+            <span style={styles.cardStats}>{documents?.total || 0} files • {documents?.total_chunks?.toLocaleString() || 0} chunks</span>
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button 
+              onClick={auditChromaDB} 
+              disabled={chromaAuditing}
+              style={{ 
+                padding: '0.4rem 0.8rem', 
+                background: '#f3f4f6', 
+                border: '1px solid #d1d5db', 
+                borderRadius: '6px', 
+                fontSize: '0.8rem',
+                cursor: chromaAuditing ? 'not-allowed' : 'pointer',
+                color: '#374151'
+              }}
+            >
+              {chromaAuditing ? '⏳ Auditing...' : '🔍 Audit'}
+            </button>
+            {chromaAudit?.orphaned_files > 0 && (
+              <button 
+                onClick={purgeChromaOrphans} 
+                disabled={chromaPurging}
+                style={{ 
+                  padding: '0.4rem 0.8rem', 
+                  background: '#fef3c7', 
+                  border: '1px solid #f59e0b', 
+                  borderRadius: '6px', 
+                  fontSize: '0.8rem',
+                  cursor: chromaPurging ? 'not-allowed' : 'pointer',
+                  color: '#92400e'
+                }}
+              >
+                {chromaPurging ? '⏳ Purging...' : `🧹 Purge ${chromaAudit.orphaned_files} Orphans`}
+              </button>
+            )}
+          </div>
         </div>
+        
+        {/* Audit Results Banner */}
+        {chromaAudit && (
+          <div style={{ 
+            marginBottom: '1rem', 
+            padding: '0.75rem', 
+            background: chromaAudit.orphaned_files > 0 ? '#fef3c7' : '#d1fae5', 
+            borderRadius: '8px',
+            fontSize: '0.85rem'
+          }}>
+            <strong>Audit Results:</strong> {chromaAudit.registered_files} registered, {chromaAudit.orphaned_files} orphaned
+            {chromaAudit.orphaned_files > 0 && (
+              <span style={{ marginLeft: '0.5rem', color: '#92400e' }}>
+                (Orphans: {chromaAudit.orphans?.slice(0, 3).map(o => o.filename).join(', ')}{chromaAudit.orphans?.length > 3 ? '...' : ''})
+              </span>
+            )}
+          </div>
+        )}
 
         {!documents?.documents?.length ? (
           <div style={styles.emptyState}>
