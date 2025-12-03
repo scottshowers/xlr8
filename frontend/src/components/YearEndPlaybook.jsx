@@ -1965,17 +1965,23 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       // Reload structure
       await loadPlaybook();
       
-      // Step 2: Re-analyze all actions (this will now be non-blocking too)
+      // Step 2: Start scan-all job (runs in background)
       const scanRes = await api.post(`/playbooks/year-end/scan-all/${project.id}`);
       const results = scanRes.data;
       
       // Reload all data
       await refreshAll();
       
-      const successful = results.successful || 0;
-      const failed = results.failed || 0;
-      
-      alert(`Structure refreshed (${actionCount} actions from ${sourceFile}) and re-analyzed: ${successful} successful, ${failed} failed.`);
+      // Check if it's a background job or immediate result
+      if (results.job_id) {
+        // Background job started
+        alert(`Structure refreshed (${actionCount} actions from ${sourceFile}). Analysis started in background - check progress in a moment.`);
+      } else {
+        // Immediate result (legacy)
+        const successful = results.successful || 0;
+        const failed = results.failed || 0;
+        alert(`Structure refreshed (${actionCount} actions from ${sourceFile}) and re-analyzed: ${successful} successful, ${failed} failed.`);
+      }
       
     } catch (err) {
       console.error('Refresh and analyze failed:', err);
