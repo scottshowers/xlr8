@@ -43,7 +43,7 @@ async def get_structured_data_status(project: Optional[str] = None):
         # Query DuckDB directly for ALL tables - more reliable than get_schema_for_project
         tables = []
         try:
-            # First try to get data from metadata table (has timestamps)
+            # First try to get data from metadata table (has timestamps) - EXCEL FILES
             try:
                 metadata_result = handler.conn.execute("""
                     SELECT table_name, project, file_name, sheet_name, columns, row_count, created_at
@@ -72,19 +72,64 @@ async def get_structured_data_status(project: Optional[str] = None):
                         'sheet': sheet,
                         'columns': columns,
                         'row_count': row_count or 0,
-                        'loaded_at': str(created_at) if created_at else None
+                        'loaded_at': str(created_at) if created_at else None,
+                        'source_type': 'excel'
                     })
                 
-                logger.info(f"[STATUS] Got {len(tables)} tables from metadata")
+                logger.info(f"[STATUS] Got {len(tables)} tables from _schema_metadata (Excel)")
                 
             except Exception as meta_e:
-                logger.warning(f"Metadata query failed, falling back to information_schema: {meta_e}")
+                logger.warning(f"Metadata query failed: {meta_e}")
+            
+            # ALSO query _pdf_tables for PDF-derived tables
+            try:
+                pdf_result = handler.conn.execute("""
+                    SELECT table_name, source_file, project, project_id, row_count, columns, created_at
+                    FROM _pdf_tables
+                """).fetchall()
+                
+                pdf_count = 0
+                for row in pdf_result:
+                    table_name, source_file, proj, project_id, row_count, columns_json, created_at = row
+                    
+                    # Apply project filter if specified
+                    if project and proj and proj.lower() != project.lower():
+                        continue
+                    
+                    # Parse columns JSON
+                    try:
+                        columns = json.loads(columns_json) if columns_json else []
+                    except:
+                        columns = []
+                    
+                    tables.append({
+                        'table_name': table_name,
+                        'project': proj or 'Unknown',
+                        'file': source_file,
+                        'sheet': 'PDF Data',  # PDFs don't have sheets
+                        'columns': columns,
+                        'row_count': row_count or 0,
+                        'loaded_at': str(created_at) if created_at else None,
+                        'source_type': 'pdf'
+                    })
+                    pdf_count += 1
+                
+                logger.info(f"[STATUS] Got {pdf_count} tables from _pdf_tables (PDF)")
+                
+            except Exception as pdf_e:
+                # _pdf_tables might not exist yet - that's fine
+                logger.debug(f"PDF tables query: {pdf_e}")
+            
+            # If we got nothing from metadata tables, fall back to information_schema
+            if not tables:
+                logger.warning("No metadata found, falling back to information_schema")
                 
                 # Fallback: Get all table names from DuckDB information_schema
                 table_result = handler.conn.execute("""
                     SELECT table_name 
                     FROM information_schema.tables 
                     WHERE table_schema = 'main'
+                    AND table_name NOT LIKE '_%'
                 """).fetchall()
                 
                 for (table_name,) in table_result:
@@ -99,10 +144,11 @@ async def get_structured_data_status(project: Optional[str] = None):
                         
                         # Parse table name to extract metadata
                         parts = table_name.split('__')
-                        if len(parts) >= 3:
+                        if len(parts) >= 2:
                             proj = parts[0]
-                            filename = parts[1]
-                            sheet = parts[2] if len(parts) > 2 else ''
+                            # Rejoin remaining parts as filename (handles filenames with __ in them)
+                            filename = '__'.join(parts[1:])
+                            sheet = ''
                         else:
                             proj = 'default'
                             filename = table_name
@@ -119,7 +165,8 @@ async def get_structured_data_status(project: Optional[str] = None):
                             'sheet': sheet,
                             'columns': columns,
                             'row_count': row_count,
-                            'loaded_at': None
+                            'loaded_at': None,
+                            'source_type': 'unknown'
                         })
                     except Exception as te:
                         logger.warning(f"Error getting info for table {table_name}: {te}")
@@ -137,6 +184,7 @@ async def get_structured_data_status(project: Optional[str] = None):
         for table in tables:
             file_name = table.get('file', 'Unknown')
             project_name = table.get('project', 'Unknown')
+            source_type = table.get('source_type', 'unknown')
             
             key = f"{project_name}:{file_name}"
             if key not in files_dict:
@@ -145,7 +193,8 @@ async def get_structured_data_status(project: Optional[str] = None):
                     'project': project_name,
                     'sheets': [],  # Frontend expects 'sheets' not 'tables'
                     'total_rows': 0,
-                    'loaded_at': None
+                    'loaded_at': None,
+                    'source_type': source_type
                 }
             
             row_count = table.get('row_count', 0)
@@ -298,28 +347,13 @@ async def fail_job_manually(job_id: str, error_message: str = "Manually terminat
 
 @router.delete("/jobs/{job_id}")
 async def delete_job(job_id: str):
-    """Delete a processing job from history"""
+    """Delete a processing job record"""
     try:
-        job = ProcessingJobModel.get_by_id(job_id)
-        if not job:
+        success = ProcessingJobModel.delete(job_id)
+        if success:
+            return {"success": True, "message": f"Job {job_id} deleted"}
+        else:
             raise HTTPException(status_code=404, detail="Job not found")
-        
-        # Delete the job from Supabase
-        from utils.database.supabase_client import get_supabase
-        supabase = get_supabase()
-        
-        if not supabase:
-            raise HTTPException(status_code=500, detail="Database connection failed")
-        
-        supabase.table('processing_jobs').delete().eq('id', job_id).execute()
-        logger.info(f"Job {job_id} deleted by user")
-        
-        return {
-            "success": True,
-            "message": f"Job {job_id} deleted successfully",
-            "job_id": job_id
-        }
-        
     except HTTPException:
         raise
     except Exception as e:
@@ -327,186 +361,190 @@ async def delete_job(job_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.delete("/jobs")
+async def delete_all_jobs():
+    """Delete all processing job records"""
+    try:
+        count = ProcessingJobModel.delete_all()
+        return {"success": True, "message": f"Deleted {count} jobs"}
+    except Exception as e:
+        logger.error(f"Failed to delete all jobs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== DOCUMENT STATUS ====================
+
 @router.get("/status/documents")
-async def get_documents(project: Optional[str] = None, limit: int = 1000):
-    """
-    Get all documents, optionally filtered by project
-    Uses ChromaDB for now - can be optimized to use DocumentModel later
-    """
+async def get_document_status(project: Optional[str] = None):
+    """Get document status from database"""
     try:
-        rag = RAGHandler()
-        collection = rag.client.get_or_create_collection(name="documents")
+        # Get documents from database
+        if project:
+            documents = DocumentModel.get_by_project(project)
+        else:
+            documents = DocumentModel.get_all()
         
-        # Check if collection is empty
-        if collection.count() == 0:
-            return {
-                "documents": [], 
-                "total": 0,
-                "total_chunks": 0
-            }
-        
-        # Get documents with limit to prevent slowness
-        results = collection.get(
-            include=["metadatas"],
-            limit=limit
-        )
-        
-        # Extract unique documents with metadata
-        documents = {}
-        for metadata in results["metadatas"]:
-            filename = metadata.get("filename") or metadata.get("source", "unknown")
-            if filename not in documents:
-                documents[filename] = {
-                    "filename": filename,
-                    "project": metadata.get("project", "unknown"),
-                    "functional_area": metadata.get("functional_area", ""),
-                    "upload_date": metadata.get("upload_date", ""),
-                    "chunks": 0
-                }
-            documents[filename]["chunks"] += 1
-        
-        # Filter by project if specified
-        doc_list = list(documents.values())
-        if project and project != "__GLOBAL__":
-            doc_list = [d for d in doc_list if d["project"] == project]
-        elif project == "__GLOBAL__":
-            doc_list = [d for d in doc_list if d["project"] == "__GLOBAL__"]
+        # Group by project
+        projects = {}
+        for doc in documents:
+            proj = doc.get('project', 'default')
+            if proj not in projects:
+                projects[proj] = []
+            projects[proj].append(doc)
         
         return {
-            "documents": doc_list, 
-            "total": len(doc_list),
-            "total_chunks": sum(d["chunks"] for d in doc_list)
+            "total_documents": len(documents),
+            "projects": projects,
+            "documents": documents
         }
     except Exception as e:
-        logger.error(f"Failed to get documents: {e}")
-        # Return empty instead of 500 error
-        return {
-            "documents": [], 
-            "total": 0,
-            "total_chunks": 0,
-            "error": str(e)
-        }
+        logger.error(f"Document status error: {e}")
+        return {"total_documents": 0, "projects": {}, "documents": [], "error": str(e)}
 
 
-@router.get("/status/documents/db")
-async def get_documents_from_db(project_id: Optional[str] = None):
-    """
-    Get documents from Supabase database (faster than ChromaDB)
-    Alternative endpoint for testing
-    """
+@router.delete("/status/documents/{doc_id}")
+async def delete_document(doc_id: str):
+    """Delete a document and its chunks from ChromaDB"""
     try:
-        if project_id:
-            documents = DocumentModel.get_by_project(project_id)
-        else:
-            # TODO: Add DocumentModel.get_all() if needed
-            documents = []
-            logger.warning("DocumentModel.get_all() not implemented - use project_id filter")
-        
-        return {
-            "documents": documents,
-            "total": len(documents),
-            "source": "supabase"
-        }
-    except Exception as e:
-        logger.error(f"Failed to get documents from DB: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.delete("/status/documents/{filename}")
-async def delete_document(filename: str, project: Optional[str] = None):
-    """Delete all chunks for a specific document from ChromaDB"""
-    try:
-        rag = RAGHandler()
-        
-        try:
-            collection = rag.client.get_collection(name="documents")
-        except:
-            return {"deleted": 0, "filename": filename, "message": "Collection does not exist"}
-        
-        # Get all chunks
-        results = collection.get(include=["metadatas"])
-        
-        # Find IDs to delete
-        ids_to_delete = []
-        for i, metadata in enumerate(results["metadatas"]):
-            doc_name = metadata.get("filename") or metadata.get("source")
-            if doc_name == filename:
-                ids_to_delete.append(results["ids"][i])
-        
-        # Delete the chunks
-        if ids_to_delete:
-            collection.delete(ids=ids_to_delete)
-            logger.info(f"Deleted {len(ids_to_delete)} chunks for {filename}")
-        else:
-            logger.warning(f"No chunks found for {filename}")
-        
-        return {
-            "deleted": len(ids_to_delete), 
-            "filename": filename, 
-            "message": f"Deleted {len(ids_to_delete)} chunks from vector store"
-        }
-    except Exception as e:
-        logger.error(f"Failed to delete document {filename}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.delete("/status/documents/db/{document_id}")
-async def delete_document_by_id(document_id: str):
-    """Delete document from Supabase database by ID"""
-    try:
-        success = DocumentModel.delete(document_id)
-        if success:
-            return {"success": True, "message": f"Document {document_id} deleted from database"}
-        else:
+        # Get document info first
+        doc = DocumentModel.get_by_id(doc_id)
+        if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
+        
+        # Delete from ChromaDB
+        try:
+            rag = RAGHandler()
+            collection = rag.client.get_or_create_collection(name="documents")
+            
+            # Get all chunks for this document
+            results = collection.get(
+                where={"source": doc.get("filename", "")}
+            )
+            
+            if results and results['ids']:
+                collection.delete(ids=results['ids'])
+                logger.info(f"Deleted {len(results['ids'])} chunks from ChromaDB")
+        except Exception as ce:
+            logger.warning(f"ChromaDB deletion issue: {ce}")
+        
+        # Delete from database
+        success = DocumentModel.delete(doc_id)
+        
+        if success:
+            return {"success": True, "message": f"Document {doc_id} deleted"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to delete from database")
+            
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Failed to delete document {document_id}: {e}")
+        logger.error(f"Failed to delete document: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/status/chromadb/reset")
-async def reset_chromadb():
-    """Reset ChromaDB collection (WARNING: Deletes all data!)"""
+@router.post("/status/documents/reset")
+async def reset_all_documents():
+    """Reset all documents (ChromaDB and database)"""
     try:
-        rag = RAGHandler()
-        rag.client.delete_collection(name="documents")
-        logger.warning("⚠️ ChromaDB collection 'documents' was RESET - all data deleted!")
-        return {"status": "reset_complete", "message": "All documents deleted from vector store"}
+        # Reset ChromaDB
+        try:
+            rag = RAGHandler()
+            collection = rag.client.get_or_create_collection(name="documents")
+            # Delete all from collection
+            all_ids = collection.get()['ids']
+            if all_ids:
+                collection.delete(ids=all_ids)
+            logger.warning(f"⚠️ Deleted {len(all_ids)} chunks from ChromaDB")
+        except Exception as ce:
+            logger.error(f"ChromaDB reset error: {ce}")
+        
+        # Reset database documents
+        count = DocumentModel.delete_all()
+        logger.warning(f"⚠️ Deleted {count} documents from database")
+        
+        return {"success": True, "message": f"Reset complete: {count} documents deleted"}
     except Exception as e:
-        logger.error(f"Failed to reset ChromaDB: {e}")
+        logger.error(f"Failed to reset documents: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/status/system")
-async def get_system_status():
-    """Get overall system health"""
+# ==================== PDF REGISTER (from upload.py consolidation) ====================
+
+@router.get("/status/pdf-register")
+async def get_pdf_register(project: Optional[str] = None, project_id: Optional[str] = None):
+    """Get PDF register entries (metadata about uploaded PDFs)"""
+    if not STRUCTURED_AVAILABLE:
+        return {"pdfs": [], "total": 0, "error": "Structured data not available"}
+    
     try:
-        # Get ChromaDB stats
-        chromadb_stats = await get_chromadb_stats()
+        handler = get_structured_handler()
         
-        # Get recent jobs
-        jobs_response = await get_processing_jobs(limit=10)
-        recent_jobs = jobs_response.get("jobs", [])
+        # Check if pdf_register table exists
+        try:
+            tables = handler.conn.execute("""
+                SELECT table_name FROM information_schema.tables 
+                WHERE table_schema = 'main' AND table_name = 'pdf_register'
+            """).fetchall()
+            
+            if not tables:
+                return {"pdfs": [], "total": 0, "message": "PDF register not initialized"}
+        except:
+            return {"pdfs": [], "total": 0, "message": "PDF register not initialized"}
         
-        # Count job statuses
-        job_counts = {
-            "processing": sum(1 for j in recent_jobs if j.get("status") == "processing"),
-            "completed": sum(1 for j in recent_jobs if j.get("status") == "completed"),
-            "failed": sum(1 for j in recent_jobs if j.get("status") == "failed"),
-            "queued": sum(1 for j in recent_jobs if j.get("status") == "queued")
-        }
+        # Build query
+        query = "SELECT * FROM pdf_register"
+        params = []
         
-        return {
-            "chromadb": chromadb_stats,
-            "jobs": {
-                "recent": len(recent_jobs),
-                "counts": job_counts
-            },
-            "status": "operational"
-        }
+        if project_id:
+            query += " WHERE project_id = ?"
+            params.append(project_id)
+        elif project:
+            query += " WHERE project = ?"
+            params.append(project)
+        
+        query += " ORDER BY created_at DESC"
+        
+        result = handler.conn.execute(query, params).fetchall()
+        columns = [desc[0] for desc in handler.conn.description]
+        
+        pdfs = []
+        for row in result:
+            pdf_dict = dict(zip(columns, row))
+            pdfs.append(pdf_dict)
+        
+        return {"pdfs": pdfs, "total": len(pdfs)}
+        
     except Exception as e:
-        logger.error(f"System status check failed: {e}")
-        return {"status": "degraded", "error": str(e)}
+        logger.error(f"PDF register query error: {e}")
+        return {"pdfs": [], "total": 0, "error": str(e)}
+
+
+@router.get("/status/pdf-register/{pdf_id}")
+async def get_pdf_detail(pdf_id: str):
+    """Get detailed info for a specific PDF"""
+    if not STRUCTURED_AVAILABLE:
+        raise HTTPException(503, "Structured data not available")
+    
+    try:
+        handler = get_structured_handler()
+        
+        result = handler.conn.execute(
+            "SELECT * FROM pdf_register WHERE id = ?", [pdf_id]
+        ).fetchone()
+        
+        if not result:
+            raise HTTPException(404, "PDF not found")
+        
+        columns = [desc[0] for desc in handler.conn.description]
+        pdf_dict = dict(zip(columns, result))
+        
+        return pdf_dict
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"PDF detail error: {e}")
+        raise HTTPException(500, str(e))
 
 
 # ==================== COLUMN MAPPING ENDPOINTS ====================
