@@ -1616,13 +1616,49 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
             </div>
           </div>
 
-          {localDocsFound.length > 0 && (
+          {/* Show matched and missing reports */}
+          {action.reports_needed && action.reports_needed.length > 0 && (
             <div style={styles.section}>
-              <div style={styles.sectionTitle}>Documents Found ({localDocsFound.length})</div>
-              <div style={styles.docsFound}>
-                {localDocsFound.map((doc, i) => (
-                  <span key={i} style={styles.docBadge}>📄 {doc}</span>
-                ))}
+              <div style={styles.sectionTitle}>Document Status</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                {action.reports_needed.split(',').map((report, i) => {
+                  const reportTrimmed = report.trim();
+                  const reportLower = reportTrimmed.toLowerCase();
+                  // Check if this report was found
+                  const found = localDocsFound.some(doc => {
+                    const docLower = doc.toLowerCase();
+                    const keywords = reportLower.split(' ');
+                    const matches = keywords.filter(kw => docLower.includes(kw)).length;
+                    return matches >= keywords.length - 1;
+                  });
+                  const matchedDoc = found ? localDocsFound.find(doc => {
+                    const docLower = doc.toLowerCase();
+                    const keywords = reportLower.split(' ');
+                    const matches = keywords.filter(kw => docLower.includes(kw)).length;
+                    return matches >= keywords.length - 1;
+                  }) : null;
+                  
+                  return (
+                    <div key={i} style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      padding: '0.35rem 0.5rem',
+                      background: found ? '#f0fdf4' : '#fef2f2',
+                      border: `1px solid ${found ? '#bbf7d0' : '#fecaca'}`,
+                      borderRadius: '4px',
+                      fontSize: '0.8rem'
+                    }}>
+                      <span>{found ? '✅' : '❌'}</span>
+                      <span style={{ fontWeight: '500' }}>{reportTrimmed}</span>
+                      {matchedDoc && (
+                        <span style={{ color: '#6b7280', fontSize: '0.75rem', marginLeft: 'auto' }}>
+                          → {matchedDoc.length > 30 ? matchedDoc.slice(0, 30) + '...' : matchedDoc}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
