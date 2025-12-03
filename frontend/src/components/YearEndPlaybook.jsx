@@ -1741,6 +1741,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [scanProgress, setScanProgress] = useState(null); // {completed, total, current_action}
   const [activePhase, setActivePhase] = useState('all');
   
   // NEW: Document checklist and AI summary state
@@ -1969,15 +1970,53 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       const scanRes = await api.post(`/playbooks/year-end/scan-all/${project.id}`);
       const results = scanRes.data;
       
-      // Reload all data
-      await refreshAll();
-      
-      // Check if it's a background job or immediate result
+      // Check if it's a background job
       if (results.job_id) {
-        // Background job started
-        alert(`Structure refreshed (${actionCount} actions from ${sourceFile}). Analysis started in background - check progress in a moment.`);
+        // Poll for completion
+        const jobId = results.job_id;
+        let done = false;
+        let finalStatus = null;
+        
+        setScanProgress({ completed: 0, total: results.total_actions || 60, current_action: 'Starting...' });
+        
+        while (!done) {
+          await new Promise(resolve => setTimeout(resolve, 1500)); // Wait 1.5s
+          
+          try {
+            const statusRes = await api.get(`/playbooks/year-end/scan-all/status/${jobId}`);
+            finalStatus = statusRes.data;
+            
+            // Update progress display
+            setScanProgress({
+              completed: finalStatus.completed || 0,
+              total: finalStatus.total || 60,
+              current_action: finalStatus.current_action || 'Analyzing...'
+            });
+            
+            if (finalStatus.status === 'completed' || finalStatus.status === 'failed' || finalStatus.status === 'cancelled') {
+              done = true;
+            }
+          } catch (pollErr) {
+            console.error('Poll error:', pollErr);
+            done = true;
+          }
+        }
+        
+        setScanProgress(null);
+        
+        // Reload all data
+        await refreshAll();
+        
+        if (finalStatus) {
+          const successful = finalStatus.successful || finalStatus.completed || 0;
+          const failed = finalStatus.failed || 0;
+          alert(`Structure refreshed (${actionCount} actions from ${sourceFile}) and analyzed: ${successful} successful, ${failed} failed.`);
+        } else {
+          alert(`Structure refreshed (${actionCount} actions from ${sourceFile}). Analysis completed.`);
+        }
       } else {
         // Immediate result (legacy)
+        await refreshAll();
         const successful = results.successful || 0;
         const failed = results.failed || 0;
         alert(`Structure refreshed (${actionCount} actions from ${sourceFile}) and re-analyzed: ${successful} successful, ${failed} failed.`);
@@ -1988,6 +2027,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       alert('Failed to refresh structure. Check that Year-End Checklist is in Global Library.');
     } finally {
       setAnalyzing(false);
+      setScanProgress(null);
     }
   };
 
@@ -2185,8 +2225,24 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
               disabled={analyzing}
               title="Refresh playbook structure from Global Library and re-analyze all documents"
             >
-              {analyzing ? '⏳ Refreshing...' : '🔄 Refresh & Analyze'}
+              {analyzing 
+                ? (scanProgress 
+                    ? `⏳ Analyzing ${scanProgress.completed}/${scanProgress.total}...` 
+                    : '⏳ Refreshing...')
+                : '🔄 Refresh & Analyze'}
             </button>
+            
+            {/* Show current action being analyzed */}
+            {scanProgress && (
+              <span style={{ 
+                fontSize: '0.75rem', 
+                color: '#6b7280', 
+                marginLeft: '0.5rem',
+                fontStyle: 'italic'
+              }}>
+                {scanProgress.current_action}
+              </span>
+            )}
             
             {/* NEW: Non-blocking scan progress component */}
             <ScanAllProgress
