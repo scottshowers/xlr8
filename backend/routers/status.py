@@ -759,6 +759,62 @@ async def delete_relationship(project: str, rel: RelationshipDelete):
 
 
 # =============================================================================
+# DOCUMENT REGISTRY SETUP
+# =============================================================================
+
+@router.get("/status/document-registry/setup-sql")
+async def get_registry_setup_sql():
+    """
+    Get SQL to create the document_registry table in Supabase.
+    Run this in Supabase SQL Editor to enable document tracking.
+    """
+    try:
+        from utils.database.models import DocumentRegistryModel
+        return {
+            "sql": DocumentRegistryModel.create_table_sql(),
+            "instructions": [
+                "1. Go to Supabase Dashboard → SQL Editor",
+                "2. Paste the SQL below and run it",
+                "3. This creates the document_registry table",
+                "4. New uploads will be registered automatically",
+                "5. Use the Audit button to verify"
+            ]
+        }
+    except Exception as e:
+        # Fallback SQL if import fails
+        return {
+            "sql": """
+CREATE TABLE IF NOT EXISTS document_registry (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    filename TEXT NOT NULL,
+    file_type TEXT,
+    storage_type TEXT DEFAULT 'chromadb',
+    usage_type TEXT DEFAULT 'rag_knowledge',
+    project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+    is_global BOOLEAN DEFAULT FALSE,
+    chunk_count INTEGER DEFAULT 0,
+    file_size INTEGER,
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_doc_registry_project ON document_registry(project_id);
+CREATE INDEX IF NOT EXISTS idx_doc_registry_filename ON document_registry(filename);
+CREATE INDEX IF NOT EXISTS idx_doc_registry_global ON document_registry(is_global);
+            """,
+            "instructions": [
+                "1. Go to Supabase Dashboard → SQL Editor",
+                "2. Paste the SQL below and run it",
+                "3. This creates the document_registry table",
+                "4. New uploads will be registered automatically",
+                "5. Use the Audit button to verify"
+            ],
+            "error": str(e)
+        }
+
+
+# =============================================================================
 # CHROMADB CLEANUP ENDPOINTS
 # =============================================================================
 
@@ -783,47 +839,66 @@ async def audit_chromadb():
             filename = metadata.get("source", metadata.get("filename", "Unknown"))
             project = metadata.get("project_id", metadata.get("project", "unknown"))
             
-            key = f"{project}::{filename}"
-            if key not in chroma_docs:
-                chroma_docs[key] = {
+            # Use just filename as key (project matching is fuzzy)
+            if filename not in chroma_docs:
+                chroma_docs[filename] = {
                     "filename": filename,
                     "project": project,
                     "chunk_ids": [],
                     "chunk_count": 0
                 }
-            chroma_docs[key]["chunk_ids"].append(doc_id)
-            chroma_docs[key]["chunk_count"] += 1
+            chroma_docs[filename]["chunk_ids"].append(doc_id)
+            chroma_docs[filename]["chunk_count"] += 1
         
-        # Get Supabase registry
+        # Get document registry from Supabase
         registry_files = set()
+        registry_available = False
+        registry_error = None
+        
         try:
-            from utils.database.models import DocumentModel
-            docs = DocumentModel.get_all(limit=1000)
-            for doc in docs:
-                filename = doc.get("filename", "")
-                project = doc.get("project_id", "")
-                registry_files.add(f"{project}::{filename}")
+            from utils.database.models import DocumentRegistryModel
+            
+            # Check if table exists
+            if DocumentRegistryModel.table_exists():
+                registry_available = True
+                docs = DocumentRegistryModel.get_all(limit=1000)
+                for doc in docs:
+                    filename = doc.get("filename", "")
+                    if filename:
+                        registry_files.add(filename)
+                logger.info(f"[AUDIT] Found {len(registry_files)} files in registry")
+            else:
+                registry_error = "document_registry table not found - run SQL to create it"
+                logger.warning(f"[AUDIT] {registry_error}")
         except Exception as e:
-            logger.warning(f"Could not fetch Supabase registry: {e}")
+            registry_error = str(e)
+            logger.warning(f"[AUDIT] Could not fetch document registry: {e}")
         
         # Find orphans (in ChromaDB but not in registry)
         orphans = []
         registered = []
         
-        for key, info in chroma_docs.items():
-            if key not in registry_files:
-                orphans.append(info)
-            else:
+        for filename, info in chroma_docs.items():
+            if filename in registry_files:
                 registered.append(info)
+            else:
+                orphans.append(info)
         
-        return {
+        result = {
             "total_chroma_files": len(chroma_docs),
             "total_chroma_chunks": sum(d["chunk_count"] for d in chroma_docs.values()),
             "registered_files": len(registered),
             "orphaned_files": len(orphans),
-            "orphans": orphans[:50],  # Limit response size
+            "registry_available": registry_available,
+            "orphans": orphans[:50],
             "registered": [{"filename": r["filename"], "project": r["project"], "chunks": r["chunk_count"]} for r in registered[:50]]
         }
+        
+        if registry_error:
+            result["registry_error"] = registry_error
+            result["note"] = "Without registry, all files appear as orphans. Create the document_registry table in Supabase."
+        
+        return result
         
     except Exception as e:
         logger.exception(f"ChromaDB audit failed: {e}")
