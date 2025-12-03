@@ -2357,7 +2357,23 @@ async def get_document_checklist(project_id: str):
                     continue
                 
                 keyword_normalized = normalize_text(keyword)
-                keyword_words = keyword_normalized.split()
+                keyword_words = [w for w in keyword_normalized.split() if len(w) > 2]  # Skip tiny words
+                
+                # Fuzzy word match helper
+                def fuzzy_word_match(kw_word, filename_text):
+                    """Check if keyword word matches anywhere in filename (prefix/partial)"""
+                    if kw_word in filename_text:
+                        return True
+                    # Check prefix matching: "worker" matches "workers", "comp" matches "compensation"
+                    filename_words = filename_text.split()
+                    for fw in filename_words:
+                        # Prefix match in either direction
+                        if fw.startswith(kw_word) or kw_word.startswith(fw):
+                            return True
+                        # First 4 chars match (handles worker/workers, comp/compensation)
+                        if len(kw_word) >= 4 and len(fw) >= 4 and kw_word[:4] == fw[:4]:
+                            return True
+                    return False
                 
                 # Check if any uploaded file matches this keyword
                 matched_file = None
@@ -2367,15 +2383,17 @@ async def get_document_checklist(project_id: str):
                         matched_file = filename
                         break
                     
-                    # Method 2: All keyword words appear in filename
+                    # Method 2: All keyword words appear in filename (exact)
                     if all(word in filename_normalized for word in keyword_words):
                         matched_file = filename
                         break
                     
-                    # Method 3: Most keyword words appear (allow 1 missing)
-                    if len(keyword_words) > 1:
-                        matches = sum(1 for w in keyword_words if w in filename_normalized)
-                        if matches >= len(keyword_words) - 1:
+                    # Method 3: Fuzzy match - most words match with prefix/partial
+                    if keyword_words:
+                        fuzzy_matches = sum(1 for w in keyword_words if fuzzy_word_match(w, filename_normalized))
+                        # Allow 1 word to not match if we have multiple words
+                        threshold = max(1, len(keyword_words) - 1)
+                        if fuzzy_matches >= threshold:
                             matched_file = filename
                             break
                 
