@@ -652,9 +652,9 @@ async def upload_file(
         # Create job record
         job = ProcessingJobModel.create(
             job_type='file_upload',
-            project_id=project,
+            project_id=project_id,  # Use UUID, not project name
             filename=file.filename,
-            input_data={'filename': file.filename, 'functional_area': functional_area}
+            input_data={'filename': file.filename, 'functional_area': functional_area, 'project_name': project}
         )
         
         if not job:
