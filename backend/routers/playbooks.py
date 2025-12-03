@@ -198,13 +198,36 @@ async def purge_project_chromadb(project_id: str):
         rag = RAGHandler()
         collection = rag.client.get_or_create_collection(name="documents")
         
+        # Get project name for flexible matching
+        project_name = None
+        try:
+            from utils.supabase_client import get_supabase
+            supabase = get_supabase()
+            proj_result = supabase.table("projects").select("name").eq("id", project_id).execute()
+            if proj_result.data:
+                project_name = proj_result.data[0].get("name", "").upper()
+        except Exception as e:
+            logger.warning(f"[CLEANUP] Could not get project name: {e}")
+        
         # Get all docs for this project
         all_chroma = collection.get(include=["metadatas"], limit=10000)
         
         ids_to_delete = []
         for i, meta in enumerate(all_chroma.get("metadatas", [])):
             doc_project = meta.get("project_id", meta.get("project", ""))
-            if doc_project == project_id or doc_project == project_id[:8]:
+            doc_project_str = str(doc_project)
+            doc_project_upper = doc_project_str.upper()
+            
+            # Match by multiple methods
+            is_match = (
+                doc_project_str == project_id or 
+                doc_project_str == project_id[:8] or
+                (project_name and doc_project_upper == project_name) or
+                (project_name and len(project_name) >= 3 and doc_project_upper.startswith(project_name[:3])) or
+                (project_name and len(project_name) >= 3 and project_name.startswith(doc_project_upper[:3]))
+            )
+            
+            if is_match:
                 ids_to_delete.append(all_chroma["ids"][i])
         
         if ids_to_delete:
@@ -213,7 +236,7 @@ async def purge_project_chromadb(project_id: str):
                 batch = ids_to_delete[i:i+batch_size]
                 collection.delete(ids=batch)
         
-        logger.warning(f"[CLEANUP] Purged {len(ids_to_delete)} chunks for project {project_id}")
+        logger.warning(f"[CLEANUP] Purged {len(ids_to_delete)} chunks for project {project_id} (name={project_name})")
         
         return {
             "success": True,
@@ -1700,17 +1723,40 @@ async def scan_for_action(project_id: str, action_id: str):
             collection = rag.client.get_or_create_collection(name="documents")
             all_results = collection.get(include=["metadatas"], limit=1000)
             
+            # Get project name for flexible matching
+            project_name = None
+            try:
+                from utils.supabase_client import get_supabase
+                supabase = get_supabase()
+                proj_result = supabase.table("projects").select("name").eq("id", project_id).execute()
+                if proj_result.data:
+                    project_name = proj_result.data[0].get("name", "").upper()
+            except Exception as e:
+                logger.warning(f"[SCAN] Could not get project name: {e}")
+            
             project_files = set()  # Just track filenames
             total_docs_in_chroma = len(all_results.get("metadatas", []))
             logger.warning(f"[SCAN] ChromaDB has {total_docs_in_chroma} total docs")
             
             for metadata in all_results.get("metadatas", []):
                 doc_project = metadata.get("project_id") or metadata.get("project", "")
-                if doc_project == project_id or doc_project == project_id[:8]:
+                doc_project_str = str(doc_project)
+                doc_project_upper = doc_project_str.upper()
+                
+                # Match by multiple methods (same as document checklist)
+                is_match = (
+                    doc_project_str == project_id or 
+                    doc_project_str == project_id[:8] or
+                    (project_name and doc_project_upper == project_name) or
+                    (project_name and len(project_name) >= 3 and doc_project_upper.startswith(project_name[:3])) or
+                    (project_name and len(project_name) >= 3 and project_name.startswith(doc_project_upper[:3]))
+                )
+                
+                if is_match:
                     filename = metadata.get("source", metadata.get("filename", "Unknown"))
                     project_files.add(filename)
             
-            logger.warning(f"[SCAN] Found {len(project_files)} files for project {project_id}: {list(project_files)}")
+            logger.warning(f"[SCAN] Found {len(project_files)} files for project {project_id} (name={project_name}): {list(project_files)}")
             
             # STEP 2: Match by filename - check if any report name appears in filename
             logger.warning(f"[SCAN] Reports needed: {reports_needed}")
@@ -2323,14 +2369,12 @@ async def get_document_checklist(project_id: str):
         
         # Get project name for matching (files might be stored with name instead of UUID)
         project_name = None
-        project_code = None
         try:
             from utils.supabase_client import get_supabase
             supabase = get_supabase()
-            proj_result = supabase.table("projects").select("name, code").eq("id", project_id).execute()
+            proj_result = supabase.table("projects").select("name").eq("id", project_id).execute()
             if proj_result.data:
                 project_name = proj_result.data[0].get("name", "").upper()
-                project_code = proj_result.data[0].get("code", "").upper()
         except Exception as e:
             logger.warning(f"Could not get project name: {e}")
         
@@ -2346,20 +2390,27 @@ async def get_document_checklist(project_id: str):
             if p:
                 all_projects_in_chroma.add(str(p))
         logger.warning(f"[DOC-CHECKLIST] All projects in ChromaDB: {all_projects_in_chroma}")
-        logger.warning(f"[DOC-CHECKLIST] Looking for project_id={project_id}, name={project_name}, code={project_code}")
+        logger.warning(f"[DOC-CHECKLIST] Looking for project_id={project_id}, name={project_name}")
         
         # Build list of uploaded filenames
         uploaded_files = []
         for metadata in all_results.get("metadatas", []):
             doc_project = metadata.get("project_id") or metadata.get("project", "")
-            doc_project_upper = str(doc_project).upper()
+            doc_project_str = str(doc_project)
+            doc_project_upper = doc_project_str.upper()
             
-            # Match by UUID, UUID prefix, project name, or project code
+            # Match by multiple methods:
+            # 1. Exact UUID match
+            # 2. UUID prefix match (first 8 chars)
+            # 3. Exact project name match
+            # 4. Project name prefix match (e.g., "TEA1000" starts with "TEA" from "TEAM")
+            # 5. Doc project contains project name or vice versa
             is_match = (
-                doc_project == project_id or 
-                doc_project == project_id[:8] or
+                doc_project_str == project_id or 
+                doc_project_str == project_id[:8] or
                 (project_name and doc_project_upper == project_name) or
-                (project_code and doc_project_upper == project_code)
+                (project_name and len(project_name) >= 3 and doc_project_upper.startswith(project_name[:3])) or
+                (project_name and len(project_name) >= 3 and project_name.startswith(doc_project_upper[:3]))
             )
             
             if is_match:
@@ -2368,7 +2419,7 @@ async def get_document_checklist(project_id: str):
                     uploaded_files.append(filename)
                     logger.warning(f"[DOC-CHECKLIST] ✓ Matched file: {filename} (project in metadata: {doc_project})")
         
-        logger.warning(f"[DOC-CHECKLIST] Found {len(uploaded_files)} files for project {project_id} (name={project_name}, code={project_code})")
+        logger.warning(f"[DOC-CHECKLIST] Found {len(uploaded_files)} files for project {project_id} (name={project_name})")
         logger.warning(f"[DOC-CHECKLIST] Files: {uploaded_files}")
         
         # Build checklist per step
@@ -2414,7 +2465,6 @@ async def get_document_checklist(project_id: str):
             "debug": {
                 "project_id": project_id,
                 "project_name": project_name,
-                "project_code": project_code,
                 "all_projects_in_chroma": list(all_projects_in_chroma)
             }
         }
