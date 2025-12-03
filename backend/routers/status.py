@@ -965,13 +965,36 @@ async def purge_chromadb_project(project_id: str):
         rag = RAGHandler()
         collection = rag.client.get_or_create_collection(name="documents")
         
+        # Get project name for flexible matching
+        project_name = None
+        try:
+            from utils.supabase_client import get_supabase
+            supabase = get_supabase()
+            proj_result = supabase.table("projects").select("name").eq("id", project_id).execute()
+            if proj_result.data:
+                project_name = proj_result.data[0].get("name", "").upper()
+        except Exception as e:
+            logger.warning(f"[CHROMADB] Could not get project name: {e}")
+        
         # Get all docs for this project
         all_chroma = collection.get(include=["metadatas"], limit=10000)
         
         ids_to_delete = []
         for i, metadata in enumerate(all_chroma.get("metadatas", [])):
             doc_project = metadata.get("project_id", metadata.get("project", ""))
-            if doc_project == project_id or doc_project == project_id[:8]:
+            doc_project_str = str(doc_project)
+            doc_project_upper = doc_project_str.upper()
+            
+            # Match by multiple methods
+            is_match = (
+                doc_project_str == project_id or 
+                doc_project_str == project_id[:8] or
+                (project_name and doc_project_upper == project_name) or
+                (project_name and len(project_name) >= 3 and doc_project_upper.startswith(project_name[:3])) or
+                (project_name and len(project_name) >= 3 and project_name.startswith(doc_project_upper[:3]))
+            )
+            
+            if is_match:
                 ids_to_delete.append(all_chroma["ids"][i])
         
         if not ids_to_delete:
