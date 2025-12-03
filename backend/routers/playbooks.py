@@ -1465,6 +1465,17 @@ async def search_duckdb_for_action(
         handler = get_structured_handler()
         conn = handler.conn
         
+        # Get project name for flexible matching
+        project_name = None
+        try:
+            from utils.supabase_client import get_supabase
+            supabase = get_supabase()
+            proj_result = supabase.table("projects").select("name").eq("id", project_id).execute()
+            if proj_result.data:
+                project_name = proj_result.data[0].get("name", "")
+        except Exception as e:
+            logger.warning(f"[DUCKDB-SCAN] Could not get project name: {e}")
+        
         # Build search keywords from action
         keywords = []
         
@@ -1491,25 +1502,49 @@ async def search_duckdb_for_action(
         
         # Find matching tables from _schema_metadata
         try:
-            # Get tables for this project OR global
-            tables_query = """
-                SELECT DISTINCT 
-                    table_name, 
-                    file_name, 
-                    sheet_name, 
-                    project,
-                    columns,
-                    row_count
-                FROM _schema_metadata 
-                WHERE is_current = TRUE
-                AND (
-                    LOWER(project) = LOWER(?)
-                    OR LOWER(project) = 'global'
-                    OR LOWER(project) LIKE ?
-                )
-            """
-            tables = conn.execute(tables_query, [project_id, f"{project_id[:8]}%"]).fetchall()
-            logger.warning(f"[DUCKDB-SCAN] Found {len(tables)} tables for project")
+            # Build query with project name matching
+            # Match by: UUID, UUID prefix, project name, or name prefix
+            if project_name:
+                tables_query = """
+                    SELECT DISTINCT 
+                        table_name, 
+                        file_name, 
+                        sheet_name, 
+                        project,
+                        columns,
+                        row_count
+                    FROM _schema_metadata 
+                    WHERE is_current = TRUE
+                    AND (
+                        LOWER(project) = LOWER(?)
+                        OR LOWER(project) = 'global'
+                        OR LOWER(project) LIKE ?
+                        OR LOWER(project) = LOWER(?)
+                        OR LOWER(project) LIKE ?
+                    )
+                """
+                name_prefix = project_name[:3].lower() + "%" if len(project_name) >= 3 else project_name.lower() + "%"
+                tables = conn.execute(tables_query, [project_id, f"{project_id[:8]}%", project_name, name_prefix]).fetchall()
+            else:
+                tables_query = """
+                    SELECT DISTINCT 
+                        table_name, 
+                        file_name, 
+                        sheet_name, 
+                        project,
+                        columns,
+                        row_count
+                    FROM _schema_metadata 
+                    WHERE is_current = TRUE
+                    AND (
+                        LOWER(project) = LOWER(?)
+                        OR LOWER(project) = 'global'
+                        OR LOWER(project) LIKE ?
+                    )
+                """
+                tables = conn.execute(tables_query, [project_id, f"{project_id[:8]}%"]).fetchall()
+            
+            logger.warning(f"[DUCKDB-SCAN] Found {len(tables)} tables for project (name={project_name})")
             
         except Exception as e:
             logger.warning(f"[DUCKDB-SCAN] Schema query failed: {e}")
@@ -1517,11 +1552,22 @@ async def search_duckdb_for_action(
         
         # Also check PDF tables
         try:
-            pdf_tables = conn.execute("""
-                SELECT table_name, source_file, row_count
-                FROM _pdf_tables
-                WHERE project_id = ? OR project_id LIKE ?
-            """, [project_id, f"{project_id[:8]}%"]).fetchall()
+            if project_name:
+                name_prefix = project_name[:3] + "%" if len(project_name) >= 3 else project_name + "%"
+                pdf_tables = conn.execute("""
+                    SELECT table_name, source_file, row_count
+                    FROM _pdf_tables
+                    WHERE project_id = ? 
+                    OR project_id LIKE ?
+                    OR LOWER(project_id) = LOWER(?)
+                    OR LOWER(project_id) LIKE LOWER(?)
+                """, [project_id, f"{project_id[:8]}%", project_name, name_prefix]).fetchall()
+            else:
+                pdf_tables = conn.execute("""
+                    SELECT table_name, source_file, row_count
+                    FROM _pdf_tables
+                    WHERE project_id = ? OR project_id LIKE ?
+                """, [project_id, f"{project_id[:8]}%"]).fetchall()
             logger.warning(f"[DUCKDB-SCAN] Found {len(pdf_tables)} PDF-derived tables")
         except:
             pdf_tables = []
