@@ -1168,11 +1168,14 @@ async def scan_for_action(project_id: str, action_id: str):
     - Flags impacted actions when new data arrives
     - Auto-completes when all conditions met
     """
+    logger.warning(f"[SCAN] >>> Starting scan for project={project_id}, action={action_id}")
+    
     try:
         from utils.rag_handler import RAGHandler
         
         # Get action details from structure
         structure = await get_year_end_structure()
+        logger.warning(f"[SCAN] Got structure with {structure.get('total_actions', 0)} actions")
         action = None
         for step in structure.get('steps', []):
             for a in step.get('actions', []):
@@ -1237,15 +1240,19 @@ async def scan_for_action(project_id: str, action_id: str):
             all_results = collection.get(include=["metadatas"], limit=1000)
             
             project_files = set()  # Just track filenames
+            total_docs_in_chroma = len(all_results.get("metadatas", []))
+            logger.warning(f"[SCAN] ChromaDB has {total_docs_in_chroma} total docs")
+            
             for metadata in all_results.get("metadatas", []):
                 doc_project = metadata.get("project_id") or metadata.get("project", "")
                 if doc_project == project_id or doc_project == project_id[:8]:
                     filename = metadata.get("source", metadata.get("filename", "Unknown"))
                     project_files.add(filename)
             
-            logger.info(f"[SCAN] Found {len(project_files)} unique files in project {project_id}: {list(project_files)}")
+            logger.warning(f"[SCAN] Found {len(project_files)} files for project {project_id}: {list(project_files)}")
             
             # STEP 2: Match by filename - check if any report name appears in filename
+            logger.warning(f"[SCAN] Reports needed: {reports_needed}")
             for report_name in reports_needed:
                 report_keywords = report_name.lower().split()
                 for filename in project_files:
@@ -1262,7 +1269,7 @@ async def scan_for_action(project_id: str, action_id: str):
                                 "match_type": "filename"
                             })
                             all_content.append(f"[FILE: {filename}] - matches required report: {report_name}")
-                            logger.info(f"[SCAN] Filename match: '{filename}' for report '{report_name}'")
+                            logger.warning(f"[SCAN] ✓ Filename match: '{filename}' for report '{report_name}'")
             
         except Exception as e:
             logger.warning(f"[SCAN] Filename matching failed: {e}")
@@ -1273,6 +1280,8 @@ async def scan_for_action(project_id: str, action_id: str):
         if inherited_docs:
             queries.extend(inherited_docs[:3])  # Also search for content from inherited docs
         
+        logger.warning(f"[SCAN] Running semantic search with {len(queries)} queries")
+        
         for query in queries[:8]:
                 try:
                     results = rag.search(
@@ -1281,6 +1290,7 @@ async def scan_for_action(project_id: str, action_id: str):
                         n_results=15,
                         project_id=project_id
                     )
+                    logger.warning(f"[SCAN] Query '{query[:30]}...' returned {len(results) if results else 0} results")
                     if results:
                         for result in results:
                             doc = result.get('document', '')
@@ -1303,7 +1313,7 @@ async def scan_for_action(project_id: str, action_id: str):
                 except Exception as e:
                     logger.warning(f"Query failed: {e}")
         
-        logger.info(f"[SCAN] Total unique docs found: {len(found_docs)}")
+        logger.warning(f"[SCAN] Total unique docs found: {len(found_docs)}")
         
         # Determine findings and suggested status
         findings = None
@@ -1311,24 +1321,27 @@ async def scan_for_action(project_id: str, action_id: str):
         
         # If we have docs OR inherited findings, we can analyze
         has_data = len(found_docs) > 0 or len(inherited_findings) > 0
+        logger.warning(f"[SCAN] has_data={has_data}, found_docs={len(found_docs)}, inherited_findings={len(inherited_findings)}")
         
         if has_data:
             suggested_status = "in_progress"
             
             # Use Claude with CONSULTATIVE context
             if all_content or inherited_findings:
+                logger.warning(f"[SCAN] Calling AI analysis with {len(all_content)} content chunks")
                 findings = await extract_findings_consultative(
                     action=action,
                     content=all_content[:15],
                     inherited_findings=inherited_findings,
                     action_id=action_id
                 )
+                logger.warning(f"[SCAN] AI analysis returned: {type(findings)}, complete={findings.get('complete') if findings else 'None'}")
                 
                 # AUTO-COMPLETE: If findings show complete and no high-risk issues
                 if findings:
                     if findings.get('complete') and findings.get('risk_level') != 'high':
                         suggested_status = "complete"
-                        logger.info(f"[SCAN] Action {action_id} AUTO-COMPLETED (complete=True, risk != high)")
+                        logger.warning(f"[SCAN] Action {action_id} AUTO-COMPLETED")
         
         # =====================================================================
         # CONFLICT DETECTION - Check for inconsistencies
@@ -1606,10 +1619,18 @@ async def extract_findings_consultative(
     - Proactive recommendations
     - Inherited findings from parent actions
     """
+    logger.warning(f"[AI] Starting extract_findings_consultative for {action_id}")
+    
     try:
         from anthropic import Anthropic
         
-        client = Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
+        api_key = os.getenv("CLAUDE_API_KEY")
+        if not api_key:
+            logger.warning(f"[AI] No CLAUDE_API_KEY found - skipping AI analysis")
+            return None
+        
+        logger.warning(f"[AI] Using API key: {api_key[:8]}...")
+        client = Anthropic(api_key=api_key)
         
         combined = "\n\n---\n\n".join(content)
         
@@ -1678,6 +1699,8 @@ Return ONLY valid JSON."""
             messages=[{"role": "user", "content": prompt}]
         )
         
+        logger.warning(f"[AI] Got response from Claude API")
+        
         text = response.content[0].text.strip()
         # Clean markdown
         if text.startswith("```"):
@@ -1686,10 +1709,14 @@ Return ONLY valid JSON."""
                 text = text[4:]
         text = text.strip()
         
-        return json.loads(text)
+        result = json.loads(text)
+        logger.warning(f"[AI] Parsed findings: complete={result.get('complete')}, risk={result.get('risk_level')}")
+        return result
         
     except Exception as e:
-        logger.error(f"Failed to extract findings: {e}")
+        logger.warning(f"[AI] Failed to extract findings: {e}")
+        import traceback
+        logger.warning(traceback.format_exc())
         return None
 
 
@@ -1706,109 +1733,70 @@ async def extract_findings_for_action(action: Dict, content: List[str]) -> Optio
 @router.get("/year-end/document-checklist/{project_id}")
 async def get_document_checklist(project_id: str):
     """
-    Get the document checklist with real-time upload status.
-    Shows which reports are needed, uploaded, and processing.
+    Get document checklist per step based on Step_Documents sheet.
+    Shows which documents are uploaded vs missing for each step.
     """
     try:
         from utils.rag_handler import RAGHandler
-        from utils.database.models import ProcessingJobModel
+        from utils.playbook_parser import match_documents_to_step
+        
+        # Get structure (which now includes required_documents per step)
+        structure = await get_year_end_structure()
         
         # Get all project files from ChromaDB
         rag = RAGHandler()
         collection = rag.client.get_or_create_collection(name="documents")
         all_results = collection.get(include=["metadatas"], limit=1000)
         
-        # Build set of uploaded filenames
-        uploaded_files = set()
+        # Build list of uploaded filenames
+        uploaded_files = []
         for metadata in all_results.get("metadatas", []):
             doc_project = metadata.get("project_id") or metadata.get("project", "")
             if doc_project == project_id or doc_project == project_id[:8]:
                 filename = metadata.get("source", metadata.get("filename", ""))
-                if filename:
-                    uploaded_files.add(filename.lower())
+                if filename and filename not in uploaded_files:
+                    uploaded_files.append(filename)
         
-        # Check for active processing jobs
-        processing_jobs = []
-        try:
-            # Get all recent jobs and filter for pending/processing
-            all_jobs = ProcessingJobModel.get_all(limit=20)
-            for job in all_jobs:
-                job_status = job.get("status", "")
-                job_project = job.get("input_data", {}).get("project_id", "")
-                
-                # Filter for this project and pending/processing status
-                if job_status in ["pending", "processing"] and job_project == project_id:
-                    processing_jobs.append({
-                        "filename": job.get("input_data", {}).get("filename", "Unknown"),
-                        "progress": job.get("progress", 0),
-                        "message": job.get("status_message", "Processing..."),
-                        "job_id": job.get("id")
-                    })
-        except Exception as e:
-            logger.warning(f"Could not fetch processing jobs: {e}")
+        # Build checklist per step
+        step_checklists = []
+        total_matched = 0
+        total_missing = 0
+        total_required_matched = 0
+        total_required_missing = 0
         
-        # Build checklist
-        checklist = []
-        for doc_name, doc_info in REQUIRED_DOCUMENTS.items():
-            # Check if this doc is uploaded (fuzzy match on keywords)
-            is_uploaded = False
-            matched_file = None
+        for step in structure.get('steps', []):
+            step_docs = step.get('required_documents', [])
+            if not step_docs:
+                continue
             
-            for uploaded in uploaded_files:
-                for keyword in doc_info["keywords"]:
-                    if keyword in uploaded:
-                        is_uploaded = True
-                        matched_file = uploaded
-                        break
-                if is_uploaded:
-                    break
+            # Match documents for this step
+            match_result = match_documents_to_step(step_docs, uploaded_files)
             
-            # Check if currently processing
-            is_processing = False
-            processing_info = None
-            for job in processing_jobs:
-                job_filename = job["filename"].lower()
-                for keyword in doc_info["keywords"]:
-                    if keyword in job_filename:
-                        is_processing = True
-                        processing_info = job
-                        break
-                if is_processing:
-                    break
-            
-            checklist.append({
-                "document_name": doc_name,
-                "description": doc_info["description"],
-                "required": doc_info["required"],
-                "actions": doc_info["actions"],
-                "status": "processing" if is_processing else ("uploaded" if is_uploaded else "missing"),
-                "matched_file": matched_file,
-                "processing_info": processing_info
+            step_checklists.append({
+                'step_number': step.get('step_number'),
+                'step_name': step.get('step_name'),
+                'matched': match_result['matched'],
+                'missing': match_result['missing'],
+                'stats': match_result['stats']
             })
-        
-        # Sort: required first, then by status (missing, processing, uploaded)
-        status_order = {"missing": 0, "processing": 1, "uploaded": 2}
-        checklist.sort(key=lambda x: (not x["required"], status_order.get(x["status"], 3)))
-        
-        # Calculate stats
-        total_required = sum(1 for d in checklist if d["required"])
-        uploaded_required = sum(1 for d in checklist if d["required"] and d["status"] == "uploaded")
-        total_uploaded = sum(1 for d in checklist if d["status"] == "uploaded")
-        total_processing = sum(1 for d in checklist if d["status"] == "processing")
+            
+            total_matched += match_result['stats']['matched']
+            total_missing += match_result['stats']['missing']
+            total_required_matched += match_result['stats']['required_matched']
+            total_required_missing += match_result['stats']['required_missing']
         
         return {
             "project_id": project_id,
-            "checklist": checklist,
+            "has_step_documents": structure.get('has_step_documents', False),
+            "uploaded_files": uploaded_files,
+            "step_checklists": step_checklists,
             "stats": {
-                "total_documents": len(checklist),
-                "total_required": total_required,
-                "uploaded_required": uploaded_required,
-                "total_uploaded": total_uploaded,
-                "total_processing": total_processing,
-                "total_missing": len(checklist) - total_uploaded - total_processing,
-                "required_complete": uploaded_required == total_required
-            },
-            "processing_jobs": processing_jobs
+                "total_uploaded": len(uploaded_files),
+                "total_matched": total_matched,
+                "total_missing": total_missing,
+                "required_matched": total_required_matched,
+                "required_missing": total_required_missing
+            }
         }
         
     except Exception as e:
