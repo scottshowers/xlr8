@@ -503,3 +503,7 @@ def get_smart_analyzer() -> SmartPDFAnalyzer:
     if _analyzer_instance is None:
         _analyzer_instance = SmartPDFAnalyzer()
     return _analyzer_instance
+
+
+# Alias for backward compatibility
+process_pdf_intelligently = smart_process_pdf
