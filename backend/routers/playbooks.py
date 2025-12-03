@@ -2226,7 +2226,64 @@ async def get_document_checklist(project_id: str):
     """
     try:
         from utils.rag_handler import RAGHandler
-        from utils.playbook_parser import match_documents_to_step
+        
+        # Inline function to avoid import issues
+        def match_documents_to_step(step_documents, uploaded_files):
+            """Match uploaded files against step document requirements."""
+            matched = []
+            missing = []
+            
+            for doc in step_documents:
+                keyword = doc.get('keyword', '').lower()
+                if not keyword:
+                    continue
+                
+                # Check if any uploaded file matches this keyword
+                matched_file = None
+                for filename in uploaded_files:
+                    filename_lower = filename.lower()
+                    # Simple keyword matching
+                    if keyword in filename_lower:
+                        matched_file = filename
+                        break
+                    # Also check individual words for multi-word keywords
+                    keyword_words = keyword.split()
+                    if len(keyword_words) > 1:
+                        matches = sum(1 for w in keyword_words if w in filename_lower)
+                        if matches >= len(keyword_words) - 1:  # Allow 1 word missing
+                            matched_file = filename
+                            break
+                
+                doc_info = {
+                    'keyword': doc.get('keyword'),
+                    'description': doc.get('description', ''),
+                    'required': doc.get('required', False)
+                }
+                
+                if matched_file:
+                    doc_info['matched_file'] = matched_file
+                    matched.append(doc_info)
+                else:
+                    missing.append(doc_info)
+            
+            # Calculate stats
+            total = len(step_documents)
+            required_docs = [d for d in step_documents if d.get('required')]
+            required_matched = sum(1 for m in matched if m.get('required'))
+            required_missing = sum(1 for m in missing if m.get('required'))
+            
+            return {
+                'matched': matched,
+                'missing': missing,
+                'stats': {
+                    'total': total,
+                    'matched': len(matched),
+                    'missing': len(missing),
+                    'required_total': len(required_docs),
+                    'required_matched': required_matched,
+                    'required_missing': required_missing
+                }
+            }
         
         # Get structure (which now includes required_documents per step)
         structure = await get_year_end_structure()
