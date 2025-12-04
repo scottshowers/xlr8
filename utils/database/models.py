@@ -736,6 +736,58 @@ class ProcessingJobModel:
         except Exception as e:
             print(f"Error deleting all jobs: {e}")
             return 0
+    
+    @staticmethod
+    def delete_older_than(days: int = 7) -> int:
+        """Delete jobs older than X days - returns count deleted"""
+        supabase = get_supabase()
+        if not supabase:
+            return 0
+        
+        try:
+            from datetime import datetime, timedelta
+            cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+            
+            # Get count first
+            count_response = supabase.table('processing_jobs') \
+                .select('id', count='exact') \
+                .lt('created_at', cutoff) \
+                .execute()
+            count = count_response.count or 0
+            
+            # Delete old jobs
+            if count > 0:
+                supabase.table('processing_jobs').delete().lt('created_at', cutoff).execute()
+            
+            return count
+        
+        except Exception as e:
+            print(f"Error deleting old jobs: {e}")
+            return 0
+    
+    @staticmethod
+    def get_recent(days: int = 7, limit: int = 100) -> List[Dict[str, Any]]:
+        """Get jobs from the last X days"""
+        supabase = get_supabase()
+        if not supabase:
+            return []
+        
+        try:
+            from datetime import datetime, timedelta
+            cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+            
+            response = supabase.table('processing_jobs') \
+                .select('*') \
+                .gte('created_at', cutoff) \
+                .order('created_at', desc=True) \
+                .limit(limit) \
+                .execute()
+            
+            return response.data if response.data else []
+        
+        except Exception as e:
+            print(f"Error getting recent jobs: {e}")
+            return []
 
 
 # Convenience functions
