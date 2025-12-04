@@ -273,6 +273,7 @@ def parse_year_end_from_duckdb() -> Dict[str, Any]:
     
     try:
         all_actions = []
+        all_fast_track = []
         file_name = tables[0]['file_name'] if tables else 'unknown'
         
         for table_info in tables:
@@ -298,7 +299,27 @@ def parse_year_end_from_duckdb() -> Dict[str, Any]:
                 col_info = conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
                 col_names = [c[1] for c in col_info]
                 
-                logger.info(f"[PARSER] {len(rows)} rows, columns: {col_names[:3]}...")
+                logger.warning(f"[PARSER] {len(rows)} rows, ALL columns: {col_names}")
+                
+                # Find Fast Track column indices
+                ft_col_indices = {}
+                for i, name in enumerate(col_names):
+                    name_lower = name.lower().replace(' ', '_').replace('-', '_')
+                    logger.warning(f"[PARSER] Checking column {i}: '{name}' -> '{name_lower}'")
+                    if 'ft_action_id' in name_lower or name_lower == 'ft_action_id':
+                        ft_col_indices['ft_id'] = i
+                    elif 'ft_description' in name_lower:
+                        ft_col_indices['description'] = i
+                    elif 'ft_sequence' in name_lower:
+                        ft_col_indices['sequence'] = i
+                    elif 'ft_ukg_actionref' in name_lower or 'ft_ukg_action_ref' in name_lower:
+                        ft_col_indices['ukg_action_ref'] = i
+                    elif 'ft_sql_script' in name_lower:
+                        ft_col_indices['sql_script'] = i
+                    elif 'ft_notes' in name_lower:
+                        ft_col_indices['notes'] = i
+                
+                logger.warning(f"[PARSER] Found Fast Track columns: {ft_col_indices}")
                 
                 # Find the description column (it's the one with the super long name)
                 desc_col_idx = None
@@ -387,6 +408,72 @@ def parse_year_end_from_duckdb() -> Dict[str, Any]:
                         'source_sheet': sheet_name
                     })
                     
+                    # Extract Fast Track data if columns exist and FT_Action_ID is populated
+                    if ft_col_indices.get('ft_id') is not None:
+                        ft_id_idx = ft_col_indices['ft_id']
+                        ft_id_raw = str(row[ft_id_idx]).strip() if len(row) > ft_id_idx and row[ft_id_idx] else ''
+                        
+                        # Debug: log first few FT values we see
+                        if action_id_clean in ['1A', '2A', '3A']:
+                            logger.warning(f"[PARSER] Row {action_id_clean}: ft_id_idx={ft_id_idx}, ft_id_raw='{ft_id_raw}'")
+                        
+                        if ft_id_raw and ft_id_raw.lower() not in ['', 'none', 'nan', 'ft_action_id']:
+                            ft_item = {
+                                'ft_id': ft_id_raw,
+                                'description': '',
+                                'sequence': 0,
+                                'ukg_action_ref': [],
+                                'sql_script': None,
+                                'notes': '',
+                                'reports_needed': reports_needed  # Inherit from parent action
+                            }
+                            
+                            # Get FT description
+                            if 'description' in ft_col_indices:
+                                idx = ft_col_indices['description']
+                                if len(row) > idx and row[idx]:
+                                    ft_item['description'] = str(row[idx]).strip()
+                            
+                            # Get FT sequence
+                            if 'sequence' in ft_col_indices:
+                                idx = ft_col_indices['sequence']
+                                if len(row) > idx and row[idx]:
+                                    try:
+                                        ft_item['sequence'] = int(float(str(row[idx]).strip()))
+                                    except:
+                                        pass
+                            
+                            # Get UKG action refs (comma-separated)
+                            if 'ukg_action_ref' in ft_col_indices:
+                                idx = ft_col_indices['ukg_action_ref']
+                                if len(row) > idx and row[idx]:
+                                    refs = str(row[idx]).strip()
+                                    if refs and refs.lower() not in ['none', 'nan']:
+                                        ft_item['ukg_action_ref'] = [r.strip() for r in refs.split(',') if r.strip()]
+                            
+                            # Get SQL script
+                            if 'sql_script' in ft_col_indices:
+                                idx = ft_col_indices['sql_script']
+                                if len(row) > idx and row[idx]:
+                                    script = str(row[idx]).strip()
+                                    if script and script.lower() not in ['none', 'nan']:
+                                        ft_item['sql_script'] = script
+                            
+                            # Get notes
+                            if 'notes' in ft_col_indices:
+                                idx = ft_col_indices['notes']
+                                if len(row) > idx and row[idx]:
+                                    notes_val = str(row[idx]).strip()
+                                    if notes_val and notes_val.lower() not in ['none', 'nan']:
+                                        ft_item['notes'] = notes_val
+                            
+                            # Only add if we have a description or can use the action description
+                            if not ft_item['description']:
+                                ft_item['description'] = description[:100]  # Use action description as fallback
+                            
+                            all_fast_track.append(ft_item)
+                            logger.warning(f"[PARSER] ⚡ Added Fast Track item: {ft_id_raw} seq={ft_item['sequence']} refs={ft_item['ukg_action_ref']}")
+                    
             except Exception as e:
                 logger.error(f"[PARSER] Error processing {table_name}: {e}")
                 import traceback
@@ -394,16 +481,20 @@ def parse_year_end_from_duckdb() -> Dict[str, Any]:
                 continue
         
         logger.info(f"[PARSER] Extracted {len(all_actions)} actions from DuckDB")
+        logger.warning(f"[PARSER] Extracted {len(all_fast_track)} Fast Track items")
         
         if not all_actions:
             logger.warning("[PARSER] No actions extracted, using default")
             return get_default_structure()
         
+        # Sort Fast Track by sequence
+        all_fast_track.sort(key=lambda x: x.get('sequence', 999))
+        
         # Load Step_Documents mapping
         step_documents = load_step_documents()
         
         # Build step structure with document mappings
-        return build_playbook_structure(all_actions, file_name, step_documents)
+        return build_playbook_structure(all_actions, file_name, step_documents, all_fast_track)
         
     except Exception as e:
         logger.exception(f"[PARSER] Error parsing Year-End from DuckDB: {e}")
@@ -412,10 +503,11 @@ def parse_year_end_from_duckdb() -> Dict[str, Any]:
         conn.close()
 
 
-def build_playbook_structure(actions: List[Dict], source_file: str, step_documents: Dict[str, List[Dict]] = None) -> Dict[str, Any]:
+def build_playbook_structure(actions: List[Dict], source_file: str, step_documents: Dict[str, List[Dict]] = None, fast_track: List[Dict] = None) -> Dict[str, Any]:
     """Build the final playbook structure from parsed actions"""
     
     step_documents = step_documents or {}
+    fast_track = fast_track or []
     
     steps = []
     seen_steps = set()
@@ -454,10 +546,12 @@ def build_playbook_structure(actions: List[Dict], source_file: str, step_documen
         'playbook_id': 'year-end-2025',
         'title': 'UKG Pro Pay U.S. Year-End Checklist: Payment Services',
         'steps': steps,
+        'fast_track': fast_track,
         'total_actions': len(actions),
         'source_file': source_file,
         'source_type': 'duckdb',
-        'has_step_documents': len(step_documents) > 0
+        'has_step_documents': len(step_documents) > 0,
+        'has_fast_track': len(fast_track) > 0
     }
 
 
@@ -600,9 +694,11 @@ def get_default_structure() -> Dict[str, Any]:
                 ]
             }
         ],
+        'fast_track': [],
         'total_actions': 2,
         'source_file': 'default_structure',
-        'source_type': 'fallback'
+        'source_type': 'fallback',
+        'has_fast_track': False
     }
 
 
