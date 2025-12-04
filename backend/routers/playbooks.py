@@ -1886,19 +1886,20 @@ async def get_document_checklist(project_id: str):
                     if doc_project_id == project_id or doc_project_id.startswith(project_id[:8]) or project_id.startswith(doc_project_id):
                         project_name = doc_project_name
                 
-                # Match by project_id OR project_name
-                matches = (
+                # Include GLOBAL files OR project-specific files
+                is_global = doc_project_name and doc_project_name.lower() in ('global', '__global__', 'global/universal')
+                is_this_project = (
                     (doc_project_id and (doc_project_id == project_id or doc_project_id.startswith(project_id[:8]) or project_id.startswith(doc_project_id))) or
                     (project_name and doc_project_name and doc_project_name.lower() == project_name.lower())
                 )
                 
-                if matches:
+                if is_global or is_this_project:
                     filename = metadata.get("source", metadata.get("filename", ""))
                     if filename and filename.lower() not in seen_files:
                         uploaded_files_list.append(filename)
                         seen_files.add(filename.lower())
             
-            logger.info(f"[DOC-CHECKLIST] ChromaDB: {len(uploaded_files_list)} files for project {project_id[:8]}")
+            logger.info(f"[DOC-CHECKLIST] ChromaDB: {len(uploaded_files_list)} files for project {project_id[:8]} (includes GLOBAL)")
         except Exception as e:
             logger.warning(f"[DOC-CHECKLIST] ChromaDB query failed: {e}")
         
@@ -1915,18 +1916,23 @@ async def get_document_checklist(project_id: str):
                     WHERE source_file IS NOT NULL
                 """).fetchall()
                 
+                logger.info(f"[DOC-CHECKLIST] DuckDB _schema_metadata returned {len(result)} rows")
+                
                 for row in result:
                     source_file, proj = row
-                    # Match project - be flexible with short codes like "TEA1000"
-                    if proj and (
-                        proj.lower() == project_name.lower() if project_name else False or
-                        project_id.lower().startswith(proj.lower()[:4]) or
-                        proj.lower().startswith(project_id[:4].lower())
-                    ):
+                    # Include GLOBAL files OR project-specific files
+                    is_global = proj and proj.lower() in ('global', '__global__', 'global/universal')
+                    is_this_project = proj and (
+                        proj.lower() in project_id.lower() or
+                        project_id[:8].lower() in proj.lower() or
+                        (project_name and proj.lower() == project_name.lower())
+                    )
+                    
+                    if is_global or is_this_project:
                         if source_file and source_file.lower() not in seen_files:
                             uploaded_files_list.append(source_file)
                             seen_files.add(source_file.lower())
-                            logger.info(f"[DOC-CHECKLIST] DuckDB Excel: {source_file}")
+                            logger.info(f"[DOC-CHECKLIST] DuckDB Excel: {source_file} (project: {proj})")
                 
                 conn.close()
         except Exception as e:
@@ -1951,19 +1957,23 @@ async def get_document_checklist(project_id: str):
                         WHERE source_file IS NOT NULL
                     """).fetchall()
                     
+                    logger.info(f"[DOC-CHECKLIST] DuckDB _pdf_tables returned {len(result)} rows")
+                    
                     for row in result:
                         source_file, proj, pid = row
-                        # Match by project name or project_id
-                        matches = (
+                        # Include GLOBAL files OR project-specific files
+                        is_global = proj and proj.lower() in ('global', '__global__', 'global/universal')
+                        is_this_project = (
                             (pid and (pid == project_id or pid.startswith(project_id[:8]))) or
-                            (proj and project_name and proj.lower() == project_name.lower()) or
-                            (proj and project_id[:4].lower() in proj.lower())
+                            (proj and project_id[:8].lower() in proj.lower()) or
+                            (proj and project_name and proj.lower() == project_name.lower())
                         )
-                        if matches:
+                        
+                        if is_global or is_this_project:
                             if source_file and source_file.lower() not in seen_files:
                                 uploaded_files_list.append(source_file)
                                 seen_files.add(source_file.lower())
-                                logger.info(f"[DOC-CHECKLIST] DuckDB PDF: {source_file}")
+                                logger.info(f"[DOC-CHECKLIST] DuckDB PDF: {source_file} (project: {proj})")
                 
                 conn.close()
         except Exception as e:
