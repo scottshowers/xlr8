@@ -355,10 +355,6 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <div style={{ textAlign: 'right', fontSize: '0.8rem' }}>
-            <div><strong>{stats?.actions_scanned || 0}</strong> scanned</div>
-            <div><strong>{stats?.total_issues || 0}</strong> issues</div>
-          </div>
           <span style={{ fontSize: '1.2rem' }}>{expanded ? '▼' : '▶'}</span>
         </div>
       </div>
@@ -1170,7 +1166,7 @@ function TooltipDisplay({ tooltips, onEdit, onDelete, isAdmin }) {
 }
 
 // Action Card Component
-function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltips, isAdmin, onAddTooltip, onEditTooltip, onDeleteTooltip }) {
+function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltips, isAdmin, onAddTooltip, onEditTooltip, onDeleteTooltip, uploadedFiles }) {
   const [expanded, setExpanded] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -1179,6 +1175,64 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
   const [localStatus, setLocalStatus] = useState(progress?.status || 'not_started');
   const [localDocsFound, setLocalDocsFound] = useState(progress?.documents_found || []);
   const fileInputRef = React.useRef(null);
+  
+  // Pre-match uploaded files to this action's reports_needed (runs on every render)
+  const reportsNeeded = Array.isArray(action?.reports_needed) 
+    ? action.reports_needed 
+    : (action?.reports_needed ? String(action.reports_needed).split(',').map(s => s.trim()) : []);
+  
+  // Match uploaded files against reports_needed using same fuzzy logic as sidebar
+  const matchedFromUploads = React.useMemo(() => {
+    if (!uploadedFiles?.length || !reportsNeeded.length) return [];
+    
+    const normalize = (s) => s.toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').replace(/\./g, ' ').replace(/'/g, '');
+    
+    const matched = [];
+    for (const report of reportsNeeded) {
+      const reportNorm = normalize(report);
+      const reportWords = reportNorm.split(' ').filter(w => w.length > 2);
+      
+      for (const file of uploadedFiles) {
+        const fileNorm = normalize(file);
+        
+        // Method 1: full keyword in filename
+        if (fileNorm.includes(reportNorm)) {
+          matched.push(file);
+          break;
+        }
+        
+        // Method 2: all words appear
+        if (reportWords.every(w => fileNorm.includes(w))) {
+          matched.push(file);
+          break;
+        }
+        
+        // Method 3: fuzzy word matching
+        const fuzzyMatch = (keyword, text) => {
+          if (text.includes(keyword)) return true;
+          const textWords = text.split(' ');
+          for (const tw of textWords) {
+            if (tw.startsWith(keyword) || keyword.startsWith(tw)) return true;
+            if (keyword.length >= 4 && tw.length >= 4 && keyword.slice(0,4) === tw.slice(0,4)) return true;
+          }
+          return false;
+        };
+        
+        const fuzzyMatches = reportWords.filter(w => fuzzyMatch(w, fileNorm)).length;
+        if (fuzzyMatches >= reportWords.length - 1 && fuzzyMatches > 0) {
+          matched.push(file);
+          break;
+        }
+      }
+    }
+    return matched;
+  }, [uploadedFiles, reportsNeeded]);
+  
+  // Combine scan results + upload matches for display
+  const allDocsFound = React.useMemo(() => {
+    const combined = new Set([...localDocsFound, ...matchedFromUploads]);
+    return Array.from(combined);
+  }, [localDocsFound, matchedFromUploads]);
   
   // Sync local docs with progress prop - MUST be before any conditional returns
   React.useEffect(() => {
@@ -1191,9 +1245,6 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
   }
   
   const findings = progress?.findings;
-  const reportsNeeded = Array.isArray(action.reports_needed) 
-    ? action.reports_needed 
-    : (action.reports_needed ? String(action.reports_needed).split(',').map(s => s.trim()) : []);
   const expectedCount = reportsNeeded.length || 1;
   
   const statusConfig = STATUS_OPTIONS.find(s => s.value === localStatus) || STATUS_OPTIONS[0];
@@ -1550,9 +1601,9 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
               <span style={styles.dueDate}>📅 Due: {action.due_date}</span>
             )}
             <span style={styles.actionType}>{action.action_type || 'unknown'}</span>
-            {localDocsFound.length > 0 && (
+            {allDocsFound.length > 0 && (
               <span style={{ fontSize: '0.75rem', color: COLORS.grassGreen }}>
-                ✓ {localDocsFound.length} doc{localDocsFound.length > 1 ? 's' : ''} found
+                ✓ {allDocsFound.length} doc{allDocsFound.length > 1 ? 's' : ''} found
               </span>
             )}
           </div>
@@ -1670,8 +1721,8 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
                     return false;
                   };
                   
-                  const found = localDocsFound.some(matchDoc);
-                  const matchedDoc = found ? localDocsFound.find(matchDoc) : null;
+                  const found = allDocsFound.some(matchDoc);
+                  const matchedDoc = found ? allDocsFound.find(matchDoc) : null;
                   
                   return (
                     <div key={i} style={{
@@ -1901,7 +1952,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
 }
 
 // Step Accordion Component
-function StepAccordion({ step, progress, projectId, onUpdate, tooltipsByAction, isAdmin, onAddTooltip, onEditTooltip, onDeleteTooltip }) {
+function StepAccordion({ step, progress, projectId, onUpdate, tooltipsByAction, isAdmin, onAddTooltip, onEditTooltip, onDeleteTooltip, uploadedFiles }) {
   const [expanded, setExpanded] = useState(true);
   
   // Safety check
@@ -2007,6 +2058,7 @@ function StepAccordion({ step, progress, projectId, onUpdate, tooltipsByAction, 
               onAddTooltip={onAddTooltip}
               onEditTooltip={onEditTooltip}
               onDeleteTooltip={onDeleteTooltip}
+              uploadedFiles={uploadedFiles || []}
             />
           ) : null)}
         </div>
@@ -2028,7 +2080,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   // NEW: Document checklist and AI summary state
   const [docChecklist, setDocChecklist] = useState(null);
   const [aiSummary, setAiSummary] = useState(null);
-  const [summaryExpanded, setSummaryExpanded] = useState(true);
+  const [summaryExpanded, setSummaryExpanded] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   
   // TOOLTIPS: State for consultant-driven notes
@@ -2590,6 +2642,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
             onAddTooltip={handleAddTooltip}
             onEditTooltip={handleEditTooltip}
             onDeleteTooltip={handleDeleteTooltip}
+            uploadedFiles={docChecklist?.uploaded_files || []}
           />
         ))}
       </div>
