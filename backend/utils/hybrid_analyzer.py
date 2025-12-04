@@ -335,16 +335,20 @@ ACTION: {action.get('action_id')} - {action.get('description', '')}
 {text[:15000]}
 </document>
 
+IMPORTANT: Each document chunk is labeled with [FILE: filename]. Include source citations.
+
 Analyze and return JSON:
 {{
     "complete": true/false,
-    "key_values": {{"label": "value"}},
-    "issues": ["specific concerns"],
+    "key_values": {{"label": "value (from filename)"}},
+    "issues": ["Issue description (Source: filename)"],
     "recommendations": ["specific actions"],
     "risk_level": "low|medium|high",
-    "summary": "2-3 sentence summary"
+    "summary": "2-3 sentence summary",
+    "sources_used": ["list of filenames analyzed"]
 }}
 
+Include "(Source: filename)" at the end of each issue when you can identify the source.
 Return ONLY valid JSON."""
 
             logger.info(f"[HYBRID] Calling Claude for {action.get('action_id')}")
