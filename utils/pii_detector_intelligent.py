@@ -37,11 +37,12 @@ PII_CONCEPTS = {
     'tax_id': {
         'description': 'Tax Identification Number',
         'variations': [
-            'tax id', 'tin', 'fein', 'ein', 'fed id', 'federal id',
-            'tax num', 'itin', 'employer id'
+            # NOTE: FEIN/EIN removed - these are public business identifiers
+            # Only individual tax IDs (ITIN) are sensitive
+            'itin', 'individual tax'
         ],
-        'data_patterns': [r'\d{2}-\d{7}', r'\d{9}'],
-        'sensitivity': 'critical'
+        'data_patterns': [],
+        'sensitivity': 'low'  # Business tax IDs are public
     },
     'bank_account': {
         'description': 'Bank Account Information',
