@@ -304,11 +304,17 @@ async def get_processing_jobs(limit: int = 50, status: Optional[str] = None, day
 
 
 @router.delete("/jobs/old")
-async def delete_old_jobs(days: int = 7):
-    """Delete processing jobs older than X days (default 7)"""
+async def delete_old_jobs(days: int = 7, start_date: Optional[str] = None, end_date: Optional[str] = None):
+    """Delete processing jobs by date range or older than X days"""
     try:
-        count = ProcessingJobModel.delete_older_than(days=days)
-        return {"success": True, "message": f"Deleted {count} jobs older than {days} days", "deleted_count": count}
+        if start_date and end_date:
+            # Use date range
+            count = ProcessingJobModel.delete_by_date_range(start_date, end_date)
+            return {"success": True, "message": f"Deleted {count} jobs from {start_date} to {end_date}", "deleted_count": count}
+        else:
+            # Use days threshold
+            count = ProcessingJobModel.delete_older_than(days=days)
+            return {"success": True, "message": f"Deleted {count} jobs older than {days} days", "deleted_count": count}
     except Exception as e:
         logger.error(f"Failed to delete old jobs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
