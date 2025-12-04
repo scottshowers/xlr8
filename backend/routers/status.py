@@ -286,18 +286,32 @@ async def get_chromadb_stats():
 
 
 @router.get("/jobs")
-async def get_processing_jobs(limit: int = 50, status: Optional[str] = None):
-    """Get processing jobs from database"""
+async def get_processing_jobs(limit: int = 50, status: Optional[str] = None, days: Optional[int] = 7):
+    """Get processing jobs from database. Default shows last 7 days."""
     try:
-        jobs = ProcessingJobModel.get_all(limit=limit)
+        if days:
+            jobs = ProcessingJobModel.get_recent(days=days, limit=limit)
+        else:
+            jobs = ProcessingJobModel.get_all(limit=limit)
         
         if status:
             jobs = [j for j in jobs if j.get("status") == status]
         
-        return {"jobs": jobs, "total": len(jobs)}
+        return {"jobs": jobs, "total": len(jobs), "days_filter": days}
     except Exception as e:
         logger.error(f"Failed to get processing jobs: {e}")
         return {"jobs": [], "total": 0, "error": str(e)}
+
+
+@router.delete("/jobs/old")
+async def delete_old_jobs(days: int = 7):
+    """Delete processing jobs older than X days (default 7)"""
+    try:
+        count = ProcessingJobModel.delete_older_than(days=days)
+        return {"success": True, "message": f"Deleted {count} jobs older than {days} days", "deleted_count": count}
+    except Exception as e:
+        logger.error(f"Failed to delete old jobs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/jobs/{job_id}")
