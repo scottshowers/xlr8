@@ -274,6 +274,7 @@ def parse_year_end_from_duckdb() -> Dict[str, Any]:
     try:
         all_actions = []
         all_fast_track = []
+        all_step_names = {}  # Collect step names from "Step X:" rows in Column A
         file_name = tables[0]['file_name'] if tables else 'unknown'
         
         for table_info in tables:
@@ -345,6 +346,22 @@ def parse_year_end_from_duckdb() -> Dict[str, Any]:
                 
                 logger.info(f"[PARSER] Description column index: {desc_col_idx}")
                 
+                # First pass: Extract step names from "Step XX:" rows
+                step_names_from_data = {}
+                for row in rows:
+                    col_a = str(row[0]).strip() if row[0] else ''
+                    # Match "Step 1:", "Step 10:", "Step 1 :", etc.
+                    step_match = re.match(r'^Step\s*(\d+)\s*[:\-–—]\s*(.+)$', col_a, re.IGNORECASE)
+                    if step_match:
+                        step_num = step_match.group(1)
+                        step_name = step_match.group(2).strip()
+                        step_names_from_data[step_num] = step_name
+                        logger.info(f"[PARSER] Found step name: Step {step_num} = '{step_name}'")
+                
+                logger.info(f"[PARSER] Extracted {len(step_names_from_data)} step names from data")
+                all_step_names.update(step_names_from_data)  # Merge into global collection
+                
+                # Second pass: Parse actions
                 for row in rows:
                     # Column 0 is Action ID
                     action_id_raw = str(row[0]).strip() if row[0] else ''
@@ -354,7 +371,8 @@ def parse_year_end_from_duckdb() -> Dict[str, Any]:
                         continue
                     if action_id_raw.lower() in ['action', 'action type', 'quarter-end', 'completed', 'due date', 'type']:
                         continue
-                    if action_id_raw.lower().startswith('step '):
+                    # Skip step header rows (already captured above)
+                    if re.match(r'^Step\s*\d+\s*[:\-–—]', action_id_raw, re.IGNORECASE):
                         continue
                     if action_id_raw.lower().startswith('if a due date'):
                         continue
@@ -515,8 +533,12 @@ def parse_year_end_from_duckdb() -> Dict[str, Any]:
         # Load Step_Documents mapping
         step_documents = load_step_documents()
         
-        # Build step structure with document mappings
-        return build_playbook_structure(all_actions, file_name, step_documents, unique_fast_track)
+        logger.info(f"[PARSER] Total step names extracted: {len(all_step_names)}")
+        for sn, name in sorted(all_step_names.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 999):
+            logger.info(f"[PARSER]   Step {sn}: {name}")
+        
+        # Build step structure with document mappings and step names from data
+        return build_playbook_structure(all_actions, file_name, step_documents, unique_fast_track, all_step_names)
         
     except Exception as e:
         logger.exception(f"[PARSER] Error parsing Year-End from DuckDB: {e}")
@@ -525,11 +547,12 @@ def parse_year_end_from_duckdb() -> Dict[str, Any]:
         conn.close()
 
 
-def build_playbook_structure(actions: List[Dict], source_file: str, step_documents: Dict[str, List[Dict]] = None, fast_track: List[Dict] = None) -> Dict[str, Any]:
+def build_playbook_structure(actions: List[Dict], source_file: str, step_documents: Dict[str, List[Dict]] = None, fast_track: List[Dict] = None, step_names: Dict[str, str] = None) -> Dict[str, Any]:
     """Build the final playbook structure from parsed actions"""
     
     step_documents = step_documents or {}
     fast_track = fast_track or []
+    step_names = step_names or {}
     
     steps = []
     seen_steps = set()
@@ -542,9 +565,12 @@ def build_playbook_structure(actions: List[Dict], source_file: str, step_documen
             # Get documents for this step from Step_Documents sheet
             step_docs = step_documents.get(step_num, [])
             
+            # Get step name from data, fallback to "Step X" if not found
+            step_name = step_names.get(step_num, f"Step {step_num}")
+            
             steps.append({
                 'step_number': step_num,
-                'step_name': get_step_name(step_num),
+                'step_name': step_name,
                 'phase': action['phase'],
                 'actions': [],
                 'required_documents': step_docs  # NEW: documents needed for this step
@@ -575,25 +601,6 @@ def build_playbook_structure(actions: List[Dict], source_file: str, step_documen
         'has_step_documents': len(step_documents) > 0,
         'has_fast_track': len(fast_track) > 0
     }
-
-
-def get_step_name(step_num: str) -> str:
-    """Get descriptive step name based on step number"""
-    step_names = {
-        '1': 'Get Ready',
-        '2': 'Review and Update Company Information',
-        '3': 'Review and Update Employee Information',
-        '4': 'Process Final Payroll',
-        '5': 'Year-End Adjustments',
-        '6': 'Benefits & ACA Reporting',
-        '7': 'Generate Tax Forms',
-        '8': 'Submit & File',
-        '9': 'Update Employee Form Delivery Options',
-        '10': 'Update Employee Tax Withholding Elections',
-        '11': 'Update Year-End Tax Codes',
-        '12': 'Post Year-End Cleanup',
-    }
-    return step_names.get(step_num, f'Step {step_num}')
 
 
 def extract_report_names(text: str) -> List[str]:
