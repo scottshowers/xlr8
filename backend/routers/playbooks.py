@@ -1866,36 +1866,25 @@ async def get_document_checklist(project_id: str):
         collection = rag.client.get_or_create_collection(name="documents")
         all_results = collection.get(include=["metadatas"], limit=1000)
         
-        # Debug: Log all project IDs in ChromaDB
-        all_project_ids = set()
-        for metadata in all_results.get("metadatas", []):
-            pid = metadata.get("project_id") or metadata.get("project", "")
-            if pid:
-                all_project_ids.add(pid)
-        logger.info(f"[DOC-CHECKLIST] Project IDs in ChromaDB: {list(all_project_ids)[:10]}")
-        logger.info(f"[DOC-CHECKLIST] Looking for project: {project_id} (or {project_id[:8]})")
-        
         # Build list of uploaded filenames for this project
         uploaded_files_list = []
         seen_files = set()
         for metadata in all_results.get("metadatas", []):
             doc_project = metadata.get("project_id") or metadata.get("project", "")
-            # More flexible matching
-            matches = (
+            # Flexible project matching
+            if doc_project and (
                 doc_project == project_id or 
                 doc_project == project_id[:8] or
                 project_id.startswith(doc_project) or
                 doc_project.startswith(project_id[:8])
-            )
-            if matches:
+            ):
                 filename = metadata.get("source", metadata.get("filename", ""))
                 if filename and filename.lower() not in seen_files:
                     uploaded_files_list.append(filename)
                     seen_files.add(filename.lower())
-                    logger.info(f"[DOC-CHECKLIST] Found file: {filename} (project: {doc_project})")
         
         uploaded_files_list.sort()
-        logger.info(f"[DOC-CHECKLIST] Total files found: {len(uploaded_files_list)}")
+        logger.info(f"[DOC-CHECKLIST] Found {len(uploaded_files_list)} files for project {project_id[:8]}")
         
         # Check for active processing jobs
         processing_jobs = []
@@ -1996,6 +1985,7 @@ async def update_step_document_keyword(request: KeywordUpdateRequest):
     Update a keyword in the Step_Documents sheet.
     This allows users to customize matching criteria.
     """
+    conn = None
     try:
         from backend.utils.playbook_parser import get_duckdb_connection
         
@@ -2016,13 +2006,15 @@ async def update_step_document_keyword(request: KeywordUpdateRequest):
         """).fetchone()
         
         if not result:
-            raise HTTPException(status_code=404, detail="Step_Documents sheet not found")
+            raise HTTPException(status_code=404, detail="Step_Documents sheet not found in database")
         
         table_name = result[0]
+        logger.info(f"[KEYWORD] Found table: {table_name}")
         
         # Get column info to find keyword column
         col_info = conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
         col_names = [c[1].lower() for c in col_info]
+        logger.info(f"[KEYWORD] Columns: {col_names}")
         
         # Find keyword column
         keyword_col = None
@@ -2032,7 +2024,7 @@ async def update_step_document_keyword(request: KeywordUpdateRequest):
                 break
         
         if not keyword_col:
-            raise HTTPException(status_code=500, detail="Could not find keyword column")
+            raise HTTPException(status_code=500, detail=f"Could not find keyword column in {col_names}")
         
         # Find step column
         step_col = None
@@ -2044,6 +2036,8 @@ async def update_step_document_keyword(request: KeywordUpdateRequest):
         if not step_col:
             step_col = col_info[0][1]  # Default to first column
         
+        logger.info(f"[KEYWORD] Using columns: step='{step_col}', keyword='{keyword_col}'")
+        
         # Update the keyword
         update_sql = f"""
             UPDATE "{table_name}"
@@ -2052,6 +2046,7 @@ async def update_step_document_keyword(request: KeywordUpdateRequest):
             AND "{keyword_col}" = ?
         """
         
+        logger.info(f"[KEYWORD] SQL: {update_sql}")
         conn.execute(update_sql, [request.new_keyword, request.step_number, request.old_keyword])
         conn.commit()
         
@@ -2064,6 +2059,12 @@ async def update_step_document_keyword(request: KeywordUpdateRequest):
     except Exception as e:
         logger.exception(f"Keyword update failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except:
+                pass
 
 
 # ============================================================================
