@@ -31,110 +31,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/playbooks", tags=["playbooks"])
 
-
-# =============================================================================
-# PII SANITIZATION - Redact sensitive data before sending to Claude
-# =============================================================================
-
-class PIISanitizer:
-    """
-    Sanitizes PII from text before sending to Claude.
-    Redacts SSN, phone, email, DOB, and converts salaries to ranges.
-    
-    PRESERVES (not PII - business identifiers):
-    - FEIN (XX-XXXXXXX) - company tax ID, public info
-    - State tax IDs
-    - Company names
-    """
-    
-    # SSN: XXX-XX-XXXX (more specific to avoid catching FEIN)
-    SSN_PATTERN = r'\b\d{3}[-\s]\d{2}[-\s]\d{4}\b'
-    PHONE_PATTERN = r'\b(?:\+1[-\s]?)?\(?\d{3}\)?[-\s]?\d{3}[-\s]?\d{4}\b'
-    EMAIL_PATTERN = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-    DOB_PATTERN = r'\b(?:0?[1-9]|1[0-2])[/-](?:0?[1-9]|[12]\d|3[01])[/-](?:19|20)\d{2}\b'
-    BANK_ACCOUNT_PATTERN = r'\b\d{8,17}\b(?=.*(?:account|acct|routing|aba))'
-    
-    # FEIN pattern to PROTECT (not redact)
-    FEIN_PATTERN = r'\b\d{2}[-]\d{7}\b'
-    
-    # Salary pattern - only redact large amounts
-    SALARY_PATTERN = r'\$[\d,]+(?:\.\d{2})?'
-    
-    def __init__(self):
-        self.redaction_count = 0
-    
-    def _salary_to_range(self, match) -> str:
-        try:
-            amount = float(match.group(0).replace('$', '').replace(',', ''))
-            if amount < 30000: return "[under $30K]"
-            elif amount < 50000: return "[$30K-50K]"
-            elif amount < 75000: return "[$50K-75K]"
-            elif amount < 100000: return "[$75K-100K]"
-            elif amount < 150000: return "[$100K-150K]"
-            else: return "[$150K+]"
-        except:
-            return "[SALARY]"
-    
-    def sanitize(self, text: str) -> str:
-        """Remove PII patterns from text before sending to Claude.
-        
-        Preserves business identifiers like FEIN, state tax IDs.
-        Only redacts personal PII: SSN, phone, email, DOB, bank accounts.
-        """
-        if not text:
-            return text
-        
-        self.redaction_count = 0
-        result = text
-        
-        # Step 1: Temporarily protect FEIN patterns by replacing with placeholder
-        fein_matches = re.findall(self.FEIN_PATTERN, result)
-        fein_placeholders = {}
-        for i, fein in enumerate(fein_matches):
-            placeholder = f"__FEIN_PROTECTED_{i}__"
-            fein_placeholders[placeholder] = fein
-            result = result.replace(fein, placeholder, 1)
-        
-        # Step 2: Redact actual PII patterns
-        patterns = [
-            (self.SSN_PATTERN, '[SSN-REDACTED]'),
-            (self.PHONE_PATTERN, '[PHONE-REDACTED]'),
-            (self.EMAIL_PATTERN, '[EMAIL-REDACTED]'),
-            (self.DOB_PATTERN, '[DOB-REDACTED]'),
-            (self.BANK_ACCOUNT_PATTERN, '[ACCOUNT-REDACTED]'),
-        ]
-        
-        for pattern, replacement in patterns:
-            matches = re.findall(pattern, result, re.IGNORECASE)
-            if matches:
-                self.redaction_count += len(matches)
-                result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
-        
-        # Step 3: Restore protected FEINs
-        for placeholder, fein in fein_placeholders.items():
-            result = result.replace(placeholder, fein)
-        
-        # Convert salaries to ranges (preserves context while hiding exact amounts)
-        # But preserve small dollar amounts that might be rates, not salaries
-        def smart_salary_redact(match):
-            amount = float(match.group(0).replace('$', '').replace(',', ''))
-            # Don't redact small amounts - likely rates, not salaries
-            if amount < 1000:
-                return match.group(0)  # Keep as-is
-            return self._salary_to_range(match)
-        
-        result = re.sub(self.SALARY_PATTERN, smart_salary_redact, result)
-        
-        return result
-    
-    def get_redaction_count(self) -> int:
-        return self.redaction_count
-
-
-# Global sanitizer instance
-_pii_sanitizer = PIISanitizer()
-
-
 # Persistent progress storage location
 PROGRESS_FILE = "/data/playbook_progress.json"
 
@@ -143,214 +39,6 @@ PLAYBOOK_CACHE = {}
 
 # Track file modification time for auto-refresh
 PLAYBOOK_FILE_INFO = {}
-
-
-# ============================================================================
-# CHROMADB CLEANUP - Remove orphaned documents
-# ============================================================================
-
-@router.get("/cleanup/chromadb-status")
-async def get_chromadb_cleanup_status():
-    """
-    Get status of ChromaDB documents vs Supabase registry.
-    Shows what would be cleaned up.
-    """
-    try:
-        from utils.rag_handler import RAGHandler
-        from utils.database.models import DocumentModel
-        
-        rag = RAGHandler()
-        collection = rag.client.get_or_create_collection(name="documents")
-        
-        # Get all ChromaDB docs
-        all_chroma = collection.get(include=["metadatas"], limit=10000)
-        chroma_ids = set(all_chroma.get("ids", []))
-        chroma_files = {}
-        
-        for i, meta in enumerate(all_chroma.get("metadatas", [])):
-            filename = meta.get("source", meta.get("filename", "unknown"))
-            project = meta.get("project_id", meta.get("project", "unknown"))
-            key = f"{project}::{filename}"
-            if key not in chroma_files:
-                chroma_files[key] = {"count": 0, "ids": []}
-            chroma_files[key]["count"] += 1
-            chroma_files[key]["ids"].append(all_chroma["ids"][i])
-        
-        # Get all Supabase registered docs
-        try:
-            supabase_docs = DocumentModel.get_all(limit=1000)
-            supabase_files = set()
-            for doc in supabase_docs:
-                filename = doc.get("filename", "")
-                project = doc.get("project_id", "")
-                supabase_files.add(f"{project}::{filename}")
-        except Exception as e:
-            logger.warning(f"Could not get Supabase docs: {e}")
-            supabase_files = set()
-        
-        # Find orphans (in ChromaDB but not in Supabase)
-        orphan_keys = set(chroma_files.keys()) - supabase_files
-        orphan_count = sum(chroma_files[k]["count"] for k in orphan_keys)
-        
-        return {
-            "chromadb_total_chunks": len(chroma_ids),
-            "chromadb_unique_files": len(chroma_files),
-            "supabase_registered": len(supabase_files),
-            "orphan_files": len(orphan_keys),
-            "orphan_chunks": orphan_count,
-            "orphan_details": [
-                {"file": k, "chunks": chroma_files[k]["count"]} 
-                for k in list(orphan_keys)[:20]  # Limit to first 20
-            ]
-        }
-        
-    except Exception as e:
-        logger.exception(f"Cleanup status failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/cleanup/chromadb-purge")
-async def purge_chromadb_orphans(dry_run: bool = True):
-    """
-    Purge orphaned documents from ChromaDB.
-    
-    Args:
-        dry_run: If True, only report what would be deleted. If False, actually delete.
-    """
-    try:
-        from utils.rag_handler import RAGHandler
-        from utils.database.models import DocumentModel
-        
-        rag = RAGHandler()
-        collection = rag.client.get_or_create_collection(name="documents")
-        
-        # Get all ChromaDB docs
-        all_chroma = collection.get(include=["metadatas"], limit=10000)
-        
-        # Build file -> chunk IDs mapping
-        chroma_files = {}
-        for i, meta in enumerate(all_chroma.get("metadatas", [])):
-            filename = meta.get("source", meta.get("filename", "unknown"))
-            project = meta.get("project_id", meta.get("project", "unknown"))
-            key = f"{project}::{filename}"
-            if key not in chroma_files:
-                chroma_files[key] = []
-            chroma_files[key].append(all_chroma["ids"][i])
-        
-        # Get Supabase registered docs
-        try:
-            supabase_docs = DocumentModel.get_all(limit=1000)
-            supabase_files = set()
-            for doc in supabase_docs:
-                filename = doc.get("filename", "")
-                project = doc.get("project_id", "")
-                supabase_files.add(f"{project}::{filename}")
-        except:
-            supabase_files = set()
-        
-        # Find orphans
-        orphan_keys = set(chroma_files.keys()) - supabase_files
-        
-        # Collect all orphan chunk IDs
-        orphan_ids = []
-        for key in orphan_keys:
-            orphan_ids.extend(chroma_files[key])
-        
-        result = {
-            "dry_run": dry_run,
-            "orphan_files": len(orphan_keys),
-            "orphan_chunks": len(orphan_ids),
-            "files_to_delete": list(orphan_keys)[:50],  # Show first 50
-            "deleted": False
-        }
-        
-        if not dry_run and orphan_ids:
-            # Actually delete
-            try:
-                # ChromaDB delete in batches
-                batch_size = 100
-                for i in range(0, len(orphan_ids), batch_size):
-                    batch = orphan_ids[i:i+batch_size]
-                    collection.delete(ids=batch)
-                
-                result["deleted"] = True
-                result["message"] = f"Deleted {len(orphan_ids)} orphan chunks from {len(orphan_keys)} files"
-                logger.warning(f"[CLEANUP] Purged {len(orphan_ids)} orphan chunks")
-                
-            except Exception as e:
-                result["error"] = str(e)
-                logger.error(f"[CLEANUP] Purge failed: {e}")
-        else:
-            result["message"] = f"Would delete {len(orphan_ids)} chunks from {len(orphan_keys)} files"
-        
-        return result
-        
-    except Exception as e:
-        logger.exception(f"Purge failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/cleanup/chromadb-purge-project/{project_id}")
-async def purge_project_chromadb(project_id: str):
-    """
-    Purge ALL ChromaDB documents for a specific project.
-    Use with caution - deletes everything for that project.
-    """
-    try:
-        from utils.rag_handler import RAGHandler
-        
-        rag = RAGHandler()
-        collection = rag.client.get_or_create_collection(name="documents")
-        
-        # Get project name for flexible matching
-        project_name = None
-        try:
-            from utils.supabase_client import get_supabase
-            supabase = get_supabase()
-            proj_result = supabase.table("projects").select("name").eq("id", project_id).execute()
-            if proj_result.data:
-                project_name = proj_result.data[0].get("name", "").upper()
-        except Exception as e:
-            logger.warning(f"[CLEANUP] Could not get project name: {e}")
-        
-        # Get all docs for this project
-        all_chroma = collection.get(include=["metadatas"], limit=10000)
-        
-        ids_to_delete = []
-        for i, meta in enumerate(all_chroma.get("metadatas", [])):
-            doc_project = meta.get("project_id", meta.get("project", ""))
-            doc_project_str = str(doc_project)
-            doc_project_upper = doc_project_str.upper()
-            
-            # Match by multiple methods
-            is_match = (
-                doc_project_str == project_id or 
-                doc_project_str == project_id[:8] or
-                (project_name and doc_project_upper == project_name) or
-                (project_name and len(project_name) >= 3 and doc_project_upper.startswith(project_name[:3])) or
-                (project_name and len(project_name) >= 3 and project_name.startswith(doc_project_upper[:3]))
-            )
-            
-            if is_match:
-                ids_to_delete.append(all_chroma["ids"][i])
-        
-        if ids_to_delete:
-            batch_size = 100
-            for i in range(0, len(ids_to_delete), batch_size):
-                batch = ids_to_delete[i:i+batch_size]
-                collection.delete(ids=batch)
-        
-        logger.warning(f"[CLEANUP] Purged {len(ids_to_delete)} chunks for project {project_id} (name={project_name})")
-        
-        return {
-            "success": True,
-            "project_id": project_id,
-            "chunks_deleted": len(ids_to_delete)
-        }
-        
-    except Exception as e:
-        logger.exception(f"Project purge failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 def invalidate_year_end_cache():
@@ -955,9 +643,8 @@ PLAYBOOK_PROGRESS = load_progress()
 
 
 class ActionUpdate(BaseModel):
-    status: Optional[str] = None  # not_started, in_progress, complete, na, blocked
+    status: str  # not_started, in_progress, complete, na, blocked
     notes: Optional[str] = None
-    ai_context: Optional[str] = None  # Fed to Claude on re-scan
     findings: Optional[Dict[str, Any]] = None
 
 
@@ -1141,79 +828,6 @@ async def debug_duckdb():
         result["connection_error"] = str(e)
     
     return result
-
-
-@router.post("/year-end/set-current-file")
-async def set_current_year_end_file(filename: str):
-    """
-    Manually set which Year-End file should be current.
-    
-    This sets is_current=FALSE for all other files and is_current=TRUE for the specified file.
-    
-    Use: POST /api/playbooks/year-end/set-current-file?filename=Pro_Pay_Year-End_Checklist...xlsx
-    """
-    import duckdb
-    
-    DUCKDB_PATH = "/data/structured_data.duckdb"
-    
-    if not os.path.exists(DUCKDB_PATH):
-        raise HTTPException(404, "DuckDB not found")
-    
-    try:
-        conn = duckdb.connect(DUCKDB_PATH)
-        
-        # First, set ALL year-end files to is_current = FALSE
-        conn.execute("""
-            UPDATE _schema_metadata 
-            SET is_current = FALSE 
-            WHERE LOWER(project) = 'global'
-            AND (
-                LOWER(file_name) LIKE '%year%end%'
-                OR LOWER(file_name) LIKE '%checklist%'
-                OR LOWER(file_name) LIKE '%pro_pay%'
-            )
-        """)
-        
-        # Now set the specified file to is_current = TRUE
-        result = conn.execute("""
-            UPDATE _schema_metadata 
-            SET is_current = TRUE 
-            WHERE file_name = ?
-            RETURNING file_name, sheet_name, table_name
-        """, [filename]).fetchall()
-        
-        conn.commit()
-        conn.close()
-        
-        if not result:
-            # Try partial match
-            conn = duckdb.connect(DUCKDB_PATH)
-            result = conn.execute("""
-                UPDATE _schema_metadata 
-                SET is_current = TRUE 
-                WHERE LOWER(file_name) LIKE ?
-                RETURNING file_name, sheet_name, table_name
-            """, [f"%{filename.lower()}%"]).fetchall()
-            conn.commit()
-            conn.close()
-        
-        # Clear the playbook cache to force refresh
-        global PLAYBOOK_CACHE
-        PLAYBOOK_CACHE.clear()
-        
-        logger.warning(f"[SET-CURRENT] Set {filename} as current, updated {len(result)} tables")
-        
-        return {
-            "status": "success",
-            "filename": filename,
-            "tables_updated": len(result),
-            "tables": [{"file": r[0], "sheet": r[1], "table": r[2]} for r in result],
-            "message": f"Set {filename} as current Year-End file. Run 'Refresh & Analyze' to reload."
-        }
-        
-    except Exception as e:
-        logger.error(f"[SET-CURRENT] Failed: {e}")
-        raise HTTPException(500, str(e))
 
 
 @router.get("/year-end/debug-table-data")
@@ -1482,66 +1096,6 @@ async def debug_parser():
                 ]
             },
         ],
-        "fast_track": [
-            # Fast Track items - HCMPACT's curated checklist
-            # These reference UKG actions via ukg_action_ref and can have SQL scripts
-            {
-                "ft_id": "FT-1",
-                "sequence": 1,
-                "description": "Verify Company FEIN and Tax Setup",
-                "ukg_action_ref": ["2A"],
-                "sql_script": None,
-                "reports_needed": ["Company Tax Verification", "Company Master Profile"]
-            },
-            {
-                "ft_id": "FT-2", 
-                "sequence": 2,
-                "description": "Validate Employee SSNs and Addresses",
-                "ukg_action_ref": ["3A", "3B"],
-                "sql_script": "SELECT EmployeeID, SSN, Address1, City, State, Zip FROM Employees WHERE SSN IS NULL OR LEN(SSN) < 9",
-                "reports_needed": ["Year-End Validation"]
-            },
-            {
-                "ft_id": "FT-3",
-                "sequence": 3,
-                "description": "Review SUI and Tax Rates",
-                "ukg_action_ref": ["2A", "2C"],
-                "sql_script": None,
-                "reports_needed": ["Company Tax Verification"]
-            },
-            {
-                "ft_id": "FT-4",
-                "sequence": 4,
-                "description": "Audit Earnings Tax Categories",
-                "ukg_action_ref": ["2F"],
-                "sql_script": "SELECT EarningCode, Description, TaxCategory FROM EarningsCodes WHERE TaxCategory IS NULL",
-                "reports_needed": ["Earnings Tax Categories"]
-            },
-            {
-                "ft_id": "FT-5",
-                "sequence": 5,
-                "description": "Audit Deduction Tax Categories",
-                "ukg_action_ref": ["2G"],
-                "sql_script": "SELECT DeductionCode, Description, TaxCategory FROM DeductionCodes WHERE TaxCategory IS NULL",
-                "reports_needed": ["Deduction Tax Categories"]
-            },
-            {
-                "ft_id": "FT-6",
-                "sequence": 6,
-                "description": "Run Final Payroll Preview",
-                "ukg_action_ref": ["5A", "5B"],
-                "sql_script": None,
-                "reports_needed": []
-            },
-            {
-                "ft_id": "FT-7",
-                "sequence": 7,
-                "description": "Generate and Distribute W-2s",
-                "ukg_action_ref": ["11A", "11B", "12A"],
-                "sql_script": None,
-                "reports_needed": []
-            }
-        ],
         "total_actions": 55,
         "source_file": "default_structure"
     }
@@ -1570,27 +1124,17 @@ async def update_progress(project_id: str, action_id: str, update: ActionUpdate)
     if project_id not in PLAYBOOK_PROGRESS:
         PLAYBOOK_PROGRESS[project_id] = {}
     
-    # Get existing progress or create new
-    existing = PLAYBOOK_PROGRESS[project_id].get(action_id, {})
-    
-    # Merge updates (only update fields that were provided)
-    if update.status is not None:
-        existing["status"] = update.status
-    if update.notes is not None:
-        existing["notes"] = update.notes
-    if update.ai_context is not None:
-        existing["ai_context"] = update.ai_context
-    if update.findings is not None:
-        existing["findings"] = update.findings
-    
-    existing["updated_at"] = datetime.now().isoformat()
-    
-    PLAYBOOK_PROGRESS[project_id][action_id] = existing
+    PLAYBOOK_PROGRESS[project_id][action_id] = {
+        "status": update.status,
+        "notes": update.notes,
+        "findings": update.findings,
+        "updated_at": datetime.now().isoformat()
+    }
     
     # Persist to file
     save_progress(PLAYBOOK_PROGRESS)
     
-    return {"success": True, "action_id": action_id, "status": existing.get("status")}
+    return {"success": True, "action_id": action_id, "status": update.status}
 
 
 @router.delete("/year-end/progress/{project_id}")
@@ -1608,321 +1152,27 @@ async def reset_progress(project_id: str):
 
 
 # ============================================================================
-# DUCKDB STRUCTURED DATA SEARCH
-# ============================================================================
-
-async def search_duckdb_for_action(
-    project_id: str, 
-    action: Dict, 
-    reports_needed: List[str]
-) -> List[str]:
-    """
-    Search DuckDB structured data for content relevant to an action.
-    
-    This searches:
-    1. Tables in the project's DuckDB data
-    2. Tables in GLOBAL (shared reference data)
-    3. PDF-derived tables
-    
-    Returns list of formatted content strings for AI analysis.
-    """
-    DUCKDB_PATH = "/data/structured_data.duckdb"
-    
-    if not os.path.exists(DUCKDB_PATH):
-        logger.warning("[DUCKDB-SCAN] DuckDB file not found")
-        return []
-    
-    content_chunks = []
-    
-    try:
-        # Use existing handler connection to avoid conflicts
-        from utils.structured_data_handler import get_structured_handler
-        handler = get_structured_handler()
-        conn = handler.conn
-        
-        # Get project name for flexible matching
-        project_name = None
-        try:
-            from utils.supabase_client import get_supabase
-            supabase = get_supabase()
-            proj_result = supabase.table("projects").select("name").eq("id", project_id).execute()
-            if proj_result.data:
-                project_name = proj_result.data[0].get("name", "")
-        except Exception as e:
-            logger.warning(f"[DUCKDB-SCAN] Could not get project name: {e}")
-        
-        # Build search keywords from action
-        keywords = []
-        
-        # Add reports_needed as keywords
-        for report in reports_needed:
-            keywords.extend(report.lower().split())
-        
-        # Add keywords from action description
-        action_desc = action.get('description', '').lower()
-        key_terms = ['tax', 'earnings', 'deduction', 'w-2', 'w2', '1099', 'workers comp', 
-                     'benefits', 'healthcare', 'fein', 'company', 'employee', 'payroll',
-                     'rate', 'code', 'withholding', 'fica', 'suta', 'futa']
-        for term in key_terms:
-            if term in action_desc:
-                keywords.append(term)
-        
-        # Also add action-specific keywords
-        action_keywords = action.get('keywords', [])
-        keywords.extend(action_keywords)
-        
-        # Dedupe
-        keywords = list(set(keywords))
-        logger.warning(f"[DUCKDB-SCAN] Searching with keywords: {keywords[:10]}")
-        
-        # Find matching tables from _schema_metadata
-        try:
-            # Build query with project name matching
-            # Match by: UUID, UUID prefix, project name, or name prefix
-            if project_name:
-                tables_query = """
-                    SELECT DISTINCT 
-                        table_name, 
-                        file_name, 
-                        sheet_name, 
-                        project,
-                        columns,
-                        row_count
-                    FROM _schema_metadata 
-                    WHERE is_current = TRUE
-                    AND (
-                        LOWER(project) = LOWER(?)
-                        OR LOWER(project) = 'global'
-                        OR LOWER(project) LIKE ?
-                        OR LOWER(project) = LOWER(?)
-                        OR LOWER(project) LIKE ?
-                    )
-                """
-                name_prefix = project_name[:3].lower() + "%" if len(project_name) >= 3 else project_name.lower() + "%"
-                tables = conn.execute(tables_query, [project_id, f"{project_id[:8]}%", project_name, name_prefix]).fetchall()
-            else:
-                tables_query = """
-                    SELECT DISTINCT 
-                        table_name, 
-                        file_name, 
-                        sheet_name, 
-                        project,
-                        columns,
-                        row_count
-                    FROM _schema_metadata 
-                    WHERE is_current = TRUE
-                    AND (
-                        LOWER(project) = LOWER(?)
-                        OR LOWER(project) = 'global'
-                        OR LOWER(project) LIKE ?
-                    )
-                """
-                tables = conn.execute(tables_query, [project_id, f"{project_id[:8]}%"]).fetchall()
-            
-            logger.warning(f"[DUCKDB-SCAN] Found {len(tables)} tables for project (name={project_name})")
-            
-        except Exception as e:
-            logger.warning(f"[DUCKDB-SCAN] Schema query failed: {e}")
-            tables = []
-        
-        # Also check PDF tables
-        try:
-            # First, get ALL pdf tables to debug
-            all_pdf_tables = conn.execute("""
-                SELECT table_name, source_file, row_count, project_id
-                FROM _pdf_tables
-            """).fetchall()
-            logger.warning(f"[DUCKDB-SCAN] All PDF tables in DB: {[(t[0], t[3]) for t in all_pdf_tables]}")
-            
-            # Filter to matching project - be flexible with matching
-            pdf_tables = []
-            for table in all_pdf_tables:
-                table_name, source_file, row_count, pid = table
-                pid_lower = str(pid).lower() if pid else ""
-                table_name_lower = table_name.lower() if table_name else ""
-                
-                # Match by: project_id, project_name prefix in table name, or project_name match
-                match = False
-                if pid_lower == project_id.lower():
-                    match = True
-                elif project_name and pid_lower == project_name.lower():
-                    match = True
-                elif project_name and table_name_lower.startswith(project_name.lower()):
-                    match = True
-                elif pid_lower.startswith(project_id[:8].lower()):
-                    match = True
-                
-                if match:
-                    pdf_tables.append((table_name, source_file, row_count))
-            
-            logger.warning(f"[DUCKDB-SCAN] Found {len(pdf_tables)} PDF-derived tables for project: {[t[0] for t in pdf_tables]}")
-        except Exception as e:
-            logger.warning(f"[DUCKDB-SCAN] Error getting PDF tables: {e}")
-            import traceback
-            logger.warning(traceback.format_exc())
-            pdf_tables = []
-        
-        # Score and select relevant tables
-        relevant_tables = []
-        all_table_scores = []  # Track ALL tables for debugging
-        
-        for table in tables:
-            table_name, file_name, sheet_name, project, columns_json, row_count = table
-            
-            # Build searchable text
-            searchable = f"{file_name} {sheet_name} {table_name}".lower()
-            if columns_json:
-                try:
-                    columns = json.loads(columns_json) if isinstance(columns_json, str) else columns_json
-                    searchable += " " + " ".join(str(c).lower() for c in columns)
-                except:
-                    pass
-            
-            # Score by keyword matches
-            score = sum(1 for kw in keywords if kw in searchable)
-            matched_kws = [kw for kw in keywords if kw in searchable]
-            all_table_scores.append(f"{table_name}: score={score}, matched={matched_kws[:3]}")
-            
-            if score > 0:
-                relevant_tables.append({
-                    'table_name': table_name,
-                    'file_name': file_name,
-                    'sheet_name': sheet_name,
-                    'project': project,
-                    'row_count': row_count,
-                    'score': score,
-                    'source_type': 'excel'
-                })
-        
-        # Add PDF tables
-        for pdf_table in pdf_tables:
-            table_name, source_file, row_count = pdf_table
-            searchable = f"{table_name} {source_file}".lower()
-            score = sum(1 for kw in keywords if kw in searchable)
-            matched_kws = [kw for kw in keywords if kw in searchable]
-            all_table_scores.append(f"PDF:{table_name}: score={score}, matched={matched_kws[:3]}")
-            
-            if score > 0:
-                relevant_tables.append({
-                    'table_name': table_name,
-                    'file_name': source_file,
-                    'sheet_name': 'PDF Extract',
-                    'project': project_id,
-                    'row_count': row_count,
-                    'score': score,
-                    'source_type': 'pdf'
-                })
-        
-        # Log ALL table scores for debugging
-        logger.warning(f"[DUCKDB-SCAN] All table scores: {all_table_scores}")
-        
-        # Sort by score and take top 5
-        relevant_tables.sort(key=lambda x: x['score'], reverse=True)
-        relevant_tables = relevant_tables[:5]
-        
-        logger.warning(f"[DUCKDB-SCAN] Selected {len(relevant_tables)} relevant tables")
-        
-        # Query each relevant table and format content
-        for table_info in relevant_tables:
-            table_name = table_info['table_name']
-            
-            try:
-                # Get sample data (limit rows to avoid huge content)
-                row_limit = min(50, table_info.get('row_count', 50))
-                
-                # Get column names
-                col_info = conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
-                col_names = [c[1] for c in col_info]
-                
-                # Query data
-                rows = conn.execute(f'SELECT * FROM "{table_name}" LIMIT {row_limit}').fetchall()
-                
-                if not rows:
-                    continue
-                
-                # Format as readable content for AI
-                content = f"[DUCKDB TABLE: {table_name}]\n"
-                content += f"Source: {table_info['file_name']} / {table_info['sheet_name']}\n"
-                content += f"Columns: {', '.join(col_names)}\n"
-                content += f"Total Rows: {table_info['row_count']}\n"
-                content += "-" * 40 + "\n"
-                
-                # Add header row
-                content += " | ".join(str(c)[:20] for c in col_names) + "\n"
-                content += "-" * 40 + "\n"
-                
-                # Add data rows (decrypt if needed)
-                for row in rows[:30]:  # Limit to 30 rows for AI context
-                    row_values = []
-                    for val in row:
-                        val_str = str(val) if val is not None else ""
-                        # Check for encrypted values
-                        if val_str.startswith("ENC256:"):
-                            val_str = "[ENCRYPTED]"
-                        row_values.append(val_str[:25])  # Truncate long values
-                    content += " | ".join(row_values) + "\n"
-                
-                content_chunks.append(content)
-                logger.warning(f"[DUCKDB-SCAN] Added table {table_name} ({len(rows)} rows)")
-                
-            except Exception as e:
-                logger.warning(f"[DUCKDB-SCAN] Failed to query {table_name}: {e}")
-                continue
-        
-        # Don't close - using shared handler connection
-        
-    except Exception as e:
-        logger.warning(f"[DUCKDB-SCAN] DuckDB search failed: {e}")
-        import traceback
-        logger.warning(traceback.format_exc())
-    
-    return content_chunks
-
-
-# ============================================================================
 # SCAN ENDPOINT - Search docs for action-relevant content
 # ============================================================================
 
 @router.post("/year-end/scan/{project_id}/{action_id}")
-async def scan_for_action(project_id: str, action_id: str, force_refresh: bool = False):
+async def scan_for_action(project_id: str, action_id: str):
     """
     Scan project documents for content relevant to a specific action.
     
     ENHANCED FEATURES:
-    - CACHING: Returns cached findings if docs haven't changed (instant)
     - Inherits documents/findings from parent actions (no re-upload needed)
     - For DEPENDENT actions: Skip redundant scan, provide guidance only
     - Uses consultative AI with industry benchmarks
     - Detects conflicts with existing data
     - Flags impacted actions when new data arrives
     - Auto-completes when all conditions met
-    
-    Args:
-        force_refresh: If True, skip cache and re-analyze
     """
-    logger.warning(f"[SCAN] >>> Starting scan for project={project_id}, action={action_id}, force={force_refresh}")
-    
     try:
         from utils.rag_handler import RAGHandler
-        import hashlib
-        
-        # =====================================================================
-        # CACHE CHECK - Return cached findings if docs haven't changed
-        # =====================================================================
-        if not force_refresh:
-            progress = PLAYBOOK_PROGRESS.get(project_id, {})
-            action_progress = progress.get(action_id, {})
-            cached_findings = action_progress.get('findings')
-            cached_doc_hash = action_progress.get('doc_hash')
-            
-            if cached_findings and cached_doc_hash:
-                logger.warning(f"[SCAN] Found cached findings for {action_id}, checking if docs changed...")
-                # This is a quick check - if hash matches, return cached instantly
-                # We'll compute current hash after getting docs below
         
         # Get action details from structure
         structure = await get_year_end_structure()
-        logger.warning(f"[SCAN] Got structure with {structure.get('total_actions', 0)} actions")
         action = None
         for step in structure.get('steps', []):
             for a in step.get('actions', []):
@@ -1986,321 +1236,99 @@ async def scan_for_action(project_id: str, action_id: str, force_refresh: bool =
             collection = rag.client.get_or_create_collection(name="documents")
             all_results = collection.get(include=["metadatas"], limit=1000)
             
-            # Get project name for flexible matching
-            project_name = None
-            try:
-                from utils.supabase_client import get_supabase
-                supabase = get_supabase()
-                proj_result = supabase.table("projects").select("name").eq("id", project_id).execute()
-                if proj_result.data:
-                    project_name = proj_result.data[0].get("name", "").upper()
-            except Exception as e:
-                logger.warning(f"[SCAN] Could not get project name: {e}")
-            
             project_files = set()  # Just track filenames
-            total_docs_in_chroma = len(all_results.get("metadatas", []))
-            logger.warning(f"[SCAN] ChromaDB has {total_docs_in_chroma} total docs")
-            
             for metadata in all_results.get("metadatas", []):
                 doc_project = metadata.get("project_id") or metadata.get("project", "")
-                doc_project_str = str(doc_project)
-                doc_project_upper = doc_project_str.upper()
-                
-                # Match by multiple methods (same as document checklist)
-                is_match = (
-                    doc_project_str == project_id or 
-                    doc_project_str == project_id[:8] or
-                    (project_name and doc_project_upper == project_name) or
-                    (project_name and len(project_name) >= 3 and doc_project_upper.startswith(project_name[:3])) or
-                    (project_name and len(project_name) >= 3 and project_name.startswith(doc_project_upper[:3]))
-                )
-                
-                if is_match:
+                if doc_project == project_id or doc_project == project_id[:8]:
                     filename = metadata.get("source", metadata.get("filename", "Unknown"))
                     project_files.add(filename)
             
-            logger.warning(f"[SCAN] Found {len(project_files)} files for project {project_id} (name={project_name}): {list(project_files)}")
-            
-            def normalize_for_match(text):
-                """Remove punctuation, lowercase, split into words"""
-                import string
-                cleaned = text.lower().translate(str.maketrans('', '', string.punctuation))
-                return cleaned.replace('_', ' ').replace('-', ' ')
-            
-            def words_match(kw_word, filename_words):
-                """Check if keyword word matches any filename word (prefix in either direction)"""
-                for fw in filename_words:
-                    # Exact match
-                    if kw_word == fw:
-                        return True
-                    # Prefix match either direction: "comp" matches "compensation", "compensation" matches "comp"
-                    if kw_word.startswith(fw) or fw.startswith(kw_word):
-                        return True
-                    # First 4 chars match
-                    if len(kw_word) >= 4 and len(fw) >= 4 and kw_word[:4] == fw[:4]:
-                        return True
-                return False
+            logger.info(f"[SCAN] Found {len(project_files)} unique files in project {project_id}: {list(project_files)}")
             
             # STEP 2: Match by filename - check if any report name appears in filename
-            # AND FORCE RETRIEVE CONTENT for matched files
-            logger.warning(f"[SCAN] Reports needed: {reports_needed}")
             for report_name in reports_needed:
-                report_normalized = normalize_for_match(report_name)
-                report_words = [w for w in report_normalized.split() if len(w) > 2]
-                
+                report_keywords = report_name.lower().split()
                 for filename in project_files:
-                    filename_normalized = normalize_for_match(filename)
-                    filename_words = filename_normalized.split()
-                    
-                    # Count how many keyword words match filename words
-                    matches = sum(1 for kw in report_words if words_match(kw, filename_words))
-                    threshold = max(1, len(report_words) - 1)  # Allow 1 word missing
-                    
-                    if matches >= threshold and filename not in seen_files:
-                        seen_files.add(filename)
-                        found_docs.append({
-                            "filename": filename,
-                            "snippet": f"Matched report: {report_name}",
-                            "query": report_name,
-                            "match_type": "filename"
-                        })
-                        logger.warning(f"[SCAN] ✓ Filename match: '{filename}' for report '{report_name}' ({matches}/{len(report_words)} words)")
-                        
-                        # FORCE RETRIEVE actual content for this matched file
-                        # Try multiple approaches since ChromaDB metadata can vary
-                        chunk_texts = []
-                        try:
-                            # Approach 1: Exact match on "source"
-                            file_chunks = collection.get(
-                                where={"source": filename},
-                                include=["documents", "metadatas"],
-                                limit=50
-                            )
-                            if file_chunks and file_chunks.get('documents'):
-                                chunk_texts = file_chunks['documents']
-                                logger.warning(f"[SCAN] Found {len(chunk_texts)} chunks via source='{filename}'")
-                            
-                            # Approach 2: Try "filename" key if source didn't work
-                            if not chunk_texts:
-                                file_chunks = collection.get(
-                                    where={"filename": filename},
-                                    include=["documents", "metadatas"],
-                                    limit=50
-                                )
-                                if file_chunks and file_chunks.get('documents'):
-                                    chunk_texts = file_chunks['documents']
-                                    logger.warning(f"[SCAN] Found {len(chunk_texts)} chunks via filename='{filename}'")
-                            
-                            # Approach 3: Get all docs and filter by partial filename match
-                            if not chunk_texts:
-                                # Get a sample to check what metadata keys exist
-                                all_docs = collection.get(include=["documents", "metadatas"], limit=500)
-                                filename_lower = filename.lower()
-                                for i, meta in enumerate(all_docs.get('metadatas', [])):
-                                    source_val = str(meta.get('source', meta.get('filename', ''))).lower()
-                                    if filename_lower in source_val or source_val in filename_lower:
-                                        chunk_texts.append(all_docs['documents'][i])
-                                if chunk_texts:
-                                    logger.warning(f"[SCAN] Found {len(chunk_texts)} chunks via partial filename match")
-                            
-                            if chunk_texts:
-                                # Use ALL chunks (up to 30) with higher char limit
-                                # 8000 was truncating important multi-page PDFs
-                                combined_content = "\n---\n".join(chunk_texts[:30])  # Up to 30 chunks
-                                # Clean encrypted values
-                                combined_content = re.sub(r'ENC256:[A-Za-z0-9+/=]+', '[ENCRYPTED]', combined_content)
-                                # Increase limit to 25000 chars (~6000 tokens) - well within Claude's context
-                                all_content.append(f"[FILE: {filename}]\n{combined_content[:25000]}")
-                                logger.warning(f"[SCAN] ✓ Force-retrieved {len(chunk_texts)} chunks ({len(combined_content)} chars) for '{filename}'")
-                            else:
-                                all_content.append(f"[FILE: {filename}] - matches required report: {report_name} (content not found in ChromaDB)")
-                                logger.warning(f"[SCAN] ⚠ No chunks found for matched file '{filename}' - tried all approaches")
-                        except Exception as fetch_err:
-                            logger.warning(f"[SCAN] Failed to force-retrieve content for '{filename}': {fetch_err}")
+                    filename_lower = filename.lower()
+                    # Check if report keywords appear in filename
+                    matches = sum(1 for kw in report_keywords if kw in filename_lower)
+                    if matches >= len(report_keywords) - 1:  # Allow 1 word missing
+                        if filename not in seen_files:
+                            seen_files.add(filename)
+                            found_docs.append({
+                                "filename": filename,
+                                "snippet": f"Matched report: {report_name}",
+                                "query": report_name,
+                                "match_type": "filename"
+                            })
                             all_content.append(f"[FILE: {filename}] - matches required report: {report_name}")
+                            logger.info(f"[SCAN] Filename match: '{filename}' for report '{report_name}'")
             
         except Exception as e:
             logger.warning(f"[SCAN] Filename matching failed: {e}")
         
-        # STEP 3: Semantic search - get content for AI analysis
-        # Note: We DON'T add to found_docs here - only use for AI context
-        # found_docs should only contain docs that match reports_needed keywords
+        # STEP 3: Semantic search - also search for inherited doc content
+        # Build queries from: reports needed + action description + inherited doc names
         queries = reports_needed + [action.get('description', '')[:100]]
         if inherited_docs:
             queries.extend(inherited_docs[:3])  # Also search for content from inherited docs
         
-        logger.warning(f"[SCAN] Running semantic search with {len(queries)} queries")
-        
         for query in queries[:8]:
-            try:
-                results = rag.search(
-                    collection_name="documents",
-                    query=query,
-                    n_results=15,
-                    project_id=project_id
-                )
-                logger.warning(f"[SCAN] Query '{query[:30]}...' returned {len(results) if results else 0} results")
-                if results:
-                    for result in results:
-                        doc = result.get('document', '')
-                        if doc and len(doc) > 50:
-                            cleaned = re.sub(r'ENC256:[A-Za-z0-9+/=]+', '[ENCRYPTED]', doc)
-                            if cleaned.count('[ENCRYPTED]') < 10:
-                                metadata = result.get('metadata', {})
-                                filename = metadata.get('source', metadata.get('filename', 'Unknown'))
-                                # Add content for AI analysis (always)
-                                all_content.append(f"[FILE: {filename}]\n{cleaned[:5000]}")
-                                
-                                # Only add to found_docs if filename matches a report_needed
-                                if filename not in seen_files:
-                                    filename_lower = filename.lower()
-                                    for report_name in reports_needed:
-                                        report_keywords = report_name.lower().split()
-                                        matches = sum(1 for kw in report_keywords if kw in filename_lower)
-                                        if matches >= len(report_keywords) - 1:  # Allow 1 word missing
-                                            seen_files.add(filename)
-                                            found_docs.append({
-                                                "filename": filename,
-                                                "snippet": cleaned[:300],
-                                                "query": report_name,
-                                                "match_type": "semantic"
-                                            })
-                                            break
-            except Exception as e:
-                logger.warning(f"Query failed: {e}")
+                try:
+                    results = rag.search(
+                        collection_name="documents",
+                        query=query,
+                        n_results=15,
+                        project_id=project_id
+                    )
+                    if results:
+                        for result in results:
+                            doc = result.get('document', '')
+                            if doc and len(doc) > 50:
+                                cleaned = re.sub(r'ENC256:[A-Za-z0-9+/=]+', '[ENCRYPTED]', doc)
+                                if cleaned.count('[ENCRYPTED]') < 10:
+                                    metadata = result.get('metadata', {})
+                                    filename = metadata.get('source', metadata.get('filename', 'Unknown'))
+                                    # Add content for AI analysis
+                                    all_content.append(f"[FILE: {filename}]\n{cleaned[:3000]}")
+                                    # Add to found_docs if not already there
+                                    if filename not in seen_files:
+                                        seen_files.add(filename)
+                                        found_docs.append({
+                                            "filename": filename,
+                                            "snippet": cleaned[:300],
+                                            "query": query,
+                                            "match_type": "semantic"
+                                        })
+                except Exception as e:
+                    logger.warning(f"Query failed: {e}")
         
-        logger.warning(f"[SCAN] Total unique docs from ChromaDB: {len(found_docs)}")
-        
-        # =====================================================================
-        # STEP 4: Search DuckDB for structured data FIRST (higher priority)
-        # DuckDB has COMPLETE data, ChromaDB may have truncated PDF chunks
-        # =====================================================================
-        duckdb_files_with_full_data = set()  # Track files we got complete data for
-        duckdb_content = await search_duckdb_for_action(project_id, action, reports_needed)
-        if duckdb_content:
-            logger.warning(f"[SCAN] DuckDB returned {len(duckdb_content)} content chunks - PRIORITIZING over PDF chunks")
-            
-            # INSERT at beginning so Claude sees complete data first
-            all_content = duckdb_content + all_content
-            
-            # Track which files we have full DuckDB data for
-            for content in duckdb_content:
-                if content.startswith("[DUCKDB TABLE:"):
-                    table_name = content.split("]")[0].replace("[DUCKDB TABLE: ", "")
-                    # Extract source filename from content if present
-                    if "Source:" in content:
-                        source_line = [l for l in content.split('\n') if l.startswith('Source:')]
-                        if source_line:
-                            source_file = source_line[0].replace('Source:', '').strip().split('/')[0].strip()
-                            duckdb_files_with_full_data.add(source_file.lower())
-                    duckdb_files_with_full_data.add(table_name.lower())
-                    
-                    if table_name not in seen_files:
-                        # Check if table name matches any report_needed keyword
-                        table_lower = table_name.lower()
-                        matched_report = None
-                        for report_name in reports_needed:
-                            report_keywords = report_name.lower().split()
-                            matches = sum(1 for kw in report_keywords if kw in table_lower)
-                            if matches >= len(report_keywords) - 1:
-                                matched_report = report_name
-                                break
-                        
-                        if matched_report:
-                            seen_files.add(table_name)
-                            found_docs.append({
-                                "filename": f"📊 {table_name}",
-                                "snippet": content[:300],
-                                "query": matched_report,
-                                "match_type": "duckdb"
-                            })
-            
-            logger.warning(f"[SCAN] Files with full DuckDB data (skip PDF chunks): {duckdb_files_with_full_data}")
-            
-            # REMOVE truncated ChromaDB content for files we have full DuckDB data
-            if duckdb_files_with_full_data:
-                original_count = len(all_content)
-                filtered_content = []
-                for c in all_content:
-                    # Keep DuckDB content
-                    if c.startswith("[DUCKDB TABLE:"):
-                        filtered_content.append(c)
-                        continue
-                    # Check if this ChromaDB content is for a file we have DuckDB data for
-                    skip = False
-                    for duckdb_file in duckdb_files_with_full_data:
-                        if duckdb_file in c.lower()[:200]:  # Check header area
-                            skip = True
-                            break
-                    if not skip:
-                        filtered_content.append(c)
-                
-                if len(filtered_content) < original_count:
-                    logger.warning(f"[SCAN] Removed {original_count - len(filtered_content)} truncated PDF chunks (using DuckDB instead)")
-                    all_content = filtered_content
-        
-        logger.warning(f"[SCAN] Total matched sources (ChromaDB + DuckDB): {len(found_docs)}")
-        
-        # =====================================================================
-        # CACHE CHECK - Skip Claude if docs haven't changed
-        # =====================================================================
-        current_doc_list = sorted([d['filename'] for d in found_docs])
-        current_doc_hash = hashlib.md5(json.dumps(current_doc_list).encode()).hexdigest()[:12]
-        
-        if not force_refresh:
-            progress = PLAYBOOK_PROGRESS.get(project_id, {})
-            action_progress = progress.get(action_id, {})
-            cached_findings = action_progress.get('findings')
-            cached_doc_hash = action_progress.get('doc_hash')
-            
-            if cached_findings and cached_doc_hash == current_doc_hash:
-                logger.warning(f"[SCAN] ⚡ CACHE HIT - returning cached findings for {action_id}")
-                return {
-                    "found": len(found_docs) > 0,
-                    "documents": found_docs,
-                    "findings": cached_findings,
-                    "suggested_status": action_progress.get('status', 'in_progress'),
-                    "inherited_from": action_progress.get('inherited_from'),
-                    "conflicts": cached_findings.get('conflicts', []),
-                    "cached": True
-                }
-            else:
-                if cached_findings:
-                    logger.warning(f"[SCAN] Cache MISS - docs changed (old={cached_doc_hash}, new={current_doc_hash})")
+        logger.info(f"[SCAN] Total unique docs found: {len(found_docs)}")
         
         # Determine findings and suggested status
         findings = None
         suggested_status = "not_started"
         
-        # Get ai_context from progress (consultant-provided context)
-        progress = PLAYBOOK_PROGRESS.get(project_id, {})
-        action_progress = progress.get(action_id, {})
-        ai_context = action_progress.get('ai_context', '')
-        
         # If we have docs OR inherited findings, we can analyze
         has_data = len(found_docs) > 0 or len(inherited_findings) > 0
-        logger.warning(f"[SCAN] has_data={has_data}, found_docs={len(found_docs)}, inherited_findings={len(inherited_findings)}")
         
         if has_data:
             suggested_status = "in_progress"
             
             # Use Claude with CONSULTATIVE context
             if all_content or inherited_findings:
-                logger.warning(f"[SCAN] Calling AI analysis with {len(all_content)} content chunks, ai_context={bool(ai_context)}")
                 findings = await extract_findings_consultative(
                     action=action,
                     content=all_content[:15],
                     inherited_findings=inherited_findings,
-                    action_id=action_id,
-                    ai_context=ai_context
+                    action_id=action_id
                 )
-                logger.warning(f"[SCAN] AI analysis returned: {type(findings)}, complete={findings.get('complete') if findings else 'None'}")
                 
                 # AUTO-COMPLETE: If findings show complete and no high-risk issues
                 if findings:
                     if findings.get('complete') and findings.get('risk_level') != 'high':
                         suggested_status = "complete"
-                        logger.warning(f"[SCAN] Action {action_id} AUTO-COMPLETED")
+                        logger.info(f"[SCAN] Action {action_id} AUTO-COMPLETED (complete=True, risk != high)")
         
         # =====================================================================
         # CONFLICT DETECTION - Check for inconsistencies
@@ -2334,7 +1362,6 @@ async def scan_for_action(project_id: str, action_id: str, force_refresh: bool =
             "status": final_status,
             "findings": findings,
             "documents_found": [d['filename'] for d in found_docs],
-            "doc_hash": current_doc_hash,  # For cache validation
             "inherited_from": parent_actions if parent_actions else None,
             "last_scan": datetime.now().isoformat(),
             "notes": PLAYBOOK_PROGRESS.get(project_id, {}).get(action_id, {}).get("notes"),
@@ -2492,10 +1519,8 @@ async def detect_conflicts(project_id: str, action_id: str, new_findings: Option
         if other_action_id == action_id:
             continue
         
-        other_findings = other_progress.get("findings") or {}
-        if not other_findings:
-            continue
-        other_values = other_findings.get("key_values") or {}
+        other_findings = other_progress.get("findings", {})
+        other_values = other_findings.get("key_values", {})
         
         for field in critical_fields:
             # Normalize field names for comparison
@@ -2570,39 +1595,49 @@ async def extract_findings_consultative(
     action: Dict, 
     content: List[str], 
     inherited_findings: List[Dict],
-    action_id: str,
-    ai_context: Optional[str] = None
+    action_id: str
 ) -> Optional[Dict]:
     """
-    Use Claude to extract findings WITH CONSULTATIVE ANALYSIS.
+    HYBRID ANALYZER: Uses local LLM for extraction, Claude for complex analysis.
     
-    Includes:
-    - Industry benchmarks and comparisons
-    - Red flag detection
-    - Proactive recommendations
-    - Inherited findings from parent actions
-    - Consultant-provided AI context (e.g., "rate confirmed", "N/A for this client")
+    Cost Reduction: 50-70% fewer Claude API calls
+    
+    Flow:
+    1. Try local LLM extraction first (fast, free)
+    2. If simple action + good extraction → return local result
+    3. If complex action or issues found → call Claude
     """
-    logger.warning(f"[AI] Starting extract_findings_consultative for {action_id}")
-    
     try:
+        # Try hybrid approach first
+        try:
+            from utils.hybrid_analyzer import get_hybrid_analyzer
+            analyzer = get_hybrid_analyzer()
+            
+            result = await analyzer.analyze(action, content, inherited_findings)
+            
+            if result:
+                # Log which method was used
+                method = result.get('_analyzed_by', 'unknown')
+                logger.info(f"[HYBRID] Action {action_id} analyzed by: {method}")
+                
+                # Get stats periodically
+                stats = analyzer.get_stats()
+                if stats['total_analyses'] > 0 and stats['total_analyses'] % 10 == 0:
+                    logger.info(f"[HYBRID] Stats: {stats}")
+                
+                return result
+                
+        except ImportError:
+            logger.warning("[HYBRID] hybrid_analyzer not available, falling back to Claude-only")
+        except Exception as e:
+            logger.warning(f"[HYBRID] Hybrid analysis failed: {e}, falling back to Claude-only")
+        
+        # FALLBACK: Original Claude-only approach
         from anthropic import Anthropic
         
-        api_key = os.getenv("CLAUDE_API_KEY")
-        if not api_key:
-            logger.warning(f"[AI] No CLAUDE_API_KEY found - skipping AI analysis")
-            return None
-        
-        logger.warning(f"[AI] Using API key: {api_key[:8]}...")
-        client = Anthropic(api_key=api_key)
+        client = Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
         
         combined = "\n\n---\n\n".join(content)
-        
-        # SANITIZE PII before sending to Claude
-        sanitized_content = _pii_sanitizer.sanitize(combined)
-        redaction_count = _pii_sanitizer.get_redaction_count()
-        if redaction_count > 0:
-            logger.warning(f"[AI] Sanitized {redaction_count} PII patterns from content")
         
         # Get action-specific consultative context
         consultative_context = CONSULTATIVE_PROMPTS.get(action_id, CONSULTATIVE_PROMPTS["DEFAULT"])
@@ -2632,82 +1667,44 @@ INHERITED DATA FROM PREVIOUS ACTIONS:
 {inherited_context}
 ''' if inherited_context else ''}
 
-{f'''
-CONSULTANT CONTEXT (take this into account - consultant has verified/confirmed):
-{ai_context}
-''' if ai_context else ''}
-
 <documents>
-{sanitized_content[:40000]}
+{combined[:20000]}
 </documents>
 
 {consultative_context}
 
-ANALYZE THE DOCUMENTS AND PROVIDE SPECIFIC, ACTIONABLE FINDINGS.
+Based on the documents and your UKG/Payroll expertise, provide:
 
-RULES - BE CONCRETE, NOT GENERIC:
-- BAD: "Review SUI rates for accuracy" 
-- GOOD: "PA SUI rate is 13.65% - verify this matches your Q4 tax notice. If not, update in Company Tax Profile > State Tax Codes"
-
-- BAD: "Ensure tax codes are configured correctly"
-- GOOD: "Found 3 inactive tax codes (WA PFML, OR FLI, NY PFL) - reactivate in Tax Code Maintenance if employees work in these states"
-
-- BAD: "Address any discrepancies"
-- GOOD: "FEIN 74-1776312 in Master Profile doesn't match 74-1776313 in Tax Verification - correct in Company Setup before W-2 processing"
-
-DON'T STATE THE OBVIOUS - These are USELESS, never say things like:
-- "High complexity: 15+ states identified" (they already know this)
-- "Multi-state operation requires attention" (obvious)
-- "Complex tax situation" (not actionable)
-- "Requires dedicated review" (what review? of what?)
-- "Ensure compliance" (with what? how?)
-- "This is a large company" (so what?)
-
-INSTEAD, be specific about WHICH states have issues:
-- "PA, ND, WA have SUI rates above 5% - pull rate notices to verify"
-- "CA SDI rate shows 1.1% but 2025 rate is 1.2% - update before Jan 1"
-- "NY PFL code is inactive but you have 23 NY employees - enable in Tax Codes"
+1. EXTRACT key data values found (FEIN, rates, states, etc.)
+2. COMPARE to benchmarks where applicable (flag HIGH/LOW/UNUSUAL)
+3. IDENTIFY risks, issues, or items needing attention
+4. RECOMMEND specific actions the customer should take
+5. ASSESS completeness - can this action be marked complete?
 
 Return as JSON:
 {{
     "complete": true/false,
-    "key_values": {{"FEIN": "74-1776312", "Company": "Acme Corp", "SUI_PA": "13.65%"}},
-    "issues": [
-        "SPECIFIC issue with SPECIFIC value - SPECIFIC consequence if not fixed",
-        "Example: PA SUI rate 13.65% exceeds standard 3.5% - indicates claims history issues, verify rate notice"
-    ],
-    "recommendations": [
-        "DO THIS: Navigate to [specific screen] and [specific action]",
-        "Example: Go to Company Tax Profile > PA > Update SUI rate to match 2025 rate notice"
-    ],
-    "guidance": [
-        "Step 1: [Specific action with specific location in UKG]",
-        "Step 2: [What to click, what to enter, what to verify]",
-        "Step 3: [How to confirm the change was successful]"
-    ],
+    "key_values": {{"label": "value"}},
+    "issues": ["list of concerns - be specific"],
+    "recommendations": ["specific actions to take"],
     "risk_level": "low|medium|high",
-    "summary": "2-3 sentences with SPECIFIC findings. Mention actual values, actual states, actual issues found."
+    "summary": "2-3 sentence consultative summary with specific observations"
 }}
 
-CRITICAL REQUIREMENTS:
-1. Every issue must reference a SPECIFIC value from the documents
-2. Every recommendation must say WHERE in UKG to make the change
-3. Every guidance step must be actionable - what screen, what field, what value
-4. If data is missing, say EXACTLY what report to run and where to find it
-5. Don't say "review" or "ensure" - say "change X to Y" or "verify X equals Y"
-6. NEVER state the obvious - don't tell them they're complex or multi-state, tell them WHICH states need WHAT action
-7. If something looks fine, don't mention it - only flag items that need action
+Be specific and actionable. Reference actual values from the documents.
+If rates are high/low compared to benchmarks, say so explicitly.
+If data is missing, specify exactly what's needed.
 
 Return ONLY valid JSON."""
 
+        logger.info(f"[FALLBACK] Calling Claude directly for {action_id}")
+        
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=2000,
+            max_tokens=1500,
             temperature=0,
             messages=[{"role": "user", "content": prompt}]
         )
-        
-        logger.warning(f"[AI] Got response from Claude API")
         
         text = response.content[0].text.strip()
         # Clean markdown
@@ -2718,20 +1715,18 @@ Return ONLY valid JSON."""
         text = text.strip()
         
         result = json.loads(text)
-        logger.warning(f"[AI] Parsed findings: complete={result.get('complete')}, risk={result.get('risk_level')}")
+        result['_analyzed_by'] = 'claude_fallback'
         return result
         
     except Exception as e:
-        logger.warning(f"[AI] Failed to extract findings: {e}")
-        import traceback
-        logger.warning(traceback.format_exc())
+        logger.error(f"Failed to extract findings: {e}")
         return None
 
 
 # Keep original function for backward compatibility
-async def extract_findings_for_action(action: Dict, content: List[str], ai_context: str = None) -> Optional[Dict]:
+async def extract_findings_for_action(action: Dict, content: List[str]) -> Optional[Dict]:
     """Legacy function - redirects to consultative version."""
-    return await extract_findings_consultative(action, content, [], action['action_id'], ai_context)
+    return await extract_findings_consultative(action, content, [], action['action_id'])
 
 
 # ============================================================================
@@ -2741,360 +1736,114 @@ async def extract_findings_for_action(action: Dict, content: List[str], ai_conte
 @router.get("/year-end/document-checklist/{project_id}")
 async def get_document_checklist(project_id: str):
     """
-    Get document checklist per step based on Step_Documents sheet.
-    Shows which documents are uploaded vs missing for each step.
+    Get the document checklist with real-time upload status.
+    Shows which reports are needed, uploaded, and processing.
     """
     try:
         from utils.rag_handler import RAGHandler
-        
-        # Inline function to avoid import issues
-        def normalize_text(text):
-            """Normalize text for matching - lowercase, replace separators with spaces"""
-            return text.lower().replace('_', ' ').replace('-', ' ').replace('.', ' ')
-        
-        # Common abbreviation mappings for payroll/HR docs
-        ABBREVIATIONS = {
-            'wc': 'workers compensation',
-            'w2': 'w 2',
-            'w4': 'w 4',
-            'i9': 'i 9',
-            'pto': 'paid time off',
-            'fmla': 'family medical leave',
-            'ada': 'americans disabilities',
-            'eeo': 'equal employment',
-            'sui': 'state unemployment',
-            'futa': 'federal unemployment',
-            'suta': 'state unemployment',
-            'fica': 'social security medicare',
-            'sdi': 'state disability',
-            'tdi': 'temporary disability',
-            'hsa': 'health savings',
-            'fsa': 'flexible spending',
-            'cobra': 'continuation coverage',
-            'erisa': 'employee retirement',
-            'gl': 'general ledger',
-            'ee': 'employee',
-            'er': 'employer',
-            'ytd': 'year to date',
-            'mtd': 'month to date',
-            'qtd': 'quarter to date',
-        }
-        
-        def expand_abbreviations(text):
-            """Expand known abbreviations in text"""
-            words = text.lower().split()
-            expanded = []
-            for word in words:
-                if word in ABBREVIATIONS:
-                    expanded.append(ABBREVIATIONS[word])
-                else:
-                    expanded.append(word)
-            return ' '.join(expanded)
-        
-        def match_documents_to_step(step_documents, uploaded_files):
-            """Match uploaded files against step document requirements."""
-            matched = []
-            missing = []
-            
-            # Pre-normalize all filenames AND expand abbreviations
-            normalized_files = [(f, normalize_text(f), expand_abbreviations(normalize_text(f))) for f in uploaded_files]
-            
-            for doc in step_documents:
-                keyword = doc.get('keyword', '')
-                if not keyword:
-                    continue
-                
-                keyword_normalized = normalize_text(keyword)
-                keyword_expanded = expand_abbreviations(keyword_normalized)
-                keyword_words = [w for w in keyword_normalized.split() if len(w) > 2]  # Skip tiny words
-                keyword_expanded_words = [w for w in keyword_expanded.split() if len(w) > 2]
-                
-                # Fuzzy word match helper
-                def fuzzy_word_match(kw_word, filename_text):
-                    """Check if keyword word matches anywhere in filename (prefix/partial)"""
-                    if kw_word in filename_text:
-                        return True
-                    # Check prefix matching: "worker" matches "workers", "comp" matches "compensation"
-                    filename_words = filename_text.split()
-                    for fw in filename_words:
-                        # Prefix match in either direction
-                        if fw.startswith(kw_word) or kw_word.startswith(fw):
-                            return True
-                        # First 4 chars match (handles worker/workers, comp/compensation)
-                        if len(kw_word) >= 4 and len(fw) >= 4 and kw_word[:4] == fw[:4]:
-                            return True
-                    return False
-                
-                # Check if any uploaded file matches this keyword
-                matched_file = None
-                for filename, filename_normalized, filename_expanded in normalized_files:
-                    # Method 1: Full keyword appears in filename
-                    if keyword_normalized in filename_normalized:
-                        matched_file = filename
-                        break
-                    
-                    # Method 2: All keyword words appear in filename (exact)
-                    if all(word in filename_normalized for word in keyword_words):
-                        matched_file = filename
-                        break
-                    
-                    # Method 3: Abbreviation expansion match
-                    # "WC Risk Rates" expands to "workers compensation risk rates"
-                    # "Workers' Compensation Risk Rates" matches
-                    if keyword_expanded in filename_expanded or filename_expanded in keyword_expanded:
-                        matched_file = filename
-                        break
-                    
-                    # Method 4: Expanded keyword words match expanded filename
-                    if keyword_expanded_words:
-                        expanded_matches = sum(1 for w in keyword_expanded_words if w in filename_expanded)
-                        if expanded_matches >= len(keyword_expanded_words) - 1:
-                            matched_file = filename
-                            break
-                    
-                    # Method 5: Fuzzy match - most words match with prefix/partial
-                    if keyword_words:
-                        fuzzy_matches = sum(1 for w in keyword_words if fuzzy_word_match(w, filename_normalized))
-                        # Allow 1 word to not match if we have multiple words
-                        threshold = max(1, len(keyword_words) - 1)
-                        if fuzzy_matches >= threshold:
-                            matched_file = filename
-                            break
-                
-                doc_info = {
-                    'keyword': doc.get('keyword'),
-                    'description': doc.get('description', ''),
-                    'required': doc.get('required', False)
-                }
-                
-                if matched_file:
-                    doc_info['matched_file'] = matched_file
-                    matched.append(doc_info)
-                else:
-                    missing.append(doc_info)
-            
-            # Calculate stats
-            total = len(step_documents)
-            required_docs = [d for d in step_documents if d.get('required')]
-            required_matched = sum(1 for m in matched if m.get('required'))
-            required_missing = sum(1 for m in missing if m.get('required'))
-            
-            return {
-                'matched': matched,
-                'missing': missing,
-                'stats': {
-                    'total': total,
-                    'matched': len(matched),
-                    'missing': len(missing),
-                    'required_total': len(required_docs),
-                    'required_matched': required_matched,
-                    'required_missing': required_missing
-                }
-            }
-        
-        # Get structure (which now includes required_documents per step)
-        structure = await get_year_end_structure()
-        
-        # Get project name for matching (files might be stored with name instead of UUID)
-        project_name = None
-        try:
-            from utils.supabase_client import get_supabase
-            supabase = get_supabase()
-            proj_result = supabase.table("projects").select("name").eq("id", project_id).execute()
-            if proj_result.data:
-                project_name = proj_result.data[0].get("name", "").upper()
-        except Exception as e:
-            logger.warning(f"Could not get project name: {e}")
+        from utils.database.models import ProcessingJobModel
         
         # Get all project files from ChromaDB
         rag = RAGHandler()
         collection = rag.client.get_or_create_collection(name="documents")
         all_results = collection.get(include=["metadatas"], limit=1000)
         
-        # Debug: Log all unique projects in ChromaDB
-        all_projects_in_chroma = set()
-        for metadata in all_results.get("metadatas", []):
-            p = metadata.get("project_id") or metadata.get("project", "")
-            if p:
-                all_projects_in_chroma.add(str(p))
-        logger.warning(f"[DOC-CHECKLIST] All projects in ChromaDB: {all_projects_in_chroma}")
-        logger.warning(f"[DOC-CHECKLIST] Looking for project_id={project_id}, name={project_name}")
-        
-        # Build list of uploaded filenames
-        uploaded_files = []
+        # Build set of uploaded filenames
+        uploaded_files = set()
         for metadata in all_results.get("metadatas", []):
             doc_project = metadata.get("project_id") or metadata.get("project", "")
-            doc_project_str = str(doc_project)
-            doc_project_upper = doc_project_str.upper()
-            
-            # Match by multiple methods:
-            # 1. Exact UUID match
-            # 2. UUID prefix match (first 8 chars)
-            # 3. Exact project name match
-            # 4. Project name prefix match (e.g., "TEA1000" starts with "TEA" from "TEAM")
-            # 5. Doc project contains project name or vice versa
-            is_match = (
-                doc_project_str == project_id or 
-                doc_project_str == project_id[:8] or
-                (project_name and doc_project_upper == project_name) or
-                (project_name and len(project_name) >= 3 and doc_project_upper.startswith(project_name[:3])) or
-                (project_name and len(project_name) >= 3 and project_name.startswith(doc_project_upper[:3]))
-            )
-            
-            if is_match:
+            if doc_project == project_id or doc_project == project_id[:8]:
                 filename = metadata.get("source", metadata.get("filename", ""))
-                if filename and filename not in uploaded_files:
-                    uploaded_files.append(filename)
-                    logger.warning(f"[DOC-CHECKLIST] ✓ Matched file: {filename} (project in metadata: {doc_project})")
+                if filename:
+                    uploaded_files.add(filename.lower())
         
-        logger.warning(f"[DOC-CHECKLIST] Found {len(uploaded_files)} files for project {project_id} (name={project_name})")
-        logger.warning(f"[DOC-CHECKLIST] Files: {uploaded_files}")
+        # Check for active processing jobs
+        processing_jobs = []
+        try:
+            # Get all recent jobs and filter for pending/processing
+            all_jobs = ProcessingJobModel.get_all(limit=20)
+            for job in all_jobs:
+                job_status = job.get("status", "")
+                job_project = job.get("input_data", {}).get("project_id", "")
+                
+                # Filter for this project and pending/processing status
+                if job_status in ["pending", "processing"] and job_project == project_id:
+                    processing_jobs.append({
+                        "filename": job.get("input_data", {}).get("filename", "Unknown"),
+                        "progress": job.get("progress", 0),
+                        "message": job.get("status_message", "Processing..."),
+                        "job_id": job.get("id")
+                    })
+        except Exception as e:
+            logger.warning(f"Could not fetch processing jobs: {e}")
         
-        # Build checklist per step
-        step_checklists = []
-        total_matched = 0
-        total_missing = 0
-        total_required_matched = 0
-        total_required_missing = 0
-        
-        for step in structure.get('steps', []):
-            step_docs = step.get('required_documents', [])
-            if not step_docs:
-                continue
+        # Build checklist
+        checklist = []
+        for doc_name, doc_info in REQUIRED_DOCUMENTS.items():
+            # Check if this doc is uploaded (fuzzy match on keywords)
+            is_uploaded = False
+            matched_file = None
             
-            # Match documents for this step
-            match_result = match_documents_to_step(step_docs, uploaded_files)
+            for uploaded in uploaded_files:
+                for keyword in doc_info["keywords"]:
+                    if keyword in uploaded:
+                        is_uploaded = True
+                        matched_file = uploaded
+                        break
+                if is_uploaded:
+                    break
             
-            step_checklists.append({
-                'step_number': step.get('step_number'),
-                'step_name': step.get('step_name'),
-                'matched': match_result['matched'],
-                'missing': match_result['missing'],
-                'stats': match_result['stats']
+            # Check if currently processing
+            is_processing = False
+            processing_info = None
+            for job in processing_jobs:
+                job_filename = job["filename"].lower()
+                for keyword in doc_info["keywords"]:
+                    if keyword in job_filename:
+                        is_processing = True
+                        processing_info = job
+                        break
+                if is_processing:
+                    break
+            
+            checklist.append({
+                "document_name": doc_name,
+                "description": doc_info["description"],
+                "required": doc_info["required"],
+                "actions": doc_info["actions"],
+                "status": "processing" if is_processing else ("uploaded" if is_uploaded else "missing"),
+                "matched_file": matched_file,
+                "processing_info": processing_info
             })
-            
-            total_matched += match_result['stats']['matched']
-            total_missing += match_result['stats']['missing']
-            total_required_matched += match_result['stats']['required_matched']
-            total_required_missing += match_result['stats']['required_missing']
+        
+        # Sort: required first, then by status (missing, processing, uploaded)
+        status_order = {"missing": 0, "processing": 1, "uploaded": 2}
+        checklist.sort(key=lambda x: (not x["required"], status_order.get(x["status"], 3)))
+        
+        # Calculate stats
+        total_required = sum(1 for d in checklist if d["required"])
+        uploaded_required = sum(1 for d in checklist if d["required"] and d["status"] == "uploaded")
+        total_uploaded = sum(1 for d in checklist if d["status"] == "uploaded")
+        total_processing = sum(1 for d in checklist if d["status"] == "processing")
         
         return {
             "project_id": project_id,
-            "has_step_documents": structure.get('has_step_documents', False),
-            "uploaded_files": uploaded_files,
-            "step_checklists": step_checklists,
+            "checklist": checklist,
             "stats": {
-                "total_uploaded": len(uploaded_files),
-                "total_matched": total_matched,
-                "total_missing": total_missing,
-                "required_matched": total_required_matched,
-                "required_missing": total_required_missing
+                "total_documents": len(checklist),
+                "total_required": total_required,
+                "uploaded_required": uploaded_required,
+                "total_uploaded": total_uploaded,
+                "total_processing": total_processing,
+                "total_missing": len(checklist) - total_uploaded - total_processing,
+                "required_complete": uploaded_required == total_required
             },
-            "debug": {
-                "project_id": project_id,
-                "project_name": project_name,
-                "all_projects_in_chroma": list(all_projects_in_chroma)
-            }
+            "processing_jobs": processing_jobs
         }
         
     except Exception as e:
         logger.exception(f"Document checklist failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-class UpdateStepDocumentRequest(BaseModel):
-    step: str
-    old_keyword: str
-    new_keyword: str
-
-
-@router.put("/year-end/step-documents/keyword")
-async def update_step_document_keyword(request: UpdateStepDocumentRequest):
-    """
-    Update a keyword in the Step_Documents table.
-    Allows inline editing of document matching keywords.
-    """
-    import duckdb
-    
-    DUCKDB_PATH = "/data/structured_data.duckdb"
-    
-    if not os.path.exists(DUCKDB_PATH):
-        raise HTTPException(404, "DuckDB not found")
-    
-    try:
-        conn = duckdb.connect(DUCKDB_PATH)
-        
-        # Find the Step_Documents table
-        tables = conn.execute("""
-            SELECT table_name FROM _schema_metadata 
-            WHERE LOWER(sheet_name) LIKE '%step_documents%'
-            AND is_current = TRUE
-            AND LOWER(project) = 'global'
-        """).fetchall()
-        
-        if not tables:
-            raise HTTPException(404, "Step_Documents table not found")
-        
-        table_name = tables[0][0]
-        
-        # Get column names to find the right ones
-        col_info = conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
-        col_names = [c[1].lower() for c in col_info]
-        
-        # Find keyword column (might be named differently)
-        keyword_col = None
-        step_col = None
-        for col in col_names:
-            if 'keyword' in col:
-                keyword_col = col
-            if col == 'step' or col == 'step_number':
-                step_col = col
-        
-        if not keyword_col:
-            raise HTTPException(400, f"No keyword column found. Columns: {col_names}")
-        
-        # Update the keyword
-        if step_col:
-            result = conn.execute(f"""
-                UPDATE "{table_name}" 
-                SET "{keyword_col}" = ?
-                WHERE "{step_col}" = ? AND LOWER("{keyword_col}") = LOWER(?)
-                RETURNING *
-            """, [request.new_keyword, request.step, request.old_keyword]).fetchall()
-        else:
-            result = conn.execute(f"""
-                UPDATE "{table_name}" 
-                SET "{keyword_col}" = ?
-                WHERE LOWER("{keyword_col}") = LOWER(?)
-                RETURNING *
-            """, [request.new_keyword, request.old_keyword]).fetchall()
-        
-        conn.commit()
-        conn.close()
-        
-        if not result:
-            raise HTTPException(404, f"Keyword '{request.old_keyword}' not found in step {request.step}")
-        
-        # Clear playbook cache to reload structure
-        global PLAYBOOK_CACHE
-        if 'year-end-2025' in PLAYBOOK_CACHE:
-            del PLAYBOOK_CACHE['year-end-2025']
-        
-        logger.info(f"[STEP-DOCS] Updated keyword '{request.old_keyword}' → '{request.new_keyword}' for step {request.step}")
-        
-        return {
-            "success": True,
-            "step": request.step,
-            "old_keyword": request.old_keyword,
-            "new_keyword": request.new_keyword,
-            "message": f"Keyword updated. Refresh to see changes."
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[STEP-DOCS] Update failed: {e}")
-        raise HTTPException(500, str(e))
 
 
 # ============================================================================
@@ -3318,7 +2067,6 @@ async def export_progress(project_id: str, customer_name: str = "Customer"):
             findings = action_progress.get('findings', {})
             docs_found = action_progress.get('documents_found', [])
             notes = action_progress.get('notes', '')
-            ai_context = action_progress.get('ai_context', '')
             
             # Determine analysis tab link
             analysis_tab = None
@@ -3378,13 +2126,8 @@ async def export_progress(project_id: str, customer_name: str = "Customer"):
                     })
             ws1.cell(row=row, column=14, value=issues_text).alignment = wrap_align
             
-            # Notes (combine consultant notes + AI context)
-            combined_notes = []
-            if notes:
-                combined_notes.append(f"NOTES: {notes}")
-            if ai_context:
-                combined_notes.append(f"AI CONTEXT: {ai_context}")
-            ws1.cell(row=row, column=15, value='\n'.join(combined_notes) if combined_notes else '').alignment = wrap_align
+            # Notes
+            ws1.cell(row=row, column=15, value=notes or '').alignment = wrap_align
             
             # Apply borders
             for col in range(1, 16):
@@ -3632,66 +2375,6 @@ async def export_progress(project_id: str, customer_name: str = "Customer"):
         
         ws.column_dimensions['A'].width = 50
         ws.column_dimensions['B'].width = 60
-    
-    # =========================================================================
-    # TAB: Fast Track Summary
-    # =========================================================================
-    ws_ft = wb.create_sheet("⚡ Fast Track")
-    
-    # Header
-    ft_headers = ["Seq", "Fast Track Item", "UKG Actions", "Reports Needed", "SQL Script", "Status", "Notes"]
-    for col, header in enumerate(ft_headers, 1):
-        cell = ws_ft.cell(row=1, column=col, value=header)
-        cell.font = header_font
-        cell.fill = PatternFill(start_color="059669", end_color="059669", fill_type="solid")
-        cell.border = thin_border
-    
-    ft_widths = [8, 50, 20, 40, 60, 15, 40]
-    for col, width in enumerate(ft_widths, 1):
-        ws_ft.column_dimensions[get_column_letter(col)].width = width
-    
-    ws_ft.freeze_panes = 'A2'
-    
-    # Add Fast Track items
-    fast_track = structure.get('fast_track', [])
-    for row_idx, ft_item in enumerate(fast_track, 2):
-        # Calculate status from referenced UKG actions
-        ukg_refs = ft_item.get('ukg_action_ref', [])
-        ref_statuses = [progress.get(ref, {}).get('status', 'not_started') for ref in ukg_refs]
-        
-        if all(s in ['complete', 'na'] for s in ref_statuses) and ref_statuses:
-            ft_status = 'Complete'
-            status_fill = complete_fill
-        elif any(s == 'blocked' for s in ref_statuses):
-            ft_status = 'Blocked'
-            status_fill = blocked_fill
-        elif any(s in ['in_progress', 'complete'] for s in ref_statuses):
-            ft_status = 'In Progress'
-            status_fill = in_progress_fill
-        else:
-            ft_status = 'Not Started'
-            status_fill = not_started_fill
-        
-        ws_ft.cell(row=row_idx, column=1, value=ft_item.get('sequence', row_idx - 1))
-        ws_ft.cell(row=row_idx, column=2, value=ft_item.get('description', '')).alignment = wrap_align
-        ws_ft.cell(row=row_idx, column=3, value=', '.join(ukg_refs))
-        ws_ft.cell(row=row_idx, column=4, value=', '.join(ft_item.get('reports_needed', []))).alignment = wrap_align
-        ws_ft.cell(row=row_idx, column=5, value=ft_item.get('sql_script', '') or '').alignment = wrap_align
-        
-        status_cell = ws_ft.cell(row=row_idx, column=6, value=ft_status)
-        status_cell.fill = status_fill
-        
-        # Combine notes from all referenced UKG actions
-        combined_notes = []
-        for ref in ukg_refs:
-            ref_progress = progress.get(ref, {})
-            if ref_progress.get('notes'):
-                combined_notes.append(f"{ref}: {ref_progress['notes']}")
-        ws_ft.cell(row=row_idx, column=7, value='\n'.join(combined_notes)).alignment = wrap_align
-        
-        for col in range(1, 8):
-            ws_ft.cell(row=row_idx, column=col).border = thin_border
-        ws_ft.row_dimensions[row_idx].height = 30
     
     # =========================================================================
     # Save and return
