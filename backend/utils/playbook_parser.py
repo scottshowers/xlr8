@@ -226,6 +226,7 @@ def load_step_documents() -> Dict[str, List[Dict[str, Any]]]:
                     'description': description,
                     'required': required
                 })
+                logger.info(f"[PARSER] Step {step_num} keyword: '{keyword}' (required={required})")
                 
             except Exception as e:
                 logger.warning(f"[PARSER] Error parsing Step_Documents row: {e}")
@@ -762,6 +763,9 @@ def match_documents_to_step(step_documents: List[Dict], uploaded_files: List[str
         """Get significant words (3+ chars)"""
         return [w for w in normalize(text).split() if len(w) >= 3]
     
+    logger.info(f"[MATCH] Matching {len(step_documents)} keywords against {len(uploaded_files)} files")
+    logger.info(f"[MATCH] Uploaded files: {uploaded_files}")
+    
     for doc in step_documents:
         keyword = doc.get('keyword', '')
         if not keyword:
@@ -769,7 +773,10 @@ def match_documents_to_step(step_documents: List[Dict], uploaded_files: List[str
         
         keyword_words = get_words(keyword)
         if not keyword_words:
+            logger.warning(f"[MATCH] Skipping empty keyword: '{keyword}'")
             continue
+        
+        logger.info(f"[MATCH] Looking for keyword '{keyword}' (words: {keyword_words})")
         
         # Check if any uploaded file matches this keyword
         matched_file = None
@@ -781,6 +788,7 @@ def match_documents_to_step(step_documents: List[Dict], uploaded_files: List[str
             # Method 1: Direct substring match
             if normalize(keyword) in normalize(filename):
                 matched_file = filename
+                logger.info(f"[MATCH] ✓ Direct match: '{keyword}' in '{filename}'")
                 break
             
             # Method 2: Word overlap scoring
@@ -790,11 +798,17 @@ def match_documents_to_step(step_documents: List[Dict], uploaded_files: List[str
             # Score based on percentage of keyword words matched
             score = matching_words / len(keyword_words) if keyword_words else 0
             
+            logger.debug(f"[MATCH] '{keyword}' vs '{filename}': {matching_words}/{len(keyword_words)} words = {score:.0%}")
+            
             # Need at least 60% word match, or 2+ words matching
             if score >= 0.6 or matching_words >= 2:
                 if score > best_score:
                     best_score = score
                     matched_file = filename
+                    logger.info(f"[MATCH] ✓ Word match: '{keyword}' ~ '{filename}' ({matching_words} words, {score:.0%})")
+        
+        if not matched_file:
+            logger.warning(f"[MATCH] ✗ No match for keyword: '{keyword}'")
         
         doc_info = {
             'keyword': doc.get('keyword'),
@@ -807,6 +821,8 @@ def match_documents_to_step(step_documents: List[Dict], uploaded_files: List[str
             matched.append(doc_info)
         else:
             missing.append(doc_info)
+    
+    logger.info(f"[MATCH] Result: {len(matched)} matched, {len(missing)} missing")
     
     # Calculate stats
     total = len(step_documents)
