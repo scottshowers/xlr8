@@ -85,30 +85,43 @@ class LocalLLMClient:
     """Client for Ollama (local LLM)"""
     
     def __init__(self):
-        self.ollama_url = os.getenv("LLM_ENDPOINT", "").rstrip('/')
+        # Use same env vars as smart_pdf_analyzer.py
+        self.ollama_url = (
+            os.getenv("LLM_INFERENCE_URL") or 
+            os.getenv("OLLAMA_URL") or 
+            os.getenv("RUNPOD_URL") or 
+            os.getenv("LLM_ENDPOINT", "")
+        )
+        if self.ollama_url:
+            self.ollama_url = self.ollama_url.rstrip('/')
+        
         self.ollama_username = os.getenv("LLM_USERNAME", "")
         self.ollama_password = os.getenv("LLM_PASSWORD", "")
-        self.model = os.getenv("OLLAMA_MODEL", "mistral")  # or llama3, deepseek-coder
+        self.model = os.getenv("OLLAMA_MODEL", os.getenv("LLM_MODEL", "mistral"))
         
-        logger.info(f"LocalLLMClient: {self.ollama_url}, model={self.model}")
+        logger.info(f"[HYBRID] LocalLLMClient initialized: url={self.ollama_url}, model={self.model}")
     
     def is_available(self) -> bool:
         """Check if local LLM is configured and reachable"""
         if not self.ollama_url:
+            logger.warning("[HYBRID] No LLM URL configured")
             return False
         try:
             url = f"{self.ollama_url}/api/tags"
-            if self.ollama_username:
-                resp = requests.get(url, auth=HTTPBasicAuth(self.ollama_username, self.ollama_password), timeout=5)
-            else:
-                resp = requests.get(url, timeout=5)
+            auth = None
+            if self.ollama_username and self.ollama_password:
+                auth = HTTPBasicAuth(self.ollama_username, self.ollama_password)
+            resp = requests.get(url, auth=auth, timeout=5)
+            logger.info(f"[HYBRID] LLM availability check: {resp.status_code}")
             return resp.status_code == 200
-        except:
+        except Exception as e:
+            logger.warning(f"[HYBRID] LLM not reachable: {e}")
             return False
     
     def extract(self, text: str, prompt: str) -> Tuple[Optional[str], bool]:
         """Call local LLM for extraction"""
         if not self.ollama_url:
+            logger.warning("[HYBRID] No LLM URL configured, skipping local extraction")
             return None, False
         
         try:
@@ -124,25 +137,25 @@ class LocalLLMClient:
                 }
             }
             
-            logger.info(f"[HYBRID] Calling local LLM ({self.model}) for extraction")
+            logger.info(f"[HYBRID] Calling local LLM at {url} with model {self.model}")
             
+            auth = None
             if self.ollama_username and self.ollama_password:
-                response = requests.post(
-                    url, json=payload,
-                    auth=HTTPBasicAuth(self.ollama_username, self.ollama_password),
-                    timeout=30
-                )
-            else:
-                response = requests.post(url, json=payload, timeout=30)
+                auth = HTTPBasicAuth(self.ollama_username, self.ollama_password)
+            
+            response = requests.post(url, json=payload, auth=auth, timeout=60)
             
             if response.status_code != 200:
-                logger.warning(f"[HYBRID] Local LLM error: {response.status_code}")
+                logger.warning(f"[HYBRID] Local LLM error: {response.status_code} - {response.text[:200]}")
                 return None, False
             
             result = response.json().get("response", "")
             logger.info(f"[HYBRID] Local LLM response: {len(result)} chars")
             return result, True
             
+        except requests.Timeout:
+            logger.warning(f"[HYBRID] Local LLM timeout after 60s")
+            return None, False
         except Exception as e:
             logger.warning(f"[HYBRID] Local LLM failed: {e}")
             return None, False
