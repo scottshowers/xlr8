@@ -421,13 +421,29 @@ Return ONLY valid JSON."""
             return None
     
     def build_local_only_result(self, action_id: str, local_results: Dict) -> Dict:
-        """Build a findings result using only local extraction"""
+        """Build a findings result using local extraction + learned patterns"""
         self.stats['local_only'] += 1
         
         # Run rule-based validation if learning is available
         rule_issues = []
+        learned_recommendations = []
+        learned_summary = None
+        
         if self.learning:
             rule_issues = self.learning.validate_extraction(local_results)
+            
+            # Get learned examples for this action type
+            examples = self.learning.get_examples_for_action(action_id, limit=3)
+            if examples:
+                # Use learned patterns to generate recommendations
+                for ex in examples:
+                    ex_findings = ex.get('findings', {})
+                    if ex_findings.get('recommendations'):
+                        for rec in ex_findings['recommendations']:
+                            if rec not in learned_recommendations:
+                                learned_recommendations.append(rec)
+                    if ex_findings.get('summary') and not learned_summary:
+                        learned_summary = ex_findings.get('summary')
         
         # Get key values from extraction
         key_values = {}
@@ -437,18 +453,17 @@ Return ONLY valid JSON."""
             """Format FEIN as XX-XXXXXXX"""
             if not fein_str:
                 return None
-            # Extract just digits
             digits = ''.join(c for c in str(fein_str) if c.isdigit())
             if len(digits) == 9:
                 return f"{digits[:2]}-{digits[2:]}"
             elif len(digits) >= 7:
                 return f"{digits[:2]}-{digits[2:9]}"
-            return fein_str  # Return as-is if can't format
+            return fein_str
         
         if local_results.get('fein'):
             key_values['FEIN'] = format_fein(local_results['fein'])
         elif regex.get('fein'):
-            key_values['FEIN'] = regex['fein'][0]  # Already formatted from regex
+            key_values['FEIN'] = regex['fein'][0]
         
         if local_results.get('company_name'):
             key_values['Company'] = local_results['company_name']
@@ -471,13 +486,53 @@ Return ONLY valid JSON."""
         if self.learning:
             all_issues = [i for i in all_issues if not self.learning.should_suppress_issue(i)]
         
+        # Generate analysis-based recommendations if none learned
+        if not learned_recommendations:
+            # Add smart recommendations based on extracted data
+            if key_values.get('FEIN'):
+                learned_recommendations.append(f"Verify FEIN {key_values['FEIN']} matches all tax agency registrations")
+            
+            # Check for high SUI rates
+            for k, v in key_values.items():
+                if 'SUI' in k and isinstance(v, dict):
+                    for state, rate in v.items():
+                        try:
+                            rate_val = float(rate.replace('%', ''))
+                            if rate_val > 5.0:
+                                learned_recommendations.append(f"Review {state} SUI rate of {rate} - higher than typical")
+                        except:
+                            pass
+                elif 'Rate' in k and isinstance(v, str) and '%' in v:
+                    try:
+                        rate_val = float(v.replace('%', ''))
+                        if 'FUTA' in k and rate_val != 0.6:
+                            learned_recommendations.append(f"FUTA rate {v} differs from standard 0.6% - verify credit reduction status")
+                    except:
+                        pass
+        
+        # Build summary
+        if learned_summary:
+            summary = learned_summary
+        else:
+            extracted_items = list(key_values.keys())
+            if extracted_items:
+                summary = f"Extracted: {', '.join(extracted_items[:5])}. "
+                if all_issues:
+                    summary += f"Found {len(all_issues)} issue(s) requiring attention."
+                elif learned_recommendations:
+                    summary += f"{len(learned_recommendations)} recommendation(s) for review."
+                else:
+                    summary += "No issues detected."
+            else:
+                summary = "Document analyzed. Manual review recommended."
+        
         return {
             'complete': len(all_issues) == 0,
             'key_values': key_values,
             'issues': all_issues,
-            'recommendations': [],
-            'risk_level': 'low' if len(all_issues) == 0 else 'medium',
-            'summary': f'Data extracted successfully via local analysis.',
+            'recommendations': learned_recommendations[:5],  # Limit to top 5
+            'risk_level': 'high' if len(all_issues) > 2 else ('medium' if all_issues or learned_recommendations else 'low'),
+            'summary': summary,
             '_analyzed_by': 'local'
         }
     
