@@ -1271,7 +1271,7 @@ async def scan_for_action(project_id: str, action_id: str):
     """
     logger.info(f"[SCAN] Starting scan for action {action_id} in project {project_id[:8]}")
     try:
-        from backend.utils.rag_handler import RAGHandler
+        from utils.rag_handler import RAGHandler
         
         # Get action details from structure
         structure = await get_year_end_structure()
@@ -1861,8 +1861,8 @@ async def get_document_checklist(project_id: str):
     Shows which reports are needed per step, matched vs missing.
     """
     try:
-        from backend.utils.rag_handler import RAGHandler
-        from backend.utils.database.models import ProcessingJobModel
+        from utils.rag_handler import RAGHandler
+        from utils.database.models import ProcessingJobModel
         from backend.utils.playbook_parser import load_step_documents, match_documents_to_step
         
         # Get all project files from ChromaDB
@@ -2711,12 +2711,12 @@ def get_supabase():
     """Get Supabase client - try multiple import paths"""
     try:
         # Try the standard import
-        from backend.utils.supabase_client import get_supabase as _get_supabase
+        from utils.supabase_client import get_supabase as _get_supabase
         return _get_supabase()
     except ImportError:
         try:
             # Fallback: try direct supabase client
-            from backend.utils.supabase_client import supabase
+            from utils.supabase_client import supabase
             return supabase
         except ImportError:
             try:
