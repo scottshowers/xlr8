@@ -133,7 +133,7 @@ class LocalLLMClient:
                 "stream": False,
                 "options": {
                     "temperature": 0.1,  # Low temp for extraction
-                    "num_predict": 1024
+                    "num_predict": 4096  # Increased to avoid truncation
                 }
             }
             
@@ -228,10 +228,10 @@ class HybridAnalyzer:
                     examples_context += f"Output: {json.dumps(ex.get('output', {}))}\n\n"
         
         # Build focused extraction prompt
-        prompt = f"""Extract the following from this document. Return ONLY a JSON object.
+        prompt = f"""You are a JSON extraction assistant. Extract data from this document and return ONLY a JSON object - no text before or after.
 
-LOOK FOR:
-- FEIN/EIN (format: XX-XXXXXXX)
+EXTRACT:
+- FEIN/EIN (format as XX-XXXXXXX, e.g., 74-1776312)
 - Company name and address
 - Tax rates (percentages like X.XX%)
 - State tax codes (SUI, SIT, SDI, etc.)
@@ -241,10 +241,8 @@ LOOK FOR:
 DOCUMENT:
 {text[:8000]}
 
-Return JSON like:
-{{"fein": "XX-XXXXXXX", "company_name": "...", "address": "...", "tax_rates": {{"SUI": "X.XX%"}}, "issues_found": []}}
-
-If data is missing, use null. Return ONLY valid JSON, no explanation."""
+OUTPUT FORMAT (return exactly this structure, no other text):
+{{"fein": "XX-XXXXXXX", "company_name": "...", "address": "...", "tax_rates": {{"SUI": "X.XX%"}}, "issues_found": []}}"""
 
         result, success = self.local_llm.extract(text, prompt)
         
@@ -253,12 +251,36 @@ If data is missing, use null. Return ONLY valid JSON, no explanation."""
         
         # Try to parse JSON from response
         try:
-            # Clean up response
+            # Clean up response - handle preamble text before JSON
             result = result.strip()
+            
+            # Find JSON object in response (may have preamble text)
+            json_start = result.find('{')
+            if json_start > 0:
+                result = result[json_start:]
+            
+            # Handle markdown code blocks
             if result.startswith("```"):
                 result = result.split("```")[1]
                 if result.startswith("json"):
                     result = result[4:]
+                result = result.strip()
+            
+            # Find matching closing brace
+            brace_count = 0
+            json_end = -1
+            for i, char in enumerate(result):
+                if char == '{':
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        json_end = i + 1
+                        break
+            
+            if json_end > 0:
+                result = result[:json_end]
+            
             result = result.strip()
             
             extracted = json.loads(result)
@@ -411,10 +433,22 @@ Return ONLY valid JSON."""
         key_values = {}
         regex = local_results.get('_regex', {})
         
+        def format_fein(fein_str):
+            """Format FEIN as XX-XXXXXXX"""
+            if not fein_str:
+                return None
+            # Extract just digits
+            digits = ''.join(c for c in str(fein_str) if c.isdigit())
+            if len(digits) == 9:
+                return f"{digits[:2]}-{digits[2:]}"
+            elif len(digits) >= 7:
+                return f"{digits[:2]}-{digits[2:9]}"
+            return fein_str  # Return as-is if can't format
+        
         if local_results.get('fein'):
-            key_values['FEIN'] = local_results['fein']
+            key_values['FEIN'] = format_fein(local_results['fein'])
         elif regex.get('fein'):
-            key_values['FEIN'] = regex['fein'][0]
+            key_values['FEIN'] = regex['fein'][0]  # Already formatted from regex
         
         if local_results.get('company_name'):
             key_values['Company'] = local_results['company_name']
