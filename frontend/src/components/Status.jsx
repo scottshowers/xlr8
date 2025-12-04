@@ -12,6 +12,7 @@ export default function Status() {
   const [deleting, setDeleting] = useState(null)
   const [killingJob, setKillingJob] = useState(null)
   const [deletingJob, setDeletingJob] = useState(null)
+  const [clearingOldJobs, setClearingOldJobs] = useState(false)
 
   useEffect(() => {
     loadData()
@@ -86,6 +87,23 @@ export default function Status() {
       alert('Error deleting job: ' + (err.response?.data?.detail || err.message))
     } finally {
       setDeletingJob(null)
+    }
+  }
+
+  const deleteOldJobs = async () => {
+    if (!confirm('Delete all processing jobs older than 7 days?')) return
+    
+    setClearingOldJobs(true)
+    
+    try {
+      const res = await api.delete('/jobs/old?days=7')
+      alert(`Deleted ${res.data.deleted_count || 0} old jobs`)
+      await loadData()
+    } catch (err) {
+      console.error('Delete old jobs error:', err)
+      alert('Error clearing old jobs: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setClearingOldJobs(false)
     }
   }
 
@@ -310,7 +328,30 @@ export default function Status() {
       {/* Job Monitor */}
       {jobs.length > 0 && (
         <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-2xl font-bold mb-4">Processing Jobs</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-2xl font-bold">Processing Jobs</h2>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-500">Showing last 7 days</span>
+              <button
+                onClick={deleteOldJobs}
+                disabled={clearingOldJobs}
+                className="flex items-center gap-1 px-3 py-1 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Clear jobs older than 7 days"
+              >
+                {clearingOldJobs ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Clearing...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>Clear Old Jobs</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
           <div className="space-y-3">
             {jobs.map((job) => (
               <div key={job.id} className="border rounded-lg p-4">
