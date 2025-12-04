@@ -592,7 +592,7 @@ function DocumentChecklistSidebar({ checklist, collapsed, onToggle, onKeywordUpd
     setSaving(true);
     try {
       const res = await api.put('/playbooks/year-end/step-documents/keyword', {
-        step: String(editingDoc.step),
+        step_number: String(editingDoc.step),
         old_keyword: editingDoc.keyword,
         new_keyword: editValue.trim()
       });
@@ -606,7 +606,7 @@ function DocumentChecklistSidebar({ checklist, collapsed, onToggle, onKeywordUpd
       }
     } catch (err) {
       console.error('Update failed:', err);
-      alert('Failed to update: ' + (err.response?.data?.detail || err.message));
+      alert('Failed to update: ' + (err.response?.data?.detail || err.message || 'Unknown error'));
     } finally {
       setSaving(false);
     }
