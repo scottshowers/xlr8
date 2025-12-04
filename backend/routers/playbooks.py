@@ -1870,31 +1870,50 @@ async def get_document_checklist(project_id: str):
         collection = rag.client.get_or_create_collection(name="documents")
         all_results = collection.get(include=["metadatas"], limit=1000)
         
+        # First, find what project name corresponds to this project_id
+        # by checking if any metadata has both matching project_id AND a project name
+        project_name = None
+        for metadata in all_results.get("metadatas", []):
+            pid = metadata.get("project_id", "")
+            if pid and (pid == project_id or pid == project_id[:8] or project_id.startswith(pid)):
+                project_name = metadata.get("project") or metadata.get("project_name")
+                if project_name:
+                    break
+        
         # Build list of uploaded filenames for this project
         uploaded_files_list = []
         seen_files = set()
         seen_projects = set()
         
         for metadata in all_results.get("metadatas", []):
-            doc_project = metadata.get("project_id") or metadata.get("project", "")
-            if doc_project:
-                seen_projects.add(doc_project[:20])  # Track what projects exist
+            doc_project_id = metadata.get("project_id", "")
+            doc_project_name = metadata.get("project") or metadata.get("project_name", "")
             
-            # Flexible project matching
-            if doc_project and (
-                doc_project == project_id or 
-                doc_project == project_id[:8] or
-                project_id.startswith(doc_project) or
-                doc_project.startswith(project_id[:8])
-            ):
+            if doc_project_id:
+                seen_projects.add(f"id:{doc_project_id[:12]}")
+            if doc_project_name:
+                seen_projects.add(f"name:{doc_project_name}")
+            
+            # Match by project_id OR project_name
+            matches_by_id = doc_project_id and (
+                doc_project_id == project_id or 
+                doc_project_id == project_id[:8] or
+                project_id.startswith(doc_project_id) or
+                doc_project_id.startswith(project_id[:8])
+            )
+            matches_by_name = project_name and doc_project_name and (
+                doc_project_name.lower() == project_name.lower()
+            )
+            
+            if matches_by_id or matches_by_name:
                 filename = metadata.get("source", metadata.get("filename", ""))
                 if filename and filename.lower() not in seen_files:
                     uploaded_files_list.append(filename)
                     seen_files.add(filename.lower())
         
         uploaded_files_list.sort()
-        logger.info(f"[DOC-CHECKLIST] Looking for project: {project_id[:8]}")
-        logger.info(f"[DOC-CHECKLIST] Projects in ChromaDB: {list(seen_projects)[:10]}")
+        logger.info(f"[DOC-CHECKLIST] Looking for project_id: {project_id[:8]}, project_name: {project_name}")
+        logger.info(f"[DOC-CHECKLIST] Projects in ChromaDB: {list(seen_projects)[:15]}")
         logger.info(f"[DOC-CHECKLIST] Found {len(uploaded_files_list)} files: {uploaded_files_list}")
         
         # Check for active processing jobs
