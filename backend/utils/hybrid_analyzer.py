@@ -182,7 +182,7 @@ class HybridAnalyzer:
         
         # Try to import learning system
         try:
-            from utils.learning_engine import get_learning_system
+            from backend.utils.learning_engine import get_learning_system
             self.learning = get_learning_system()
             logger.info("[HYBRID] Learning system enabled")
         except ImportError:
@@ -263,8 +263,12 @@ If data is missing, use null. Return ONLY valid JSON, no explanation."""
             
             extracted = json.loads(result)
             
+            # Ensure we have a dict, not a list
+            if isinstance(extracted, list):
+                extracted = {'items': extracted}
+            
             # Merge regex results
-            if regex_results:
+            if regex_results and isinstance(extracted, dict):
                 extracted['_regex'] = regex_results
             
             return extracted
