@@ -1924,6 +1924,35 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
             </div>
           )}
 
+          {/* Show extracted key values */}
+          {findings?.key_values && Object.keys(findings.key_values).length > 0 && (
+            <div style={styles.section}>
+              <div style={styles.sectionTitle}>📊 Extracted Data</div>
+              <div style={{ 
+                background: '#f0f9ff', 
+                border: '1px solid #bae6fd',
+                borderRadius: '6px',
+                padding: '0.75rem',
+                display: 'grid',
+                gridTemplateColumns: 'auto 1fr',
+                gap: '0.5rem 1rem',
+                fontSize: '0.85rem'
+              }}>
+                {Object.entries(findings.key_values).map(([key, value], i) => (
+                  <React.Fragment key={i}>
+                    <div style={{ fontWeight: '600', color: '#0369a1' }}>{key}:</div>
+                    <div style={{ color: '#0c4a6e' }}>
+                      {typeof value === 'object' 
+                        ? Object.entries(value).map(([k, v]) => `${k}: ${v}`).join(', ')
+                        : String(value)
+                      }
+                    </div>
+                  </React.Fragment>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Show issues/concerns */}
           {findings?.issues && Array.isArray(findings.issues) && findings.issues.length > 0 && (
             <div style={styles.section}>
