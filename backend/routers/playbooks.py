@@ -1899,17 +1899,30 @@ async def get_document_checklist(project_id: str):
             # Load Step_Documents from DuckDB
             step_documents = load_step_documents()
             
+            # Get step names from structure
+            step_names_map = {}
+            try:
+                from backend.utils.playbook_parser import parse_year_end_checklist
+                structure = parse_year_end_checklist()
+                for step in structure.get('steps', []):
+                    step_names_map[step['step_number']] = step.get('step_name', f"Step {step['step_number']}")
+            except Exception as e:
+                logger.warning(f"[DOC-CHECKLIST] Could not load step names: {e}")
+            
             if step_documents:
                 has_step_documents = True
                 logger.info(f"[DOC-CHECKLIST] Found Step_Documents for {len(step_documents)} steps")
                 
                 # Build checklist for each step
-                for step_num, docs in sorted(step_documents.items(), key=lambda x: x[0]):
+                for step_num, docs in sorted(step_documents.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 999):
                     result = match_documents_to_step(docs, uploaded_files_list)
+                    
+                    # Use actual step name from structure, fallback to just the number
+                    actual_step_name = step_names_map.get(step_num, "")
                     
                     step_checklists.append({
                         'step_number': step_num,
-                        'step_name': f"Step {step_num}",
+                        'step_name': actual_step_name,  # Just the name, no "Step X:" prefix
                         'matched': result['matched'],
                         'missing': result['missing'],
                         'stats': result['stats']
