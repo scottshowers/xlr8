@@ -40,14 +40,25 @@ class PIISanitizer:
     """
     Sanitizes PII from text before sending to Claude.
     Redacts SSN, phone, email, DOB, and converts salaries to ranges.
+    
+    PRESERVES (not PII - business identifiers):
+    - FEIN (XX-XXXXXXX) - company tax ID, public info
+    - State tax IDs
+    - Company names
     """
     
-    SSN_PATTERN = r'\b\d{3}[-\s]?\d{2}[-\s]?\d{4}\b'
+    # SSN: XXX-XX-XXXX (more specific to avoid catching FEIN)
+    SSN_PATTERN = r'\b\d{3}[-\s]\d{2}[-\s]\d{4}\b'
     PHONE_PATTERN = r'\b(?:\+1[-\s]?)?\(?\d{3}\)?[-\s]?\d{3}[-\s]?\d{4}\b'
     EMAIL_PATTERN = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
     DOB_PATTERN = r'\b(?:0?[1-9]|1[0-2])[/-](?:0?[1-9]|[12]\d|3[01])[/-](?:19|20)\d{2}\b'
-    SALARY_PATTERN = r'\$[\d,]+(?:\.\d{2})?'
     BANK_ACCOUNT_PATTERN = r'\b\d{8,17}\b(?=.*(?:account|acct|routing|aba))'
+    
+    # FEIN pattern to PROTECT (not redact)
+    FEIN_PATTERN = r'\b\d{2}[-]\d{7}\b'
+    
+    # Salary pattern - only redact large amounts
+    SALARY_PATTERN = r'\$[\d,]+(?:\.\d{2})?'
     
     def __init__(self):
         self.redaction_count = 0
@@ -65,14 +76,26 @@ class PIISanitizer:
             return "[SALARY]"
     
     def sanitize(self, text: str) -> str:
-        """Remove PII patterns from text before sending to Claude."""
+        """Remove PII patterns from text before sending to Claude.
+        
+        Preserves business identifiers like FEIN, state tax IDs.
+        Only redacts personal PII: SSN, phone, email, DOB, bank accounts.
+        """
         if not text:
             return text
         
         self.redaction_count = 0
         result = text
         
-        # Redact patterns
+        # Step 1: Temporarily protect FEIN patterns by replacing with placeholder
+        fein_matches = re.findall(self.FEIN_PATTERN, result)
+        fein_placeholders = {}
+        for i, fein in enumerate(fein_matches):
+            placeholder = f"__FEIN_PROTECTED_{i}__"
+            fein_placeholders[placeholder] = fein
+            result = result.replace(fein, placeholder, 1)
+        
+        # Step 2: Redact actual PII patterns
         patterns = [
             (self.SSN_PATTERN, '[SSN-REDACTED]'),
             (self.PHONE_PATTERN, '[PHONE-REDACTED]'),
@@ -87,8 +110,20 @@ class PIISanitizer:
                 self.redaction_count += len(matches)
                 result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
         
+        # Step 3: Restore protected FEINs
+        for placeholder, fein in fein_placeholders.items():
+            result = result.replace(placeholder, fein)
+        
         # Convert salaries to ranges (preserves context while hiding exact amounts)
-        result = re.sub(self.SALARY_PATTERN, self._salary_to_range, result)
+        # But preserve small dollar amounts that might be rates, not salaries
+        def smart_salary_redact(match):
+            amount = float(match.group(0).replace('$', '').replace(',', ''))
+            # Don't redact small amounts - likely rates, not salaries
+            if amount < 1000:
+                return match.group(0)  # Keep as-is
+            return self._salary_to_range(match)
+        
+        result = re.sub(self.SALARY_PATTERN, smart_salary_redact, result)
         
         return result
     
@@ -2510,41 +2545,66 @@ INHERITED DATA FROM PREVIOUS ACTIONS:
 
 {consultative_context}
 
-Based on the documents and your UKG/Payroll expertise, provide:
+ANALYZE THE DOCUMENTS AND PROVIDE SPECIFIC, ACTIONABLE FINDINGS.
 
-1. EXTRACT key data values found (FEIN, rates, states, etc.)
-2. COMPARE to benchmarks where applicable (flag HIGH/LOW/UNUSUAL)
-3. IDENTIFY risks, issues, or items needing attention
-4. RECOMMEND specific actions the customer should take
-5. PROVIDE step-by-step guidance for completing THIS SPECIFIC ACTION
-6. ASSESS completeness - can this action be marked complete?
+RULES - BE CONCRETE, NOT GENERIC:
+- BAD: "Review SUI rates for accuracy" 
+- GOOD: "PA SUI rate is 13.65% - verify this matches your Q4 tax notice. If not, update in Company Tax Profile > State Tax Codes"
+
+- BAD: "Ensure tax codes are configured correctly"
+- GOOD: "Found 3 inactive tax codes (WA PFML, OR FLI, NY PFL) - reactivate in Tax Code Maintenance if employees work in these states"
+
+- BAD: "Address any discrepancies"
+- GOOD: "FEIN 74-1776312 in Master Profile doesn't match 74-1776313 in Tax Verification - correct in Company Setup before W-2 processing"
+
+DON'T STATE THE OBVIOUS - These are USELESS, never say things like:
+- "High complexity: 15+ states identified" (they already know this)
+- "Multi-state operation requires attention" (obvious)
+- "Complex tax situation" (not actionable)
+- "Requires dedicated review" (what review? of what?)
+- "Ensure compliance" (with what? how?)
+- "This is a large company" (so what?)
+
+INSTEAD, be specific about WHICH states have issues:
+- "PA, ND, WA have SUI rates above 5% - pull rate notices to verify"
+- "CA SDI rate shows 1.1% but 2025 rate is 1.2% - update before Jan 1"
+- "NY PFL code is inactive but you have 23 NY employees - enable in Tax Codes"
 
 Return as JSON:
 {{
     "complete": true/false,
-    "key_values": {{"label": "value"}},
-    "issues": ["list of concerns - be specific"],
-    "recommendations": ["specific actions to take"],
-    "guidance": ["Step 1: ...", "Step 2: ...", "Step 3: ..."],
+    "key_values": {{"FEIN": "74-1776312", "Company": "Acme Corp", "SUI_PA": "13.65%"}},
+    "issues": [
+        "SPECIFIC issue with SPECIFIC value - SPECIFIC consequence if not fixed",
+        "Example: PA SUI rate 13.65% exceeds standard 3.5% - indicates claims history issues, verify rate notice"
+    ],
+    "recommendations": [
+        "DO THIS: Navigate to [specific screen] and [specific action]",
+        "Example: Go to Company Tax Profile > PA > Update SUI rate to match 2025 rate notice"
+    ],
+    "guidance": [
+        "Step 1: [Specific action with specific location in UKG]",
+        "Step 2: [What to click, what to enter, what to verify]",
+        "Step 3: [How to confirm the change was successful]"
+    ],
     "risk_level": "low|medium|high",
-    "summary": "2-3 sentence consultative summary with specific observations"
+    "summary": "2-3 sentences with SPECIFIC findings. Mention actual values, actual states, actual issues found."
 }}
 
-IMPORTANT for guidance field:
-- Provide 3-5 concrete steps the consultant should take to complete THIS action
-- Be specific to THIS action ({action['action_id']}) - not general advice
-- Reference specific values or documents where relevant
-- If this action depends on data from previous actions, focus on what's NEW for this step
-
-Be specific and actionable. Reference actual values from the documents.
-If rates are high/low compared to benchmarks, say so explicitly.
-If data is missing, specify exactly what's needed.
+CRITICAL REQUIREMENTS:
+1. Every issue must reference a SPECIFIC value from the documents
+2. Every recommendation must say WHERE in UKG to make the change
+3. Every guidance step must be actionable - what screen, what field, what value
+4. If data is missing, say EXACTLY what report to run and where to find it
+5. Don't say "review" or "ensure" - say "change X to Y" or "verify X equals Y"
+6. NEVER state the obvious - don't tell them they're complex or multi-state, tell them WHICH states need WHAT action
+7. If something looks fine, don't mention it - only flag items that need action
 
 Return ONLY valid JSON."""
 
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=1500,
+            max_tokens=2000,
             temperature=0,
             messages=[{"role": "user", "content": prompt}]
         )
