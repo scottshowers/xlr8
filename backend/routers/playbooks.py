@@ -955,8 +955,9 @@ PLAYBOOK_PROGRESS = load_progress()
 
 
 class ActionUpdate(BaseModel):
-    status: str  # not_started, in_progress, complete, na, blocked
+    status: str = None  # not_started, in_progress, complete, na, blocked
     notes: Optional[str] = None
+    ai_context: Optional[str] = None  # Fed to Claude on re-scan
     findings: Optional[Dict[str, Any]] = None
 
 
@@ -1481,6 +1482,66 @@ async def debug_parser():
                 ]
             },
         ],
+        "fast_track": [
+            # Fast Track items - HCMPACT's curated checklist
+            # These reference UKG actions via ukg_action_ref and can have SQL scripts
+            {
+                "ft_id": "FT-1",
+                "sequence": 1,
+                "description": "Verify Company FEIN and Tax Setup",
+                "ukg_action_ref": ["2A"],
+                "sql_script": None,
+                "reports_needed": ["Company Tax Verification", "Company Master Profile"]
+            },
+            {
+                "ft_id": "FT-2", 
+                "sequence": 2,
+                "description": "Validate Employee SSNs and Addresses",
+                "ukg_action_ref": ["3A", "3B"],
+                "sql_script": "SELECT EmployeeID, SSN, Address1, City, State, Zip FROM Employees WHERE SSN IS NULL OR LEN(SSN) < 9",
+                "reports_needed": ["Year-End Validation"]
+            },
+            {
+                "ft_id": "FT-3",
+                "sequence": 3,
+                "description": "Review SUI and Tax Rates",
+                "ukg_action_ref": ["2A", "2C"],
+                "sql_script": None,
+                "reports_needed": ["Company Tax Verification"]
+            },
+            {
+                "ft_id": "FT-4",
+                "sequence": 4,
+                "description": "Audit Earnings Tax Categories",
+                "ukg_action_ref": ["2F"],
+                "sql_script": "SELECT EarningCode, Description, TaxCategory FROM EarningsCodes WHERE TaxCategory IS NULL",
+                "reports_needed": ["Earnings Tax Categories"]
+            },
+            {
+                "ft_id": "FT-5",
+                "sequence": 5,
+                "description": "Audit Deduction Tax Categories",
+                "ukg_action_ref": ["2G"],
+                "sql_script": "SELECT DeductionCode, Description, TaxCategory FROM DeductionCodes WHERE TaxCategory IS NULL",
+                "reports_needed": ["Deduction Tax Categories"]
+            },
+            {
+                "ft_id": "FT-6",
+                "sequence": 6,
+                "description": "Run Final Payroll Preview",
+                "ukg_action_ref": ["5A", "5B"],
+                "sql_script": None,
+                "reports_needed": []
+            },
+            {
+                "ft_id": "FT-7",
+                "sequence": 7,
+                "description": "Generate and Distribute W-2s",
+                "ukg_action_ref": ["11A", "11B", "12A"],
+                "sql_script": None,
+                "reports_needed": []
+            }
+        ],
         "total_actions": 55,
         "source_file": "default_structure"
     }
@@ -1509,17 +1570,27 @@ async def update_progress(project_id: str, action_id: str, update: ActionUpdate)
     if project_id not in PLAYBOOK_PROGRESS:
         PLAYBOOK_PROGRESS[project_id] = {}
     
-    PLAYBOOK_PROGRESS[project_id][action_id] = {
-        "status": update.status,
-        "notes": update.notes,
-        "findings": update.findings,
-        "updated_at": datetime.now().isoformat()
-    }
+    # Get existing progress or create new
+    existing = PLAYBOOK_PROGRESS[project_id].get(action_id, {})
+    
+    # Merge updates (only update fields that were provided)
+    if update.status is not None:
+        existing["status"] = update.status
+    if update.notes is not None:
+        existing["notes"] = update.notes
+    if update.ai_context is not None:
+        existing["ai_context"] = update.ai_context
+    if update.findings is not None:
+        existing["findings"] = update.findings
+    
+    existing["updated_at"] = datetime.now().isoformat()
+    
+    PLAYBOOK_PROGRESS[project_id][action_id] = existing
     
     # Persist to file
     save_progress(PLAYBOOK_PROGRESS)
     
-    return {"success": True, "action_id": action_id, "status": update.status}
+    return {"success": True, "action_id": action_id, "status": existing.get("status")}
 
 
 @router.delete("/year-end/progress/{project_id}")
@@ -2201,6 +2272,11 @@ async def scan_for_action(project_id: str, action_id: str, force_refresh: bool =
         findings = None
         suggested_status = "not_started"
         
+        # Get ai_context from progress (consultant-provided context)
+        progress = PLAYBOOK_PROGRESS.get(project_id, {})
+        action_progress = progress.get(action_id, {})
+        ai_context = action_progress.get('ai_context', '')
+        
         # If we have docs OR inherited findings, we can analyze
         has_data = len(found_docs) > 0 or len(inherited_findings) > 0
         logger.warning(f"[SCAN] has_data={has_data}, found_docs={len(found_docs)}, inherited_findings={len(inherited_findings)}")
@@ -2210,12 +2286,13 @@ async def scan_for_action(project_id: str, action_id: str, force_refresh: bool =
             
             # Use Claude with CONSULTATIVE context
             if all_content or inherited_findings:
-                logger.warning(f"[SCAN] Calling AI analysis with {len(all_content)} content chunks")
+                logger.warning(f"[SCAN] Calling AI analysis with {len(all_content)} content chunks, ai_context={bool(ai_context)}")
                 findings = await extract_findings_consultative(
                     action=action,
                     content=all_content[:15],
                     inherited_findings=inherited_findings,
-                    action_id=action_id
+                    action_id=action_id,
+                    ai_context=ai_context
                 )
                 logger.warning(f"[SCAN] AI analysis returned: {type(findings)}, complete={findings.get('complete') if findings else 'None'}")
                 
@@ -2493,7 +2570,8 @@ async def extract_findings_consultative(
     action: Dict, 
     content: List[str], 
     inherited_findings: List[Dict],
-    action_id: str
+    action_id: str,
+    ai_context: Optional[str] = None
 ) -> Optional[Dict]:
     """
     Use Claude to extract findings WITH CONSULTATIVE ANALYSIS.
@@ -2503,6 +2581,7 @@ async def extract_findings_consultative(
     - Red flag detection
     - Proactive recommendations
     - Inherited findings from parent actions
+    - Consultant-provided AI context (e.g., "rate confirmed", "N/A for this client")
     """
     logger.warning(f"[AI] Starting extract_findings_consultative for {action_id}")
     
@@ -2552,6 +2631,11 @@ REPORTS NEEDED: {', '.join(action.get('reports_needed', []))}
 INHERITED DATA FROM PREVIOUS ACTIONS:
 {inherited_context}
 ''' if inherited_context else ''}
+
+{f'''
+CONSULTANT CONTEXT (take this into account - consultant has verified/confirmed):
+{ai_context}
+''' if ai_context else ''}
 
 <documents>
 {sanitized_content[:40000]}
@@ -2645,9 +2729,9 @@ Return ONLY valid JSON."""
 
 
 # Keep original function for backward compatibility
-async def extract_findings_for_action(action: Dict, content: List[str]) -> Optional[Dict]:
+async def extract_findings_for_action(action: Dict, content: List[str], ai_context: str = None) -> Optional[Dict]:
     """Legacy function - redirects to consultative version."""
-    return await extract_findings_consultative(action, content, [], action['action_id'])
+    return await extract_findings_consultative(action, content, [], action['action_id'], ai_context)
 
 
 # ============================================================================
@@ -3234,6 +3318,7 @@ async def export_progress(project_id: str, customer_name: str = "Customer"):
             findings = action_progress.get('findings', {})
             docs_found = action_progress.get('documents_found', [])
             notes = action_progress.get('notes', '')
+            ai_context = action_progress.get('ai_context', '')
             
             # Determine analysis tab link
             analysis_tab = None
@@ -3293,8 +3378,13 @@ async def export_progress(project_id: str, customer_name: str = "Customer"):
                     })
             ws1.cell(row=row, column=14, value=issues_text).alignment = wrap_align
             
-            # Notes
-            ws1.cell(row=row, column=15, value=notes or '').alignment = wrap_align
+            # Notes (combine consultant notes + AI context)
+            combined_notes = []
+            if notes:
+                combined_notes.append(f"NOTES: {notes}")
+            if ai_context:
+                combined_notes.append(f"AI CONTEXT: {ai_context}")
+            ws1.cell(row=row, column=15, value='\n'.join(combined_notes) if combined_notes else '').alignment = wrap_align
             
             # Apply borders
             for col in range(1, 16):
@@ -3542,6 +3632,66 @@ async def export_progress(project_id: str, customer_name: str = "Customer"):
         
         ws.column_dimensions['A'].width = 50
         ws.column_dimensions['B'].width = 60
+    
+    # =========================================================================
+    # TAB: Fast Track Summary
+    # =========================================================================
+    ws_ft = wb.create_sheet("⚡ Fast Track")
+    
+    # Header
+    ft_headers = ["Seq", "Fast Track Item", "UKG Actions", "Reports Needed", "SQL Script", "Status", "Notes"]
+    for col, header in enumerate(ft_headers, 1):
+        cell = ws_ft.cell(row=1, column=col, value=header)
+        cell.font = header_font
+        cell.fill = PatternFill(start_color="059669", end_color="059669", fill_type="solid")
+        cell.border = thin_border
+    
+    ft_widths = [8, 50, 20, 40, 60, 15, 40]
+    for col, width in enumerate(ft_widths, 1):
+        ws_ft.column_dimensions[get_column_letter(col)].width = width
+    
+    ws_ft.freeze_panes = 'A2'
+    
+    # Add Fast Track items
+    fast_track = structure.get('fast_track', [])
+    for row_idx, ft_item in enumerate(fast_track, 2):
+        # Calculate status from referenced UKG actions
+        ukg_refs = ft_item.get('ukg_action_ref', [])
+        ref_statuses = [progress.get(ref, {}).get('status', 'not_started') for ref in ukg_refs]
+        
+        if all(s in ['complete', 'na'] for s in ref_statuses) and ref_statuses:
+            ft_status = 'Complete'
+            status_fill = complete_fill
+        elif any(s == 'blocked' for s in ref_statuses):
+            ft_status = 'Blocked'
+            status_fill = blocked_fill
+        elif any(s in ['in_progress', 'complete'] for s in ref_statuses):
+            ft_status = 'In Progress'
+            status_fill = in_progress_fill
+        else:
+            ft_status = 'Not Started'
+            status_fill = not_started_fill
+        
+        ws_ft.cell(row=row_idx, column=1, value=ft_item.get('sequence', row_idx - 1))
+        ws_ft.cell(row=row_idx, column=2, value=ft_item.get('description', '')).alignment = wrap_align
+        ws_ft.cell(row=row_idx, column=3, value=', '.join(ukg_refs))
+        ws_ft.cell(row=row_idx, column=4, value=', '.join(ft_item.get('reports_needed', []))).alignment = wrap_align
+        ws_ft.cell(row=row_idx, column=5, value=ft_item.get('sql_script', '') or '').alignment = wrap_align
+        
+        status_cell = ws_ft.cell(row=row_idx, column=6, value=ft_status)
+        status_cell.fill = status_fill
+        
+        # Combine notes from all referenced UKG actions
+        combined_notes = []
+        for ref in ukg_refs:
+            ref_progress = progress.get(ref, {})
+            if ref_progress.get('notes'):
+                combined_notes.append(f"{ref}: {ref_progress['notes']}")
+        ws_ft.cell(row=row_idx, column=7, value='\n'.join(combined_notes)).alignment = wrap_align
+        
+        for col in range(1, 8):
+            ws_ft.cell(row=row_idx, column=col).border = thin_border
+        ws_ft.row_dimensions[row_idx].height = 30
     
     # =========================================================================
     # Save and return
