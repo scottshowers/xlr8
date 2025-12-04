@@ -1310,6 +1310,11 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
   }
   
   const findings = progress?.findings;
+  
+  // Debug: log what we receive
+  console.log(`[ActionCard ${action.action_id}] progress:`, progress);
+  console.log(`[ActionCard ${action.action_id}] findings:`, findings);
+  
   const expectedCount = reportsNeeded.length || 1;
   
   const statusConfig = STATUS_OPTIONS.find(s => s.value === localStatus) || STATUS_OPTIONS[0];
