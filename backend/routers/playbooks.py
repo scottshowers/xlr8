@@ -1269,7 +1269,7 @@ async def scan_for_action(project_id: str, action_id: str):
     - Flags impacted actions when new data arrives
     - Auto-completes when all conditions met
     """
-    logger.info(f"[SCAN] Starting scan for action {action_id} in project {project_id[:8]}")
+    logger.warning(f"[SCAN] === Starting scan for action {action_id} in project {project_id[:8]} ===")
     try:
         from utils.rag_handler import RAGHandler
         
@@ -1285,7 +1285,10 @@ async def scan_for_action(project_id: str, action_id: str):
                 break
         
         if not action:
+            logger.warning(f"[SCAN] Action {action_id} NOT FOUND in structure")
             raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
+        
+        logger.warning(f"[SCAN] Found action {action_id}: {action.get('description', 'no desc')[:50]}")
         
         # Get reports needed for this action
         reports_needed = action.get('reports_needed', [])
@@ -1298,8 +1301,10 @@ async def scan_for_action(project_id: str, action_id: str):
         # Actions with parent_actions should NOT get their own full scan
         # =====================================================================
         if parent_actions:
-            logger.info(f"[SCAN] Action {action_id} is DEPENDENT on {parent_actions} - using guidance mode")
+            logger.warning(f"[SCAN] Action {action_id} is DEPENDENT on {parent_actions} - using guidance mode")
             return await handle_dependent_action(project_id, action_id, action, parent_actions)
+        
+        logger.warning(f"[SCAN] Action {action_id} has {len(reports_needed)} reports_needed: {reports_needed[:3]}")
         
         # =====================================================================
         # STANDARD SCAN FOR ACTIONS WITH REPORTS_NEEDED
@@ -1333,41 +1338,85 @@ async def scan_for_action(project_id: str, action_id: str):
         # Add inherited context to all_content for AI
         all_content.extend(inherited_content)
         
-        # STEP 1: Get project document filenames from ChromaDB metadata
+        # STEP 1: Get project document filenames from ChromaDB AND DuckDB
+        project_files = set()
+        
+        # SOURCE 1: ChromaDB
         try:
             collection = rag.client.get_or_create_collection(name="documents")
             all_results = collection.get(include=["metadatas"], limit=1000)
             
-            project_files = set()  # Just track filenames
             for metadata in all_results.get("metadatas", []):
                 doc_project = metadata.get("project_id") or metadata.get("project", "")
-                if doc_project == project_id or doc_project == project_id[:8]:
-                    filename = metadata.get("source", metadata.get("filename", "Unknown"))
-                    project_files.add(filename)
+                doc_project_name = metadata.get("project") or ""
+                
+                # Include GLOBAL or this project
+                is_global = doc_project_name.lower() in ('global', '__global__', 'global/universal')
+                is_this_project = doc_project == project_id or doc_project == project_id[:8]
+                
+                if is_global or is_this_project:
+                    filename = metadata.get("source", metadata.get("filename", ""))
+                    if filename:
+                        project_files.add(filename)
             
-            logger.info(f"[SCAN] Found {len(project_files)} unique files in project {project_id}: {list(project_files)}")
-            
-            # STEP 2: Match by filename - check if any report name appears in filename
-            for report_name in reports_needed:
-                report_keywords = report_name.lower().split()
-                for filename in project_files:
-                    filename_lower = filename.lower()
-                    # Check if report keywords appear in filename
-                    matches = sum(1 for kw in report_keywords if kw in filename_lower)
-                    if matches >= len(report_keywords) - 1:  # Allow 1 word missing
-                        if filename not in seen_files:
-                            seen_files.add(filename)
-                            found_docs.append({
-                                "filename": filename,
-                                "snippet": f"Matched report: {report_name}",
-                                "query": report_name,
-                                "match_type": "filename"
-                            })
-                            all_content.append(f"[FILE: {filename}] - matches required report: {report_name}")
-                            logger.info(f"[SCAN] Filename match: '{filename}' for report '{report_name}'")
+            logger.warning(f"[SCAN] ChromaDB: {len(project_files)} files")
             
         except Exception as e:
-            logger.warning(f"[SCAN] Filename matching failed: {e}")
+            logger.warning(f"[SCAN] ChromaDB query failed: {e}")
+        
+        # SOURCE 2: DuckDB _pdf_tables
+        try:
+            from backend.utils.playbook_parser import get_duckdb_connection
+            conn = get_duckdb_connection()
+            if conn:
+                table_check = conn.execute("""
+                    SELECT COUNT(*) FROM information_schema.tables 
+                    WHERE table_name = '_pdf_tables'
+                """).fetchone()
+                
+                if table_check and table_check[0] > 0:
+                    result = conn.execute("""
+                        SELECT DISTINCT source_file, project
+                        FROM _pdf_tables
+                        WHERE source_file IS NOT NULL
+                    """).fetchall()
+                    
+                    for row in result:
+                        source_file, proj = row
+                        # Include GLOBAL or this project
+                        is_global = proj and proj.lower() in ('global', '__global__', 'global/universal')
+                        is_this_project = proj and project_id[:8].lower() in proj.lower()
+                        
+                        if is_global or is_this_project:
+                            if source_file:
+                                project_files.add(source_file)
+                    
+                    logger.warning(f"[SCAN] DuckDB _pdf_tables: added files, total now {len(project_files)}")
+                
+                conn.close()
+        except Exception as e:
+            logger.warning(f"[SCAN] DuckDB query failed: {e}")
+        
+        logger.warning(f"[SCAN] Total {len(project_files)} files in project: {list(project_files)}")
+        
+        # STEP 2: Match by filename - check if any report name appears in filename
+        for report_name in reports_needed:
+            report_keywords = report_name.lower().split()
+            for filename in project_files:
+                filename_lower = filename.lower()
+                # Check if report keywords appear in filename
+                matches = sum(1 for kw in report_keywords if kw in filename_lower)
+                if matches >= len(report_keywords) - 1:  # Allow 1 word missing
+                    if filename not in seen_files:
+                        seen_files.add(filename)
+                        found_docs.append({
+                            "filename": filename,
+                            "snippet": f"Matched report: {report_name}",
+                            "query": report_name,
+                            "match_type": "filename"
+                        })
+                        all_content.append(f"[FILE: {filename}] - matches required report: {report_name}")
+                        logger.warning(f"[SCAN] Filename match: '{filename}' for report '{report_name}'")
         
         # STEP 3: Semantic search - also search for inherited doc content
         # Build queries from: reports needed + action description + inherited doc names
@@ -1376,36 +1425,37 @@ async def scan_for_action(project_id: str, action_id: str):
             queries.extend(inherited_docs[:3])  # Also search for content from inherited docs
         
         for query in queries[:8]:
-                try:
-                    results = rag.search(
-                        collection_name="documents",
-                        query=query,
-                        n_results=15,
-                        project_id=project_id
-                    )
-                    if results:
-                        for result in results:
-                            doc = result.get('document', '')
-                            if doc and len(doc) > 50:
-                                cleaned = re.sub(r'ENC256:[A-Za-z0-9+/=]+', '[ENCRYPTED]', doc)
-                                if cleaned.count('[ENCRYPTED]') < 10:
-                                    metadata = result.get('metadata', {})
-                                    filename = metadata.get('source', metadata.get('filename', 'Unknown'))
-                                    # Add content for AI analysis
-                                    all_content.append(f"[FILE: {filename}]\n{cleaned[:3000]}")
-                                    # Add to found_docs if not already there
-                                    if filename not in seen_files:
-                                        seen_files.add(filename)
-                                        found_docs.append({
-                                            "filename": filename,
-                                            "snippet": cleaned[:300],
-                                            "query": query,
-                                            "match_type": "semantic"
-                                        })
-                except Exception as e:
-                    logger.warning(f"Query failed: {e}")
+            try:
+                results = rag.search(
+                    collection_name="documents",
+                    query=query,
+                    n_results=15,
+                    project_id=project_id
+                )
+                if results:
+                    for result in results:
+                        doc = result.get('document', '')
+                        if doc and len(doc) > 50:
+                            cleaned = re.sub(r'ENC256:[A-Za-z0-9+/=]+', '[ENCRYPTED]', doc)
+                            if cleaned.count('[ENCRYPTED]') < 10:
+                                metadata = result.get('metadata', {})
+                                filename = metadata.get('source', metadata.get('filename', 'Unknown'))
+                                # Add content for AI analysis
+                                all_content.append(f"[FILE: {filename}]\n{cleaned[:3000]}")
+                                # Add to found_docs if not already there
+                                if filename not in seen_files:
+                                    seen_files.add(filename)
+                                    found_docs.append({
+                                        "filename": filename,
+                                        "snippet": cleaned[:300],
+                                        "query": query,
+                                        "match_type": "semantic"
+                                    })
+            except Exception as e:
+                logger.warning(f"Query failed: {e}")
         
-        logger.info(f"[SCAN] Total unique docs found: {len(found_docs)}")
+        logger.warning(f"[SCAN] Total unique docs found: {len(found_docs)}")
+        logger.warning(f"[SCAN] Content chunks for AI: {len(all_content)}")
         
         # Determine findings and suggested status
         findings = None
@@ -1416,6 +1466,7 @@ async def scan_for_action(project_id: str, action_id: str):
         
         if has_data:
             suggested_status = "in_progress"
+            logger.warning(f"[SCAN] Has data - calling AI for analysis...")
             
             # Use Claude with CONSULTATIVE context
             if all_content or inherited_findings:
@@ -1425,6 +1476,8 @@ async def scan_for_action(project_id: str, action_id: str):
                     inherited_findings=inherited_findings,
                     action_id=action_id
                 )
+                
+                logger.warning(f"[SCAN] AI analysis complete. Findings: {bool(findings)}, keys: {list(findings.keys()) if findings else 'None'}")
                 
                 # AUTO-COMPLETE: If findings show complete and no high-risk issues
                 if findings:
@@ -1910,10 +1963,11 @@ async def get_document_checklist(project_id: str):
             conn = get_duckdb_connection()
             if conn:
                 # Get unique source files from _schema_metadata
+                # Column is file_name, not source_file
                 result = conn.execute("""
-                    SELECT DISTINCT source_file, project
+                    SELECT DISTINCT file_name, project
                     FROM _schema_metadata
-                    WHERE source_file IS NOT NULL
+                    WHERE file_name IS NOT NULL
                 """).fetchall()
                 
                 logger.info(f"[DOC-CHECKLIST] DuckDB _schema_metadata returned {len(result)} rows")
