@@ -11,8 +11,72 @@
  * UPDATED: Non-blocking scan-all with live progress (no more 20-min freezes!)
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, Component } from 'react';
 import api from '../services/api';
+
+// Error Boundary to catch rendering errors and show them instead of blank screen
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null, errorInfo: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    this.setState({ error, errorInfo });
+    console.error('ErrorBoundary caught:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ 
+          padding: '2rem', 
+          background: '#fef2f2', 
+          border: '1px solid #fecaca',
+          borderRadius: '8px',
+          margin: '1rem'
+        }}>
+          <h3 style={{ color: '#dc2626', marginBottom: '1rem' }}>⚠️ Something went wrong</h3>
+          <p style={{ color: '#991b1b', marginBottom: '0.5rem' }}>
+            {this.state.error?.message || 'Unknown error'}
+          </p>
+          <details style={{ marginTop: '1rem', fontSize: '0.8rem', color: '#6b7280' }}>
+            <summary style={{ cursor: 'pointer' }}>Technical details</summary>
+            <pre style={{ 
+              overflow: 'auto', 
+              padding: '0.5rem', 
+              background: '#f9fafb',
+              borderRadius: '4px',
+              marginTop: '0.5rem'
+            }}>
+              {this.state.errorInfo?.componentStack}
+            </pre>
+          </details>
+          <button 
+            onClick={() => this.setState({ hasError: false, error: null, errorInfo: null })}
+            style={{
+              marginTop: '1rem',
+              padding: '0.5rem 1rem',
+              background: '#3b82f6',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer'
+            }}
+          >
+            Try Again
+          </button>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 // Brand Colors
 const COLORS = {
@@ -2079,20 +2143,22 @@ function StepAccordion({ step, progress, projectId, onUpdate, tooltipsByAction, 
       {expanded && (
         <div style={styles.actionsContainer}>
           {actions.map(action => action ? (
-            <ActionCard
-              key={action.action_id}
-              action={action}
-              stepNumber={step.step_number}
-              progress={progress[action.action_id] || {}}
-              projectId={projectId}
-              onUpdate={onUpdate}
-              tooltips={tooltipsByAction[action.action_id] || []}
-              isAdmin={isAdmin}
-              onAddTooltip={onAddTooltip}
-              onEditTooltip={onEditTooltip}
-              onDeleteTooltip={onDeleteTooltip}
-              uploadedFiles={uploadedFiles || []}
-            />
+            <ErrorBoundary key={`eb-${action.action_id}`}>
+              <ActionCard
+                key={action.action_id}
+                action={action}
+                stepNumber={step.step_number}
+                progress={progress[action.action_id] || {}}
+                projectId={projectId}
+                onUpdate={onUpdate}
+                tooltips={tooltipsByAction[action.action_id] || []}
+                isAdmin={isAdmin}
+                onAddTooltip={onAddTooltip}
+                onEditTooltip={onEditTooltip}
+                onDeleteTooltip={onDeleteTooltip}
+                uploadedFiles={uploadedFiles || []}
+              />
+            </ErrorBoundary>
           ) : null)}
         </div>
       )}
@@ -2110,6 +2176,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   const [scanProgress, setScanProgress] = useState(null); // {completed, total, current_action}
   const [activePhase, setActivePhase] = useState('all');
   const [viewMode, setViewMode] = useState('ukg'); // 'ukg' or 'fasttrack'
+  const [expandedAction, setExpandedAction] = useState(null); // For Fast Track expand/collapse
   
   // NEW: Document checklist and AI summary state
   const [docChecklist, setDocChecklist] = useState(null);
@@ -2696,6 +2763,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   }
 
   return (
+    <ErrorBoundary>
     <div style={{ display: 'flex' }}>
       {/* Main Content */}
       <div style={{ ...styles.container, marginRight: sidebarCollapsed ? '40px' : '320px', transition: 'margin-right 0.3s ease' }}>
@@ -3388,5 +3456,6 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
         existingTooltip={editingTooltip}
       />
     </div>
+    </ErrorBoundary>
   );
 }
