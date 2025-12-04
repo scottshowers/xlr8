@@ -1788,18 +1788,21 @@ INHERITED DATA FROM PREVIOUS ACTIONS:
 
 Based on the documents and your UKG/Payroll expertise, provide:
 
-1. EXTRACT key data values found (FEIN, rates, states, etc.) - note which file each came from
+1. EXTRACT key data values found (FEIN in XX-XXXXXXX format, rates as percentages, states, etc.) - note which file each came from
 2. COMPARE to benchmarks where applicable (flag HIGH/LOW/UNUSUAL)
 3. IDENTIFY risks, issues, or items needing attention - cite the source document
 4. RECOMMEND specific actions the customer should take
 5. ASSESS completeness - can this action be marked complete?
 
-IMPORTANT: Each document chunk is labeled with [FILE: filename]. Include source citations.
+IMPORTANT: 
+- Each document chunk is labeled with [FILE: filename]. Include source citations.
+- FEIN must be formatted as XX-XXXXXXX (e.g., 74-1776312)
+- Rates should be percentages (e.g., 0.6%, 2.7%)
 
 Return as JSON:
 {{
     "complete": true/false,
-    "key_values": {{"label": "value (from filename)"}},
+    "key_values": {{"FEIN": "XX-XXXXXXX (from filename)", "other_field": "value (from filename)"}},
     "issues": ["Issue description (Source: filename)"],
     "recommendations": ["Specific action to take"],
     "risk_level": "low|medium|high",
@@ -1869,8 +1872,13 @@ async def get_document_checklist(project_id: str):
         # Build list of uploaded filenames for this project
         uploaded_files_list = []
         seen_files = set()
+        seen_projects = set()
+        
         for metadata in all_results.get("metadatas", []):
             doc_project = metadata.get("project_id") or metadata.get("project", "")
+            if doc_project:
+                seen_projects.add(doc_project[:20])  # Track what projects exist
+            
             # Flexible project matching
             if doc_project and (
                 doc_project == project_id or 
@@ -1884,7 +1892,9 @@ async def get_document_checklist(project_id: str):
                     seen_files.add(filename.lower())
         
         uploaded_files_list.sort()
-        logger.info(f"[DOC-CHECKLIST] Found {len(uploaded_files_list)} files for project {project_id[:8]}")
+        logger.info(f"[DOC-CHECKLIST] Looking for project: {project_id[:8]}")
+        logger.info(f"[DOC-CHECKLIST] Projects in ChromaDB: {list(seen_projects)[:10]}")
+        logger.info(f"[DOC-CHECKLIST] Found {len(uploaded_files_list)} files: {uploaded_files_list}")
         
         # Check for active processing jobs
         processing_jobs = []
@@ -1929,6 +1939,7 @@ async def get_document_checklist(project_id: str):
             if step_documents:
                 has_step_documents = True
                 logger.info(f"[DOC-CHECKLIST] Found Step_Documents for {len(step_documents)} steps")
+                logger.info(f"[DOC-CHECKLIST] Files to match against: {uploaded_files_list}")
                 
                 # Build checklist for each step
                 for step_num, docs in sorted(step_documents.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 999):
