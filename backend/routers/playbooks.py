@@ -1269,8 +1269,9 @@ async def scan_for_action(project_id: str, action_id: str):
     - Flags impacted actions when new data arrives
     - Auto-completes when all conditions met
     """
+    logger.info(f"[SCAN] Starting scan for action {action_id} in project {project_id[:8]}")
     try:
-        from utils.rag_handler import RAGHandler
+        from backend.utils.rag_handler import RAGHandler
         
         # Get action details from structure
         structure = await get_year_end_structure()
@@ -1860,8 +1861,8 @@ async def get_document_checklist(project_id: str):
     Shows which reports are needed per step, matched vs missing.
     """
     try:
-        from utils.rag_handler import RAGHandler
-        from utils.database.models import ProcessingJobModel
+        from backend.utils.rag_handler import RAGHandler
+        from backend.utils.database.models import ProcessingJobModel
         from backend.utils.playbook_parser import load_step_documents, match_documents_to_step
         
         # Get all project files from ChromaDB
@@ -2691,12 +2692,12 @@ def get_supabase():
     """Get Supabase client - try multiple import paths"""
     try:
         # Try the standard import
-        from utils.supabase_client import get_supabase as _get_supabase
+        from backend.utils.supabase_client import get_supabase as _get_supabase
         return _get_supabase()
     except ImportError:
         try:
             # Fallback: try direct supabase client
-            from utils.supabase_client import supabase
+            from backend.utils.supabase_client import supabase
             return supabase
         except ImportError:
             try:
@@ -3260,6 +3261,7 @@ async def scan_all_actions(project_id: str, timeout: int = 600):
     def run_scan():
         try:
             job.start()
+            logger.info(f"[SCAN-ALL] Starting job {job_id} with {len(job.actions)} actions: {job.actions}")
             
             # Create event loop for async calls
             loop = asyncio_mod.new_event_loop()
@@ -3278,9 +3280,12 @@ async def scan_all_actions(project_id: str, timeout: int = 600):
                 
                 try:
                     job.update(action_id, f"Scanning {action_id}...")
+                    logger.info(f"[SCAN-ALL] Scanning action {action_id}...")
                     
                     # Run the scan
                     result = loop.run_until_complete(scan_for_action(project_id, action_id))
+                    
+                    logger.info(f"[SCAN-ALL] Action {action_id} result: found={result.get('found')}, docs={len(result.get('documents', []))}")
                     
                     job.action_done(action_id, {
                         "found": result.get("found", False),
