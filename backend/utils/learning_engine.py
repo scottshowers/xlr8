@@ -616,6 +616,10 @@ class LearningSystem:
         """Get examples for few-shot prompting"""
         return self.collector.get_examples_for_action(action_id, limit)
     
+    def get_examples_for_action(self, action_id: str, limit: int = 3) -> List[Dict]:
+        """Get examples for an action (alias for get_few_shot_examples)"""
+        return self.collector.get_examples_for_action(action_id, limit)
+    
     def get_stats(self) -> Dict:
         """Get comprehensive learning statistics"""
         return {
