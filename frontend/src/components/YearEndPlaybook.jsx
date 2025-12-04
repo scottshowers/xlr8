@@ -1172,6 +1172,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState(null);
   const [notes, setNotes] = useState(progress?.notes || '');
+  const [aiContext, setAiContext] = useState(progress?.ai_context || '');
   const [localStatus, setLocalStatus] = useState(progress?.status || 'not_started');
   const [localDocsFound, setLocalDocsFound] = useState(progress?.documents_found || []);
   const fileInputRef = React.useRef(null);
@@ -1378,6 +1379,17 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
       onUpdate(action.action_id, { notes });
     } catch (err) {
       console.error('Notes update failed:', err);
+    }
+  };
+
+  const handleAiContextChange = async () => {
+    try {
+      await api.put(`/playbooks/year-end/progress/${projectId}/${action.action_id}`, {
+        ai_context: aiContext
+      });
+      onUpdate(action.action_id, { ai_context: aiContext });
+    } catch (err) {
+      console.error('AI Context update failed:', err);
     }
   };
 
@@ -1934,16 +1946,37 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
             </div>
           </div>
 
-          <div style={styles.section}>
-            <div style={styles.sectionTitle}>Notes</div>
-            <textarea
-              style={styles.notesArea}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              onBlur={handleNotesChange}
-              placeholder="Add consultant notes..."
-              onClick={(e) => e.stopPropagation()}
-            />
+          {/* Two text boxes side by side */}
+          <div style={{ display: 'flex', gap: '1rem' }}>
+            <div style={{ ...styles.section, flex: 1 }}>
+              <div style={styles.sectionTitle}>📝 Consultant Notes</div>
+              <div style={{ fontSize: '0.7rem', color: '#6b7280', marginBottom: '0.25rem' }}>
+                For team handoffs & documentation (not sent to AI)
+              </div>
+              <textarea
+                style={styles.notesArea}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                onBlur={handleNotesChange}
+                placeholder="Add consultant notes, reminders, handoff info..."
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+            
+            <div style={{ ...styles.section, flex: 1 }}>
+              <div style={styles.sectionTitle}>🤖 AI Context</div>
+              <div style={{ fontSize: '0.7rem', color: '#6b7280', marginBottom: '0.25rem' }}>
+                Tell AI to adjust analysis (sent on re-scan)
+              </div>
+              <textarea
+                style={{ ...styles.notesArea, borderColor: '#bfdbfe', background: '#f0f9ff' }}
+                value={aiContext}
+                onChange={(e) => setAiContext(e.target.value)}
+                onBlur={handleAiContextChange}
+                placeholder="e.g., 'PA rate confirmed via email 12/3', 'N/A - no employees in WA', 'Client aware, fixing in Jan'"
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
           </div>
         </div>
       )}
@@ -2076,12 +2109,15 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   const [analyzing, setAnalyzing] = useState(false);
   const [scanProgress, setScanProgress] = useState(null); // {completed, total, current_action}
   const [activePhase, setActivePhase] = useState('all');
+  const [viewMode, setViewMode] = useState('ukg'); // 'ukg' or 'fasttrack'
   
   // NEW: Document checklist and AI summary state
   const [docChecklist, setDocChecklist] = useState(null);
   const [aiSummary, setAiSummary] = useState(null);
   const [summaryExpanded, setSummaryExpanded] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [actionsReadyToScan, setActionsReadyToScan] = useState([]);
+  const [scanningAll, setScanningAll] = useState(false);
   
   // TOOLTIPS: State for consultant-driven notes
   const [tooltipsByAction, setTooltipsByAction] = useState({});
@@ -2159,6 +2195,97 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
     }
   };
   
+  // Calculate which actions have documents but haven't been scanned yet
+  const calculateActionsReadyToScan = React.useCallback(() => {
+    if (!structure?.steps || !docChecklist?.uploaded_files) return [];
+    
+    const uploadedFiles = docChecklist.uploaded_files || [];
+    const normalize = (s) => s.toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').replace(/\./g, ' ').replace(/'/g, '');
+    
+    const ready = [];
+    
+    for (const step of structure.steps) {
+      for (const action of (step.actions || [])) {
+        if (!action?.reports_needed?.length) continue;
+        
+        const reportsNeeded = Array.isArray(action.reports_needed) 
+          ? action.reports_needed 
+          : String(action.reports_needed).split(',').map(s => s.trim());
+        
+        // Check if any uploaded file matches this action's reports
+        let hasMatchingFile = false;
+        for (const report of reportsNeeded) {
+          const reportNorm = normalize(report);
+          const reportWords = reportNorm.split(' ').filter(w => w.length > 2);
+          
+          for (const file of uploadedFiles) {
+            const fileNorm = normalize(file);
+            // Simple match: all report words in filename
+            if (reportWords.every(w => fileNorm.includes(w))) {
+              hasMatchingFile = true;
+              break;
+            }
+          }
+          if (hasMatchingFile) break;
+        }
+        
+        // Check if this action has been scanned
+        const actionProgress = progress[action.action_id] || {};
+        const hasFindings = actionProgress.findings && Object.keys(actionProgress.findings).length > 0;
+        
+        // Ready to scan if: has matching file AND (no findings OR status is not_started)
+        if (hasMatchingFile && (!hasFindings || actionProgress.status === 'not_started')) {
+          ready.push({
+            action_id: action.action_id,
+            description: action.description,
+            step_number: step.step_number
+          });
+        }
+      }
+    }
+    
+    return ready;
+  }, [structure, docChecklist, progress]);
+  
+  // Update actions ready to scan when dependencies change
+  React.useEffect(() => {
+    const ready = calculateActionsReadyToScan();
+    setActionsReadyToScan(ready);
+  }, [calculateActionsReadyToScan]);
+  
+  // Scan all affected actions
+  const handleScanAllAffected = async () => {
+    if (actionsReadyToScan.length === 0) return;
+    
+    setScanningAll(true);
+    
+    try {
+      for (const action of actionsReadyToScan) {
+        try {
+          const res = await api.post(`/playbooks/year-end/scan/${project.id}/${action.action_id}?force_refresh=true`);
+          if (res.data) {
+            const newDocs = res.data.documents?.map(d => d.filename) || [];
+            handleUpdate(action.action_id, {
+              status: res.data.suggested_status,
+              findings: res.data.findings,
+              documents_found: newDocs
+            });
+          }
+        } catch (err) {
+          console.error(`Scan failed for ${action.action_id}:`, err);
+        }
+      }
+      
+      // Refresh AI summary after all scans
+      loadAiSummary();
+      
+      // Clear the ready list
+      setActionsReadyToScan([]);
+    } finally {
+      setScanningAll(false);
+    }
+  };
+  
   // TOOLTIP FUNCTIONS
   const loadTooltips = async () => {
     try {
@@ -2215,6 +2342,38 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       ...prev,
       [actionId]: { ...prev[actionId], ...updates }
     }));
+  };
+
+  // Fast Track: Get combined status from referenced UKG actions
+  const getFastTrackProgress = (ftItem) => {
+    if (!ftItem?.ukg_action_ref?.length) return { status: 'not_started', findings: null };
+    
+    const refStatuses = ftItem.ukg_action_ref.map(actionId => {
+      const p = progress[actionId] || {};
+      return p.status || 'not_started';
+    });
+    
+    // All complete = complete, any blocked = blocked, any in_progress = in_progress, else not_started
+    if (refStatuses.every(s => s === 'complete' || s === 'na')) return { status: 'complete' };
+    if (refStatuses.some(s => s === 'blocked')) return { status: 'blocked' };
+    if (refStatuses.some(s => s === 'in_progress' || s === 'complete')) return { status: 'in_progress' };
+    return { status: 'not_started' };
+  };
+  
+  // Fast Track: Update status (syncs to all referenced UKG actions)
+  const handleFastTrackUpdate = async (ftItem, newStatus) => {
+    if (!ftItem?.ukg_action_ref?.length) return;
+    
+    for (const actionId of ftItem.ukg_action_ref) {
+      try {
+        await api.put(`/playbooks/year-end/progress/${project.id}/${actionId}`, {
+          status: newStatus
+        });
+        handleUpdate(actionId, { status: newStatus });
+      } catch (err) {
+        console.error(`Failed to update ${actionId}:`, err);
+      }
+    }
   };
 
   const handleReset = async () => {
@@ -2607,7 +2766,52 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
           </div>
         </div>
 
-        {/* Phase Filter */}
+        {/* View Mode Toggle */}
+        <div style={{ 
+          display: 'flex', 
+          gap: '0.5rem', 
+          marginBottom: '1rem',
+          padding: '0.25rem',
+          background: '#f1f5f9',
+          borderRadius: '8px',
+          width: 'fit-content'
+        }}>
+          <button
+            onClick={() => setViewMode('ukg')}
+            style={{
+              padding: '0.5rem 1rem',
+              border: 'none',
+              borderRadius: '6px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              background: viewMode === 'ukg' ? 'white' : 'transparent',
+              color: viewMode === 'ukg' ? '#1e40af' : '#64748b',
+              boxShadow: viewMode === 'ukg' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              transition: 'all 0.2s'
+            }}
+          >
+            📋 UKG Full Checklist
+          </button>
+          <button
+            onClick={() => setViewMode('fasttrack')}
+            style={{
+              padding: '0.5rem 1rem',
+              border: 'none',
+              borderRadius: '6px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              background: viewMode === 'fasttrack' ? 'white' : 'transparent',
+              color: viewMode === 'fasttrack' ? '#059669' : '#64748b',
+              boxShadow: viewMode === 'fasttrack' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              transition: 'all 0.2s'
+            }}
+          >
+            ⚡ Fast Track
+          </button>
+        </div>
+
+        {/* Phase Filter - only show for UKG view */}
+        {viewMode === 'ukg' && (
         <div style={styles.phaseFilter}>
           <button 
             style={styles.phaseBtn(activePhase === 'all')} 
@@ -2628,9 +2832,63 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
             After Final Payroll
           </button>
         </div>
+        )}
 
-        {/* Steps */}
-        {filteredSteps.map(step => (
+        {/* Smart Queue - Actions Ready to Analyze */}
+        {actionsReadyToScan.length > 0 && (
+          <div style={{
+            background: '#eff6ff',
+            border: '1px solid #bfdbfe',
+            borderRadius: '8px',
+            padding: '0.75rem 1rem',
+            marginBottom: '1rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span style={{ fontSize: '1.25rem' }}>📋</span>
+              <div>
+                <div style={{ fontWeight: '600', color: '#1e40af' }}>
+                  {actionsReadyToScan.length} action{actionsReadyToScan.length > 1 ? 's' : ''} ready to analyze
+                </div>
+                <div style={{ fontSize: '0.8rem', color: '#3b82f6' }}>
+                  Documents uploaded - click to run AI analysis
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={handleScanAllAffected}
+              disabled={scanningAll}
+              style={{
+                background: scanningAll ? '#94a3b8' : '#2563eb',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                padding: '0.5rem 1rem',
+                fontWeight: '600',
+                cursor: scanningAll ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem'
+              }}
+            >
+              {scanningAll ? (
+                <>
+                  <span style={{ animation: 'spin 1s linear infinite' }}>⏳</span>
+                  Analyzing...
+                </>
+              ) : (
+                <>
+                  🔍 Analyze All
+                </>
+              )}
+            </button>
+          </div>
+        )}
+
+        {/* UKG Full Checklist View */}
+        {viewMode === 'ukg' && filteredSteps.map(step => (
           <StepAccordion
             key={step.step_number || Math.random()}
             step={step}
@@ -2645,6 +2903,152 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
             uploadedFiles={docChecklist?.uploaded_files || []}
           />
         ))}
+
+        {/* Fast Track View */}
+        {viewMode === 'fasttrack' && (
+          <div style={{ background: 'white', borderRadius: '12px', padding: '1rem', border: '1px solid #e1e8ed' }}>
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '0.5rem', 
+              marginBottom: '1rem',
+              paddingBottom: '0.75rem',
+              borderBottom: '1px solid #e1e8ed'
+            }}>
+              <span style={{ fontSize: '1.5rem' }}>⚡</span>
+              <div>
+                <div style={{ fontWeight: '700', fontSize: '1.1rem', color: '#059669' }}>Fast Track Checklist</div>
+                <div style={{ fontSize: '0.8rem', color: '#6b7280' }}>HCMPACT's curated essential actions</div>
+              </div>
+            </div>
+            
+            {(structure?.fast_track || []).map((ftItem, index) => {
+              const ftProgress = getFastTrackProgress(ftItem);
+              const statusColors = {
+                complete: { bg: '#f0fdf4', border: '#bbf7d0', text: '#166534', badge: '#22c55e' },
+                in_progress: { bg: '#eff6ff', border: '#bfdbfe', text: '#1e40af', badge: '#3b82f6' },
+                blocked: { bg: '#fef2f2', border: '#fecaca', text: '#991b1b', badge: '#ef4444' },
+                not_started: { bg: '#f9fafb', border: '#e5e7eb', text: '#374151', badge: '#9ca3af' }
+              };
+              const colors = statusColors[ftProgress.status] || statusColors.not_started;
+              
+              return (
+                <div 
+                  key={ftItem.ft_id}
+                  style={{
+                    background: colors.bg,
+                    border: `1px solid ${colors.border}`,
+                    borderRadius: '8px',
+                    padding: '1rem',
+                    marginBottom: '0.75rem'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                        <span style={{ 
+                          background: colors.badge, 
+                          color: 'white', 
+                          borderRadius: '50%',
+                          width: '24px',
+                          height: '24px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '0.8rem',
+                          fontWeight: '700'
+                        }}>
+                          {ftItem.sequence}
+                        </span>
+                        <span style={{ fontWeight: '600', color: colors.text }}>{ftItem.description}</span>
+                      </div>
+                      
+                      {ftItem.ukg_action_ref?.length > 0 && (
+                        <div style={{ fontSize: '0.75rem', color: '#6b7280', marginLeft: '32px' }}>
+                          Maps to UKG: {ftItem.ukg_action_ref.join(', ')}
+                        </div>
+                      )}
+                      
+                      {ftItem.reports_needed?.length > 0 && (
+                        <div style={{ fontSize: '0.75rem', color: '#6b7280', marginLeft: '32px', marginTop: '0.25rem' }}>
+                          📄 {ftItem.reports_needed.join(', ')}
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      {/* SQL Copy Button */}
+                      {ftItem.sql_script && (
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(ftItem.sql_script);
+                            alert('SQL copied to clipboard!');
+                          }}
+                          style={{
+                            background: '#f1f5f9',
+                            border: '1px solid #cbd5e1',
+                            borderRadius: '4px',
+                            padding: '0.25rem 0.5rem',
+                            fontSize: '0.75rem',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.25rem'
+                          }}
+                          title={ftItem.sql_script}
+                        >
+                          📋 SQL
+                        </button>
+                      )}
+                      
+                      {/* Status Badge */}
+                      <span style={{
+                        background: colors.badge,
+                        color: 'white',
+                        padding: '0.25rem 0.5rem',
+                        borderRadius: '4px',
+                        fontSize: '0.7rem',
+                        fontWeight: '600',
+                        textTransform: 'uppercase'
+                      }}>
+                        {ftProgress.status.replace('_', ' ')}
+                      </span>
+                      
+                      {/* Quick Complete Button */}
+                      {ftProgress.status !== 'complete' && (
+                        <button
+                          onClick={() => handleFastTrackUpdate(ftItem, 'complete')}
+                          style={{
+                            background: '#22c55e',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            padding: '0.25rem 0.5rem',
+                            fontSize: '0.75rem',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          ✓ Done
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            
+            {(!structure?.fast_track || structure.fast_track.length === 0) && (
+              <div style={{ 
+                textAlign: 'center', 
+                padding: '2rem', 
+                color: '#6b7280',
+                fontStyle: 'italic'
+              }}>
+                No Fast Track items defined. Add fast_track_seq column to your workbook.
+              </div>
+            )}
+          </div>
+        )}
       </div>
       
       {/* Document Checklist Sidebar */}
