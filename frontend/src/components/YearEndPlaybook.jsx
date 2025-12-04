@@ -2918,19 +2918,32 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
               <span style={{ fontSize: '1.5rem' }}>⚡</span>
               <div>
                 <div style={{ fontWeight: '700', fontSize: '1.1rem', color: '#059669' }}>Fast Track Checklist</div>
-                <div style={{ fontSize: '0.8rem', color: '#6b7280' }}>HCMPACT's curated essential actions</div>
+                <div style={{ fontSize: '0.8rem', color: '#6b7280' }}>HCMPACT's curated essential actions • Status syncs with UKG actions</div>
               </div>
             </div>
             
             {(structure?.fast_track || []).map((ftItem, index) => {
               const ftProgress = getFastTrackProgress(ftItem);
+              // Get the primary linked UKG action for details
+              const primaryActionId = ftItem.ukg_action_ref?.[0];
+              const primaryActionProgress = primaryActionId ? (progress[primaryActionId] || {}) : {};
+              
               const statusColors = {
                 complete: { bg: '#f0fdf4', border: '#bbf7d0', text: '#166534', badge: '#22c55e' },
                 in_progress: { bg: '#eff6ff', border: '#bfdbfe', text: '#1e40af', badge: '#3b82f6' },
                 blocked: { bg: '#fef2f2', border: '#fecaca', text: '#991b1b', badge: '#ef4444' },
+                na: { bg: '#f5f5f4', border: '#d6d3d1', text: '#57534e', badge: '#78716c' },
                 not_started: { bg: '#f9fafb', border: '#e5e7eb', text: '#374151', badge: '#9ca3af' }
               };
               const colors = statusColors[ftProgress.status] || statusColors.not_started;
+              
+              // Track expanded state for this FT item
+              const isExpanded = expandedAction === `ft_${ftItem.ft_id}`;
+              
+              // Get documents found for linked actions
+              const linkedDocsFound = ftItem.ukg_action_ref?.flatMap(actionId => 
+                progress[actionId]?.documents_found || []
+              ) || [];
               
               return (
                 <div 
@@ -2939,11 +2952,21 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                     background: colors.bg,
                     border: `1px solid ${colors.border}`,
                     borderRadius: '8px',
-                    padding: '1rem',
-                    marginBottom: '0.75rem'
+                    marginBottom: '0.75rem',
+                    overflow: 'hidden'
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+                  {/* Header Row - Clickable */}
+                  <div 
+                    onClick={() => setExpandedAction(isExpanded ? null : `ft_${ftItem.ft_id}`)}
+                    style={{ 
+                      display: 'flex', 
+                      alignItems: 'flex-start', 
+                      justifyContent: 'space-between',
+                      padding: '1rem',
+                      cursor: 'pointer'
+                    }}
+                  >
                     <div style={{ flex: 1 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
                         <span style={{ 
@@ -2961,78 +2984,372 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                           {ftItem.sequence}
                         </span>
                         <span style={{ fontWeight: '600', color: colors.text }}>{ftItem.description}</span>
+                        <span style={{ color: '#9ca3af', fontSize: '0.8rem' }}>{isExpanded ? '▼' : '▶'}</span>
                       </div>
                       
-                      {ftItem.ukg_action_ref?.length > 0 && (
-                        <div style={{ fontSize: '0.75rem', color: '#6b7280', marginLeft: '32px' }}>
-                          Maps to UKG: {ftItem.ukg_action_ref.join(', ')}
+                      <div style={{ marginLeft: '32px', display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+                        {ftItem.ukg_action_ref?.length > 0 && (
+                          <span style={{ fontSize: '0.75rem', color: '#6b7280', background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>
+                            🔗 UKG: {ftItem.ukg_action_ref.join(', ')}
+                          </span>
+                        )}
+                        
+                        {ftItem.reports_needed?.length > 0 && (
+                          <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                            📄 {ftItem.reports_needed.length} report{ftItem.reports_needed.length > 1 ? 's' : ''}
+                          </span>
+                        )}
+                        
+                        {linkedDocsFound.length > 0 && (
+                          <span style={{ fontSize: '0.75rem', color: '#22c55e' }}>
+                            ✓ {linkedDocsFound.length} doc{linkedDocsFound.length > 1 ? 's' : ''} found
+                          </span>
+                        )}
+                        
+                        {ftItem.notes && (
+                          <span style={{ fontSize: '0.75rem', color: '#f59e0b' }}>
+                            📝 Has notes
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }} onClick={e => e.stopPropagation()}>
+                      {/* SQL Copy Button with Tooltip */}
+                      {ftItem.sql_script && (
+                        <div style={{ position: 'relative' }} className="sql-tooltip-container">
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(ftItem.sql_script);
+                              alert('SQL copied to clipboard!');
+                            }}
+                            style={{
+                              background: '#dbeafe',
+                              border: '1px solid #93c5fd',
+                              borderRadius: '4px',
+                              padding: '0.25rem 0.5rem',
+                              fontSize: '0.75rem',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.25rem',
+                              color: '#1e40af'
+                            }}
+                            title={ftItem.sql_script}
+                          >
+                            📋 SQL
+                          </button>
                         </div>
                       )}
                       
-                      {ftItem.reports_needed?.length > 0 && (
-                        <div style={{ fontSize: '0.75rem', color: '#6b7280', marginLeft: '32px', marginTop: '0.25rem' }}>
-                          📄 {ftItem.reports_needed.join(', ')}
+                      {/* Status Dropdown */}
+                      <select
+                        value={ftProgress.status}
+                        onChange={(e) => handleFastTrackUpdate(ftItem, e.target.value)}
+                        style={{
+                          background: colors.badge,
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '4px',
+                          padding: '0.25rem 0.5rem',
+                          fontSize: '0.7rem',
+                          fontWeight: '600',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <option value="not_started">Not Started</option>
+                        <option value="in_progress">In Progress</option>
+                        <option value="complete">Complete</option>
+                        <option value="blocked">Blocked</option>
+                        <option value="na">N/A</option>
+                      </select>
+                    </div>
+                  </div>
+                  
+                  {/* Expanded Details */}
+                  {isExpanded && (
+                    <div style={{ 
+                      borderTop: `1px solid ${colors.border}`,
+                      padding: '1rem',
+                      background: 'rgba(255,255,255,0.5)'
+                    }}>
+                      {/* FT Notes from Workbook */}
+                      {ftItem.notes && (
+                        <div style={{ marginBottom: '1rem' }}>
+                          <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', marginBottom: '0.25rem' }}>
+                            📋 FAST TRACK NOTES (from workbook)
+                          </div>
+                          <div style={{ 
+                            background: '#fffbeb', 
+                            border: '1px solid #fcd34d',
+                            borderRadius: '6px',
+                            padding: '0.75rem',
+                            fontSize: '0.85rem',
+                            color: '#92400e'
+                          }}>
+                            {ftItem.notes}
+                          </div>
                         </div>
                       )}
-                    </div>
-                    
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      {/* SQL Copy Button */}
+                      
+                      {/* SQL Script Display */}
                       {ftItem.sql_script && (
+                        <div style={{ marginBottom: '1rem' }}>
+                          <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', marginBottom: '0.25rem' }}>
+                            💾 SQL SCRIPT
+                          </div>
+                          <pre style={{ 
+                            background: '#1e293b', 
+                            color: '#e2e8f0',
+                            borderRadius: '6px',
+                            padding: '0.75rem',
+                            fontSize: '0.75rem',
+                            overflow: 'auto',
+                            maxHeight: '150px',
+                            margin: 0
+                          }}>
+                            {ftItem.sql_script}
+                          </pre>
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(ftItem.sql_script);
+                              alert('SQL copied!');
+                            }}
+                            style={{
+                              marginTop: '0.5rem',
+                              background: '#3b82f6',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '4px',
+                              padding: '0.25rem 0.75rem',
+                              fontSize: '0.75rem',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            📋 Copy SQL
+                          </button>
+                        </div>
+                      )}
+                      
+                      {/* Reports Needed */}
+                      {ftItem.reports_needed?.length > 0 && (
+                        <div style={{ marginBottom: '1rem' }}>
+                          <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', marginBottom: '0.25rem' }}>
+                            📄 REPORTS NEEDED
+                          </div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                            {ftItem.reports_needed.map((report, i) => {
+                              const isFound = linkedDocsFound.some(d => 
+                                d.toLowerCase().includes(report.toLowerCase().split(' ')[0])
+                              );
+                              return (
+                                <span 
+                                  key={i}
+                                  style={{
+                                    background: isFound ? '#dcfce7' : '#f1f5f9',
+                                    color: isFound ? '#166534' : '#64748b',
+                                    padding: '0.25rem 0.5rem',
+                                    borderRadius: '4px',
+                                    fontSize: '0.75rem',
+                                    border: `1px solid ${isFound ? '#bbf7d0' : '#e2e8f0'}`
+                                  }}
+                                >
+                                  {isFound ? '✓' : '○'} {report}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Linked UKG Actions Details */}
+                      {ftItem.ukg_action_ref?.length > 0 && (
+                        <div style={{ marginBottom: '1rem' }}>
+                          <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', marginBottom: '0.5rem' }}>
+                            🔗 LINKED UKG ACTIONS
+                          </div>
+                          {ftItem.ukg_action_ref.map(actionId => {
+                            const actionProg = progress[actionId] || {};
+                            const actionStatus = actionProg.status || 'not_started';
+                            const actionColors = statusColors[actionStatus] || statusColors.not_started;
+                            
+                            // Find the action details from structure
+                            let actionDesc = '';
+                            for (const step of (structure?.steps || [])) {
+                              const found = step.actions?.find(a => a.action_id === actionId);
+                              if (found) {
+                                actionDesc = found.description?.substring(0, 100) + '...';
+                                break;
+                              }
+                            }
+                            
+                            return (
+                              <div 
+                                key={actionId}
+                                style={{
+                                  background: actionColors.bg,
+                                  border: `1px solid ${actionColors.border}`,
+                                  borderRadius: '6px',
+                                  padding: '0.75rem',
+                                  marginBottom: '0.5rem'
+                                }}
+                              >
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <div>
+                                    <span style={{ fontWeight: '600', color: actionColors.text }}>{actionId}</span>
+                                    <span style={{ 
+                                      marginLeft: '0.5rem',
+                                      background: actionColors.badge,
+                                      color: 'white',
+                                      padding: '2px 6px',
+                                      borderRadius: '4px',
+                                      fontSize: '0.65rem',
+                                      textTransform: 'uppercase'
+                                    }}>
+                                      {actionStatus.replace('_', ' ')}
+                                    </span>
+                                  </div>
+                                  <button
+                                    onClick={() => {
+                                      setExpandedAction(actionId);
+                                      setViewMode('ukg');
+                                    }}
+                                    style={{
+                                      background: 'transparent',
+                                      border: '1px solid #cbd5e1',
+                                      borderRadius: '4px',
+                                      padding: '0.25rem 0.5rem',
+                                      fontSize: '0.7rem',
+                                      cursor: 'pointer',
+                                      color: '#64748b'
+                                    }}
+                                  >
+                                    View in UKG →
+                                  </button>
+                                </div>
+                                {actionDesc && (
+                                  <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                                    {actionDesc}
+                                  </div>
+                                )}
+                                {actionProg.documents_found?.length > 0 && (
+                                  <div style={{ fontSize: '0.7rem', color: '#22c55e', marginTop: '0.25rem' }}>
+                                    ✓ {actionProg.documents_found.length} document{actionProg.documents_found.length > 1 ? 's' : ''} found
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      
+                      {/* Notes Section - Same as UKG Actions */}
+                      <div style={{ marginBottom: '1rem' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', marginBottom: '0.5rem' }}>
+                          ✏️ CONSULTANT NOTES & AI CONTEXT
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                          {/* Consultant Notes - syncs to primary linked action */}
+                          <div>
+                            <div style={{ fontSize: '0.7rem', color: '#6b7280', marginBottom: '0.25rem' }}>
+                              📝 Notes (for handoffs)
+                            </div>
+                            <textarea
+                              value={primaryActionProgress.notes || ''}
+                              onChange={async (e) => {
+                                if (!primaryActionId) return;
+                                const newNotes = e.target.value;
+                                handleUpdate(primaryActionId, { notes: newNotes });
+                                try {
+                                  await api.put(`/playbooks/year-end/progress/${project.id}/${primaryActionId}`, {
+                                    notes: newNotes
+                                  });
+                                } catch (err) {
+                                  console.error('Failed to save notes:', err);
+                                }
+                              }}
+                              placeholder="Add notes for team handoffs..."
+                              style={{
+                                width: '100%',
+                                minHeight: '80px',
+                                padding: '0.5rem',
+                                borderRadius: '6px',
+                                border: '1px solid #d1d5db',
+                                fontSize: '0.8rem',
+                                resize: 'vertical'
+                              }}
+                            />
+                          </div>
+                          
+                          {/* AI Context - syncs to primary linked action */}
+                          <div>
+                            <div style={{ fontSize: '0.7rem', color: '#3b82f6', marginBottom: '0.25rem' }}>
+                              🤖 AI Context (sent on re-scan)
+                            </div>
+                            <textarea
+                              value={primaryActionProgress.ai_context || ''}
+                              onChange={async (e) => {
+                                if (!primaryActionId) return;
+                                const newContext = e.target.value;
+                                handleUpdate(primaryActionId, { ai_context: newContext });
+                                try {
+                                  await api.put(`/playbooks/year-end/progress/${project.id}/${primaryActionId}`, {
+                                    ai_context: newContext
+                                  });
+                                } catch (err) {
+                                  console.error('Failed to save AI context:', err);
+                                }
+                              }}
+                              placeholder="Tell AI to adjust analysis..."
+                              style={{
+                                width: '100%',
+                                minHeight: '80px',
+                                padding: '0.5rem',
+                                borderRadius: '6px',
+                                border: '1px solid #bfdbfe',
+                                background: '#f0f9ff',
+                                fontSize: '0.8rem',
+                                resize: 'vertical'
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Scan Button */}
+                      {primaryActionId && (
                         <button
-                          onClick={() => {
-                            navigator.clipboard.writeText(ftItem.sql_script);
-                            alert('SQL copied to clipboard!');
+                          onClick={async () => {
+                            try {
+                              const res = await api.post(`/playbooks/year-end/scan/${project.id}/${primaryActionId}?force_refresh=true`);
+                              handleUpdate(primaryActionId, {
+                                status: res.data.suggested_status,
+                                findings: res.data.findings,
+                                documents_found: res.data.documents?.map(d => d.filename) || []
+                              });
+                              loadAiSummary();
+                            } catch (err) {
+                              console.error('Scan failed:', err);
+                            }
                           }}
                           style={{
-                            background: '#f1f5f9',
-                            border: '1px solid #cbd5e1',
-                            borderRadius: '4px',
-                            padding: '0.25rem 0.5rem',
-                            fontSize: '0.75rem',
+                            background: '#8b5cf6',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '6px',
+                            padding: '0.5rem 1rem',
+                            fontSize: '0.8rem',
                             cursor: 'pointer',
                             display: 'flex',
                             alignItems: 'center',
-                            gap: '0.25rem'
-                          }}
-                          title={ftItem.sql_script}
-                        >
-                          📋 SQL
-                        </button>
-                      )}
-                      
-                      {/* Status Badge */}
-                      <span style={{
-                        background: colors.badge,
-                        color: 'white',
-                        padding: '0.25rem 0.5rem',
-                        borderRadius: '4px',
-                        fontSize: '0.7rem',
-                        fontWeight: '600',
-                        textTransform: 'uppercase'
-                      }}>
-                        {ftProgress.status.replace('_', ' ')}
-                      </span>
-                      
-                      {/* Quick Complete Button */}
-                      {ftProgress.status !== 'complete' && (
-                        <button
-                          onClick={() => handleFastTrackUpdate(ftItem, 'complete')}
-                          style={{
-                            background: '#22c55e',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '4px',
-                            padding: '0.25rem 0.5rem',
-                            fontSize: '0.75rem',
-                            cursor: 'pointer'
+                            gap: '0.5rem'
                           }}
                         >
-                          ✓ Done
+                          🔍 Scan Documents for {primaryActionId}
                         </button>
                       )}
                     </div>
-                  </div>
+                  )}
                 </div>
               );
             })}
