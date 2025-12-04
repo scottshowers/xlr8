@@ -226,7 +226,6 @@ def load_step_documents() -> Dict[str, List[Dict[str, Any]]]:
                     'description': description,
                     'required': required
                 })
-                logger.info(f"[PARSER] Step {step_num} keyword: '{keyword}' (required={required})")
                 
             except Exception as e:
                 logger.warning(f"[PARSER] Error parsing Step_Documents row: {e}")
@@ -763,52 +762,52 @@ def match_documents_to_step(step_documents: List[Dict], uploaded_files: List[str
         """Get significant words (3+ chars)"""
         return [w for w in normalize(text).split() if len(w) >= 3]
     
-    logger.info(f"[MATCH] Matching {len(step_documents)} keywords against {len(uploaded_files)} files")
-    logger.info(f"[MATCH] Uploaded files: {uploaded_files}")
-    
     for doc in step_documents:
         keyword = doc.get('keyword', '')
         if not keyword:
             continue
         
+        keyword_norm = normalize(keyword)
         keyword_words = get_words(keyword)
         if not keyword_words:
-            logger.warning(f"[MATCH] Skipping empty keyword: '{keyword}'")
             continue
-        
-        logger.info(f"[MATCH] Looking for keyword '{keyword}' (words: {keyword_words})")
         
         # Check if any uploaded file matches this keyword
         matched_file = None
         best_score = 0
         
         for filename in uploaded_files:
+            filename_norm = normalize(filename)
             filename_words = get_words(filename)
             
-            # Method 1: Direct substring match
-            if normalize(keyword) in normalize(filename):
+            # Method 1: Direct substring match (keyword in filename or vice versa)
+            if keyword_norm in filename_norm or filename_norm in keyword_norm:
                 matched_file = filename
-                logger.info(f"[MATCH] ✓ Direct match: '{keyword}' in '{filename}'")
                 break
             
-            # Method 2: Word overlap scoring
-            # Count words that match between keyword and filename
-            matching_words = sum(1 for kw in keyword_words if any(kw in fw or fw in kw for fw in filename_words))
+            # Method 2: Any keyword word appears in filename
+            for kw in keyword_words:
+                if kw in filename_norm:
+                    matched_file = filename
+                    break
+            if matched_file:
+                break
             
-            # Score based on percentage of keyword words matched
+            # Method 3: Word overlap scoring
+            matching_words = 0
+            for kw in keyword_words:
+                for fw in filename_words:
+                    # Exact match or one contains the other
+                    if kw == fw or kw in fw or fw in kw:
+                        matching_words += 1
+                        break
+            
+            # Need at least 50% word match, or 2+ words matching
             score = matching_words / len(keyword_words) if keyword_words else 0
-            
-            logger.debug(f"[MATCH] '{keyword}' vs '{filename}': {matching_words}/{len(keyword_words)} words = {score:.0%}")
-            
-            # Need at least 60% word match, or 2+ words matching
-            if score >= 0.6 or matching_words >= 2:
+            if score >= 0.5 or matching_words >= 2:
                 if score > best_score:
                     best_score = score
                     matched_file = filename
-                    logger.info(f"[MATCH] ✓ Word match: '{keyword}' ~ '{filename}' ({matching_words} words, {score:.0%})")
-        
-        if not matched_file:
-            logger.warning(f"[MATCH] ✗ No match for keyword: '{keyword}'")
         
         doc_info = {
             'keyword': doc.get('keyword'),
@@ -821,8 +820,6 @@ def match_documents_to_step(step_documents: List[Dict], uploaded_files: List[str
             matched.append(doc_info)
         else:
             missing.append(doc_info)
-    
-    logger.info(f"[MATCH] Result: {len(matched)} matched, {len(missing)} missing")
     
     # Calculate stats
     total = len(step_documents)
