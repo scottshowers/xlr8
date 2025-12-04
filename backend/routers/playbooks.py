@@ -1843,96 +1843,19 @@ async def extract_findings_for_action(action: Dict, content: List[str]) -> Optio
 async def get_document_checklist(project_id: str):
     """
     Get the document checklist with real-time upload status.
-    Shows which reports are needed, uploaded, and processing.
+    Shows which reports are needed per step, matched vs missing.
     """
     try:
         from utils.rag_handler import RAGHandler
         from utils.database.models import ProcessingJobModel
+        from utils.playbook_parser import load_step_documents, match_documents_to_step
         
         # Get all project files from ChromaDB
         rag = RAGHandler()
         collection = rag.client.get_or_create_collection(name="documents")
         all_results = collection.get(include=["metadatas"], limit=1000)
         
-        # Build set of uploaded filenames
-        uploaded_files = set()
-        for metadata in all_results.get("metadatas", []):
-            doc_project = metadata.get("project_id") or metadata.get("project", "")
-            if doc_project == project_id or doc_project == project_id[:8]:
-                filename = metadata.get("source", metadata.get("filename", ""))
-                if filename:
-                    uploaded_files.add(filename.lower())
-        
-        # Check for active processing jobs
-        processing_jobs = []
-        try:
-            # Get all recent jobs and filter for pending/processing
-            all_jobs = ProcessingJobModel.get_all(limit=20)
-            for job in all_jobs:
-                job_status = job.get("status", "")
-                job_project = job.get("input_data", {}).get("project_id", "")
-                
-                # Filter for this project and pending/processing status
-                if job_status in ["pending", "processing"] and job_project == project_id:
-                    processing_jobs.append({
-                        "filename": job.get("input_data", {}).get("filename", "Unknown"),
-                        "progress": job.get("progress", 0),
-                        "message": job.get("status_message", "Processing..."),
-                        "job_id": job.get("id")
-                    })
-        except Exception as e:
-            logger.warning(f"Could not fetch processing jobs: {e}")
-        
-        # Build checklist
-        checklist = []
-        for doc_name, doc_info in REQUIRED_DOCUMENTS.items():
-            # Check if this doc is uploaded (fuzzy match on keywords)
-            is_uploaded = False
-            matched_file = None
-            
-            for uploaded in uploaded_files:
-                for keyword in doc_info["keywords"]:
-                    if keyword in uploaded:
-                        is_uploaded = True
-                        matched_file = uploaded
-                        break
-                if is_uploaded:
-                    break
-            
-            # Check if currently processing
-            is_processing = False
-            processing_info = None
-            for job in processing_jobs:
-                job_filename = job["filename"].lower()
-                for keyword in doc_info["keywords"]:
-                    if keyword in job_filename:
-                        is_processing = True
-                        processing_info = job
-                        break
-                if is_processing:
-                    break
-            
-            checklist.append({
-                "document_name": doc_name,
-                "description": doc_info["description"],
-                "required": doc_info["required"],
-                "actions": doc_info["actions"],
-                "status": "processing" if is_processing else ("uploaded" if is_uploaded else "missing"),
-                "matched_file": matched_file,
-                "processing_info": processing_info
-            })
-        
-        # Sort: required first, then by status (missing, processing, uploaded)
-        status_order = {"missing": 0, "processing": 1, "uploaded": 2}
-        checklist.sort(key=lambda x: (not x["required"], status_order.get(x["status"], 3)))
-        
-        # Calculate stats
-        total_required = sum(1 for d in checklist if d["required"])
-        uploaded_required = sum(1 for d in checklist if d["required"] and d["status"] == "uploaded")
-        total_uploaded = sum(1 for d in checklist if d["status"] == "uploaded")
-        total_processing = sum(1 for d in checklist if d["status"] == "processing")
-        
-        # Build uploaded_files list for sidebar display (array of filenames)
+        # Build list of uploaded filenames for this project
         uploaded_files_list = []
         seen_files = set()
         for metadata in all_results.get("metadatas", []):
@@ -1943,22 +1866,74 @@ async def get_document_checklist(project_id: str):
                     uploaded_files_list.append(filename)
                     seen_files.add(filename.lower())
         
-        # Sort alphabetically
         uploaded_files_list.sort()
+        logger.info(f"[DOC-CHECKLIST] Found {len(uploaded_files_list)} files for project {project_id[:8]}")
+        
+        # Check for active processing jobs
+        processing_jobs = []
+        try:
+            all_jobs = ProcessingJobModel.get_all(limit=20)
+            for job in all_jobs:
+                job_status = job.get("status", "")
+                job_project = job.get("input_data", {}).get("project_id", "")
+                if job_status in ["pending", "processing"] and job_project == project_id:
+                    processing_jobs.append({
+                        "filename": job.get("input_data", {}).get("filename", "Unknown"),
+                        "progress": job.get("progress", 0),
+                        "message": job.get("status_message", "Processing..."),
+                        "job_id": job.get("id")
+                    })
+        except Exception as e:
+            logger.warning(f"Could not fetch processing jobs: {e}")
+        
+        # =====================================================================
+        # STEP-BASED DOCUMENT CHECKLIST (from Step_Documents sheet)
+        # =====================================================================
+        step_checklists = []
+        has_step_documents = False
+        total_matched = 0
+        total_missing = 0
+        required_missing = 0
+        
+        try:
+            # Load Step_Documents from DuckDB
+            step_documents = load_step_documents()
+            
+            if step_documents:
+                has_step_documents = True
+                logger.info(f"[DOC-CHECKLIST] Found Step_Documents for {len(step_documents)} steps")
+                
+                # Build checklist for each step
+                for step_num, docs in sorted(step_documents.items(), key=lambda x: x[0]):
+                    result = match_documents_to_step(docs, uploaded_files_list)
+                    
+                    step_checklists.append({
+                        'step_number': step_num,
+                        'step_name': f"Step {step_num}",
+                        'matched': result['matched'],
+                        'missing': result['missing'],
+                        'stats': result['stats']
+                    })
+                    
+                    total_matched += result['stats']['matched']
+                    total_missing += result['stats']['missing']
+                    required_missing += result['stats']['required_missing']
+            else:
+                logger.info("[DOC-CHECKLIST] No Step_Documents found - showing uploaded files only")
+                
+        except Exception as e:
+            logger.warning(f"[DOC-CHECKLIST] Could not load Step_Documents: {e}")
         
         return {
             "project_id": project_id,
-            "checklist": checklist,
-            "uploaded_files": uploaded_files_list,  # Array of filenames for sidebar
+            "has_step_documents": has_step_documents,
+            "uploaded_files": uploaded_files_list,
+            "step_checklists": step_checklists,
             "stats": {
-                "total_documents": len(checklist),
-                "total_required": total_required,
-                "uploaded_required": uploaded_required,
-                "total_uploaded": total_uploaded,
-                "total_processing": total_processing,
-                "total_missing": len(checklist) - total_uploaded - total_processing,
-                "required_complete": uploaded_required == total_required,
-                "files_in_project": len(uploaded_files_list)
+                "files_in_project": len(uploaded_files_list),
+                "total_matched": total_matched,
+                "total_missing": total_missing,
+                "required_missing": required_missing
             },
             "processing_jobs": processing_jobs
         }
