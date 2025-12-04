@@ -1297,12 +1297,10 @@ async def scan_for_action(project_id: str, action_id: str):
         parent_actions = get_parent_actions(action_id)
         
         # =====================================================================
-        # DEPENDENT ACTION HANDLING - Skip redundant scan, provide guidance
-        # Actions with parent_actions should NOT get their own full scan
+        # DEPENDENT ACTION HANDLING - Still scan but include parent context
         # =====================================================================
         if parent_actions:
-            logger.warning(f"[SCAN] Action {action_id} is DEPENDENT on {parent_actions} - using guidance mode")
-            return await handle_dependent_action(project_id, action_id, action, parent_actions)
+            logger.warning(f"[SCAN] Action {action_id} has parent actions {parent_actions} - will include their context")
         
         logger.warning(f"[SCAN] Action {action_id} has {len(reports_needed)} reports_needed: {reports_needed[:3]}")
         
@@ -1479,11 +1477,8 @@ async def scan_for_action(project_id: str, action_id: str):
                 
                 logger.warning(f"[SCAN] AI analysis complete. Findings: {bool(findings)}, keys: {list(findings.keys()) if findings else 'None'}")
                 
-                # AUTO-COMPLETE: If findings show complete and no high-risk issues
-                if findings:
-                    if findings.get('complete') and findings.get('risk_level') != 'high':
-                        suggested_status = "complete"
-                        logger.info(f"[SCAN] Action {action_id} AUTO-COMPLETED (complete=True, risk != high)")
+                # NOTE: Removed auto-complete logic - users should manually mark as complete
+                # Previously this would auto-mark as "complete" if AI said complete=True
         
         # =====================================================================
         # CONFLICT DETECTION - Check for inconsistencies
