@@ -1147,7 +1147,7 @@ async def update_progress(project_id: str, action_id: str, update: ActionUpdate)
     # LEARNING: Record user corrections for self-improvement
     # ==========================================================================
     try:
-        from utils.learning_engine import get_learning_system
+        from backend.utils.learning_engine import get_learning_system
         learning = get_learning_system()
         
         # Status change = user correcting AI suggestion
@@ -1227,8 +1227,8 @@ async def get_learning_stats():
     - Rules auto-generated
     """
     try:
-        from utils.learning_engine import get_learning_system
-        from utils.hybrid_analyzer import get_hybrid_analyzer
+        from backend.utils.learning_engine import get_learning_system
+        from backend.utils.hybrid_analyzer import get_hybrid_analyzer
         
         learning = get_learning_system()
         analyzer = get_hybrid_analyzer()
@@ -1599,6 +1599,11 @@ async def detect_conflicts(project_id: str, action_id: str, new_findings: Option
             return ""
         val = str(value).strip()
         
+        # Strip source citations like "(Source: filename.pdf)" or "(from filename)"
+        val = re.sub(r'\s*\(Source:\s*[^)]+\)', '', val)
+        val = re.sub(r'\s*\(from\s*[^)]+\)', '', val)
+        val = val.strip()
+        
         # FEIN: remove dashes, spaces, just keep digits
         if "fein" in field.lower() or "ein" in field.lower():
             return ''.join(c for c in val if c.isdigit())
@@ -1713,7 +1718,7 @@ async def extract_findings_consultative(
     try:
         # Try hybrid approach first
         try:
-            from utils.hybrid_analyzer import get_hybrid_analyzer
+            from backend.utils.hybrid_analyzer import get_hybrid_analyzer
             analyzer = get_hybrid_analyzer()
             
             result = await analyzer.analyze(action, content, inherited_findings)
@@ -3271,7 +3276,7 @@ async def record_feedback(project_id: str, feedback: FeedbackRequest):
     - Edits findings
     """
     try:
-        from utils.learning_engine import get_learning_system
+        from backend.utils.learning_engine import get_learning_system
         learning = get_learning_system()
         
         learning.record_feedback(
@@ -3310,13 +3315,13 @@ async def get_learning_stats():
     - Claude API reduction percentage
     """
     try:
-        from utils.learning_engine import get_learning_system
+        from backend.utils.learning_engine import get_learning_system
         learning = get_learning_system()
         stats = learning.get_stats()
         
         # Add hybrid analyzer stats if available
         try:
-            from utils.hybrid_analyzer import get_hybrid_analyzer
+            from backend.utils.hybrid_analyzer import get_hybrid_analyzer
             analyzer = get_hybrid_analyzer()
             stats['analyzer'] = analyzer.get_stats()
         except:
@@ -3339,7 +3344,7 @@ async def export_training_data():
     Returns path to exported file in Alpaca format.
     """
     try:
-        from utils.learning_engine import get_learning_system
+        from backend.utils.learning_engine import get_learning_system
         learning = get_learning_system()
         
         export_path = learning.export_for_finetuning()
