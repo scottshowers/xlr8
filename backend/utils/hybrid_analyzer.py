@@ -3,15 +3,18 @@ Hybrid LLM Analyzer for XLR8 Year-End Playbook
 ===============================================
 
 ARCHITECTURE:
+- Learning Engine: Cache, rules, training data collection
 - Local LLM (Ollama): Fast extraction, pattern matching, data validation
 - Claude: Complex reasoning, consultative analysis, recommendations
 
-Cost Savings: 50-70% reduction in Claude API calls
+LEARNING FLOW:
+1. Check cache → if hit, return immediately (FREE)
+2. Run rule-based validation (FREE)
+3. Try local LLM extraction (FREE)
+4. If needed, call Claude → capture output for learning
+5. User corrections → feed back into system
 
-Flow:
-1. Local LLM extracts key values and checks data presence
-2. If extraction succeeds and no complex issues → skip Claude
-3. If complex analysis needed → Claude with pre-extracted context
+Cost Savings: 60-80% reduction in Claude API calls
 
 Author: XLR8 Team
 """
@@ -151,13 +154,30 @@ class LocalLLMClient:
 
 class HybridAnalyzer:
     """
-    Hybrid analyzer that uses local LLM for extraction and Claude for reasoning.
+    Hybrid analyzer with learning capabilities.
+    
+    Priority order:
+    1. Cache hit → return immediately
+    2. Rule-based validation → add issues
+    3. Local LLM extraction → if enough, skip Claude
+    4. Claude analysis → capture for learning
     """
     
     def __init__(self):
         self.local_llm = LocalLLMClient()
         self.claude_api_key = os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+        
+        # Try to import learning system
+        try:
+            from utils.learning_engine import get_learning_system
+            self.learning = get_learning_system()
+            logger.info("[HYBRID] Learning system enabled")
+        except ImportError:
+            self.learning = None
+            logger.warning("[HYBRID] Learning system not available")
+        
         self.stats = {
+            'cache_hits': 0,
             'local_only': 0,
             'claude_calls': 0,
             'local_failures': 0
@@ -184,6 +204,16 @@ class HybridAnalyzer:
         # First, quick regex extraction
         regex_results = self.extract_with_regex(text)
         
+        # Get few-shot examples if learning is available
+        examples_context = ""
+        if self.learning:
+            examples = self.learning.get_few_shot_examples(action_id, limit=2)
+            if examples:
+                examples_context = "\n\nEXAMPLES OF GOOD EXTRACTIONS:\n"
+                for ex in examples:
+                    examples_context += f"Input sample: {ex.get('input_sample', '')[:200]}...\n"
+                    examples_context += f"Output: {json.dumps(ex.get('output', {}))}\n\n"
+        
         # Build focused extraction prompt
         prompt = f"""Extract the following from this document. Return ONLY a JSON object.
 
@@ -194,7 +224,7 @@ LOOK FOR:
 - State tax codes (SUI, SIT, SDI, etc.)
 - Wage bases (dollar amounts)
 - Any transmittal control codes (TCC)
-
+{examples_context}
 DOCUMENT:
 {text[:8000]}
 
@@ -327,14 +357,21 @@ Return ONLY valid JSON."""
                 messages=[{"role": "user", "content": prompt}]
             )
             
-            result = response.content[0].text.strip()
-            if result.startswith("```"):
-                result = result.split("```")[1]
-                if result.startswith("json"):
-                    result = result[4:]
-            result = result.strip()
+            result_text = response.content[0].text.strip()
+            if result_text.startswith("```"):
+                result_text = result_text.split("```")[1]
+                if result_text.startswith("json"):
+                    result_text = result_text[4:]
+            result_text = result_text.strip()
             
-            return json.loads(result)
+            result = json.loads(result_text)
+            
+            # LEARNING: Capture this output for future training
+            if self.learning:
+                quality = 'high' if result.get('complete') else 'medium'
+                self.learning.learn_from_claude(text, prompt, result, action.get('action_id'), quality)
+            
+            return result
             
         except Exception as e:
             logger.error(f"[HYBRID] Claude failed: {e}")
@@ -343,6 +380,11 @@ Return ONLY valid JSON."""
     def build_local_only_result(self, action_id: str, local_results: Dict) -> Dict:
         """Build a findings result using only local extraction"""
         self.stats['local_only'] += 1
+        
+        # Run rule-based validation if learning is available
+        rule_issues = []
+        if self.learning:
+            rule_issues = self.learning.validate_extraction(local_results)
         
         # Get key values from extraction
         key_values = {}
@@ -365,29 +407,49 @@ Return ONLY valid JSON."""
         elif regex.get('rate_percent'):
             key_values['Rates Found'] = ', '.join(regex['rate_percent'][:5])
         
+        # Combine local issues with rule-based issues
+        all_issues = local_results.get('issues_found', [])
+        for ri in rule_issues:
+            all_issues.append(f"{ri['field']}: {ri['error']}")
+        
+        # Filter out suppressed issues
+        if self.learning:
+            all_issues = [i for i in all_issues if not self.learning.should_suppress_issue(i)]
+        
         return {
-            'complete': True,  # Local extraction succeeded
+            'complete': len(all_issues) == 0,
             'key_values': key_values,
-            'issues': local_results.get('issues_found', []),
+            'issues': all_issues,
             'recommendations': [],
-            'risk_level': 'low',
-            'summary': f'Data extracted successfully. FEIN and rates verified.',
+            'risk_level': 'low' if len(all_issues) == 0 else 'medium',
+            'summary': f'Data extracted successfully via local analysis.',
             '_analyzed_by': 'local'
         }
     
     async def analyze(self, action: Dict, content: List[str], 
                       inherited_findings: List[Dict] = None) -> Optional[Dict]:
         """
-        Main hybrid analysis method.
+        Main hybrid analysis method with learning.
         
-        1. Try local extraction first
-        2. If simple action + good extraction → return local result
-        3. Otherwise → call Claude with pre-extracted context
+        1. Check cache
+        2. Try local extraction
+        3. If simple + good extraction → return local
+        4. Otherwise → Claude with pre-extracted context
+        5. Capture output for learning
         """
         action_id = action.get('action_id', '')
         combined_text = "\n\n---\n\n".join(content)
         
         logger.info(f"[HYBRID] Analyzing {action_id}, {len(combined_text)} chars")
+        
+        # Step 0: Check cache
+        if self.learning:
+            cached = self.learning.get_cached_analysis(combined_text, action_id)
+            if cached:
+                self.stats['cache_hits'] += 1
+                logger.info(f"[HYBRID] ✓ Cache hit for {action_id}")
+                cached['_analyzed_by'] = 'cache'
+                return cached
         
         # Step 1: Try local extraction
         local_results = None
@@ -426,12 +488,20 @@ Return ONLY valid JSON."""
     
     def get_stats(self) -> Dict:
         """Get analysis statistics"""
-        total = self.stats['local_only'] + self.stats['claude_calls']
-        return {
+        total = self.stats['cache_hits'] + self.stats['local_only'] + self.stats['claude_calls']
+        saved = self.stats['cache_hits'] + self.stats['local_only']
+        
+        stats = {
             **self.stats,
             'total_analyses': total,
-            'claude_reduction': f"{(self.stats['local_only'] / max(total, 1)) * 100:.1f}%"
+            'claude_reduction': f"{(saved / max(total, 1)) * 100:.1f}%"
         }
+        
+        # Add learning stats if available
+        if self.learning:
+            stats['learning'] = self.learning.get_stats()
+        
+        return stats
 
 
 # =============================================================================
