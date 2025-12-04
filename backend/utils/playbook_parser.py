@@ -753,26 +753,48 @@ def match_documents_to_step(step_documents: List[Dict], uploaded_files: List[str
     matched = []
     missing = []
     
+    def normalize(text):
+        """Normalize text for matching - remove punctuation, lowercase"""
+        import re
+        return re.sub(r'[^\w\s]', '', text.lower())
+    
+    def get_words(text):
+        """Get significant words (3+ chars)"""
+        return [w for w in normalize(text).split() if len(w) >= 3]
+    
     for doc in step_documents:
-        keyword = doc.get('keyword', '').lower()
+        keyword = doc.get('keyword', '')
         if not keyword:
+            continue
+        
+        keyword_words = get_words(keyword)
+        if not keyword_words:
             continue
         
         # Check if any uploaded file matches this keyword
         matched_file = None
+        best_score = 0
+        
         for filename in uploaded_files:
-            filename_lower = filename.lower()
-            # Simple keyword matching
-            if keyword in filename_lower:
+            filename_words = get_words(filename)
+            
+            # Method 1: Direct substring match
+            if normalize(keyword) in normalize(filename):
                 matched_file = filename
                 break
-            # Also check individual words for multi-word keywords
-            keyword_words = keyword.split()
-            if len(keyword_words) > 1:
-                matches = sum(1 for w in keyword_words if w in filename_lower)
-                if matches >= len(keyword_words) - 1:  # Allow 1 word missing
+            
+            # Method 2: Word overlap scoring
+            # Count words that match between keyword and filename
+            matching_words = sum(1 for kw in keyword_words if any(kw in fw or fw in kw for fw in filename_words))
+            
+            # Score based on percentage of keyword words matched
+            score = matching_words / len(keyword_words) if keyword_words else 0
+            
+            # Need at least 60% word match, or 2+ words matching
+            if score >= 0.6 or matching_words >= 2:
+                if score > best_score:
+                    best_score = score
                     matched_file = filename
-                    break
         
         doc_info = {
             'keyword': doc.get('keyword'),
