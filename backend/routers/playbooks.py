@@ -1932,9 +1932,24 @@ async def get_document_checklist(project_id: str):
         total_uploaded = sum(1 for d in checklist if d["status"] == "uploaded")
         total_processing = sum(1 for d in checklist if d["status"] == "processing")
         
+        # Build uploaded_files list for sidebar display (array of filenames)
+        uploaded_files_list = []
+        seen_files = set()
+        for metadata in all_results.get("metadatas", []):
+            doc_project = metadata.get("project_id") or metadata.get("project", "")
+            if doc_project == project_id or doc_project == project_id[:8]:
+                filename = metadata.get("source", metadata.get("filename", ""))
+                if filename and filename.lower() not in seen_files:
+                    uploaded_files_list.append(filename)
+                    seen_files.add(filename.lower())
+        
+        # Sort alphabetically
+        uploaded_files_list.sort()
+        
         return {
             "project_id": project_id,
             "checklist": checklist,
+            "uploaded_files": uploaded_files_list,  # Array of filenames for sidebar
             "stats": {
                 "total_documents": len(checklist),
                 "total_required": total_required,
@@ -1942,7 +1957,8 @@ async def get_document_checklist(project_id: str):
                 "total_uploaded": total_uploaded,
                 "total_processing": total_processing,
                 "total_missing": len(checklist) - total_uploaded - total_processing,
-                "required_complete": uploaded_required == total_required
+                "required_complete": uploaded_required == total_required,
+                "files_in_project": len(uploaded_files_list)
             },
             "processing_jobs": processing_jobs
         }
