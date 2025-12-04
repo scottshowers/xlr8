@@ -1848,7 +1848,7 @@ async def get_document_checklist(project_id: str):
     try:
         from utils.rag_handler import RAGHandler
         from utils.database.models import ProcessingJobModel
-        from utils.playbook_parser import load_step_documents, match_documents_to_step
+        from backend.utils.playbook_parser import load_step_documents, match_documents_to_step
         
         # Get all project files from ChromaDB
         rag = RAGHandler()
