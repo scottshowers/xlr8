@@ -1471,40 +1471,64 @@ async def scan_for_action(project_id: str, action_id: str):
                 """).fetchone()
                 
                 if table_check and table_check[0] > 0:
-                    # Get table names for this project's files
-                    for doc in found_docs:
-                        filename = doc.get('filename', '')
+                    # Get ALL tables for this project first
+                    all_tables = conn.execute("""
+                        SELECT table_name, columns, source_file
+                        FROM _pdf_tables
+                    """).fetchall()
+                    
+                    logger.warning(f"[SCAN] DuckDB has {len(all_tables)} tables total, project has {len(project_files)} files")
+                    
+                    seen_tables = set()  # Avoid duplicate table pulls
+                    
+                    # Get table names for ALL project files (not just found_docs)
+                    # This ensures we have complete context for analysis
+                    for filename in project_files:
                         if not filename:
                             continue
                         
-                        # Find tables derived from this file
-                        tables = conn.execute("""
-                            SELECT table_name, columns
-                            FROM _pdf_tables
-                            WHERE source_file = ?
-                        """, [filename]).fetchall()
+                        # Normalize filename for matching (remove special chars)
+                        filename_norm = filename.lower().replace("'", "").replace("'", "").replace(".pdf", "")
                         
-                        for table_name, columns_json in tables:
-                            try:
-                                # Get ALL data from the table (no limit)
-                                data = conn.execute(f'SELECT * FROM "{table_name}"').fetchall()
-                                columns = json.loads(columns_json) if columns_json else []
-                                
-                                if data and columns:
-                                    # Format as readable content
-                                    content_lines = [f"[FILE: {filename}] [TABLE: {table_name}] [FULL DATA - {len(data)} rows]"]
-                                    content_lines.append(f"Columns: {', '.join(columns)}")
+                        # Find tables that match this file (flexible matching)
+                        for table_name, columns_json, source_file in all_tables:
+                            if not source_file or table_name in seen_tables:
+                                continue
+                            source_norm = source_file.lower().replace("'", "").replace("'", "").replace(".pdf", "")
+                            
+                            # Match if normalized names are similar
+                            if filename_norm in source_norm or source_norm in filename_norm:
+                                seen_tables.add(table_name)
+                                try:
+                                    # Get ALL data from the table (no limit)
+                                    data = conn.execute(f'SELECT * FROM "{table_name}"').fetchall()
+                                    columns = json.loads(columns_json) if columns_json else []
                                     
-                                    for row in data:  # ALL rows
-                                        row_dict = {columns[i]: str(row[i]) for i in range(min(len(columns), len(row))) if row[i]}
-                                        if row_dict:
-                                            content_lines.append(str(row_dict))
-                                    
-                                    table_content = "\n".join(content_lines)
-                                    duckdb_content.append(table_content)
-                                    logger.warning(f"[SCAN] Added DuckDB table: {table_name} ({len(data)} rows)")
-                            except Exception as te:
-                                logger.warning(f"[SCAN] Error reading table {table_name}: {te}")
+                                    if data and columns:
+                                        # Format as readable content
+                                        content_lines = [f"[FILE: {filename}] [TABLE: {table_name}] [FULL DATA - {len(data)} rows]"]
+                                        content_lines.append(f"Columns: {', '.join(columns)}")
+                                        
+                                        for row in data:  # ALL rows
+                                            row_dict = {columns[i]: str(row[i]) for i in range(min(len(columns), len(row))) if row[i]}
+                                            if row_dict:
+                                                content_lines.append(str(row_dict))
+                                        
+                                        table_content = "\n".join(content_lines)
+                                        duckdb_content.append(table_content)
+                                        logger.warning(f"[SCAN] ✓ Added DuckDB table: {table_name} ({len(data)} rows) for '{filename}'")
+                                        
+                                        # Add to found_docs if not already there
+                                        if filename not in seen_files:
+                                            seen_files.add(filename)
+                                            found_docs.append({
+                                                "filename": filename,
+                                                "snippet": f"Full table data from {table_name} ({len(data)} rows)",
+                                                "query": "DuckDB",
+                                                "match_type": "structured_data"
+                                            })
+                                except Exception as te:
+                                    logger.warning(f"[SCAN] Error reading table {table_name}: {te}")
                 
                 conn.close()
         except Exception as e:
