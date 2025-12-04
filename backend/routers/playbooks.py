@@ -1866,19 +1866,36 @@ async def get_document_checklist(project_id: str):
         collection = rag.client.get_or_create_collection(name="documents")
         all_results = collection.get(include=["metadatas"], limit=1000)
         
+        # Debug: Log all project IDs in ChromaDB
+        all_project_ids = set()
+        for metadata in all_results.get("metadatas", []):
+            pid = metadata.get("project_id") or metadata.get("project", "")
+            if pid:
+                all_project_ids.add(pid)
+        logger.info(f"[DOC-CHECKLIST] Project IDs in ChromaDB: {list(all_project_ids)[:10]}")
+        logger.info(f"[DOC-CHECKLIST] Looking for project: {project_id} (or {project_id[:8]})")
+        
         # Build list of uploaded filenames for this project
         uploaded_files_list = []
         seen_files = set()
         for metadata in all_results.get("metadatas", []):
             doc_project = metadata.get("project_id") or metadata.get("project", "")
-            if doc_project == project_id or doc_project == project_id[:8]:
+            # More flexible matching
+            matches = (
+                doc_project == project_id or 
+                doc_project == project_id[:8] or
+                project_id.startswith(doc_project) or
+                doc_project.startswith(project_id[:8])
+            )
+            if matches:
                 filename = metadata.get("source", metadata.get("filename", ""))
                 if filename and filename.lower() not in seen_files:
                     uploaded_files_list.append(filename)
                     seen_files.add(filename.lower())
+                    logger.info(f"[DOC-CHECKLIST] Found file: {filename} (project: {doc_project})")
         
         uploaded_files_list.sort()
-        logger.info(f"[DOC-CHECKLIST] Found {len(uploaded_files_list)} files for project {project_id[:8]}")
+        logger.info(f"[DOC-CHECKLIST] Total files found: {len(uploaded_files_list)}")
         
         # Check for active processing jobs
         processing_jobs = []
