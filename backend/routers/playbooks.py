@@ -1656,25 +1656,39 @@ async def search_duckdb_for_action(
         
         # Also check PDF tables
         try:
-            if project_name:
-                name_prefix = project_name[:3] + "%" if len(project_name) >= 3 else project_name + "%"
-                pdf_tables = conn.execute("""
-                    SELECT table_name, source_file, row_count
-                    FROM _pdf_tables
-                    WHERE project_id = ? 
-                    OR project_id LIKE ?
-                    OR LOWER(project_id) = LOWER(?)
-                    OR LOWER(project_id) LIKE LOWER(?)
-                """, [project_id, f"{project_id[:8]}%", project_name, name_prefix]).fetchall()
-            else:
-                pdf_tables = conn.execute("""
-                    SELECT table_name, source_file, row_count
-                    FROM _pdf_tables
-                    WHERE project_id = ? OR project_id LIKE ?
-                """, [project_id, f"{project_id[:8]}%"]).fetchall()
-            logger.warning(f"[DUCKDB-SCAN] Found {len(pdf_tables)} PDF-derived tables: {[t[0] for t in pdf_tables]}")
+            # First, get ALL pdf tables to debug
+            all_pdf_tables = conn.execute("""
+                SELECT table_name, source_file, row_count, project_id
+                FROM _pdf_tables
+            """).fetchall()
+            logger.warning(f"[DUCKDB-SCAN] All PDF tables in DB: {[(t[0], t[3]) for t in all_pdf_tables]}")
+            
+            # Filter to matching project - be flexible with matching
+            pdf_tables = []
+            for table in all_pdf_tables:
+                table_name, source_file, row_count, pid = table
+                pid_lower = str(pid).lower() if pid else ""
+                table_name_lower = table_name.lower() if table_name else ""
+                
+                # Match by: project_id, project_name prefix in table name, or project_name match
+                match = False
+                if pid_lower == project_id.lower():
+                    match = True
+                elif project_name and pid_lower == project_name.lower():
+                    match = True
+                elif project_name and table_name_lower.startswith(project_name.lower()):
+                    match = True
+                elif pid_lower.startswith(project_id[:8].lower()):
+                    match = True
+                
+                if match:
+                    pdf_tables.append((table_name, source_file, row_count))
+            
+            logger.warning(f"[DUCKDB-SCAN] Found {len(pdf_tables)} PDF-derived tables for project: {[t[0] for t in pdf_tables]}")
         except Exception as e:
             logger.warning(f"[DUCKDB-SCAN] Error getting PDF tables: {e}")
+            import traceback
+            logger.warning(traceback.format_exc())
             pdf_tables = []
         
         # Score and select relevant tables
