@@ -1761,8 +1761,9 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
                 style={styles.scanBtn} 
                 onClick={(e) => { e.stopPropagation(); handleScan(); }}
                 disabled={scanning || uploading}
+                title="Analyze documents with AI Context"
               >
-                {scanning ? '⏳ Scanning...' : '🔍 Scan Documents'}
+                {scanning ? '⏳ Analyzing...' : '🔍 Analyze'}
               </button>
             </div>
           </div>
@@ -2026,6 +2027,34 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
                     <span style={{ color: '#3b82f6' }}>→</span>
                     <span>{rec}</span>
                   </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Show sources used */}
+          {findings?.sources_used && Array.isArray(findings.sources_used) && findings.sources_used.length > 0 && (
+            <div style={styles.section}>
+              <div style={styles.sectionTitle}>📄 Sources Analyzed</div>
+              <div style={{ 
+                background: '#f3f4f6', 
+                border: '1px solid #d1d5db',
+                borderRadius: '6px',
+                padding: '0.5rem',
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '0.5rem'
+              }}>
+                {findings.sources_used.map((source, i) => (
+                  <span key={i} style={{
+                    fontSize: '0.75rem',
+                    color: '#374151',
+                    background: '#e5e7eb',
+                    padding: '0.25rem 0.5rem',
+                    borderRadius: '4px'
+                  }}>
+                    {source}
+                  </span>
                 ))}
               </div>
             </div>
