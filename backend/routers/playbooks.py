@@ -1967,6 +1967,88 @@ async def get_document_checklist(project_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class KeywordUpdateRequest(BaseModel):
+    step_number: str
+    old_keyword: str
+    new_keyword: str
+
+
+@router.put("/year-end/step-documents/keyword")
+async def update_step_document_keyword(request: KeywordUpdateRequest):
+    """
+    Update a keyword in the Step_Documents sheet.
+    This allows users to customize matching criteria.
+    """
+    try:
+        from backend.utils.playbook_parser import get_duckdb_connection
+        
+        conn = get_duckdb_connection()
+        if not conn:
+            raise HTTPException(status_code=500, detail="Database connection unavailable")
+        
+        logger.info(f"[KEYWORD] Updating: Step {request.step_number}, '{request.old_keyword}' -> '{request.new_keyword}'")
+        
+        # Find the Step_Documents table
+        result = conn.execute("""
+            SELECT table_name
+            FROM _schema_metadata
+            WHERE is_current = TRUE
+            AND LOWER(project) = 'global'
+            AND LOWER(sheet_name) LIKE '%step_documents%'
+            LIMIT 1
+        """).fetchone()
+        
+        if not result:
+            raise HTTPException(status_code=404, detail="Step_Documents sheet not found")
+        
+        table_name = result[0]
+        
+        # Get column info to find keyword column
+        col_info = conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
+        col_names = [c[1].lower() for c in col_info]
+        
+        # Find keyword column
+        keyword_col = None
+        for i, name in enumerate(col_names):
+            if 'keyword' in name or 'document' in name:
+                keyword_col = col_info[i][1]  # Original column name
+                break
+        
+        if not keyword_col:
+            raise HTTPException(status_code=500, detail="Could not find keyword column")
+        
+        # Find step column
+        step_col = None
+        for i, name in enumerate(col_names):
+            if 'step' in name:
+                step_col = col_info[i][1]
+                break
+        
+        if not step_col:
+            step_col = col_info[0][1]  # Default to first column
+        
+        # Update the keyword
+        update_sql = f"""
+            UPDATE "{table_name}"
+            SET "{keyword_col}" = ?
+            WHERE CAST("{step_col}" AS VARCHAR) = ?
+            AND "{keyword_col}" = ?
+        """
+        
+        conn.execute(update_sql, [request.new_keyword, request.step_number, request.old_keyword])
+        conn.commit()
+        
+        logger.info(f"[KEYWORD] Updated successfully")
+        
+        return {"success": True, "message": f"Updated keyword for step {request.step_number}"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Keyword update failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ============================================================================
 # AI SUMMARY DASHBOARD - Consolidated view of all issues and recommendations
 # ============================================================================
@@ -2012,9 +2094,10 @@ async def get_ai_summary(project_id: str):
             if key not in all_key_values:
                 all_key_values[key] = {"value": value, "source": action_id}
         
-        # Collect conflicts
+        # Collect conflicts (skip company_name - too many false positives)
         for conflict in findings.get("conflicts", []):
-            all_conflicts.append(conflict)
+            if conflict.get("field") != "company_name":
+                all_conflicts.append(conflict)
         
         # Track review flags
         if action_progress.get("review_flag"):
