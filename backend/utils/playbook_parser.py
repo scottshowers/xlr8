@@ -753,17 +753,19 @@ def match_documents_to_step(step_documents: List[Dict], uploaded_files: List[str
     matched = []
     missing = []
     
-    logger.info(f"[MATCH] Matching {len(step_documents)} keywords against {len(uploaded_files)} files")
-    logger.info(f"[MATCH] Files available: {uploaded_files}")
+    logger.info(f"[MATCH] === Starting match ===")
+    logger.info(f"[MATCH] Keywords to match: {len(step_documents)}")
+    logger.info(f"[MATCH] Files available ({len(uploaded_files)}): {uploaded_files}")
     
     def normalize(text):
         """Normalize text for matching - remove punctuation, lowercase"""
         import re
-        return re.sub(r'[^\w\s]', '', text.lower())
+        # Remove apostrophes and other punctuation, lowercase
+        return re.sub(r'[^\w\s]', '', text.lower()).strip()
     
     def get_words(text):
         """Get words 3+ chars"""
-        return [w for w in normalize(text).split() if len(w) >= 3]
+        return set(w for w in normalize(text).split() if len(w) >= 3)
     
     for doc in step_documents:
         keyword = doc.get('keyword', '')
@@ -771,10 +773,12 @@ def match_documents_to_step(step_documents: List[Dict], uploaded_files: List[str
             continue
         
         keyword_norm = normalize(keyword)
+        keyword_words = get_words(keyword)
         matched_file = None
         
         for filename in uploaded_files:
             filename_norm = normalize(filename)
+            filename_words = get_words(filename)
             
             # Method 1: Substring match (keyword in filename)
             if keyword_norm in filename_norm:
@@ -782,16 +786,22 @@ def match_documents_to_step(step_documents: List[Dict], uploaded_files: List[str
                 logger.info(f"[MATCH] ✓ Substring: '{keyword}' in '{filename}'")
                 break
             
-            # Method 2: Word overlap (for cases like "Multiple Worksite Reporting" vs "Multiple Worksite Locations")
-            keyword_words = get_words(keyword)
-            filename_words = get_words(filename)
-            
-            if len(keyword_words) >= 2:  # Only for multi-word keywords
-                matches = sum(1 for kw in keyword_words if kw in filename_words)
-                # Require at least 2 matching words AND at least 60% match
-                if matches >= 2 and matches >= len(keyword_words) * 0.6:
+            # Method 2: All keyword words appear in filename words
+            # "Workers Comp" matches "Workers' Comp Risk Rates"
+            # But also handle "Workers Compensation" vs "Workers Comp" via partial word match
+            if len(keyword_words) >= 2:
+                # Check if each keyword word starts any filename word or vice versa
+                matches = 0
+                for kw in keyword_words:
+                    for fw in filename_words:
+                        if kw == fw or kw.startswith(fw) or fw.startswith(kw):
+                            matches += 1
+                            break
+                
+                # Require most words to match
+                if matches >= len(keyword_words) - 1 and matches >= 2:
                     matched_file = filename
-                    logger.info(f"[MATCH] ✓ Words: '{keyword}' ~ '{filename}' ({matches}/{len(keyword_words)} words)")
+                    logger.info(f"[MATCH] ✓ Words: '{keyword}' ~ '{filename}' ({matches}/{len(keyword_words)})")
                     break
         
         doc_info = {
@@ -807,7 +817,7 @@ def match_documents_to_step(step_documents: List[Dict], uploaded_files: List[str
             logger.warning(f"[MATCH] ✗ No match for: '{keyword}'")
             missing.append(doc_info)
     
-    logger.info(f"[MATCH] Result: {len(matched)} matched, {len(missing)} missing")
+    logger.info(f"[MATCH] === Result: {len(matched)} matched, {len(missing)} missing ===")
     
     # Calculate stats
     total = len(step_documents)
