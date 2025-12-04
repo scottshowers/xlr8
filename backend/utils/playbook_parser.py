@@ -301,11 +301,10 @@ def parse_year_end_from_duckdb() -> Dict[str, Any]:
                 
                 logger.warning(f"[PARSER] {len(rows)} rows, ALL columns: {col_names}")
                 
-                # Find Fast Track column indices
+                # Find Fast Track column indices - try by name first, then by position
                 ft_col_indices = {}
                 for i, name in enumerate(col_names):
                     name_lower = name.lower().replace(' ', '_').replace('-', '_')
-                    logger.warning(f"[PARSER] Checking column {i}: '{name}' -> '{name_lower}'")
                     if 'ft_action_id' in name_lower or name_lower == 'ft_action_id':
                         ft_col_indices['ft_id'] = i
                     elif 'ft_description' in name_lower:
@@ -319,7 +318,20 @@ def parse_year_end_from_duckdb() -> Dict[str, Any]:
                     elif 'ft_notes' in name_lower:
                         ft_col_indices['notes'] = i
                 
-                logger.warning(f"[PARSER] Found Fast Track columns: {ft_col_indices}")
+                # POSITIONAL FALLBACK: If no FT columns found by name but we have 12+ columns,
+                # use known positions: G=6, H=7, I=8, J=9, K=10, L=11
+                if not ft_col_indices and len(col_names) >= 12:
+                    logger.warning(f"[PARSER] Using positional fallback for Fast Track columns")
+                    ft_col_indices = {
+                        'ft_id': 6,        # Column G = FT_Action_ID
+                        'description': 7,  # Column H = FT_Description
+                        'sequence': 8,     # Column I = FT_Sequence
+                        'ukg_action_ref': 9,  # Column J = FT_UKG_ActionRef
+                        'sql_script': 10,  # Column K = FT_SQL_Script
+                        'notes': 11        # Column L = FT_Notes
+                    }
+                
+                logger.warning(f"[PARSER] Fast Track columns: {ft_col_indices}")
                 
                 # Find the description column (it's the one with the super long name)
                 desc_col_idx = None
@@ -481,20 +493,30 @@ def parse_year_end_from_duckdb() -> Dict[str, Any]:
                 continue
         
         logger.info(f"[PARSER] Extracted {len(all_actions)} actions from DuckDB")
-        logger.warning(f"[PARSER] Extracted {len(all_fast_track)} Fast Track items")
+        logger.warning(f"[PARSER] Extracted {len(all_fast_track)} Fast Track items (before dedup)")
         
         if not all_actions:
             logger.warning("[PARSER] No actions extracted, using default")
             return get_default_structure()
         
+        # Deduplicate Fast Track by ft_id (keep first occurrence)
+        seen_ft_ids = set()
+        unique_fast_track = []
+        for ft in all_fast_track:
+            if ft['ft_id'] not in seen_ft_ids:
+                seen_ft_ids.add(ft['ft_id'])
+                unique_fast_track.append(ft)
+        
+        logger.warning(f"[PARSER] Fast Track after dedup: {len(unique_fast_track)} items")
+        
         # Sort Fast Track by sequence
-        all_fast_track.sort(key=lambda x: x.get('sequence', 999))
+        unique_fast_track.sort(key=lambda x: x.get('sequence', 999))
         
         # Load Step_Documents mapping
         step_documents = load_step_documents()
         
         # Build step structure with document mappings
-        return build_playbook_structure(all_actions, file_name, step_documents, all_fast_track)
+        return build_playbook_structure(all_actions, file_name, step_documents, unique_fast_track)
         
     except Exception as e:
         logger.exception(f"[PARSER] Error parsing Year-End from DuckDB: {e}")
