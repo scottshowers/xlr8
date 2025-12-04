@@ -856,7 +856,7 @@ function DocumentChecklistSidebar({ checklist, collapsed, onToggle, onKeywordUpd
         {step_checklists.map((step, i) => (
           <div key={i} style={styles.stepSection}>
             <div style={styles.stepHeader}>
-              <span>Step {step.step_number}: {step.step_name?.slice(0, 20)}</span>
+              <span>{step.step_name ? `${step.step_number}. ${step.step_name}` : `Step ${step.step_number}`}</span>
               <span style={styles.badge(
                 step.stats.missing === 0 ? '#059669' : '#d97706',
                 step.stats.missing === 0 ? '#d1fae5' : '#fef3c7'
@@ -1424,12 +1424,30 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
   };
 
   const handleStatusChange = async (newStatus) => {
+    const previousStatus = localStatus;
     setLocalStatus(newStatus);
     try {
       await api.put(`/playbooks/year-end/progress/${projectId}/${action.action_id}`, {
         status: newStatus
       });
       onUpdate(action.action_id, { status: newStatus });
+      
+      // Record feedback for learning system (if status actually changed)
+      if (previousStatus !== newStatus) {
+        try {
+          await api.post(`/playbooks/year-end/feedback/${projectId}`, {
+            action_id: action.action_id,
+            correction_type: 'status',
+            original_value: previousStatus,
+            corrected_value: newStatus,
+            context: `User changed status from ${previousStatus} to ${newStatus}`
+          });
+          console.log(`[LEARNING] Recorded status change: ${previousStatus} → ${newStatus}`);
+        } catch (feedbackErr) {
+          // Don't fail the main operation if feedback recording fails
+          console.warn('Feedback recording failed:', feedbackErr);
+        }
+      }
     } catch (err) {
       console.error('Status update failed:', err);
     }
@@ -2451,6 +2469,9 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   const handleFastTrackUpdate = async (ftItem, newStatus) => {
     if (!ftItem?.ukg_action_ref || !Array.isArray(ftItem.ukg_action_ref) || ftItem.ukg_action_ref.length === 0) return;
     
+    const previousProgress = getFastTrackProgress(ftItem);
+    const previousStatus = previousProgress.status;
+    
     for (const actionId of ftItem.ukg_action_ref) {
       try {
         await api.put(`/playbooks/year-end/progress/${project.id}/${actionId}`, {
@@ -2459,6 +2480,22 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
         handleUpdate(actionId, { status: newStatus });
       } catch (err) {
         console.error(`Failed to update ${actionId}:`, err);
+      }
+    }
+    
+    // Record feedback for learning (Fast Track level)
+    if (previousStatus !== newStatus) {
+      try {
+        await api.post(`/playbooks/year-end/feedback/${project.id}`, {
+          action_id: `FT_${ftItem.ft_id}`,
+          correction_type: 'status',
+          original_value: previousStatus,
+          corrected_value: newStatus,
+          context: `Fast Track: ${ftItem.description}`
+        });
+        console.log(`[LEARNING] Recorded FT status change: ${previousStatus} → ${newStatus}`);
+      } catch (feedbackErr) {
+        console.warn('Feedback recording failed:', feedbackErr);
       }
     }
   };
