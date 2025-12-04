@@ -1863,58 +1863,114 @@ async def get_document_checklist(project_id: str):
     try:
         from utils.rag_handler import RAGHandler
         from utils.database.models import ProcessingJobModel
-        from backend.utils.playbook_parser import load_step_documents, match_documents_to_step
+        from backend.utils.playbook_parser import load_step_documents, match_documents_to_step, get_duckdb_connection
         
-        # Get all project files from ChromaDB
-        rag = RAGHandler()
-        collection = rag.client.get_or_create_collection(name="documents")
-        all_results = collection.get(include=["metadatas"], limit=1000)
-        
-        # First, find what project name corresponds to this project_id
-        # by checking if any metadata has both matching project_id AND a project name
-        project_name = None
-        for metadata in all_results.get("metadatas", []):
-            pid = metadata.get("project_id", "")
-            if pid and (pid == project_id or pid == project_id[:8] or project_id.startswith(pid)):
-                project_name = metadata.get("project") or metadata.get("project_name")
-                if project_name:
-                    break
-        
-        # Build list of uploaded filenames for this project
         uploaded_files_list = []
         seen_files = set()
-        seen_projects = set()
+        project_name = None
         
-        for metadata in all_results.get("metadatas", []):
-            doc_project_id = metadata.get("project_id", "")
-            doc_project_name = metadata.get("project") or metadata.get("project_name", "")
+        # =====================================================================
+        # SOURCE 1: ChromaDB (vector chunks)
+        # =====================================================================
+        try:
+            rag = RAGHandler()
+            collection = rag.client.get_or_create_collection(name="documents")
+            all_results = collection.get(include=["metadatas"], limit=1000)
             
-            if doc_project_id:
-                seen_projects.add(f"id:{doc_project_id[:12]}")
-            if doc_project_name:
-                seen_projects.add(f"name:{doc_project_name}")
+            for metadata in all_results.get("metadatas", []):
+                doc_project_id = metadata.get("project_id", "")
+                doc_project_name = metadata.get("project") or metadata.get("project_name", "")
+                
+                # Find project name for this project_id
+                if not project_name and doc_project_id:
+                    if doc_project_id == project_id or doc_project_id.startswith(project_id[:8]) or project_id.startswith(doc_project_id):
+                        project_name = doc_project_name
+                
+                # Match by project_id OR project_name
+                matches = (
+                    (doc_project_id and (doc_project_id == project_id or doc_project_id.startswith(project_id[:8]) or project_id.startswith(doc_project_id))) or
+                    (project_name and doc_project_name and doc_project_name.lower() == project_name.lower())
+                )
+                
+                if matches:
+                    filename = metadata.get("source", metadata.get("filename", ""))
+                    if filename and filename.lower() not in seen_files:
+                        uploaded_files_list.append(filename)
+                        seen_files.add(filename.lower())
             
-            # Match by project_id OR project_name
-            matches_by_id = doc_project_id and (
-                doc_project_id == project_id or 
-                doc_project_id == project_id[:8] or
-                project_id.startswith(doc_project_id) or
-                doc_project_id.startswith(project_id[:8])
-            )
-            matches_by_name = project_name and doc_project_name and (
-                doc_project_name.lower() == project_name.lower()
-            )
-            
-            if matches_by_id or matches_by_name:
-                filename = metadata.get("source", metadata.get("filename", ""))
-                if filename and filename.lower() not in seen_files:
-                    uploaded_files_list.append(filename)
-                    seen_files.add(filename.lower())
+            logger.info(f"[DOC-CHECKLIST] ChromaDB: {len(uploaded_files_list)} files for project {project_id[:8]}")
+        except Exception as e:
+            logger.warning(f"[DOC-CHECKLIST] ChromaDB query failed: {e}")
+        
+        # =====================================================================
+        # SOURCE 2: DuckDB _schema_metadata (Excel files)
+        # =====================================================================
+        try:
+            conn = get_duckdb_connection()
+            if conn:
+                # Get unique source files from _schema_metadata
+                result = conn.execute("""
+                    SELECT DISTINCT source_file, project
+                    FROM _schema_metadata
+                    WHERE source_file IS NOT NULL
+                """).fetchall()
+                
+                for row in result:
+                    source_file, proj = row
+                    # Match project - be flexible with short codes like "TEA1000"
+                    if proj and (
+                        proj.lower() == project_name.lower() if project_name else False or
+                        project_id.lower().startswith(proj.lower()[:4]) or
+                        proj.lower().startswith(project_id[:4].lower())
+                    ):
+                        if source_file and source_file.lower() not in seen_files:
+                            uploaded_files_list.append(source_file)
+                            seen_files.add(source_file.lower())
+                            logger.info(f"[DOC-CHECKLIST] DuckDB Excel: {source_file}")
+                
+                conn.close()
+        except Exception as e:
+            logger.warning(f"[DOC-CHECKLIST] DuckDB _schema_metadata query failed: {e}")
+        
+        # =====================================================================
+        # SOURCE 3: DuckDB _pdf_tables (PDF files)
+        # =====================================================================
+        try:
+            conn = get_duckdb_connection()
+            if conn:
+                # Check if _pdf_tables exists
+                table_check = conn.execute("""
+                    SELECT COUNT(*) FROM information_schema.tables 
+                    WHERE table_name = '_pdf_tables'
+                """).fetchone()
+                
+                if table_check and table_check[0] > 0:
+                    result = conn.execute("""
+                        SELECT DISTINCT source_file, project, project_id
+                        FROM _pdf_tables
+                        WHERE source_file IS NOT NULL
+                    """).fetchall()
+                    
+                    for row in result:
+                        source_file, proj, pid = row
+                        # Match by project name or project_id
+                        matches = (
+                            (pid and (pid == project_id or pid.startswith(project_id[:8]))) or
+                            (proj and project_name and proj.lower() == project_name.lower()) or
+                            (proj and project_id[:4].lower() in proj.lower())
+                        )
+                        if matches:
+                            if source_file and source_file.lower() not in seen_files:
+                                uploaded_files_list.append(source_file)
+                                seen_files.add(source_file.lower())
+                                logger.info(f"[DOC-CHECKLIST] DuckDB PDF: {source_file}")
+                
+                conn.close()
+        except Exception as e:
+            logger.warning(f"[DOC-CHECKLIST] DuckDB _pdf_tables query failed: {e}")
         
         uploaded_files_list.sort()
-        logger.info(f"[DOC-CHECKLIST] Looking for project_id: {project_id[:8]}, project_name: {project_name}")
-        logger.info(f"[DOC-CHECKLIST] Projects in ChromaDB: {list(seen_projects)[:15]}")
-        logger.info(f"[DOC-CHECKLIST] Found {len(uploaded_files_list)} files: {uploaded_files_list}")
+        logger.info(f"[DOC-CHECKLIST] TOTAL: {len(uploaded_files_list)} files: {uploaded_files_list}")
         
         # Check for active processing jobs
         processing_jobs = []
