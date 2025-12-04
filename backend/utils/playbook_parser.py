@@ -753,14 +753,12 @@ def match_documents_to_step(step_documents: List[Dict], uploaded_files: List[str
     matched = []
     missing = []
     
+    logger.info(f"[MATCH] Matching {len(step_documents)} keywords against {len(uploaded_files)} files")
+    
     def normalize(text):
         """Normalize text for matching - remove punctuation, lowercase"""
         import re
         return re.sub(r'[^\w\s]', '', text.lower())
-    
-    def get_words(text):
-        """Get significant words (3+ chars)"""
-        return [w for w in normalize(text).split() if len(w) >= 3]
     
     for doc in step_documents:
         keyword = doc.get('keyword', '')
@@ -768,46 +766,20 @@ def match_documents_to_step(step_documents: List[Dict], uploaded_files: List[str
             continue
         
         keyword_norm = normalize(keyword)
-        keyword_words = get_words(keyword)
-        if not keyword_words:
-            continue
         
         # Check if any uploaded file matches this keyword
         matched_file = None
-        best_score = 0
         
         for filename in uploaded_files:
             filename_norm = normalize(filename)
-            filename_words = get_words(filename)
             
-            # Method 1: Direct substring match (keyword in filename or vice versa)
-            if keyword_norm in filename_norm or filename_norm in keyword_norm:
+            # ONLY match if the keyword appears as a substring in the filename
+            # e.g., "Company Tax" matches "TEAM Company Tax Verification.pdf"
+            # but "Earnings Tax Categories" does NOT match "Company Tax Verification.pdf"
+            if keyword_norm in filename_norm:
                 matched_file = filename
+                logger.info(f"[MATCH] ✓ '{keyword}' matched '{filename}'")
                 break
-            
-            # Method 2: Any keyword word appears in filename
-            for kw in keyword_words:
-                if kw in filename_norm:
-                    matched_file = filename
-                    break
-            if matched_file:
-                break
-            
-            # Method 3: Word overlap scoring
-            matching_words = 0
-            for kw in keyword_words:
-                for fw in filename_words:
-                    # Exact match or one contains the other
-                    if kw == fw or kw in fw or fw in kw:
-                        matching_words += 1
-                        break
-            
-            # Need at least 50% word match, or 2+ words matching
-            score = matching_words / len(keyword_words) if keyword_words else 0
-            if score >= 0.5 or matching_words >= 2:
-                if score > best_score:
-                    best_score = score
-                    matched_file = filename
         
         doc_info = {
             'keyword': doc.get('keyword'),
