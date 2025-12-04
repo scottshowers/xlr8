@@ -1453,12 +1453,13 @@ async def scan_for_action(project_id: str, action_id: str):
                 logger.warning(f"Query failed: {e}")
         
         logger.warning(f"[SCAN] Total unique docs found: {len(found_docs)}")
-        logger.warning(f"[SCAN] Content chunks for AI: {len(all_content)}")
+        logger.warning(f"[SCAN] ChromaDB content chunks: {len(all_content)}")
         
         # =====================================================================
         # STEP 4: Get structured data from DuckDB _pdf_tables
-        # This has the FULL extracted table data, not truncated chunks
+        # This has the FULL extracted table data - PRIORITIZE THIS
         # =====================================================================
+        duckdb_content = []  # Separate list for DuckDB data
         try:
             from backend.utils.playbook_parser import get_duckdb_connection
             conn = get_duckdb_connection()
@@ -1485,22 +1486,22 @@ async def scan_for_action(project_id: str, action_id: str):
                         
                         for table_name, columns_json in tables:
                             try:
-                                # Get actual data from the table
-                                data = conn.execute(f'SELECT * FROM "{table_name}" LIMIT 100').fetchall()
+                                # Get ALL data from the table (no limit)
+                                data = conn.execute(f'SELECT * FROM "{table_name}"').fetchall()
                                 columns = json.loads(columns_json) if columns_json else []
                                 
                                 if data and columns:
                                     # Format as readable content
-                                    content_lines = [f"[FILE: {filename}] [TABLE: {table_name}]"]
+                                    content_lines = [f"[FILE: {filename}] [TABLE: {table_name}] [FULL DATA - {len(data)} rows]"]
                                     content_lines.append(f"Columns: {', '.join(columns)}")
                                     
-                                    for row in data[:50]:  # Limit rows
+                                    for row in data:  # ALL rows
                                         row_dict = {columns[i]: str(row[i]) for i in range(min(len(columns), len(row))) if row[i]}
                                         if row_dict:
                                             content_lines.append(str(row_dict))
                                     
                                     table_content = "\n".join(content_lines)
-                                    all_content.append(table_content)
+                                    duckdb_content.append(table_content)
                                     logger.warning(f"[SCAN] Added DuckDB table: {table_name} ({len(data)} rows)")
                             except Exception as te:
                                 logger.warning(f"[SCAN] Error reading table {table_name}: {te}")
@@ -1509,24 +1510,27 @@ async def scan_for_action(project_id: str, action_id: str):
         except Exception as e:
             logger.warning(f"[SCAN] DuckDB table content retrieval failed: {e}")
         
-        logger.warning(f"[SCAN] Final content chunks for AI: {len(all_content)}")
+        # PRIORITIZE: DuckDB full data FIRST, then ChromaDB chunks
+        # DuckDB has complete structured data, ChromaDB has truncated text chunks
+        final_content = duckdb_content + all_content[:20]  # DuckDB first, then top 20 ChromaDB chunks
+        logger.warning(f"[SCAN] Final content: {len(duckdb_content)} DuckDB + {min(20, len(all_content))} ChromaDB = {len(final_content)} chunks")
         
         # Determine findings and suggested status
         findings = None
         suggested_status = "not_started"
         
         # If we have docs OR inherited findings, we can analyze
-        has_data = len(found_docs) > 0 or len(inherited_findings) > 0
+        has_data = len(found_docs) > 0 or len(inherited_findings) > 0 or len(final_content) > 0
         
         if has_data:
             suggested_status = "in_progress"
             logger.warning(f"[SCAN] Has data - calling AI for analysis...")
             
             # Use Claude with CONSULTATIVE context
-            if all_content or inherited_findings:
+            if final_content or inherited_findings:
                 findings = await extract_findings_consultative(
                     action=action,
-                    content=all_content[:15],
+                    content=final_content,  # Full DuckDB + top ChromaDB chunks
                     inherited_findings=inherited_findings,
                     action_id=action_id
                 )
