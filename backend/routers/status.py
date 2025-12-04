@@ -241,12 +241,15 @@ async def get_structured_data_status(project: Optional[str] = None):
 @router.delete("/status/structured/{project}/{filename}")
 async def delete_structured_file(project: str, filename: str):
     """Delete a structured data file from DuckDB"""
+    logger.warning(f"[DELETE] Request to delete project={project}, filename={filename}")
+    
     if not STRUCTURED_AVAILABLE:
         raise HTTPException(status_code=503, detail="Structured data not available")
     
     try:
         handler = get_structured_handler()
         result = handler.delete_file(project, filename)
+        logger.warning(f"[DELETE] Result: {result}")
         return {"success": True, "message": f"Deleted {filename}", "details": result}
     except Exception as e:
         logger.error(f"Failed to delete structured file: {e}")
