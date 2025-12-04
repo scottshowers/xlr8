@@ -766,6 +766,36 @@ class ProcessingJobModel:
             return 0
     
     @staticmethod
+    def delete_by_date_range(start_date: str, end_date: str) -> int:
+        """Delete jobs within a date range - returns count deleted"""
+        supabase = get_supabase()
+        if not supabase:
+            return 0
+        
+        try:
+            # Get count first
+            count_response = supabase.table('processing_jobs') \
+                .select('id', count='exact') \
+                .gte('created_at', start_date) \
+                .lte('created_at', end_date) \
+                .execute()
+            count = count_response.count or 0
+            
+            # Delete jobs in range
+            if count > 0:
+                supabase.table('processing_jobs') \
+                    .delete() \
+                    .gte('created_at', start_date) \
+                    .lte('created_at', end_date) \
+                    .execute()
+            
+            return count
+        
+        except Exception as e:
+            print(f"Error deleting jobs by date range: {e}")
+            return 0
+    
+    @staticmethod
     def get_recent(days: int = 7, limit: int = 100) -> List[Dict[str, Any]]:
         """Get jobs from the last X days"""
         supabase = get_supabase()
