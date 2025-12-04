@@ -3150,12 +3150,12 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                         <option value="blocked">Blocked</option>
                         <option value="na">N/A</option>
                       </select>
-                      
-                      {/* Expand Arrow */}
-                      <span style={{ color: '#9ca3af', fontSize: '0.9rem', marginLeft: '0.25rem' }}>
-                        {isExpanded ? '▼' : '▶'}
-                      </span>
                     </div>
+                    
+                    {/* Expand Arrow - outside stopPropagation div so click works */}
+                    <span style={{ color: '#9ca3af', fontSize: '0.9rem', marginLeft: '0.5rem' }}>
+                      {isExpanded ? '▼' : '▶'}
+                    </span>
                   </div>
                   
                   {/* Expanded Details */}
