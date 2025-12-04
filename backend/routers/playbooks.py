@@ -1591,7 +1591,9 @@ async def detect_conflicts(project_id: str, action_id: str, new_findings: Option
     new_values = new_findings.get("key_values", {})
     
     # Check against all other actions for conflicting values
-    critical_fields = ["fein", "company_name", "federal_futa_rate"]
+    # Only flag conflicts for fields where a mismatch indicates real data problems
+    # Company name variations are cosmetic - not worth flagging
+    critical_fields = ["fein", "federal_futa_rate"]
     
     def normalize_value(field: str, value: str) -> str:
         """Normalize values for comparison to avoid false positives"""
