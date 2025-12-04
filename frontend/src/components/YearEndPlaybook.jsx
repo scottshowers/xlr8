@@ -2068,7 +2068,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
 
 // Step Accordion Component
 function StepAccordion({ step, progress, projectId, onUpdate, tooltipsByAction, isAdmin, onAddTooltip, onEditTooltip, onDeleteTooltip, uploadedFiles }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false); // Default collapsed
   
   // Safety check
   if (!step) {
@@ -3072,7 +3072,6 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                           {ftItem.sequence}
                         </span>
                         <span style={{ fontWeight: '600', color: colors.text }}>{ftItem.description}</span>
-                        <span style={{ color: '#9ca3af', fontSize: '0.8rem' }}>{isExpanded ? '▼' : '▶'}</span>
                       </div>
                       
                       <div style={{ marginLeft: '32px', display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
@@ -3151,6 +3150,11 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                         <option value="blocked">Blocked</option>
                         <option value="na">N/A</option>
                       </select>
+                      
+                      {/* Expand Arrow */}
+                      <span style={{ color: '#9ca3af', fontSize: '0.9rem', marginLeft: '0.25rem' }}>
+                        {isExpanded ? '▼' : '▶'}
+                      </span>
                     </div>
                   </div>
                   
