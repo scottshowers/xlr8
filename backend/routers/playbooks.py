@@ -1781,23 +1781,27 @@ INHERITED DATA FROM PREVIOUS ACTIONS:
 
 Based on the documents and your UKG/Payroll expertise, provide:
 
-1. EXTRACT key data values found (FEIN, rates, states, etc.)
+1. EXTRACT key data values found (FEIN, rates, states, etc.) - note which file each came from
 2. COMPARE to benchmarks where applicable (flag HIGH/LOW/UNUSUAL)
-3. IDENTIFY risks, issues, or items needing attention
+3. IDENTIFY risks, issues, or items needing attention - cite the source document
 4. RECOMMEND specific actions the customer should take
 5. ASSESS completeness - can this action be marked complete?
+
+IMPORTANT: Each document chunk is labeled with [FILE: filename]. Include source citations.
 
 Return as JSON:
 {{
     "complete": true/false,
-    "key_values": {{"label": "value"}},
-    "issues": ["list of concerns - be specific"],
-    "recommendations": ["specific actions to take"],
+    "key_values": {{"label": "value (from filename)"}},
+    "issues": ["Issue description (Source: filename)"],
+    "recommendations": ["Specific action to take"],
     "risk_level": "low|medium|high",
-    "summary": "2-3 sentence consultative summary with specific observations"
+    "summary": "2-3 sentence consultative summary with specific observations",
+    "sources_used": ["list of filenames analyzed"]
 }}
 
 Be specific and actionable. Reference actual values from the documents.
+Include "(Source: filename)" at the end of each issue when you can identify the source.
 If rates are high/low compared to benchmarks, say so explicitly.
 If data is missing, specify exactly what's needed.
 
