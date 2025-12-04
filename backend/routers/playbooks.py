@@ -1455,6 +1455,62 @@ async def scan_for_action(project_id: str, action_id: str):
         logger.warning(f"[SCAN] Total unique docs found: {len(found_docs)}")
         logger.warning(f"[SCAN] Content chunks for AI: {len(all_content)}")
         
+        # =====================================================================
+        # STEP 4: Get structured data from DuckDB _pdf_tables
+        # This has the FULL extracted table data, not truncated chunks
+        # =====================================================================
+        try:
+            from backend.utils.playbook_parser import get_duckdb_connection
+            conn = get_duckdb_connection()
+            if conn:
+                # Check if _pdf_tables exists
+                table_check = conn.execute("""
+                    SELECT COUNT(*) FROM information_schema.tables 
+                    WHERE table_name = '_pdf_tables'
+                """).fetchone()
+                
+                if table_check and table_check[0] > 0:
+                    # Get table names for this project's files
+                    for doc in found_docs:
+                        filename = doc.get('filename', '')
+                        if not filename:
+                            continue
+                        
+                        # Find tables derived from this file
+                        tables = conn.execute("""
+                            SELECT table_name, columns
+                            FROM _pdf_tables
+                            WHERE source_file = ?
+                        """, [filename]).fetchall()
+                        
+                        for table_name, columns_json in tables:
+                            try:
+                                # Get actual data from the table
+                                data = conn.execute(f'SELECT * FROM "{table_name}" LIMIT 100').fetchall()
+                                columns = json.loads(columns_json) if columns_json else []
+                                
+                                if data and columns:
+                                    # Format as readable content
+                                    content_lines = [f"[FILE: {filename}] [TABLE: {table_name}]"]
+                                    content_lines.append(f"Columns: {', '.join(columns)}")
+                                    
+                                    for row in data[:50]:  # Limit rows
+                                        row_dict = {columns[i]: str(row[i]) for i in range(min(len(columns), len(row))) if row[i]}
+                                        if row_dict:
+                                            content_lines.append(str(row_dict))
+                                    
+                                    table_content = "\n".join(content_lines)
+                                    all_content.append(table_content)
+                                    logger.warning(f"[SCAN] Added DuckDB table: {table_name} ({len(data)} rows)")
+                            except Exception as te:
+                                logger.warning(f"[SCAN] Error reading table {table_name}: {te}")
+                
+                conn.close()
+        except Exception as e:
+            logger.warning(f"[SCAN] DuckDB table content retrieval failed: {e}")
+        
+        logger.warning(f"[SCAN] Final content chunks for AI: {len(all_content)}")
+        
         # Determine findings and suggested status
         findings = None
         suggested_status = "not_started"
