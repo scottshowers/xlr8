@@ -13,6 +13,8 @@ export default function Status() {
   const [killingJob, setKillingJob] = useState(null)
   const [deletingJob, setDeletingJob] = useState(null)
   const [clearingOldJobs, setClearingOldJobs] = useState(false)
+  const [deleteStartDate, setDeleteStartDate] = useState('')
+  const [deleteEndDate, setDeleteEndDate] = useState('')
 
   useEffect(() => {
     loadData()
@@ -91,17 +93,24 @@ export default function Status() {
   }
 
   const deleteOldJobs = async () => {
-    if (!confirm('Delete all processing jobs older than 7 days?')) return
+    if (!deleteStartDate || !deleteEndDate) {
+      alert('Please select both start and end dates')
+      return
+    }
+    
+    if (!confirm(`Delete all jobs from ${deleteStartDate} to ${deleteEndDate}?`)) return
     
     setClearingOldJobs(true)
     
     try {
-      const res = await api.delete('/jobs/old?days=7')
-      alert(`Deleted ${res.data.deleted_count || 0} old jobs`)
+      const res = await api.delete(`/jobs/old?start_date=${deleteStartDate}T00:00:00Z&end_date=${deleteEndDate}T23:59:59Z`)
+      alert(`Deleted ${res.data.deleted_count || 0} jobs`)
+      setDeleteStartDate('')
+      setDeleteEndDate('')
       await loadData()
     } catch (err) {
       console.error('Delete old jobs error:', err)
-      alert('Error clearing old jobs: ' + (err.response?.data?.detail || err.message))
+      alert('Error clearing jobs: ' + (err.response?.data?.detail || err.message))
     } finally {
       setClearingOldJobs(false)
     }
@@ -331,22 +340,37 @@ export default function Status() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-2xl font-bold">Processing Jobs</h2>
             <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-500">Showing last 7 days</span>
+              <span className="text-sm text-gray-500">Delete range:</span>
+              <input
+                type="date"
+                value={deleteStartDate}
+                onChange={(e) => setDeleteStartDate(e.target.value)}
+                className="px-2 py-1 text-sm border rounded"
+                title="Start date"
+              />
+              <span className="text-gray-400">to</span>
+              <input
+                type="date"
+                value={deleteEndDate}
+                onChange={(e) => setDeleteEndDate(e.target.value)}
+                className="px-2 py-1 text-sm border rounded"
+                title="End date"
+              />
               <button
                 onClick={deleteOldJobs}
-                disabled={clearingOldJobs}
-                className="flex items-center gap-1 px-3 py-1 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                title="Clear jobs older than 7 days"
+                disabled={clearingOldJobs || !deleteStartDate || !deleteEndDate}
+                className="flex items-center gap-1 px-3 py-1 bg-red-100 text-red-700 text-sm rounded hover:bg-red-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Delete jobs in date range"
               >
                 {clearingOldJobs ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Clearing...</span>
+                    <span>Deleting...</span>
                   </>
                 ) : (
                   <>
                     <Trash2 className="w-4 h-4" />
-                    <span>Clear Old Jobs</span>
+                    <span>Delete Range</span>
                   </>
                 )}
               </button>
