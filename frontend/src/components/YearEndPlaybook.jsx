@@ -426,7 +426,7 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
       {expanded && (
         <div style={{ padding: '0 1rem 1rem', borderTop: '1px solid #e1e8ed' }}>
           {/* High Risk Actions */}
-          {high_risk_actions?.length > 0 && (
+          {Array.isArray(high_risk_actions) && high_risk_actions.length > 0 && (
             <div style={{ marginTop: '0.75rem' }}>
               <div style={{ fontWeight: '600', color: '#dc2626', marginBottom: '0.5rem' }}>
                 🚨 High Risk Actions:
@@ -446,7 +446,7 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
           )}
           
           {/* Conflicts */}
-          {conflicts?.length > 0 && (
+          {Array.isArray(conflicts) && conflicts.length > 0 && (
             <div style={{ marginTop: '0.75rem' }}>
               <div style={{ fontWeight: '600', color: '#dc2626', marginBottom: '0.5rem' }}>
                 ❗ Data Conflicts:
@@ -466,7 +466,7 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
           )}
           
           {/* Review Flags */}
-          {review_flags?.length > 0 && (
+          {Array.isArray(review_flags) && review_flags.length > 0 && (
             <div style={{ marginTop: '0.75rem' }}>
               <div style={{ fontWeight: '600', color: '#d97706', marginBottom: '0.5rem' }}>
                 🔄 Actions Needing Review:
@@ -486,7 +486,7 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
           )}
           
           {/* Top Issues */}
-          {issues?.length > 0 && (
+          {Array.isArray(issues) && issues.length > 0 && (
             <div style={{ marginTop: '0.75rem' }}>
               <div style={{ fontWeight: '600', color: COLORS.text, marginBottom: '0.5rem' }}>
                 ⚠️ Issues ({issues.length}):
@@ -519,7 +519,7 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
           )}
           
           {/* Top Recommendations */}
-          {recommendations?.length > 0 && (
+          {Array.isArray(recommendations) && recommendations.length > 0 && (
             <div style={{ marginTop: '0.75rem' }}>
               <div style={{ fontWeight: '600', color: '#059669', marginBottom: '0.5rem' }}>
                 ✅ Recommendations ({recommendations.length}):
@@ -1901,7 +1901,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
           )}
 
           {/* Show issues/concerns */}
-          {findings?.issues && findings.issues.length > 0 && (
+          {findings?.issues && Array.isArray(findings.issues) && findings.issues.length > 0 && (
             <div style={styles.section}>
               <div style={styles.sectionTitle}>⚠️ Issues Identified</div>
               <div style={{ 
@@ -1929,7 +1929,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
           )}
 
           {/* Show action-specific guidance */}
-          {findings?.guidance && findings.guidance.length > 0 && (
+          {findings?.guidance && Array.isArray(findings.guidance) && findings.guidance.length > 0 && (
             <div style={styles.section}>
               <div style={styles.sectionTitle}>📋 Guidance for This Action</div>
               <div style={{ 
@@ -1966,9 +1966,27 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
               </div>
             </div>
           )}
+          
+          {/* Show guidance as text if it's a string */}
+          {findings?.guidance && typeof findings.guidance === 'string' && findings.guidance.length > 0 && (
+            <div style={styles.section}>
+              <div style={styles.sectionTitle}>📋 Guidance for This Action</div>
+              <div style={{ 
+                background: '#f0fdf4', 
+                border: '1px solid #86efac',
+                borderRadius: '6px',
+                padding: '0.75rem',
+                fontSize: '0.85rem',
+                color: '#166534',
+                whiteSpace: 'pre-wrap'
+              }}>
+                {findings.guidance}
+              </div>
+            </div>
+          )}
 
           {/* Show recommendations */}
-          {findings?.recommendations && findings.recommendations.length > 0 && (
+          {findings?.recommendations && Array.isArray(findings.recommendations) && findings.recommendations.length > 0 && (
             <div style={styles.section}>
               <div style={styles.sectionTitle}>💡 Recommendations</div>
               <div style={{ 
@@ -2413,7 +2431,9 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
 
   // Fast Track: Get combined status from referenced UKG actions
   const getFastTrackProgress = (ftItem) => {
-    if (!ftItem?.ukg_action_ref?.length) return { status: 'not_started', findings: null };
+    if (!ftItem?.ukg_action_ref || !Array.isArray(ftItem.ukg_action_ref) || ftItem.ukg_action_ref.length === 0) {
+      return { status: 'not_started', findings: null };
+    }
     
     const refStatuses = ftItem.ukg_action_ref.map(actionId => {
       const p = progress[actionId] || {};
@@ -2429,7 +2449,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   
   // Fast Track: Update status (syncs to all referenced UKG actions)
   const handleFastTrackUpdate = async (ftItem, newStatus) => {
-    if (!ftItem?.ukg_action_ref?.length) return;
+    if (!ftItem?.ukg_action_ref || !Array.isArray(ftItem.ukg_action_ref) || ftItem.ukg_action_ref.length === 0) return;
     
     for (const actionId of ftItem.ukg_action_ref) {
       try {
@@ -3009,9 +3029,9 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
               const isExpanded = expandedAction === `ft_${ftItem.ft_id}`;
               
               // Get documents found for linked actions
-              const linkedDocsFound = ftItem.ukg_action_ref?.flatMap(actionId => 
+              const linkedDocsFound = (Array.isArray(ftItem.ukg_action_ref) ? ftItem.ukg_action_ref : []).flatMap(actionId => 
                 progress[actionId]?.documents_found || []
-              ) || [];
+              );
               
               return (
                 <div 
@@ -3056,13 +3076,13 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                       </div>
                       
                       <div style={{ marginLeft: '32px', display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-                        {ftItem.ukg_action_ref?.length > 0 && (
+                        {Array.isArray(ftItem.ukg_action_ref) && ftItem.ukg_action_ref.length > 0 && (
                           <span style={{ fontSize: '0.75rem', color: '#6b7280', background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>
                             🔗 UKG: {ftItem.ukg_action_ref.join(', ')}
                           </span>
                         )}
                         
-                        {ftItem.reports_needed?.length > 0 && (
+                        {Array.isArray(ftItem.reports_needed) && ftItem.reports_needed.length > 0 && (
                           <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>
                             📄 {ftItem.reports_needed.length} report{ftItem.reports_needed.length > 1 ? 's' : ''}
                           </span>
@@ -3200,7 +3220,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                       )}
                       
                       {/* Reports Needed */}
-                      {ftItem.reports_needed?.length > 0 && (
+                      {Array.isArray(ftItem.reports_needed) && ftItem.reports_needed.length > 0 && (
                         <div style={{ marginBottom: '1rem' }}>
                           <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', marginBottom: '0.25rem' }}>
                             📄 REPORTS NEEDED
@@ -3231,7 +3251,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                       )}
                       
                       {/* Linked UKG Actions Details */}
-                      {ftItem.ukg_action_ref?.length > 0 && (
+                      {Array.isArray(ftItem.ukg_action_ref) && ftItem.ukg_action_ref.length > 0 && (
                         <div style={{ marginBottom: '1rem' }}>
                           <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', marginBottom: '0.5rem' }}>
                             🔗 LINKED UKG ACTIONS
