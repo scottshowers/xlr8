@@ -2240,6 +2240,56 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 DELETE FROM _schema_metadata WHERE project = ? AND file_name = ? AND is_current = TRUE
             """, [project, file_name])
         
+        # ALSO handle PDF-derived tables
+        try:
+            # Check if _pdf_tables exists
+            pdf_table_exists = self.conn.execute("""
+                SELECT COUNT(*) FROM information_schema.tables 
+                WHERE table_name = '_pdf_tables'
+            """).fetchone()[0] > 0
+            
+            logger.warning(f"[DELETE] PDF tables exist: {pdf_table_exists}, looking for project={project}, file={file_name}")
+            
+            if pdf_table_exists:
+                # First, see ALL entries in _pdf_tables for debugging
+                all_pdf = self.conn.execute("""
+                    SELECT table_name, source_file, project, project_id FROM _pdf_tables
+                """).fetchall()
+                logger.warning(f"[DELETE] All PDF entries: {all_pdf}")
+                
+                # Find PDF tables matching this file
+                pdf_tables = self.conn.execute("""
+                    SELECT table_name, source_file FROM _pdf_tables 
+                    WHERE (project = ? OR project_id = ?) 
+                    AND (source_file = ? OR source_file LIKE ?)
+                """, [project, project, file_name, f"%{file_name}%"]).fetchall()
+                
+                logger.warning(f"[DELETE] Matched PDF tables: {pdf_tables}")
+                
+                for row in pdf_tables:
+                    table_name = row[0]
+                    try:
+                        self.conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+                        result['tables_deleted'].append(table_name)
+                        logger.info(f"Deleted PDF table: {table_name}")
+                    except Exception as e:
+                        logger.warning(f"Could not delete PDF table {table_name}: {e}")
+                
+                # Delete from _pdf_tables metadata
+                deleted = self.conn.execute("""
+                    DELETE FROM _pdf_tables 
+                    WHERE (project = ? OR project_id = ?) 
+                    AND (source_file = ? OR source_file LIKE ?)
+                """, [project, project, file_name, f"%{file_name}%"])
+                
+                logger.warning(f"[DELETE] Deleted {deleted.rowcount if hasattr(deleted, 'rowcount') else 'unknown'} rows from _pdf_tables")
+                
+                logger.info(f"Cleaned up PDF metadata for {file_name}")
+        except Exception as pdf_e:
+            logger.warning(f"Error cleaning up PDF tables: {pdf_e}")
+            import traceback
+            logger.warning(traceback.format_exc())
+        
         self.conn.commit()
         
         result['versions_deleted'] = list(versions_deleted)
