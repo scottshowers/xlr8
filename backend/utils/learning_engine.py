@@ -33,7 +33,17 @@ logger = logging.getLogger(__name__)
 # STORAGE PATHS
 # =============================================================================
 
+# Use /data if available, otherwise fall back to local ./data directory
 DATA_DIR = Path(os.getenv("XLR8_DATA_DIR", "/data"))
+
+# Try to create in /data, fall back to local if permissions fail
+try:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+except PermissionError:
+    DATA_DIR = Path("./data")
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    logger.warning(f"[LEARNING] Using local data directory: {DATA_DIR}")
+
 TRAINING_DIR = DATA_DIR / "training"
 FEEDBACK_DIR = DATA_DIR / "feedback"
 RULES_DIR = DATA_DIR / "rules"
@@ -41,7 +51,10 @@ CACHE_DIR = DATA_DIR / "knowledge_cache"
 
 # Ensure directories exist
 for d in [TRAINING_DIR, FEEDBACK_DIR, RULES_DIR, CACHE_DIR]:
-    d.mkdir(parents=True, exist_ok=True)
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        logger.warning(f"[LEARNING] Could not create {d}: {e}")
 
 
 # =============================================================================
