@@ -1191,7 +1191,9 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
   }
   
   const findings = progress?.findings;
-  const reportsNeeded = action.reports_needed || [];
+  const reportsNeeded = Array.isArray(action.reports_needed) 
+    ? action.reports_needed 
+    : (action.reports_needed ? String(action.reports_needed).split(',').map(s => s.trim()) : []);
   const expectedCount = reportsNeeded.length || 1;
   
   const statusConfig = STATUS_OPTIONS.find(s => s.value === localStatus) || STATUS_OPTIONS[0];
@@ -1621,13 +1623,15 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
           </div>
 
           {/* Show matched and missing reports */}
-          {action.reports_needed && (Array.isArray(action.reports_needed) ? action.reports_needed.length > 0 : action.reports_needed.length > 0) && (
+          {action.reports_needed && (Array.isArray(action.reports_needed) ? action.reports_needed.length > 0 : String(action.reports_needed).trim().length > 0) && (
             <div style={styles.section}>
               <div style={styles.sectionTitle}>Document Status</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                {(Array.isArray(action.reports_needed) 
-                  ? action.reports_needed 
-                  : action.reports_needed.split(',')
+                {(action.reports_needed 
+                  ? (Array.isArray(action.reports_needed) 
+                      ? action.reports_needed 
+                      : String(action.reports_needed).split(','))
+                  : []
                 ).map((report, i) => {
                   const reportTrimmed = String(report).trim();
                   // Normalize: lowercase, replace separators
@@ -1695,7 +1699,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
           )}
 
           {/* Show inherited indicator if applicable */}
-          {progress?.inherited_from && progress.inherited_from.length > 0 && (
+          {progress?.inherited_from && (Array.isArray(progress.inherited_from) ? progress.inherited_from.length > 0 : progress.inherited_from) && (
             <div style={{ 
               background: '#e0f2fe', 
               padding: '0.5rem 0.75rem', 
@@ -1708,7 +1712,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
               gap: '0.5rem'
             }}>
               <span>🔗</span>
-              <span>Using data from action{progress.inherited_from.length > 1 ? 's' : ''}: <strong>{progress.inherited_from.join(', ')}</strong></span>
+              <span>Using data from action{Array.isArray(progress.inherited_from) && progress.inherited_from.length > 1 ? 's' : ''}: <strong>{Array.isArray(progress.inherited_from) ? progress.inherited_from.join(', ') : progress.inherited_from}</strong></span>
             </div>
           )}
           
