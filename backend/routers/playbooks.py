@@ -1923,18 +1923,26 @@ INHERITED DATA FROM PREVIOUS ACTIONS:
 
 {consultative_context}
 
-STRICT INSTRUCTIONS:
-1. EXTRACT only values you can actually see in the documents. If a value isn't there, don't make it up.
-2. ISSUES must be specific and actionable. Do NOT include:
-   - Generic formatting complaints
-   - Vague data quality concerns
-   - "Multiple FEINs" warnings (client may have multiple entities)
-   - Anything you can't cite to a specific document
-3. RECOMMENDATIONS must be concrete next steps, not filler like "review data" or "verify information"
-4. If the documents don't reveal problems, say "complete": true and leave issues array empty
-5. DO NOT invent issues to seem thorough. Empty issues array is perfectly fine.
+ANALYSIS QUALITY STANDARDS:
+Your analysis must be consultant-grade. This means:
+- EXTRACT specific values with source citations: "FEIN: 74-1776312 (Source: Master Profile.pdf)"
+- COMPARE against benchmarks: "SUI rate of 5.2% is HIGH compared to typical new employer rate of 2.7%"
+- IDENTIFY actual problems: "W-2 Box 12 Code D is missing for 401k contributions"
+- RECOMMEND specific actions: "Update tax code ABC123 effective date to 1/1/2025"
 
-{f'CLIENT FEIN: {selected_fein} - Use this exact value, do not flag FEIN format issues.' if selected_fein else ''}
+DO NOT INCLUDE THESE AS ISSUES:
+- FEIN format issues (we already have the client's FEIN)
+- "Multiple FEINs detected" (client may have multiple entities - this is normal)
+- Generic formatting or data quality complaints
+- "Data should be verified" type filler
+- Anything without a specific document citation
+
+{f'CLIENT FEIN: {selected_fein} - This is confirmed. Never flag FEIN as an issue.' if selected_fein else ''}
+
+WHAT MAKES THIS ACTION COMPLETE?
+- Can we answer: {action.get('description', 'the action requirements')}?
+- Do we have the required reports: {', '.join(action.get('reports_needed', []))}?
+- If yes to both, mark complete: true
 
 Return as JSON:
 {{
@@ -1943,11 +1951,11 @@ Return as JSON:
     "issues": [],
     "recommendations": [],
     "risk_level": "low|medium|high",
-    "summary": "2-3 sentence summary of what you found",
+    "summary": "2-3 sentence consultant-grade summary with specific observations",
     "sources_used": ["filenames"]
 }}
 
-Only populate issues and recommendations with REAL, SPECIFIC, ACTIONABLE items you found in the documents.
+Remember: Empty issues array = good news for the client. Don't manufacture problems.
 Return ONLY valid JSON."""
 
         logger.info(f"[FALLBACK] Calling Claude directly for {action_id}")
@@ -1968,6 +1976,20 @@ Return ONLY valid JSON."""
         text = text.strip()
         
         result = json.loads(text)
+        
+        # POST-PROCESSING: Filter out any FEIN-related issues that slipped through
+        fein_keywords = ['fein', 'ein', 'federal employer', 'multiple feins', 'fein format', 'fein mismatch']
+        if result.get('issues'):
+            result['issues'] = [
+                issue for issue in result['issues']
+                if not any(kw in issue.lower() for kw in fein_keywords)
+            ]
+        if result.get('recommendations'):
+            result['recommendations'] = [
+                rec for rec in result['recommendations']
+                if not any(kw in rec.lower() for kw in fein_keywords)
+            ]
+        
         result['_analyzed_by'] = 'claude_fallback'
         return result
         
@@ -2317,34 +2339,41 @@ async def get_ai_summary(project_id: str):
     actions_with_flags = []
     high_risk_actions = []
     
+    # Keywords to filter out FEIN-related noise
+    fein_keywords = ['fein', 'ein', 'federal employer', 'multiple feins', 'fein format', 'fein mismatch', 'conflicting fein']
+    
     for action_id, action_progress in progress.items():
         findings = action_progress.get("findings", {})
         if not findings:
             continue
         
-        # Collect issues with action context
+        # Collect issues with action context - FILTER OUT FEIN ISSUES
         for issue in findings.get("issues", []):
-            all_issues.append({
-                "action_id": action_id,
-                "issue": issue,
-                "risk_level": findings.get("risk_level", "medium")
-            })
+            if not any(kw in issue.lower() for kw in fein_keywords):
+                all_issues.append({
+                    "action_id": action_id,
+                    "issue": issue,
+                    "risk_level": findings.get("risk_level", "medium")
+                })
         
-        # Collect recommendations
+        # Collect recommendations - FILTER OUT FEIN RECOMMENDATIONS
         for rec in findings.get("recommendations", []):
-            all_recommendations.append({
-                "action_id": action_id,
-                "recommendation": rec
-            })
+            if not any(kw in rec.lower() for kw in fein_keywords):
+                all_recommendations.append({
+                    "action_id": action_id,
+                    "recommendation": rec
+                })
         
         # Collect key values (dedupe by key)
         for key, value in findings.get("key_values", {}).items():
             if key not in all_key_values:
                 all_key_values[key] = {"value": value, "source": action_id}
         
-        # Collect conflicts (skip company_name - too many false positives)
+        # Collect conflicts - FILTER OUT FEIN CONFLICTS
         for conflict in findings.get("conflicts", []):
-            if conflict.get("field") != "company_name":
+            field = conflict.get("field", "").lower()
+            message = conflict.get("message", "").lower()
+            if field != "company_name" and field != "fein" and "fein" not in message:
                 all_conflicts.append(conflict)
         
         # Track review flags
