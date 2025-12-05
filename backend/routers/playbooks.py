@@ -1733,9 +1733,15 @@ async def detect_conflicts(project_id: str, action_id: str, new_findings: Option
         val = re.sub(r'\s*\(from\s*[^)]+\)', '', val)
         val = val.strip()
         
-        # FEIN: remove dashes, spaces, just keep digits
+        # FEIN: extract first valid FEIN pattern, not all digits
         if "fein" in field.lower() or "ein" in field.lower():
-            return ''.join(c for c in val if c.isdigit())
+            # Look for XX-XXXXXXX or 9 consecutive digits
+            fein_match = re.search(r'(\d{2})-?(\d{7})', val)
+            if fein_match:
+                return fein_match.group(1) + fein_match.group(2)
+            # Fallback: first 9 digits if present
+            digits = ''.join(c for c in val if c.isdigit())
+            return digits[:9] if len(digits) >= 9 else digits
         
         # Percentages: normalize to consistent decimal
         if "rate" in field.lower() or "%" in val:
@@ -1743,12 +1749,20 @@ async def detect_conflicts(project_id: str, action_id: str, new_findings: Option
                 # Remove % sign and convert to float
                 cleaned = val.replace('%', '').strip()
                 num = float(cleaned)
-                # Round to 4 decimal places for comparison
                 return f"{num:.4f}"
             except (ValueError, TypeError):
                 pass
         
         return val.lower()
+    
+    def extract_all_feins(value: str) -> set:
+        """Extract all FEINs from a value for multi-FEIN comparison"""
+        if not value:
+            return set()
+        feins = set()
+        for match in re.finditer(r'(\d{2})-?(\d{7})', str(value)):
+            feins.add(match.group(1) + match.group(2))
+        return feins
     
     for other_action_id, other_progress in progress.items():
         if other_action_id == action_id:
@@ -1780,6 +1794,14 @@ async def detect_conflicts(project_id: str, action_id: str, new_findings: Option
             
             # Compare normalized values
             if new_val and other_val and new_val != other_val:
+                # For FEIN fields, check if there's any overlap in the FEINs mentioned
+                # "Multiple FEINs: X, Y" is not a conflict with "X"
+                if "fein" in field.lower():
+                    new_feins = extract_all_feins(new_val_raw)
+                    other_feins = extract_all_feins(other_val_raw)
+                    if new_feins & other_feins:  # Sets have overlap
+                        continue  # Not a real conflict
+                
                 conflicts.append({
                     "field": field,
                     "action_1": action_id,
@@ -1788,7 +1810,6 @@ async def detect_conflicts(project_id: str, action_id: str, new_findings: Option
                     "value_2": other_val_raw,
                     "message": f"Conflicting {field}: '{new_val_raw}' (from {action_id}) vs '{other_val_raw}' (from {other_action_id})"
                 })
-                logger.warning(f"[CONFLICT] {conflicts[-1]['message']}")
     
     return conflicts
 
