@@ -3950,40 +3950,70 @@ async def get_suppression_stats(playbook_type: str, project_id: str):
 # =============================================================================
 
 async def get_project_documents_text(project_id: str) -> List[str]:
-    """Get all document text for a project (for entity detection)."""
+    """Get all document text for a project (for entity detection).
+    Checks BOTH DuckDB (structured) and ChromaDB (unstructured).
+    """
+    texts = []
+    
+    # 1. Try DuckDB first (structured data - Excel files, CSVs)
     try:
-        # Try ChromaDB first
-        try:
-            from backend.chroma_client import query_documents
-            results = query_documents("*", project_id=project_id, n_results=100)
-            if results and results.get('documents'):
-                return [doc for docs in results['documents'] for doc in docs if doc]
-        except:
-            pass
-        
-        # Fallback to DuckDB
-        try:
-            from backend.utils.duckdb_manager import get_duckdb_manager
-            manager = get_duckdb_manager()
-            tables = manager.list_project_tables(project_id)
-            
-            texts = []
-            for table in tables:
+        from backend.utils.playbook_parser import get_duckdb_connection
+        conn = get_duckdb_connection()
+        if conn:
+            # Get all tables for this project
+            try:
+                tables = conn.execute("""
+                    SELECT table_name, file_name 
+                    FROM _schema_metadata 
+                    WHERE project = ? AND is_current = TRUE
+                """, [project_id]).fetchall()
+                
+                for table_name, file_name in tables:
+                    try:
+                        df = conn.execute(f"SELECT * FROM \"{table_name}\" LIMIT 500").fetchdf()
+                        if df is not None and not df.empty:
+                            texts.append(f"[Source: {file_name}]\n{df.to_string()}")
+                    except Exception as e:
+                        logger.debug(f"[ENTITIES] Error reading table {table_name}: {e}")
+                
+                conn.close()
+            except Exception as e:
+                logger.debug(f"[ENTITIES] DuckDB query error: {e}")
                 try:
-                    df = manager.query(f"SELECT * FROM {table} LIMIT 1000")
-                    if df is not None and not df.empty:
-                        texts.append(df.to_string())
+                    conn.close()
                 except:
                     pass
-            return texts
-        except:
-            pass
-        
-        return []
-        
+    except ImportError:
+        logger.debug("[ENTITIES] playbook_parser not available for DuckDB")
     except Exception as e:
-        logger.error(f"[ENTITIES] Error getting documents: {e}")
-        return []
+        logger.debug(f"[ENTITIES] DuckDB error: {e}")
+    
+    # 2. Try ChromaDB (unstructured data - PDFs, docs)
+    try:
+        from chroma_client import query_documents
+        results = query_documents("company FEIN EIN employer", project_id=project_id, n_results=50)
+        if results and results.get('documents'):
+            for doc_list in results['documents']:
+                for doc in doc_list:
+                    if doc:
+                        texts.append(doc)
+    except ImportError:
+        # Try alternate import path
+        try:
+            from backend.chroma_client import query_documents
+            results = query_documents("company FEIN EIN employer", project_id=project_id, n_results=50)
+            if results and results.get('documents'):
+                for doc_list in results['documents']:
+                    for doc in doc_list:
+                        if doc:
+                            texts.append(doc)
+        except Exception as e:
+            logger.debug(f"[ENTITIES] ChromaDB not available: {e}")
+    except Exception as e:
+        logger.debug(f"[ENTITIES] ChromaDB error: {e}")
+    
+    logger.info(f"[ENTITIES] Retrieved {len(texts)} text chunks for project {project_id}")
+    return texts
         
 @router.post("/year-end/learning/export-training-data")
 async def export_training_data():
