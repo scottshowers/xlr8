@@ -3687,123 +3687,135 @@ async def get_learning_stats():
 @router.post("/{playbook_type}/detect-entities/{project_id}")
 async def detect_entities(playbook_type: str, project_id: str):
     """
-    Scan project documents for US FEINs and Canada BNs.
-    Call this before analysis to let user select which entities to include.
+    Scan project documents for US FEINs and Canada BNs using LLM.
+    Uses the same approach as Analyze - let AI extract intelligently.
     """
+    logger.warning(f"[ENTITIES] Starting entity detection for project {project_id}")
+    
     try:
-        from backend.utils.fein_detector import detect_entity_identifiers, identify_company_names
-        
-        # Get project documents
+        # Get project documents (same as scan uses)
         docs = await get_project_documents_text(project_id)
+        
         if not docs:
-            logger.warning("[ENTITIES] No documents retrieved")
+            logger.warning("[ENTITIES] No documents found")
             return {
                 "success": True,
                 "entities": {"us": [], "canada": []},
                 "summary": {"us_count": 0, "canada_count": 0, "total": 0},
-                "warnings": []
+                "warnings": ["No documents found for this project"]
             }
         
-        combined_text = "\n\n".join(docs)
+        combined_text = "\n\n---\n\n".join(docs)
+        # Limit to avoid token issues
+        if len(combined_text) > 50000:
+            combined_text = combined_text[:50000]
         
-        # Debug: show sample of text
-        logger.warning(f"[ENTITIES] Combined text length: {len(combined_text)} chars")
-        logger.warning(f"[ENTITIES] Text sample (first 500): {combined_text[:500]}")
+        logger.warning(f"[ENTITIES] Analyzing {len(combined_text)} chars of content")
         
-        # Show sample from Company Master Profile specifically
-        for doc in docs:
-            if 'Master Profile' in doc:
-                logger.warning(f"[ENTITIES] Company Master Profile FULL (first 3000 chars): {doc[:3000]}")
-                # Also search for 74- specifically
-                if '74-' in doc:
-                    logger.warning(f"[ENTITIES] Found '74-' in Master Profile!")
-                    idx = doc.find('74-')
-                    logger.warning(f"[ENTITIES] Context around 74-: {doc[max(0,idx-50):idx+50]}")
-                break
+        # Use LLM to extract FEINs intelligently
+        from anthropic import Anthropic
+        import json
         
-        # Also look for EIN/FEIN mentions specifically
-        import re
+        client = Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
         
-        # Look for 8-digit numbers (some EINs lose leading zero)
-        any_8digit = re.findall(r'\b\d{8}\b', combined_text)
-        logger.warning(f"[ENTITIES] Any 8-digit numbers: {any_8digit[:10]}")
+        prompt = f"""Analyze these documents and extract ALL Federal Employer Identification Numbers (FEINs/EINs).
+
+FEINs are 9-digit numbers, usually formatted as XX-XXXXXXX (like 74-1776312).
+They may appear:
+- In headers/footers
+- In company profile sections
+- Embedded in codes (like 036741776312F01 contains 74-1776312)
+- Near text like "EIN", "FEIN", "Employer Identification Number", "Tax ID"
+- In tax verification documents
+
+Also look for Canada Business Numbers (9 digits + RT/RC/RP/RZ/RR + 4 digits).
+
+Return ONLY a JSON object in this exact format, no other text:
+{{
+  "us": [
+    {{"fein": "74-1776312", "company_name": "Company Name if found", "confidence": "high"}}
+  ],
+  "canada": [
+    {{"bn": "123456789 RT 0001", "company_name": "Company Name if found", "confidence": "high"}}
+  ]
+}}
+
+If no FEINs/BNs found, return: {{"us": [], "canada": []}}
+
+DOCUMENTS:
+{combined_text}"""
+
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}]
+        )
         
-        # Look for 9-digit numbers
-        any_9digit = re.findall(r'\b\d{9}\b', combined_text)
-        logger.warning(f"[ENTITIES] Any 9-digit numbers: {any_9digit[:10]}")
+        response_text = response.content[0].text.strip()
+        logger.warning(f"[ENTITIES] LLM response: {response_text[:500]}")
         
-        # Search specifically for 74-1776312 or variants
-        if '74-1776312' in combined_text:
-            logger.warning("[ENTITIES] *** FOUND 74-1776312 in text! ***")
-            idx = combined_text.find('74-1776312')
-            logger.warning(f"[ENTITIES] Context: ...{combined_text[max(0,idx-50):idx+50]}...")
-        elif '741776312' in combined_text:
-            logger.warning("[ENTITIES] *** FOUND 741776312 (no hyphen) in text! ***")
-            idx = combined_text.find('741776312')
-            logger.warning(f"[ENTITIES] Context around 741776312: ...{repr(combined_text[max(0,idx-30):idx+30])}...")
-            # Test the regex directly
-            test_match = re.search(r'\b(\d{9})\b', combined_text[max(0,idx-30):idx+30])
-            logger.warning(f"[ENTITIES] Direct 9-digit regex match: {test_match.group() if test_match else 'NO MATCH'}")
-        elif '1776312' in combined_text:
-            logger.warning("[ENTITIES] *** FOUND 1776312 (partial) in text! ***")
-            idx = combined_text.find('1776312')
-            logger.warning(f"[ENTITIES] Context: {combined_text[max(0,idx-30):idx+30]}")
-        else:
-            logger.warning("[ENTITIES] Did NOT find 74-1776312 or 1776312 anywhere in extracted text")
+        # Parse JSON response
+        try:
+            # Handle markdown code blocks
+            if "```json" in response_text:
+                response_text = response_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in response_text:
+                response_text = response_text.split("```")[1].split("```")[0].strip()
+            
+            entities = json.loads(response_text)
+        except json.JSONDecodeError as e:
+            logger.warning(f"[ENTITIES] JSON parse error: {e}, response was: {response_text}")
+            entities = {"us": [], "canada": []}
         
-        # Look for numbers after "Number (EIN)" column header
-        ein_column = re.findall(r'Number\s*\(EIN\)[^\d]*(\d{7,9})', combined_text, re.IGNORECASE)
-        logger.warning(f"[ENTITIES] EIN column values: {ein_column[:10]}")
+        # Format response
+        us_entities = entities.get("us", [])
+        ca_entities = entities.get("canada", [])
         
-        # Look for any number that appears after EIN mention
-        after_ein = re.findall(r'EIN[^\d]{0,20}(\d{7,9})', combined_text, re.IGNORECASE)
-        logger.warning(f"[ENTITIES] Numbers after EIN: {after_ein[:10]}")
+        # Add count and id fields for compatibility
+        for i, entity in enumerate(us_entities):
+            entity['id'] = entity.get('fein', f'US-{i}')
+            entity['type'] = 'fein'
+            entity['count'] = 1
         
-        # Detect entities
-        entities = detect_entity_identifiers(combined_text)
-        logger.warning(f"[ENTITIES] Detector returned: us={len(entities.get('us', []))}, canada={len(entities.get('canada', []))}")
+        for i, entity in enumerate(ca_entities):
+            entity['id'] = entity.get('bn', f'CA-{i}')
+            entity['type'] = 'bn'
+            entity['count'] = 1
         
-        # Identify company names
-        all_entities = entities.get('us', []) + entities.get('canada', [])
-        if all_entities:
-            names = identify_company_names(all_entities, combined_text)
-            for country in ['us', 'canada']:
-                for entity in entities.get(country, []):
-                    if entity['id'] in names:
-                        entity['company_name'] = names[entity['id']].get('company_name', f"Entity {entity['id']}")
-        
-        # Build summary
-        us_count = len(entities.get('us', []))
-        ca_count = len(entities.get('canada', []))
-        
-        # Suggested primary (most mentioned)
-        primary = None
-        if all_entities:
-            primary = max(all_entities, key=lambda x: x.get('count', 0))
-        
+        # Warnings
         warnings = []
-        if ca_count > 0 and playbook_type == 'year_end':
-            warnings.append("Canada entities detected - requires Canada Year-End Playbook (coming soon)")
+        if ca_entities and playbook_type == 'year-end':
+            warnings.append("Canada entities detected - requires Canada Year-End Playbook")
+        
+        # Suggested primary (first high-confidence US entity)
+        primary = None
+        for e in us_entities:
+            if e.get('confidence') == 'high':
+                primary = e['id']
+                break
+        if not primary and us_entities:
+            primary = us_entities[0]['id']
+        
+        logger.warning(f"[ENTITIES] Found {len(us_entities)} US, {len(ca_entities)} Canada entities")
         
         return {
             "success": True,
             "project_id": project_id,
             "playbook_type": playbook_type,
-            "entities": entities,
+            "entities": {"us": us_entities, "canada": ca_entities},
             "summary": {
-                "us_count": us_count,
-                "canada_count": ca_count,
-                "total": us_count + ca_count,
-                "suggested_primary": primary['id'] if primary else None
+                "us_count": len(us_entities),
+                "canada_count": len(ca_entities),
+                "total": len(us_entities) + len(ca_entities),
+                "suggested_primary": primary
             },
             "warnings": warnings
         }
         
-    except ImportError:
-        logger.warning("[ENTITIES] fein_detector not available")
-        return {"success": False, "message": "Entity detection not available"}
     except Exception as e:
         logger.error(f"[ENTITIES] Detection error: {e}")
+        import traceback
+        logger.error(f"[ENTITIES] Traceback: {traceback.format_exc()}")
         return {"success": False, "message": str(e)}
 
 
