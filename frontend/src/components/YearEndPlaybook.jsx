@@ -13,8 +13,6 @@
 
 import React, { useState, useEffect, useRef, useCallback, Component } from 'react';
 import api from '../services/api';
-import { EntityConfigModal, EntityStatusBar } from './playbooks/EntityConfigModal';
-import { FindingsByEntity } from './playbooks/FindingsByEntity';
 
 // Error Boundary to catch rendering errors and show them instead of blank screen
 class ErrorBoundary extends Component {
@@ -377,6 +375,14 @@ function ScanAllProgress({ projectId, onComplete, onError, buttonText = "🔍 An
 // AI SUMMARY DASHBOARD COMPONENT
 // =============================================================================
 function AISummaryDashboard({ summary, expanded, onToggle }) {
+  const [sectionsExpanded, setSectionsExpanded] = useState({
+    pending: false,
+    conflicts: false,
+    review: false,
+    issues: false,
+    recommendations: false
+  });
+  
   if (!summary) return null;
   
   const { overall_risk, summary_text, stats, issues, recommendations, conflicts, review_flags, high_risk_actions } = summary;
@@ -388,6 +394,49 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
   };
   
   const riskTextColor = riskColors[overall_risk]?.text || '#059669';
+  
+  const toggleSection = (section) => {
+    setSectionsExpanded(prev => ({ ...prev, [section]: !prev[section] }));
+  };
+  
+  const CollapsibleSection = ({ id, icon, title, count, color, children }) => {
+    const isExpanded = sectionsExpanded[id];
+    return (
+      <div style={{ marginTop: '0.75rem', border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden' }}>
+        <div 
+          onClick={() => toggleSection(id)}
+          style={{ 
+            padding: '0.5rem 0.75rem',
+            background: '#f9fafb',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            cursor: 'pointer',
+            userSelect: 'none'
+          }}
+        >
+          <div style={{ fontWeight: '600', color: color || COLORS.text, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span>{icon}</span>
+            <span>{title}</span>
+            {count > 0 && <span style={{ 
+              background: color === '#dc2626' ? '#fee2e2' : color === '#d97706' ? '#fef3c7' : '#e5e7eb',
+              padding: '0.1rem 0.5rem',
+              borderRadius: '10px',
+              fontSize: '0.75rem'
+            }}>
+              {count}
+            </span>}
+          </div>
+          <span style={{ fontSize: '0.8rem', color: '#6b7280' }}>{isExpanded ? '▼' : '▶'}</span>
+        </div>
+        {isExpanded && (
+          <div style={{ padding: '0.5rem 0.75rem', background: 'white' }}>
+            {children}
+          </div>
+        )}
+      </div>
+    );
+  };
   
   return (
     <div style={{
@@ -427,15 +476,18 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
       
       {expanded && (
         <div style={{ padding: '0 1rem 1rem', borderTop: '1px solid #e1e8ed' }}>
-          {/* High Risk Actions */}
+          {/* Actions Pending Analysis (formerly High Risk) */}
           {Array.isArray(high_risk_actions) && high_risk_actions.length > 0 && (
-            <div style={{ marginTop: '0.75rem' }}>
-              <div style={{ fontWeight: '600', color: '#dc2626', marginBottom: '0.5rem' }}>
-                🚨 High Risk Actions:
-              </div>
+            <CollapsibleSection 
+              id="pending" 
+              icon="📋" 
+              title="Actions Pending Analysis" 
+              count={high_risk_actions.length}
+              color="#6b7280"
+            >
               {high_risk_actions.map((action, i) => (
                 <div key={i} style={{ 
-                  background: 'white', 
+                  background: '#f9fafb', 
                   padding: '0.5rem', 
                   borderRadius: '6px', 
                   marginBottom: '0.25rem',
@@ -444,18 +496,21 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
                   <strong>{action.action_id}:</strong> {action.summary}
                 </div>
               ))}
-            </div>
+            </CollapsibleSection>
           )}
           
-          {/* Conflicts */}
+          {/* Data Conflicts */}
           {Array.isArray(conflicts) && conflicts.length > 0 && (
-            <div style={{ marginTop: '0.75rem' }}>
-              <div style={{ fontWeight: '600', color: '#dc2626', marginBottom: '0.5rem' }}>
-                ❗ Data Conflicts:
-              </div>
+            <CollapsibleSection 
+              id="conflicts" 
+              icon="❗" 
+              title="Data Conflicts" 
+              count={conflicts.length}
+              color="#dc2626"
+            >
               {conflicts.map((conflict, i) => (
                 <div key={i} style={{ 
-                  background: 'white', 
+                  background: '#fef2f2', 
                   padding: '0.5rem', 
                   borderRadius: '6px', 
                   marginBottom: '0.25rem',
@@ -464,18 +519,21 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
                   {conflict.message}
                 </div>
               ))}
-            </div>
+            </CollapsibleSection>
           )}
           
           {/* Review Flags */}
           {Array.isArray(review_flags) && review_flags.length > 0 && (
-            <div style={{ marginTop: '0.75rem' }}>
-              <div style={{ fontWeight: '600', color: '#d97706', marginBottom: '0.5rem' }}>
-                🔄 Actions Needing Review:
-              </div>
+            <CollapsibleSection 
+              id="review" 
+              icon="🔄" 
+              title="Actions Needing Review" 
+              count={review_flags.length}
+              color="#d97706"
+            >
               {review_flags.map((flag, i) => (
                 <div key={i} style={{ 
-                  background: 'white', 
+                  background: '#fffbeb', 
                   padding: '0.5rem', 
                   borderRadius: '6px', 
                   marginBottom: '0.25rem',
@@ -484,19 +542,22 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
                   <strong>{flag.action_id}:</strong> {flag.flag?.reason}
                 </div>
               ))}
-            </div>
+            </CollapsibleSection>
           )}
           
-          {/* Top Issues */}
+          {/* Issues */}
           {Array.isArray(issues) && issues.length > 0 && (
-            <div style={{ marginTop: '0.75rem' }}>
-              <div style={{ fontWeight: '600', color: COLORS.text, marginBottom: '0.5rem' }}>
-                ⚠️ Issues ({issues.length}):
-              </div>
-              <div style={{ maxHeight: '150px', overflow: 'auto' }}>
-                {issues.slice(0, 10).map((issue, i) => (
+            <CollapsibleSection 
+              id="issues" 
+              icon="⚠️" 
+              title="Issues Identified" 
+              count={issues.length}
+              color="#d97706"
+            >
+              <div style={{ maxHeight: '200px', overflow: 'auto' }}>
+                {issues.slice(0, 15).map((issue, i) => (
                   <div key={i} style={{ 
-                    background: 'white', 
+                    background: '#fffbeb', 
                     padding: '0.5rem', 
                     borderRadius: '6px', 
                     marginBottom: '0.25rem',
@@ -509,7 +570,8 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
                       padding: '0.1rem 0.4rem',
                       borderRadius: '4px',
                       fontSize: '0.7rem',
-                      fontWeight: '600'
+                      fontWeight: '600',
+                      whiteSpace: 'nowrap'
                     }}>
                       {issue.action_id}
                     </span>
@@ -517,19 +579,22 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
                   </div>
                 ))}
               </div>
-            </div>
+            </CollapsibleSection>
           )}
           
-          {/* Top Recommendations */}
+          {/* Recommendations */}
           {Array.isArray(recommendations) && recommendations.length > 0 && (
-            <div style={{ marginTop: '0.75rem' }}>
-              <div style={{ fontWeight: '600', color: '#059669', marginBottom: '0.5rem' }}>
-                ✅ Recommendations ({recommendations.length}):
-              </div>
-              <div style={{ maxHeight: '120px', overflow: 'auto' }}>
-                {recommendations.slice(0, 8).map((rec, i) => (
+            <CollapsibleSection 
+              id="recommendations" 
+              icon="✅" 
+              title="Recommendations" 
+              count={recommendations.length}
+              color="#059669"
+            >
+              <div style={{ maxHeight: '200px', overflow: 'auto' }}>
+                {recommendations.slice(0, 12).map((rec, i) => (
                   <div key={i} style={{ 
-                    background: 'white', 
+                    background: '#ecfdf5', 
                     padding: '0.5rem', 
                     borderRadius: '6px', 
                     marginBottom: '0.25rem',
@@ -549,7 +614,7 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
                   </div>
                 ))}
               </div>
-            </div>
+            </CollapsibleSection>
           )}
         </div>
       )}
@@ -1955,17 +2020,31 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
             </div>
           )}
 
-          {/* Show issues with suppress/acknowledge controls */}
-          {findings && (findings.issues?.length > 0 || findings.is_multi_fein) && (
+          {/* Show issues/concerns */}
+          {findings?.issues && Array.isArray(findings.issues) && findings.issues.length > 0 && (
             <div style={styles.section}>
               <div style={styles.sectionTitle}>⚠️ Issues Identified</div>
-              <FindingsByEntity
-                findings={findings}
-                projectId={projectId}
-                playbookType="year-end"
-                actionId={action.action_id}
-                onFindingChange={() => onUpdate(action.action_id, {})}
-              />
+              <div style={{ 
+                background: '#fef2f2', 
+                border: '1px solid #fecaca',
+                borderRadius: '6px',
+                padding: '0.5rem'
+              }}>
+                {findings.issues.map((issue, i) => (
+                  <div key={i} style={{
+                    fontSize: '0.85rem',
+                    color: '#991b1b',
+                    padding: '0.35rem 0',
+                    borderBottom: i < findings.issues.length - 1 ? '1px solid #fecaca' : 'none',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '0.5rem'
+                  }}>
+                    <span style={{ color: '#dc2626' }}>•</span>
+                    <span>{issue}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -2273,11 +2352,6 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   const [actionsReadyToScan, setActionsReadyToScan] = useState([]);
   const [scanningAll, setScanningAll] = useState(false);
   
-  // ENTITY CONFIGURATION
-  const [showEntityConfig, setShowEntityConfig] = useState(false);
-  const [entityConfig, setEntityConfig] = useState(null);
-  const [entityConfigChecked, setEntityConfigChecked] = useState(false);
-  
   // TOOLTIPS: State for consultant-driven notes
   const [tooltipsByAction, setTooltipsByAction] = useState({});
   const [tooltipModalOpen, setTooltipModalOpen] = useState(false);
@@ -2296,32 +2370,6 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       loadTooltips();
     }
   }, [project]);
-  
-  // Check entity configuration on load
-  useEffect(() => {
-    if (project?.id && !entityConfigChecked) {
-      checkEntityConfig();
-    }
-  }, [project?.id, entityConfigChecked]);
-
-  const checkEntityConfig = async () => {
-    try {
-      const res = await api.get(`/playbooks/year-end/entity-config/${project.id}`);
-      if (res.data.configured) {
-        setEntityConfig(res.data.config);
-      } else {
-        // No config yet - detect entities first
-        const detectRes = await api.post(`/playbooks/year-end/detect-entities/${project.id}`);
-        if (detectRes.data.success && detectRes.data.summary?.total > 0) {
-          setShowEntityConfig(true);
-        }
-      }
-    } catch (err) {
-      console.error('Entity config check failed:', err);
-    } finally {
-      setEntityConfigChecked(true);
-    }
-  };
   
   // Poll for processing jobs updates
   useEffect(() => {
@@ -2952,14 +3000,6 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
             </button>
           </div>
         </div>
-        
-        {/* Entity Configuration Status */}
-        {entityConfig && (
-          <EntityStatusBar 
-            config={entityConfig}
-            onReconfigure={() => setShowEntityConfig(true)}
-          />
-        )}
         
         {/* AI Summary Dashboard */}
         <AISummaryDashboard 
@@ -3606,26 +3646,6 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
         actionId={tooltipModalActionId}
         existingTooltip={editingTooltip}
       />
-      
-      {/* Entity Configuration Modal */}
-      {showEntityConfig && (
-        <EntityConfigModal
-          projectId={project.id}
-          playbookType="year-end"
-          playbookCountry="us"
-          onConfigured={(config) => {
-            setEntityConfig(config);
-            setShowEntityConfig(false);
-            loadPlaybook();
-            loadAiSummary();
-          }}
-          onCancel={() => setShowEntityConfig(false)}
-          onSkip={() => {
-            setShowEntityConfig(false);
-            setEntityConfigChecked(true);
-          }}
-        />
-      )}
     </div>
     </ErrorBoundary>
   );
