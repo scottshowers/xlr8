@@ -372,6 +372,228 @@ function ScanAllProgress({ projectId, onComplete, onError, buttonText = "🔍 An
 }
 
 // =============================================================================
+// ENTITY CONFIG MODAL - Select which FEIN(s) to analyze
+// =============================================================================
+function EntityConfigModal({ detectedEntities, onSave, onCancel, onSkip }) {
+  const [selectedEntities, setSelectedEntities] = useState([]);
+  const [primaryEntity, setPrimaryEntity] = useState(null);
+  
+  if (!detectedEntities) return null;
+  
+  const usEntities = detectedEntities.entities?.us || [];
+  const caEntities = detectedEntities.entities?.canada || [];
+  const suggestedPrimary = detectedEntities.summary?.suggested_primary;
+  
+  // Auto-select suggested primary on mount
+  useEffect(() => {
+    if (suggestedPrimary && selectedEntities.length === 0) {
+      setSelectedEntities([suggestedPrimary]);
+      setPrimaryEntity(suggestedPrimary);
+    }
+  }, [suggestedPrimary]);
+  
+  const toggleEntity = (id) => {
+    if (selectedEntities.includes(id)) {
+      setSelectedEntities(selectedEntities.filter(e => e !== id));
+      if (primaryEntity === id) setPrimaryEntity(selectedEntities.filter(e => e !== id)[0] || null);
+    } else {
+      setSelectedEntities([...selectedEntities, id]);
+      if (!primaryEntity) setPrimaryEntity(id);
+    }
+  };
+  
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      background: 'rgba(0,0,0,0.5)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000
+    }}>
+      <div style={{
+        background: 'white',
+        borderRadius: '12px',
+        padding: '1.5rem',
+        maxWidth: '500px',
+        width: '90%',
+        maxHeight: '80vh',
+        overflow: 'auto'
+      }}>
+        <h3 style={{ margin: '0 0 1rem', color: '#1f2937' }}>
+          🏢 Select Company Entity
+        </h3>
+        <p style={{ color: '#6b7280', fontSize: '0.9rem', marginBottom: '1rem' }}>
+          We detected {usEntities.length} FEIN(s) in your documents. Select which entity to analyze:
+        </p>
+        
+        {usEntities.length > 0 && (
+          <div style={{ marginBottom: '1rem' }}>
+            <div style={{ fontWeight: '600', marginBottom: '0.5rem', color: '#374151' }}>
+              US Entities (FEIN)
+            </div>
+            {usEntities.map((entity, i) => (
+              <div 
+                key={i}
+                onClick={() => toggleEntity(entity.id || entity.fein)}
+                style={{
+                  padding: '0.75rem',
+                  border: selectedEntities.includes(entity.id || entity.fein) ? '2px solid #3b82f6' : '1px solid #e5e7eb',
+                  borderRadius: '8px',
+                  marginBottom: '0.5rem',
+                  cursor: 'pointer',
+                  background: selectedEntities.includes(entity.id || entity.fein) ? '#eff6ff' : 'white'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <input 
+                    type="checkbox" 
+                    checked={selectedEntities.includes(entity.id || entity.fein)}
+                    onChange={() => {}}
+                    style={{ margin: 0 }}
+                  />
+                  <span style={{ fontWeight: '600' }}>{entity.fein || entity.id}</span>
+                  {entity.company_name && (
+                    <span style={{ color: '#6b7280' }}>- {entity.company_name}</span>
+                  )}
+                  {entity.confidence === 'high' && (
+                    <span style={{ 
+                      background: '#dcfce7', 
+                      color: '#166534', 
+                      padding: '0.1rem 0.4rem', 
+                      borderRadius: '4px', 
+                      fontSize: '0.7rem' 
+                    }}>
+                      High Confidence
+                    </span>
+                  )}
+                </div>
+                {selectedEntities.includes(entity.id || entity.fein) && selectedEntities.length > 1 && (
+                  <div style={{ marginTop: '0.5rem', paddingLeft: '1.5rem' }}>
+                    <label style={{ fontSize: '0.8rem', color: '#6b7280', cursor: 'pointer' }}>
+                      <input 
+                        type="radio" 
+                        checked={primaryEntity === (entity.id || entity.fein)}
+                        onChange={() => setPrimaryEntity(entity.id || entity.fein)}
+                        style={{ marginRight: '0.25rem' }}
+                      />
+                      Primary Entity
+                    </label>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        
+        {caEntities.length > 0 && (
+          <div style={{ 
+            background: '#fef3c7', 
+            padding: '0.75rem', 
+            borderRadius: '6px', 
+            marginBottom: '1rem',
+            fontSize: '0.85rem'
+          }}>
+            ⚠️ {caEntities.length} Canada entity/entities detected. Canada Year-End analysis coming soon.
+          </div>
+        )}
+        
+        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
+          <button
+            onClick={onSkip}
+            style={{
+              padding: '0.5rem 1rem',
+              background: '#f3f4f6',
+              border: '1px solid #d1d5db',
+              borderRadius: '6px',
+              cursor: 'pointer'
+            }}
+          >
+            Skip for Now
+          </button>
+          <button
+            onClick={onCancel}
+            style={{
+              padding: '0.5rem 1rem',
+              background: 'white',
+              border: '1px solid #d1d5db',
+              borderRadius: '6px',
+              cursor: 'pointer'
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => onSave(selectedEntities, primaryEntity)}
+            disabled={selectedEntities.length === 0}
+            style={{
+              padding: '0.5rem 1rem',
+              background: selectedEntities.length > 0 ? '#3b82f6' : '#9ca3af',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: selectedEntities.length > 0 ? 'pointer' : 'not-allowed'
+            }}
+          >
+            Continue with {selectedEntities.length} Entity
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// ENTITY STATUS BAR - Shows selected entity
+// =============================================================================
+function EntityStatusBar({ config, onReconfigure }) {
+  if (!config) return null;
+  
+  return (
+    <div style={{
+      background: '#eff6ff',
+      border: '1px solid #bfdbfe',
+      borderRadius: '8px',
+      padding: '0.75rem 1rem',
+      marginBottom: '1rem',
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center'
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <span>🏢</span>
+        <span style={{ fontWeight: '600', color: '#1e40af' }}>
+          Analyzing: {config.primary_entity || config.selected_entities?.[0]}
+        </span>
+        {config.selected_entities?.length > 1 && (
+          <span style={{ color: '#6b7280', fontSize: '0.85rem' }}>
+            (+{config.selected_entities.length - 1} more)
+          </span>
+        )}
+      </div>
+      <button
+        onClick={onReconfigure}
+        style={{
+          padding: '0.25rem 0.5rem',
+          background: 'white',
+          border: '1px solid #bfdbfe',
+          borderRadius: '4px',
+          fontSize: '0.8rem',
+          cursor: 'pointer',
+          color: '#1e40af'
+        }}
+      >
+        Change
+      </button>
+    </div>
+  );
+}
+
+// =============================================================================
 // AI SUMMARY DASHBOARD COMPONENT
 // =============================================================================
 function AISummaryDashboard({ summary, expanded, onToggle }) {
@@ -2418,6 +2640,12 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   // SUPPRESSIONS: State for acknowledged/suppressed findings
   const [suppressions, setSuppressions] = useState([]);
   
+  // ENTITY CONFIGURATION: State for FEIN selection
+  const [showEntityConfig, setShowEntityConfig] = useState(false);
+  const [entityConfig, setEntityConfig] = useState(null);
+  const [detectedEntities, setDetectedEntities] = useState(null);
+  const [entityConfigChecked, setEntityConfigChecked] = useState(false);
+  
   // TOOLTIPS: State for consultant-driven notes
   const [tooltipsByAction, setTooltipsByAction] = useState({});
   const [tooltipModalOpen, setTooltipModalOpen] = useState(false);
@@ -2435,8 +2663,54 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       loadAiSummary();
       loadTooltips();
       loadSuppressions();
+      checkEntityConfig();
     }
   }, [project]);
+  
+  // Check/load entity configuration
+  const checkEntityConfig = async () => {
+    if (entityConfigChecked) return;
+    try {
+      const res = await api.get(`/playbooks/year-end/entity-config/${project.id}`);
+      if (res.data?.configured && res.data?.config) {
+        setEntityConfig(res.data.config);
+        setEntityConfigChecked(true);
+      } else {
+        // No config - try to detect entities
+        const detectRes = await api.post(`/playbooks/year-end/detect-entities/${project.id}`);
+        if (detectRes.data?.success && detectRes.data?.summary?.total > 0) {
+          setDetectedEntities(detectRes.data);
+          setShowEntityConfig(true);
+        }
+        setEntityConfigChecked(true);
+      }
+    } catch (err) {
+      console.error('Entity config check failed:', err);
+      setEntityConfigChecked(true);
+    }
+  };
+
+  // Save entity configuration
+  const handleSaveEntityConfig = async (selectedEntities, primaryEntity) => {
+    try {
+      await api.post(`/playbooks/year-end/entity-config/${project.id}`, {
+        analysis_scope: 'selected',
+        selected_entities: selectedEntities,
+        primary_entity: primaryEntity,
+        country_mode: 'us_only'
+      });
+      setEntityConfig({
+        selected_entities: selectedEntities,
+        primary_entity: primaryEntity
+      });
+      setShowEntityConfig(false);
+      // Reload to get fresh analysis
+      loadPlaybook();
+      loadAiSummary();
+    } catch (err) {
+      console.error('Failed to save entity config:', err);
+    }
+  };
   
   // Poll for processing jobs updates
   useEffect(() => {
@@ -3145,6 +3419,14 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
           </div>
         </div>
         
+        {/* Entity Configuration Status Bar */}
+        {entityConfig && (
+          <EntityStatusBar 
+            config={entityConfig}
+            onReconfigure={() => setShowEntityConfig(true)}
+          />
+        )}
+        
         {/* AI Summary Dashboard */}
         <AISummaryDashboard 
           summary={aiSummary} 
@@ -3795,6 +4077,19 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
         actionId={tooltipModalActionId}
         existingTooltip={editingTooltip}
       />
+      
+      {/* Entity Configuration Modal */}
+      {showEntityConfig && detectedEntities && (
+        <EntityConfigModal
+          detectedEntities={detectedEntities}
+          onSave={handleSaveEntityConfig}
+          onCancel={() => setShowEntityConfig(false)}
+          onSkip={() => {
+            setShowEntityConfig(false);
+            setEntityConfigChecked(true);
+          }}
+        />
+      )}
     </div>
     </ErrorBoundary>
   );
