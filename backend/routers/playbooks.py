@@ -3712,26 +3712,41 @@ async def detect_entities(playbook_type: str, project_id: str):
         
         # Show sample from Company Master Profile specifically
         for doc in docs:
-            if 'Master Profile' in doc or 'Tax Verification' in doc:
-                logger.warning(f"[ENTITIES] Company profile sample: {doc[:1000]}")
+            if 'Master Profile' in doc:
+                logger.warning(f"[ENTITIES] Company Master Profile FULL (first 3000 chars): {doc[:3000]}")
+                # Also search for 74- specifically
+                if '74-' in doc:
+                    logger.warning(f"[ENTITIES] Found '74-' in Master Profile!")
+                    idx = doc.find('74-')
+                    logger.warning(f"[ENTITIES] Context around 74-: {doc[max(0,idx-50):idx+50]}")
                 break
         
         # Also look for EIN/FEIN mentions specifically
         import re
-        ein_mentions = re.findall(r'.{0,80}(EIN|FEIN|Employer.*Identification|Tax.*ID|Federal.*ID).{0,80}', combined_text, re.IGNORECASE)
-        logger.warning(f"[ENTITIES] EIN mentions found (with context): {ein_mentions[:3]}")
         
-        # Look for ANY 9-digit sequences
-        any_9digit = re.findall(r'\b\d{9}\b', combined_text)
-        logger.warning(f"[ENTITIES] Any 9-digit numbers: {any_9digit[:10]}")
+        # Look for 8-digit numbers (some EINs lose leading zero)
+        any_8digit = re.findall(r'\b\d{8}\b', combined_text)
+        logger.warning(f"[ENTITIES] Any 8-digit numbers: {any_8digit[:10]}")
         
-        # Look for XX-XXXXXXX pattern more broadly
-        hyphen_pattern = re.findall(r'\d{2}-\d{7}', combined_text)
-        logger.warning(f"[ENTITIES] Hyphenated patterns: {hyphen_pattern[:10]}")
+        # Search specifically for 74-1776312 or variants
+        if '74-1776312' in combined_text:
+            logger.warning("[ENTITIES] *** FOUND 74-1776312 in text! ***")
+        elif '741776312' in combined_text:
+            logger.warning("[ENTITIES] *** FOUND 741776312 (no hyphen) in text! ***")
+        elif '1776312' in combined_text:
+            logger.warning("[ENTITIES] *** FOUND 1776312 (partial) in text! ***")
+            idx = combined_text.find('1776312')
+            logger.warning(f"[ENTITIES] Context: {combined_text[max(0,idx-30):idx+30]}")
+        else:
+            logger.warning("[ENTITIES] Did NOT find 74-1776312 or 1776312 anywhere in extracted text")
         
-        # Look for 2 digits followed by 7 digits with anything in between
-        flexible_pattern = re.findall(r'\b(\d{2})[\s\-\.]*(\d{7})\b', combined_text)
-        logger.warning(f"[ENTITIES] Flexible patterns: {flexible_pattern[:10]}")
+        # Look for numbers after "Number (EIN)" column header
+        ein_column = re.findall(r'Number\s*\(EIN\)[^\d]*(\d{7,9})', combined_text, re.IGNORECASE)
+        logger.warning(f"[ENTITIES] EIN column values: {ein_column[:10]}")
+        
+        # Look for any number that appears after EIN mention
+        after_ein = re.findall(r'EIN[^\d]{0,20}(\d{7,9})', combined_text, re.IGNORECASE)
+        logger.warning(f"[ENTITIES] Numbers after EIN: {after_ein[:10]}")
         
         # Detect entities
         entities = detect_entity_identifiers(combined_text)
