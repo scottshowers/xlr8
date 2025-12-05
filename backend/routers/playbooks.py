@@ -1710,106 +1710,74 @@ async def detect_conflicts(project_id: str, action_id: str, new_findings: Option
     """
     Detect conflicts between new findings and existing data.
     Returns list of conflict objects.
+    
+    IMPORTANT: If user has configured entity (selected FEIN), we skip FEIN conflict detection
+    entirely - they've already told us which entity they care about.
     """
     if not new_findings or not new_findings.get("key_values"):
         return []
+    
+    # Check if entity is configured - if so, skip FEIN conflicts entirely
+    entity_configured = False
+    try:
+        from utils.database.models import EntityConfigModel
+        config = EntityConfigModel.get(project_id, "year-end")
+        if config and config.get("primary_entity"):
+            entity_configured = True
+    except Exception:
+        pass
     
     conflicts = []
     progress = PLAYBOOK_PROGRESS.get(project_id, {})
     new_values = new_findings.get("key_values", {})
     
-    # Check against all other actions for conflicting values
-    # Only flag conflicts for fields where a mismatch indicates real data problems
-    # Company name variations are cosmetic - not worth flagging
-    critical_fields = ["fein", "federal_futa_rate"]
+    # Only check rate conflicts - FEIN is handled by entity selection
+    critical_fields = ["federal_futa_rate"] if entity_configured else ["fein", "federal_futa_rate"]
     
-    def normalize_value(field: str, value: str) -> str:
-        """Normalize values for comparison to avoid false positives"""
+    def normalize_rate(value: str) -> str:
+        """Normalize percentage values for comparison"""
         if not value:
             return ""
         val = str(value).strip()
-        
-        # Strip source citations like "(Source: filename.pdf)" or "(from filename)"
         val = re.sub(r'\s*\(Source:\s*[^)]+\)', '', val)
         val = re.sub(r'\s*\(from\s*[^)]+\)', '', val)
-        val = val.strip()
-        
-        # FEIN: extract first valid FEIN pattern, not all digits
-        if "fein" in field.lower() or "ein" in field.lower():
-            # Look for XX-XXXXXXX or 9 consecutive digits
-            fein_match = re.search(r'(\d{2})-?(\d{7})', val)
-            if fein_match:
-                return fein_match.group(1) + fein_match.group(2)
-            # Fallback: first 9 digits if present
-            digits = ''.join(c for c in val if c.isdigit())
-            return digits[:9] if len(digits) >= 9 else digits
-        
-        # Percentages: normalize to consistent decimal
-        if "rate" in field.lower() or "%" in val:
-            try:
-                # Remove % sign and convert to float
-                cleaned = val.replace('%', '').strip()
-                num = float(cleaned)
-                return f"{num:.4f}"
-            except (ValueError, TypeError):
-                pass
-        
-        return val.lower()
-    
-    def extract_all_feins(value: str) -> set:
-        """Extract all FEINs from a value for multi-FEIN comparison"""
-        if not value:
-            return set()
-        feins = set()
-        for match in re.finditer(r'(\d{2})-?(\d{7})', str(value)):
-            feins.add(match.group(1) + match.group(2))
-        return feins
+        try:
+            cleaned = val.replace('%', '').strip()
+            num = float(cleaned)
+            return f"{num:.4f}"
+        except (ValueError, TypeError):
+            return val.lower()
     
     for other_action_id, other_progress in progress.items():
         if other_action_id == action_id:
             continue
         
         other_findings = other_progress.get("findings") if other_progress else None
-        if not other_findings:
+        if not other_findings or not isinstance(other_findings, dict):
             continue
-        other_values = other_findings.get("key_values", {}) if isinstance(other_findings, dict) else {}
+        other_values = other_findings.get("key_values", {})
         
         for field in critical_fields:
-            # Normalize field names for comparison
             new_val = None
             other_val = None
-            new_val_raw = None
-            other_val_raw = None
             
             for k, v in new_values.items():
                 if field.lower() in k.lower():
-                    new_val_raw = str(v).strip()
-                    new_val = normalize_value(field, new_val_raw)
+                    new_val = normalize_rate(str(v))
                     break
             
             for k, v in other_values.items():
                 if field.lower() in k.lower():
-                    other_val_raw = str(v).strip()
-                    other_val = normalize_value(field, other_val_raw)
+                    other_val = normalize_rate(str(v))
                     break
             
-            # Compare normalized values
+            # Only flag if values exist and are actually different
             if new_val and other_val and new_val != other_val:
-                # For FEIN fields, check if there's any overlap in the FEINs mentioned
-                # "Multiple FEINs: X, Y" is not a conflict with "X"
-                if "fein" in field.lower():
-                    new_feins = extract_all_feins(new_val_raw)
-                    other_feins = extract_all_feins(other_val_raw)
-                    if new_feins & other_feins:  # Sets have overlap
-                        continue  # Not a real conflict
-                
                 conflicts.append({
                     "field": field,
                     "action_1": action_id,
-                    "value_1": new_val_raw,
                     "action_2": other_action_id,
-                    "value_2": other_val_raw,
-                    "message": f"Conflicting {field}: '{new_val_raw}' (from {action_id}) vs '{other_val_raw}' (from {other_action_id})"
+                    "message": f"Rate mismatch: {field} differs between {action_id} and {other_action_id}"
                 })
     
     return conflicts
@@ -1955,36 +1923,31 @@ INHERITED DATA FROM PREVIOUS ACTIONS:
 
 {consultative_context}
 
-Based on the documents and your UKG/Payroll expertise, provide:
+STRICT INSTRUCTIONS:
+1. EXTRACT only values you can actually see in the documents. If a value isn't there, don't make it up.
+2. ISSUES must be specific and actionable. Do NOT include:
+   - Generic formatting complaints
+   - Vague data quality concerns
+   - "Multiple FEINs" warnings (client may have multiple entities)
+   - Anything you can't cite to a specific document
+3. RECOMMENDATIONS must be concrete next steps, not filler like "review data" or "verify information"
+4. If the documents don't reveal problems, say "complete": true and leave issues array empty
+5. DO NOT invent issues to seem thorough. Empty issues array is perfectly fine.
 
-1. EXTRACT key data values found (FEIN, rates as percentages, states, etc.) - note which file each came from
-2. COMPARE to benchmarks where applicable (flag HIGH/LOW/UNUSUAL)
-3. IDENTIFY risks, issues, or items needing attention - cite the source document
-4. RECOMMEND specific actions the customer should take
-5. ASSESS completeness - can this action be marked complete?
-
-IMPORTANT: 
-- Each document chunk is labeled with [FILE: filename]. Include source citations.
-{f'- The client FEIN is {selected_fein}. Use this exact value.' if selected_fein else '- FEIN should be formatted as XX-XXXXXXX'}
-- Do NOT flag "multiple FEINs found" as an issue - documents may reference multiple entities
-- Rates should be percentages (e.g., 0.6%, 2.7%)
+{f'CLIENT FEIN: {selected_fein} - Use this exact value, do not flag FEIN format issues.' if selected_fein else ''}
 
 Return as JSON:
 {{
     "complete": true/false,
-    "key_values": {{"FEIN": "XX-XXXXXXX (from filename)", "other_field": "value (from filename)"}},
-    "issues": ["Issue description (Source: filename)"],
-    "recommendations": ["Specific action to take"],
+    "key_values": {{"field": "value (Source: filename)"}},
+    "issues": [],
+    "recommendations": [],
     "risk_level": "low|medium|high",
-    "summary": "2-3 sentence consultative summary with specific observations",
-    "sources_used": ["list of filenames analyzed"]
+    "summary": "2-3 sentence summary of what you found",
+    "sources_used": ["filenames"]
 }}
 
-Be specific and actionable. Reference actual values from the documents.
-Include "(Source: filename)" at the end of each issue when you can identify the source.
-If rates are high/low compared to benchmarks, say so explicitly.
-If data is missing, specify exactly what's needed.
-
+Only populate issues and recommendations with REAL, SPECIFIC, ACTIONABLE items you found in the documents.
 Return ONLY valid JSON."""
 
         logger.info(f"[FALLBACK] Calling Claude directly for {action_id}")
