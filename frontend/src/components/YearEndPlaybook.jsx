@@ -13,8 +13,8 @@
 
 import React, { useState, useEffect, useRef, useCallback, Component } from 'react';
 import api from '../services/api';
-import { EntityConfigModal, EntityStatusBar } from '../components/playbooks/EntityConfigModal';
-import { FindingsByEntity } from '../components/playbooks/FindingsByEntity';
+import { EntityConfigModal, EntityStatusBar } from './playbooks/EntityConfigModal';
+import { FindingsByEntity } from './playbooks/FindingsByEntity';
 
 // Error Boundary to catch rendering errors and show them instead of blank screen
 class ErrorBoundary extends Component {
