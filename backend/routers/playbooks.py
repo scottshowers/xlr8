@@ -3993,7 +3993,9 @@ async def get_project_documents_text(project_id: str) -> List[str]:
                         WHERE LOWER(project) = LOWER(?) AND is_current = TRUE
                     """, [project_name]).fetchall()
                     
-                    logger.warning(f"[ENTITIES] Found {len(tables)} tables for project {project_name}")
+                    logger.warning(f"[ENTITIES] Found {len(tables)} current tables for project {project_name}")
+                    for t in tables:
+                        logger.warning(f"[ENTITIES] Table: {t[0]} from {t[1]}")
                     
                     for table_name, file_name in tables:
                         try:
@@ -4002,6 +4004,34 @@ async def get_project_documents_text(project_id: str) -> List[str]:
                                 texts.append(f"[Source: {file_name}]\n{df.to_string()}")
                         except Exception as e:
                             logger.warning(f"[ENTITIES] Error reading table {table_name}: {e}")
+                    
+                    # ALSO check _pdf_tables for PDF content
+                    try:
+                        # First check columns
+                        cols = conn.execute("DESCRIBE _pdf_tables").fetchall()
+                        logger.warning(f"[ENTITIES] _pdf_tables columns: {[c[0] for c in cols]}")
+                        
+                        # Try with project name
+                        pdf_data = conn.execute("""
+                            SELECT * FROM _pdf_tables LIMIT 5
+                        """).fetchall()
+                        logger.warning(f"[ENTITIES] _pdf_tables sample: {pdf_data[:2] if pdf_data else 'empty'}")
+                        
+                        # Get all for this project (try both name and id)
+                        for proj_filter in [project_name, project_id]:
+                            pdf_rows = conn.execute("""
+                                SELECT * FROM _pdf_tables 
+                                WHERE project = ? OR project_id = ?
+                            """, [proj_filter, proj_filter]).fetchall()
+                            if pdf_rows:
+                                logger.warning(f"[ENTITIES] Found {len(pdf_rows)} PDFs with filter {proj_filter}")
+                                for row in pdf_rows:
+                                    # Get text content - try different column names
+                                    text = str(row)  # Fallback: entire row as string
+                                    texts.append(f"[Source: PDF]\n{text}")
+                                break
+                    except Exception as e:
+                        logger.warning(f"[ENTITIES] _pdf_tables error: {e}")
                     
                     conn.close()
                 except Exception as e:
@@ -4019,26 +4049,24 @@ async def get_project_documents_text(project_id: str) -> List[str]:
     
     # 2. Try ChromaDB (unstructured data - PDFs, docs)
     try:
-        from chroma_client import query_documents
-        results = query_documents("company FEIN EIN employer", project_id=project_id, n_results=50)
-        if results and results.get('documents'):
-            for doc_list in results['documents']:
-                for doc in doc_list:
-                    if doc:
-                        texts.append(doc)
-            logger.warning(f"[ENTITIES] ChromaDB returned {len(results.get('documents', []))} results")
-    except ImportError:
-        try:
-            from backend.chroma_client import query_documents
-            results = query_documents("company FEIN EIN employer", project_id=project_id, n_results=50)
-            if results and results.get('documents'):
-                for doc_list in results['documents']:
-                    for doc in doc_list:
-                        if doc:
-                            texts.append(doc)
-                logger.warning(f"[ENTITIES] ChromaDB (backend) returned {len(results.get('documents', []))} results")
-        except Exception as e:
-            logger.warning(f"[ENTITIES] ChromaDB not available: {e}")
+        from utils.rag_handler import RAGHandler
+        rag = RAGHandler()
+        # Search using project NAME not UUID
+        search_project = project_name if project_name else project_id
+        results = rag.search(
+            collection_name="xlr8_documents",
+            query="company FEIN EIN employer tax federal",
+            n_results=50,
+            project_id=search_project
+        )
+        if results:
+            for result in results:
+                doc_text = result.get('document', '')
+                if doc_text:
+                    texts.append(doc_text)
+            logger.warning(f"[ENTITIES] ChromaDB returned {len(results)} results for project {search_project}")
+    except ImportError as e:
+        logger.warning(f"[ENTITIES] RAGHandler not available: {e}")
     except Exception as e:
         logger.warning(f"[ENTITIES] ChromaDB error: {e}")
     
