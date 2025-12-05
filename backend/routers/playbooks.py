@@ -3728,11 +3728,22 @@ async def detect_entities(playbook_type: str, project_id: str):
         any_8digit = re.findall(r'\b\d{8}\b', combined_text)
         logger.warning(f"[ENTITIES] Any 8-digit numbers: {any_8digit[:10]}")
         
+        # Look for 9-digit numbers
+        any_9digit = re.findall(r'\b\d{9}\b', combined_text)
+        logger.warning(f"[ENTITIES] Any 9-digit numbers: {any_9digit[:10]}")
+        
         # Search specifically for 74-1776312 or variants
         if '74-1776312' in combined_text:
             logger.warning("[ENTITIES] *** FOUND 74-1776312 in text! ***")
+            idx = combined_text.find('74-1776312')
+            logger.warning(f"[ENTITIES] Context: ...{combined_text[max(0,idx-50):idx+50]}...")
         elif '741776312' in combined_text:
             logger.warning("[ENTITIES] *** FOUND 741776312 (no hyphen) in text! ***")
+            idx = combined_text.find('741776312')
+            logger.warning(f"[ENTITIES] Context around 741776312: ...{repr(combined_text[max(0,idx-30):idx+30])}...")
+            # Test the regex directly
+            test_match = re.search(r'\b(\d{9})\b', combined_text[max(0,idx-30):idx+30])
+            logger.warning(f"[ENTITIES] Direct 9-digit regex match: {test_match.group() if test_match else 'NO MATCH'}")
         elif '1776312' in combined_text:
             logger.warning("[ENTITIES] *** FOUND 1776312 (partial) in text! ***")
             idx = combined_text.find('1776312')
