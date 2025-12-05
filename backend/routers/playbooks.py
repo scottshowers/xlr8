@@ -4007,29 +4007,24 @@ async def get_project_documents_text(project_id: str) -> List[str]:
                     
                     # ALSO check _pdf_tables for PDF content
                     try:
-                        # First check columns
-                        cols = conn.execute("DESCRIBE _pdf_tables").fetchall()
-                        logger.warning(f"[ENTITIES] _pdf_tables columns: {[c[0] for c in cols]}")
+                        # _pdf_tables has table metadata - we need to query the actual tables
+                        pdf_tables = conn.execute("""
+                            SELECT table_name, source_file 
+                            FROM _pdf_tables 
+                            WHERE project = ? OR project_id = ?
+                        """, [project_name, project_id]).fetchall()
                         
-                        # Try with project name
-                        pdf_data = conn.execute("""
-                            SELECT * FROM _pdf_tables LIMIT 5
-                        """).fetchall()
-                        logger.warning(f"[ENTITIES] _pdf_tables sample: {pdf_data[:2] if pdf_data else 'empty'}")
+                        logger.warning(f"[ENTITIES] Found {len(pdf_tables)} PDF tables for {project_name}")
                         
-                        # Get all for this project (try both name and id)
-                        for proj_filter in [project_name, project_id]:
-                            pdf_rows = conn.execute("""
-                                SELECT * FROM _pdf_tables 
-                                WHERE project = ? OR project_id = ?
-                            """, [proj_filter, proj_filter]).fetchall()
-                            if pdf_rows:
-                                logger.warning(f"[ENTITIES] Found {len(pdf_rows)} PDFs with filter {proj_filter}")
-                                for row in pdf_rows:
-                                    # Get text content - try different column names
-                                    text = str(row)  # Fallback: entire row as string
-                                    texts.append(f"[Source: PDF]\n{text}")
-                                break
+                        for table_name, source_file in pdf_tables:
+                            try:
+                                # Query the actual table content
+                                df = conn.execute(f'SELECT * FROM "{table_name}" LIMIT 500').fetchdf()
+                                if df is not None and not df.empty:
+                                    texts.append(f"[Source: {source_file}]\n{df.to_string()}")
+                                    logger.warning(f"[ENTITIES] Added {len(df)} rows from {source_file}")
+                            except Exception as e:
+                                logger.warning(f"[ENTITIES] Error reading PDF table {table_name}: {e}")
                     except Exception as e:
                         logger.warning(f"[ENTITIES] _pdf_tables error: {e}")
                     
