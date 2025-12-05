@@ -143,7 +143,7 @@ class LocalLLMClient:
             if self.ollama_username and self.ollama_password:
                 auth = HTTPBasicAuth(self.ollama_username, self.ollama_password)
             
-            response = requests.post(url, json=payload, auth=auth, timeout=60)
+            response = requests.post(url, json=payload, auth=auth, timeout=120)
             
             if response.status_code != 200:
                 logger.warning(f"[HYBRID] Local LLM error: {response.status_code} - {response.text[:200]}")
@@ -154,7 +154,7 @@ class LocalLLMClient:
             return result, True
             
         except requests.Timeout:
-            logger.warning(f"[HYBRID] Local LLM timeout after 60s")
+            logger.warning(f"[HYBRID] Local LLM timeout after 120s")
             return None, False
         except Exception as e:
             logger.warning(f"[HYBRID] Local LLM failed: {e}")
@@ -228,38 +228,23 @@ class HybridAnalyzer:
                     examples_context += f"Output: {json.dumps(ex.get('output', {}))}\n\n"
         
         # Build consultant-grade analysis prompt with domain knowledge
-        prompt = f"""You are a senior UKG payroll implementation consultant reviewing year-end tax documents.
+        prompt = f"""You are a UKG payroll consultant. Analyze this document and extract real values.
 
-YOUR EXPERTISE:
-- SUI (State Unemployment) rates typically range 0.5% to 5.4%, rates above 6% are unusual
-- FUTA is normally 0.6% (6.0% minus 5.4% credit) - anything else needs verification
-- Workers' Comp rates vary by class code and state, but rates above 10% are high-risk jobs
-- PA has hundreds of local tax jurisdictions - verify all localities are configured
-- FEIN format must be XX-XXXXXXX (9 digits with hyphen after 2nd digit)
-- Company addresses must match state tax registrations
-- Multiple SUI rates for same state may indicate acquired companies or location issues
+RULES:
+- SUI rates: normal 0.5%-5.4%, above 6% is unusual
+- FUTA: should be 0.6%
+- WC rates above 10% = high-risk
+- FEIN format: XX-XXXXXXX
 
-ANALYZE THIS DOCUMENT AND:
-1. Extract key data (FEIN, company name, tax rates, WC codes/rates)
-2. Flag any rates that seem unusual (too high, too low, or missing)
-3. Identify compliance risks (missing registrations, address mismatches)
-4. Note anything that needs customer verification before year-end
+Extract REAL values, not placeholders.
 
 {examples_context}
-DOCUMENT:
-{text[:10000]}
 
-Return ONLY valid JSON (no comments, no trailing commas):
-{{
-  "fein": "XX-XXXXXXX or null",
-  "company_name": "string",
-  "address": "string or null",
-  "tax_rates": {{"STATE_SUI": "X.XX%", "FUTA": "X.XX%"}},
-  "wc_rates": {{"class_code": "rate%"}} or null,
-  "issues_found": ["list of problems found"],
-  "recommendations": ["list of things to verify or fix"],
-  "risk_level": "low|medium|high"
-}}"""
+DOCUMENT:
+{text[:15000]}
+
+Return JSON with actual values found:
+{{"fein":"actual-fein","company_name":"actual name","tax_rates":{{"STATE":"rate%"}},"wc_rates":{{"code":"rate%"}},"issues_found":["real issues"],"recommendations":["real advice"],"risk_level":"low/medium/high"}}"""
 
         result, success = self.local_llm.extract(text, prompt)
         
@@ -559,7 +544,7 @@ Return ONLY valid JSON."""
         action_id = action.get('action_id', '')
         combined_text = "\n\n---\n\n".join(content)
         
-        logger.info(f"[HYBRID] Analyzing {action_id}, {len(combined_text)} chars")
+        logger.warning(f"[HYBRID] Analyzing {action_id}: {len(combined_text)} total chars, sending {min(15000, len(combined_text))} to LLM")
         
         # Step 0: Check cache
         if self.learning:
