@@ -1923,32 +1923,29 @@ INHERITED DATA FROM PREVIOUS ACTIONS:
 
 {consultative_context}
 
-ANALYSIS QUALITY STANDARDS:
-Your analysis must be consultant-grade. This means:
-- EXTRACT specific values with source citations: "FEIN: 74-1776312 (Source: Master Profile.pdf)"
-- COMPARE against benchmarks: "SUI rate of 5.2% is HIGH compared to typical new employer rate of 2.7%"
-- IDENTIFY actual problems: "W-2 Box 12 Code D is missing for 401k contributions"
-- RECOMMEND specific actions: "Update tax code ABC123 effective date to 1/1/2025"
+YOUR JOB: Extract data, find discrepancies, provide UKG configuration instructions.
 
-DO NOT INCLUDE THESE AS ISSUES:
-- FEIN format issues (we already have the client's FEIN)
-- "Multiple FEINs detected" (client may have multiple entities - this is normal)
-- Generic formatting or data quality complaints
-- "Data should be verified" type filler
-- Anything without a specific document citation
+ISSUES must be specific findings:
+✓ "KY SUI has 4 duplicate entries at 0.3250% (Source: Tax Verification.pdf)"
+✓ "CA SUIER 5.4% in Master Profile but missing from Tax Verification"
+✓ "SUI rate 8.2% is HIGH - industry average is 2-4%"
+✗ NOT "Data formatting issues" (that's PDF extraction, not their problem)
+✗ NOT "Multiple FEINs detected" (normal for multi-entity clients)
+✗ NOT anything without a source citation
 
-DO NOT INCLUDE THESE AS RECOMMENDATIONS:
-- "Conduct an audit" or "complete audit" - WE ARE the audit, don't tell them to audit themselves
-- "Verify consistency" or "ensure reports match" - WE are doing that analysis
-- Generic advice like "review data" or "confirm information"
-- Recommendations must be SPECIFIC ACTIONS like "Add KY SUI code with rate 2.7%"
+RECOMMENDATIONS must be UKG CONFIGURATION INSTRUCTIONS:
+✓ "Add tax code KYSUI with rate 0.3250%, effective 01/01/2025"
+✓ "Remove duplicate KY SUI entries, keep only code KYSUI001"
+✓ "Add CA to Company Tax profile with SUIER rate 5.4%"
+✓ "Update MN SUI rate from 2.32% to 5.0% effective 01/01/2025"
+✗ NOT "Conduct an audit" - WE ARE THE AUDIT
+✗ NOT "Verify consistency" - WE JUST DID THAT
+✗ NOT "Review data" or "Confirm information" - THAT'S FILLER
+✗ NOT "Ensure reports match" - TELL THEM EXACTLY WHAT TO CHANGE
 
-{f'CLIENT FEIN: {selected_fein} - This is confirmed. Never flag FEIN as an issue.' if selected_fein else ''}
+{f'CLIENT FEIN: {selected_fein} - Confirmed. Never mention FEIN as an issue.' if selected_fein else ''}
 
-WHAT MAKES THIS ACTION COMPLETE?
-- Can we answer: {action.get('description', 'the action requirements')}?
-- Do we have the required reports: {', '.join(action.get('reports_needed', []))}?
-- If yes to both, mark complete: true
+COMPLETENESS: Mark complete=true if we have the required reports and can answer the action's question.
 
 Return as JSON:
 {{
@@ -1956,12 +1953,12 @@ Return as JSON:
     "key_values": {{"field": "value (Source: filename)"}},
     "issues": [],
     "recommendations": [],
-    "risk_level": "low|medium|high",
-    "summary": "2-3 sentence consultant-grade summary with specific observations",
+    "risk_level": "low|medium|high", 
+    "summary": "2-3 sentences with specific findings",
     "sources_used": ["filenames"]
 }}
 
-Remember: Empty issues array = good news for the client. Don't manufacture problems.
+Empty arrays are FINE. Don't invent problems. Don't give generic advice.
 Return ONLY valid JSON."""
 
         logger.info(f"[FALLBACK] Calling Claude directly for {action_id}")
@@ -1983,13 +1980,19 @@ Return ONLY valid JSON."""
         
         result = json.loads(text)
         
-        # POST-PROCESSING: Filter out noise issues (FEIN stuff + PDF artifacts + generic filler)
+        # POST-PROCESSING: Filter out noise (FEIN + PDF artifacts + consultant filler)
         noise_keywords = [
+            # FEIN stuff
             'fein', 'ein', 'federal employer', 'multiple feins', 'fein format', 'fein mismatch',
+            # PDF extraction garbage
             'formatting issue', 'column alignment', 'garbled', 'misaligned data', 'data formatting',
             'fix data formatting', 'proper column',
-            'conduct complete audit', 'conduct a complete audit', 'complete audit of all',
-            'ensure both reports contain identical', 'verify and update status consistency'
+            # Consultant filler - we are the audit
+            'conduct complete audit', 'conduct a complete audit', 'conduct an audit', 'complete audit',
+            'ensure both reports', 'ensure reports match', 'ensure consistency',
+            'verify consistency', 'verify and update', 'verify information',
+            'review data', 'review the data', 'confirm information',
+            'reconcile all', 'comprehensive review', 'thorough review'
         ]
         if result.get('issues'):
             result['issues'] = [
@@ -2351,13 +2354,19 @@ async def get_ai_summary(project_id: str):
     actions_with_flags = []
     high_risk_actions = []
     
-    # Keywords to filter out noise (FEIN + PDF artifacts + generic filler)
+    # Keywords to filter out noise (FEIN + PDF artifacts + consultant filler)
     noise_keywords = [
+        # FEIN stuff
         'fein', 'ein', 'federal employer', 'multiple feins', 'fein format', 'fein mismatch', 'conflicting fein',
+        # PDF extraction garbage
         'formatting issue', 'column alignment', 'garbled', 'misaligned data', 'data formatting',
         'fix data formatting', 'proper column',
-        'conduct complete audit', 'conduct a complete audit', 'complete audit of all',
-        'ensure both reports contain identical', 'verify and update status consistency'
+        # Consultant filler - we are the audit
+        'conduct complete audit', 'conduct a complete audit', 'conduct an audit', 'complete audit',
+        'ensure both reports', 'ensure reports match', 'ensure consistency',
+        'verify consistency', 'verify and update', 'verify information',
+        'review data', 'review the data', 'confirm information',
+        'reconcile all', 'comprehensive review', 'thorough review'
     ]
     
     for action_id, action_progress in progress.items():
