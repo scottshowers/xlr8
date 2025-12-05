@@ -3710,6 +3710,15 @@ async def detect_entities(playbook_type: str, project_id: str):
         logger.warning(f"[ENTITIES] Combined text length: {len(combined_text)} chars")
         logger.warning(f"[ENTITIES] Text sample (first 500): {combined_text[:500]}")
         
+        # Also look for EIN/FEIN mentions specifically
+        import re
+        ein_mentions = re.findall(r'.{0,50}(EIN|FEIN|Employer.*Identification|Tax.*ID|Federal.*ID).{0,50}', combined_text, re.IGNORECASE)
+        logger.warning(f"[ENTITIES] EIN mentions found: {ein_mentions[:5]}")
+        
+        # Also look for 2-digit + 7-digit patterns (with or without hyphen)
+        potential_feins = re.findall(r'\b\d{2}[-\s]?\d{7}\b', combined_text)
+        logger.warning(f"[ENTITIES] Potential FEIN patterns (XX-XXXXXXX or XXXXXXXXX): {potential_feins[:10]}")
+        
         # Detect entities
         entities = detect_entity_identifiers(combined_text)
         logger.warning(f"[ENTITIES] Detector returned: us={len(entities.get('us', []))}, canada={len(entities.get('canada', []))}")
