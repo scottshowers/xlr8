@@ -3696,6 +3696,7 @@ async def detect_entities(playbook_type: str, project_id: str):
         # Get project documents
         docs = await get_project_documents_text(project_id)
         if not docs:
+            logger.warning("[ENTITIES] No documents retrieved")
             return {
                 "success": True,
                 "entities": {"us": [], "canada": []},
@@ -3705,8 +3706,13 @@ async def detect_entities(playbook_type: str, project_id: str):
         
         combined_text = "\n\n".join(docs)
         
+        # Debug: show sample of text
+        logger.warning(f"[ENTITIES] Combined text length: {len(combined_text)} chars")
+        logger.warning(f"[ENTITIES] Text sample (first 500): {combined_text[:500]}")
+        
         # Detect entities
         entities = detect_entity_identifiers(combined_text)
+        logger.warning(f"[ENTITIES] Detector returned: us={len(entities.get('us', []))}, canada={len(entities.get('canada', []))}")
         
         # Identify company names
         all_entities = entities.get('us', []) + entities.get('canada', [])
