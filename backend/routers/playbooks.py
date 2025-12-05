@@ -1269,7 +1269,7 @@ async def scan_for_action(project_id: str, action_id: str):
     - Flags impacted actions when new data arrives
     - Auto-completes when all conditions met
     """
-    logger.warning(f"[SCAN] === Starting scan for action {action_id} in project {project_id[:8]} ===")
+    logger.info(f"[SCAN] {action_id} in project {project_id[:8]}")
     try:
         from utils.rag_handler import RAGHandler
         
@@ -1285,10 +1285,9 @@ async def scan_for_action(project_id: str, action_id: str):
                 break
         
         if not action:
-            logger.warning(f"[SCAN] Action {action_id} NOT FOUND in structure")
+            logger.info(f"[SCAN] Action {action_id} NOT FOUND in structure")
             raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
         
-        logger.warning(f"[SCAN] Found action {action_id}: {action.get('description', 'no desc')[:50]}")
         
         # Get reports needed for this action
         reports_needed = action.get('reports_needed', [])
@@ -1297,24 +1296,12 @@ async def scan_for_action(project_id: str, action_id: str):
         parent_actions = get_parent_actions(action_id)
         
         # =====================================================================
-        # DEPENDENT ACTION HANDLING - Still scan but include parent context
-        # =====================================================================
-        if parent_actions:
-            logger.warning(f"[SCAN] Action {action_id} has parent actions {parent_actions} - will include their context")
-        
-        logger.warning(f"[SCAN] Action {action_id} has {len(reports_needed)} reports_needed: {reports_needed[:3]}")
-        
-        # =====================================================================
         # STANDARD SCAN FOR ACTIONS WITH REPORTS_NEEDED
         # =====================================================================
         inherited = get_inherited_data(project_id, action_id)
         inherited_docs = inherited["documents"]
         inherited_findings = inherited["findings"]
         inherited_content = inherited["content"]
-        
-        if parent_actions:
-            logger.info(f"[SCAN] Action {action_id} inherits from: {parent_actions}")
-            logger.info(f"[SCAN] Inherited {len(inherited_docs)} docs, {len(inherited_findings)} findings sets")
         
         # Search for documents
         rag = RAGHandler()
@@ -1357,10 +1344,9 @@ async def scan_for_action(project_id: str, action_id: str):
                     if filename:
                         project_files.add(filename)
             
-            logger.warning(f"[SCAN] ChromaDB: {len(project_files)} files")
             
         except Exception as e:
-            logger.warning(f"[SCAN] ChromaDB query failed: {e}")
+            logger.debug(f"[SCAN] ChromaDB query failed: {e}")
         
         # SOURCE 2: DuckDB _pdf_tables
         try:
@@ -1389,13 +1375,9 @@ async def scan_for_action(project_id: str, action_id: str):
                             if source_file:
                                 project_files.add(source_file)
                     
-                    logger.warning(f"[SCAN] DuckDB _pdf_tables: added files, total now {len(project_files)}")
-                
                 conn.close()
         except Exception as e:
-            logger.warning(f"[SCAN] DuckDB query failed: {e}")
-        
-        logger.warning(f"[SCAN] Total {len(project_files)} files in project: {list(project_files)}")
+            logger.debug(f"[SCAN] DuckDB query failed: {e}")
         
         # STEP 2: Match by filename - check if any report name appears in filename
         for report_name in reports_needed:
@@ -1414,46 +1396,69 @@ async def scan_for_action(project_id: str, action_id: str):
                             "match_type": "filename"
                         })
                         all_content.append(f"[FILE: {filename}] - matches required report: {report_name}")
-                        logger.warning(f"[SCAN] Filename match: '{filename}' for report '{report_name}'")
         
-        # STEP 3: Semantic search - also search for inherited doc content
-        # Build queries from: reports needed + action description + inherited doc names
-        queries = reports_needed + [action.get('description', '')[:100]]
-        if inherited_docs:
-            queries.extend(inherited_docs[:3])  # Also search for content from inherited docs
+        # STEP 3: Semantic search - consolidated queries for efficiency
+        # Combine reports_needed into single query, search once with more results
+        search_results = []
         
-        for query in queries[:8]:
+        # Primary search: all required reports combined
+        if reports_needed:
+            primary_query = " ".join(reports_needed[:5])
             try:
                 results = rag.search(
                     collection_name="documents",
-                    query=query,
-                    n_results=15,
+                    query=primary_query,
+                    n_results=40,
                     project_id=project_id
                 )
                 if results:
-                    for result in results:
-                        doc = result.get('document', '')
-                        if doc and len(doc) > 50:
-                            cleaned = re.sub(r'ENC256:[A-Za-z0-9+/=]+', '[ENCRYPTED]', doc)
-                            if cleaned.count('[ENCRYPTED]') < 10:
-                                metadata = result.get('metadata', {})
-                                filename = metadata.get('source', metadata.get('filename', 'Unknown'))
-                                # Add content for AI analysis
-                                all_content.append(f"[FILE: {filename}]\n{cleaned[:3000]}")
-                                # Add to found_docs if not already there
-                                if filename not in seen_files:
-                                    seen_files.add(filename)
-                                    found_docs.append({
-                                        "filename": filename,
-                                        "snippet": cleaned[:300],
-                                        "query": query,
-                                        "match_type": "semantic"
-                                    })
-            except Exception as e:
-                logger.warning(f"Query failed: {e}")
+                    search_results.extend(results)
+            except Exception:
+                pass
         
-        logger.warning(f"[SCAN] Total unique docs found: {len(found_docs)}")
-        logger.warning(f"[SCAN] ChromaDB content chunks: {len(all_content)}")
+        # Secondary search: action description (if different context needed)
+        desc = action.get('description', '')
+        if desc and len(desc) > 20:
+            try:
+                results = rag.search(
+                    collection_name="documents",
+                    query=desc[:100],
+                    n_results=20,
+                    project_id=project_id
+                )
+                if results:
+                    search_results.extend(results)
+            except Exception:
+                pass
+        
+        # Process all results
+        seen_content = set()
+        for result in search_results:
+            doc = result.get('document', '')
+            if not doc or len(doc) < 50:
+                continue
+            
+            # Dedupe by content hash
+            content_hash = hash(doc[:500])
+            if content_hash in seen_content:
+                continue
+            seen_content.add(content_hash)
+            
+            cleaned = re.sub(r'ENC256:[A-Za-z0-9+/=]+', '[ENCRYPTED]', doc)
+            if cleaned.count('[ENCRYPTED]') >= 10:
+                continue
+            
+            metadata = result.get('metadata', {})
+            filename = metadata.get('source', metadata.get('filename', 'Unknown'))
+            all_content.append(f"[FILE: {filename}]\n{cleaned[:3000]}")
+            
+            if filename not in seen_files:
+                seen_files.add(filename)
+                found_docs.append({
+                    "filename": filename,
+                    "snippet": cleaned[:300],
+                    "match_type": "semantic"
+                })
         
         # =====================================================================
         # STEP 4: Get structured data from DuckDB _pdf_tables
@@ -1476,8 +1481,6 @@ async def scan_for_action(project_id: str, action_id: str):
                         SELECT table_name, columns, source_file
                         FROM _pdf_tables
                     """).fetchall()
-                    
-                    logger.warning(f"[SCAN] DuckDB has {len(all_tables)} tables total, project has {len(project_files)} files")
                     
                     seen_tables = set()  # Avoid duplicate table pulls
                     
@@ -1516,7 +1519,7 @@ async def scan_for_action(project_id: str, action_id: str):
                                         
                                         table_content = "\n".join(content_lines)
                                         duckdb_content.append(table_content)
-                                        logger.warning(f"[SCAN] ✓ Added DuckDB table: {table_name} ({len(data)} rows) for '{filename}'")
+                                        # Table added successfully
                                         
                                         # Add to found_docs if not already there
                                         if filename not in seen_files:
@@ -1527,21 +1530,15 @@ async def scan_for_action(project_id: str, action_id: str):
                                                 "query": "DuckDB",
                                                 "match_type": "structured_data"
                                             })
-                                except Exception as te:
-                                    logger.warning(f"[SCAN] Error reading table {table_name}: {te}")
+                                except Exception:
+                                    pass  # Skip unreadable tables
                 
                 conn.close()
-        except Exception as e:
-            logger.warning(f"[SCAN] DuckDB table content retrieval failed: {e}")
+        except Exception:
+            pass  # DuckDB not available or query failed
         
-        # PRIORITIZE: DuckDB full data FIRST, then ChromaDB chunks
-        # DuckDB has complete structured data, ChromaDB has truncated text chunks
-        final_content = duckdb_content + all_content[:20]  # DuckDB first, then top 20 ChromaDB chunks
-        
-        # Log content sizes for debugging
-        duckdb_chars = sum(len(c) for c in duckdb_content)
-        chroma_chars = sum(len(c) for c in all_content[:20])
-        logger.warning(f"[SCAN] Final content: {len(duckdb_content)} DuckDB ({duckdb_chars} chars) + {min(20, len(all_content))} ChromaDB ({chroma_chars} chars) = {len(final_content)} chunks")
+        # Combine: DuckDB full data FIRST, then ChromaDB chunks
+        final_content = duckdb_content + all_content[:20]
         
         # Determine findings and suggested status
         findings = None
@@ -1552,21 +1549,15 @@ async def scan_for_action(project_id: str, action_id: str):
         
         if has_data:
             suggested_status = "in_progress"
-            logger.warning(f"[SCAN] Has data - calling AI for analysis...")
             
             # Use Claude with CONSULTATIVE context
             if final_content or inherited_findings:
                 findings = await extract_findings_consultative(
                     action=action,
-                    content=final_content,  # Full DuckDB + top ChromaDB chunks
+                    content=final_content,
                     inherited_findings=inherited_findings,
                     action_id=action_id
                 )
-                
-                logger.warning(f"[SCAN] AI analysis complete. Findings: {bool(findings)}, keys: {list(findings.keys()) if findings else 'None'}")
-                
-                # NOTE: Removed auto-complete logic - users should manually mark as complete
-                # Previously this would auto-mark as "complete" if AI said complete=True
         
         # =====================================================================
         # CONFLICT DETECTION - Check for inconsistencies
@@ -1576,8 +1567,7 @@ async def scan_for_action(project_id: str, action_id: str):
             findings = findings or {}
             findings['conflicts'] = conflicts
             if suggested_status == "complete":
-                suggested_status = "in_progress"  # Don't auto-complete if conflicts exist
-                logger.info(f"[SCAN] Conflicts detected - downgrading status to in_progress")
+                suggested_status = "in_progress"
         
         # =====================================================================
         # IMPACT FLAGGING - Flag dependent actions if this data changes
@@ -3690,14 +3680,13 @@ async def detect_entities(playbook_type: str, project_id: str):
     Scan project documents for US FEINs and Canada BNs using LLM.
     Uses the same approach as Analyze - let AI extract intelligently.
     """
-    logger.warning(f"[ENTITIES] Starting entity detection for project {project_id}")
+    logger.info(f"[ENTITIES] Starting entity detection for project {project_id}")
     
     try:
         # Get project documents (same as scan uses)
         docs = await get_project_documents_text(project_id)
         
         if not docs:
-            logger.warning("[ENTITIES] No documents found")
             return {
                 "success": True,
                 "entities": {"us": [], "canada": []},
@@ -3710,7 +3699,7 @@ async def detect_entities(playbook_type: str, project_id: str):
         if len(combined_text) > 50000:
             combined_text = combined_text[:50000]
         
-        logger.warning(f"[ENTITIES] Analyzing {len(combined_text)} chars of content")
+        logger.info(f"[ENTITIES] Analyzing {len(combined_text)} chars")
         
         # Use LLM to extract FEINs intelligently
         from anthropic import Anthropic
@@ -3752,7 +3741,6 @@ DOCUMENTS:
         )
         
         response_text = response.content[0].text.strip()
-        logger.warning(f"[ENTITIES] LLM response: {response_text[:500]}")
         
         # Parse JSON response
         try:
@@ -3764,7 +3752,7 @@ DOCUMENTS:
             
             entities = json.loads(response_text)
         except json.JSONDecodeError as e:
-            logger.warning(f"[ENTITIES] JSON parse error: {e}, response was: {response_text}")
+            logger.warning(f"[ENTITIES] JSON parse error: {e}")
             entities = {"us": [], "canada": []}
         
         # Format response
@@ -3796,7 +3784,7 @@ DOCUMENTS:
         if not primary and us_entities:
             primary = us_entities[0]['id']
         
-        logger.warning(f"[ENTITIES] Found {len(us_entities)} US, {len(ca_entities)} Canada entities")
+        logger.info(f"[ENTITIES] Found {len(us_entities)} US, {len(ca_entities)} Canada entities")
         
         return {
             "success": True,
@@ -3814,8 +3802,6 @@ DOCUMENTS:
         
     except Exception as e:
         logger.error(f"[ENTITIES] Detection error: {e}")
-        import traceback
-        logger.error(f"[ENTITIES] Traceback: {traceback.format_exc()}")
         return {"success": False, "message": str(e)}
 
 
@@ -4023,28 +4009,21 @@ async def get_project_documents_text(project_id: str) -> List[str]:
     texts = []
     project_name = None
     
-    logger.warning(f"[ENTITIES] Starting document retrieval for project {project_id}")
-    
-    # First, get the project NAME from Supabase (DuckDB uses names, not UUIDs)
+    # Get project NAME from Supabase (DuckDB uses names, not UUIDs)
     try:
         supabase = get_supabase()
-        logger.warning(f"[ENTITIES] Supabase client: {supabase is not None}")
         if supabase:
             result = supabase.table('projects').select('name').eq('id', project_id).execute()
             if result.data and len(result.data) > 0:
                 project_name = result.data[0].get('name')
-                logger.warning(f"[ENTITIES] Project name: {project_name}")
-            else:
-                logger.warning(f"[ENTITIES] No project found for ID {project_id}")
     except Exception as e:
-        logger.warning(f"[ENTITIES] Could not get project name: {e}")
+        logger.debug(f"[ENTITIES] Could not get project name: {e}")
     
     # 1. Try DuckDB (structured data - Excel files, CSVs)
     if project_name:
         try:
             from backend.utils.playbook_parser import get_duckdb_connection
             conn = get_duckdb_connection()
-            logger.warning(f"[ENTITIES] DuckDB connection: {conn is not None}")
             if conn:
                 try:
                     # Query using project NAME not UUID
@@ -4054,80 +4033,61 @@ async def get_project_documents_text(project_id: str) -> List[str]:
                         WHERE LOWER(project) = LOWER(?) AND is_current = TRUE
                     """, [project_name]).fetchall()
                     
-                    logger.warning(f"[ENTITIES] Found {len(tables)} current tables for project {project_name}")
-                    for t in tables:
-                        logger.warning(f"[ENTITIES] Table: {t[0]} from {t[1]}")
-                    
                     for table_name, file_name in tables:
                         try:
                             df = conn.execute(f'SELECT * FROM "{table_name}" LIMIT 500').fetchdf()
                             if df is not None and not df.empty:
                                 texts.append(f"[Source: {file_name}]\n{df.to_string()}")
-                        except Exception as e:
-                            logger.warning(f"[ENTITIES] Error reading table {table_name}: {e}")
+                        except Exception:
+                            pass
                     
                     # ALSO check _pdf_tables for PDF content
                     try:
-                        # _pdf_tables has table metadata - we need to query the actual tables
                         pdf_tables = conn.execute("""
                             SELECT table_name, source_file 
                             FROM _pdf_tables 
                             WHERE project = ? OR project_id = ?
                         """, [project_name, project_id]).fetchall()
                         
-                        logger.warning(f"[ENTITIES] Found {len(pdf_tables)} PDF tables for {project_name}")
-                        
                         for table_name, source_file in pdf_tables:
                             try:
-                                # Query the actual table content
                                 df = conn.execute(f'SELECT * FROM "{table_name}" LIMIT 500').fetchdf()
                                 if df is not None and not df.empty:
                                     texts.append(f"[Source: {source_file}]\n{df.to_string()}")
-                                    logger.warning(f"[ENTITIES] Added {len(df)} rows from {source_file}")
-                            except Exception as e:
-                                logger.warning(f"[ENTITIES] Error reading PDF table {table_name}: {e}")
-                    except Exception as e:
-                        logger.warning(f"[ENTITIES] _pdf_tables error: {e}")
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
                     
                     conn.close()
                 except Exception as e:
-                    logger.warning(f"[ENTITIES] DuckDB query error: {e}")
+                    logger.debug(f"[ENTITIES] DuckDB query error: {e}")
                     try:
                         conn.close()
                     except:
                         pass
-        except ImportError as e:
-            logger.warning(f"[ENTITIES] playbook_parser import failed: {e}")
-        except Exception as e:
-            logger.warning(f"[ENTITIES] DuckDB error: {e}")
-    else:
-        logger.warning("[ENTITIES] No project_name, skipping DuckDB")
+        except Exception:
+            pass
     
     # 2. Try ChromaDB (unstructured data - PDFs, docs)
     try:
         from utils.rag_handler import RAGHandler
         rag = RAGHandler()
-        # ChromaDB uses project_id (UUID), not project name
         results = rag.search(
             collection_name="documents",
             query="company FEIN EIN employer tax federal identification",
             n_results=50,
-            project_id=project_id  # Use UUID, not name
+            project_id=project_id
         )
         if results:
             for result in results:
                 doc_text = result.get('document', '')
                 if doc_text:
                     texts.append(doc_text)
-            logger.warning(f"[ENTITIES] ChromaDB returned {len(results)} results for project {project_id}")
-        else:
-            logger.warning(f"[ENTITIES] ChromaDB returned no results for {project_id}")
-    except ImportError as e:
-        logger.warning(f"[ENTITIES] RAGHandler not available: {e}")
-    except Exception as e:
-        logger.warning(f"[ENTITIES] ChromaDB error: {e}")
+    except Exception:
+        pass
     
-    logger.warning(f"[ENTITIES] Retrieved {len(texts)} total text chunks")
+    logger.info(f"[ENTITIES] Retrieved {len(texts)} text chunks for project {project_id[:8]}")
     return texts
         
 @router.post("/year-end/learning/export-training-data")
