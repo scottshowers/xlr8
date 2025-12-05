@@ -3763,7 +3763,7 @@ class EntityConfigRequest(BaseModel):
 async def save_entity_config(playbook_type: str, project_id: str, config: EntityConfigRequest):
     """Save entity configuration for a project/playbook."""
     try:
-        from backend.models import EntityConfigModel
+        from utils.database.models import EntityConfigModel
         
         result = EntityConfigModel.save(
             project_id=project_id,
@@ -3791,7 +3791,7 @@ async def save_entity_config(playbook_type: str, project_id: str, config: Entity
 async def get_entity_config(playbook_type: str, project_id: str):
     """Get entity configuration for a project/playbook."""
     try:
-        from backend.models import EntityConfigModel
+        from utils.database.models import EntityConfigModel
         
         config = EntityConfigModel.get(project_id, playbook_type)
         
@@ -3827,7 +3827,7 @@ class SuppressionRequest(BaseModel):
 async def create_suppression(playbook_type: str, project_id: str, request: SuppressionRequest):
     """Create a suppression rule."""
     try:
-        from backend.models import FindingSuppressionModel
+        from utils.database.models import FindingSuppressionModel
         
         result = FindingSuppressionModel.create(
             project_id=project_id,
@@ -3859,7 +3859,7 @@ async def create_suppression(playbook_type: str, project_id: str, request: Suppr
 async def list_suppressions(playbook_type: str, project_id: str, include_inactive: bool = False):
     """List all suppression rules for a project."""
     try:
-        from backend.models import FindingSuppressionModel
+        from utils.database.models import FindingSuppressionModel
         
         rules = FindingSuppressionModel.get_by_project(project_id, playbook_type, include_inactive)
         stats = FindingSuppressionModel.get_stats(project_id, playbook_type)
@@ -3875,7 +3875,7 @@ async def list_suppressions(playbook_type: str, project_id: str, include_inactiv
 async def deactivate_suppression(playbook_type: str, rule_id: str):
     """Deactivate a suppression rule (soft delete)."""
     try:
-        from backend.models import FindingSuppressionModel
+        from utils.database.models import FindingSuppressionModel
         
         success = FindingSuppressionModel.deactivate(rule_id)
         return {"success": success}
@@ -3889,7 +3889,7 @@ async def deactivate_suppression(playbook_type: str, rule_id: str):
 async def reactivate_suppression(playbook_type: str, rule_id: str):
     """Reactivate a deactivated suppression rule."""
     try:
-        from backend.models import FindingSuppressionModel
+        from utils.database.models import FindingSuppressionModel
         
         success = FindingSuppressionModel.reactivate(rule_id)
         return {"success": success}
@@ -3910,7 +3910,7 @@ class QuickSuppressRequest(BaseModel):
 async def quick_suppress(playbook_type: str, project_id: str, action_id: str, request: QuickSuppressRequest):
     """Quick suppress from UI - one click acknowledge/suppress."""
     try:
-        from backend.models import FindingSuppressionModel
+        from utils.database.models import FindingSuppressionModel
         
         result = FindingSuppressionModel.create(
             project_id=project_id,
@@ -3935,7 +3935,7 @@ async def quick_suppress(playbook_type: str, project_id: str, action_id: str, re
 async def get_suppression_stats(playbook_type: str, project_id: str):
     """Get suppression statistics for a project."""
     try:
-        from backend.models import FindingSuppressionModel
+        from utils.database.models import FindingSuppressionModel
         
         stats = FindingSuppressionModel.get_stats(project_id, playbook_type)
         return {"success": True, "stats": stats}
