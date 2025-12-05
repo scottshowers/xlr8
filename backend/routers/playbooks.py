@@ -3676,7 +3676,315 @@ async def get_learning_stats():
         logger.error(f"[LEARNING] Stats error: {e}")
         return {"success": False, "message": str(e), "stats": {}}
 
+# =============================================================================
+# PASTE THIS BEFORE THE LAST LINE OF playbooks.py
+# =============================================================================
 
+# =============================================================================
+# ENTITY DETECTION & CONFIGURATION ENDPOINTS
+# =============================================================================
+
+@router.post("/{playbook_type}/detect-entities/{project_id}")
+async def detect_entities(playbook_type: str, project_id: str):
+    """
+    Scan project documents for US FEINs and Canada BNs.
+    Call this before analysis to let user select which entities to include.
+    """
+    try:
+        from backend.utils.fein_detector import detect_entity_identifiers, identify_company_names
+        
+        # Get project documents
+        docs = await get_project_documents_text(project_id)
+        if not docs:
+            return {
+                "success": True,
+                "entities": {"us": [], "canada": []},
+                "summary": {"us_count": 0, "canada_count": 0, "total": 0},
+                "warnings": []
+            }
+        
+        combined_text = "\n\n".join(docs)
+        
+        # Detect entities
+        entities = detect_entity_identifiers(combined_text)
+        
+        # Identify company names
+        all_entities = entities.get('us', []) + entities.get('canada', [])
+        if all_entities:
+            names = identify_company_names(all_entities, combined_text)
+            for country in ['us', 'canada']:
+                for entity in entities.get(country, []):
+                    if entity['id'] in names:
+                        entity['company_name'] = names[entity['id']].get('company_name', f"Entity {entity['id']}")
+        
+        # Build summary
+        us_count = len(entities.get('us', []))
+        ca_count = len(entities.get('canada', []))
+        
+        # Suggested primary (most mentioned)
+        primary = None
+        if all_entities:
+            primary = max(all_entities, key=lambda x: x.get('count', 0))
+        
+        warnings = []
+        if ca_count > 0 and playbook_type == 'year_end':
+            warnings.append("Canada entities detected - requires Canada Year-End Playbook (coming soon)")
+        
+        return {
+            "success": True,
+            "project_id": project_id,
+            "playbook_type": playbook_type,
+            "entities": entities,
+            "summary": {
+                "us_count": us_count,
+                "canada_count": ca_count,
+                "total": us_count + ca_count,
+                "suggested_primary": primary['id'] if primary else None
+            },
+            "warnings": warnings
+        }
+        
+    except ImportError:
+        logger.warning("[ENTITIES] fein_detector not available")
+        return {"success": False, "message": "Entity detection not available"}
+    except Exception as e:
+        logger.error(f"[ENTITIES] Detection error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+class EntityConfigRequest(BaseModel):
+    analysis_scope: str  # 'all', 'selected', 'primary_only'
+    selected_entities: List[str]
+    primary_entity: Optional[str] = None
+    country_mode: str = 'us_only'
+
+
+@router.post("/{playbook_type}/entity-config/{project_id}")
+async def save_entity_config(playbook_type: str, project_id: str, config: EntityConfigRequest):
+    """Save entity configuration for a project/playbook."""
+    try:
+        from backend.models import EntityConfigModel
+        
+        result = EntityConfigModel.save(
+            project_id=project_id,
+            playbook_type=playbook_type,
+            analysis_scope=config.analysis_scope,
+            selected_entities=config.selected_entities,
+            primary_entity=config.primary_entity,
+            country_mode=config.country_mode
+        )
+        
+        if result:
+            return {
+                "success": True,
+                "message": f"Entity configuration saved. Analyzing {len(config.selected_entities)} entities.",
+                "config": result
+            }
+        return {"success": False, "message": "Failed to save configuration"}
+        
+    except Exception as e:
+        logger.error(f"[ENTITY-CONFIG] Save error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{playbook_type}/entity-config/{project_id}")
+async def get_entity_config(playbook_type: str, project_id: str):
+    """Get entity configuration for a project/playbook."""
+    try:
+        from backend.models import EntityConfigModel
+        
+        config = EntityConfigModel.get(project_id, playbook_type)
+        
+        if config:
+            return {"success": True, "configured": True, "config": config}
+        return {"success": True, "configured": False, "config": None}
+        
+    except Exception as e:
+        logger.error(f"[ENTITY-CONFIG] Get error: {e}")
+        return {"success": False, "configured": False, "config": None, "message": str(e)}
+
+
+# =============================================================================
+# SUPPRESSION ENDPOINTS
+# =============================================================================
+
+class SuppressionRequest(BaseModel):
+    suppression_type: str  # 'acknowledge', 'suppress', 'pattern'
+    reason: str
+    action_id: Optional[str] = None
+    finding_text: Optional[str] = None
+    pattern: Optional[str] = None
+    category: Optional[str] = None
+    document_filter: Optional[str] = None
+    state_filter: Optional[List[str]] = None
+    keyword_filter: Optional[List[str]] = None
+    fein_filter: Optional[List[str]] = None
+    expires_at: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@router.post("/{playbook_type}/suppress/{project_id}")
+async def create_suppression(playbook_type: str, project_id: str, request: SuppressionRequest):
+    """Create a suppression rule."""
+    try:
+        from backend.models import FindingSuppressionModel
+        
+        result = FindingSuppressionModel.create(
+            project_id=project_id,
+            playbook_type=playbook_type,
+            suppression_type=request.suppression_type,
+            reason=request.reason,
+            action_id=request.action_id,
+            finding_text=request.finding_text,
+            pattern=request.pattern,
+            category=request.category,
+            document_filter=request.document_filter,
+            state_filter=request.state_filter,
+            keyword_filter=request.keyword_filter,
+            fein_filter=request.fein_filter,
+            expires_at=request.expires_at,
+            notes=request.notes
+        )
+        
+        if result:
+            return {"success": True, "rule_id": result['id'], "rule": result}
+        return {"success": False, "message": "Failed to create suppression"}
+        
+    except Exception as e:
+        logger.error(f"[SUPPRESS] Create error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{playbook_type}/suppressions/{project_id}")
+async def list_suppressions(playbook_type: str, project_id: str, include_inactive: bool = False):
+    """List all suppression rules for a project."""
+    try:
+        from backend.models import FindingSuppressionModel
+        
+        rules = FindingSuppressionModel.get_by_project(project_id, playbook_type, include_inactive)
+        stats = FindingSuppressionModel.get_stats(project_id, playbook_type)
+        
+        return {"success": True, "rules": rules, "stats": stats}
+        
+    except Exception as e:
+        logger.error(f"[SUPPRESS] List error: {e}")
+        return {"success": False, "rules": [], "stats": {}, "message": str(e)}
+
+
+@router.delete("/{playbook_type}/suppress/{rule_id}")
+async def deactivate_suppression(playbook_type: str, rule_id: str):
+    """Deactivate a suppression rule (soft delete)."""
+    try:
+        from backend.models import FindingSuppressionModel
+        
+        success = FindingSuppressionModel.deactivate(rule_id)
+        return {"success": success}
+        
+    except Exception as e:
+        logger.error(f"[SUPPRESS] Deactivate error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+@router.put("/{playbook_type}/suppress/{rule_id}/reactivate")
+async def reactivate_suppression(playbook_type: str, rule_id: str):
+    """Reactivate a deactivated suppression rule."""
+    try:
+        from backend.models import FindingSuppressionModel
+        
+        success = FindingSuppressionModel.reactivate(rule_id)
+        return {"success": success}
+        
+    except Exception as e:
+        logger.error(f"[SUPPRESS] Reactivate error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+class QuickSuppressRequest(BaseModel):
+    finding_text: str
+    reason: str
+    suppress_type: str = 'acknowledge'  # 'acknowledge' or 'suppress'
+    fein: Optional[str] = None
+
+
+@router.post("/{playbook_type}/suppress/quick/{project_id}/{action_id}")
+async def quick_suppress(playbook_type: str, project_id: str, action_id: str, request: QuickSuppressRequest):
+    """Quick suppress from UI - one click acknowledge/suppress."""
+    try:
+        from backend.models import FindingSuppressionModel
+        
+        result = FindingSuppressionModel.create(
+            project_id=project_id,
+            playbook_type=playbook_type,
+            action_id=action_id,
+            suppression_type=request.suppress_type,
+            finding_text=request.finding_text,
+            reason=request.reason,
+            fein_filter=[request.fein] if request.fein else None
+        )
+        
+        if result:
+            return {"success": True, "rule_id": result['id'], "type": request.suppress_type}
+        return {"success": False, "message": "Failed to create suppression"}
+        
+    except Exception as e:
+        logger.error(f"[SUPPRESS] Quick suppress error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+@router.get("/{playbook_type}/suppressions/stats/{project_id}")
+async def get_suppression_stats(playbook_type: str, project_id: str):
+    """Get suppression statistics for a project."""
+    try:
+        from backend.models import FindingSuppressionModel
+        
+        stats = FindingSuppressionModel.get_stats(project_id, playbook_type)
+        return {"success": True, "stats": stats}
+        
+    except Exception as e:
+        logger.error(f"[SUPPRESS] Stats error: {e}")
+        return {"success": False, "stats": {}, "message": str(e)}
+
+
+# =============================================================================
+# HELPER FUNCTION FOR ENTITY DETECTION
+# =============================================================================
+
+async def get_project_documents_text(project_id: str) -> List[str]:
+    """Get all document text for a project (for entity detection)."""
+    try:
+        # Try ChromaDB first
+        try:
+            from backend.chroma_client import query_documents
+            results = query_documents("*", project_id=project_id, n_results=100)
+            if results and results.get('documents'):
+                return [doc for docs in results['documents'] for doc in docs if doc]
+        except:
+            pass
+        
+        # Fallback to DuckDB
+        try:
+            from backend.utils.duckdb_manager import get_duckdb_manager
+            manager = get_duckdb_manager()
+            tables = manager.list_project_tables(project_id)
+            
+            texts = []
+            for table in tables:
+                try:
+                    df = manager.query(f"SELECT * FROM {table} LIMIT 1000")
+                    if df is not None and not df.empty:
+                        texts.append(df.to_string())
+                except:
+                    pass
+            return texts
+        except:
+            pass
+        
+        return []
+        
+    except Exception as e:
+        logger.error(f"[ENTITIES] Error getting documents: {e}")
+        return []
+        
 @router.post("/year-end/learning/export-training-data")
 async def export_training_data():
     """
