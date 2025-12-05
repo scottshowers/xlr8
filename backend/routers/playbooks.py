@@ -3954,39 +3954,54 @@ async def get_project_documents_text(project_id: str) -> List[str]:
     Checks BOTH DuckDB (structured) and ChromaDB (unstructured).
     """
     texts = []
+    project_name = None
     
-    # 1. Try DuckDB first (structured data - Excel files, CSVs)
+    # First, get the project NAME from Supabase (DuckDB uses names, not UUIDs)
     try:
-        from backend.utils.playbook_parser import get_duckdb_connection
-        conn = get_duckdb_connection()
-        if conn:
-            # Get all tables for this project
-            try:
-                tables = conn.execute("""
-                    SELECT table_name, file_name 
-                    FROM _schema_metadata 
-                    WHERE project = ? AND is_current = TRUE
-                """, [project_id]).fetchall()
-                
-                for table_name, file_name in tables:
-                    try:
-                        df = conn.execute(f"SELECT * FROM \"{table_name}\" LIMIT 500").fetchdf()
-                        if df is not None and not df.empty:
-                            texts.append(f"[Source: {file_name}]\n{df.to_string()}")
-                    except Exception as e:
-                        logger.debug(f"[ENTITIES] Error reading table {table_name}: {e}")
-                
-                conn.close()
-            except Exception as e:
-                logger.debug(f"[ENTITIES] DuckDB query error: {e}")
-                try:
-                    conn.close()
-                except:
-                    pass
-    except ImportError:
-        logger.debug("[ENTITIES] playbook_parser not available for DuckDB")
+        supabase = get_supabase()
+        if supabase:
+            result = supabase.table('projects').select('name').eq('id', project_id).execute()
+            if result.data and len(result.data) > 0:
+                project_name = result.data[0].get('name')
+                logger.info(f"[ENTITIES] Project name for {project_id}: {project_name}")
     except Exception as e:
-        logger.debug(f"[ENTITIES] DuckDB error: {e}")
+        logger.warning(f"[ENTITIES] Could not get project name: {e}")
+    
+    # 1. Try DuckDB (structured data - Excel files, CSVs)
+    if project_name:
+        try:
+            from backend.utils.playbook_parser import get_duckdb_connection
+            conn = get_duckdb_connection()
+            if conn:
+                try:
+                    # Query using project NAME not UUID
+                    tables = conn.execute("""
+                        SELECT table_name, file_name 
+                        FROM _schema_metadata 
+                        WHERE LOWER(project) = LOWER(?) AND is_current = TRUE
+                    """, [project_name]).fetchall()
+                    
+                    logger.info(f"[ENTITIES] Found {len(tables)} tables for project {project_name}")
+                    
+                    for table_name, file_name in tables:
+                        try:
+                            df = conn.execute(f'SELECT * FROM "{table_name}" LIMIT 500').fetchdf()
+                            if df is not None and not df.empty:
+                                texts.append(f"[Source: {file_name}]\n{df.to_string()}")
+                        except Exception as e:
+                            logger.debug(f"[ENTITIES] Error reading table {table_name}: {e}")
+                    
+                    conn.close()
+                except Exception as e:
+                    logger.warning(f"[ENTITIES] DuckDB query error: {e}")
+                    try:
+                        conn.close()
+                    except:
+                        pass
+        except ImportError as e:
+            logger.debug(f"[ENTITIES] playbook_parser not available: {e}")
+        except Exception as e:
+            logger.warning(f"[ENTITIES] DuckDB error: {e}")
     
     # 2. Try ChromaDB (unstructured data - PDFs, docs)
     try:
@@ -3998,7 +4013,6 @@ async def get_project_documents_text(project_id: str) -> List[str]:
                     if doc:
                         texts.append(doc)
     except ImportError:
-        # Try alternate import path
         try:
             from backend.chroma_client import query_documents
             results = query_documents("company FEIN EIN employer", project_id=project_id, n_results=50)
