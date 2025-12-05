@@ -133,7 +133,7 @@ class LocalLLMClient:
                 "stream": False,
                 "options": {
                     "temperature": 0.1,  # Low temp for extraction
-                    "num_predict": 4096  # Increased to avoid truncation
+                    "num_predict": 8192  # Increased to avoid truncation with complex docs
                 }
             }
             
@@ -211,8 +211,8 @@ class HybridAnalyzer:
     
     def local_extraction(self, text: str, action_id: str, reports_needed: List[str]) -> Optional[Dict]:
         """
-        Try to extract key values using local LLM.
-        Returns extracted data or None if extraction fails.
+        Use local LLM to extract AND analyze data like a UKG consultant.
+        Returns extracted data with issues and recommendations.
         """
         # First, quick regex extraction
         regex_results = self.extract_with_regex(text)
@@ -222,27 +222,44 @@ class HybridAnalyzer:
         if self.learning:
             examples = self.learning.get_few_shot_examples(action_id, limit=2)
             if examples:
-                examples_context = "\n\nEXAMPLES OF GOOD EXTRACTIONS:\n"
+                examples_context = "\n\nEXAMPLES OF GOOD ANALYSIS:\n"
                 for ex in examples:
                     examples_context += f"Input sample: {ex.get('input_sample', '')[:200]}...\n"
                     examples_context += f"Output: {json.dumps(ex.get('output', {}))}\n\n"
         
-        # Build focused extraction prompt
-        prompt = f"""You are a JSON extraction assistant. Extract data from this document and return ONLY a JSON object - no text before or after.
+        # Build consultant-grade analysis prompt with domain knowledge
+        prompt = f"""You are a senior UKG payroll implementation consultant reviewing year-end tax documents.
 
-EXTRACT:
-- FEIN/EIN (format as XX-XXXXXXX, e.g., 74-1776312)
-- Company name and address
-- Tax rates (percentages like X.XX%)
-- State tax codes (SUI, SIT, SDI, etc.)
-- Wage bases (dollar amounts)
-- Any transmittal control codes (TCC)
+YOUR EXPERTISE:
+- SUI (State Unemployment) rates typically range 0.5% to 5.4%, rates above 6% are unusual
+- FUTA is normally 0.6% (6.0% minus 5.4% credit) - anything else needs verification
+- Workers' Comp rates vary by class code and state, but rates above 10% are high-risk jobs
+- PA has hundreds of local tax jurisdictions - verify all localities are configured
+- FEIN format must be XX-XXXXXXX (9 digits with hyphen after 2nd digit)
+- Company addresses must match state tax registrations
+- Multiple SUI rates for same state may indicate acquired companies or location issues
+
+ANALYZE THIS DOCUMENT AND:
+1. Extract key data (FEIN, company name, tax rates, WC codes/rates)
+2. Flag any rates that seem unusual (too high, too low, or missing)
+3. Identify compliance risks (missing registrations, address mismatches)
+4. Note anything that needs customer verification before year-end
+
 {examples_context}
 DOCUMENT:
-{text[:8000]}
+{text[:10000]}
 
-OUTPUT FORMAT (return exactly this structure, no other text):
-{{"fein": "XX-XXXXXXX", "company_name": "...", "address": "...", "tax_rates": {{"SUI": "X.XX%"}}, "issues_found": []}}"""
+Return ONLY valid JSON (no comments, no trailing commas):
+{{
+  "fein": "XX-XXXXXXX or null",
+  "company_name": "string",
+  "address": "string or null",
+  "tax_rates": {{"STATE_SUI": "X.XX%", "FUTA": "X.XX%"}},
+  "wc_rates": {{"class_code": "rate%"}} or null,
+  "issues_found": ["list of problems found"],
+  "recommendations": ["list of things to verify or fix"],
+  "risk_level": "low|medium|high"
+}}"""
 
         result, success = self.local_llm.extract(text, prompt)
         
@@ -253,6 +270,21 @@ OUTPUT FORMAT (return exactly this structure, no other text):
         try:
             # Clean up response - handle preamble text before JSON
             result = result.strip()
+            
+            # Strip JavaScript-style comments that break JSON
+            # Remove single-line comments (// ...)
+            result = re.sub(r'//[^\n]*', '', result)
+            # Remove multi-line comments (/* ... */)
+            result = re.sub(r'/\*.*?\*/', '', result, flags=re.DOTALL)
+            # Remove trailing commas before } or ]
+            result = re.sub(r',\s*([}\]])', r'\1', result)
+            
+            # Strip JavaScript-style comments (// ... until end of line)
+            # This handles local LLMs that add comments like: "address": null, // not provided
+            result = re.sub(r'//[^\n]*', '', result)
+            
+            # Strip multi-line comments /* ... */
+            result = re.sub(r'/\*.*?\*/', '', result, flags=re.DOTALL)
             
             # Find JSON object in response (may have preamble text)
             json_start = result.find('{')
@@ -280,6 +312,15 @@ OUTPUT FORMAT (return exactly this structure, no other text):
             
             if json_end > 0:
                 result = result[:json_end]
+            else:
+                # JSON appears truncated - try to repair by closing brackets
+                logger.warning(f"[HYBRID] JSON appears truncated (unclosed braces: {brace_count}), attempting repair")
+                # Close any open strings first (find last " and add one if odd count)
+                quote_count = result.count('"')
+                if quote_count % 2 == 1:
+                    result += '"'
+                # Close brackets/braces
+                result += '}' * brace_count
             
             result = result.strip()
             
@@ -318,13 +359,10 @@ OUTPUT FORMAT (return exactly this structure, no other text):
         if local_results.get('issues_found') and len(local_results.get('issues_found', [])) > 0:
             return True
         
-        # If parse failed but we have regex results, might be okay
+        # If parse failed, ALWAYS use Claude - regex extraction is not analysis
         if local_results.get('_local_parse_failed'):
-            # Check if we got the essential data via regex
-            regex = local_results.get('_regex', {})
-            if regex.get('fein') or regex.get('rate_percent'):
-                return False  # We got what we needed
-            return True  # Need Claude to interpret
+            logger.info(f"[HYBRID] Local parse failed, falling back to Claude for real analysis")
+            return True
         
         # Simple extraction actions can skip Claude if local succeeded
         if action_id in SIMPLE_EXTRACTION_ACTIONS:
@@ -421,29 +459,25 @@ Return ONLY valid JSON."""
             return None
     
     def build_local_only_result(self, action_id: str, local_results: Dict) -> Dict:
-        """Build a findings result using local extraction + learned patterns"""
+        """Build a findings result using local LLM analysis."""
         self.stats['local_only'] += 1
         
-        # Run rule-based validation if learning is available
-        rule_issues = []
-        learned_recommendations = []
-        learned_summary = None
+        # The local LLM now returns issues, recommendations, and risk_level directly
+        # Use those if available, otherwise fall back to learned patterns
         
+        # Get LLM's direct analysis
+        llm_issues = local_results.get('issues_found', [])
+        llm_recommendations = local_results.get('recommendations', [])
+        llm_risk_level = local_results.get('risk_level', 'low')
+        
+        # Run additional rule-based validation if learning is available
+        rule_issues = []
         if self.learning:
             rule_issues = self.learning.validate_extraction(local_results)
-            
-            # Get learned examples for this action type
-            examples = self.learning.get_examples_for_action(action_id, limit=3)
-            if examples:
-                # Use learned patterns to generate recommendations
-                for ex in examples:
-                    ex_findings = ex.get('findings', {})
-                    if ex_findings.get('recommendations'):
-                        for rec in ex_findings['recommendations']:
-                            if rec not in learned_recommendations:
-                                learned_recommendations.append(rec)
-                    if ex_findings.get('summary') and not learned_summary:
-                        learned_summary = ex_findings.get('summary')
+            for ri in rule_issues:
+                issue_text = f"{ri['field']}: {ri['error']}"
+                if issue_text not in llm_issues:
+                    llm_issues.append(issue_text)
         
         # Get key values from extraction
         key_values = {}
@@ -473,65 +507,40 @@ Return ONLY valid JSON."""
         
         if local_results.get('tax_rates'):
             for code, rate in local_results.get('tax_rates', {}).items():
-                key_values[f'{code} Rate'] = rate
+                if isinstance(rate, dict):
+                    key_values[f'{code}'] = rate
+                else:
+                    key_values[f'{code} Rate'] = rate
         elif regex.get('rate_percent'):
             key_values['Rates Found'] = ', '.join(regex['rate_percent'][:5])
         
-        # Combine local issues with rule-based issues
-        all_issues = local_results.get('issues_found', [])
-        for ri in rule_issues:
-            all_issues.append(f"{ri['field']}: {ri['error']}")
+        # Add WC rates if present
+        if local_results.get('wc_rates'):
+            key_values['WC Rates'] = local_results['wc_rates']
         
         # Filter out suppressed issues
         if self.learning:
-            all_issues = [i for i in all_issues if not self.learning.should_suppress_issue(i)]
+            llm_issues = [i for i in llm_issues if not self.learning.should_suppress_issue(i)]
         
-        # Generate analysis-based recommendations if none learned
-        if not learned_recommendations:
-            # Add smart recommendations based on extracted data
-            if key_values.get('FEIN'):
-                learned_recommendations.append(f"Verify FEIN {key_values['FEIN']} matches all tax agency registrations")
-            
-            # Check for high SUI rates
-            for k, v in key_values.items():
-                if 'SUI' in k and isinstance(v, dict):
-                    for state, rate in v.items():
-                        try:
-                            rate_val = float(rate.replace('%', ''))
-                            if rate_val > 5.0:
-                                learned_recommendations.append(f"Review {state} SUI rate of {rate} - higher than typical")
-                        except:
-                            pass
-                elif 'Rate' in k and isinstance(v, str) and '%' in v:
-                    try:
-                        rate_val = float(v.replace('%', ''))
-                        if 'FUTA' in k and rate_val != 0.6:
-                            learned_recommendations.append(f"FUTA rate {v} differs from standard 0.6% - verify credit reduction status")
-                    except:
-                        pass
-        
-        # Build summary
-        if learned_summary:
-            summary = learned_summary
+        # Build summary based on what was found
+        if llm_issues:
+            summary = f"Found {len(llm_issues)} issue(s) requiring attention. "
         else:
-            extracted_items = list(key_values.keys())
-            if extracted_items:
-                summary = f"Extracted: {', '.join(extracted_items[:5])}. "
-                if all_issues:
-                    summary += f"Found {len(all_issues)} issue(s) requiring attention."
-                elif learned_recommendations:
-                    summary += f"{len(learned_recommendations)} recommendation(s) for review."
-                else:
-                    summary += "No issues detected."
-            else:
-                summary = "Document analyzed. Manual review recommended."
+            summary = "Analysis complete. "
+        
+        extracted_items = [k for k in key_values.keys() if key_values[k]]
+        if extracted_items:
+            summary += f"Extracted: {', '.join(extracted_items[:4])}."
+        
+        if llm_recommendations:
+            summary += f" {len(llm_recommendations)} recommendation(s) for review."
         
         return {
-            'complete': len(all_issues) == 0,
+            'complete': len(llm_issues) == 0,
             'key_values': key_values,
-            'issues': all_issues,
-            'recommendations': learned_recommendations[:5],  # Limit to top 5
-            'risk_level': 'high' if len(all_issues) > 2 else ('medium' if all_issues or learned_recommendations else 'low'),
+            'issues': llm_issues,
+            'recommendations': llm_recommendations[:5],
+            'risk_level': llm_risk_level,
             'summary': summary,
             '_analyzed_by': 'local'
         }
