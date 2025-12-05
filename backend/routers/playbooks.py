@@ -1937,6 +1937,12 @@ DO NOT INCLUDE THESE AS ISSUES:
 - "Data should be verified" type filler
 - Anything without a specific document citation
 
+DO NOT INCLUDE THESE AS RECOMMENDATIONS:
+- "Conduct an audit" or "complete audit" - WE ARE the audit, don't tell them to audit themselves
+- "Verify consistency" or "ensure reports match" - WE are doing that analysis
+- Generic advice like "review data" or "confirm information"
+- Recommendations must be SPECIFIC ACTIONS like "Add KY SUI code with rate 2.7%"
+
 {f'CLIENT FEIN: {selected_fein} - This is confirmed. Never flag FEIN as an issue.' if selected_fein else ''}
 
 WHAT MAKES THIS ACTION COMPLETE?
@@ -1977,17 +1983,23 @@ Return ONLY valid JSON."""
         
         result = json.loads(text)
         
-        # POST-PROCESSING: Filter out any FEIN-related issues that slipped through
-        fein_keywords = ['fein', 'ein', 'federal employer', 'multiple feins', 'fein format', 'fein mismatch']
+        # POST-PROCESSING: Filter out noise issues (FEIN stuff + PDF artifacts + generic filler)
+        noise_keywords = [
+            'fein', 'ein', 'federal employer', 'multiple feins', 'fein format', 'fein mismatch',
+            'formatting issue', 'column alignment', 'garbled', 'misaligned data', 'data formatting',
+            'fix data formatting', 'proper column',
+            'conduct complete audit', 'conduct a complete audit', 'complete audit of all',
+            'ensure both reports contain identical', 'verify and update status consistency'
+        ]
         if result.get('issues'):
             result['issues'] = [
                 issue for issue in result['issues']
-                if not any(kw in issue.lower() for kw in fein_keywords)
+                if not any(kw in issue.lower() for kw in noise_keywords)
             ]
         if result.get('recommendations'):
             result['recommendations'] = [
                 rec for rec in result['recommendations']
-                if not any(kw in rec.lower() for kw in fein_keywords)
+                if not any(kw in rec.lower() for kw in noise_keywords)
             ]
         
         result['_analyzed_by'] = 'claude_fallback'
@@ -2339,26 +2351,32 @@ async def get_ai_summary(project_id: str):
     actions_with_flags = []
     high_risk_actions = []
     
-    # Keywords to filter out FEIN-related noise
-    fein_keywords = ['fein', 'ein', 'federal employer', 'multiple feins', 'fein format', 'fein mismatch', 'conflicting fein']
+    # Keywords to filter out noise (FEIN + PDF artifacts + generic filler)
+    noise_keywords = [
+        'fein', 'ein', 'federal employer', 'multiple feins', 'fein format', 'fein mismatch', 'conflicting fein',
+        'formatting issue', 'column alignment', 'garbled', 'misaligned data', 'data formatting',
+        'fix data formatting', 'proper column',
+        'conduct complete audit', 'conduct a complete audit', 'complete audit of all',
+        'ensure both reports contain identical', 'verify and update status consistency'
+    ]
     
     for action_id, action_progress in progress.items():
         findings = action_progress.get("findings", {})
         if not findings:
             continue
         
-        # Collect issues with action context - FILTER OUT FEIN ISSUES
+        # Collect issues with action context - FILTER OUT NOISE
         for issue in findings.get("issues", []):
-            if not any(kw in issue.lower() for kw in fein_keywords):
+            if not any(kw in issue.lower() for kw in noise_keywords):
                 all_issues.append({
                     "action_id": action_id,
                     "issue": issue,
                     "risk_level": findings.get("risk_level", "medium")
                 })
         
-        # Collect recommendations - FILTER OUT FEIN RECOMMENDATIONS
+        # Collect recommendations - FILTER OUT NOISE
         for rec in findings.get("recommendations", []):
-            if not any(kw in rec.lower() for kw in fein_keywords):
+            if not any(kw in rec.lower() for kw in noise_keywords):
                 all_recommendations.append({
                     "action_id": action_id,
                     "recommendation": rec
