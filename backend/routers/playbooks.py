@@ -1505,14 +1505,14 @@ async def scan_for_action(project_id: str, action_id: str):
                                     columns = json.loads(columns_json) if columns_json else []
                                     
                                     if data and columns:
-                                        # Format as readable content
-                                        content_lines = [f"[FILE: {filename}] [TABLE: {table_name}] [FULL DATA - {len(data)} rows]"]
-                                        content_lines.append(f"Columns: {', '.join(columns)}")
+                                        # Format as compact CSV-style (much smaller than dict format)
+                                        content_lines = [f"[FILE: {filename}] [TABLE: {table_name}] [{len(data)} rows]"]
+                                        content_lines.append("|".join(columns))  # Header row
                                         
                                         for row in data:  # ALL rows
-                                            row_dict = {columns[i]: str(row[i]) for i in range(min(len(columns), len(row))) if row[i]}
-                                            if row_dict:
-                                                content_lines.append(str(row_dict))
+                                            # Compact pipe-separated format
+                                            row_vals = [str(row[i]) if row[i] else "" for i in range(min(len(columns), len(row)))]
+                                            content_lines.append("|".join(row_vals))
                                         
                                         table_content = "\n".join(content_lines)
                                         duckdb_content.append(table_content)
@@ -1537,7 +1537,11 @@ async def scan_for_action(project_id: str, action_id: str):
         # PRIORITIZE: DuckDB full data FIRST, then ChromaDB chunks
         # DuckDB has complete structured data, ChromaDB has truncated text chunks
         final_content = duckdb_content + all_content[:20]  # DuckDB first, then top 20 ChromaDB chunks
-        logger.warning(f"[SCAN] Final content: {len(duckdb_content)} DuckDB + {min(20, len(all_content))} ChromaDB = {len(final_content)} chunks")
+        
+        # Log content sizes for debugging
+        duckdb_chars = sum(len(c) for c in duckdb_content)
+        chroma_chars = sum(len(c) for c in all_content[:20])
+        logger.warning(f"[SCAN] Final content: {len(duckdb_content)} DuckDB ({duckdb_chars} chars) + {min(20, len(all_content))} ChromaDB ({chroma_chars} chars) = {len(final_content)} chunks")
         
         # Determine findings and suggested status
         findings = None
