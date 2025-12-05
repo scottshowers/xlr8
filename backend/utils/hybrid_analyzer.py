@@ -228,7 +228,7 @@ class HybridAnalyzer:
                     examples_context += f"Output: {json.dumps(ex.get('output', {}))}\n\n"
         
         # Build consultant-grade analysis prompt with domain knowledge
-        prompt = f"""You are a UKG payroll consultant. Analyze this document and extract real values.
+        prompt = f"""You are a UKG payroll consultant. Analyze this document and provide SPECIFIC findings.
 
 RULES:
 - SUI rates: normal 0.5%-5.4%, above 6% is unusual
@@ -236,15 +236,24 @@ RULES:
 - WC rates above 10% = high-risk
 - FEIN format: XX-XXXXXXX
 
-Extract REAL values, not placeholders.
+CRITICAL: Be SPECIFIC. Don't say "there are issues" - LIST THE EXACT ITEMS.
+
+BAD: "Multiple duplicate SUI entries found"
+GOOD: "Duplicate SUI entries: KY has 2.7% and 2.5%, MI has 3.1% twice, MN has 2.8% and 2.9%"
+
+BAD: "Some states missing WC coverage"  
+GOOD: "States missing WC coverage: TX, FL, GA, NC (these are active payroll states with no WC rates)"
+
+BAD: "Tax rate inconsistencies found"
+GOOD: "Rate mismatches: PA SUI is 13.6% in Tax Verification but 13.2% in Master Profile"
 
 {examples_context}
 
 DOCUMENT:
 {text[:15000]}
 
-Return JSON with actual values found:
-{{"fein":"actual-fein","company_name":"actual name","tax_rates":{{"STATE":"rate%"}},"wc_rates":{{"code":"rate%"}},"issues_found":["real issues"],"recommendations":["real advice"],"risk_level":"low/medium/high"}}"""
+Return JSON with SPECIFIC values and lists:
+{{"fein":"actual-fein","company_name":"actual name","tax_rates":{{"STATE":"rate%"}},"wc_rates":{{"code":"rate%"}},"issues_found":["SPECIFIC issue with exact values"],"recommendations":["SPECIFIC action: fix X, Y, Z"],"risk_level":"low/medium/high"}}"""
 
         result, success = self.local_llm.extract(text, prompt)
         
@@ -397,20 +406,27 @@ ACTION: {action.get('action_id')} - {action.get('description', '')}
 {text[:15000]}
 </document>
 
-IMPORTANT: Each document chunk is labeled with [FILE: filename]. Include source citations.
+CRITICAL: Be SPECIFIC with findings. Don't summarize - LIST EXACT ITEMS.
 
-Analyze and return JSON:
+BAD: "Multiple duplicate SUI entries found"
+GOOD: "Duplicate SUI entries: KY has 2.7% and 2.5%, MI has 3.1% twice"
+
+BAD: "Some states missing WC coverage"  
+GOOD: "States missing WC coverage: TX, FL, GA, NC"
+
+Each document chunk is labeled with [FILE: filename]. Include source citations.
+
+Return JSON:
 {{
     "complete": true/false,
     "key_values": {{"label": "value (from filename)"}},
-    "issues": ["Issue description (Source: filename)"],
-    "recommendations": ["specific actions"],
+    "issues": ["SPECIFIC issue with exact values (Source: filename)"],
+    "recommendations": ["SPECIFIC action: fix X, Y, Z"],
     "risk_level": "low|medium|high",
     "summary": "2-3 sentence summary",
     "sources_used": ["list of filenames analyzed"]
 }}
 
-Include "(Source: filename)" at the end of each issue when you can identify the source.
 Return ONLY valid JSON."""
 
             logger.info(f"[HYBRID] Calling Claude for {action.get('action_id')}")
@@ -418,7 +434,7 @@ Return ONLY valid JSON."""
             
             response = client.messages.create(
                 model="claude-sonnet-4-20250514",
-                max_tokens=1500,
+                max_tokens=2500,
                 temperature=0,
                 messages=[{"role": "user", "content": prompt}]
             )
