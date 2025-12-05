@@ -700,4 +700,3 @@ const styles = {
 };
 
 export default EntityConfigModal;
-
