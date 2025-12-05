@@ -13,6 +13,8 @@
 
 import React, { useState, useEffect, useRef, useCallback, Component } from 'react';
 import api from '../services/api';
+import { EntityConfigModal, EntityStatusBar } from '../components/playbooks/EntityConfigModal';
+import { FindingsByEntity } from '../components/playbooks/FindingsByEntity';
 
 // Error Boundary to catch rendering errors and show them instead of blank screen
 class ErrorBoundary extends Component {
@@ -1953,31 +1955,17 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
             </div>
           )}
 
-          {/* Show issues/concerns */}
-          {findings?.issues && Array.isArray(findings.issues) && findings.issues.length > 0 && (
+          {/* Show issues with suppress/acknowledge controls */}
+          {findings && (findings.issues?.length > 0 || findings.is_multi_fein) && (
             <div style={styles.section}>
               <div style={styles.sectionTitle}>⚠️ Issues Identified</div>
-              <div style={{ 
-                background: '#fef2f2', 
-                border: '1px solid #fecaca',
-                borderRadius: '6px',
-                padding: '0.5rem'
-              }}>
-                {findings.issues.map((issue, i) => (
-                  <div key={i} style={{
-                    fontSize: '0.85rem',
-                    color: '#991b1b',
-                    padding: '0.35rem 0',
-                    borderBottom: i < findings.issues.length - 1 ? '1px solid #fecaca' : 'none',
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: '0.5rem'
-                  }}>
-                    <span style={{ color: '#dc2626' }}>•</span>
-                    <span>{issue}</span>
-                  </div>
-                ))}
-              </div>
+              <FindingsByEntity
+                findings={findings}
+                projectId={projectId}
+                playbookType="year_end"
+                actionId={action.action_id}
+                onFindingChange={() => onUpdate(action.action_id, {})}
+              />
             </div>
           )}
 
@@ -2285,6 +2273,11 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   const [actionsReadyToScan, setActionsReadyToScan] = useState([]);
   const [scanningAll, setScanningAll] = useState(false);
   
+  // ENTITY CONFIGURATION
+  const [showEntityConfig, setShowEntityConfig] = useState(false);
+  const [entityConfig, setEntityConfig] = useState(null);
+  const [entityConfigChecked, setEntityConfigChecked] = useState(false);
+  
   // TOOLTIPS: State for consultant-driven notes
   const [tooltipsByAction, setTooltipsByAction] = useState({});
   const [tooltipModalOpen, setTooltipModalOpen] = useState(false);
@@ -2303,6 +2296,32 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       loadTooltips();
     }
   }, [project]);
+  
+  // Check entity configuration on load
+  useEffect(() => {
+    if (project?.id && !entityConfigChecked) {
+      checkEntityConfig();
+    }
+  }, [project?.id, entityConfigChecked]);
+
+  const checkEntityConfig = async () => {
+    try {
+      const res = await api.get(`/playbooks/year_end/entity-config/${project.id}`);
+      if (res.data.configured) {
+        setEntityConfig(res.data.config);
+      } else {
+        // No config yet - detect entities first
+        const detectRes = await api.post(`/playbooks/year_end/detect-entities/${project.id}`);
+        if (detectRes.data.success && detectRes.data.summary?.total > 0) {
+          setShowEntityConfig(true);
+        }
+      }
+    } catch (err) {
+      console.error('Entity config check failed:', err);
+    } finally {
+      setEntityConfigChecked(true);
+    }
+  };
   
   // Poll for processing jobs updates
   useEffect(() => {
@@ -2933,6 +2952,14 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
             </button>
           </div>
         </div>
+        
+        {/* Entity Configuration Status */}
+        {entityConfig && (
+          <EntityStatusBar 
+            config={entityConfig}
+            onReconfigure={() => setShowEntityConfig(true)}
+          />
+        )}
         
         {/* AI Summary Dashboard */}
         <AISummaryDashboard 
@@ -3579,6 +3606,26 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
         actionId={tooltipModalActionId}
         existingTooltip={editingTooltip}
       />
+      
+      {/* Entity Configuration Modal */}
+      {showEntityConfig && (
+        <EntityConfigModal
+          projectId={project.id}
+          playbookType="year_end"
+          playbookCountry="us"
+          onConfigured={(config) => {
+            setEntityConfig(config);
+            setShowEntityConfig(false);
+            loadPlaybook();
+            loadAiSummary();
+          }}
+          onCancel={() => setShowEntityConfig(false)}
+          onSkip={() => {
+            setShowEntityConfig(false);
+            setEntityConfigChecked(true);
+          }}
+        />
+      )}
     </div>
     </ErrorBoundary>
   );
