@@ -1556,7 +1556,8 @@ async def scan_for_action(project_id: str, action_id: str):
                     action=action,
                     content=final_content,
                     inherited_findings=inherited_findings,
-                    action_id=action_id
+                    action_id=action_id,
+                    project_id=project_id
                 )
         
         # =====================================================================
@@ -1853,7 +1854,8 @@ async def extract_findings_consultative(
     action: Dict, 
     content: List[str], 
     inherited_findings: List[Dict],
-    action_id: str
+    action_id: str,
+    project_id: str = None
 ) -> Optional[Dict]:
     """
     HYBRID ANALYZER: Uses local LLM for extraction, Claude for complex analysis.
@@ -1865,6 +1867,17 @@ async def extract_findings_consultative(
     2. If simple action + good extraction → return local result
     3. If complex action or issues found → call Claude
     """
+    # Get selected entity config if available
+    selected_fein = None
+    if project_id:
+        try:
+            from utils.database.models import EntityConfigModel
+            config = EntityConfigModel.get(project_id, "year-end")
+            if config and config.get("primary_entity"):
+                selected_fein = config["primary_entity"]
+        except Exception:
+            pass
+    
     try:
         # Try hybrid approach first
         try:
@@ -1918,11 +1931,19 @@ Issues: {parent_findings.get('issues', [])}
 """)
             inherited_context = "\n".join(inherited_parts)
         
+        # Build entity context
+        entity_context = ""
+        if selected_fein:
+            entity_context = f"""
+CLIENT'S PRIMARY FEIN: {selected_fein}
+Focus your analysis on this specific entity. Other FEINs in documents are for reference only - do not flag them as issues or conflicts.
+"""
+        
         prompt = f"""You are a senior UKG implementation consultant performing Year-End analysis.
 
 ACTION: {action['action_id']} - {action.get('description', '')}
 REPORTS NEEDED: {', '.join(action.get('reports_needed', []))}
-
+{entity_context}
 {f'''
 INHERITED DATA FROM PREVIOUS ACTIONS:
 {inherited_context}
@@ -1936,7 +1957,7 @@ INHERITED DATA FROM PREVIOUS ACTIONS:
 
 Based on the documents and your UKG/Payroll expertise, provide:
 
-1. EXTRACT key data values found (FEIN in XX-XXXXXXX format, rates as percentages, states, etc.) - note which file each came from
+1. EXTRACT key data values found (FEIN, rates as percentages, states, etc.) - note which file each came from
 2. COMPARE to benchmarks where applicable (flag HIGH/LOW/UNUSUAL)
 3. IDENTIFY risks, issues, or items needing attention - cite the source document
 4. RECOMMEND specific actions the customer should take
@@ -1944,7 +1965,8 @@ Based on the documents and your UKG/Payroll expertise, provide:
 
 IMPORTANT: 
 - Each document chunk is labeled with [FILE: filename]. Include source citations.
-- FEIN must be formatted as XX-XXXXXXX (e.g., 74-1776312)
+{f'- The client FEIN is {selected_fein}. Use this exact value.' if selected_fein else '- FEIN should be formatted as XX-XXXXXXX'}
+- Do NOT flag "multiple FEINs found" as an issue - documents may reference multiple entities
 - Rates should be percentages (e.g., 0.6%, 2.7%)
 
 Return as JSON:
@@ -2380,10 +2402,11 @@ async def get_ai_summary(project_id: str):
     risk_order = {"high": 0, "medium": 1, "low": 2}
     all_issues.sort(key=lambda x: risk_order.get(x["risk_level"], 3))
     
-    # Calculate overall risk
-    if high_risk_actions:
+    # Calculate overall risk - only high if there are real conflicts or critical issues
+    # Actions marked "high risk" by AI are informational, not panic-level
+    if all_conflicts:
         overall_risk = "high"
-    elif any(i["risk_level"] == "medium" for i in all_issues):
+    elif len(high_risk_actions) >= 5 or any(i["risk_level"] == "medium" for i in all_issues):
         overall_risk = "medium"
     else:
         overall_risk = "low"
@@ -2391,7 +2414,7 @@ async def get_ai_summary(project_id: str):
     # Generate summary text
     summary_parts = []
     if high_risk_actions:
-        summary_parts.append(f"⚠️ {len(high_risk_actions)} high-risk action(s) need attention")
+        summary_parts.append(f"📋 {len(high_risk_actions)} action(s) pending analysis")
     if all_conflicts:
         summary_parts.append(f"❗ {len(all_conflicts)} data conflict(s) detected")
     if actions_with_flags:
