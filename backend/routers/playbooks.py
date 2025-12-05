@@ -4087,8 +4087,8 @@ async def get_project_documents_text(project_id: str) -> List[str]:
         # Search using project NAME not UUID
         search_project = project_name if project_name else project_id
         results = rag.search(
-            collection_name="xlr8_documents",
-            query="company FEIN EIN employer tax federal",
+            collection_name="documents",  # Correct collection name
+            query="company FEIN EIN employer tax federal identification",
             n_results=50,
             project_id=search_project
         )
@@ -4098,6 +4098,8 @@ async def get_project_documents_text(project_id: str) -> List[str]:
                 if doc_text:
                     texts.append(doc_text)
             logger.warning(f"[ENTITIES] ChromaDB returned {len(results)} results for project {search_project}")
+        else:
+            logger.warning(f"[ENTITIES] ChromaDB returned no results")
     except ImportError as e:
         logger.warning(f"[ENTITIES] RAGHandler not available: {e}")
     except Exception as e:
