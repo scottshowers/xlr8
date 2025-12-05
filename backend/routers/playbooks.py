@@ -3710,14 +3710,28 @@ async def detect_entities(playbook_type: str, project_id: str):
         logger.warning(f"[ENTITIES] Combined text length: {len(combined_text)} chars")
         logger.warning(f"[ENTITIES] Text sample (first 500): {combined_text[:500]}")
         
+        # Show sample from Company Master Profile specifically
+        for doc in docs:
+            if 'Master Profile' in doc or 'Tax Verification' in doc:
+                logger.warning(f"[ENTITIES] Company profile sample: {doc[:1000]}")
+                break
+        
         # Also look for EIN/FEIN mentions specifically
         import re
-        ein_mentions = re.findall(r'.{0,50}(EIN|FEIN|Employer.*Identification|Tax.*ID|Federal.*ID).{0,50}', combined_text, re.IGNORECASE)
-        logger.warning(f"[ENTITIES] EIN mentions found: {ein_mentions[:5]}")
+        ein_mentions = re.findall(r'.{0,80}(EIN|FEIN|Employer.*Identification|Tax.*ID|Federal.*ID).{0,80}', combined_text, re.IGNORECASE)
+        logger.warning(f"[ENTITIES] EIN mentions found (with context): {ein_mentions[:3]}")
         
-        # Also look for 2-digit + 7-digit patterns (with or without hyphen)
-        potential_feins = re.findall(r'\b\d{2}[-\s]?\d{7}\b', combined_text)
-        logger.warning(f"[ENTITIES] Potential FEIN patterns (XX-XXXXXXX or XXXXXXXXX): {potential_feins[:10]}")
+        # Look for ANY 9-digit sequences
+        any_9digit = re.findall(r'\b\d{9}\b', combined_text)
+        logger.warning(f"[ENTITIES] Any 9-digit numbers: {any_9digit[:10]}")
+        
+        # Look for XX-XXXXXXX pattern more broadly
+        hyphen_pattern = re.findall(r'\d{2}-\d{7}', combined_text)
+        logger.warning(f"[ENTITIES] Hyphenated patterns: {hyphen_pattern[:10]}")
+        
+        # Look for 2 digits followed by 7 digits with anything in between
+        flexible_pattern = re.findall(r'\b(\d{2})[\s\-\.]*(\d{7})\b', combined_text)
+        logger.warning(f"[ENTITIES] Flexible patterns: {flexible_pattern[:10]}")
         
         # Detect entities
         entities = detect_entity_identifiers(combined_text)
