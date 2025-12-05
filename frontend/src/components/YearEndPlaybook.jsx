@@ -1297,7 +1297,7 @@ function TooltipDisplay({ tooltips, onEdit, onDelete, isAdmin }) {
 }
 
 // Action Card Component
-function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltips, isAdmin, onAddTooltip, onEditTooltip, onDeleteTooltip, uploadedFiles }) {
+function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltips, isAdmin, onAddTooltip, onEditTooltip, onDeleteTooltip, uploadedFiles, onAcknowledge, onSuppress, onSuppressPattern, isIssueSuppressed, isIssueAcknowledged }) {
   const [expanded, setExpanded] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -2020,30 +2020,88 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
             </div>
           )}
 
-          {/* Show issues/concerns */}
+          {/* Show issues/concerns with acknowledge/suppress buttons */}
           {findings?.issues && Array.isArray(findings.issues) && findings.issues.length > 0 && (
             <div style={styles.section}>
-              <div style={styles.sectionTitle}>⚠️ Issues Identified</div>
+              <div style={styles.sectionTitle}>⚠️ Issues Identified ({findings.issues.filter(issue => !isIssueSuppressed?.(action.action_id, issue)).length})</div>
               <div style={{ 
                 background: '#fef2f2', 
                 border: '1px solid #fecaca',
                 borderRadius: '6px',
                 padding: '0.5rem'
               }}>
-                {findings.issues.map((issue, i) => (
-                  <div key={i} style={{
-                    fontSize: '0.85rem',
-                    color: '#991b1b',
-                    padding: '0.35rem 0',
-                    borderBottom: i < findings.issues.length - 1 ? '1px solid #fecaca' : 'none',
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: '0.5rem'
-                  }}>
-                    <span style={{ color: '#dc2626' }}>•</span>
-                    <span>{issue}</span>
+                {findings.issues
+                  .filter(issue => !isIssueSuppressed?.(action.action_id, issue))
+                  .map((issue, i, filteredIssues) => {
+                    const acknowledged = isIssueAcknowledged?.(action.action_id, issue);
+                    return (
+                      <div key={i} style={{
+                        fontSize: '0.85rem',
+                        color: acknowledged ? '#9ca3af' : '#991b1b',
+                        padding: '0.5rem',
+                        borderBottom: i < filteredIssues.length - 1 ? '1px solid #fecaca' : 'none',
+                        background: acknowledged ? '#f9fafb' : 'transparent',
+                        borderRadius: '4px',
+                        marginBottom: '0.25rem'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                          <span style={{ color: acknowledged ? '#9ca3af' : '#dc2626' }}>•</span>
+                          <span style={{ flex: 1, textDecoration: acknowledged ? 'line-through' : 'none' }}>{issue}</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.5rem', marginLeft: '1rem' }}>
+                          {!acknowledged && (
+                            <button
+                              onClick={() => onAcknowledge?.(action.action_id, issue)}
+                              style={{
+                                padding: '0.2rem 0.5rem',
+                                fontSize: '0.7rem',
+                                background: '#dcfce7',
+                                border: '1px solid #86efac',
+                                borderRadius: '4px',
+                                color: '#166534',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              ✓ Acknowledge
+                            </button>
+                          )}
+                          <button
+                            onClick={() => onSuppress?.(action.action_id, issue)}
+                            style={{
+                              padding: '0.2rem 0.5rem',
+                              fontSize: '0.7rem',
+                              background: '#fee2e2',
+                              border: '1px solid #fecaca',
+                              borderRadius: '4px',
+                              color: '#991b1b',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            ✕ Suppress
+                          </button>
+                          <button
+                            onClick={() => onSuppressPattern?.(issue)}
+                            style={{
+                              padding: '0.2rem 0.5rem',
+                              fontSize: '0.7rem',
+                              background: '#f3f4f6',
+                              border: '1px solid #d1d5db',
+                              borderRadius: '4px',
+                              color: '#4b5563',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            ⚙ Suppress Pattern
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                {findings.issues.filter(issue => !isIssueSuppressed?.(action.action_id, issue)).length === 0 && (
+                  <div style={{ color: '#6b7280', fontStyle: 'italic', padding: '0.5rem' }}>
+                    All issues have been suppressed
                   </div>
-                ))}
+                )}
               </div>
             </div>
           )}
@@ -2215,7 +2273,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
 }
 
 // Step Accordion Component
-function StepAccordion({ step, progress, projectId, onUpdate, tooltipsByAction, isAdmin, onAddTooltip, onEditTooltip, onDeleteTooltip, uploadedFiles }) {
+function StepAccordion({ step, progress, projectId, onUpdate, tooltipsByAction, isAdmin, onAddTooltip, onEditTooltip, onDeleteTooltip, uploadedFiles, onAcknowledge, onSuppress, onSuppressPattern, isIssueSuppressed, isIssueAcknowledged }) {
   const [expanded, setExpanded] = useState(false); // Default collapsed
   
   // Safety check
@@ -2323,6 +2381,11 @@ function StepAccordion({ step, progress, projectId, onUpdate, tooltipsByAction, 
                 onEditTooltip={onEditTooltip}
                 onDeleteTooltip={onDeleteTooltip}
                 uploadedFiles={uploadedFiles || []}
+                onAcknowledge={onAcknowledge}
+                onSuppress={onSuppress}
+                onSuppressPattern={onSuppressPattern}
+                isIssueSuppressed={isIssueSuppressed}
+                isIssueAcknowledged={isIssueAcknowledged}
               />
             </ErrorBoundary>
           ) : null)}
@@ -2352,6 +2415,9 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   const [actionsReadyToScan, setActionsReadyToScan] = useState([]);
   const [scanningAll, setScanningAll] = useState(false);
   
+  // SUPPRESSIONS: State for acknowledged/suppressed findings
+  const [suppressions, setSuppressions] = useState([]);
+  
   // TOOLTIPS: State for consultant-driven notes
   const [tooltipsByAction, setTooltipsByAction] = useState({});
   const [tooltipModalOpen, setTooltipModalOpen] = useState(false);
@@ -2368,6 +2434,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       loadDocChecklist();
       loadAiSummary();
       loadTooltips();
+      loadSuppressions();
     }
   }, [project]);
   
@@ -2384,6 +2451,83 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
     
     return () => clearInterval(interval);
   }, [project?.id, docChecklist?.processing_jobs?.length]);
+
+  // Load suppressions
+  const loadSuppressions = async () => {
+    try {
+      const res = await api.get(`/playbooks/year-end/suppressions/${project.id}`);
+      setSuppressions(res.data?.rules || []);
+    } catch (err) {
+      console.error('Failed to load suppressions:', err);
+    }
+  };
+
+  // Acknowledge a finding (mark as seen, keep visible but dimmed)
+  const handleAcknowledge = async (actionId, issue) => {
+    try {
+      await api.post(`/playbooks/year-end/suppress/${project.id}`, {
+        action_id: actionId,
+        suppression_type: 'acknowledge',
+        pattern: issue,
+        reason: 'User acknowledged'
+      });
+      await loadSuppressions();
+    } catch (err) {
+      console.error('Failed to acknowledge:', err);
+    }
+  };
+
+  // Suppress a finding (hide it)
+  const handleSuppress = async (actionId, issue) => {
+    try {
+      await api.post(`/playbooks/year-end/suppress/${project.id}`, {
+        action_id: actionId,
+        suppression_type: 'suppress',
+        pattern: issue,
+        reason: 'User suppressed'
+      });
+      await loadSuppressions();
+    } catch (err) {
+      console.error('Failed to suppress:', err);
+    }
+  };
+
+  // Suppress by pattern (hide all matching issues across actions)
+  const handleSuppressPattern = async (pattern) => {
+    const keyword = prompt('Enter keyword/pattern to suppress (e.g., "FEIN", "formatting"):');
+    if (!keyword) return;
+    try {
+      await api.post(`/playbooks/year-end/suppress/${project.id}`, {
+        suppression_type: 'pattern',
+        pattern: keyword,
+        reason: `Pattern suppression: ${keyword}`
+      });
+      await loadSuppressions();
+    } catch (err) {
+      console.error('Failed to suppress pattern:', err);
+    }
+  };
+
+  // Check if an issue is suppressed
+  const isIssueSuppressed = (actionId, issue) => {
+    return suppressions.some(s => {
+      if (!s.is_active) return false;
+      if (s.suppression_type === 'pattern') {
+        return issue.toLowerCase().includes(s.pattern.toLowerCase());
+      }
+      return s.action_id === actionId && s.pattern === issue && s.suppression_type === 'suppress';
+    });
+  };
+
+  // Check if an issue is acknowledged
+  const isIssueAcknowledged = (actionId, issue) => {
+    return suppressions.some(s => 
+      s.is_active && 
+      s.action_id === actionId && 
+      s.pattern === issue && 
+      s.suppression_type === 'acknowledge'
+    );
+  };
 
   const loadPlaybook = async () => {
     setLoading(true);
@@ -3156,6 +3300,11 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
             onEditTooltip={handleEditTooltip}
             onDeleteTooltip={handleDeleteTooltip}
             uploadedFiles={docChecklist?.uploaded_files || []}
+            onAcknowledge={handleAcknowledge}
+            onSuppress={handleSuppress}
+            onSuppressPattern={handleSuppressPattern}
+            isIssueSuppressed={isIssueSuppressed}
+            isIssueAcknowledged={isIssueAcknowledged}
           />
         ))}
 
