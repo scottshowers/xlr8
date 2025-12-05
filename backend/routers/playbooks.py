@@ -1859,6 +1859,28 @@ async def extract_findings_consultative(
                 method = result.get('_analyzed_by', 'unknown')
                 logger.info(f"[HYBRID] Action {action_id} analyzed by: {method}")
                 
+                # POST-PROCESSING: Filter noise from hybrid results too
+                noise_keywords = [
+                    'fein', 'ein', 'federal employer', 'multiple feins', 'fein format', 'fein mismatch',
+                    'formatting issue', 'column alignment', 'garbled', 'misaligned data', 'data formatting',
+                    'fix data formatting', 'proper column',
+                    'conduct complete audit', 'conduct a complete audit', 'conduct an audit', 'complete audit',
+                    'ensure both reports', 'ensure reports match', 'ensure consistency',
+                    'verify consistency', 'verify and update', 'verify information',
+                    'review data', 'review the data', 'confirm information',
+                    'reconcile all', 'comprehensive review', 'thorough review'
+                ]
+                if result.get('issues'):
+                    result['issues'] = [
+                        issue for issue in result['issues']
+                        if not any(kw in issue.lower() for kw in noise_keywords)
+                    ]
+                if result.get('recommendations'):
+                    result['recommendations'] = [
+                        rec for rec in result['recommendations']
+                        if not any(kw in rec.lower() for kw in noise_keywords)
+                    ]
+                
                 # Get stats periodically
                 stats = analyzer.get_stats()
                 if stats['total_analyses'] > 0 and stats['total_analyses'] % 10 == 0:
