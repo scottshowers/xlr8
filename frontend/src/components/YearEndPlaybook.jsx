@@ -1962,7 +1962,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
               <FindingsByEntity
                 findings={findings}
                 projectId={projectId}
-                playbookType="year_end"
+                playbookType="year-end"
                 actionId={action.action_id}
                 onFindingChange={() => onUpdate(action.action_id, {})}
               />
@@ -2306,12 +2306,12 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
 
   const checkEntityConfig = async () => {
     try {
-      const res = await api.get(`/playbooks/year_end/entity-config/${project.id}`);
+      const res = await api.get(`/playbooks/year-end/entity-config/${project.id}`);
       if (res.data.configured) {
         setEntityConfig(res.data.config);
       } else {
         // No config yet - detect entities first
-        const detectRes = await api.post(`/playbooks/year_end/detect-entities/${project.id}`);
+        const detectRes = await api.post(`/playbooks/year-end/detect-entities/${project.id}`);
         if (detectRes.data.success && detectRes.data.summary?.total > 0) {
           setShowEntityConfig(true);
         }
@@ -3611,7 +3611,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       {showEntityConfig && (
         <EntityConfigModal
           projectId={project.id}
-          playbookType="year_end"
+          playbookType="year-end"
           playbookCountry="us"
           onConfigured={(config) => {
             setEntityConfig(config);
