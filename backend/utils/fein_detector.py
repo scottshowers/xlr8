@@ -41,6 +41,28 @@ ENTITY_PATTERNS = {
         'type': 'fein',
         'description': 'FEIN with label'
     },
+    'us_ein_labeled': {
+        'pattern': r'\bEIN[:\s]*(\d{2})[-\s]?(\d{7})\b',
+        'format': lambda m: f"{m.group(1)}-{m.group(2)}",
+        'country': 'us',
+        'type': 'fein',
+        'description': 'EIN with label'
+    },
+    'us_fein_9digit': {
+        # 9 consecutive digits that look like FEIN (starts with valid prefix)
+        'pattern': r'\b([1-9]\d)(\d{7})\b',
+        'format': lambda m: f"{m.group(1)}-{m.group(2)}",
+        'country': 'us',
+        'type': 'fein',
+        'description': 'FEIN without hyphen (9 digits)'
+    },
+    'us_employer_id': {
+        'pattern': r'(?:Employer\s*(?:Identification|ID)|Tax\s*ID)[^0-9]*(\d{2})[-\s]?(\d{7})',
+        'format': lambda m: f"{m.group(1)}-{m.group(2)}",
+        'country': 'us',
+        'type': 'fein',
+        'description': 'Employer ID Number'
+    },
     'canada_bn_spaced': {
         'pattern': r'\b(\d{9})\s+(RT|RC|RP|RZ|RR)\s*(\d{4})\b',
         'format': lambda m: f"{m.group(1)} {m.group(2).upper()} {m.group(3)}",
