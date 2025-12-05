@@ -3956,14 +3956,19 @@ async def get_project_documents_text(project_id: str) -> List[str]:
     texts = []
     project_name = None
     
+    logger.warning(f"[ENTITIES] Starting document retrieval for project {project_id}")
+    
     # First, get the project NAME from Supabase (DuckDB uses names, not UUIDs)
     try:
         supabase = get_supabase()
+        logger.warning(f"[ENTITIES] Supabase client: {supabase is not None}")
         if supabase:
             result = supabase.table('projects').select('name').eq('id', project_id).execute()
             if result.data and len(result.data) > 0:
                 project_name = result.data[0].get('name')
-                logger.info(f"[ENTITIES] Project name for {project_id}: {project_name}")
+                logger.warning(f"[ENTITIES] Project name: {project_name}")
+            else:
+                logger.warning(f"[ENTITIES] No project found for ID {project_id}")
     except Exception as e:
         logger.warning(f"[ENTITIES] Could not get project name: {e}")
     
@@ -3972,6 +3977,7 @@ async def get_project_documents_text(project_id: str) -> List[str]:
         try:
             from backend.utils.playbook_parser import get_duckdb_connection
             conn = get_duckdb_connection()
+            logger.warning(f"[ENTITIES] DuckDB connection: {conn is not None}")
             if conn:
                 try:
                     # Query using project NAME not UUID
@@ -3981,7 +3987,7 @@ async def get_project_documents_text(project_id: str) -> List[str]:
                         WHERE LOWER(project) = LOWER(?) AND is_current = TRUE
                     """, [project_name]).fetchall()
                     
-                    logger.info(f"[ENTITIES] Found {len(tables)} tables for project {project_name}")
+                    logger.warning(f"[ENTITIES] Found {len(tables)} tables for project {project_name}")
                     
                     for table_name, file_name in tables:
                         try:
@@ -3989,7 +3995,7 @@ async def get_project_documents_text(project_id: str) -> List[str]:
                             if df is not None and not df.empty:
                                 texts.append(f"[Source: {file_name}]\n{df.to_string()}")
                         except Exception as e:
-                            logger.debug(f"[ENTITIES] Error reading table {table_name}: {e}")
+                            logger.warning(f"[ENTITIES] Error reading table {table_name}: {e}")
                     
                     conn.close()
                 except Exception as e:
@@ -3999,9 +4005,11 @@ async def get_project_documents_text(project_id: str) -> List[str]:
                     except:
                         pass
         except ImportError as e:
-            logger.debug(f"[ENTITIES] playbook_parser not available: {e}")
+            logger.warning(f"[ENTITIES] playbook_parser import failed: {e}")
         except Exception as e:
             logger.warning(f"[ENTITIES] DuckDB error: {e}")
+    else:
+        logger.warning("[ENTITIES] No project_name, skipping DuckDB")
     
     # 2. Try ChromaDB (unstructured data - PDFs, docs)
     try:
@@ -4012,6 +4020,7 @@ async def get_project_documents_text(project_id: str) -> List[str]:
                 for doc in doc_list:
                     if doc:
                         texts.append(doc)
+            logger.warning(f"[ENTITIES] ChromaDB returned {len(results.get('documents', []))} results")
     except ImportError:
         try:
             from backend.chroma_client import query_documents
@@ -4021,12 +4030,13 @@ async def get_project_documents_text(project_id: str) -> List[str]:
                     for doc in doc_list:
                         if doc:
                             texts.append(doc)
+                logger.warning(f"[ENTITIES] ChromaDB (backend) returned {len(results.get('documents', []))} results")
         except Exception as e:
-            logger.debug(f"[ENTITIES] ChromaDB not available: {e}")
+            logger.warning(f"[ENTITIES] ChromaDB not available: {e}")
     except Exception as e:
-        logger.debug(f"[ENTITIES] ChromaDB error: {e}")
+        logger.warning(f"[ENTITIES] ChromaDB error: {e}")
     
-    logger.info(f"[ENTITIES] Retrieved {len(texts)} text chunks for project {project_id}")
+    logger.warning(f"[ENTITIES] Retrieved {len(texts)} total text chunks")
     return texts
         
 @router.post("/year-end/learning/export-training-data")
