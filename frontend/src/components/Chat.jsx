@@ -1,9 +1,18 @@
 /**
- * Chat.jsx - Complete Replacement
+ * Chat.jsx - Enhanced with Scope Selection & Feedback
  * 
- * Now supports:
- * - External project from context (hideProjectSelector prop)
- * - Falls back to local project selection if not provided
+ * NEW FEATURES:
+ * - Scope selector: project, global, all
+ * - Thumbs up/down feedback buttons
+ * - Routing indicator showing what was searched
+ * - Learning integration
+ * 
+ * PRESERVED:
+ * - Personas
+ * - Excel export
+ * - Project selector
+ * - PII indicators
+ * - Source citations
  */
 
 import { useState, useEffect, useRef } from 'react'
@@ -28,7 +37,10 @@ export default function Chat({
   const messagesEndRef = useRef(null)
   const messagesAreaRef = useRef(null)
   
-  // Persona state - store full persona object
+  // NEW: Scope state - project, global, all
+  const [scope, setScope] = useState('project')
+  
+  // Persona state
   const [currentPersona, setCurrentPersona] = useState({
     id: 'bessie',
     name: 'Bessie',
@@ -57,7 +69,7 @@ export default function Chat({
     scrollToBottom()
   }, [messages])
 
-  // Set up global function for opening persona creator from dropdown
+  // Set up global function for opening persona creator
   useEffect(() => {
     window.openPersonaCreator = () => setShowPersonaCreator(true)
     return () => {
@@ -66,7 +78,6 @@ export default function Chat({
   }, [])
 
   const scrollToBottom = () => {
-    // Scroll within the messages container only, not the whole page
     if (messagesAreaRef.current) {
       messagesAreaRef.current.scrollTop = messagesAreaRef.current.scrollHeight
     }
@@ -97,6 +108,21 @@ export default function Chat({
     }))
   }
 
+  // NEW: Submit feedback
+  const submitFeedback = async (jobId, feedbackType, messageContent, responseContent) => {
+    try {
+      await api.post('/chat/feedback', {
+        job_id: jobId,
+        feedback: feedbackType,
+        message: messageContent,
+        response: responseContent
+      })
+      console.log(`✅ Feedback submitted: ${feedbackType}`)
+    } catch (err) {
+      console.error('Failed to submit feedback:', err)
+    }
+  }
+
   const sendMessage = async () => {
     if (!input.trim()) return
 
@@ -124,12 +150,13 @@ export default function Chat({
     setMessages(prev => [...prev, statusMessage])
 
     try {
-      // Start the chat job
+      // Start the chat job - NOW WITH SCOPE
       const startResponse = await api.post('/chat/start', {
         message: userMessage.content,
         project: selectedProject || null,
         max_results: 50,
-        persona: currentPersona?.id || 'bessie'
+        persona: currentPersona?.id || 'bessie',
+        scope: scope  // NEW: Pass scope
       })
 
       const { job_id } = startResponse.data
@@ -164,7 +191,13 @@ export default function Chat({
               models_used: jobStatus.models_used || [],
               query_type: jobStatus.query_type || 'unknown',
               sanitized: jobStatus.sanitized || false,
-              timestamp: new Date().toISOString()
+              routing_info: jobStatus.routing_info || null,  // NEW
+              scope: jobStatus.scope || scope,  // NEW
+              pii_redacted: jobStatus.pii_redacted || false,  // NEW
+              job_id: job_id,  // NEW: Store for feedback
+              userQuery: userMessage.content,  // NEW: Store for feedback
+              timestamp: new Date().toISOString(),
+              feedbackGiven: null  // NEW: Track feedback state
             }
 
             setMessages(prev => prev.map(msg =>
@@ -231,70 +264,82 @@ export default function Chat({
 
   const clearChat = () => {
     setMessages([])
-    setExpandedSources({})
     setError(null)
+    setExpandedSources({})
   }
 
   const formatTimestamp = (ts) => {
-    return new Date(ts).toLocaleTimeString('en-US', { 
-      hour: '2-digit', 
-      minute: '2-digit' 
+    return new Date(ts).toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit'
     })
   }
 
   const getModelBadge = (model) => {
-    const modelLower = model.toLowerCase()
-    if (modelLower.includes('mistral')) return { icon: '🔵', label: 'Mistral', color: '#3b82f6' }
-    if (modelLower.includes('deepseek')) return { icon: '🟣', label: 'DeepSeek', color: '#8b5cf6' }
-    if (modelLower.includes('llama')) return { icon: '🟢', label: 'Llama', color: '#22c55e' }
-    if (modelLower.includes('claude')) return { icon: '🟠', label: 'Claude', color: '#f97316' }
-    return { icon: '🔵', label: 'Local', color: '#3b82f6' }
+    const badges = {
+      'claude': { icon: '🧠', color: '#a855f7' },
+      'cache': { icon: '⚡', color: '#22c55e' },
+      'local': { icon: '🏠', color: '#3b82f6' },
+      'none': { icon: '❌', color: '#ef4444' },
+      'error': { icon: '⚠️', color: '#f59e0b' }
+    }
+    return badges[model] || badges['claude']
   }
 
-  // Styles
+  // Scope labels
+  const scopeLabels = {
+    'project': '📁 This Project',
+    'global': '🌐 Global Knowledge',
+    'all': '📊 All Projects'
+  }
+
   const styles = {
     container: {
+      height: '100%',
       display: 'flex',
       flexDirection: 'column',
-      height: 'calc(100vh - 240px)',
-      maxWidth: '1000px',
-      margin: '0 auto'
+      background: 'linear-gradient(135deg, rgba(131, 177, 109, 0.02) 0%, rgba(147, 171, 217, 0.02) 100%)',
+      borderRadius: '16px',
+      boxShadow: '0 4px 24px rgba(42, 52, 65, 0.08)',
+      overflow: 'hidden'
     },
     header: {
-      background: 'white',
-      borderRadius: '16px 16px 0 0',
-      padding: '1.25rem 1.5rem',
-      borderBottom: '1px solid #e1e8ed',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      boxShadow: '0 1px 3px rgba(42, 52, 65, 0.08)'
-    },
-    headerTitle: {
-      fontSize: '1.25rem',
-      fontWeight: '700',
-      color: '#2a3441',
-      fontFamily: "'Sora', sans-serif"
-    },
-    headerSubtitle: {
-      fontSize: '0.875rem',
-      color: '#5f6c7b',
-      marginTop: '0.25rem'
+      padding: '1rem 1.5rem',
+      background: 'white',
+      borderRadius: '16px 16px 0 0',
+      borderBottom: '1px solid #e1e8ed',
+      flexWrap: 'wrap',
+      gap: '0.75rem'
     },
     headerControls: {
       display: 'flex',
       alignItems: 'center',
-      gap: '1rem'
+      gap: '0.75rem',
+      flexWrap: 'wrap'
     },
     select: {
       padding: '0.5rem 1rem',
-      fontSize: '0.9rem',
+      fontSize: '0.875rem',
       border: '1px solid #e1e8ed',
       borderRadius: '8px',
       background: 'white',
-      color: '#2a3441',
+      cursor: 'pointer',
       outline: 'none',
-      cursor: 'pointer'
+      color: '#2a3441'
+    },
+    scopeSelect: {
+      padding: '0.5rem 0.75rem',
+      fontSize: '0.8rem',
+      border: '1px solid #e1e8ed',
+      borderRadius: '8px',
+      background: 'linear-gradient(135deg, rgba(131, 177, 109, 0.1), rgba(147, 171, 217, 0.1))',
+      cursor: 'pointer',
+      outline: 'none',
+      color: '#2a3441',
+      fontWeight: '500'
     },
     clearButton: {
       padding: '0.5rem 1rem',
@@ -395,6 +440,37 @@ export default function Chat({
       fontSize: '0.75rem',
       marginTop: '0.5rem',
       opacity: 0.7
+    },
+    routingBadge: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: '0.25rem',
+      padding: '0.25rem 0.5rem',
+      background: 'rgba(59, 130, 246, 0.1)',
+      color: '#3b82f6',
+      borderRadius: '4px',
+      fontSize: '0.7rem',
+      marginTop: '0.5rem'
+    },
+    feedbackButtons: {
+      display: 'flex',
+      gap: '0.5rem',
+      marginTop: '0.75rem',
+      paddingTop: '0.75rem',
+      borderTop: '1px solid #e1e8ed'
+    },
+    feedbackButton: {
+      padding: '0.25rem 0.5rem',
+      fontSize: '0.8rem',
+      border: '1px solid #e1e8ed',
+      borderRadius: '6px',
+      cursor: 'pointer',
+      background: 'white',
+      transition: 'all 0.2s ease'
+    },
+    feedbackButtonActive: {
+      background: 'rgba(131, 177, 109, 0.2)',
+      borderColor: '#83b16d'
     },
     sourcesSection: {
       marginTop: '1rem',
@@ -502,16 +578,18 @@ export default function Chat({
     },
     inputHint: {
       fontSize: '0.75rem',
-      color: '#5f6c7b',
-      marginTop: '0.5rem'
+      color: '#8896a4',
+      marginTop: '0.5rem',
+      textAlign: 'center'
     },
     errorBanner: {
       background: '#fef2f2',
       border: '1px solid #fecaca',
+      borderRadius: '8px',
       padding: '0.75rem 1rem',
+      margin: '0 1.5rem',
       display: 'flex',
       alignItems: 'center',
-      gap: '0.5rem',
       fontSize: '0.875rem',
       color: '#dc2626'
     }
@@ -519,12 +597,25 @@ export default function Chat({
 
   const isDisabled = loading || !input.trim()
 
+  // NEW: Handle feedback click
+  const handleFeedback = (messageIndex, feedbackType) => {
+    const message = messages[messageIndex]
+    if (message && message.job_id) {
+      submitFeedback(message.job_id, feedbackType, message.userQuery, message.content)
+      
+      // Update message to show feedback was given
+      setMessages(prev => prev.map((msg, idx) => 
+        idx === messageIndex ? { ...msg, feedbackGiven: feedbackType } : msg
+      ))
+    }
+  }
+
   return (
     <div style={styles.container}>
-      {/* Header - Persona + Controls */}
+      {/* Header - Persona + Scope + Controls */}
       <div style={styles.header}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          {/* Persona Switcher - Moved to header */}
+          {/* Persona Switcher */}
           <PersonaSwitcher 
             currentPersona={currentPersona?.id || 'bessie'}
             onPersonaChange={(persona) => setCurrentPersona(persona)}
@@ -532,6 +623,19 @@ export default function Chat({
         </div>
         
         <div style={styles.headerControls}>
+          {/* NEW: Scope Selector */}
+          <select
+            value={scope}
+            onChange={(e) => setScope(e.target.value)}
+            style={styles.scopeSelect}
+            title="Search scope"
+          >
+            <option value="project">📁 This Project</option>
+            <option value="global">🌐 Global Knowledge</option>
+            <option value="all">📊 All Projects</option>
+          </select>
+
+          {/* Model/Feature indicators */}
           <div style={{ 
             display: 'flex', 
             alignItems: 'center', 
@@ -539,22 +643,23 @@ export default function Chat({
             padding: '0.25rem 0.75rem',
             background: 'rgba(131, 177, 109, 0.1)',
             borderRadius: '6px',
-            fontSize: '0.7rem',
+            fontSize: '0.65rem',
             color: '#5f6c7b'
           }}>
-            <span title="Config queries go direct to Claude">⚡ Config→Claude</span>
+            <span title="Local LLM tried first">🏠 Local→</span>
+            <span title="Claude fallback">🧠 Claude</span>
             <span style={{ color: '#d1d5db' }}>|</span>
-            <span title="Employee queries use local LLM then Claude">🔒 PII→Local→Claude</span>
+            <span title="PII is redacted before sending to Claude">🔒 PII Safe</span>
           </div>
 
-          {/* Only show project selector if not hidden */}
+          {/* Project selector */}
           {!hideProjectSelector && (
             <select
               value={selectedProject}
               onChange={(e) => setSelectedProject(e.target.value)}
               style={styles.select}
             >
-              <option value="">All Projects</option>
+              <option value="">Select Project</option>
               {projectList.map(project => (
                 <option key={project.id} value={project.name}>
                   {project.name}
@@ -576,7 +681,11 @@ export default function Chat({
             <div style={styles.emptyIcon}>💬</div>
             <p style={styles.emptyTitle}>Start a conversation</p>
             <p style={styles.emptyText}>
-              {selectedProject ? `Searching in: ${selectedProject}` : 'Select a project to get started.'}
+              {selectedProject 
+                ? `Searching ${scopeLabels[scope]} for: ${selectedProject}` 
+                : scope === 'global' 
+                  ? 'Searching global knowledge base'
+                  : 'Select a project or search globally'}
             </p>
           </div>
         ) : (
@@ -627,7 +736,19 @@ export default function Chat({
                     )}
                   </div>
                   
-                  {/* Sources Section - GROUPED BY DOCUMENT */}
+                  {/* NEW: Routing indicator */}
+                  {message.role === 'assistant' && message.routing_info && !message.isStatus && (
+                    <div style={styles.routingBadge}>
+                      🔍 {message.routing_info.route || 'hybrid'}
+                      {message.routing_info.reasoning && message.routing_info.reasoning.length > 0 && (
+                        <span style={{ marginLeft: '0.25rem', opacity: 0.7 }}>
+                          ({message.routing_info.reasoning.slice(0, 2).join(', ')})
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  
+                  {/* Sources Section */}
                   {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
                     <div style={styles.sourcesSection}>
                       <div style={styles.sourcesHeader}>
@@ -644,7 +765,8 @@ export default function Chat({
                                 functional_area: source.functional_area,
                                 chunks: [],
                                 maxRelevance: 0,
-                                sheets: new Set()
+                                sheets: new Set(),
+                                type: source.type
                               };
                             }
                             acc[key].chunks.push(source);
@@ -656,7 +778,10 @@ export default function Chat({
                           return Object.values(grouped).map((doc, idx) => (
                             <div key={idx} style={styles.sourceItem}>
                               <div style={styles.sourceHeader}>
-                                <span style={styles.sourceFilename}>{doc.filename}</span>
+                                <span style={styles.sourceFilename}>
+                                  {doc.type === 'structured' ? '📊 ' : '📄 '}
+                                  {doc.filename}
+                                </span>
                                 <span style={{
                                   ...styles.sourceRelevance,
                                   background: doc.maxRelevance > 80 ? 'rgba(22, 163, 74, 0.1)' : 
@@ -669,11 +794,13 @@ export default function Chat({
                                   borderRadius: '4px',
                                   fontWeight: '600'
                                 }}>
-                                  {Math.round(doc.maxRelevance)}% best match
+                                  {Math.round(doc.maxRelevance)}% match
                                 </span>
                               </div>
                               <div style={styles.sourceMetadata}>
-                                <span style={styles.metadataTag}>📊 {doc.chunks.length} relevant section{doc.chunks.length > 1 ? 's' : ''}</span>
+                                <span style={styles.metadataTag}>
+                                  {doc.type === 'structured' ? `📊 ${doc.chunks[0]?.rows || '?'} rows` : `📄 ${doc.chunks.length} section${doc.chunks.length > 1 ? 's' : ''}`}
+                                </span>
                                 {doc.functional_area && <span style={styles.metadataTag}>📁 {doc.functional_area}</span>}
                                 {doc.sheets.size > 0 && <span style={styles.metadataTag}>📋 {doc.sheets.size} sheet{doc.sheets.size > 1 ? 's' : ''}</span>}
                               </div>
@@ -684,12 +811,11 @@ export default function Chat({
                     </div>
                   )}
                   
-                  {/* Download Button - Show when we have structured data sources */}
-                  {message.role === 'assistant' && message.sources && message.sources.some(s => s.type === 'structured') && (
+                  {/* Download Button - for structured data */}
+                  {message.role === 'assistant' && message.sources && message.sources.some(s => s.type === 'structured') && !message.isStatus && (
                     <button
                       onClick={async () => {
                         try {
-                          // Find the user's original query (previous message)
                           const userQuery = messages[index - 1]?.content || 'data export';
                           
                           const response = await api.post('/chat/export-excel', {
@@ -736,6 +862,40 @@ export default function Chat({
                       📥 Download as Excel
                     </button>
                   )}
+                  
+                  {/* NEW: Feedback buttons */}
+                  {message.role === 'assistant' && !message.isStatus && !message.error && message.job_id && (
+                    <div style={styles.feedbackButtons}>
+                      <span style={{ fontSize: '0.75rem', color: '#5f6c7b', marginRight: '0.5rem' }}>
+                        Was this helpful?
+                      </span>
+                      <button
+                        onClick={() => handleFeedback(index, 'up')}
+                        style={{
+                          ...styles.feedbackButton,
+                          ...(message.feedbackGiven === 'up' ? styles.feedbackButtonActive : {})
+                        }}
+                        disabled={message.feedbackGiven !== null}
+                      >
+                        👍
+                      </button>
+                      <button
+                        onClick={() => handleFeedback(index, 'down')}
+                        style={{
+                          ...styles.feedbackButton,
+                          ...(message.feedbackGiven === 'down' ? { background: 'rgba(220, 38, 38, 0.1)', borderColor: '#dc2626' } : {})
+                        }}
+                        disabled={message.feedbackGiven !== null}
+                      >
+                        👎
+                      </button>
+                      {message.feedbackGiven && (
+                        <span style={{ fontSize: '0.7rem', color: '#83b16d', marginLeft: '0.5rem' }}>
+                          ✓ Thanks!
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
                 
                 <div style={{
@@ -743,16 +903,21 @@ export default function Chat({
                   textAlign: message.role === 'user' ? 'right' : 'left'
                 }}>
                   {formatTimestamp(message.timestamp)}
-                  {message.query_type && (
+                  {message.query_type && message.query_type !== 'unknown' && (
                     <span style={{ 
                       marginLeft: '0.5rem',
                       padding: '0.125rem 0.5rem',
                       borderRadius: '4px',
                       fontSize: '0.7rem',
-                      background: message.query_type === 'config' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(168, 85, 247, 0.1)',
-                      color: message.query_type === 'config' ? '#3b82f6' : '#a855f7'
+                      background: message.query_type === 'cached' ? 'rgba(34, 197, 94, 0.1)' :
+                                 message.query_type === 'structured' ? 'rgba(59, 130, 246, 0.1)' : 
+                                 'rgba(168, 85, 247, 0.1)',
+                      color: message.query_type === 'cached' ? '#22c55e' :
+                             message.query_type === 'structured' ? '#3b82f6' : '#a855f7'
                     }}>
-                      {message.query_type === 'config' ? '⚡ CONFIG' : '🔒 EMPLOYEE'}
+                      {message.query_type === 'cached' ? '⚡ CACHED' : 
+                       message.query_type === 'structured' ? '📊 SQL' : 
+                       message.query_type.toUpperCase()}
                     </span>
                   )}
                   {message.models_used && message.models_used.length > 0 && (
@@ -765,8 +930,8 @@ export default function Chat({
                           </span>
                         )
                       })}
-                      {message.sanitized && (
-                        <span style={{ marginLeft: '0.25rem' }} title="PII Sanitized">
+                      {message.pii_redacted && (
+                        <span style={{ marginLeft: '0.25rem' }} title="PII was safely handled">
                           🔒
                         </span>
                       )}
@@ -811,9 +976,12 @@ export default function Chat({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder={selectedProject 
-              ? `Ask about ${selectedProject} documents...` 
-              : "Ask a question about your documents..."
+            placeholder={
+              scope === 'global' 
+                ? "Ask about global knowledge..." 
+                : selectedProject 
+                  ? `Ask about ${selectedProject}...` 
+                  : "Select a project or search globally..."
             }
             style={styles.textarea}
             rows={2}
@@ -831,7 +999,7 @@ export default function Chat({
           </button>
         </div>
         <p style={styles.inputHint}>
-          Press Enter to send • Shift+Enter for new line
+          Press Enter to send • Shift+Enter for new line • Scope: {scopeLabels[scope]}
         </p>
       </div>
 
@@ -840,7 +1008,6 @@ export default function Chat({
         isOpen={showPersonaCreator}
         onClose={() => setShowPersonaCreator(false)}
         onPersonaCreated={(persona) => {
-          // Set full persona object with generated ID
           setCurrentPersona({
             id: persona.name.toLowerCase().replace(/\s+/g, '_'),
             name: persona.name,
