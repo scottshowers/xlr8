@@ -61,7 +61,7 @@ except ImportError:
 
 # Import smart PDF analyzer for tabular PDFs
 try:
-    from utils.smart_pdf_analyzer import process_pdf_intelligently
+    from backend.utils.smart_pdf_analyzer import process_pdf_intelligently
     SMART_PDF_AVAILABLE = True
 except ImportError:
     SMART_PDF_AVAILABLE = False
@@ -111,7 +111,7 @@ async def debug_features():
     
     # Try imports and capture specific errors
     try:
-        from utils.smart_pdf_analyzer import process_pdf_intelligently
+        from backend.utils.smart_pdf_analyzer import process_pdf_intelligently
         results["smart_pdf_import"] = "SUCCESS"
     except ImportError as e:
         results["smart_pdf_import"] = f"FAILED: {e}"
