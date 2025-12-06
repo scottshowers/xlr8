@@ -9,6 +9,15 @@ FEATURES:
 - Handles large files gracefully
 - Smart Excel parsing (detects blue/colored headers)
 - SMART PDF ROUTING - tabular PDFs go to DuckDB!
+- CONTENT-BASED ROUTING - routes by content, not file extension
+
+ROUTING LOGIC:
+- XLSX/XLS/CSV → DuckDB ONLY (never ChromaDB - structured data doesn't chunk)
+- PDF → Smart analysis → DuckDB (tables) + ChromaDB (text)
+- DOCX/TXT/MD → Content analysis:
+    - If TABULAR → Extract tables → DuckDB
+    - If NARRATIVE → ChromaDB
+- Other → ChromaDB
 
 Author: XLR8 Team
 """
@@ -58,6 +67,15 @@ except ImportError:
     SMART_PDF_AVAILABLE = False
     logger_temp = logging.getLogger(__name__)
     logger_temp.warning("Smart PDF analyzer not available - PDFs will use RAG only")
+
+# Import document analyzer for content-based routing
+try:
+    from utils.document_analyzer import DocumentAnalyzer, DocumentStructure
+    DOCUMENT_ANALYZER_AVAILABLE = True
+except ImportError:
+    DOCUMENT_ANALYZER_AVAILABLE = False
+    logger_temp = logging.getLogger(__name__)
+    logger_temp.warning("Document analyzer not available - DOCX/TXT will use extension-based routing")
 
 logger = logging.getLogger(__name__)
 
@@ -561,8 +579,17 @@ def process_file_background(
                 return
                 
             except Exception as e:
-                logger.error(f"[BACKGROUND] Structured storage failed: {e}, falling back to RAG")
-                # Fall through to RAG processing
+                # XLSX/CSV should NEVER go to ChromaDB - structured data doesn't chunk well
+                logger.error(f"[BACKGROUND] Structured storage failed: {e}")
+                ProcessingJobModel.fail(job_id, f"Failed to process structured data: {str(e)}")
+                
+                # Cleanup
+                if file_path and os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                    except:
+                        pass
+                return  # Do NOT fall through to RAG
         
         # =================================================================
         # ROUTE 1.5: SMART PDF ROUTING - Check if PDF is tabular
@@ -673,6 +700,193 @@ def process_file_background(
                 text = None  # Force re-extraction below
         else:
             text = None
+        
+        # =================================================================
+        # ROUTE 1.75: DOCX/TXT CONTENT ANALYSIS - Route by content, not extension
+        # =================================================================
+        if file_ext in ['docx', 'txt', 'md'] and DOCUMENT_ANALYZER_AVAILABLE and STRUCTURED_HANDLER_AVAILABLE:
+            logger.warning(f"[BACKGROUND] Route 1.75: Analyzing {file_ext} content structure...")
+            ProcessingJobModel.update_progress(job_id, 5, "Analyzing document structure...")
+            
+            try:
+                # Extract text first
+                text = extract_text(file_path)
+                
+                if text and len(text.strip()) > 100:
+                    # Analyze content structure
+                    analyzer = DocumentAnalyzer()
+                    analysis = analyzer.analyze(text, filename, file_ext)
+                    
+                    logger.warning(f"[BACKGROUND] Content analysis: structure={analysis.structure.value}, "
+                                   f"patterns={analysis.patterns}")
+                    
+                    # If content is TABULAR, route to DuckDB
+                    if analysis.structure == DocumentStructure.TABULAR:
+                        logger.warning(f"[BACKGROUND] >>> TABULAR content detected in {file_ext}! Routing to DuckDB")
+                        ProcessingJobModel.update_progress(job_id, 15, "Detected tabular data - converting for SQL queries...")
+                        
+                        try:
+                            # Convert text to structured format and store in DuckDB
+                            handler = get_structured_handler()
+                            
+                            # Parse the tabular content
+                            # Try to detect delimiter and parse as table
+                            lines = [l for l in text.strip().split('\n') if l.strip()]
+                            
+                            if lines:
+                                # Detect delimiter
+                                first_lines = '\n'.join(lines[:10])
+                                if '\t' in first_lines:
+                                    delimiter = '\t'
+                                elif '|' in first_lines:
+                                    delimiter = '|'
+                                elif ',' in first_lines and first_lines.count(',') > 3:
+                                    delimiter = ','
+                                else:
+                                    delimiter = None
+                                
+                                if delimiter:
+                                    # Parse as delimited data
+                                    import io
+                                    
+                                    # Clean up pipe-delimited format
+                                    if delimiter == '|':
+                                        cleaned_lines = []
+                                        for line in lines:
+                                            # Remove leading/trailing pipes and strip
+                                            cleaned = line.strip().strip('|').strip()
+                                            if cleaned and not cleaned.startswith('-'):  # Skip separator lines
+                                                cleaned_lines.append(cleaned)
+                                        text_for_parsing = '\n'.join(cleaned_lines)
+                                        delimiter = '|'
+                                    else:
+                                        text_for_parsing = '\n'.join(lines)
+                                    
+                                    try:
+                                        df = pd.read_csv(io.StringIO(text_for_parsing), sep=delimiter, skipinitialspace=True)
+                                        
+                                        if len(df) > 0 and len(df.columns) > 1:
+                                            # Save as temp CSV and store
+                                            temp_csv = f"/tmp/{job_id}_converted.csv"
+                                            df.to_csv(temp_csv, index=False)
+                                            
+                                            result = handler.store_csv(temp_csv, project, f"{filename}_extracted.csv")
+                                            
+                                            # Cleanup temp file
+                                            try:
+                                                os.remove(temp_csv)
+                                            except:
+                                                pass
+                                            
+                                            ProcessingJobModel.update_progress(job_id, 70, 
+                                                f"Created table with {result.get('row_count', 0):,} rows")
+                                            
+                                            # Register in document registry
+                                            try:
+                                                from utils.database.models import DocumentRegistryModel
+                                                
+                                                DocumentRegistryModel.register(
+                                                    filename=filename,
+                                                    file_type=file_ext,
+                                                    storage_type=DocumentRegistryModel.STORAGE_DUCKDB,
+                                                    usage_type=DocumentRegistryModel.USAGE_STRUCTURED_DATA,
+                                                    project_id=project_id,
+                                                    is_global=project.lower() in ['global', '__global__'],
+                                                    row_count=result.get('row_count', 0),
+                                                    metadata={
+                                                        'project_name': project,
+                                                        'functional_area': functional_area,
+                                                        'original_type': file_ext,
+                                                        'detected_structure': 'tabular',
+                                                        'delimiter': delimiter
+                                                    }
+                                                )
+                                            except Exception as reg_e:
+                                                logger.warning(f"[BACKGROUND] Could not register: {reg_e}")
+                                            
+                                            # Cleanup and complete
+                                            if file_path and os.path.exists(file_path):
+                                                try:
+                                                    os.remove(file_path)
+                                                except:
+                                                    pass
+                                            
+                                            ProcessingJobModel.complete(job_id, {
+                                                'filename': filename,
+                                                'type': 'structured_from_text',
+                                                'original_format': file_ext,
+                                                'rows': result.get('row_count', 0),
+                                                'project': project
+                                            })
+                                            
+                                            logger.info(f"[BACKGROUND] Converted {file_ext} to structured data!")
+                                            return
+                                    
+                                    except Exception as parse_e:
+                                        logger.warning(f"[BACKGROUND] Could not parse as delimited: {parse_e}")
+                                
+                                # If delimiter parsing failed, try Word table extraction for DOCX
+                                if file_ext == 'docx':
+                                    try:
+                                        doc = docx.Document(file_path)
+                                        tables_data = []
+                                        
+                                        for table in doc.tables:
+                                            table_rows = []
+                                            for row in table.rows:
+                                                row_data = [cell.text.strip() for cell in row.cells]
+                                                table_rows.append(row_data)
+                                            
+                                            if table_rows:
+                                                tables_data.append(table_rows)
+                                        
+                                        if tables_data:
+                                            # Convert first table to DataFrame
+                                            first_table = tables_data[0]
+                                            if len(first_table) > 1:
+                                                df = pd.DataFrame(first_table[1:], columns=first_table[0])
+                                                
+                                                temp_csv = f"/tmp/{job_id}_docx_table.csv"
+                                                df.to_csv(temp_csv, index=False)
+                                                
+                                                result = handler.store_csv(temp_csv, project, f"{filename}_table.csv")
+                                                
+                                                try:
+                                                    os.remove(temp_csv)
+                                                except:
+                                                    pass
+                                                
+                                                # Complete as structured
+                                                if file_path and os.path.exists(file_path):
+                                                    try:
+                                                        os.remove(file_path)
+                                                    except:
+                                                        pass
+                                                
+                                                ProcessingJobModel.complete(job_id, {
+                                                    'filename': filename,
+                                                    'type': 'structured_from_docx_table',
+                                                    'tables_found': len(tables_data),
+                                                    'rows': result.get('row_count', 0),
+                                                    'project': project
+                                                })
+                                                
+                                                logger.info(f"[BACKGROUND] Extracted {len(tables_data)} tables from DOCX!")
+                                                return
+                                    
+                                    except Exception as docx_e:
+                                        logger.warning(f"[BACKGROUND] DOCX table extraction failed: {docx_e}")
+                        
+                        except Exception as struct_e:
+                            logger.warning(f"[BACKGROUND] Structured conversion failed: {struct_e}, continuing to ChromaDB")
+                    
+                    # If we get here, content is not tabular or conversion failed
+                    # Continue to Route 2 with the already-extracted text
+                    logger.warning(f"[BACKGROUND] Content is {analysis.structure.value}, continuing to ChromaDB")
+                    
+            except Exception as analyze_e:
+                logger.warning(f"[BACKGROUND] Content analysis failed: {analyze_e}, continuing to ChromaDB")
+                text = None  # Force re-extraction
         
         # ROUTE 2: UNSTRUCTURED DATA (PDF/Word/Text) → ChromaDB
         logger.warning(f"[BACKGROUND] Route 2 check: text is {'set' if text else 'None'}")
