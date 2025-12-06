@@ -149,6 +149,96 @@ def extract_pdf_text(file_path: str) -> str:
 
 
 # =============================================================================
+# RULE-BASED DETECTION (Fallback when LLM unavailable)
+# =============================================================================
+
+def detect_tabular_by_rules(text_sample: str) -> Dict[str, Any]:
+    """
+    Detect tabular structure using rules when LLM is unavailable.
+    
+    Looks for:
+    - Consistent delimiters (|, tabs, commas)
+    - Repeated line patterns
+    - Column-like spacing
+    - Numeric data patterns
+    """
+    lines = [l for l in text_sample.split('\n') if l.strip()]
+    
+    if len(lines) < 5:
+        return {"is_tabular": False, "method": "rules", "reason": "too few lines"}
+    
+    # Check for pipe delimiters (very common in PDF tables)
+    pipe_lines = sum(1 for l in lines if '|' in l and l.count('|') >= 2)
+    pipe_ratio = pipe_lines / len(lines)
+    
+    # Check for tab delimiters
+    tab_lines = sum(1 for l in lines if '\t' in l)
+    tab_ratio = tab_lines / len(lines)
+    
+    # Check for consistent spacing patterns (column alignment)
+    # Lines with multiple spaces followed by content = columnar data
+    spacing_pattern = sum(1 for l in lines if len(re.findall(r'\s{2,}\S+', l)) >= 2)
+    spacing_ratio = spacing_pattern / len(lines)
+    
+    # Check for repeated numeric patterns (data rows)
+    numeric_lines = sum(1 for l in lines if len(re.findall(r'\b\d+\.?\d*\b', l)) >= 2)
+    numeric_ratio = numeric_lines / len(lines)
+    
+    # Check for UKG-specific patterns
+    ukg_patterns = ['Earnings Code', 'Deduction Code', 'Company Code', 'Tax Category', 
+                    'Employee Number', 'Pay Group', 'Rate Table', 'Filing Status']
+    has_ukg = any(p.lower() in text_sample.lower() for p in ukg_patterns)
+    
+    # Decision logic
+    is_tabular = False
+    confidence = 0.0
+    reasons = []
+    
+    if pipe_ratio > 0.3:
+        is_tabular = True
+        confidence = max(confidence, pipe_ratio)
+        reasons.append(f"pipe_delimited ({pipe_ratio:.0%})")
+    
+    if tab_ratio > 0.3:
+        is_tabular = True
+        confidence = max(confidence, tab_ratio)
+        reasons.append(f"tab_delimited ({tab_ratio:.0%})")
+    
+    if spacing_ratio > 0.4 and numeric_ratio > 0.2:
+        is_tabular = True
+        confidence = max(confidence, spacing_ratio)
+        reasons.append(f"column_spacing ({spacing_ratio:.0%}) + numeric ({numeric_ratio:.0%})")
+    
+    if has_ukg and (spacing_ratio > 0.2 or numeric_ratio > 0.3):
+        is_tabular = True
+        confidence = max(confidence, 0.8)
+        reasons.append("ukg_patterns_detected")
+    
+    # Large documents with moderate signals should lean tabular
+    if len(text_sample) > 100000 and (spacing_ratio > 0.25 or numeric_ratio > 0.25):
+        is_tabular = True
+        confidence = max(confidence, 0.7)
+        reasons.append(f"large_doc_with_patterns")
+    
+    result = {
+        "is_tabular": is_tabular,
+        "method": "rules",
+        "confidence": confidence,
+        "reasons": reasons,
+        "metrics": {
+            "pipe_ratio": pipe_ratio,
+            "tab_ratio": tab_ratio,
+            "spacing_ratio": spacing_ratio,
+            "numeric_ratio": numeric_ratio,
+            "has_ukg_patterns": has_ukg
+        }
+    }
+    
+    logger.warning(f"[RULES] Detection result: is_tabular={is_tabular}, reasons={reasons}")
+    return result
+
+
+# =============================================================================
 # LLM-BASED ANALYSIS
 # =============================================================================
 
@@ -194,8 +284,8 @@ JSON RESPONSE:"""
     response = call_llm(prompt)
     
     if not response:
-        logger.warning("[LLM] No response from LLM, defaulting to non-tabular")
-        return {"is_tabular": False, "error": "No LLM response"}
+        logger.warning("[LLM] No response from LLM, using rule-based detection...")
+        return detect_tabular_by_rules(text_sample)
     
     # Parse JSON from response
     try:
@@ -443,8 +533,18 @@ def process_pdf_intelligently(
         else:
             update_status("PDF classified as narrative text (not tabular)", 50)
         
-        # Always include ChromaDB for semantic search
-        result['storage_used'].append('chromadb')
+        # ChromaDB decision: Skip for large tabular PDFs that went to DuckDB
+        text_length = len(text) if text else 0
+        duckdb_success = 'duckdb' in result['storage_used']
+        
+        if is_tabular and duckdb_success and text_length > 500000:
+            # Large tabular PDF successfully in DuckDB - skip ChromaDB
+            logger.warning(f"[SMART-PDF] Skipping ChromaDB for large tabular PDF ({text_length:,} chars)")
+            update_status("✓ Large tabular PDF stored to DuckDB only (too large for semantic search)", 95)
+        else:
+            # Include ChromaDB for semantic search
+            result['storage_used'].append('chromadb')
+        
         result['success'] = True
         
         update_status("PDF processing complete", 100)
@@ -455,10 +555,14 @@ def process_pdf_intelligently(
         import traceback
         logger.error(traceback.format_exc())
         result['error'] = str(e)
-        # Still try to return text for ChromaDB
-        if 'chromadb_result' not in result or not result['chromadb_result']:
-            result['chromadb_result'] = {'text_content': '', 'text_length': 0}
-        result['storage_used'].append('chromadb')
+        # Still try to return text for ChromaDB if not too large
+        text_content = result.get('chromadb_result', {}).get('text_content', '')
+        if len(text_content) > 500000:
+            logger.warning(f"[SMART-PDF] Skipping ChromaDB fallback - text too large ({len(text_content):,} chars)")
+        else:
+            if 'chromadb_result' not in result or not result['chromadb_result']:
+                result['chromadb_result'] = {'text_content': '', 'text_length': 0}
+            result['storage_used'].append('chromadb')
         return result
 
 
