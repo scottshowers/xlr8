@@ -73,7 +73,7 @@ except ImportError as e:
 
 # Import learning system
 try:
-    from utils.learning_engine import get_learning_system
+    from backend.utils.learning_engine import get_learning_system
     LEARNING_AVAILABLE = True
     logging.getLogger(__name__).info("✅ Learning system loaded")
 except ImportError as e:
@@ -82,7 +82,7 @@ except ImportError as e:
 
 # Import local LLM client
 try:
-    from utils.hybrid_analyzer import LocalLLMClient
+    from backend.utils.hybrid_analyzer import LocalLLMClient
     LOCAL_LLM_AVAILABLE = True
     logging.getLogger(__name__).info("✅ Local LLM client loaded")
 except ImportError as e:
