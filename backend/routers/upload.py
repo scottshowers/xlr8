@@ -70,7 +70,7 @@ except ImportError:
 
 # Import document analyzer for content-based routing
 try:
-    from utils.document_analyzer import DocumentAnalyzer, DocumentStructure
+    from backend.utils.document_analyzer import DocumentAnalyzer, DocumentStructure
     DOCUMENT_ANALYZER_AVAILABLE = True
 except ImportError:
     DOCUMENT_ANALYZER_AVAILABLE = False
@@ -685,6 +685,29 @@ def process_file_background(
                         'project': project
                     })
                     logger.info(f"[BACKGROUND] Smart PDF job {job_id} completed (DuckDB only)")
+                    return
+                
+                # Check if smart_pdf_analyzer says to skip ChromaDB (large tabular PDFs)
+                skip_chromadb = 'chromadb' not in pdf_result.get('storage_used', [])
+                
+                if skip_chromadb and duckdb_success:
+                    # Large tabular PDF - DuckDB only, skip ChromaDB
+                    ProcessingJobModel.update_progress(job_id, 90, "Cleaning up (skipping semantic search for large table)...")
+                    if file_path and os.path.exists(file_path):
+                        try:
+                            os.remove(file_path)
+                        except:
+                            pass
+                    
+                    ProcessingJobModel.complete(job_id, {
+                        'filename': filename,
+                        'type': 'smart_pdf_tabular_only',
+                        'storage': pdf_result.get('storage_used', []),
+                        'duckdb_rows': pdf_result.get('duckdb_result', {}).get('total_rows', 0),
+                        'project': project,
+                        'note': 'ChromaDB skipped - large tabular PDF'
+                    })
+                    logger.info(f"[BACKGROUND] Smart PDF job {job_id} completed (DuckDB only - large tabular)")
                     return
                 
                 # Continue with ChromaDB using extracted text
