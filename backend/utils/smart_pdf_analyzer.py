@@ -536,6 +536,7 @@ def process_pdf_intelligently(
         # ChromaDB decision: Skip for large tabular PDFs that went to DuckDB
         text_length = len(text) if text else 0
         duckdb_success = 'duckdb' in result['storage_used']
+        is_tabular = analysis.get('is_tabular', False)
         
         if is_tabular and duckdb_success and text_length > 500000:
             # Large tabular PDF successfully in DuckDB - skip ChromaDB
