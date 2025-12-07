@@ -405,7 +405,7 @@ def store_to_duckdb(rows: List[Dict], project: str, filename: str, project_id: s
         table_name = f"{clean_project}__{clean_filename}"
         
         # Connect to DuckDB
-        db_path = os.getenv('DUCKDB_PATH', '/data/xlr8.duckdb')
+        db_path = os.getenv('DUCKDB_PATH', '/data/structured_data.duckdb')
         conn = duckdb.connect(db_path)
         
         # Create/replace table
