@@ -28,6 +28,13 @@ except Exception as e:
     print(f"ERROR: Playbooks router import failed: {e}")
     print(traceback.format_exc())
 
+# Import progress router (SSE streaming)
+try:
+    from backend.routers import progress
+    PROGRESS_AVAILABLE = True
+except ImportError:
+    PROGRESS_AVAILABLE = False
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -70,6 +77,13 @@ if PLAYBOOKS_AVAILABLE:
 else:
     logger.warning("Playbooks router not available")
 
+# Register progress router if available (SSE streaming)
+if PROGRESS_AVAILABLE:
+    app.include_router(progress.router, prefix="/api", tags=["progress"])
+    logger.info("Progress router registered (SSE streaming enabled)")
+else:
+    logger.warning("Progress router not available")
+
 @app.get("/api/health")
 async def health():
     try:
@@ -79,81 +93,65 @@ async def health():
         return {
             "status": "healthy",
             "chromadb": "connected",
-            "vacuum_available": VACUUM_AVAILABLE,
-            "playbooks_available": PLAYBOOKS_AVAILABLE
+            "collection_count": len(rag.chroma_client.list_collections()),
+            "version": "2.0-optimized",
+            "features": {
+                "vacuum": VACUUM_AVAILABLE,
+                "playbooks": PLAYBOOKS_AVAILABLE,
+                "progress_streaming": PROGRESS_AVAILABLE,
+            }
         }
     except Exception as e:
-        return {"status": "unhealthy", "error": str(e)}
+        return {
+            "status": "degraded",
+            "error": str(e)
+        }
 
+# Debug route to check imports
+@app.get("/api/debug/imports")
+async def debug_imports():
+    results = {}
+    
+    # Check smart_pdf_analyzer
+    try:
+        from backend.utils.smart_pdf_analyzer import process_pdf_intelligently
+        results['smart_pdf_analyzer'] = 'OK'
+    except Exception as e:
+        results['smart_pdf_analyzer'] = f'ERROR: {e}'
+    
+    # Check progress router
+    try:
+        from backend.routers.progress import update_chunk_progress
+        results['progress_streaming'] = 'OK'
+    except Exception as e:
+        results['progress_streaming'] = f'ERROR: {e}'
+    
+    # Check parallel processing
+    try:
+        from concurrent.futures import ThreadPoolExecutor
+        results['parallel_processing'] = 'OK'
+    except Exception as e:
+        results['parallel_processing'] = f'ERROR: {e}'
+    
+    return results
 
-@app.get("/api/debug/ollama")
-async def debug_ollama():
-    """Test Ollama connectivity from Railway"""
-    import requests
-    from requests.auth import HTTPBasicAuth
-    import os
-    
-    ollama_url = os.getenv("LLM_ENDPOINT", "http://178.156.190.64:11435")
-    username = os.getenv("LLM_USERNAME", "xlr8")
-    password = os.getenv("LLM_PASSWORD", "Argyle76226#")
-    
-    result = {
-        "ollama_url": ollama_url,
-        "tests": {}
-    }
-    
-    # Test 1: Check if server responds
-    try:
-        resp = requests.get(f"{ollama_url}/api/tags", auth=HTTPBasicAuth(username, password), timeout=10)
-        result["tests"]["tags_endpoint"] = {
-            "status_code": resp.status_code,
-            "response": resp.text[:500] if resp.status_code == 200 else resp.text
-        }
-    except Exception as e:
-        result["tests"]["tags_endpoint"] = {"error": str(e)}
-    
-    # Test 2: Try embedding endpoint
-    try:
-        resp = requests.post(
-            f"{ollama_url}/api/embeddings",
-            json={"model": "nomic-embed-text", "prompt": "test"},
-            auth=HTTPBasicAuth(username, password),
-            timeout=30
-        )
-        result["tests"]["embeddings_endpoint"] = {
-            "status_code": resp.status_code,
-            "response": resp.text[:500] if len(resp.text) < 500 else f"Response size: {len(resp.text)} chars"
-        }
-    except Exception as e:
-        result["tests"]["embeddings_endpoint"] = {"error": str(e)}
-    
-    # Test 3: Try alternate embed endpoint
-    try:
-        resp = requests.post(
-            f"{ollama_url}/api/embed",
-            json={"model": "nomic-embed-text", "input": "test"},
-            auth=HTTPBasicAuth(username, password),
-            timeout=30
-        )
-        result["tests"]["embed_endpoint"] = {
-            "status_code": resp.status_code,
-            "response": resp.text[:500] if len(resp.text) < 500 else f"Response size: {len(resp.text)} chars"
-        }
-    except Exception as e:
-        result["tests"]["embed_endpoint"] = {"error": str(e)}
-    
-    return result
-
-# Serve frontend
-frontend_path = Path("/app/frontend/dist")
-if frontend_path.exists():
-    app.mount("/assets", StaticFiles(directory=str(frontend_path / "assets")), name="assets")
+# Serve static files in production
+static_path = Path("/app/static")
+if static_path.exists():
+    app.mount("/assets", StaticFiles(directory=static_path / "assets"), name="assets")
     
     @app.get("/{full_path:path}")
-    async def serve_frontend(full_path: str):
+    async def serve_spa(full_path: str):
+        # API routes should not reach here
         if full_path.startswith("api/"):
             return {"error": "Not found"}
-        file_path = frontend_path / full_path
-        if file_path.is_file():
-            return FileResponse(file_path)
-        return FileResponse(frontend_path / "index.html")
+        
+        # Serve index.html for SPA routing
+        index_path = static_path / "index.html"
+        if index_path.exists():
+            return FileResponse(index_path)
+        return {"error": "Frontend not built"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
