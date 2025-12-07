@@ -2791,8 +2791,8 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   const [analyzing, setAnalyzing] = useState(false);
   const [scanProgress, setScanProgress] = useState(null); // {completed, total, current_action}
   const [activePhase, setActivePhase] = useState('all');
-  const [viewMode, setViewMode] = useState('ukg'); // 'ukg' or 'expertpath'
-  const [expandedAction, setExpandedAction] = useState(null); // For Expert Path (TD) expand/collapse
+  const [viewMode, setViewMode] = useState('ukg'); // 'ukg' or 'fasttrack'
+  const [expandedAction, setExpandedAction] = useState(null); // For Fast Track (Expert Path) expand/collapse
   
   // NEW: Document checklist and AI summary state
   const [docChecklist, setDocChecklist] = useState(null);
@@ -3179,13 +3179,13 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
     }));
   };
 
-  // Expert Path (TD): Get combined status from referenced UKG actions
-  const getFastTrackProgress = (epItem) => {
-    if (!epItem?.ukg_action_ref || !Array.isArray(epItem.ukg_action_ref) || epItem.ukg_action_ref.length === 0) {
+  // Fast Track (Expert Path): Get combined status from referenced UKG actions
+  const getFastTrackProgress = (ftItem) => {
+    if (!ftItem?.ukg_action_ref || !Array.isArray(ftItem.ukg_action_ref) || ftItem.ukg_action_ref.length === 0) {
       return { status: 'not_started', findings: null };
     }
     
-    const refStatuses = epItem.ukg_action_ref.map(actionId => {
+    const refStatuses = ftItem.ukg_action_ref.map(actionId => {
       const p = progress[actionId] || {};
       return p.status || 'not_started';
     });
@@ -3197,14 +3197,14 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
     return { status: 'not_started' };
   };
   
-  // Expert Path (TD): Update status (syncs to all referenced UKG actions)
-  const handleFastTrackUpdate = async (epItem, newStatus) => {
-    if (!epItem?.ukg_action_ref || !Array.isArray(epItem.ukg_action_ref) || epItem.ukg_action_ref.length === 0) return;
+  // Fast Track (Expert Path): Update status (syncs to all referenced UKG actions)
+  const handleFastTrackUpdate = async (ftItem, newStatus) => {
+    if (!ftItem?.ukg_action_ref || !Array.isArray(ftItem.ukg_action_ref) || ftItem.ukg_action_ref.length === 0) return;
     
-    const previousProgress = getFastTrackProgress(epItem);
+    const previousProgress = getFastTrackProgress(ftItem);
     const previousStatus = previousProgress.status;
     
-    for (const actionId of epItem.ukg_action_ref) {
+    for (const actionId of ftItem.ukg_action_ref) {
       try {
         await api.put(`/playbooks/year-end/progress/${project.id}/${actionId}`, {
           status: newStatus
@@ -3215,15 +3215,15 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       }
     }
     
-    // Record feedback for learning (Expert Path (TD) level)
+    // Record feedback for learning (Fast Track (Expert Path) level)
     if (previousStatus !== newStatus) {
       try {
         await api.post(`/playbooks/year-end/feedback/${project.id}`, {
-          action_id: `FT_${epItem.ep_id}`,
+          action_id: `FT_${ftItem.ft_id}`,
           correction_type: 'status',
           original_value: previousStatus,
           corrected_value: newStatus,
-          context: `Expert Path (TD): ${epItem.description}`
+          context: `Fast Track (Expert Path): ${ftItem.description}`
         });
         console.log(`[LEARNING] Recorded FT status change: ${previousStatus} → ${newStatus}`);
       } catch (feedbackErr) {
@@ -3658,20 +3658,20 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
             📋 UKG Full Checklist
           </button>
           <button
-            onClick={() => setViewMode('expertpath')}
+            onClick={() => setViewMode('fasttrack')}
             style={{
               padding: '0.5rem 1rem',
               border: 'none',
               borderRadius: '6px',
               fontWeight: '600',
               cursor: 'pointer',
-              background: viewMode === 'expertpath' ? 'white' : 'transparent',
-              color: viewMode === 'expertpath' ? '#059669' : '#64748b',
-              boxShadow: viewMode === 'expertpath' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              background: viewMode === 'fasttrack' ? 'white' : 'transparent',
+              color: viewMode === 'fasttrack' ? '#059669' : '#64748b',
+              boxShadow: viewMode === 'fasttrack' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
               transition: 'all 0.2s'
             }}
           >
-            ⚡ Expert Path (TD)
+            ⚡ Fast Track (Expert Path)
           </button>
         </div>
 
@@ -3775,8 +3775,8 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
           />
         ))}
 
-        {/* Expert Path (TD) View */}
-        {viewMode === 'expertpath' && (
+        {/* Fast Track (Expert Path) View */}
+        {viewMode === 'fasttrack' && (
           <div style={{ background: 'white', borderRadius: '12px', padding: '1rem', border: '1px solid #e1e8ed' }}>
             <div style={{ 
               display: 'flex', 
@@ -3788,15 +3788,15 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
             }}>
               <span style={{ fontSize: '1.5rem' }}>⚡</span>
               <div>
-                <div style={{ fontWeight: '700', fontSize: '1.1rem', color: '#059669' }}>Expert Path (TD) Checklist</div>
+                <div style={{ fontWeight: '700', fontSize: '1.1rem', color: '#059669' }}>Fast Track (Expert Path) Checklist</div>
                 <div style={{ fontSize: '0.8rem', color: '#6b7280' }}>HCMPACT's curated essential actions • Status syncs with UKG actions</div>
               </div>
             </div>
             
-            {(structure?.expert_path || []).map((epItem, index) => {
-              const epProgress = getFastTrackProgress(epItem);
+            {(structure?.fast_track || []).map((ftItem, index) => {
+              const ftProgress = getFastTrackProgress(ftItem);
               // Get the primary linked UKG action for details
-              const primaryActionId = epItem.ukg_action_ref?.[0];
+              const primaryActionId = ftItem.ukg_action_ref?.[0];
               const primaryActionProgress = primaryActionId ? (progress[primaryActionId] || {}) : {};
               
               const statusColors = {
@@ -3806,19 +3806,19 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                 na: { bg: '#f5f5f4', border: '#d6d3d1', text: '#57534e', badge: '#78716c' },
                 not_started: { bg: '#f9fafb', border: '#e5e7eb', text: '#374151', badge: '#9ca3af' }
               };
-              const colors = statusColors[epProgress.status] || statusColors.not_started;
+              const colors = statusColors[ftProgress.status] || statusColors.not_started;
               
               // Track expanded state for this FT item
-              const isExpanded = expandedAction === `ft_${epItem.ep_id}`;
+              const isExpanded = expandedAction === `ft_${ftItem.ft_id}`;
               
               // Get documents found for linked actions
-              const linkedDocsFound = (Array.isArray(epItem.ukg_action_ref) ? epItem.ukg_action_ref : []).flatMap(actionId => 
+              const linkedDocsFound = (Array.isArray(ftItem.ukg_action_ref) ? ftItem.ukg_action_ref : []).flatMap(actionId => 
                 progress[actionId]?.documents_found || []
               );
               
               return (
                 <div 
-                  key={epItem.ep_id}
+                  key={ftItem.ft_id}
                   style={{
                     background: colors.bg,
                     border: `1px solid ${colors.border}`,
@@ -3829,7 +3829,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                 >
                   {/* Header Row - Clickable */}
                   <div 
-                    onClick={() => setExpandedAction(isExpanded ? null : `ft_${epItem.ep_id}`)}
+                    onClick={() => setExpandedAction(isExpanded ? null : `ft_${ftItem.ft_id}`)}
                     style={{ 
                       display: 'flex', 
                       alignItems: 'flex-start', 
@@ -3852,21 +3852,21 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                           fontSize: '0.8rem',
                           fontWeight: '700'
                         }}>
-                          {epItem.sequence}
+                          {ftItem.sequence}
                         </span>
-                        <span style={{ fontWeight: '600', color: colors.text }}>{epItem.description}</span>
+                        <span style={{ fontWeight: '600', color: colors.text }}>{ftItem.description}</span>
                       </div>
                       
                       <div style={{ marginLeft: '32px', display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-                        {Array.isArray(epItem.ukg_action_ref) && epItem.ukg_action_ref.length > 0 && (
+                        {Array.isArray(ftItem.ukg_action_ref) && ftItem.ukg_action_ref.length > 0 && (
                           <span style={{ fontSize: '0.75rem', color: '#6b7280', background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>
-                            🔗 UKG: {epItem.ukg_action_ref.join(', ')}
+                            🔗 UKG: {ftItem.ukg_action_ref.join(', ')}
                           </span>
                         )}
                         
-                        {Array.isArray(epItem.reports_needed) && epItem.reports_needed.length > 0 && (
+                        {Array.isArray(ftItem.reports_needed) && ftItem.reports_needed.length > 0 && (
                           <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-                            📄 {epItem.reports_needed.length} report{epItem.reports_needed.length > 1 ? 's' : ''}
+                            📄 {ftItem.reports_needed.length} report{ftItem.reports_needed.length > 1 ? 's' : ''}
                           </span>
                         )}
                         
@@ -3876,7 +3876,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                           </span>
                         )}
                         
-                        {epItem.notes && (
+                        {ftItem.notes && (
                           <span style={{ fontSize: '0.75rem', color: '#f59e0b' }}>
                             📝 Has notes
                           </span>
@@ -3886,11 +3886,11 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                     
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }} onClick={e => e.stopPropagation()}>
                       {/* SQL Copy Button with Tooltip */}
-                      {epItem.sql_script && (
+                      {ftItem.sql_script && (
                         <div style={{ position: 'relative' }} className="sql-tooltip-container">
                           <button
                             onClick={() => {
-                              navigator.clipboard.writeText(epItem.sql_script);
+                              navigator.clipboard.writeText(ftItem.sql_script);
                               alert('SQL copied to clipboard!');
                             }}
                             style={{
@@ -3905,7 +3905,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                               gap: '0.25rem',
                               color: '#1e40af'
                             }}
-                            title={epItem.sql_script}
+                            title={ftItem.sql_script}
                           >
                             📋 SQL
                           </button>
@@ -3914,8 +3914,8 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                       
                       {/* Status Dropdown */}
                       <select
-                        value={epProgress.status}
-                        onChange={(e) => handleFastTrackUpdate(epItem, e.target.value)}
+                        value={ftProgress.status}
+                        onChange={(e) => handleFastTrackUpdate(ftItem, e.target.value)}
                         style={{
                           background: colors.badge,
                           color: 'white',
@@ -3949,7 +3949,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                       background: 'rgba(255,255,255,0.5)'
                     }}>
                       {/* FT Notes from Workbook */}
-                      {epItem.notes && (
+                      {ftItem.notes && (
                         <div style={{ marginBottom: '1rem' }}>
                           <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', marginBottom: '0.25rem' }}>
                             📋 FAST TRACK NOTES (from workbook)
@@ -3962,13 +3962,13 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                             fontSize: '0.85rem',
                             color: '#92400e'
                           }}>
-                            {epItem.notes}
+                            {ftItem.notes}
                           </div>
                         </div>
                       )}
                       
                       {/* SQL Script Display */}
-                      {epItem.sql_script && (
+                      {ftItem.sql_script && (
                         <div style={{ marginBottom: '1rem' }}>
                           <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', marginBottom: '0.25rem' }}>
                             💾 SQL SCRIPT
@@ -3983,11 +3983,11 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                             maxHeight: '150px',
                             margin: 0
                           }}>
-                            {epItem.sql_script}
+                            {ftItem.sql_script}
                           </pre>
                           <button
                             onClick={() => {
-                              navigator.clipboard.writeText(epItem.sql_script);
+                              navigator.clipboard.writeText(ftItem.sql_script);
                               alert('SQL copied!');
                             }}
                             style={{
@@ -4007,13 +4007,13 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                       )}
                       
                       {/* Reports Needed */}
-                      {Array.isArray(epItem.reports_needed) && epItem.reports_needed.length > 0 && (
+                      {Array.isArray(ftItem.reports_needed) && ftItem.reports_needed.length > 0 && (
                         <div style={{ marginBottom: '1rem' }}>
                           <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', marginBottom: '0.25rem' }}>
                             📄 REPORTS NEEDED
                           </div>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                            {epItem.reports_needed.map((report, i) => {
+                            {ftItem.reports_needed.map((report, i) => {
                               const isFound = linkedDocsFound.some(d => 
                                 d.toLowerCase().includes(report.toLowerCase().split(' ')[0])
                               );
@@ -4038,12 +4038,12 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                       )}
                       
                       {/* Linked UKG Actions Details */}
-                      {Array.isArray(epItem.ukg_action_ref) && epItem.ukg_action_ref.length > 0 && (
+                      {Array.isArray(ftItem.ukg_action_ref) && ftItem.ukg_action_ref.length > 0 && (
                         <div style={{ marginBottom: '1rem' }}>
                           <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', marginBottom: '0.5rem' }}>
                             🔗 LINKED UKG ACTIONS
                           </div>
-                          {epItem.ukg_action_ref.map(actionId => {
+                          {ftItem.ukg_action_ref.map(actionId => {
                             const actionProg = progress[actionId] || {};
                             const actionStatus = actionProg.status || 'not_started';
                             const actionColors = statusColors[actionStatus] || statusColors.not_started;
@@ -4229,14 +4229,14 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
               );
             })}
             
-            {(!structure?.expert_path || structure.expert_path.length === 0) && (
+            {(!structure?.fast_track || structure.fast_track.length === 0) && (
               <div style={{ 
                 textAlign: 'center', 
                 padding: '2rem', 
                 color: '#6b7280',
                 fontStyle: 'italic'
               }}>
-                No Expert Path (TD) items defined. Add expert_path_seq column to your workbook.
+                No Fast Track items defined. Add FT_Action_ID and FT_Sequence columns to your workbook.
               </div>
             )}
           </div>
