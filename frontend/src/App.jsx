@@ -2,8 +2,9 @@
  * App.jsx - Main Application Entry
  * 
  * Routes:
- * /           → LoginPage (public)
- * /dashboard  → DashboardPage (overview hub)
+ * /           → Landing (public)
+ * /login      → LoginPage (public)
+ * /dashboard  → DashboardPage (protected)
  * /workspace  → WorkspacePage (Chat + Personas)
  * /projects   → ProjectsPage (Project management)
  * /data       → DataPage (Upload, Vacuum, Status, Data Mgmt, Global, Connections)
@@ -25,12 +26,13 @@ import { AuthProvider } from './context/AuthContext';
 
 // Auth Components
 import ProtectedRoute from './components/ProtectedRoute';
-import LoginPage from './pages/LoginPage';
 
 // Layout
 import Layout from './components/Layout';
 
 // Pages
+import Landing from './pages/Landing';
+import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import WorkspacePage from './pages/WorkspacePage';
 import ProjectsPage from './pages/ProjectsPage';
@@ -52,16 +54,11 @@ function App() {
       <ProjectProvider>
         <Router>
           <Routes>
-            {/* Public route - Login */}
+            {/* Public routes */}
+            <Route path="/" element={<Landing />} />
             <Route path="/login" element={<LoginPage />} />
             
             {/* Protected routes - require authentication */}
-            <Route path="/" element={
-              <ProtectedRoute>
-                <Navigate to="/dashboard" replace />
-              </ProtectedRoute>
-            } />
-            
             <Route path="/dashboard" element={
               <ProtectedRoute>
                 <Layout><DashboardPage /></Layout>
@@ -137,7 +134,7 @@ function App() {
             <Route path="/packs" element={<Navigate to="/playbooks" replace />} />
             
             {/* 404 fallback */}
-            <Route path="*" element={<Navigate to="/login" replace />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Router>
       </ProjectProvider>
