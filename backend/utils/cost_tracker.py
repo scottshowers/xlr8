@@ -64,8 +64,9 @@ PRICING = {
         "output_per_1k": 0.015,     # $15 per 1M output tokens
     },
     CostService.RUNPOD: {
-        # RunPod GPU pricing varies - using estimate for A40/A100
-        "per_second": 0.00039,      # ~$1.40/hr for mid-tier GPU
+        # RunPod GPU pricing - user's actual rate
+        "per_hour": 0.06,           # $0.06/hr
+        "per_second": 0.06 / 3600,  # ~$0.0000167/sec
     },
     CostService.TEXTRACT: {
         # AWS Textract pricing
@@ -111,6 +112,167 @@ def calculate_cost(
         return (total_tokens / 1000) * PRICING[service]["per_1k_tokens"]
     
     return 0.0
+
+
+# =============================================================================
+# FIXED COSTS MANAGEMENT
+# =============================================================================
+
+def get_fixed_costs() -> Dict[str, Any]:
+    """Get all fixed/subscription costs from platform_costs table."""
+    client = _get_supabase()
+    if not client:
+        return {"error": "Supabase not available", "items": [], "total": 0}
+    
+    try:
+        result = client.table("platform_costs").select("*").eq(
+            "category", "subscription"
+        ).eq("is_active", True).execute()
+        
+        items = result.data or []
+        total = sum(
+            (item.get("cost_per_unit", 0) * item.get("quantity", 1))
+            for item in items
+        )
+        
+        return {
+            "items": items,
+            "total": round(total, 2),
+            "count": len(items)
+        }
+    except Exception as e:
+        logger.error(f"[COST] Fixed costs query failed: {e}")
+        return {"error": str(e), "items": [], "total": 0}
+
+
+def update_fixed_cost(name: str, cost_per_unit: float = None, quantity: int = None) -> Dict:
+    """Update a fixed cost entry."""
+    client = _get_supabase()
+    if not client:
+        return {"error": "Supabase not available"}
+    
+    try:
+        updates = {"updated_at": datetime.utcnow().isoformat()}
+        if cost_per_unit is not None:
+            updates["cost_per_unit"] = cost_per_unit
+        if quantity is not None:
+            updates["quantity"] = quantity
+        
+        result = client.table("platform_costs").update(updates).eq(
+            "name", name
+        ).execute()
+        
+        return {"success": True, "updated": result.data}
+    except Exception as e:
+        logger.error(f"[COST] Update fixed cost failed: {e}")
+        return {"error": str(e)}
+
+
+def get_daily_costs(days: int = 7) -> list:
+    """Get daily cost breakdown for the last N days."""
+    client = _get_supabase()
+    if not client:
+        return []
+    
+    try:
+        from datetime import timedelta
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        
+        result = client.table("cost_tracking").select(
+            "created_at, estimated_cost, service"
+        ).gte("created_at", cutoff).execute()
+        
+        records = result.data or []
+        
+        # Aggregate by day
+        by_day = {}
+        for r in records:
+            day = r.get("created_at", "")[:10]  # YYYY-MM-DD
+            cost = r.get("estimated_cost", 0) or 0
+            
+            if day not in by_day:
+                by_day[day] = {"date": day, "total": 0, "by_service": {}}
+            
+            by_day[day]["total"] += cost
+            svc = r.get("service", "unknown")
+            by_day[day]["by_service"][svc] = by_day[day]["by_service"].get(svc, 0) + cost
+        
+        # Sort and round
+        daily_list = sorted(by_day.values(), key=lambda x: x["date"], reverse=True)
+        for day in daily_list:
+            day["total"] = round(day["total"], 4)
+            day["by_service"] = {k: round(v, 4) for k, v in day["by_service"].items()}
+        
+        return daily_list
+        
+    except Exception as e:
+        logger.error(f"[COST] Daily costs query failed: {e}")
+        return []
+
+
+def get_month_costs(year: int = None, month: int = None) -> Dict[str, Any]:
+    """Get costs for a specific calendar month."""
+    client = _get_supabase()
+    if not client:
+        return {"error": "Supabase not available"}
+    
+    try:
+        from datetime import timedelta
+        
+        # Default to current month
+        now = datetime.utcnow()
+        if year is None:
+            year = now.year
+        if month is None:
+            month = now.month
+        
+        # Calculate month boundaries
+        start_date = datetime(year, month, 1)
+        if month == 12:
+            end_date = datetime(year + 1, 1, 1)
+        else:
+            end_date = datetime(year, month + 1, 1)
+        
+        result = client.table("cost_tracking").select(
+            "service, operation, estimated_cost"
+        ).gte("created_at", start_date.isoformat()).lt(
+            "created_at", end_date.isoformat()
+        ).execute()
+        
+        records = result.data or []
+        
+        # Aggregate
+        total = sum(r.get("estimated_cost", 0) or 0 for r in records)
+        by_service = {}
+        by_operation = {}
+        
+        for r in records:
+            svc = r.get("service", "unknown")
+            op = r.get("operation", "unknown")
+            cost = r.get("estimated_cost", 0) or 0
+            
+            by_service[svc] = by_service.get(svc, 0) + cost
+            by_operation[op] = by_operation.get(op, 0) + cost
+        
+        # Get fixed costs
+        fixed = get_fixed_costs()
+        
+        return {
+            "year": year,
+            "month": month,
+            "month_name": start_date.strftime("%B"),
+            "api_usage": round(total, 4),
+            "fixed_costs": fixed.get("total", 0),
+            "total": round(total + fixed.get("total", 0), 2),
+            "by_service": {k: round(v, 4) for k, v in by_service.items()},
+            "by_operation": {k: round(v, 4) for k, v in by_operation.items()},
+            "call_count": len(records),
+            "fixed_items": fixed.get("items", [])
+        }
+        
+    except Exception as e:
+        logger.error(f"[COST] Month costs query failed: {e}")
+        return {"error": str(e)}
 
 
 # =============================================================================
