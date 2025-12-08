@@ -9,10 +9,13 @@
  * - Questions to answer
  * - Data sources to use
  * - Output structure (workbook format)
+ * 
+ * Updated: Filters playbooks based on project assignment
  */
 
 import React, { useState, useEffect } from 'react';
 import { useProject } from '../context/ProjectContext';
+import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import YearEndPlaybook from '../components/YearEndPlaybook';
 import api from '../services/api';
@@ -39,7 +42,7 @@ const PLAYBOOKS = [
     outputs: ['Action Checklist', 'Tax Verification', 'Earnings Analysis', 'Deductions Review', 'Outstanding Items', 'Arrears Summary'],
     estimatedTime: '5-15 minutes',
     dataRequired: ['Company Tax Verification', 'Earnings Codes', 'Deduction Codes', 'Workers Comp Rates'],
-    hasRunner: true, // Has dedicated runner component
+    hasRunner: true,
   },
   {
     id: 'secure-2.0',
@@ -329,18 +332,53 @@ function SelectProjectPrompt() {
   );
 }
 
+// No playbooks assigned placeholder
+function NoPlaybooksPrompt({ isAdmin }) {
+  return (
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: '50vh',
+      textAlign: 'center',
+      padding: '2rem',
+    }}>
+      <div style={{ fontSize: '4rem', marginBottom: '1.5rem', opacity: 0.6 }}>📭</div>
+      <h2 style={{
+        fontFamily: "'Sora', sans-serif",
+        fontSize: '1.5rem',
+        fontWeight: '700',
+        color: COLORS.text,
+        marginBottom: '0.75rem',
+      }}>No Playbooks Assigned</h2>
+      <p style={{
+        color: COLORS.textLight,
+        fontSize: '1rem',
+        maxWidth: '400px',
+        lineHeight: '1.6',
+      }}>
+        {isAdmin 
+          ? "This project doesn't have any playbooks assigned yet. Go to Projects to assign playbooks."
+          : "No playbooks have been assigned to this project. Contact your administrator to enable playbooks."
+        }
+      </p>
+    </div>
+  );
+}
+
 export default function PlaybooksPage() {
   const { activeProject, projectName, customerName, hasActiveProject, loading } = useProject();
+  const { isAdmin, isConsultant } = useAuth();
   const navigate = useNavigate();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [activePlaybook, setActivePlaybook] = useState(null);
-  const [playbookProgress, setPlaybookProgress] = useState({}); // {playbookId: hasProgress}
+  const [playbookProgress, setPlaybookProgress] = useState({});
 
   // Check if user has started any playbooks
   useEffect(() => {
     if (activeProject?.id) {
-      // Check year-end progress
       api.get(`/playbooks/year-end/progress/${activeProject.id}`)
         .then(res => {
           const progress = res.data?.progress || {};
@@ -348,7 +386,6 @@ export default function PlaybooksPage() {
           setPlaybookProgress(prev => ({ ...prev, 'year-end-checklist': hasStarted }));
         })
         .catch(() => {
-          // No progress yet
           setPlaybookProgress(prev => ({ ...prev, 'year-end-checklist': false }));
         });
     }
@@ -380,17 +417,29 @@ export default function PlaybooksPage() {
     }
   }
 
-  const categories = ['all', ...new Set(PLAYBOOKS.map(p => p.category))];
-  const filteredPlaybooks = selectedCategory === 'all' 
+  // Get assigned playbooks for this project
+  const assignedPlaybookIds = activeProject?.playbooks || [];
+  
+  // Admins and consultants see all playbooks, customers only see assigned ones
+  const canSeeAll = isAdmin || isConsultant;
+  const availablePlaybooks = canSeeAll 
     ? PLAYBOOKS 
-    : PLAYBOOKS.filter(p => p.category === selectedCategory);
+    : PLAYBOOKS.filter(p => assignedPlaybookIds.includes(p.id));
+
+  // Show "no playbooks" message if customer has none assigned
+  if (!canSeeAll && availablePlaybooks.length === 0) {
+    return <NoPlaybooksPrompt isAdmin={isAdmin} />;
+  }
+
+  const categories = ['all', ...new Set(availablePlaybooks.map(p => p.category))];
+  const filteredPlaybooks = selectedCategory === 'all' 
+    ? availablePlaybooks 
+    : availablePlaybooks.filter(p => p.category === selectedCategory);
 
   const handleRunPlaybook = (playbook) => {
     if (playbook.hasRunner) {
-      // Open dedicated runner
       setActivePlaybook(playbook);
     } else {
-      // Coming soon - navigate to workspace with context (placeholder)
       navigate('/workspace', { state: { playbook } });
     }
   };
@@ -456,6 +505,18 @@ export default function PlaybooksPage() {
       gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
       gap: '1.5rem',
     },
+    assignedInfo: {
+      background: '#f0fdf4',
+      border: '1px solid #bbf7d0',
+      borderRadius: '8px',
+      padding: '0.75rem 1rem',
+      marginBottom: '1.5rem',
+      fontSize: '0.85rem',
+      color: '#166534',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.5rem',
+    },
   };
 
   return (
@@ -474,11 +535,20 @@ export default function PlaybooksPage() {
               Run pre-built analysis templates to generate deliverables.
             </p>
           </div>
-          <button style={styles.createButton} onClick={() => setShowCreateModal(true)}>
-            ➕ Create Playbook
-          </button>
+          {canSeeAll && (
+            <button style={styles.createButton} onClick={() => setShowCreateModal(true)}>
+              ➕ Create Playbook
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Show assigned count for admins/consultants */}
+      {canSeeAll && assignedPlaybookIds.length > 0 && (
+        <div style={styles.assignedInfo}>
+          ✓ {assignedPlaybookIds.length} playbook{assignedPlaybookIds.length !== 1 ? 's' : ''} assigned to this project
+        </div>
+      )}
 
       {/* Category Filters */}
       <div style={styles.filters}>
@@ -495,15 +565,37 @@ export default function PlaybooksPage() {
 
       {/* Playbooks Grid */}
       <div style={styles.grid}>
-        {filteredPlaybooks.map(playbook => (
-          <PlaybookCard 
-            key={playbook.id} 
-            playbook={playbook} 
-            onRun={handleRunPlaybook}
-            isActive={playbook.hasRunner}
-            hasProgress={playbookProgress[playbook.id] || false}
-          />
-        ))}
+        {filteredPlaybooks.map(playbook => {
+          const isAssigned = assignedPlaybookIds.includes(playbook.id);
+          return (
+            <div key={playbook.id} style={{ position: 'relative' }}>
+              {/* Show "Not Assigned" badge for admins viewing unassigned playbooks */}
+              {canSeeAll && !isAssigned && (
+                <div style={{
+                  position: 'absolute',
+                  top: '-8px',
+                  left: '12px',
+                  background: '#fef3c7',
+                  color: '#92400e',
+                  fontSize: '0.65rem',
+                  fontWeight: '700',
+                  padding: '0.15rem 0.4rem',
+                  borderRadius: '4px',
+                  zIndex: 1,
+                  textTransform: 'uppercase',
+                }}>
+                  Not Assigned
+                </div>
+              )}
+              <PlaybookCard 
+                playbook={playbook} 
+                onRun={handleRunPlaybook}
+                isActive={playbook.hasRunner && isAssigned}
+                hasProgress={playbookProgress[playbook.id] || false}
+              />
+            </div>
+          );
+        })}
       </div>
 
       {/* Create Modal */}
