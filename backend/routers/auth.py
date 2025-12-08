@@ -21,7 +21,7 @@ Date: December 8, 2025
 import os
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 import httpx
 
 # Import auth middleware
@@ -49,7 +49,7 @@ SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")  # For admin o
 # =============================================================================
 
 class UserCreate(BaseModel):
-    email: EmailStr
+    email: str
     password: str
     full_name: Optional[str] = None
     phone: Optional[str] = None
