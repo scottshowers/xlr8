@@ -1,50 +1,50 @@
 /**
- * XLR8 OPERATIONS CENTER
+ * XLR8 OPERATIONS CENTER - LIGHT MODE
  * 
- * CIA/NASA Mission Control Style Dashboard
- * Dark theme, glowing accents, real-time monitoring
+ * Clean, professional light theme
+ * Same structure as dark ops version
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../services/api';
 
 // =============================================================================
-// THEME - Dark Ops Center
+// THEME - Light Ops Center
 // =============================================================================
 const T = {
   // Backgrounds
-  bg: '#05080f',
-  panel: '#0a0f18',
-  panelLight: '#0f1520',
-  panelBorder: '#1a2535',
+  bg: '#f0f4f8',
+  panel: '#ffffff',
+  panelLight: '#f8fafc',
+  panelBorder: '#e2e8f0',
   
   // Text
-  text: '#c8d4e3',
-  textDim: '#6b7a8f',
-  textBright: '#ffffff',
+  text: '#1e293b',
+  textDim: '#64748b',
+  textBright: '#0f172a',
   
-  // Accent colors - subtle glows
-  green: '#00ff88',
-  greenDim: '#00aa55',
-  greenGlow: 'rgba(0, 255, 136, 0.1)',
+  // Accent colors - professional, not neon
+  green: '#059669',
+  greenDim: '#10b981',
+  greenGlow: 'rgba(5, 150, 105, 0.08)',
   
-  red: '#ff3355',
-  redDim: '#aa2244',
-  redGlow: 'rgba(255, 51, 85, 0.15)',
+  red: '#dc2626',
+  redDim: '#ef4444',
+  redGlow: 'rgba(220, 38, 38, 0.08)',
   
-  yellow: '#ffaa00',
-  yellowDim: '#aa7700',
-  yellowGlow: 'rgba(255, 170, 0, 0.1)',
+  yellow: '#d97706',
+  yellowDim: '#f59e0b',
+  yellowGlow: 'rgba(217, 119, 6, 0.08)',
   
-  blue: '#0088ff',
-  blueDim: '#005599',
-  blueGlow: 'rgba(0, 136, 255, 0.1)',
+  blue: '#2563eb',
+  blueDim: '#3b82f6',
+  blueGlow: 'rgba(37, 99, 235, 0.08)',
   
-  cyan: '#00ddff',
-  cyanDim: '#008899',
+  cyan: '#0891b2',
+  cyanDim: '#06b6d4',
   
-  purple: '#8855ff',
-  orange: '#ff6622',
+  purple: '#7c3aed',
+  orange: '#ea580c',
 };
 
 // Risk and security data
@@ -61,16 +61,16 @@ const THREATS = {
 // UTILITY COMPONENTS
 // =============================================================================
 
-const GlowText = ({ children, color = T.green, size = '1rem', mono = false }) => (
+const AccentText = ({ children, color = T.green, size = '1rem', mono = false }) => (
   <span style={{
     color,
     fontSize: size,
     fontFamily: mono ? "'JetBrains Mono', 'Fira Code', monospace" : 'inherit',
-    textShadow: `0 0 10px ${color}40, 0 0 20px ${color}20`,
+    fontWeight: 600,
   }}>{children}</span>
 );
 
-const StatusDot = ({ status, size = 8, pulse = false }) => {
+const StatusDot = ({ status, size = 8 }) => {
   const color = status === 2 ? T.red : status === 1 ? T.yellow : T.green;
   return (
     <span style={{
@@ -79,8 +79,7 @@ const StatusDot = ({ status, size = 8, pulse = false }) => {
       height: size,
       borderRadius: '50%',
       background: color,
-      boxShadow: `0 0 ${size}px ${color}, 0 0 ${size * 2}px ${color}50`,
-      animation: pulse ? 'pulse 2s infinite' : 'none',
+      boxShadow: `0 0 0 2px ${color}20`,
     }} />
   );
 };
@@ -89,13 +88,14 @@ const Panel = ({ children, title, status, style = {} }) => (
   <div style={{
     background: T.panel,
     border: `1px solid ${T.panelBorder}`,
-    borderRadius: 4,
+    borderRadius: 8,
     overflow: 'hidden',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
     ...style,
   }}>
     {title && (
       <div style={{
-        padding: '0.5rem 0.75rem',
+        padding: '0.6rem 0.875rem',
         borderBottom: `1px solid ${T.panelBorder}`,
         display: 'flex',
         justifyContent: 'space-between',
@@ -103,17 +103,17 @@ const Panel = ({ children, title, status, style = {} }) => (
         background: T.panelLight,
       }}>
         <span style={{ 
-          fontSize: '0.65rem', 
+          fontSize: '0.7rem', 
           fontWeight: 600, 
           color: T.textDim, 
           textTransform: 'uppercase',
-          letterSpacing: '0.1em',
+          letterSpacing: '0.05em',
           fontFamily: "'JetBrains Mono', monospace",
         }}>{title}</span>
         {status !== undefined && <StatusDot status={status} size={6} />}
       </div>
     )}
-    <div style={{ padding: '0.75rem' }}>{children}</div>
+    <div style={{ padding: '0.875rem' }}>{children}</div>
   </div>
 );
 
@@ -124,20 +124,20 @@ const Panel = ({ children, title, status, style = {} }) => (
 function MetricCard({ label, value, unit, sublabel, trend, status }) {
   return (
     <Panel status={status}>
-      <div style={{ fontSize: '0.6rem', color: T.textDim, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.4rem', fontFamily: 'monospace' }}>
+      <div style={{ fontSize: '0.65rem', color: T.textDim, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.4rem', fontFamily: 'monospace' }}>
         {label}
       </div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.3rem' }}>
-        <GlowText size="1.75rem" color={status === 2 ? T.red : status === 1 ? T.yellow : T.green} mono>
+        <AccentText size="1.75rem" color={status === 2 ? T.red : status === 1 ? T.yellow : T.green} mono>
           {value}
-        </GlowText>
+        </AccentText>
         {unit && <span style={{ fontSize: '0.8rem', color: T.textDim }}>{unit}</span>}
       </div>
       {(sublabel || trend !== undefined) && (
         <div style={{ marginTop: '0.3rem', fontSize: '0.65rem', color: T.textDim, display: 'flex', gap: '0.5rem' }}>
           {sublabel && <span>{sublabel}</span>}
           {trend !== undefined && (
-            <span style={{ color: trend >= 0 ? T.green : T.red }}>
+            <span style={{ color: trend >= 0 ? T.green : T.red, fontWeight: 600 }}>
               {trend >= 0 ? '▲' : '▼'} {Math.abs(trend)}%
             </span>
           )}
@@ -161,17 +161,16 @@ function SpendBreakdown({ data }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
         {items.map(item => (
           <div key={item.label}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
-              <span style={{ fontSize: '0.6rem', color: T.textDim, fontFamily: 'monospace' }}>{item.label}</span>
-              <GlowText size="0.7rem" color={item.color} mono>${item.value.toFixed(2)}</GlowText>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+              <span style={{ fontSize: '0.65rem', color: T.textDim, fontFamily: 'monospace' }}>{item.label}</span>
+              <AccentText size="0.75rem" color={item.color} mono>${item.value.toFixed(2)}</AccentText>
             </div>
-            <div style={{ height: 3, background: T.panelBorder, borderRadius: 2 }}>
+            <div style={{ height: 4, background: T.panelBorder, borderRadius: 2 }}>
               <div style={{
                 height: '100%',
                 width: `${(item.value / max) * 100}%`,
                 background: item.color,
                 borderRadius: 2,
-                boxShadow: `0 0 8px ${item.color}60`,
               }} />
             </div>
           </div>
@@ -182,11 +181,10 @@ function SpendBreakdown({ data }) {
 }
 
 // =============================================================================
-// SYSTEM TOPOLOGY - Clean schematic
+// SYSTEM TOPOLOGY
 // =============================================================================
 
 function SystemTopology({ status, flow, onNodeClick, selectedNode }) {
-  // Node positions (x, y)
   const nodes = {
     user: { x: 60, y: 140, icon: '◉', label: 'USER', color: T.blue },
     api: { x: 180, y: 140, icon: '⬡', label: 'API', color: T.blue, encrypted: true, threat: THREATS.api },
@@ -201,7 +199,6 @@ function SystemTopology({ status, flow, onNodeClick, selectedNode }) {
     deepseek: { x: 720, y: 200, icon: '○', label: 'DEEP', color: T.green },
   };
 
-  // Connection paths
   const connections = [
     { from: 'user', to: 'api', color: T.blue, active: flow.user },
     { from: 'api', to: 'supabase', color: T.purple, active: flow.auth },
@@ -234,7 +231,7 @@ function SystemTopology({ status, flow, onNodeClick, selectedNode }) {
             stroke={threatLevel === 2 ? T.red : T.yellow}
             strokeWidth={2}
             strokeDasharray="4,4"
-            opacity={0.6}
+            opacity={0.5}
           >
             <animateTransform
               attributeName="transform"
@@ -252,39 +249,24 @@ function SystemTopology({ status, flow, onNodeClick, selectedNode }) {
           r={isSelected ? 24 : 20}
           fill={T.panel}
           stroke={isSelected ? T.textBright : data.color}
-          strokeWidth={isSelected ? 2 : 1.5}
-          style={{
-            filter: `drop-shadow(0 0 ${isSelected ? 15 : 8}px ${data.color}60)`,
-            transition: 'all 0.2s ease',
-          }}
+          strokeWidth={isSelected ? 2.5 : 2}
+          style={{ filter: isSelected ? `drop-shadow(0 2px 8px ${data.color}40)` : 'none' }}
         />
         
         {/* Icon */}
-        <text
-          y={4}
-          textAnchor="middle"
-          fontSize={14}
-          fill={data.color}
-          style={{ fontFamily: 'monospace' }}
-        >
+        <text y={4} textAnchor="middle" fontSize={14} fill={data.color} style={{ fontFamily: 'monospace' }}>
           {data.icon}
         </text>
         
         {/* Label */}
-        <text
-          y={38}
-          textAnchor="middle"
-          fontSize={8}
-          fill={T.textDim}
-          style={{ fontFamily: 'monospace', letterSpacing: '0.05em' }}
-        >
+        <text y={38} textAnchor="middle" fontSize={8} fill={T.textDim} style={{ fontFamily: 'monospace', letterSpacing: '0.05em' }}>
           {data.label}
         </text>
         
         {/* Encrypted badge */}
         {data.encrypted && (
           <g transform="translate(14, -14)">
-            <circle r={7} fill={T.panel} stroke={T.yellow} strokeWidth={1} />
+            <circle r={7} fill={T.panel} stroke={T.yellow} strokeWidth={1.5} />
             <text y={3} textAnchor="middle" fontSize={7} fill={T.yellow}>🔒</text>
           </g>
         )}
@@ -295,7 +277,6 @@ function SystemTopology({ status, flow, onNodeClick, selectedNode }) {
           cy={-14}
           r={4}
           fill={threatLevel === 2 ? T.red : threatLevel === 1 ? T.yellow : T.green}
-          style={{ filter: `drop-shadow(0 0 4px ${threatLevel === 2 ? T.red : threatLevel === 1 ? T.yellow : T.green})` }}
         />
       </g>
     );
@@ -305,10 +286,10 @@ function SystemTopology({ status, flow, onNodeClick, selectedNode }) {
     <Panel title="SYSTEM TOPOLOGY" style={{ gridColumn: 'span 2' }}>
       <svg width="100%" height="280" viewBox="0 0 780 280">
         {/* Zone backgrounds */}
-        <rect x="550" y="40" width="220" height="80" rx={4} fill={T.cyan} opacity={0.03} stroke={T.cyan} strokeWidth={0.5} strokeOpacity={0.2} />
+        <rect x="550" y="40" width="220" height="80" rx={6} fill={T.cyan} opacity={0.06} stroke={T.cyan} strokeWidth={1} strokeOpacity={0.3} />
         <text x="560" y={55} fontSize={8} fill={T.cyanDim} style={{ fontFamily: 'monospace' }}>CLOUD ZONE</text>
         
-        <rect x="550" y="140" width="220" height="100" rx={4} fill={T.green} opacity={0.03} stroke={T.green} strokeWidth={0.5} strokeOpacity={0.2} />
+        <rect x="550" y="140" width="220" height="100" rx={6} fill={T.green} opacity={0.06} stroke={T.green} strokeWidth={1} strokeOpacity={0.3} />
         <text x="560" y={155} fontSize={8} fill={T.greenDim} style={{ fontFamily: 'monospace' }}>LOCAL ZONE</text>
 
         {/* Connections */}
@@ -321,27 +302,14 @@ function SystemTopology({ status, flow, onNodeClick, selectedNode }) {
           return (
             <g key={i}>
               <line
-                x1={from.x}
-                y1={from.y}
-                x2={to.x}
-                y2={to.y}
+                x1={from.x} y1={from.y} x2={to.x} y2={to.y}
                 stroke={conn.active ? conn.color : T.panelBorder}
-                strokeWidth={conn.active ? 2 : 1}
-                opacity={conn.active ? 0.8 : 0.3}
-                style={{ 
-                  filter: conn.active ? `drop-shadow(0 0 4px ${conn.color})` : 'none',
-                  transition: 'all 0.3s ease',
-                }}
+                strokeWidth={conn.active ? 2.5 : 1.5}
+                opacity={conn.active ? 1 : 0.4}
+                style={{ transition: 'all 0.3s ease' }}
               />
               {conn.label && (
-                <text
-                  x={mx}
-                  y={my - 6}
-                  textAnchor="middle"
-                  fontSize={6}
-                  fill={T.textDim}
-                  style={{ fontFamily: 'monospace' }}
-                >
+                <text x={mx} y={my - 6} textAnchor="middle" fontSize={6} fill={T.textDim} style={{ fontFamily: 'monospace' }}>
                   {conn.label}
                 </text>
               )}
@@ -366,7 +334,7 @@ function SystemTopology({ status, flow, onNodeClick, selectedNode }) {
           <text x={139} y={3} fontSize={7} fill={T.textDim}>ACTION REQ</text>
           
           <g transform="translate(200, -3)">
-            <circle r={5} fill="none" stroke={T.yellow} strokeWidth={1} strokeDasharray="2,2" />
+            <circle r={5} fill="none" stroke={T.yellow} strokeWidth={1.5} strokeDasharray="2,2" />
           </g>
           <text x={210} y={3} fontSize={7} fill={T.textDim}>THREAT DETECTED</text>
         </g>
@@ -376,7 +344,7 @@ function SystemTopology({ status, flow, onNodeClick, selectedNode }) {
 }
 
 // =============================================================================
-// THREAT DETAILS PANEL
+// THREAT PANEL
 // =============================================================================
 
 function ThreatPanel({ nodeId, onClose }) {
@@ -395,6 +363,7 @@ function ThreatPanel({ nodeId, onClose }) {
       display: 'flex',
       flexDirection: 'column',
       zIndex: 10,
+      boxShadow: '-4px 0 20px rgba(0,0,0,0.08)',
     }}>
       <div style={{
         padding: '1rem',
@@ -402,6 +371,7 @@ function ThreatPanel({ nodeId, onClose }) {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
+        background: T.panelLight,
       }}>
         <div>
           <div style={{ fontSize: '0.7rem', color: T.textDim, fontFamily: 'monospace', marginBottom: '0.2rem' }}>
@@ -412,7 +382,7 @@ function ThreatPanel({ nodeId, onClose }) {
         <button
           onClick={onClose}
           style={{
-            background: 'none',
+            background: T.panelLight,
             border: `1px solid ${T.panelBorder}`,
             borderRadius: 4,
             color: T.textDim,
@@ -431,18 +401,18 @@ function ThreatPanel({ nodeId, onClose }) {
         <div style={{
           padding: '0.75rem',
           background: threat.level === 2 ? T.redGlow : threat.level === 1 ? T.yellowGlow : T.greenGlow,
-          borderRadius: 4,
+          borderRadius: 6,
           marginBottom: '1rem',
-          border: `1px solid ${threat.level === 2 ? T.redDim : threat.level === 1 ? T.yellowDim : T.greenDim}`,
+          border: `1px solid ${threat.level === 2 ? T.redDim : threat.level === 1 ? T.yellowDim : T.greenDim}20`,
         }}>
           <div style={{ fontSize: '0.6rem', color: T.textDim, marginBottom: '0.3rem', fontFamily: 'monospace' }}>RISK LEVEL</div>
-          <GlowText 
+          <AccentText 
             size="1.2rem" 
             color={threat.level === 2 ? T.red : threat.level === 1 ? T.yellow : T.green}
             mono
           >
             {threat.level === 2 ? 'HIGH' : threat.level === 1 ? 'MEDIUM' : 'LOW'}
-          </GlowText>
+          </AccentText>
         </div>
 
         {/* Issues */}
@@ -455,9 +425,9 @@ function ThreatPanel({ nodeId, onClose }) {
               <div key={i} style={{
                 padding: '0.6rem',
                 background: T.panelLight,
-                borderRadius: 4,
+                borderRadius: 6,
                 marginBottom: '0.5rem',
-                borderLeft: `2px solid ${T.yellow}`,
+                borderLeft: `3px solid ${T.yellow}`,
               }}>
                 <div style={{ fontSize: '0.75rem', color: T.text }}>{issue}</div>
               </div>
@@ -474,10 +444,10 @@ function ThreatPanel({ nodeId, onClose }) {
             <div style={{
               padding: '0.75rem',
               background: T.greenGlow,
-              borderRadius: 4,
-              borderLeft: `2px solid ${T.green}`,
+              borderRadius: 6,
+              borderLeft: `3px solid ${T.green}`,
             }}>
-              <div style={{ fontSize: '0.75rem', color: T.green }}>{threat.action}</div>
+              <div style={{ fontSize: '0.75rem', color: T.green, fontWeight: 500 }}>{threat.action}</div>
             </div>
           </div>
         )}
@@ -503,16 +473,11 @@ function ActivityLog({ entries }) {
             <div key={i} style={{
               display: 'flex',
               gap: '0.5rem',
-              padding: '0.4rem',
+              padding: '0.4rem 0.5rem',
               background: i === 0 ? T.panelLight : 'transparent',
-              borderRadius: 3,
+              borderRadius: 4,
             }}>
-              <span style={{ 
-                fontSize: '0.6rem', 
-                color: T.textDim, 
-                fontFamily: 'monospace',
-                minWidth: 55,
-              }}>
+              <span style={{ fontSize: '0.6rem', color: T.textDim, fontFamily: 'monospace', minWidth: 55 }}>
                 {entry.time}
               </span>
               <StatusDot status={entry.status} size={6} />
@@ -520,7 +485,7 @@ function ActivityLog({ entries }) {
                 {entry.message}
               </span>
               {entry.cost && (
-                <span style={{ fontSize: '0.65rem', color: T.green, fontFamily: 'monospace', marginLeft: 'auto' }}>
+                <span style={{ fontSize: '0.65rem', color: T.green, fontFamily: 'monospace', marginLeft: 'auto', fontWeight: 600 }}>
                   ${entry.cost.toFixed(4)}
                 </span>
               )}
@@ -592,7 +557,7 @@ export default function SystemMonitor() {
     return () => clearInterval(interval);
   }, []);
 
-  // Simulate flow animation
+  // Simulate flow
   useEffect(() => {
     const animate = () => {
       const flows = ['user', 'auth', 'struct', 'semantic', 'vector', 'llm', 'cloud', 'local'];
@@ -600,7 +565,6 @@ export default function SystemMonitor() {
       flows.forEach(f => active[f] = Math.random() > 0.5);
       setFlow(active);
     };
-    
     const interval = setInterval(animate, 2500);
     animate();
     return () => clearInterval(interval);
@@ -630,7 +594,6 @@ export default function SystemMonitor() {
     return () => clearInterval(interval);
   }, []);
 
-  // Count threats
   const threatCount = Object.values(THREATS).filter(t => t.level > 0).length;
 
   return (
@@ -652,7 +615,7 @@ export default function SystemMonitor() {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
           <div>
-            <div style={{ fontSize: '0.6rem', color: T.textDim, fontFamily: 'monospace', letterSpacing: '0.2em' }}>
+            <div style={{ fontSize: '0.6rem', color: T.textDim, fontFamily: 'monospace', letterSpacing: '0.15em' }}>
               XLR8 PLATFORM
             </div>
             <div style={{ fontSize: '1.1rem', fontWeight: 600, color: T.textBright }}>
@@ -663,18 +626,18 @@ export default function SystemMonitor() {
           <div style={{ 
             padding: '0.4rem 0.75rem', 
             background: threatCount > 0 ? T.yellowGlow : T.greenGlow,
-            borderRadius: 4,
-            border: `1px solid ${threatCount > 0 ? T.yellowDim : T.greenDim}`,
+            borderRadius: 6,
+            border: `1px solid ${threatCount > 0 ? T.yellowDim : T.greenDim}30`,
           }}>
-            <GlowText size="0.7rem" color={threatCount > 0 ? T.yellow : T.green} mono>
+            <AccentText size="0.7rem" color={threatCount > 0 ? T.yellow : T.green} mono>
               {threatCount > 0 ? `${threatCount} ITEMS NEED REVIEW` : 'ALL SYSTEMS NOMINAL'}
-            </GlowText>
+            </AccentText>
           </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '2rem' }}>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: '1.2rem', fontFamily: 'monospace', color: T.green }}>
+            <div style={{ fontSize: '1.2rem', fontFamily: 'monospace', color: T.green, fontWeight: 600 }}>
               {time.toLocaleTimeString('en-US', { hour12: false })}
             </div>
             <div style={{ fontSize: '0.6rem', color: T.textDim, fontFamily: 'monospace' }}>
@@ -693,14 +656,12 @@ export default function SystemMonitor() {
         paddingRight: selectedNode ? '340px' : '1rem',
         transition: 'padding-right 0.3s ease',
       }}>
-        {/* Top metrics row */}
         <MetricCard label={`${data.month.month_name} SPEND`} value={`$${data.month.total.toFixed(0)}`} sublabel="Total" />
         <MetricCard label="API USAGE" value={`$${data.usage.total.toFixed(2)}`} sublabel={`${data.usage.calls} calls`} status={0} />
         <MetricCard label="DOCUMENTS" value={data.stats.files.toLocaleString()} sublabel="Processed" status={0} />
         <MetricCard label="LOCAL %" value="62%" sublabel="Cost savings" status={0} />
         <MetricCard label="UPTIME" value="99.9%" sublabel="30 days" status={0} />
 
-        {/* Second row */}
         <SpendBreakdown data={{
           fixed: data.month.fixed,
           claude: data.usage.claude,
@@ -715,17 +676,16 @@ export default function SystemMonitor() {
           selectedNode={selectedNode}
         />
 
-        {/* Third row */}
         <Panel title="STORAGE" style={{ gridColumn: 'span 2' }}>
           <div style={{ display: 'flex', gap: '1.5rem' }}>
             <div>
               <div style={{ fontSize: '0.6rem', color: T.textDim, fontFamily: 'monospace', marginBottom: '0.3rem' }}>STRUCTURED</div>
-              <GlowText size="1.2rem" color={T.purple} mono>{data.stats.rows.toLocaleString()}</GlowText>
+              <AccentText size="1.2rem" color={T.purple} mono>{data.stats.rows.toLocaleString()}</AccentText>
               <div style={{ fontSize: '0.6rem', color: T.textDim }}>rows</div>
             </div>
             <div>
               <div style={{ fontSize: '0.6rem', color: T.textDim, fontFamily: 'monospace', marginBottom: '0.3rem' }}>VECTOR</div>
-              <GlowText size="1.2rem" color={T.cyan} mono>{(data.stats.chunks || 0).toLocaleString()}</GlowText>
+              <AccentText size="1.2rem" color={T.cyan} mono>{(data.stats.chunks || 0).toLocaleString()}</AccentText>
               <div style={{ fontSize: '0.6rem', color: T.textDim }}>chunks</div>
             </div>
             <div style={{ flex: 1 }}>
@@ -745,18 +705,9 @@ export default function SystemMonitor() {
         <ActivityLog entries={activity} />
       </div>
 
-      {/* Threat Panel */}
       {selectedNode && (
         <ThreatPanel nodeId={selectedNode} onClose={() => setSelectedNode(null)} />
       )}
-
-      {/* CSS for pulse animation */}
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.5; }
-        }
-      `}</style>
     </div>
   );
 }
