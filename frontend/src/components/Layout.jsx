@@ -1,12 +1,13 @@
 /**
  * Layout - Main App Wrapper
- * Vertical logo, no Analysis Engine subtitle, fixed scroll
+ * With role-based navigation hiding
  */
 
-import React, { useEffect, useLayoutEffect } from 'react';
+import React, { useLayoutEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Rocket } from 'lucide-react';
 import ContextBar from './ContextBar';
+import { useAuth, Permissions } from '../context/AuthContext';
 
 const COLORS = {
   grassGreen: '#83b16d',
@@ -17,13 +18,14 @@ const COLORS = {
   textLight: '#5f6c7b',
 };
 
+// Nav items with required permissions
 const NAV_ITEMS = [
-  { path: '/dashboard', label: 'Dashboard', icon: '🏠' },
-  { path: '/projects', label: 'Projects', icon: '🏢' },
-  { path: '/data', label: 'Data', icon: '📁' },
-  { path: '/data-model', label: 'Data Model', icon: '🔗' },
-  { path: '/playbooks', label: 'Playbooks', icon: '📋' },
-  { path: '/admin', label: 'Admin', icon: '⚙️' },
+  { path: '/dashboard', label: 'Dashboard', icon: '🏠', permission: null }, // Always visible
+  { path: '/projects', label: 'Projects', icon: '🏢', permission: null },
+  { path: '/data', label: 'Data', icon: '📁', permission: Permissions.UPLOAD },
+  { path: '/data-model', label: 'Data Model', icon: '🔗', permission: Permissions.DATA_MODEL },
+  { path: '/playbooks', label: 'Playbooks', icon: '📋', permission: Permissions.PLAYBOOKS },
+  { path: '/admin', label: 'Admin', icon: '⚙️', permission: Permissions.OPS_CENTER },
 ];
 
 // Full Detail Green H Logo
@@ -65,6 +67,7 @@ const HLogoGreen = () => (
 
 function Navigation() {
   const location = useLocation();
+  const { hasPermission, user, isAdmin, logout } = useAuth();
 
   const isActive = (path) => {
     if (path === '/dashboard') {
@@ -72,6 +75,13 @@ function Navigation() {
     }
     return location.pathname.startsWith(path);
   };
+
+  // Filter nav items based on permissions
+  const visibleItems = NAV_ITEMS.filter(item => {
+    if (!item.permission) return true; // No permission required
+    if (isAdmin) return true; // Admin sees everything
+    return hasPermission(item.permission);
+  });
 
   return (
     <nav style={{
@@ -82,56 +92,91 @@ function Navigation() {
       <div style={{
         display: 'flex',
         alignItems: 'center',
-        gap: '1.5rem',
+        justifyContent: 'space-between',
         maxWidth: '1400px',
         margin: '0 auto',
       }}>
-        {/* Vertical Logo */}
-        <Link to="/" style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.5rem',
-          padding: '0.5rem 0',
-          textDecoration: 'none',
-        }}>
-          <div style={{ width: '32px', height: '32px' }}>
-            <HLogoGreen />
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-            <span style={{
-              fontFamily: "'Ubuntu Mono', monospace",
-              fontWeight: '700',
-              fontSize: '1.1rem',
-              color: COLORS.text,
-            }}>XLR8</span>
-            <Rocket style={{ width: 14, height: 14, color: COLORS.grassGreen }} />
-          </div>
-        </Link>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+          {/* Vertical Logo */}
+          <Link to="/" style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            padding: '0.5rem 0',
+            textDecoration: 'none',
+          }}>
+            <div style={{ width: '32px', height: '32px' }}>
+              <HLogoGreen />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+              <span style={{
+                fontFamily: "'Ubuntu Mono', monospace",
+                fontWeight: '700',
+                fontSize: '1.1rem',
+                color: COLORS.text,
+              }}>XLR8</span>
+              <Rocket style={{ width: 14, height: 14, color: COLORS.grassGreen }} />
+            </div>
+          </Link>
 
-        {/* Nav Items */}
-        <div style={{ display: 'flex', gap: '0.25rem' }}>
-          {NAV_ITEMS.map((item) => (
-            <Link
-              key={item.path}
-              to={item.path}
+          {/* Nav Items */}
+          <div style={{ display: 'flex', gap: '0.25rem' }}>
+            {visibleItems.map((item) => (
+              <Link
+                key={item.path}
+                to={item.path}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  padding: '0.875rem 1rem',
+                  textDecoration: 'none',
+                  fontSize: '0.875rem',
+                  fontWeight: '600',
+                  color: isActive(item.path) ? COLORS.grassGreen : COLORS.textLight,
+                  borderBottom: isActive(item.path) ? `2px solid ${COLORS.grassGreen}` : '2px solid transparent',
+                  marginBottom: '-1px',
+                }}
+              >
+                <span>{item.icon}</span>
+                {item.label}
+              </Link>
+            ))}
+          </div>
+        </div>
+
+        {/* User menu */}
+        {user && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: '600', color: COLORS.text }}>
+                {user.full_name || user.email}
+              </div>
+              <div style={{ 
+                fontSize: '0.7rem', 
+                color: COLORS.textLight,
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px',
+              }}>
+                {user.role}
+              </div>
+            </div>
+            <button
+              onClick={logout}
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.4rem',
-                padding: '0.875rem 1rem',
-                textDecoration: 'none',
-                fontSize: '0.875rem',
-                fontWeight: '600',
-                color: isActive(item.path) ? COLORS.grassGreen : COLORS.textLight,
-                borderBottom: isActive(item.path) ? `2px solid ${COLORS.grassGreen}` : '2px solid transparent',
-                marginBottom: '-1px',
+                padding: '0.5rem 1rem',
+                background: 'transparent',
+                border: '1px solid #e1e8ed',
+                borderRadius: '6px',
+                color: COLORS.textLight,
+                fontSize: '0.8rem',
+                cursor: 'pointer',
               }}
             >
-              <span>{item.icon}</span>
-              {item.label}
-            </Link>
-          ))}
-        </div>
+              Logout
+            </button>
+          </div>
+        )}
       </div>
     </nav>
   );
