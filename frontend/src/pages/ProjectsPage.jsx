@@ -244,8 +244,7 @@ export default function ProjectsPage() {
                         <input
                           type="checkbox"
                           checked={isSelected}
-                          onChange={(e) => e.stopPropagation()}
-                          onClick={(e) => e.stopPropagation()}
+                          readOnly
                           style={styles.playbookCheckbox}
                         />
                         <span style={styles.playbookIcon}>{playbook.icon}</span>
