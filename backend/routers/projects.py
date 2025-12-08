@@ -1,11 +1,12 @@
 """
 Projects Router - Complete CRUD
 Fixed to use correct ProjectModel methods: get_all(), create(), update(), delete()
+Updated: Added playbooks array support
 """
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 import sys
 import logging
 
@@ -27,6 +28,7 @@ class ProjectCreate(BaseModel):
     type: str  # Frontend sends 'type'
     start_date: Optional[str] = None
     notes: Optional[str] = None
+    playbooks: Optional[List[str]] = []  # Array of playbook IDs
 
 
 class ProjectUpdate(BaseModel):
@@ -38,6 +40,7 @@ class ProjectUpdate(BaseModel):
     start_date: Optional[str] = None
     notes: Optional[str] = None
     status: Optional[str] = None
+    playbooks: Optional[List[str]] = None  # Array of playbook IDs
 
 
 @router.get("/list")
@@ -62,6 +65,7 @@ async def list_projects():
                 'start_date': proj.get('start_date'),
                 'status': proj.get('status', 'active'),
                 'notes': metadata.get('notes', ''),
+                'playbooks': metadata.get('playbooks', []),  # ✅ Include playbooks
                 'is_active': proj.get('is_active', False),
                 'created_at': proj.get('created_at'),
                 'updated_at': proj.get('updated_at'),
@@ -95,6 +99,13 @@ async def create_project(project: ProjectCreate):
         if not new_project:
             raise HTTPException(status_code=500, detail="Failed to create project")
         
+        # ✅ Update metadata with playbooks if provided
+        if project.playbooks:
+            existing_metadata = new_project.get('metadata', {})
+            existing_metadata['playbooks'] = project.playbooks
+            ProjectModel.update(new_project['id'], metadata=existing_metadata)
+            new_project['metadata'] = existing_metadata
+        
         # Extract metadata for response
         metadata = new_project.get('metadata', {})
         
@@ -107,6 +118,7 @@ async def create_project(project: ProjectCreate):
                 'product': metadata.get('product', ''),
                 'type': metadata.get('type', 'Implementation'),
                 'notes': metadata.get('notes', ''),
+                'playbooks': metadata.get('playbooks', []),  # ✅ Include playbooks
                 'status': new_project.get('status', 'active'),
                 'created_at': new_project.get('created_at')
             },
@@ -140,8 +152,8 @@ async def update_project(project_id: str, updates: ProjectUpdate):
         if updates.start_date is not None:
             update_dict['start_date'] = updates.start_date
         
-        # Metadata updates (type, product, and notes go in metadata JSON)
-        if updates.type is not None or updates.notes is not None or updates.product is not None:
+        # Metadata updates (type, product, notes, and playbooks go in metadata JSON)
+        if updates.type is not None or updates.notes is not None or updates.product is not None or updates.playbooks is not None:
             # Get existing project to merge metadata
             existing = ProjectModel.get_by_id(project_id)
             if existing:
@@ -155,6 +167,10 @@ async def update_project(project_id: str, updates: ProjectUpdate):
                 
                 if updates.product is not None:
                     existing_metadata['product'] = updates.product
+                
+                # ✅ Handle playbooks update
+                if updates.playbooks is not None:
+                    existing_metadata['playbooks'] = updates.playbooks
                 
                 update_dict['metadata'] = existing_metadata
         
@@ -176,6 +192,7 @@ async def update_project(project_id: str, updates: ProjectUpdate):
                 'product': metadata.get('product', ''),
                 'type': metadata.get('type', 'Implementation'),
                 'notes': metadata.get('notes', ''),
+                'playbooks': metadata.get('playbooks', []),  # ✅ Include playbooks
                 'status': updated.get('status', 'active'),
                 'updated_at': updated.get('updated_at')
             },
@@ -232,6 +249,7 @@ async def get_project(project_id: str):
             'product': metadata.get('product', ''),
             'type': metadata.get('type', 'Implementation'),
             'notes': metadata.get('notes', ''),
+            'playbooks': metadata.get('playbooks', []),  # ✅ Include playbooks
             'status': project.get('status', 'active'),
             'start_date': project.get('start_date'),
             'created_at': project.get('created_at'),
