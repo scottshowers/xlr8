@@ -48,6 +48,14 @@ except ImportError as e:
     SECURITY_AVAILABLE = False
     logging.warning(f"Security router import failed: {e}")
 
+# Import auth router (user management, RBAC)
+try:
+    from backend.routers import auth
+    AUTH_AVAILABLE = True
+except ImportError as e:
+    AUTH_AVAILABLE = False
+    logging.warning(f"Auth router import failed: {e}")
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -157,6 +165,13 @@ else:
     app.include_router(security_fallback)
     logger.info("✓ Security fallback endpoints registered (using threat_assessor directly)")
 
+# Register auth router if available (user management, RBAC)
+if AUTH_AVAILABLE:
+    app.include_router(auth.router, tags=["auth"])
+    logger.info("✓ Auth router registered at /api/auth")
+else:
+    logger.warning("Auth router not available")
+
 
 @app.get("/api/health")
 async def health():
@@ -175,6 +190,7 @@ async def health():
             "playbooks": PLAYBOOKS_AVAILABLE,
             "progress": PROGRESS_AVAILABLE,
             "security": SECURITY_AVAILABLE,
+            "auth": AUTH_AVAILABLE,
         }
         
         return {
