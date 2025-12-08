@@ -1,6 +1,13 @@
 /**
- * SystemMonitor - Real-time Data Flow & Cost Tracking Visualization
- * Updated: December 2025 - Added real cost tracking, all LLM models, data breakdown
+ * SystemMonitor - Real-time Data Flow, Cost Tracking & System Health Dashboard
+ * Redesigned: December 2025
+ * 
+ * Features:
+ * - Architecture diagram with encryption points and data flow branching
+ * - Monthly/daily cost tracking with editable fixed costs
+ * - Data storage breakdown (Chunks vs Structured)
+ * - Session metrics (API calls, queries, LLM calls)
+ * - Component health status
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -9,7 +16,7 @@ import api from '../services/api';
 const COLORS = {
   bg: '#f6f5fa',
   cardBg: '#ffffff',
-  archBg: '#c9d3d4',
+  archBg: '#e8eef0',
   border: '#e1e8ed',
   text: '#2a3441',
   textMuted: '#5f6c7b',
@@ -23,135 +30,282 @@ const COLORS = {
   orange: '#f97316',
   pink: '#ec4899',
   indigo: '#4f46e5',
-  amber: '#ea580c',
-  llama: '#10b981',    // Emerald for Llama
-  mistral: '#f59e0b',  // Amber for Mistral
-  deepseek: '#6366f1', // Indigo for DeepSeek
-  qwen: '#ec4899',     // Pink for Qwen
+  amber: '#d97706',
+  encryption: '#f59e0b',
 };
+
+// =============================================================================
+// SMALL COMPONENTS
+// =============================================================================
 
 function StatusLight({ status, size = 12 }) {
   const color = status === 'healthy' ? COLORS.green : status === 'warning' ? COLORS.yellow : COLORS.red;
   return (
-    <div
-      style={{
-        width: size,
-        height: size,
-        borderRadius: '50%',
-        background: color,
-        boxShadow: '0 0 8px ' + color,
-      }}
-    />
+    <div style={{
+      width: size,
+      height: size,
+      borderRadius: '50%',
+      background: color,
+      boxShadow: `0 0 8px ${color}`,
+    }} />
   );
 }
 
-function MetricCard({ icon, label, value, subValue, color, onClick }) {
-  return (
-    <div
-      onClick={onClick}
-      style={{
-        background: COLORS.cardBg,
-        borderRadius: 12,
-        padding: '1rem',
-        border: '1px solid ' + COLORS.border,
-        boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-        minWidth: 130,
-        cursor: onClick ? 'pointer' : 'default',
-        transition: 'transform 0.1s, box-shadow 0.1s',
-      }}
-      onMouseEnter={(e) => onClick && (e.currentTarget.style.transform = 'translateY(-2px)')}
-      onMouseLeave={(e) => onClick && (e.currentTarget.style.transform = 'translateY(0)')}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-        <span style={{ fontSize: '1.1rem' }}>{icon}</span>
-        <span style={{ color: COLORS.textMuted, fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase' }}>{label}</span>
-      </div>
-      <div style={{ fontSize: '1.5rem', fontWeight: 700, color: color || COLORS.text }}>
-        {value}
-      </div>
-      {subValue && (
-        <div style={{ fontSize: '0.7rem', color: COLORS.textMuted, marginTop: '0.25rem' }}>
-          {subValue}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CostBreakdownCard({ costs, loading }) {
-  if (loading) {
-    return (
-      <div style={{
-        background: COLORS.cardBg,
-        borderRadius: 12,
-        padding: '1rem',
-        border: '1px solid ' + COLORS.border,
-        minWidth: 200,
-      }}>
-        <div style={{ color: COLORS.textMuted, fontSize: '0.85rem' }}>Loading costs...</div>
-      </div>
-    );
-  }
-
-  const serviceColors = {
-    claude: COLORS.cyan,
-    runpod: COLORS.orange,
-    textract: COLORS.purple,
-  };
-
-  const serviceIcons = {
-    claude: '🤖',
-    runpod: '⚡',
-    textract: '📄',
-  };
-
+function MetricCard({ icon, label, value, subValue, color }) {
   return (
     <div style={{
       background: COLORS.cardBg,
       borderRadius: 12,
-      padding: '1rem',
-      border: '1px solid ' + COLORS.border,
+      padding: '0.875rem',
+      border: `1px solid ${COLORS.border}`,
       boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-      minWidth: 220,
+      minWidth: 120,
+      flex: '1 1 120px',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
-        <span style={{ fontSize: '1.1rem' }}>📊</span>
-        <span style={{ color: COLORS.textMuted, fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase' }}>API Usage (30d)</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
+        <span style={{ fontSize: '1rem' }}>{icon}</span>
+        <span style={{ color: COLORS.textMuted, fontSize: '0.65rem', fontWeight: 600, textTransform: 'uppercase' }}>{label}</span>
       </div>
-      
-      <div style={{ fontSize: '1.5rem', fontWeight: 700, color: COLORS.cyan, marginBottom: '0.75rem' }}>
-        ${(costs.total_cost || 0).toFixed(2)}
-        <span style={{ fontSize: '0.7rem', color: COLORS.textMuted, fontWeight: 400, marginLeft: '0.5rem' }}>
-          {costs.record_count || 0} calls
-        </span>
-      </div>
+      <div style={{ fontSize: '1.4rem', fontWeight: 700, color: color || COLORS.text }}>{value}</div>
+      {subValue && <div style={{ fontSize: '0.65rem', color: COLORS.textMuted, marginTop: '0.2rem' }}>{subValue}</div>}
+    </div>
+  );
+}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-        {Object.entries(costs.by_service || {}).map(([service, amount]) => (
-          <div key={service} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.75rem', color: COLORS.textMuted }}>
-              {serviceIcons[service] || '💵'} {service}
-            </span>
-            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: serviceColors[service] || COLORS.text }}>
-              ${(amount || 0).toFixed(4)}
-            </span>
-          </div>
-        ))}
+// =============================================================================
+// COST SETTINGS MODAL
+// =============================================================================
+
+function CostSettingsModal({ isOpen, onClose, fixedItems, onSave }) {
+  const [items, setItems] = useState([]);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (fixedItems) setItems([...fixedItems]);
+  }, [fixedItems]);
+
+  if (!isOpen) return null;
+
+  const handleChange = (idx, field, value) => {
+    const updated = [...items];
+    updated[idx] = { ...updated[idx], [field]: field === 'quantity' ? parseInt(value) || 0 : parseFloat(value) || 0 };
+    setItems(updated);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      for (const item of items) {
+        await api.put(`/status/costs/fixed/${encodeURIComponent(item.name)}`, null, {
+          params: { cost_per_unit: item.cost_per_unit, quantity: item.quantity }
+        });
+      }
+      onSave();
+      onClose();
+    } catch (err) {
+      console.error('Save failed:', err);
+      alert('Failed to save costs');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+      background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 1000,
+    }} onClick={onClose}>
+      <div style={{
+        background: COLORS.cardBg, borderRadius: 16, padding: '1.5rem', minWidth: 400,
+        boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+      }} onClick={e => e.stopPropagation()}>
+        <h3 style={{ margin: '0 0 1rem 0', color: COLORS.text }}>⚙️ Fixed Monthly Costs</h3>
+        
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          {items.filter(i => i.category === 'subscription').map((item, idx) => (
+            <div key={item.name} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <span style={{ flex: 1, fontSize: '0.85rem', color: COLORS.text }}>{item.name}</span>
+              <input
+                type="number"
+                value={item.cost_per_unit}
+                onChange={e => handleChange(idx, 'cost_per_unit', e.target.value)}
+                style={{ width: 80, padding: '0.4rem', borderRadius: 6, border: `1px solid ${COLORS.border}` }}
+                step="0.01"
+              />
+              <span style={{ fontSize: '0.75rem', color: COLORS.textMuted }}>× </span>
+              <input
+                type="number"
+                value={item.quantity}
+                onChange={e => handleChange(idx, 'quantity', e.target.value)}
+                style={{ width: 50, padding: '0.4rem', borderRadius: 6, border: `1px solid ${COLORS.border}` }}
+              />
+              <span style={{ fontSize: '0.75rem', color: COLORS.textMuted, width: 60 }}>
+                = ${(item.cost_per_unit * item.quantity).toFixed(2)}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1.5rem', justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{
+            padding: '0.5rem 1rem', borderRadius: 8, border: `1px solid ${COLORS.border}`,
+            background: 'white', cursor: 'pointer'
+          }}>Cancel</button>
+          <button onClick={handleSave} disabled={saving} style={{
+            padding: '0.5rem 1rem', borderRadius: 8, border: 'none',
+            background: COLORS.blue, color: 'white', cursor: 'pointer'
+          }}>{saving ? 'Saving...' : 'Save Changes'}</button>
+        </div>
       </div>
     </div>
   );
 }
 
-function MonthCostCard({ monthCosts, loading }) {
+// =============================================================================
+// ARCHITECTURE DIAGRAM
+// =============================================================================
+
+function ArchitectureDiagram({ componentStatus, dataFlowActive }) {
+  // Node component
+  const Node = ({ x, y, icon, label, status, isActive, encrypted, size = 'normal' }) => {
+    const statusColor = status === 'healthy' ? COLORS.green : status === 'warning' ? COLORS.yellow : COLORS.red;
+    const w = size === 'small' ? 85 : 100;
+    const h = size === 'small' ? 50 : 55;
+    
+    return (
+      <g>
+        <rect
+          x={x - w/2} y={y - h/2} width={w} height={h} rx={10}
+          fill={COLORS.cardBg}
+          stroke={isActive ? COLORS.blue : '#94a3b8'}
+          strokeWidth={isActive ? 2.5 : 1.5}
+          style={{ filter: isActive ? 'drop-shadow(0 2px 8px rgba(59,130,246,0.3))' : 'drop-shadow(0 1px 2px rgba(0,0,0,0.08))' }}
+        />
+        <text x={x} y={y - 2} textAnchor="middle" fontSize={size === 'small' ? 16 : 20}>{icon}</text>
+        <text x={x} y={y + 16} textAnchor="middle" fontSize={size === 'small' ? 8 : 9} fill={COLORS.textMuted} fontWeight="600">{label}</text>
+        <circle cx={x + w/2 - 8} cy={y - h/2 + 8} r={4} fill={statusColor} />
+        {encrypted && (
+          <g>
+            <circle cx={x - w/2 + 10} cy={y - h/2 + 10} r={7} fill="#fef3c7" stroke={COLORS.encryption} strokeWidth={1.5} />
+            <text x={x - w/2 + 10} y={y - h/2 + 13} textAnchor="middle" fontSize="8">🔒</text>
+          </g>
+        )}
+      </g>
+    );
+  };
+
+  // Connection line with optional label
+  const Connection = ({ x1, y1, x2, y2, active, color, label, encrypted }) => {
+    const midX = (x1 + x2) / 2;
+    const midY = (y1 + y2) / 2;
+    
+    return (
+      <g>
+        <line
+          x1={x1} y1={y1} x2={x2} y2={y2}
+          stroke={active ? (color || COLORS.blue) : COLORS.border}
+          strokeWidth={active ? 2.5 : 1.5}
+          strokeDasharray={active ? 'none' : '4,4'}
+          style={{ transition: 'all 0.3s ease' }}
+        />
+        {label && (
+          <text x={midX} y={midY - 5} textAnchor="middle" fontSize="7" fill={COLORS.textMuted}>{label}</text>
+        )}
+        {encrypted && (
+          <text x={midX} y={midY + 8} textAnchor="middle" fontSize="7" fill={COLORS.encryption}>HTTPS</text>
+        )}
+      </g>
+    );
+  };
+
+  // Section label
+  const SectionLabel = ({ x, y, label, color }) => (
+    <g>
+      <rect x={x - 2} y={y - 10} width={label.length * 6 + 10} height={16} rx={4} fill={color} opacity={0.15} />
+      <text x={x + 3} y={y} fontSize="9" fill={color} fontWeight="600">{label}</text>
+    </g>
+  );
+
+  return (
+    <svg width="100%" height="420" viewBox="0 0 700 420">
+      {/* Background sections */}
+      <rect x="430" y="140" width="260" height="110" rx={12} fill={COLORS.cyan} opacity={0.08} />
+      <rect x="430" y="260" width="260" height="140" rx={12} fill={COLORS.orange} opacity={0.08} />
+      
+      {/* Section Labels */}
+      <SectionLabel x={440} y={155} label="CLOUD API" color={COLORS.cyan} />
+      <SectionLabel x={440} y={275} label="LOCAL LLM (RunPod)" color={COLORS.orange} />
+      
+      {/* Connections */}
+      <Connection x1={100} y1={80} x2={200} y2={140} active={dataFlowActive.frontendToApi} label="REST" encrypted />
+      <Connection x1={200} y1={200} x2={100} y2={260} active={dataFlowActive.apiToSupabase} label="Auth" encrypted />
+      
+      {/* API to Data Layer - SPLIT POINT */}
+      <Connection x1={260} y1={160} x2={350} y2={90} active={dataFlowActive.apiToDuckdb} color={COLORS.purple} label="Structured" />
+      <Connection x1={260} y1={180} x2={350} y2={180} active={dataFlowActive.apiToRag} color={COLORS.orange} label="Semantic" />
+      
+      {/* RAG to Storage */}
+      <Connection x1={410} y1={180} x2={470} y2={90} active={dataFlowActive.ragToChroma} color={COLORS.green} label="Vector" />
+      
+      {/* RAG to LLMs - SPLIT POINT */}
+      <Connection x1={410} y1={190} x2={470} y2={190} active={dataFlowActive.ragToClaude} color={COLORS.cyan} />
+      <Connection x1={410} y1={200} x2={470} y2={310} active={dataFlowActive.ragToLocalLLM} color={COLORS.orange} />
+      
+      {/* Local LLM internal connections */}
+      <line x1={530} y1={310} x2={530} y2={380} stroke={COLORS.orange} strokeWidth={1} opacity={0.3} />
+      <line x1={610} y1={310} x2={610} y2={380} stroke={COLORS.orange} strokeWidth={1} opacity={0.3} />
+      
+      {/* Nodes - User Layer */}
+      <Node x={70} y={80} icon="🖥️" label="FRONTEND" status={componentStatus.frontend} isActive={dataFlowActive.frontendToApi} />
+      
+      {/* Nodes - API Layer */}
+      <Node x={230} y={170} icon="⚙️" label="API SERVER" status={componentStatus.api} isActive={true} encrypted />
+      
+      {/* Nodes - Auth */}
+      <Node x={70} y={290} icon="🔐" label="SUPABASE" status={componentStatus.supabase} isActive={dataFlowActive.apiToSupabase} encrypted />
+      
+      {/* Nodes - Data Layer (SPLIT) */}
+      <Node x={380} y={90} icon="🦆" label="DUCKDB" status={componentStatus.duckdb} isActive={dataFlowActive.apiToDuckdb} encrypted />
+      <Node x={380} y={180} icon="🎯" label="RAG" status={componentStatus.rag} isActive={dataFlowActive.apiToRag} />
+      <Node x={500} y={90} icon="🔍" label="CHROMADB" status={componentStatus.chromadb} isActive={dataFlowActive.ragToChroma} />
+      
+      {/* Nodes - Cloud LLM */}
+      <Node x={530} y={190} icon="🤖" label="CLAUDE API" status={componentStatus.claude} isActive={dataFlowActive.ragToClaude} />
+      
+      {/* Nodes - Local LLMs */}
+      <Node x={530} y={310} icon="🦙" label="LLAMA 3.1" status={componentStatus.llama} isActive={dataFlowActive.ragToLocalLLM} size="small" />
+      <Node x={610} y={310} icon="🌬️" label="MISTRAL" status={componentStatus.mistral} isActive={dataFlowActive.ragToLocalLLM} size="small" />
+      <Node x={530} y={370} icon="🔮" label="DEEPSEEK" status={componentStatus.deepseek} isActive={dataFlowActive.ragToLocalLLM} size="small" />
+      <Node x={610} y={370} icon="❄️" label="QWEN" status={componentStatus.qwen || 'healthy'} isActive={false} size="small" />
+      
+      {/* Legend */}
+      <g transform="translate(20, 390)">
+        <circle cx={8} cy={4} r={6} fill="#fef3c7" stroke={COLORS.encryption} strokeWidth={1.5} />
+        <text x={8} y={7} textAnchor="middle" fontSize="7">🔒</text>
+        <text x={20} y={7} fontSize="8" fill={COLORS.textMuted}>Encryption at rest</text>
+        
+        <text x={120} y={7} fontSize="8" fill={COLORS.encryption}>HTTPS</text>
+        <text x={150} y={7} fontSize="8" fill={COLORS.textMuted}>= Encrypted in transit</text>
+        
+        <rect x={260} y={-2} width={12} height={12} rx={3} fill={COLORS.purple} opacity={0.2} />
+        <text x={278} y={7} fontSize="8" fill={COLORS.textMuted}>Structured data path</text>
+        
+        <rect x={370} y={-2} width={12} height={12} rx={3} fill={COLORS.orange} opacity={0.2} />
+        <text x={388} y={7} fontSize="8" fill={COLORS.textMuted}>Semantic/LLM path</text>
+      </g>
+    </svg>
+  );
+}
+
+// =============================================================================
+// COST CARDS
+// =============================================================================
+
+function MonthCostCard({ monthCosts, loading, onSettingsClick }) {
   if (loading) {
     return (
-      <div style={{
-        background: COLORS.cardBg,
-        borderRadius: 12,
-        padding: '1rem',
-        border: '1px solid ' + COLORS.border,
-        minWidth: 240,
-      }}>
+      <div style={{ background: COLORS.cardBg, borderRadius: 12, padding: '1rem', border: `1px solid ${COLORS.border}`, minWidth: 200 }}>
         <div style={{ color: COLORS.textMuted, fontSize: '0.85rem' }}>Loading...</div>
       </div>
     );
@@ -159,27 +313,28 @@ function MonthCostCard({ monthCosts, loading }) {
 
   return (
     <div style={{
-      background: COLORS.cardBg,
-      borderRadius: 12,
-      padding: '1rem',
-      border: '1px solid ' + COLORS.border,
-      boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-      minWidth: 240,
+      background: COLORS.cardBg, borderRadius: 12, padding: '1rem',
+      border: `1px solid ${COLORS.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.05)', minWidth: 200,
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
-        <span style={{ fontSize: '1.1rem' }}>💰</span>
-        <span style={{ color: COLORS.textMuted, fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase' }}>
-          {monthCosts.month_name || 'This Month'}
-        </span>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <span style={{ fontSize: '1rem' }}>💰</span>
+          <span style={{ color: COLORS.textMuted, fontSize: '0.65rem', fontWeight: 600, textTransform: 'uppercase' }}>
+            {monthCosts.month_name || 'This Month'}
+          </span>
+        </div>
+        <button onClick={onSettingsClick} style={{
+          background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.9rem', padding: '0.2rem'
+        }} title="Edit fixed costs">⚙️</button>
       </div>
       
       <div style={{ fontSize: '1.75rem', fontWeight: 700, color: COLORS.grassGreen, marginBottom: '0.5rem' }}>
         ${(monthCosts.total || 0).toFixed(2)}
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.75rem' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.7rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <span style={{ color: COLORS.textMuted }}>📋 Fixed (subscriptions)</span>
+          <span style={{ color: COLORS.textMuted }}>📋 Subscriptions</span>
           <span style={{ fontWeight: 600, color: COLORS.pink }}>${(monthCosts.fixed_costs || 0).toFixed(2)}</span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -189,10 +344,10 @@ function MonthCostCard({ monthCosts, loading }) {
       </div>
 
       {monthCosts.fixed_items && monthCosts.fixed_items.length > 0 && (
-        <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid ' + COLORS.border }}>
-          {monthCosts.fixed_items.slice(0, 3).map((item, idx) => (
-            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.65rem', color: COLORS.textMuted }}>
-              <span>{item.name} {item.quantity > 1 ? `(${item.quantity})` : ''}</span>
+        <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: `1px solid ${COLORS.border}` }}>
+          {monthCosts.fixed_items.filter(i => i.category === 'subscription').map((item, idx) => (
+            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.6rem', color: COLORS.textMuted }}>
+              <span>{item.name} {item.quantity > 1 ? `(×${item.quantity})` : ''}</span>
               <span>${(item.cost_per_unit * item.quantity).toFixed(2)}</span>
             </div>
           ))}
@@ -202,50 +357,76 @@ function MonthCostCard({ monthCosts, loading }) {
   );
 }
 
-function DailyCostCard({ dailyCosts, loading }) {
-  if (loading || !dailyCosts || dailyCosts.length === 0) {
-    return null; // Don't show if no data
-  }
+function ApiUsageCard({ costs, loading }) {
+  if (loading) return null;
 
-  const maxCost = Math.max(...dailyCosts.map(d => d.total || 0), 0.01);
+  const services = [
+    { key: 'claude', icon: '🤖', label: 'Claude', color: COLORS.cyan },
+    { key: 'runpod', icon: '⚡', label: 'RunPod', color: COLORS.orange },
+    { key: 'textract', icon: '📄', label: 'Textract', color: COLORS.purple },
+  ];
 
   return (
     <div style={{
-      background: COLORS.cardBg,
-      borderRadius: 12,
-      padding: '1rem',
-      border: '1px solid ' + COLORS.border,
-      boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-      minWidth: 280,
+      background: COLORS.cardBg, borderRadius: 12, padding: '1rem',
+      border: `1px solid ${COLORS.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.05)', minWidth: 180,
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
-        <span style={{ fontSize: '1.1rem' }}>📈</span>
-        <span style={{ color: COLORS.textMuted, fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase' }}>Daily API Spend</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.5rem' }}>
+        <span style={{ fontSize: '1rem' }}>📊</span>
+        <span style={{ color: COLORS.textMuted, fontSize: '0.65rem', fontWeight: 600, textTransform: 'uppercase' }}>API Usage (30d)</span>
+      </div>
+      
+      <div style={{ fontSize: '1.4rem', fontWeight: 700, color: COLORS.cyan, marginBottom: '0.5rem' }}>
+        ${(costs.total_cost || 0).toFixed(4)}
+        <span style={{ fontSize: '0.6rem', color: COLORS.textMuted, fontWeight: 400, marginLeft: '0.3rem' }}>
+          {costs.record_count || 0} calls
+        </span>
       </div>
 
-      <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'flex-end', height: 50 }}>
-        {dailyCosts.slice(0, 7).reverse().map((day, idx) => {
-          const height = Math.max((day.total / maxCost) * 100, 5);
-          const dayName = new Date(day.date).toLocaleDateString('en-US', { weekday: 'short' });
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+        {services.map(svc => (
+          <div key={svc.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.7rem' }}>
+            <span style={{ color: COLORS.textMuted }}>{svc.icon} {svc.label}</span>
+            <span style={{ fontWeight: 600, color: svc.color }}>${(costs.by_service?.[svc.key] || 0).toFixed(4)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DailySpendCard({ dailyCosts, loading }) {
+  if (loading || !dailyCosts || dailyCosts.length === 0) return null;
+
+  const data = dailyCosts.slice(0, 7).reverse();
+  const maxCost = Math.max(...data.map(d => d.total || 0), 0.001);
+
+  return (
+    <div style={{
+      background: COLORS.cardBg, borderRadius: 12, padding: '1rem',
+      border: `1px solid ${COLORS.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.05)', minWidth: 200,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.75rem' }}>
+        <span style={{ fontSize: '1rem' }}>📈</span>
+        <span style={{ color: COLORS.textMuted, fontSize: '0.65rem', fontWeight: 600, textTransform: 'uppercase' }}>Daily Spend</span>
+      </div>
+
+      <div style={{ display: 'flex', gap: '0.2rem', alignItems: 'flex-end', height: 45 }}>
+        {data.map((day, idx) => {
+          const height = Math.max((day.total / maxCost) * 100, 8);
+          const dayName = new Date(day.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' });
           return (
             <div key={idx} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              <div 
-                style={{ 
-                  width: '100%', 
-                  height: `${height}%`,
-                  background: COLORS.cyan,
-                  borderRadius: 2,
-                  minHeight: 4,
-                }} 
-                title={`$${day.total.toFixed(4)}`}
-              />
-              <span style={{ fontSize: '0.55rem', color: COLORS.textMuted, marginTop: 2 }}>{dayName}</span>
+              <div style={{ 
+                width: '100%', height: `${height}%`, background: COLORS.cyan, borderRadius: 2, minHeight: 3,
+              }} title={`${day.date}: $${day.total.toFixed(4)}`} />
+              <span style={{ fontSize: '0.5rem', color: COLORS.textMuted, marginTop: 2 }}>{dayName.charAt(0)}</span>
             </div>
           );
         })}
       </div>
 
-      <div style={{ marginTop: '0.5rem', fontSize: '0.65rem', color: COLORS.textMuted, textAlign: 'center' }}>
+      <div style={{ marginTop: '0.4rem', fontSize: '0.6rem', color: COLORS.textMuted, textAlign: 'center' }}>
         Today: ${(dailyCosts[0]?.total || 0).toFixed(4)}
       </div>
     </div>
@@ -253,294 +434,142 @@ function DailyCostCard({ dailyCosts, loading }) {
 }
 
 function DataStorageCard({ chunks, structured, loading }) {
-  if (loading) {
-    return (
-      <div style={{
-        background: COLORS.cardBg,
-        borderRadius: 12,
-        padding: '1rem',
-        border: '1px solid ' + COLORS.border,
-        minWidth: 180,
-      }}>
-        <div style={{ color: COLORS.textMuted, fontSize: '0.85rem' }}>Loading...</div>
-      </div>
-    );
-  }
+  if (loading) return null;
 
   const total = (chunks || 0) + (structured || 0);
   const chunkPercent = total > 0 ? Math.round((chunks / total) * 100) : 50;
-  const structuredPercent = 100 - chunkPercent;
 
   return (
     <div style={{
-      background: COLORS.cardBg,
-      borderRadius: 12,
-      padding: '1rem',
-      border: '1px solid ' + COLORS.border,
-      boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-      minWidth: 180,
+      background: COLORS.cardBg, borderRadius: 12, padding: '1rem',
+      border: `1px solid ${COLORS.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.05)', minWidth: 160,
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
-        <span style={{ fontSize: '1.1rem' }}>💾</span>
-        <span style={{ color: COLORS.textMuted, fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase' }}>Data Storage</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.5rem' }}>
+        <span style={{ fontSize: '1rem' }}>💾</span>
+        <span style={{ color: COLORS.textMuted, fontSize: '0.65rem', fontWeight: 600, textTransform: 'uppercase' }}>Data Storage</span>
       </div>
 
-      {/* Visual bar */}
-      <div style={{ 
-        display: 'flex', 
-        height: 8, 
-        borderRadius: 4, 
-        overflow: 'hidden',
-        marginBottom: '0.75rem',
-        background: COLORS.border
-      }}>
-        <div style={{ width: `${chunkPercent}%`, background: COLORS.green, transition: 'width 0.3s' }} />
-        <div style={{ width: `${structuredPercent}%`, background: COLORS.purple, transition: 'width 0.3s' }} />
+      <div style={{ display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden', marginBottom: '0.5rem', background: COLORS.border }}>
+        <div style={{ width: `${chunkPercent}%`, background: COLORS.green }} />
+        <div style={{ width: `${100 - chunkPercent}%`, background: COLORS.purple }} />
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: '0.75rem', color: COLORS.textMuted, display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-            <span style={{ width: 8, height: 8, borderRadius: 2, background: COLORS.green }} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', fontSize: '0.7rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span style={{ color: COLORS.textMuted, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: COLORS.green, display: 'inline-block' }} />
             ChromaDB
           </span>
-          <span style={{ fontSize: '0.75rem', fontWeight: 600, color: COLORS.green }}>
-            {(chunks || 0).toLocaleString()} chunks
-          </span>
+          <span style={{ fontWeight: 600, color: COLORS.green }}>{(chunks || 0).toLocaleString()}</span>
         </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: '0.75rem', color: COLORS.textMuted, display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-            <span style={{ width: 8, height: 8, borderRadius: 2, background: COLORS.purple }} />
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span style={{ color: COLORS.textMuted, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: COLORS.purple, display: 'inline-block' }} />
             DuckDB
           </span>
-          <span style={{ fontSize: '0.75rem', fontWeight: 600, color: COLORS.purple }}>
-            {(structured || 0).toLocaleString()} rows
+          <span style={{ fontWeight: 600, color: COLORS.purple }}>{(structured || 0).toLocaleString()}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// ACTIVITY PANEL
+// =============================================================================
+
+function ActivityPanel({ recentCosts, activity, showCosts, onToggle, loading }) {
+  const serviceColors = { claude: COLORS.cyan, runpod: COLORS.orange, textract: COLORS.purple };
+
+  return (
+    <div style={{
+      background: COLORS.cardBg, borderRadius: 12, padding: '1rem',
+      border: `1px solid ${COLORS.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+      display: 'flex', flexDirection: 'column', height: '100%',
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: COLORS.green }} />
+          <span style={{ color: COLORS.text, fontSize: '0.85rem', fontWeight: 600 }}>
+            {showCosts ? 'Cost Activity' : 'Live Activity'}
           </span>
         </div>
+        <button onClick={onToggle} style={{
+          background: 'none', border: 'none', color: COLORS.blue, fontSize: '0.65rem', cursor: 'pointer', textDecoration: 'underline'
+        }}>{showCosts ? 'Show Live' : 'Show Costs'}</button>
       </div>
-    </div>
-  );
-}
 
-function CostActivityPanel({ recentCosts, loading }) {
-  if (loading) {
-    return <div style={{ color: COLORS.textMuted, fontSize: '0.85rem', padding: '1rem' }}>Loading...</div>;
-  }
-
-  if (!recentCosts || recentCosts.length === 0) {
-    return (
-      <div style={{ color: COLORS.textMuted, fontSize: '0.85rem', textAlign: 'center', padding: '2rem 0' }}>
-        No cost activity yet. Use the app to generate tracked calls.
-      </div>
-    );
-  }
-
-  const serviceColors = {
-    claude: COLORS.cyan,
-    runpod: COLORS.orange,
-    textract: COLORS.purple,
-  };
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-      {recentCosts.slice(0, 15).map((item, idx) => (
-        <div
-          key={item.id || idx}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            padding: '0.4rem 0',
-            borderBottom: '1px solid ' + COLORS.border,
-          }}
-        >
-          <div
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: '50%',
-              background: serviceColors[item.service] || COLORS.blue,
-              flexShrink: 0,
-            }}
-          />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: '0.75rem', color: COLORS.text, display: 'flex', justifyContent: 'space-between' }}>
-              <span>{item.service}/{item.operation}</span>
-              <span style={{ color: COLORS.grassGreen, fontWeight: 600 }}>${(item.estimated_cost || 0).toFixed(5)}</span>
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {showCosts ? (
+          loading ? <div style={{ color: COLORS.textMuted, fontSize: '0.8rem', padding: '1rem', textAlign: 'center' }}>Loading...</div> :
+          recentCosts.length === 0 ? <div style={{ color: COLORS.textMuted, fontSize: '0.8rem', padding: '1rem', textAlign: 'center' }}>No API calls tracked yet</div> :
+          recentCosts.slice(0, 12).map((item, idx) => (
+            <div key={item.id || idx} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.35rem 0', borderBottom: `1px solid ${COLORS.border}` }}>
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: serviceColors[item.service] || COLORS.blue, flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: '0.7rem', color: COLORS.text, display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{item.service}/{item.operation}</span>
+                  <span style={{ color: COLORS.grassGreen, fontWeight: 600 }}>${(item.estimated_cost || 0).toFixed(5)}</span>
+                </div>
+                <div style={{ fontSize: '0.55rem', color: COLORS.textMuted }}>
+                  {item.tokens_in ? `${item.tokens_in}→${item.tokens_out} tok` : ''}
+                  {item.duration_ms ? `${item.duration_ms}ms` : ''}
+                  {item.pages ? `${item.pages}pg` : ''}
+                  {' · '}{new Date(item.created_at).toLocaleTimeString()}
+                </div>
+              </div>
             </div>
-            <div style={{ fontSize: '0.6rem', color: COLORS.textMuted }}>
-              {item.tokens_in ? `${item.tokens_in} in / ${item.tokens_out} out` : ''}
-              {item.duration_ms ? `${item.duration_ms}ms` : ''}
-              {item.pages ? `${item.pages} pages` : ''}
-              {' • '}
-              {new Date(item.created_at).toLocaleTimeString()}
+          ))
+        ) : (
+          activity.length === 0 ? <div style={{ color: COLORS.textMuted, fontSize: '0.8rem', padding: '1rem', textAlign: 'center' }}>Waiting...</div> :
+          activity.map(item => (
+            <div key={item.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', padding: '0.35rem 0', borderBottom: `1px solid ${COLORS.border}` }}>
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: item.color || COLORS.blue, marginTop: 3, flexShrink: 0 }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '0.7rem', color: COLORS.text }}>{item.message}</div>
+                <div style={{ fontSize: '0.55rem', color: COLORS.textMuted }}>{item.time}</div>
+              </div>
             </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function ActivityItem({ time, type, message }) {
-  const typeColors = {
-    upload: COLORS.blue,
-    query: COLORS.purple,
-    claude: COLORS.cyan,
-    llama: COLORS.llama,
-    mistral: COLORS.mistral,
-    deepseek: COLORS.deepseek,
-    rag: COLORS.orange,
-    auth: COLORS.pink,
-    error: COLORS.red,
-    success: COLORS.green,
-  };
-  const dotColor = typeColors[type] || COLORS.blue;
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: '0.75rem',
-        padding: '0.5rem 0',
-        borderBottom: '1px solid ' + COLORS.border,
-      }}
-    >
-      <div
-        style={{
-          width: 8,
-          height: 8,
-          borderRadius: '50%',
-          background: dotColor,
-          marginTop: 4,
-          flexShrink: 0,
-        }}
-      />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: '0.8rem', color: COLORS.text }}>{message}</div>
-        <div style={{ fontSize: '0.65rem', color: COLORS.textMuted }}>{time}</div>
+          ))
+        )}
       </div>
     </div>
   );
 }
 
-function SystemNode({ x, y, icon, label, status, color, isActive, encrypted }) {
-  const statusColor = status === 'healthy' ? COLORS.green : status === 'warning' ? COLORS.yellow : COLORS.red;
-  return (
-    <g>
-      {isActive && (
-        <rect
-          x={x - 55}
-          y={y - 32}
-          width={110}
-          height={64}
-          rx={12}
-          fill="none"
-          stroke={color}
-          strokeWidth={3}
-          opacity={0.5}
-        />
-      )}
-      <rect
-        x={x - 52}
-        y={y - 29}
-        width={104}
-        height={58}
-        rx={10}
-        fill={COLORS.cardBg}
-        stroke={isActive ? color : '#94a3b8'}
-        strokeWidth={isActive ? 2.5 : 1.5}
-        style={{ filter: isActive ? 'drop-shadow(0 2px 6px rgba(0,0,0,0.15))' : 'drop-shadow(0 1px 2px rgba(0,0,0,0.08))' }}
-      />
-      <text x={x} y={y - 4} textAnchor="middle" fontSize="22" fill={COLORS.text}>
-        {icon}
-      </text>
-      <text x={x} y={y + 18} textAnchor="middle" fontSize="10" fill={COLORS.textMuted} fontWeight="600">
-        {label}
-      </text>
-      <circle cx={x + 42} cy={y - 20} r={5} fill={statusColor} />
-      {encrypted && (
-        <g>
-          <circle cx={x - 38} cy={y - 18} r={8} fill="#fef3c7" stroke="#f59e0b" strokeWidth={1} />
-          <text x={x - 38} y={y - 14} textAnchor="middle" fontSize="10">🔒</text>
-        </g>
-      )}
-    </g>
-  );
-}
+// =============================================================================
+// MAIN COMPONENT
+// =============================================================================
 
 export default function SystemMonitor() {
-  const [metrics, setMetrics] = useState({
-    apiRequests: 0,
-    dbQueries: 0,
-    llmCalls: 0,
-    ragQueries: 0,
-    totalFiles: 0,
-    totalRows: 0,
-    uptime: '0h 0m',
-    latency: 0,
-  });
-
-  const [costs, setCosts] = useState({
-    total_cost: 0,
-    by_service: {},
-    by_operation: {},
-    record_count: 0,
-    days: 30,
-  });
-  const [monthCosts, setMonthCosts] = useState({
-    api_usage: 0,
-    fixed_costs: 0,
-    total: 0,
-    month_name: '',
-    fixed_items: [],
-    by_service: {},
-    call_count: 0,
-  });
+  // State
+  const [metrics, setMetrics] = useState({ apiRequests: 0, dbQueries: 0, llmCalls: 0, ragQueries: 0, totalFiles: 0, totalRows: 0 });
+  const [costs, setCosts] = useState({ total_cost: 0, by_service: {}, record_count: 0 });
+  const [monthCosts, setMonthCosts] = useState({ api_usage: 0, fixed_costs: 0, total: 0, month_name: '', fixed_items: [] });
   const [dailyCosts, setDailyCosts] = useState([]);
   const [recentCosts, setRecentCosts] = useState([]);
+  const [dataStats, setDataStats] = useState({ chunks: 0, structured: 0, loading: true });
   const [costsLoading, setCostsLoading] = useState(true);
   const [showCostDetails, setShowCostDetails] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   const [componentStatus, setComponentStatus] = useState({
-    frontend: 'healthy',
-    api: 'healthy',
-    supabase: 'healthy',
-    duckdb: 'healthy',
-    chromadb: 'healthy',
-    rag: 'healthy',
-    claude: 'healthy',
-    llama: 'healthy',
-    mistral: 'healthy',
-    deepseek: 'healthy',
-  });
-
-  const [dataStats, setDataStats] = useState({
-    chunks: 0,
-    structured: 0,
-    loading: true,
+    frontend: 'healthy', api: 'healthy', supabase: 'healthy', duckdb: 'healthy',
+    chromadb: 'healthy', rag: 'healthy', claude: 'healthy', llama: 'healthy',
+    mistral: 'healthy', deepseek: 'healthy', qwen: 'healthy',
   });
 
   const [activity, setActivity] = useState([]);
   const [dataFlowActive, setDataFlowActive] = useState({
-    frontendToApi: false,
-    apiToSupabase: false,
-    apiToDuckdb: false,
-    apiToRag: false,
-    ragToChroma: false,
-    ragToClaude: false,
-    ragToLlama: false,
-    ragToMistral: false,
-    ragToDeepseek: false,
+    frontendToApi: false, apiToSupabase: false, apiToDuckdb: false, apiToRag: false,
+    ragToChroma: false, ragToClaude: false, ragToLocalLLM: false,
   });
 
   const requestCountRef = useRef(0);
-  const startTimeRef = useRef(Date.now());
 
-  // Fetch real cost data
-  useEffect(function fetchCostsEffect() {
-    const fetchCosts = async function() {
+  // Fetch costs
+  useEffect(() => {
+    const fetchCosts = async () => {
       try {
         setCostsLoading(true);
         const [summaryRes, recentRes, monthRes, dailyRes] = await Promise.all([
@@ -549,7 +578,6 @@ export default function SystemMonitor() {
           api.get('/status/costs/month').catch(() => ({ data: {} })),
           api.get('/status/costs/daily?days=7').catch(() => ({ data: [] })),
         ]);
-        
         setCosts(summaryRes.data || {});
         setRecentCosts(recentRes.data?.records || []);
         setMonthCosts(monthRes.data || {});
@@ -560,349 +588,174 @@ export default function SystemMonitor() {
         setCostsLoading(false);
       }
     };
-
     fetchCosts();
-    const interval = setInterval(fetchCosts, 30000); // Refresh every 30s
+    const interval = setInterval(fetchCosts, 30000);
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(function fetchMetricsEffect() {
-    const fetchMetrics = async function() {
+  // Fetch metrics
+  useEffect(() => {
+    const fetchMetrics = async () => {
       try {
-        setDataFlowActive(function(prev) {
-          return { ...prev, frontendToApi: true };
-        });
-        setTimeout(function() {
-          setDataFlowActive(function(prev) {
-            return { ...prev, frontendToApi: false };
-          });
-        }, 500);
+        setDataFlowActive(prev => ({ ...prev, frontendToApi: true }));
+        setTimeout(() => setDataFlowActive(prev => ({ ...prev, frontendToApi: false })), 500);
 
-        const results = await Promise.all([
-          api.get('/status/structured').catch(function() { return { data: {} }; }),
-          api.get('/status/chromadb').catch(function() { return { data: {} }; }),
+        const [structuredRes, chromaRes] = await Promise.all([
+          api.get('/status/structured').catch(() => ({ data: {} })),
+          api.get('/status/chromadb').catch(() => ({ data: {} })),
         ]);
 
-        const structuredRes = results[0];
-        const chromaRes = results[1];
-
         requestCountRef.current += 2;
+        setMetrics(prev => ({
+          ...prev,
+          apiRequests: requestCountRef.current,
+          totalFiles: structuredRes.data?.total_files || 0,
+          totalRows: structuredRes.data?.total_rows || 0,
+          dbQueries: prev.dbQueries + 1,
+        }));
 
-        const uptimeMs = Date.now() - startTimeRef.current;
-        const hours = Math.floor(uptimeMs / 3600000);
-        const minutes = Math.floor((uptimeMs % 3600000) / 60000);
-
-        setMetrics(function(prev) {
-          return {
-            ...prev,
-            apiRequests: requestCountRef.current,
-            totalFiles: structuredRes.data?.total_files || 0,
-            totalRows: structuredRes.data?.total_rows || 0,
-            uptime: hours + 'h ' + minutes + 'm',
-            latency: Math.floor(Math.random() * 50 + 20),
-            dbQueries: prev.dbQueries + 1,
-          };
-        });
-
-        // Update data stats for the storage card
         setDataStats({
           chunks: chromaRes.data?.total_chunks || chromaRes.data?.chunk_count || 0,
           structured: structuredRes.data?.total_rows || 0,
           loading: false,
         });
 
-        setComponentStatus({
-          frontend: 'healthy',
-          api: 'healthy',
-          supabase: 'healthy',
+        setComponentStatus(prev => ({
+          ...prev,
           duckdb: structuredRes.data?.available !== false ? 'healthy' : 'error',
           chromadb: chromaRes.data?.status === 'operational' ? 'healthy' : 'warning',
-          rag: 'healthy',
-          claude: 'healthy',
-          llama: 'healthy',
-          mistral: 'healthy',
-          deepseek: 'healthy',
-        });
+        }));
 
-        setDataFlowActive(function(prev) {
-          return { ...prev, apiToDuckdb: true };
-        });
-        setTimeout(function() {
-          setDataFlowActive(function(prev) {
-            return { ...prev, apiToDuckdb: false };
-          });
-        }, 300);
-
+        setDataFlowActive(prev => ({ ...prev, apiToDuckdb: true }));
+        setTimeout(() => setDataFlowActive(prev => ({ ...prev, apiToDuckdb: false })), 300);
       } catch (err) {
         console.error('Metrics fetch error:', err);
       }
     };
-
     fetchMetrics();
     const interval = setInterval(fetchMetrics, 5000);
-    return function() {
-      clearInterval(interval);
-    };
+    return () => clearInterval(interval);
   }, []);
 
-  useEffect(function activityEffect() {
+  // Activity simulation
+  useEffect(() => {
     const activities = [
-      { type: 'query', message: 'DuckDB: SELECT query executed' },
-      { type: 'upload', message: 'File ingested to structured store' },
-      { type: 'claude', message: 'Claude API: Response generated' },
-      { type: 'llama', message: 'Llama 3.1: Local inference complete' },
-      { type: 'mistral', message: 'Mistral: Fast extraction done' },
-      { type: 'deepseek', message: 'DeepSeek: Code analysis complete' },
-      { type: 'rag', message: 'RAG: Context retrieved (5 docs)' },
-      { type: 'auth', message: 'Supabase: Session validated' },
-      { type: 'success', message: 'Analysis completed' },
+      { type: 'query', message: 'DuckDB: Query executed', color: COLORS.purple },
+      { type: 'upload', message: 'File ingested', color: COLORS.blue },
+      { type: 'claude', message: 'Claude API response', color: COLORS.cyan },
+      { type: 'llama', message: 'Llama 3.1 inference', color: COLORS.green },
+      { type: 'rag', message: 'RAG context retrieved', color: COLORS.orange },
+      { type: 'auth', message: 'Session validated', color: COLORS.pink },
     ];
 
-    const addActivity = function() {
-      const randomActivity = activities[Math.floor(Math.random() * activities.length)];
-      setActivity(function(prev) {
-        const newItem = {
-          ...randomActivity,
-          time: new Date().toLocaleTimeString(),
-          id: Date.now(),
-        };
-        return [newItem].concat(prev.slice(0, 9));
-      });
+    const addActivity = () => {
+      const act = activities[Math.floor(Math.random() * activities.length)];
+      setActivity(prev => [{ ...act, time: new Date().toLocaleTimeString(), id: Date.now() }, ...prev.slice(0, 9)]);
 
-      if (randomActivity.type === 'claude') {
+      if (act.type === 'claude') {
         setDataFlowActive(prev => ({ ...prev, ragToClaude: true }));
         setTimeout(() => setDataFlowActive(prev => ({ ...prev, ragToClaude: false })), 800);
         setMetrics(prev => ({ ...prev, llmCalls: prev.llmCalls + 1 }));
-      } else if (randomActivity.type === 'llama') {
-        setDataFlowActive(prev => ({ ...prev, ragToLlama: true }));
-        setTimeout(() => setDataFlowActive(prev => ({ ...prev, ragToLlama: false })), 700);
+      } else if (act.type === 'llama') {
+        setDataFlowActive(prev => ({ ...prev, ragToLocalLLM: true }));
+        setTimeout(() => setDataFlowActive(prev => ({ ...prev, ragToLocalLLM: false })), 700);
         setMetrics(prev => ({ ...prev, llmCalls: prev.llmCalls + 1 }));
-      } else if (randomActivity.type === 'mistral') {
-        setDataFlowActive(prev => ({ ...prev, ragToMistral: true }));
-        setTimeout(() => setDataFlowActive(prev => ({ ...prev, ragToMistral: false })), 600);
-        setMetrics(prev => ({ ...prev, llmCalls: prev.llmCalls + 1 }));
-      } else if (randomActivity.type === 'deepseek') {
-        setDataFlowActive(prev => ({ ...prev, ragToDeepseek: true }));
-        setTimeout(() => setDataFlowActive(prev => ({ ...prev, ragToDeepseek: false })), 650);
-        setMetrics(prev => ({ ...prev, llmCalls: prev.llmCalls + 1 }));
-      } else if (randomActivity.type === 'rag') {
+      } else if (act.type === 'rag') {
         setDataFlowActive(prev => ({ ...prev, apiToRag: true, ragToChroma: true }));
         setTimeout(() => setDataFlowActive(prev => ({ ...prev, apiToRag: false, ragToChroma: false })), 600);
         setMetrics(prev => ({ ...prev, ragQueries: prev.ragQueries + 1 }));
-      } else if (randomActivity.type === 'auth') {
-        setDataFlowActive(prev => ({ ...prev, apiToSupabase: true }));
-        setTimeout(() => setDataFlowActive(prev => ({ ...prev, apiToSupabase: false })), 400);
-      } else if (randomActivity.type === 'query') {
+      } else if (act.type === 'query') {
         setDataFlowActive(prev => ({ ...prev, apiToDuckdb: true }));
         setTimeout(() => setDataFlowActive(prev => ({ ...prev, apiToDuckdb: false })), 500);
         setMetrics(prev => ({ ...prev, dbQueries: prev.dbQueries + 1 }));
       }
     };
 
-    const interval = setInterval(addActivity, 2500);
+    const interval = setInterval(addActivity, 3000);
     return () => clearInterval(interval);
   }, []);
 
   const allHealthy = Object.values(componentStatus).every(s => s === 'healthy');
 
-  var getLineStyle = function(active, color) {
-    return {
-      fill: 'none',
-      stroke: active ? color : COLORS.border,
-      strokeWidth: active ? 2.5 : 1.5,
-      strokeDasharray: active ? 'none' : '4,4',
-      transition: 'all 0.3s ease',
-    };
+  const refreshCosts = async () => {
+    const monthRes = await api.get('/status/costs/month').catch(() => ({ data: {} }));
+    setMonthCosts(monthRes.data || {});
   };
 
   return (
-    <div style={{ background: COLORS.bg, minHeight: '100vh' }}>
-      <div style={{ marginBottom: '1.5rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.25rem' }}>
-          <h1 style={{ fontFamily: 'Sora, sans-serif', fontSize: '1.5rem', fontWeight: 700, color: COLORS.text, margin: 0 }}>
+    <div style={{ background: COLORS.bg, minHeight: '100vh', padding: '0' }}>
+      {/* Header */}
+      <div style={{ marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+          <h1 style={{ fontFamily: 'Sora, sans-serif', fontSize: '1.4rem', fontWeight: 700, color: COLORS.text, margin: 0 }}>
             System Monitor
           </h1>
           <StatusLight status={allHealthy ? 'healthy' : 'warning'} size={10} />
         </div>
-        <p style={{ color: COLORS.textMuted, fontSize: '0.85rem', margin: 0 }}>
-          Real-time data flow & cost tracking across the XLR8 stack
+        <p style={{ color: COLORS.textMuted, fontSize: '0.8rem', margin: 0 }}>
+          Real-time data flow, cost tracking & system health
         </p>
       </div>
 
       {/* Metrics Row */}
-      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
-        <MonthCostCard monthCosts={monthCosts} loading={costsLoading} />
-        <CostBreakdownCard costs={costs} loading={costsLoading} />
-        <DailyCostCard dailyCosts={dailyCosts} loading={costsLoading} />
+      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+        <MonthCostCard monthCosts={monthCosts} loading={costsLoading} onSettingsClick={() => setShowSettings(true)} />
+        <ApiUsageCard costs={costs} loading={costsLoading} />
+        <DailySpendCard dailyCosts={dailyCosts} loading={costsLoading} />
         <DataStorageCard chunks={dataStats.chunks} structured={dataStats.structured} loading={dataStats.loading} />
-        <MetricCard icon="🤖" label="LLM Calls" value={metrics.llmCalls} subValue="This session" color={COLORS.cyan} />
+        <MetricCard icon="📡" label="API Calls" value={metrics.apiRequests} subValue="Session" color={COLORS.blue} />
+        <MetricCard icon="🦆" label="DB Queries" value={metrics.dbQueries} subValue="DuckDB" color={COLORS.purple} />
+        <MetricCard icon="🔍" label="RAG" value={metrics.ragQueries} subValue="Searches" color={COLORS.orange} />
+        <MetricCard icon="🤖" label="LLM" value={metrics.llmCalls} subValue="Calls" color={COLORS.cyan} />
       </div>
 
       {/* Main Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: '1.5rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 260px', gap: '1rem' }}>
         {/* Architecture Diagram */}
-        <div
-          style={{
-            background: COLORS.archBg,
-            borderRadius: 16,
-            padding: '1.5rem',
-            border: '1px solid ' + COLORS.border,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-          }}
-        >
-          <h2 style={{ color: COLORS.text, fontSize: '1.25rem', fontWeight: 700, margin: '0 0 1rem 0' }}>
-            Tech Stack
+        <div style={{
+          background: COLORS.archBg, borderRadius: 12, padding: '1rem',
+          border: `1px solid ${COLORS.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+        }}>
+          <h2 style={{ color: COLORS.text, fontSize: '1rem', fontWeight: 600, margin: '0 0 0.5rem 0' }}>
+            Architecture & Data Flow
           </h2>
-
-          <svg width="100%" height="480" viewBox="0 0 800 480">
-            {/* Frontend to API */}
-            <path d="M 100 80 L 200 160" style={getLineStyle(dataFlowActive.frontendToApi, COLORS.blue)} />
-            
-            {/* API to Supabase */}
-            <path d="M 200 200 L 100 280" style={getLineStyle(dataFlowActive.apiToSupabase, COLORS.pink)} />
-            
-            {/* API to DuckDB */}
-            <path d="M 270 180 L 370 100" style={getLineStyle(dataFlowActive.apiToDuckdb, COLORS.purple)} />
-            
-            {/* API to RAG Controller */}
-            <path d="M 270 200 L 370 200" style={getLineStyle(dataFlowActive.apiToRag, COLORS.orange)} />
-            
-            {/* RAG to ChromaDB */}
-            <path d="M 470 180 L 570 100" style={getLineStyle(dataFlowActive.ragToChroma, COLORS.green)} />
-            
-            {/* RAG to Claude */}
-            <path d="M 470 190 L 570 190" style={getLineStyle(dataFlowActive.ragToClaude, COLORS.cyan)} />
-            
-            {/* RAG to Llama */}
-            <path d="M 470 205 L 570 260" style={getLineStyle(dataFlowActive.ragToLlama, COLORS.llama)} />
-            
-            {/* RAG to Mistral */}
-            <path d="M 470 215 L 570 330" style={getLineStyle(dataFlowActive.ragToMistral, COLORS.mistral)} />
-            
-            {/* RAG to DeepSeek */}
-            <path d="M 470 225 L 570 400" style={getLineStyle(dataFlowActive.ragToDeepseek, COLORS.deepseek)} />
-
-            {/* Nodes - Left Column */}
-            <SystemNode x={70} y={80} icon="🖥️" label="FRONTEND" status={componentStatus.frontend} color={COLORS.blue} isActive={dataFlowActive.frontendToApi} />
-            <SystemNode x={70} y={280} icon="🔐" label="SUPABASE" status={componentStatus.supabase} color={COLORS.pink} isActive={dataFlowActive.apiToSupabase} encrypted={true} />
-            
-            {/* Center - API */}
-            <SystemNode x={220} y={180} icon="⚙️" label="API SERVER" status={componentStatus.api} color={COLORS.grassGreen} isActive={true} encrypted={true} />
-            
-            {/* Right of API */}
-            <SystemNode x={420} y={100} icon="🦆" label="DUCKDB" status={componentStatus.duckdb} color={COLORS.purple} isActive={dataFlowActive.apiToDuckdb} encrypted={true} />
-            <SystemNode x={420} y={200} icon="🎯" label="RAG CTRL" status={componentStatus.rag} color={COLORS.orange} isActive={dataFlowActive.apiToRag} />
-            
-            {/* Far Right - Vector DB */}
-            <SystemNode x={620} y={100} icon="🔍" label="CHROMADB" status={componentStatus.chromadb} color={COLORS.green} isActive={dataFlowActive.ragToChroma} />
-            
-            {/* Far Right - LLMs */}
-            <SystemNode x={620} y={190} icon="🤖" label="CLAUDE" status={componentStatus.claude} color={COLORS.cyan} isActive={dataFlowActive.ragToClaude} />
-            <SystemNode x={620} y={260} icon="🦙" label="LLAMA 3.1" status={componentStatus.llama} color={COLORS.llama} isActive={dataFlowActive.ragToLlama} />
-            <SystemNode x={620} y={330} icon="🌬️" label="MISTRAL" status={componentStatus.mistral} color={COLORS.mistral} isActive={dataFlowActive.ragToMistral} />
-            <SystemNode x={620} y={400} icon="🔮" label="DEEPSEEK" status={componentStatus.deepseek} color={COLORS.deepseek} isActive={dataFlowActive.ragToDeepseek} />
-
-            {/* Connection Labels */}
-            <text x="135" y="110" fontSize="8" fill={COLORS.textMuted}>REST</text>
-            <text x="120" y="245" fontSize="8" fill={COLORS.textMuted}>Auth</text>
-            <text x="305" y="130" fontSize="8" fill={COLORS.textMuted}>SQL</text>
-            <text x="315" y="190" fontSize="8" fill={COLORS.textMuted}>Query</text>
-            <text x="510" y="130" fontSize="8" fill={COLORS.textMuted}>Vector</text>
-            
-            {/* RunPod label for local LLMs */}
-            <text x="720" y="295" fontSize="9" fill={COLORS.orange} fontWeight="600">RunPod</text>
-            <rect x="705" y="250" width="55" height="175" rx={8} fill="none" stroke={COLORS.orange} strokeWidth={1.5} strokeDasharray="4,4" opacity={0.6} />
-            
-            {/* Legend */}
-            <g transform="translate(20, 440)">
-              <circle cx={8} cy={0} r={6} fill="#fef3c7" stroke="#f59e0b" strokeWidth={1} />
-              <text x={8} y={4} textAnchor="middle" fontSize="8">🔒</text>
-              <text x={20} y={3} fontSize="8" fill={COLORS.textMuted}>= Encryption at rest</text>
-              <text x={140} y={3} fontSize="8" fill={COLORS.cyan}>● Claude = API</text>
-              <text x={240} y={3} fontSize="8" fill={COLORS.orange}>◻ RunPod = Local LLMs</text>
-            </g>
-          </svg>
+          <ArchitectureDiagram componentStatus={componentStatus} dataFlowActive={dataFlowActive} />
         </div>
 
-        {/* Right Panel - Cost Activity */}
-        <div
-          style={{
-            background: COLORS.cardBg,
-            borderRadius: 16,
-            padding: '1.5rem',
-            border: '1px solid ' + COLORS.border,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-            display: 'flex',
-            flexDirection: 'column',
-            maxHeight: 560,
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <h2 style={{ color: COLORS.text, fontSize: '1rem', fontWeight: 600, margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: COLORS.grassGreen }} />
-              {showCostDetails ? 'Cost Activity' : 'Live Activity'}
-            </h2>
-            <button
-              onClick={() => setShowCostDetails(!showCostDetails)}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: COLORS.blue,
-                fontSize: '0.7rem',
-                cursor: 'pointer',
-                textDecoration: 'underline',
-              }}
-            >
-              {showCostDetails ? 'Show Live' : 'Show Costs'}
-            </button>
-          </div>
-
-          <div style={{ flex: 1, overflowY: 'auto' }}>
-            {showCostDetails ? (
-              <CostActivityPanel recentCosts={recentCosts} loading={costsLoading} />
-            ) : (
-              activity.length === 0 ? (
-                <div style={{ color: COLORS.textMuted, fontSize: '0.85rem', textAlign: 'center', padding: '2rem 0' }}>
-                  Waiting for activity...
-                </div>
-              ) : (
-                activity.map(item => (
-                  <ActivityItem key={item.id} time={item.time} type={item.type} message={item.message} />
-                ))
-              )
-            )}
-          </div>
-        </div>
+        {/* Activity Panel */}
+        <ActivityPanel
+          recentCosts={recentCosts}
+          activity={activity}
+          showCosts={showCostDetails}
+          onToggle={() => setShowCostDetails(!showCostDetails)}
+          loading={costsLoading}
+        />
       </div>
 
       {/* Status Bar */}
-      <div
-        style={{
-          marginTop: '1.5rem',
-          background: COLORS.cardBg,
-          borderRadius: 12,
-          padding: '0.75rem 1.5rem',
-          border: '1px solid ' + COLORS.border,
-          boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-          display: 'flex',
-          justifyContent: 'space-around',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '0.5rem',
-        }}
-      >
-        {Object.entries(componentStatus).map(([name, status]) => {
-          const statusColor = status === 'healthy' ? COLORS.green : status === 'warning' ? COLORS.yellow : COLORS.red;
-          return (
-            <div key={name} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <StatusLight status={status} size={6} />
-              <span style={{ color: statusColor, fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase' }}>
-                {name}
-              </span>
-            </div>
-          );
-        })}
+      <div style={{
+        marginTop: '1rem', background: COLORS.cardBg, borderRadius: 10, padding: '0.6rem 1rem',
+        border: `1px solid ${COLORS.border}`, display: 'flex', justifyContent: 'space-around',
+        alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem',
+      }}>
+        {Object.entries(componentStatus).slice(0, 8).map(([name, status]) => (
+          <div key={name} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+            <StatusLight status={status} size={5} />
+            <span style={{
+              color: status === 'healthy' ? COLORS.green : status === 'warning' ? COLORS.yellow : COLORS.red,
+              fontSize: '0.6rem', fontWeight: 600, textTransform: 'uppercase'
+            }}>{name}</span>
+          </div>
+        ))}
       </div>
+
+      {/* Cost Settings Modal */}
+      <CostSettingsModal
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        fixedItems={monthCosts.fixed_items}
+        onSave={refreshCosts}
+      />
     </div>
   );
 }
