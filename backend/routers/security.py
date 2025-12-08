@@ -274,3 +274,52 @@ def _get_fallback_threats() -> Dict[str, Any]:
         "runpod": {"level": 0, "label": "LOCAL AI (RUNPOD)", "component": "runpod", "category": "ai", "issues": [], "action": "", "lastScan": now},
         "rag": {"level": 0, "label": "RAG ENGINE", "component": "rag", "category": "ai", "issues": [], "action": "", "lastScan": now},
     }
+
+
+# =============================================================================
+# AUDIT LOG ENDPOINTS
+# =============================================================================
+
+@router.get("/audit/summary")
+async def get_audit_summary(hours: int = 24) -> Dict[str, Any]:
+    """
+    Get audit log summary for the specified time period.
+    """
+    from datetime import datetime
+    
+    # For now, return placeholder data
+    # TODO: Connect to actual audit log storage
+    return {
+        "period_hours": hours,
+        "total_events": 0,
+        "by_category": {
+            "auth": 0,
+            "data_access": 0,
+            "config_change": 0,
+            "security": 0,
+        },
+        "by_severity": {
+            "info": 0,
+            "warning": 0,
+            "error": 0,
+            "critical": 0,
+        },
+        "generated_at": datetime.now().isoformat(),
+    }
+
+
+@router.get("/audit/recent")
+async def get_recent_audit_logs(limit: int = 20) -> Dict[str, Any]:
+    """
+    Get recent audit log entries.
+    """
+    from datetime import datetime
+    
+    # For now, return placeholder data
+    # TODO: Connect to actual audit log storage
+    return {
+        "logs": [],
+        "total": 0,
+        "limit": limit,
+        "generated_at": datetime.now().isoformat(),
+    }
