@@ -137,6 +137,42 @@ async def get_config() -> Dict[str, Any]:
             return {"error": "Security config not available"}
 
 
+class ConfigUpdate(BaseModel):
+    """Model for config updates."""
+    updates: Dict[str, Any] = {}
+
+
+@router.patch("/config")
+async def update_config(body: ConfigUpdate) -> Dict[str, Any]:
+    """Update security configuration."""
+    try:
+        from backend.utils.security_config import get_security_config
+        config = get_security_config()
+    except ImportError:
+        try:
+            from utils.security_config import get_security_config
+            config = get_security_config()
+        except ImportError:
+            raise HTTPException(500, "Security config not available")
+    
+    # Apply updates
+    for key, value in body.updates.items():
+        config.set(key, value, updated_by="admin")
+    
+    # Refresh threat assessor to pick up changes
+    try:
+        from backend.utils.threat_assessor import refresh_assessor
+        refresh_assessor()
+    except ImportError:
+        try:
+            from utils.threat_assessor import refresh_assessor
+            refresh_assessor()
+        except ImportError:
+            pass
+    
+    return {"status": "updated", "config": config.get_all()}
+
+
 @router.post("/toggle/rate-limiting")
 async def toggle_rate_limiting(req: ToggleRequest) -> ToggleResponse:
     """Toggle rate limiting on/off."""
