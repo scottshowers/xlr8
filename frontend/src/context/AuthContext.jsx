@@ -15,7 +15,16 @@ import { createClient } from '@supabase/supabase-js';
 // Supabase client
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+
+// Debug: Log if env vars are present (not the actual values)
+console.log('[Auth] Supabase URL configured:', !!supabaseUrl);
+console.log('[Auth] Supabase Key configured:', !!supabaseKey);
+
 const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+
+if (!supabase) {
+  console.warn('[Auth] Supabase client not initialized - missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY');
+}
 
 // API base URL
 const API_URL = import.meta.env.VITE_API_URL || '';
