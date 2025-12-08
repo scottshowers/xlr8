@@ -1,5 +1,5 @@
 /**
- * LoginPage - Authentication with Landing-style header
+ * LoginPage - Clean login matching screenshot design
  */
 
 import React, { useState } from 'react';
@@ -9,7 +9,6 @@ import { useAuth } from '../context/AuthContext';
 
 const COLORS = {
   grassGreen: '#83b16d',
-  grassGreenDark: '#6a9958',
   text: '#2a3441',
   textLight: '#5f6c7b',
   border: '#e1e8ed',
@@ -19,7 +18,7 @@ const COLORS = {
 };
 
 // H Logo matching Landing page
-const HLogoWhite = () => (
+const HLogo = () => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 570 570" style={{ width: '100%', height: '100%' }}>
     <path fill="rgba(255,255,255,0.3)" d="M492.04,500v-31.35l-36.53-35.01V163.76c0-15.8,.94-16.74,16.74-16.74h19.79v-31.36l-45.66-45.66H73v31.36l36.53,36.53V406.24c0,15.8-.94,16.74-16.74,16.74h-19.79v31.35l45.66,45.66H492.04Z"/>
     <g fill="rgba(255,255,255,0.5)">
@@ -95,170 +94,120 @@ export default function LoginPage() {
     }
   };
 
-  const styles = {
-    container: {
+  return (
+    <div style={{
       minHeight: '100vh',
       display: 'flex',
-      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
       background: COLORS.bg,
-    },
-    header: {
-      background: COLORS.grassGreen,
-      padding: '1.5rem 2rem',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: '1rem',
-    },
-    logoContainer: {
-      width: '48px',
-      height: '48px',
-    },
-    headerText: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.5rem',
-    },
-    headerTitle: {
-      fontFamily: "'Ubuntu Mono', monospace",
-      fontSize: '1.5rem',
-      fontWeight: '700',
-      color: COLORS.white,
-    },
-    headerSub: {
-      fontFamily: "'Sora', sans-serif",
-      fontSize: '1.25rem',
-      fontWeight: '300',
-      color: 'rgba(255,255,255,0.9)',
-    },
-    content: {
-      flex: 1,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: '2rem',
-    },
-    card: {
-      background: COLORS.white,
-      borderRadius: 16,
-      boxShadow: '0 4px 20px rgba(42, 52, 65, 0.1)',
-      width: '100%',
-      maxWidth: 400,
-      padding: '2.5rem',
-    },
-    title: {
-      fontFamily: "'Sora', sans-serif",
-      fontSize: '1.5rem',
-      fontWeight: 600,
-      color: COLORS.text,
-      textAlign: 'center',
-      marginBottom: '1.5rem',
-    },
-    form: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '1rem',
-    },
-    inputGroup: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '0.375rem',
-    },
-    label: {
-      fontSize: '0.8rem',
-      fontWeight: 600,
-      color: COLORS.textLight,
-    },
-    input: {
-      padding: '0.75rem 1rem',
-      fontSize: '1rem',
-      border: `1px solid ${COLORS.border}`,
-      borderRadius: 8,
-      outline: 'none',
-      transition: 'border-color 0.2s ease',
-    },
-    button: {
-      padding: '0.875rem',
-      fontSize: '1rem',
-      fontWeight: 600,
-      color: COLORS.white,
-      background: COLORS.grassGreen,
-      border: 'none',
-      borderRadius: 8,
-      cursor: 'pointer',
-      marginTop: '0.5rem',
-      transition: 'background 0.2s ease',
-    },
-    buttonDisabled: {
-      opacity: 0.6,
-      cursor: 'not-allowed',
-    },
-    error: {
-      background: '#fef2f2',
-      border: '1px solid #fecaca',
-      color: COLORS.red,
-      padding: '0.75rem 1rem',
-      borderRadius: 8,
-      fontSize: '0.875rem',
-      textAlign: 'center',
-      marginBottom: '1rem',
-    },
-    footer: {
-      marginTop: '1.5rem',
-      textAlign: 'center',
-      fontSize: '0.8rem',
-      color: COLORS.textLight,
-    },
-    backLink: {
-      color: COLORS.grassGreen,
-      textDecoration: 'none',
-      fontWeight: 600,
-    },
-  };
-
-  return (
-    <div style={styles.container}>
-      {/* Header matching Landing page */}
-      <div style={styles.header}>
-        <div style={styles.logoContainer}>
-          <HLogoWhite />
+      padding: '1rem',
+    }}>
+      <div style={{
+        width: '100%',
+        maxWidth: 420,
+        borderRadius: 16,
+        overflow: 'hidden',
+        boxShadow: '0 4px 20px rgba(42, 52, 65, 0.15)',
+      }}>
+        {/* Green Header */}
+        <div style={{
+          background: COLORS.grassGreen,
+          padding: '1.25rem 1.5rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.75rem',
+        }}>
+          <div style={{ width: 40, height: 40 }}>
+            <HLogo />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{
+              fontFamily: "'Ubuntu Mono', monospace",
+              fontSize: '1.4rem',
+              fontWeight: 700,
+              color: COLORS.white,
+            }}>XLR8</span>
+            <Rocket size={18} color="white" style={{ opacity: 0.9 }} />
+            <span style={{
+              fontFamily: "'Sora', sans-serif",
+              fontSize: '1.1rem',
+              fontWeight: 300,
+              color: 'rgba(255,255,255,0.9)',
+            }}>Analysis Platform</span>
+          </div>
         </div>
-        <div style={styles.headerText}>
-          <span style={styles.headerTitle}>XLR8</span>
-          <Rocket size={20} color="white" />
-          <span style={styles.headerSub}>Analysis Platform</span>
-        </div>
-      </div>
 
-      {/* Login Form */}
-      <div style={styles.content}>
-        <div style={styles.card}>
-          <h1 style={styles.title}>Sign In</h1>
+        {/* White Form Area */}
+        <div style={{
+          background: COLORS.white,
+          padding: '2rem',
+        }}>
+          {error && (
+            <div style={{
+              background: '#fef2f2',
+              border: '1px solid #fecaca',
+              color: COLORS.red,
+              padding: '0.75rem 1rem',
+              borderRadius: 8,
+              fontSize: '0.875rem',
+              textAlign: 'center',
+              marginBottom: '1.25rem',
+            }}>
+              {error}
+            </div>
+          )}
 
-          {error && <div style={styles.error}>{error}</div>}
-
-          <form style={styles.form} onSubmit={handleLogin}>
-            <div style={styles.inputGroup}>
-              <label style={styles.label}>Email</label>
+          <form onSubmit={handleLogin}>
+            <div style={{ marginBottom: '1.25rem' }}>
+              <label style={{
+                display: 'block',
+                fontSize: '0.85rem',
+                fontWeight: 500,
+                color: COLORS.text,
+                marginBottom: '0.5rem',
+              }}>Email</label>
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@company.com"
                 required
-                style={styles.input}
+                style={{
+                  width: '100%',
+                  padding: '0.75rem 1rem',
+                  fontSize: '1rem',
+                  border: `1px solid ${COLORS.border}`,
+                  borderRadius: 8,
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
               />
             </div>
 
-            <div style={styles.inputGroup}>
-              <label style={styles.label}>Password</label>
+            <div style={{ marginBottom: '1.5rem' }}>
+              <label style={{
+                display: 'block',
+                fontSize: '0.85rem',
+                fontWeight: 500,
+                color: COLORS.text,
+                marginBottom: '0.5rem',
+              }}>Password</label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 required
-                style={styles.input}
+                style={{
+                  width: '100%',
+                  padding: '0.75rem 1rem',
+                  fontSize: '1rem',
+                  border: `1px solid ${COLORS.border}`,
+                  borderRadius: 8,
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
               />
             </div>
 
@@ -266,17 +215,40 @@ export default function LoginPage() {
               type="submit"
               disabled={loading}
               style={{
-                ...styles.button,
-                ...(loading ? styles.buttonDisabled : {}),
+                width: '100%',
+                padding: '0.875rem',
+                fontSize: '1rem',
+                fontWeight: 600,
+                color: COLORS.white,
+                background: COLORS.grassGreen,
+                border: `2px solid ${COLORS.grassGreen}`,
+                borderRadius: 8,
+                cursor: loading ? 'not-allowed' : 'pointer',
+                opacity: loading ? 0.6 : 1,
+                transition: 'all 0.2s ease',
               }}
             >
               {loading ? 'Signing in...' : 'Sign In'}
             </button>
           </form>
 
-          <div style={styles.footer}>
-            <p>Need help? Contact your administrator.</p>
-            <a href="/" style={styles.backLink}>← Back to Home</a>
+          <div style={{
+            marginTop: '1.5rem',
+            textAlign: 'center',
+            fontSize: '0.85rem',
+            color: COLORS.textLight,
+          }}>
+            <p style={{ margin: '0 0 0.5rem 0' }}>Need help? Contact your administrator.</p>
+            <a 
+              href="/" 
+              style={{
+                color: COLORS.grassGreen,
+                textDecoration: 'none',
+                fontWeight: 600,
+              }}
+            >
+              ← Back to Home
+            </a>
           </div>
         </div>
       </div>
