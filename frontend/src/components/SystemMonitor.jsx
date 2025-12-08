@@ -1,6 +1,6 @@
 /**
  * SystemMonitor - Real-time Data Flow & Cost Tracking Visualization
- * Updated: December 2025 - Added real cost tracking from Supabase
+ * Updated: December 2025 - Added real cost tracking, all LLM models, data breakdown
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -24,6 +24,10 @@ const COLORS = {
   pink: '#ec4899',
   indigo: '#4f46e5',
   amber: '#ea580c',
+  llama: '#10b981',    // Emerald for Llama
+  mistral: '#f59e0b',  // Amber for Mistral
+  deepseek: '#6366f1', // Indigo for DeepSeek
+  qwen: '#ec4899',     // Pink for Qwen
 };
 
 function StatusLight({ status, size = 12 }) {
@@ -144,6 +148,76 @@ function CostBreakdownCard({ costs, loading }) {
   );
 }
 
+function DataStorageCard({ chunks, structured, loading }) {
+  if (loading) {
+    return (
+      <div style={{
+        background: COLORS.cardBg,
+        borderRadius: 12,
+        padding: '1rem',
+        border: '1px solid ' + COLORS.border,
+        minWidth: 180,
+      }}>
+        <div style={{ color: COLORS.textMuted, fontSize: '0.85rem' }}>Loading...</div>
+      </div>
+    );
+  }
+
+  const total = (chunks || 0) + (structured || 0);
+  const chunkPercent = total > 0 ? Math.round((chunks / total) * 100) : 50;
+  const structuredPercent = 100 - chunkPercent;
+
+  return (
+    <div style={{
+      background: COLORS.cardBg,
+      borderRadius: 12,
+      padding: '1rem',
+      border: '1px solid ' + COLORS.border,
+      boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+      minWidth: 180,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+        <span style={{ fontSize: '1.1rem' }}>💾</span>
+        <span style={{ color: COLORS.textMuted, fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase' }}>Data Storage</span>
+      </div>
+
+      {/* Visual bar */}
+      <div style={{ 
+        display: 'flex', 
+        height: 8, 
+        borderRadius: 4, 
+        overflow: 'hidden',
+        marginBottom: '0.75rem',
+        background: COLORS.border
+      }}>
+        <div style={{ width: `${chunkPercent}%`, background: COLORS.green, transition: 'width 0.3s' }} />
+        <div style={{ width: `${structuredPercent}%`, background: COLORS.purple, transition: 'width 0.3s' }} />
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: '0.75rem', color: COLORS.textMuted, display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: COLORS.green }} />
+            ChromaDB
+          </span>
+          <span style={{ fontSize: '0.75rem', fontWeight: 600, color: COLORS.green }}>
+            {(chunks || 0).toLocaleString()} chunks
+          </span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: '0.75rem', color: COLORS.textMuted, display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: COLORS.purple }} />
+            DuckDB
+          </span>
+          <span style={{ fontSize: '0.75rem', fontWeight: 600, color: COLORS.purple }}>
+            {(structured || 0).toLocaleString()} rows
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CostActivityPanel({ recentCosts, loading }) {
   if (loading) {
     return <div style={{ color: COLORS.textMuted, fontSize: '0.85rem', padding: '1rem' }}>Loading...</div>;
@@ -209,7 +283,9 @@ function ActivityItem({ time, type, message }) {
     upload: COLORS.blue,
     query: COLORS.purple,
     claude: COLORS.cyan,
-    runpod: COLORS.orange,
+    llama: COLORS.llama,
+    mistral: COLORS.mistral,
+    deepseek: COLORS.deepseek,
     rag: COLORS.orange,
     auth: COLORS.pink,
     error: COLORS.red,
@@ -321,7 +397,15 @@ export default function SystemMonitor() {
     chromadb: 'healthy',
     rag: 'healthy',
     claude: 'healthy',
-    runpod: 'healthy',
+    llama: 'healthy',
+    mistral: 'healthy',
+    deepseek: 'healthy',
+  });
+
+  const [dataStats, setDataStats] = useState({
+    chunks: 0,
+    structured: 0,
+    loading: true,
   });
 
   const [activity, setActivity] = useState([]);
@@ -332,7 +416,9 @@ export default function SystemMonitor() {
     apiToRag: false,
     ragToChroma: false,
     ragToClaude: false,
-    ragToRunpod: false,
+    ragToLlama: false,
+    ragToMistral: false,
+    ragToDeepseek: false,
   });
 
   const requestCountRef = useRef(0);
@@ -400,6 +486,13 @@ export default function SystemMonitor() {
           };
         });
 
+        // Update data stats for the storage card
+        setDataStats({
+          chunks: chromaRes.data?.total_chunks || chromaRes.data?.chunk_count || 0,
+          structured: structuredRes.data?.total_rows || 0,
+          loading: false,
+        });
+
         setComponentStatus({
           frontend: 'healthy',
           api: 'healthy',
@@ -408,7 +501,9 @@ export default function SystemMonitor() {
           chromadb: chromaRes.data?.status === 'operational' ? 'healthy' : 'warning',
           rag: 'healthy',
           claude: 'healthy',
-          runpod: 'healthy',
+          llama: 'healthy',
+          mistral: 'healthy',
+          deepseek: 'healthy',
         });
 
         setDataFlowActive(function(prev) {
@@ -436,8 +531,10 @@ export default function SystemMonitor() {
     const activities = [
       { type: 'query', message: 'DuckDB: SELECT query executed' },
       { type: 'upload', message: 'File ingested to structured store' },
-      { type: 'claude', message: 'Claude: Response generated' },
-      { type: 'runpod', message: 'RunPod: Local LLM inference' },
+      { type: 'claude', message: 'Claude API: Response generated' },
+      { type: 'llama', message: 'Llama 3.1: Local inference complete' },
+      { type: 'mistral', message: 'Mistral: Fast extraction done' },
+      { type: 'deepseek', message: 'DeepSeek: Code analysis complete' },
       { type: 'rag', message: 'RAG: Context retrieved (5 docs)' },
       { type: 'auth', message: 'Supabase: Session validated' },
       { type: 'success', message: 'Analysis completed' },
@@ -458,9 +555,17 @@ export default function SystemMonitor() {
         setDataFlowActive(prev => ({ ...prev, ragToClaude: true }));
         setTimeout(() => setDataFlowActive(prev => ({ ...prev, ragToClaude: false })), 800);
         setMetrics(prev => ({ ...prev, llmCalls: prev.llmCalls + 1 }));
-      } else if (randomActivity.type === 'runpod') {
-        setDataFlowActive(prev => ({ ...prev, ragToRunpod: true }));
-        setTimeout(() => setDataFlowActive(prev => ({ ...prev, ragToRunpod: false })), 700);
+      } else if (randomActivity.type === 'llama') {
+        setDataFlowActive(prev => ({ ...prev, ragToLlama: true }));
+        setTimeout(() => setDataFlowActive(prev => ({ ...prev, ragToLlama: false })), 700);
+        setMetrics(prev => ({ ...prev, llmCalls: prev.llmCalls + 1 }));
+      } else if (randomActivity.type === 'mistral') {
+        setDataFlowActive(prev => ({ ...prev, ragToMistral: true }));
+        setTimeout(() => setDataFlowActive(prev => ({ ...prev, ragToMistral: false })), 600);
+        setMetrics(prev => ({ ...prev, llmCalls: prev.llmCalls + 1 }));
+      } else if (randomActivity.type === 'deepseek') {
+        setDataFlowActive(prev => ({ ...prev, ragToDeepseek: true }));
+        setTimeout(() => setDataFlowActive(prev => ({ ...prev, ragToDeepseek: false })), 650);
         setMetrics(prev => ({ ...prev, llmCalls: prev.llmCalls + 1 }));
       } else if (randomActivity.type === 'rag') {
         setDataFlowActive(prev => ({ ...prev, apiToRag: true, ragToChroma: true }));
@@ -509,11 +614,11 @@ export default function SystemMonitor() {
       {/* Metrics Row */}
       <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
         <CostBreakdownCard costs={costs} loading={costsLoading} />
+        <DataStorageCard chunks={dataStats.chunks} structured={dataStats.structured} loading={dataStats.loading} />
         <MetricCard icon="📡" label="API Calls" value={metrics.apiRequests} subValue="This session" color={COLORS.blue} />
         <MetricCard icon="🦆" label="DB Queries" value={metrics.dbQueries} subValue="DuckDB" color={COLORS.purple} />
         <MetricCard icon="🔍" label="RAG Queries" value={metrics.ragQueries} subValue="Vector search" color={COLORS.orange} />
-        <MetricCard icon="🤖" label="LLM Calls" value={metrics.llmCalls} subValue="This session" color={COLORS.cyan} />
-        <MetricCard icon="📊" label="Data" value={metrics.totalRows.toLocaleString()} subValue={metrics.totalFiles + ' files'} color={COLORS.yellow} />
+        <MetricCard icon="🤖" label="LLM Calls" value={metrics.llmCalls} subValue="All models" color={COLORS.cyan} />
       </div>
 
       {/* Main Grid */}
@@ -532,7 +637,7 @@ export default function SystemMonitor() {
             Tech Stack
           </h2>
 
-          <svg width="100%" height="400" viewBox="0 0 750 400">
+          <svg width="100%" height="480" viewBox="0 0 800 480">
             {/* Frontend to API */}
             <path d="M 100 80 L 200 160" style={getLineStyle(dataFlowActive.frontendToApi, COLORS.blue)} />
             
@@ -549,10 +654,16 @@ export default function SystemMonitor() {
             <path d="M 470 180 L 570 100" style={getLineStyle(dataFlowActive.ragToChroma, COLORS.green)} />
             
             {/* RAG to Claude */}
-            <path d="M 470 200 L 570 200" style={getLineStyle(dataFlowActive.ragToClaude, COLORS.cyan)} />
+            <path d="M 470 190 L 570 190" style={getLineStyle(dataFlowActive.ragToClaude, COLORS.cyan)} />
             
-            {/* RAG to RunPod */}
-            <path d="M 470 210 L 570 280" style={getLineStyle(dataFlowActive.ragToRunpod, COLORS.orange)} />
+            {/* RAG to Llama */}
+            <path d="M 470 205 L 570 260" style={getLineStyle(dataFlowActive.ragToLlama, COLORS.llama)} />
+            
+            {/* RAG to Mistral */}
+            <path d="M 470 215 L 570 330" style={getLineStyle(dataFlowActive.ragToMistral, COLORS.mistral)} />
+            
+            {/* RAG to DeepSeek */}
+            <path d="M 470 225 L 570 400" style={getLineStyle(dataFlowActive.ragToDeepseek, COLORS.deepseek)} />
 
             {/* Nodes - Left Column */}
             <SystemNode x={70} y={80} icon="🖥️" label="FRONTEND" status={componentStatus.frontend} color={COLORS.blue} isActive={dataFlowActive.frontendToApi} />
@@ -569,8 +680,10 @@ export default function SystemMonitor() {
             <SystemNode x={620} y={100} icon="🔍" label="CHROMADB" status={componentStatus.chromadb} color={COLORS.green} isActive={dataFlowActive.ragToChroma} />
             
             {/* Far Right - LLMs */}
-            <SystemNode x={620} y={200} icon="🤖" label="CLAUDE" status={componentStatus.claude} color={COLORS.cyan} isActive={dataFlowActive.ragToClaude} />
-            <SystemNode x={620} y={280} icon="⚡" label="RUNPOD" status={componentStatus.runpod} color={COLORS.orange} isActive={dataFlowActive.ragToRunpod} />
+            <SystemNode x={620} y={190} icon="🤖" label="CLAUDE" status={componentStatus.claude} color={COLORS.cyan} isActive={dataFlowActive.ragToClaude} />
+            <SystemNode x={620} y={260} icon="🦙" label="LLAMA 3.1" status={componentStatus.llama} color={COLORS.llama} isActive={dataFlowActive.ragToLlama} />
+            <SystemNode x={620} y={330} icon="🌬️" label="MISTRAL" status={componentStatus.mistral} color={COLORS.mistral} isActive={dataFlowActive.ragToMistral} />
+            <SystemNode x={620} y={400} icon="🔮" label="DEEPSEEK" status={componentStatus.deepseek} color={COLORS.deepseek} isActive={dataFlowActive.ragToDeepseek} />
 
             {/* Connection Labels */}
             <text x="135" y="110" fontSize="8" fill={COLORS.textMuted}>REST</text>
@@ -579,11 +692,17 @@ export default function SystemMonitor() {
             <text x="315" y="190" fontSize="8" fill={COLORS.textMuted}>Query</text>
             <text x="510" y="130" fontSize="8" fill={COLORS.textMuted}>Vector</text>
             
+            {/* RunPod label for local LLMs */}
+            <text x="720" y="295" fontSize="9" fill={COLORS.orange} fontWeight="600">RunPod</text>
+            <rect x="705" y="250" width="55" height="175" rx={8} fill="none" stroke={COLORS.orange} strokeWidth={1.5} strokeDasharray="4,4" opacity={0.6} />
+            
             {/* Legend */}
-            <g transform="translate(20, 360)">
+            <g transform="translate(20, 440)">
               <circle cx={8} cy={0} r={6} fill="#fef3c7" stroke="#f59e0b" strokeWidth={1} />
               <text x={8} y={4} textAnchor="middle" fontSize="8">🔒</text>
               <text x={20} y={3} fontSize="8" fill={COLORS.textMuted}>= Encryption at rest</text>
+              <text x={140} y={3} fontSize="8" fill={COLORS.cyan}>● Claude = API</text>
+              <text x={240} y={3} fontSize="8" fill={COLORS.orange}>◻ RunPod = Local LLMs</text>
             </g>
           </svg>
         </div>
@@ -598,7 +717,7 @@ export default function SystemMonitor() {
             boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
             display: 'flex',
             flexDirection: 'column',
-            maxHeight: 480,
+            maxHeight: 560,
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
