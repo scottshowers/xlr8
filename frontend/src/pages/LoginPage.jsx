@@ -53,6 +53,11 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
+      // Check if supabase is available
+      if (!supabase) {
+        throw new Error('Authentication service not configured. Please contact administrator.');
+      }
+
       // Attempt password login
       const { data, error: loginError } = await supabase.auth.signInWithPassword({
         email,
@@ -107,6 +112,10 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
+      if (!supabase) {
+        throw new Error('Authentication service not configured');
+      }
+
       const { data: challenge, error: challengeError } = await supabase.auth.mfa.challenge({
         factorId: mfaFactorId,
       });
@@ -130,6 +139,10 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
+      if (!supabase) {
+        throw new Error('Authentication service not configured');
+      }
+
       const { data, error: verifyError } = await supabase.auth.mfa.verify({
         factorId: mfaFactorId,
         challengeId: mfaChallengeId,
@@ -444,7 +457,7 @@ export default function LoginPage() {
       <div style={styles.card}>
         <div style={styles.logo}>
           <div style={styles.logoText}>🚀 XLR8</div>
-          <div style={styles.logoSub}>UKG Implementation Platform</div>
+          <div style={styles.logoSub}>Accelerate Your Implementation</div>
         </div>
 
         <h1 style={styles.title}>Sign In</h1>
