@@ -116,13 +116,13 @@ function CostBreakdownCard({ costs, loading }) {
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
         <span style={{ fontSize: '1.1rem' }}>📊</span>
-        <span style={{ color: COLORS.textMuted, fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase' }}>Cost Breakdown</span>
+        <span style={{ color: COLORS.textMuted, fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase' }}>API Usage (30d)</span>
       </div>
       
-      <div style={{ fontSize: '1.5rem', fontWeight: 700, color: COLORS.grassGreen, marginBottom: '0.75rem' }}>
+      <div style={{ fontSize: '1.5rem', fontWeight: 700, color: COLORS.cyan, marginBottom: '0.75rem' }}>
         ${(costs.total_cost || 0).toFixed(2)}
         <span style={{ fontSize: '0.7rem', color: COLORS.textMuted, fontWeight: 400, marginLeft: '0.5rem' }}>
-          {costs.days || 30} days
+          {costs.record_count || 0} calls
         </span>
       </div>
 
@@ -138,12 +138,116 @@ function CostBreakdownCard({ costs, loading }) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
 
-      {costs.record_count > 0 && (
-        <div style={{ fontSize: '0.65rem', color: COLORS.textMuted, marginTop: '0.5rem', borderTop: '1px solid ' + COLORS.border, paddingTop: '0.5rem' }}>
-          {costs.record_count} API calls tracked
+function MonthCostCard({ monthCosts, loading }) {
+  if (loading) {
+    return (
+      <div style={{
+        background: COLORS.cardBg,
+        borderRadius: 12,
+        padding: '1rem',
+        border: '1px solid ' + COLORS.border,
+        minWidth: 240,
+      }}>
+        <div style={{ color: COLORS.textMuted, fontSize: '0.85rem' }}>Loading...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      background: COLORS.cardBg,
+      borderRadius: 12,
+      padding: '1rem',
+      border: '1px solid ' + COLORS.border,
+      boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+      minWidth: 240,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+        <span style={{ fontSize: '1.1rem' }}>💰</span>
+        <span style={{ color: COLORS.textMuted, fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase' }}>
+          {monthCosts.month_name || 'This Month'}
+        </span>
+      </div>
+      
+      <div style={{ fontSize: '1.75rem', fontWeight: 700, color: COLORS.grassGreen, marginBottom: '0.5rem' }}>
+        ${(monthCosts.total || 0).toFixed(2)}
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.75rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span style={{ color: COLORS.textMuted }}>📋 Fixed (subscriptions)</span>
+          <span style={{ fontWeight: 600, color: COLORS.pink }}>${(monthCosts.fixed_costs || 0).toFixed(2)}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span style={{ color: COLORS.textMuted }}>⚡ API Usage</span>
+          <span style={{ fontWeight: 600, color: COLORS.cyan }}>${(monthCosts.api_usage || 0).toFixed(4)}</span>
+        </div>
+      </div>
+
+      {monthCosts.fixed_items && monthCosts.fixed_items.length > 0 && (
+        <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid ' + COLORS.border }}>
+          {monthCosts.fixed_items.slice(0, 3).map((item, idx) => (
+            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.65rem', color: COLORS.textMuted }}>
+              <span>{item.name} {item.quantity > 1 ? `(${item.quantity})` : ''}</span>
+              <span>${(item.cost_per_unit * item.quantity).toFixed(2)}</span>
+            </div>
+          ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function DailyCostCard({ dailyCosts, loading }) {
+  if (loading || !dailyCosts || dailyCosts.length === 0) {
+    return null; // Don't show if no data
+  }
+
+  const maxCost = Math.max(...dailyCosts.map(d => d.total || 0), 0.01);
+
+  return (
+    <div style={{
+      background: COLORS.cardBg,
+      borderRadius: 12,
+      padding: '1rem',
+      border: '1px solid ' + COLORS.border,
+      boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+      minWidth: 280,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+        <span style={{ fontSize: '1.1rem' }}>📈</span>
+        <span style={{ color: COLORS.textMuted, fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase' }}>Daily API Spend</span>
+      </div>
+
+      <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'flex-end', height: 50 }}>
+        {dailyCosts.slice(0, 7).reverse().map((day, idx) => {
+          const height = Math.max((day.total / maxCost) * 100, 5);
+          const dayName = new Date(day.date).toLocaleDateString('en-US', { weekday: 'short' });
+          return (
+            <div key={idx} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              <div 
+                style={{ 
+                  width: '100%', 
+                  height: `${height}%`,
+                  background: COLORS.cyan,
+                  borderRadius: 2,
+                  minHeight: 4,
+                }} 
+                title={`$${day.total.toFixed(4)}`}
+              />
+              <span style={{ fontSize: '0.55rem', color: COLORS.textMuted, marginTop: 2 }}>{dayName}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ marginTop: '0.5rem', fontSize: '0.65rem', color: COLORS.textMuted, textAlign: 'center' }}>
+        Today: ${(dailyCosts[0]?.total || 0).toFixed(4)}
+      </div>
     </div>
   );
 }
@@ -385,6 +489,16 @@ export default function SystemMonitor() {
     record_count: 0,
     days: 30,
   });
+  const [monthCosts, setMonthCosts] = useState({
+    api_usage: 0,
+    fixed_costs: 0,
+    total: 0,
+    month_name: '',
+    fixed_items: [],
+    by_service: {},
+    call_count: 0,
+  });
+  const [dailyCosts, setDailyCosts] = useState([]);
   const [recentCosts, setRecentCosts] = useState([]);
   const [costsLoading, setCostsLoading] = useState(true);
   const [showCostDetails, setShowCostDetails] = useState(false);
@@ -429,13 +543,17 @@ export default function SystemMonitor() {
     const fetchCosts = async function() {
       try {
         setCostsLoading(true);
-        const [summaryRes, recentRes] = await Promise.all([
+        const [summaryRes, recentRes, monthRes, dailyRes] = await Promise.all([
           api.get('/status/costs?days=30').catch(() => ({ data: {} })),
           api.get('/status/costs/recent?limit=20').catch(() => ({ data: { records: [] } })),
+          api.get('/status/costs/month').catch(() => ({ data: {} })),
+          api.get('/status/costs/daily?days=7').catch(() => ({ data: [] })),
         ]);
         
         setCosts(summaryRes.data || {});
         setRecentCosts(recentRes.data?.records || []);
+        setMonthCosts(monthRes.data || {});
+        setDailyCosts(Array.isArray(dailyRes.data) ? dailyRes.data : []);
       } catch (err) {
         console.error('Cost fetch error:', err);
       } finally {
@@ -613,12 +731,11 @@ export default function SystemMonitor() {
 
       {/* Metrics Row */}
       <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+        <MonthCostCard monthCosts={monthCosts} loading={costsLoading} />
         <CostBreakdownCard costs={costs} loading={costsLoading} />
+        <DailyCostCard dailyCosts={dailyCosts} loading={costsLoading} />
         <DataStorageCard chunks={dataStats.chunks} structured={dataStats.structured} loading={dataStats.loading} />
-        <MetricCard icon="📡" label="API Calls" value={metrics.apiRequests} subValue="This session" color={COLORS.blue} />
-        <MetricCard icon="🦆" label="DB Queries" value={metrics.dbQueries} subValue="DuckDB" color={COLORS.purple} />
-        <MetricCard icon="🔍" label="RAG Queries" value={metrics.ragQueries} subValue="Vector search" color={COLORS.orange} />
-        <MetricCard icon="🤖" label="LLM Calls" value={metrics.llmCalls} subValue="All models" color={COLORS.cyan} />
+        <MetricCard icon="🤖" label="LLM Calls" value={metrics.llmCalls} subValue="This session" color={COLORS.cyan} />
       </div>
 
       {/* Main Grid */}
