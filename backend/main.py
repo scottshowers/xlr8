@@ -61,16 +61,11 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="XLR8", version="2.0")
 
-# CORS Configuration
+# CORS Configuration - Allow all origins for now
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://xlr8-six.vercel.app",
-        "https://xlr8-git-main-scott-showers-projects.vercel.app",
-        "http://localhost:5173",
-        "http://localhost:3000",
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,  # Must be False when using wildcard
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],
