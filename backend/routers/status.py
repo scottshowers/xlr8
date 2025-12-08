@@ -1081,3 +1081,50 @@ async def purge_chromadb_all(confirm: str = None):
     except Exception as e:
         logger.exception(f"ChromaDB full purge failed: {e}")
         raise HTTPException(500, str(e))
+
+
+# ==================== COST TRACKING ====================
+
+@router.get("/status/costs")
+async def get_cost_summary(days: int = 30, project_id: Optional[str] = None):
+    """Get cost summary for System Monitor dashboard"""
+    try:
+        from backend.utils.cost_tracker import get_cost_summary
+        return get_cost_summary(days=days, project_id=project_id)
+    except ImportError:
+        return {"error": "Cost tracker not available", "total_cost": 0}
+    except Exception as e:
+        logger.error(f"Cost summary failed: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.get("/status/costs/by-project")
+async def get_costs_by_project():
+    """Get costs grouped by project"""
+    try:
+        from backend.utils.cost_tracker import get_cost_by_project
+        return get_cost_by_project()
+    except ImportError:
+        return []
+    except Exception as e:
+        logger.error(f"Cost by project failed: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.get("/status/costs/recent")
+async def get_recent_costs(limit: int = 100):
+    """Get recent cost entries for detailed view"""
+    try:
+        from utils.database.supabase_client import get_supabase
+        client = get_supabase()
+        if not client:
+            return {"error": "Supabase not available", "records": []}
+        
+        result = client.table("cost_tracking").select("*").order(
+            "created_at", desc=True
+        ).limit(limit).execute()
+        
+        return {"records": result.data or [], "count": len(result.data or [])}
+    except Exception as e:
+        logger.error(f"Recent costs query failed: {e}")
+        raise HTTPException(500, str(e))
