@@ -12,7 +12,11 @@ import {
   BarChart3,
   Users,
   ArrowRight,
-  Rocket
+  Rocket,
+  Eye,
+  DollarSign,
+  Smartphone,
+  Activity
 } from 'lucide-react'
 
 // Brand Colors
@@ -181,20 +185,36 @@ export default function Landing() {
                 textDecoration: 'none'
               }}
             >
-              Get Started
+              Dashboard
               <ArrowRight style={{ width: 16, height: 16 }} />
+            </Link>
+            <Link 
+              to="/login" 
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.625rem 1.25rem',
+                background: 'transparent',
+                color: 'white',
+                border: '2px solid white',
+                borderRadius: '8px',
+                fontSize: '0.9rem',
+                fontWeight: '600',
+                textDecoration: 'none'
+              }}
+            >
+              <Lock style={{ width: 14, height: 14 }} />
+              Sign In
             </Link>
           </div>
         </div>
       </div>
 
       {/* Main Content */}
-      <div style={{ 
-        maxWidth: '1000px', 
-        margin: '0 auto',
-        padding: '2rem'
-      }}>
-        {/* Security Section */}
+      <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '2rem' }}>
+        
+        {/* Security First Section */}
         <section style={{ marginBottom: '2.5rem' }}>
           <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
             <h2 style={{
@@ -203,33 +223,36 @@ export default function Landing() {
               fontWeight: '700',
               color: COLORS.text
             }}>
+              <Shield style={{ width: 22, height: 22, display: 'inline', verticalAlign: 'middle', marginRight: '0.5rem', color: COLORS.grassGreen }} />
               Enterprise-Grade Security
             </h2>
           </div>
 
           <div style={{ 
             display: 'grid', 
-            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
             gap: '1rem'
           }}>
             {[
-              { icon: <Lock style={{ width: 20, height: 20 }} />, title: 'PII Protection', desc: 'SSN/DOB encrypted at rest, never sent to external AI.' },
-              { icon: <Shield style={{ width: 20, height: 20 }} />, title: 'Dual-LLM Architecture', desc: 'Employee data stays on private infrastructure.' },
-              { icon: <Database style={{ width: 20, height: 20 }} />, title: 'Isolated Workspaces', desc: 'Customer data segregation by project.' }
+              { icon: <Users style={{ width: 18, height: 18 }} />, title: 'Role-Based Access', desc: 'Admin, Consultant, Customer roles with granular permissions' },
+              { icon: <Smartphone style={{ width: 18, height: 18 }} />, title: 'Dual MFA Options', desc: 'Authenticator app (TOTP) or SMS verification' },
+              { icon: <Eye style={{ width: 18, height: 18 }} />, title: 'PII Protection', desc: 'Automatic detection and sanitization before AI processing' },
+              { icon: <Lock style={{ width: 18, height: 18 }} />, title: 'Data Isolation', desc: 'Project-scoped access with encrypted storage' }
             ].map((item, idx) => (
               <div key={idx} style={{
                 background: 'white',
                 borderRadius: '10px',
-                padding: '1.25rem',
+                padding: '1rem',
                 boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
                 display: 'flex',
+                alignItems: 'flex-start',
                 gap: '0.75rem'
               }}>
                 <div style={{
                   flexShrink: 0,
-                  width: '40px',
-                  height: '40px',
-                  background: COLORS.iceFlow,
+                  width: '36px',
+                  height: '36px',
+                  background: '#f0fdf4',
                   borderRadius: '8px',
                   display: 'flex',
                   alignItems: 'center',
@@ -239,10 +262,10 @@ export default function Landing() {
                   {item.icon}
                 </div>
                 <div>
-                  <h3 style={{ fontFamily: "'Sora', sans-serif", fontSize: '0.95rem', fontWeight: '600', color: COLORS.text, marginBottom: '0.25rem' }}>
+                  <h3 style={{ fontFamily: "'Sora', sans-serif", fontSize: '0.9rem', fontWeight: '600', color: COLORS.text, marginBottom: '0.2rem' }}>
                     {item.title}
                   </h3>
-                  <p style={{ fontSize: '0.85rem', color: COLORS.textLight, lineHeight: 1.5, margin: 0 }}>
+                  <p style={{ fontSize: '0.8rem', color: COLORS.textLight, lineHeight: 1.4, margin: 0 }}>
                     {item.desc}
                   </p>
                 </div>
@@ -270,9 +293,9 @@ export default function Landing() {
             gap: '1rem'
           }}>
             {[
-              { icon: <Cpu style={{ width: 20, height: 20 }} />, title: 'Dual-LLM Architecture', desc: 'Claude for config, local LLM for employee data.' },
-              { icon: <FileSearch style={{ width: 20, height: 20 }} />, title: 'Universal Processing', desc: 'OCR, table extraction, intelligent chunking.' },
-              { icon: <Zap style={{ width: 20, height: 20 }} />, title: 'Self-Healing Systems', desc: 'AI-driven detection. No brittle regex.' }
+              { icon: <Cpu style={{ width: 20, height: 20 }} />, title: 'Hybrid LLM Architecture', desc: 'Cloud AI for complex analysis, local models for sensitive data.' },
+              { icon: <Zap style={{ width: 20, height: 20 }} />, title: 'Parallel Processing', desc: '4-worker PDF extraction. 6 min → 90 seconds.' },
+              { icon: <Activity style={{ width: 20, height: 20 }} />, title: 'Operations Center', desc: 'Real-time topology, threat monitoring, cost tracking.' }
             ].map((item, idx) => (
               <div key={idx} style={{
                 background: 'white',
@@ -327,12 +350,12 @@ export default function Landing() {
             gap: '1rem'
           }}>
             {[
-              { icon: <MessageSquare style={{ width: 18, height: 18 }} />, title: 'Intelligent Workspace', desc: 'Chat across all data' },
-              { icon: <FileText style={{ width: 18, height: 18 }} />, title: 'Multi-File Upload', desc: 'Batch processing' },
-              { icon: <Database style={{ width: 18, height: 18 }} />, title: 'Vacuum Extractor', desc: 'Tables from PDFs' },
-              { icon: <BookOpen style={{ width: 18, height: 18 }} />, title: 'Playbooks', desc: 'Analysis templates' },
-              { icon: <BarChart3 style={{ width: 18, height: 18 }} />, title: 'Processing Dashboard', desc: 'Real-time status' },
-              { icon: <Users style={{ width: 18, height: 18 }} />, title: 'Customer Workspaces', desc: 'Isolated workspaces' }
+              { icon: <MessageSquare style={{ width: 18, height: 18 }} />, title: 'Intelligent Chat', desc: 'Query across all data' },
+              { icon: <FileText style={{ width: 18, height: 18 }} />, title: 'Smart Upload', desc: 'Auto-route by file type' },
+              { icon: <Database style={{ width: 18, height: 18 }} />, title: 'Vacuum Extractor', desc: 'Tables from any PDF' },
+              { icon: <BookOpen style={{ width: 18, height: 18 }} />, title: 'Guided Playbooks', desc: 'Compliance workflows' },
+              { icon: <BarChart3 style={{ width: 18, height: 18 }} />, title: 'Ops Center', desc: 'Live system topology' },
+              { icon: <DollarSign style={{ width: 18, height: 18 }} />, title: 'Cost Tracking', desc: 'Usage & subscriptions' }
             ].map((feature, idx) => (
               <div key={idx} style={{
                 background: 'white',
