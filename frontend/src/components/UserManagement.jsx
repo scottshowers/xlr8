@@ -205,7 +205,7 @@ export default function UserManagement() {
       }
 
       try {
-        const response = await api.get('/api/auth/users');
+        const response = await api.get('/auth/users');
         setUsers(response.data || []);
       } catch (err) {
         console.error('Failed to fetch users:', err);
@@ -258,7 +258,7 @@ export default function UserManagement() {
     try {
       if (editingUser) {
         // Update existing user via backend API
-        const response = await api.patch(`/api/auth/users/${editingUser.id}`, {
+        const response = await api.patch(`/auth/users/${editingUser.id}`, {
           full_name: formData.full_name,
           phone: formData.phone || null,
           role: formData.role,
@@ -282,7 +282,7 @@ export default function UserManagement() {
           return;
         }
 
-        const response = await api.post('/api/auth/users', {
+        const response = await api.post('/auth/users', {
           email: formData.email,
           password: formData.password,
           full_name: formData.full_name,
@@ -329,7 +329,7 @@ export default function UserManagement() {
     }
 
     try {
-      await api.delete(`/api/auth/users/${userId}`);
+      await api.delete(`/auth/users/${userId}`);
       setUsers(prev => prev.filter(u => u.id !== userId));
     } catch (err) {
       console.error('Delete error:', err);
