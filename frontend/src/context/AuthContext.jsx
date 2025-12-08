@@ -1,12 +1,7 @@
 /**
  * AuthContext - Authentication & Authorization State
  * 
- * Provides:
- * - user: Current authenticated user
- * - permissions: User's permission list
- * - hasPermission(perm): Check if user has permission
- * - isAdmin/isConsultant/isCustomer: Role helpers
- * - login/logout: Auth actions
+ * Reads user profile directly from Supabase profiles table
  */
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
@@ -16,23 +11,36 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
-// Debug: Log if env vars are present (not the actual values)
 console.log('[Auth] Supabase URL configured:', !!supabaseUrl);
 console.log('[Auth] Supabase Key configured:', !!supabaseKey);
 
 const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
 if (!supabase) {
-  console.warn('[Auth] Supabase client not initialized - missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY');
+  console.warn('[Auth] Supabase client not initialized');
 }
-
-// API base URL
-const API_URL = import.meta.env.VITE_API_URL || '';
 
 // Context
 const AuthContext = createContext(null);
 
-// Default permissions by role (fallback when API unavailable)
+// Permission constants
+export const Permissions = {
+  CHAT: 'chat',
+  UPLOAD: 'upload',
+  PLAYBOOKS: 'playbooks',
+  VACUUM: 'vacuum',
+  EXPORT: 'export',
+  DATA_MODEL: 'data_model',
+  PROJECTS_ALL: 'projects_all',
+  PROJECTS_OWN: 'projects_own',
+  DELETE_DATA: 'delete_data',
+  OPS_CENTER: 'ops_center',
+  SECURITY_SETTINGS: 'security_settings',
+  USER_MANAGEMENT: 'user_management',
+  ROLE_PERMISSIONS: 'role_permissions',
+};
+
+// Default permissions by role
 const DEFAULT_PERMISSIONS = {
   admin: [
     'chat', 'upload', 'playbooks', 'vacuum', 'export', 'data_model',
@@ -52,47 +60,53 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);
 
-  // Fetch user profile and permissions from backend
-  const fetchUserData = useCallback(async (accessToken) => {
+  // Fetch user profile directly from Supabase
+  const fetchUserProfile = useCallback(async (supabaseUser) => {
+    if (!supabase || !supabaseUser) return;
+    
     try {
-      const response = await fetch(`${API_URL}/api/auth/me`, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-        },
-      });
+      console.log('[Auth] Fetching profile for:', supabaseUser.email);
+      
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', supabaseUser.id)
+        .single();
 
-      if (response.ok) {
-        const userData = await response.json();
-        setUser(userData);
-        
-        // Fetch permissions
-        const permResponse = await fetch(`${API_URL}/api/auth/permissions`, {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-          },
-        });
-        
-        if (permResponse.ok) {
-          const permData = await permResponse.json();
-          setPermissions(permData.permissions || []);
-        } else {
-          // Fallback to default permissions
-          setPermissions(DEFAULT_PERMISSIONS[userData.role] || []);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to fetch user data:', error);
-      // In dev mode, set admin user
-      if (!supabase) {
+      if (error) {
+        console.error('[Auth] Profile fetch error:', error);
+        // Fallback to basic user info
         setUser({
-          id: 'dev-user',
-          email: 'dev@xlr8.com',
-          full_name: 'Dev User',
-          role: 'admin',
+          id: supabaseUser.id,
+          email: supabaseUser.email,
+          full_name: supabaseUser.email,
+          role: 'customer',
           project_id: null,
         });
-        setPermissions(DEFAULT_PERMISSIONS.admin);
+        setPermissions(DEFAULT_PERMISSIONS.customer);
+        return;
       }
+
+      console.log('[Auth] Profile loaded:', profile);
+
+      // Set user from profile
+      setUser({
+        id: profile.id,
+        email: profile.email,
+        full_name: profile.full_name || profile.email,
+        role: profile.role || 'customer',
+        project_id: profile.project_id,
+        mfa_enabled: profile.mfa_enabled,
+        mfa_method: profile.mfa_method,
+      });
+
+      // Set permissions based on role
+      const role = profile.role || 'customer';
+      setPermissions(DEFAULT_PERMISSIONS[role] || DEFAULT_PERMISSIONS.customer);
+      
+      console.log('[Auth] User role:', role, 'Permissions:', DEFAULT_PERMISSIONS[role]);
+    } catch (error) {
+      console.error('[Auth] Failed to fetch user data:', error);
     }
   }, []);
 
@@ -101,6 +115,7 @@ export function AuthProvider({ children }) {
     const initAuth = async () => {
       if (!supabase) {
         // Dev mode - auto-login as admin
+        console.log('[Auth] Dev mode - using mock admin');
         setUser({
           id: 'dev-user',
           email: 'dev@xlr8.com',
@@ -115,10 +130,11 @@ export function AuthProvider({ children }) {
 
       // Get initial session
       const { data: { session: initialSession } } = await supabase.auth.getSession();
+      console.log('[Auth] Initial session:', !!initialSession);
       setSession(initialSession);
       
-      if (initialSession?.access_token) {
-        await fetchUserData(initialSession.access_token);
+      if (initialSession?.user) {
+        await fetchUserProfile(initialSession.user);
       }
       
       setLoading(false);
@@ -126,11 +142,12 @@ export function AuthProvider({ children }) {
       // Listen for auth changes
       const { data: { subscription } } = supabase.auth.onAuthStateChange(
         async (event, newSession) => {
+          console.log('[Auth] Auth state changed:', event);
           setSession(newSession);
           
-          if (newSession?.access_token) {
-            await fetchUserData(newSession.access_token);
-          } else {
+          if (event === 'SIGNED_IN' && newSession?.user) {
+            await fetchUserProfile(newSession.user);
+          } else if (event === 'SIGNED_OUT') {
             setUser(null);
             setPermissions([]);
           }
@@ -141,12 +158,12 @@ export function AuthProvider({ children }) {
     };
 
     initAuth();
-  }, [fetchUserData]);
+  }, [fetchUserProfile]);
 
-  // Login with email/password
+  // Login
   const login = async (email, password) => {
     if (!supabase) {
-      throw new Error('Supabase not configured');
+      throw new Error('Authentication not configured');
     }
 
     const { data, error } = await supabase.auth.signInWithPassword({
@@ -160,61 +177,56 @@ export function AuthProvider({ children }) {
 
   // Logout
   const logout = async () => {
-    if (supabase) {
-      await supabase.auth.signOut();
-    }
+    if (!supabase) return;
+    
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+    
     setUser(null);
-    setSession(null);
     setPermissions([]);
+    setSession(null);
   };
 
-  // Check if user has a specific permission
-  const hasPermission = useCallback((permission) => {
+  // Permission helpers
+  const hasPermission = (permission) => {
     return permissions.includes(permission);
-  }, [permissions]);
+  };
 
-  // Check if user can access a route/feature
-  const canAccess = useCallback((requiredPermission) => {
-    if (!user) return false;
-    if (user.role === 'admin') return true; // Admin bypasses all checks
-    return hasPermission(requiredPermission);
-  }, [user, hasPermission]);
+  const canAccess = (permission) => {
+    // Admins can access everything
+    if (user?.role === 'admin') return true;
+    return hasPermission(permission);
+  };
 
   // Role helpers
   const isAdmin = user?.role === 'admin';
   const isConsultant = user?.role === 'consultant';
   const isCustomer = user?.role === 'customer';
+  const isAuthenticated = !!user;
 
-  // Get auth header for API calls
-  const getAuthHeader = useCallback(() => {
+  // Auth header for API calls
+  const getAuthHeader = () => {
     if (session?.access_token) {
       return { Authorization: `Bearer ${session.access_token}` };
     }
     return {};
-  }, [session]);
+  };
 
   const value = {
-    // State
     user,
     permissions,
     loading,
     session,
-    
-    // Role helpers
+    supabase,
     isAdmin,
     isConsultant,
     isCustomer,
-    isAuthenticated: !!user,
-    
-    // Methods
+    isAuthenticated,
     login,
     logout,
     hasPermission,
     canAccess,
     getAuthHeader,
-    
-    // Supabase client (for advanced usage)
-    supabase,
   };
 
   return (
@@ -224,7 +236,6 @@ export function AuthProvider({ children }) {
   );
 }
 
-// Hook for consuming auth context
 export function useAuth() {
   const context = useContext(AuthContext);
   if (!context) {
@@ -232,27 +243,5 @@ export function useAuth() {
   }
   return context;
 }
-
-// Permission constants (match backend)
-export const Permissions = {
-  // Features
-  CHAT: 'chat',
-  UPLOAD: 'upload',
-  PLAYBOOKS: 'playbooks',
-  VACUUM: 'vacuum',
-  EXPORT: 'export',
-  DATA_MODEL: 'data_model',
-  
-  // Data access
-  PROJECTS_ALL: 'projects_all',
-  PROJECTS_OWN: 'projects_own',
-  DELETE_DATA: 'delete_data',
-  
-  // Admin
-  OPS_CENTER: 'ops_center',
-  SECURITY_SETTINGS: 'security_settings',
-  USER_MANAGEMENT: 'user_management',
-  ROLE_PERMISSIONS: 'role_permissions',
-};
 
 export default AuthContext;
