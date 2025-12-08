@@ -179,7 +179,7 @@ const styles = {
 };
 
 export default function UserManagement() {
-  const { user: currentUser, isAdmin } = useAuth();
+  const { user: currentUser, supabase, isAdmin } = useAuth();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -199,13 +199,25 @@ export default function UserManagement() {
   // Fetch users from backend API
   useEffect(() => {
     const fetchUsers = async () => {
-      if (!isAdmin) {
+      if (!isAdmin || !supabase) {
         setLoading(false);
         return;
       }
 
       try {
-        const response = await api.get('/auth/users');
+        // Get current session for auth token
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) {
+          setError('Authentication required');
+          setLoading(false);
+          return;
+        }
+
+        const response = await api.get('/auth/users', {
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`
+          }
+        });
         setUsers(response.data || []);
       } catch (err) {
         console.error('Failed to fetch users:', err);
@@ -216,7 +228,7 @@ export default function UserManagement() {
     };
 
     fetchUsers();
-  }, [isAdmin]);
+  }, [isAdmin, supabase]);
 
   // Open modal for new user
   const handleAddUser = () => {
@@ -252,10 +264,21 @@ export default function UserManagement() {
 
   // Save user (create or update)
   const handleSave = async () => {
+    if (!supabase) return;
+    
     setSaving(true);
     setError(null);
 
     try {
+      // Get auth token
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        setError('Authentication required');
+        setSaving(false);
+        return;
+      }
+      const authHeaders = { 'Authorization': `Bearer ${session.access_token}` };
+
       if (editingUser) {
         // Update existing user via backend API
         const response = await api.patch(`/auth/users/${editingUser.id}`, {
@@ -264,7 +287,7 @@ export default function UserManagement() {
           role: formData.role,
           project_id: formData.project_id || null,
           mfa_method: formData.mfa_method,
-        });
+        }, { headers: authHeaders });
 
         if (response.data?.status === 'updated') {
           // Update local state
@@ -290,7 +313,7 @@ export default function UserManagement() {
           role: formData.role,
           project_id: formData.project_id || null,
           mfa_method: formData.mfa_method,
-        });
+        }, { headers: authHeaders });
 
         if (response.data?.status === 'created') {
           // Add new user to local state
@@ -319,6 +342,8 @@ export default function UserManagement() {
 
   // Delete user
   const handleDelete = async (userId) => {
+    if (!supabase) return;
+    
     if (userId === currentUser?.id) {
       setError("You can't delete yourself");
       return;
@@ -329,7 +354,16 @@ export default function UserManagement() {
     }
 
     try {
-      await api.delete(`/auth/users/${userId}`);
+      // Get auth token
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        setError('Authentication required');
+        return;
+      }
+
+      await api.delete(`/auth/users/${userId}`, {
+        headers: { 'Authorization': `Bearer ${session.access_token}` }
+      });
       setUsers(prev => prev.filter(u => u.id !== userId));
     } catch (err) {
       console.error('Delete error:', err);
