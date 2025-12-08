@@ -47,7 +47,7 @@ DEFAULT_CONFIG = {
     "cors_origins": [
         "http://localhost:3000",
         "http://localhost:5173",
-        "https://xlr8.vercel.app",
+        "https://xlr8-six.vercel.app",
     ],
     
     # Audit settings
@@ -91,7 +91,7 @@ class SecurityConfig:
         return cls._instance
     
     def __init__(self, config_path: str = "/data/security_config.json"):
-        if self._initialized:
+        if getattr(self, '_initialized', False):
             return
             
         self.config_path = Path(config_path)
@@ -176,102 +176,9 @@ def get_security_config() -> SecurityConfig:
     return _security_config
 
 
-# =============================================================================
-# API ENDPOINTS FOR SECURITY CONFIG
-# =============================================================================
-
-def create_config_router():
-    """Create FastAPI router for security config endpoints."""
-    from fastapi import APIRouter, HTTPException
-    from pydantic import BaseModel
-    from typing import Dict, Any, List
-    
-    router = APIRouter(prefix="/api/security/config", tags=["security-config"])
-    
-    class ConfigUpdate(BaseModel):
-        updates: Dict[str, Any]
-    
-    class ToggleRequest(BaseModel):
-        enabled: bool
-    
-    @router.get("")
-    async def get_config():
-        """Get current security configuration."""
-        config = get_security_config()
-        return config.get_all()
-    
-    @router.patch("")
-    async def update_config(update: ConfigUpdate):
-        """Update security configuration."""
-        config = get_security_config()
-        config.update(update.updates, updated_by="admin")
-        return {"status": "updated", "config": config.get_all()}
-    
-    @router.post("/reset")
-    async def reset_config():
-        """Reset to default configuration."""
-        config = get_security_config()
-        config.reset_to_defaults(updated_by="admin")
-        return {"status": "reset", "config": config.get_all()}
-    
-    # Convenience toggle endpoints
-    @router.post("/toggle/rate-limiting")
-    async def toggle_rate_limiting(req: ToggleRequest):
-        """Toggle rate limiting on/off."""
-        config = get_security_config()
-        config.set("rate_limiting_enabled", req.enabled, updated_by="admin")
-        return {"rate_limiting_enabled": req.enabled}
-    
-    @router.post("/toggle/input-validation")
-    async def toggle_input_validation(req: ToggleRequest):
-        """Toggle input validation on/off."""
-        config = get_security_config()
-        config.set("input_validation_enabled", req.enabled, updated_by="admin")
-        return {"input_validation_enabled": req.enabled}
-    
-    @router.post("/toggle/audit-logging")
-    async def toggle_audit_logging(req: ToggleRequest):
-        """Toggle audit logging on/off."""
-        config = get_security_config()
-        config.set("audit_logging_enabled", req.enabled, updated_by="admin")
-        return {"audit_logging_enabled": req.enabled}
-    
-    @router.post("/toggle/prompt-sanitization")
-    async def toggle_prompt_sanitization(req: ToggleRequest):
-        """Toggle prompt sanitization on/off."""
-        config = get_security_config()
-        config.set("prompt_sanitization_enabled", req.enabled, updated_by="admin")
-        return {"prompt_sanitization_enabled": req.enabled}
-    
-    @router.post("/toggle/pii-scan-llm")
-    async def toggle_pii_scan_llm(req: ToggleRequest):
-        """Toggle PII scanning before LLM calls."""
-        config = get_security_config()
-        config.set("pii_scan_before_llm", req.enabled, updated_by="admin")
-        return {"pii_scan_before_llm": req.enabled}
-    
-    @router.put("/rate-limits/{resource}")
-    async def update_rate_limit(resource: str, max_requests: int, period_seconds: int):
-        """Update rate limit for a specific resource."""
-        config = get_security_config()
-        limits = config.get("rate_limits", {})
-        
-        if resource not in limits:
-            raise HTTPException(404, f"Unknown resource: {resource}")
-        
-        limits[resource] = {
-            "max_requests": max_requests,
-            "period_seconds": period_seconds
-        }
-        config.set("rate_limits", limits, updated_by="admin")
-        
-        return {"resource": resource, "limit": limits[resource]}
-    
-    @router.put("/cors-origins")
-    async def update_cors_origins(origins: List[str]):
-        """Update CORS allowed origins."""
-        config = get_security_config()
-        config.set("cors_origins", origins, updated_by="admin")
-        return {"cors_origins": origins}
-    
-    return router
+def reset_security_config() -> SecurityConfig:
+    """Force reset of the security config (useful after file changes)."""
+    global _security_config
+    SecurityConfig._instance = None
+    _security_config = SecurityConfig()
+    return _security_config
