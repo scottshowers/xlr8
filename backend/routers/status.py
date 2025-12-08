@@ -1128,3 +1128,55 @@ async def get_recent_costs(limit: int = 100):
     except Exception as e:
         logger.error(f"Recent costs query failed: {e}")
         raise HTTPException(500, str(e))
+
+
+@router.get("/status/costs/daily")
+async def get_daily_costs(days: int = 7):
+    """Get daily cost breakdown"""
+    try:
+        from backend.utils.cost_tracker import get_daily_costs
+        return get_daily_costs(days=days)
+    except ImportError:
+        return []
+    except Exception as e:
+        logger.error(f"Daily costs failed: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.get("/status/costs/month")
+async def get_month_costs(year: int = None, month: int = None):
+    """Get costs for a specific calendar month (includes fixed costs)"""
+    try:
+        from backend.utils.cost_tracker import get_month_costs
+        return get_month_costs(year=year, month=month)
+    except ImportError:
+        return {"error": "Cost tracker not available"}
+    except Exception as e:
+        logger.error(f"Month costs failed: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.get("/status/costs/fixed")
+async def get_fixed_costs():
+    """Get fixed/subscription costs"""
+    try:
+        from backend.utils.cost_tracker import get_fixed_costs
+        return get_fixed_costs()
+    except ImportError:
+        return {"error": "Cost tracker not available", "items": [], "total": 0}
+    except Exception as e:
+        logger.error(f"Fixed costs failed: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.put("/status/costs/fixed/{name}")
+async def update_fixed_cost(name: str, cost_per_unit: float = None, quantity: int = None):
+    """Update a fixed cost entry"""
+    try:
+        from backend.utils.cost_tracker import update_fixed_cost
+        return update_fixed_cost(name=name, cost_per_unit=cost_per_unit, quantity=quantity)
+    except ImportError:
+        return {"error": "Cost tracker not available"}
+    except Exception as e:
+        logger.error(f"Update fixed cost failed: {e}")
+        raise HTTPException(500, str(e))
