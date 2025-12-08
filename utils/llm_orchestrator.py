@@ -280,7 +280,7 @@ class LLMOrchestrator:
             logger.error(f"Ollama error: {e}")
             return str(e), False
     
-    def _call_claude(self, prompt: str, system_prompt: str) -> Tuple[str, bool]:
+    def _call_claude(self, prompt: str, system_prompt: str, project_id: str = None, operation: str = "chat") -> Tuple[str, bool]:
         """Call Claude API with retry for rate limits"""
         if not self.claude_api_key:
             return "Claude API key not configured", False
@@ -304,6 +304,22 @@ class LLMOrchestrator:
                 
                 result = response.content[0].text
                 logger.info(f"Claude response: {len(result)} chars")
+                
+                # Log cost
+                try:
+                    from backend.utils.cost_tracker import log_cost, CostService
+                    usage = response.usage
+                    log_cost(
+                        service=CostService.CLAUDE,
+                        operation=operation,
+                        tokens_in=usage.input_tokens if usage else 0,
+                        tokens_out=usage.output_tokens if usage else 0,
+                        project_id=project_id,
+                        metadata={"model": self.claude_model}
+                    )
+                except Exception as cost_err:
+                    logger.debug(f"Cost tracking failed: {cost_err}")
+                
                 return result, True
                 
             except anthropic.RateLimitError as e:
@@ -519,6 +535,20 @@ Output ONLY the SQL query, nothing else."""
             )
             
             sql = response.content[0].text.strip()
+            
+            # Log cost
+            try:
+                from backend.utils.cost_tracker import log_cost, CostService
+                usage = response.usage
+                log_cost(
+                    service=CostService.CLAUDE,
+                    operation="sql_generate",
+                    tokens_in=usage.input_tokens if usage else 0,
+                    tokens_out=usage.output_tokens if usage else 0,
+                    metadata={"model": self.claude_model}
+                )
+            except Exception as cost_err:
+                logger.debug(f"Cost tracking failed: {cost_err}")
             
             # Clean up markdown if present
             if sql.startswith("```sql"):
