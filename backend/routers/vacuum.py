@@ -861,6 +861,19 @@ class VacuumExtractor:
                               message=f'OCR processing page {page_num + 1} of {to_process}...')
                 
                 logger.info(f"Textract: Extracted page {page_num + 1}/{to_process}")
+            
+            # Log Textract cost
+            try:
+                from backend.utils.cost_tracker import log_cost, CostService
+                log_cost(
+                    service=CostService.TEXTRACT,
+                    operation="vacuum",
+                    pages=len(pages_text),
+                    textract_type="analyze",  # AnalyzeDocument with TABLES
+                    metadata={"file": file_path.split('/')[-1]}
+                )
+            except Exception as cost_err:
+                logger.debug(f"Cost tracking failed: {cost_err}")
                 
         finally:
             doc.close()
@@ -895,6 +908,21 @@ class VacuumExtractor:
             ) as stream:
                 for text in stream.text_stream:
                     response_text += text
+                
+                # Get final message for usage stats
+                try:
+                    final_message = stream.get_final_message()
+                    if final_message and hasattr(final_message, 'usage'):
+                        from backend.utils.cost_tracker import log_cost, CostService
+                        log_cost(
+                            service=CostService.CLAUDE,
+                            operation="vacuum",
+                            tokens_in=final_message.usage.input_tokens,
+                            tokens_out=final_message.usage.output_tokens,
+                            metadata={"model": "claude-sonnet-4-20250514", "vendor": vendor_type}
+                        )
+                except Exception as cost_err:
+                    logger.debug(f"Cost tracking failed: {cost_err}")
             
             logger.info(f"Claude response length: {len(response_text)}")
             
