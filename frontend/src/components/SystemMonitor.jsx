@@ -1,484 +1,534 @@
 /**
- * SystemMonitor - Executive Dashboard + Tube Map Architecture
+ * XLR8 OPERATIONS CENTER
  * 
- * Top: Executive KPIs (costs, efficiency, trends)
- * Bottom: London Tube-style system diagram
+ * CIA/NASA Mission Control Style Dashboard
+ * Dark theme, glowing accents, real-time monitoring
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import api from '../services/api';
 
-const COLORS = {
-  bg: '#f8fafc',
-  cardBg: '#ffffff',
-  border: '#e2e8f0',
-  text: '#1e293b',
-  textMuted: '#64748b',
-  textLight: '#94a3b8',
+// =============================================================================
+// THEME - Dark Ops Center
+// =============================================================================
+const T = {
+  // Backgrounds
+  bg: '#05080f',
+  panel: '#0a0f18',
+  panelLight: '#0f1520',
+  panelBorder: '#1a2535',
   
-  // Status
-  green: '#22c55e',
-  yellow: '#eab308',
-  red: '#ef4444',
+  // Text
+  text: '#c8d4e3',
+  textDim: '#6b7a8f',
+  textBright: '#ffffff',
   
-  // Tube lines
-  userLine: '#3b82f6',      // Blue - User/Frontend
-  authLine: '#ec4899',      // Pink - Auth/Supabase  
-  structuredLine: '#8b5cf6', // Purple - DuckDB/Structured
-  semanticLine: '#f97316',   // Orange - RAG/Semantic
-  cloudLine: '#06b6d4',      // Cyan - Claude API
-  localLine: '#10b981',      // Emerald - Local LLMs
-  storageLine: '#6366f1',    // Indigo - ChromaDB
+  // Accent colors - subtle glows
+  green: '#00ff88',
+  greenDim: '#00aa55',
+  greenGlow: 'rgba(0, 255, 136, 0.1)',
+  
+  red: '#ff3355',
+  redDim: '#aa2244',
+  redGlow: 'rgba(255, 51, 85, 0.15)',
+  
+  yellow: '#ffaa00',
+  yellowDim: '#aa7700',
+  yellowGlow: 'rgba(255, 170, 0, 0.1)',
+  
+  blue: '#0088ff',
+  blueDim: '#005599',
+  blueGlow: 'rgba(0, 136, 255, 0.1)',
+  
+  cyan: '#00ddff',
+  cyanDim: '#008899',
+  
+  purple: '#8855ff',
+  orange: '#ff6622',
 };
 
-// Tube line definitions
-const LINES = {
-  user: { color: COLORS.userLine, name: 'User Line' },
-  auth: { color: COLORS.authLine, name: 'Auth Line' },
-  structured: { color: COLORS.structuredLine, name: 'Structured Line' },
-  semantic: { color: COLORS.semanticLine, name: 'Semantic Line' },
-  cloud: { color: COLORS.cloudLine, name: 'Cloud AI' },
-  local: { color: COLORS.localLine, name: 'Local AI' },
+// Risk and security data
+const THREATS = {
+  api: { level: 2, label: 'API GATEWAY', issues: ['Rate limiting not enforced', 'Input validation needed'], action: 'Implement throttling' },
+  duckdb: { level: 2, label: 'STRUCTURED DB', issues: ['PII exposure risk', 'Query logging disabled'], action: 'Enable data masking' },
+  chromadb: { level: 1, label: 'VECTOR STORE', issues: ['Embeddings may contain PII'], action: 'Audit chunk content' },
+  claude: { level: 2, label: 'CLOUD AI', issues: ['External data transmission', 'Prompt injection risk'], action: 'Sanitize prompts' },
+  supabase: { level: 0, label: 'AUTH', issues: [], action: '' },
+  runpod: { level: 0, label: 'LOCAL AI', issues: [], action: '' },
 };
+
+// =============================================================================
+// UTILITY COMPONENTS
+// =============================================================================
+
+const GlowText = ({ children, color = T.green, size = '1rem', mono = false }) => (
+  <span style={{
+    color,
+    fontSize: size,
+    fontFamily: mono ? "'JetBrains Mono', 'Fira Code', monospace" : 'inherit',
+    textShadow: `0 0 10px ${color}40, 0 0 20px ${color}20`,
+  }}>{children}</span>
+);
+
+const StatusDot = ({ status, size = 8, pulse = false }) => {
+  const color = status === 2 ? T.red : status === 1 ? T.yellow : T.green;
+  return (
+    <span style={{
+      display: 'inline-block',
+      width: size,
+      height: size,
+      borderRadius: '50%',
+      background: color,
+      boxShadow: `0 0 ${size}px ${color}, 0 0 ${size * 2}px ${color}50`,
+      animation: pulse ? 'pulse 2s infinite' : 'none',
+    }} />
+  );
+};
+
+const Panel = ({ children, title, status, style = {} }) => (
+  <div style={{
+    background: T.panel,
+    border: `1px solid ${T.panelBorder}`,
+    borderRadius: 4,
+    overflow: 'hidden',
+    ...style,
+  }}>
+    {title && (
+      <div style={{
+        padding: '0.5rem 0.75rem',
+        borderBottom: `1px solid ${T.panelBorder}`,
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        background: T.panelLight,
+      }}>
+        <span style={{ 
+          fontSize: '0.65rem', 
+          fontWeight: 600, 
+          color: T.textDim, 
+          textTransform: 'uppercase',
+          letterSpacing: '0.1em',
+          fontFamily: "'JetBrains Mono', monospace",
+        }}>{title}</span>
+        {status !== undefined && <StatusDot status={status} size={6} />}
+      </div>
+    )}
+    <div style={{ padding: '0.75rem' }}>{children}</div>
+  </div>
+);
 
 // =============================================================================
 // EXECUTIVE METRICS
 // =============================================================================
 
-function KPICard({ label, value, subValue, trend, trendUp, color, large }) {
+function MetricCard({ label, value, unit, sublabel, trend, status }) {
   return (
-    <div style={{
-      background: COLORS.cardBg,
-      borderRadius: 12,
-      padding: large ? '1.25rem' : '1rem',
-      border: `1px solid ${COLORS.border}`,
-      boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-      flex: large ? '1.5' : '1',
-      minWidth: large ? 180 : 140,
-    }}>
-      <div style={{ fontSize: '0.7rem', fontWeight: 600, color: COLORS.textMuted, textTransform: 'uppercase', marginBottom: '0.5rem' }}>
+    <Panel status={status}>
+      <div style={{ fontSize: '0.6rem', color: T.textDim, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.4rem', fontFamily: 'monospace' }}>
         {label}
       </div>
-      <div style={{ fontSize: large ? '2rem' : '1.5rem', fontWeight: 700, color: color || COLORS.text, lineHeight: 1 }}>
-        {value}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.3rem' }}>
+        <GlowText size="1.75rem" color={status === 2 ? T.red : status === 1 ? T.yellow : T.green} mono>
+          {value}
+        </GlowText>
+        {unit && <span style={{ fontSize: '0.8rem', color: T.textDim }}>{unit}</span>}
       </div>
-      {(subValue || trend) && (
-        <div style={{ marginTop: '0.4rem', fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          {subValue && <span style={{ color: COLORS.textMuted }}>{subValue}</span>}
-          {trend && (
-            <span style={{ 
-              color: trendUp ? COLORS.green : COLORS.red,
-              fontWeight: 600,
-            }}>
-              {trendUp ? '▲' : '▼'} {trend}
+      {(sublabel || trend !== undefined) && (
+        <div style={{ marginTop: '0.3rem', fontSize: '0.65rem', color: T.textDim, display: 'flex', gap: '0.5rem' }}>
+          {sublabel && <span>{sublabel}</span>}
+          {trend !== undefined && (
+            <span style={{ color: trend >= 0 ? T.green : T.red }}>
+              {trend >= 0 ? '▲' : '▼'} {Math.abs(trend)}%
             </span>
           )}
         </div>
       )}
-    </div>
+    </Panel>
   );
 }
 
-function SpendBreakdown({ monthCosts, usage }) {
+function SpendBreakdown({ data }) {
   const items = [
-    { label: 'Subscriptions', value: monthCosts.fixed_costs || 0, color: COLORS.authLine, detail: `${monthCosts.fixed_items?.filter(i => i.category === 'subscription').length || 0} services` },
-    { label: 'Claude API', value: usage.by_service?.claude || 0, color: COLORS.cloudLine, detail: 'Cloud AI' },
-    { label: 'Local LLM', value: usage.by_service?.runpod || 0, color: COLORS.localLine, detail: 'RunPod' },
-    { label: 'Textract', value: usage.by_service?.textract || 0, color: COLORS.structuredLine, detail: 'OCR' },
+    { label: 'SUBSCRIPTIONS', value: data.fixed || 0, color: T.purple },
+    { label: 'CLAUDE API', value: data.claude || 0, color: T.cyan },
+    { label: 'LOCAL LLM', value: data.runpod || 0, color: T.green },
+    { label: 'TEXTRACT', value: data.textract || 0, color: T.orange },
   ];
-  
-  const total = items.reduce((s, i) => s + i.value, 0) || 1;
-  const maxVal = Math.max(...items.map(i => i.value), 1);
+  const max = Math.max(...items.map(i => i.value), 1);
 
   return (
-    <div style={{
-      background: COLORS.cardBg,
-      borderRadius: 12,
-      padding: '1rem',
-      border: `1px solid ${COLORS.border}`,
-      boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-      minWidth: 220,
-    }}>
-      <div style={{ fontSize: '0.7rem', fontWeight: 600, color: COLORS.textMuted, textTransform: 'uppercase', marginBottom: '0.75rem' }}>
-        Cost Breakdown
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+    <Panel title="COST ALLOCATION">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
         {items.map(item => (
           <div key={item.label}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '0.2rem' }}>
-              <span style={{ color: COLORS.text }}>{item.label}</span>
-              <span style={{ fontWeight: 600, color: item.color }}>${item.value.toFixed(2)}</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
+              <span style={{ fontSize: '0.6rem', color: T.textDim, fontFamily: 'monospace' }}>{item.label}</span>
+              <GlowText size="0.7rem" color={item.color} mono>${item.value.toFixed(2)}</GlowText>
             </div>
-            <div style={{ height: 6, background: COLORS.border, borderRadius: 3, overflow: 'hidden' }}>
-              <div style={{ 
-                width: `${(item.value / maxVal) * 100}%`, 
-                height: '100%', 
+            <div style={{ height: 3, background: T.panelBorder, borderRadius: 2 }}>
+              <div style={{
+                height: '100%',
+                width: `${(item.value / max) * 100}%`,
                 background: item.color,
-                borderRadius: 3,
-                transition: 'width 0.3s ease'
+                borderRadius: 2,
+                boxShadow: `0 0 8px ${item.color}60`,
               }} />
             </div>
           </div>
         ))}
       </div>
-    </div>
+    </Panel>
   );
 }
 
-function TrendChart({ dailyCosts }) {
-  if (!dailyCosts || dailyCosts.length === 0) return null;
-  
-  const data = dailyCosts.slice(0, 14).reverse();
-  const maxVal = Math.max(...data.map(d => d.total || 0), 0.01);
-  const points = data.map((d, i) => ({
-    x: 20 + (i * ((280 - 40) / (data.length - 1 || 1))),
-    y: 60 - ((d.total / maxVal) * 45),
-    value: d.total,
-    date: d.date,
-  }));
-  
-  const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+// =============================================================================
+// SYSTEM TOPOLOGY - Clean schematic
+// =============================================================================
 
-  return (
-    <div style={{
-      background: COLORS.cardBg,
-      borderRadius: 12,
-      padding: '1rem',
-      border: `1px solid ${COLORS.border}`,
-      boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-      minWidth: 280,
-    }}>
-      <div style={{ fontSize: '0.7rem', fontWeight: 600, color: COLORS.textMuted, textTransform: 'uppercase', marginBottom: '0.5rem' }}>
-        14-Day Trend
-      </div>
-      <svg width="100%" height="70" viewBox="0 0 280 70">
-        {/* Grid lines */}
-        <line x1="20" y1="60" x2="260" y2="60" stroke={COLORS.border} strokeWidth="1" />
-        <line x1="20" y1="35" x2="260" y2="35" stroke={COLORS.border} strokeWidth="1" strokeDasharray="4,4" opacity="0.5" />
-        <line x1="20" y1="10" x2="260" y2="10" stroke={COLORS.border} strokeWidth="1" strokeDasharray="4,4" opacity="0.5" />
-        
-        {/* Area fill */}
-        <path d={`${pathD} L ${points[points.length-1]?.x || 20} 60 L 20 60 Z`} fill={COLORS.cloudLine} opacity="0.1" />
-        
-        {/* Line */}
-        <path d={pathD} fill="none" stroke={COLORS.cloudLine} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        
-        {/* Data points */}
-        {points.map((p, i) => (
-          <circle key={i} cx={p.x} cy={p.y} r="3" fill={COLORS.cardBg} stroke={COLORS.cloudLine} strokeWidth="2">
-            <title>{p.date}: ${p.value.toFixed(4)}</title>
-          </circle>
-        ))}
-        
-        {/* Labels */}
-        <text x="20" y="68" fontSize="7" fill={COLORS.textLight}>{data[0]?.date?.slice(5) || ''}</text>
-        <text x="260" y="68" fontSize="7" fill={COLORS.textLight} textAnchor="end">{data[data.length-1]?.date?.slice(5) || ''}</text>
-      </svg>
-    </div>
-  );
-}
+function SystemTopology({ status, flow, onNodeClick, selectedNode }) {
+  // Node positions (x, y)
+  const nodes = {
+    user: { x: 60, y: 140, icon: '◉', label: 'USER', color: T.blue },
+    api: { x: 180, y: 140, icon: '⬡', label: 'API', color: T.blue, encrypted: true, threat: THREATS.api },
+    supabase: { x: 180, y: 240, icon: '◈', label: 'AUTH', color: T.purple, encrypted: true, threat: THREATS.supabase },
+    duckdb: { x: 340, y: 70, icon: '▣', label: 'STRUCT', color: T.purple, encrypted: true, threat: THREATS.duckdb },
+    rag: { x: 340, y: 140, icon: '◎', label: 'RAG', color: T.orange },
+    chromadb: { x: 340, y: 210, icon: '◇', label: 'VECTOR', color: T.cyan, threat: THREATS.chromadb },
+    router: { x: 480, y: 140, icon: '⬢', label: 'ROUTER', color: T.yellow },
+    claude: { x: 620, y: 80, icon: '●', label: 'CLAUDE', color: T.cyan, threat: THREATS.claude },
+    llama: { x: 580, y: 200, icon: '○', label: 'LLAMA', color: T.green, threat: THREATS.runpod },
+    mistral: { x: 650, y: 200, icon: '○', label: 'MISTRAL', color: T.green },
+    deepseek: { x: 720, y: 200, icon: '○', label: 'DEEP', color: T.green },
+  };
 
-function EfficiencyMetrics({ stats, costs }) {
-  const metrics = [
-    { label: 'Avg Response', value: '1.2s', status: 'good' },
-    { label: 'Success Rate', value: '99.2%', status: 'good' },
-    { label: 'Local vs Cloud', value: `${stats.localPct || 62}%`, status: 'info', detail: 'Local' },
-    { label: 'Docs Processed', value: (stats.totalFiles || 0).toLocaleString(), status: 'info' },
+  // Connection paths
+  const connections = [
+    { from: 'user', to: 'api', color: T.blue, active: flow.user },
+    { from: 'api', to: 'supabase', color: T.purple, active: flow.auth },
+    { from: 'api', to: 'duckdb', color: T.purple, active: flow.struct, label: 'SQL' },
+    { from: 'api', to: 'rag', color: T.orange, active: flow.semantic, label: 'SEMANTIC' },
+    { from: 'rag', to: 'chromadb', color: T.cyan, active: flow.vector },
+    { from: 'rag', to: 'router', color: T.yellow, active: flow.llm },
+    { from: 'router', to: 'claude', color: T.cyan, active: flow.cloud, label: 'CLOUD' },
+    { from: 'router', to: 'llama', color: T.green, active: flow.local, label: 'LOCAL' },
+    { from: 'llama', to: 'mistral', color: T.green, active: flow.local },
+    { from: 'mistral', to: 'deepseek', color: T.green, active: flow.local },
   ];
 
-  return (
-    <div style={{
-      background: COLORS.cardBg,
-      borderRadius: 12,
-      padding: '1rem',
-      border: `1px solid ${COLORS.border}`,
-      boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-      minWidth: 180,
-    }}>
-      <div style={{ fontSize: '0.7rem', fontWeight: 600, color: COLORS.textMuted, textTransform: 'uppercase', marginBottom: '0.75rem' }}>
-        Performance
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-        {metrics.map(m => (
-          <div key={m.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem' }}>
-            <span style={{ color: COLORS.textMuted }}>{m.label}</span>
-            <span style={{ 
-              fontWeight: 600, 
-              color: m.status === 'good' ? COLORS.green : m.status === 'warn' ? COLORS.yellow : COLORS.text,
-              display: 'flex', alignItems: 'center', gap: '0.25rem'
-            }}>
-              {m.value}
-              {m.status === 'good' && <span style={{ color: COLORS.green }}>✓</span>}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// =============================================================================
-// TUBE MAP DIAGRAM
-// =============================================================================
-
-function TubeMap({ status, flow }) {
-  // Station component
-  const Station = ({ x, y, name, icon, lines, interchange, encrypted, active }) => (
-    <g transform={`translate(${x}, ${y})`}>
-      {/* Interchange circle (larger, white fill) */}
-      {interchange ? (
-        <>
-          <circle r="16" fill={COLORS.cardBg} stroke={COLORS.text} strokeWidth="3" />
-          <circle r="10" fill={COLORS.cardBg} stroke={COLORS.text} strokeWidth="2" />
-        </>
-      ) : (
-        <circle r="12" fill={active ? lines[0] : COLORS.cardBg} stroke={lines[0] || COLORS.text} strokeWidth="3" />
-      )}
-      
-      {/* Icon */}
-      <text y="4" textAnchor="middle" fontSize="12">{icon}</text>
-      
-      {/* Encryption indicator */}
-      {encrypted && (
-        <g transform="translate(10, -10)">
-          <circle r="6" fill="#fef3c7" stroke="#f59e0b" strokeWidth="1.5" />
-          <text y="3" textAnchor="middle" fontSize="7">🔒</text>
-        </g>
-      )}
-      
-      {/* Station name */}
-      <text y="28" textAnchor="middle" fontSize="9" fontWeight="600" fill={COLORS.text}>{name}</text>
-      
-      {/* Status dot */}
-      <circle cx="14" cy="-8" r="4" fill={status[name.toLowerCase().replace(/\s/g, '')] === 'healthy' ? COLORS.green : COLORS.yellow} />
-    </g>
-  );
-
-  // Line segment (straight or with bend)
-  const Line = ({ x1, y1, x2, y2, color, active, bend }) => {
-    let d;
-    if (bend === 'right-down') {
-      d = `M ${x1} ${y1} H ${x2 - 15} Q ${x2} ${y1} ${x2} ${y1 + 15} V ${y2}`;
-    } else if (bend === 'right-up') {
-      d = `M ${x1} ${y1} H ${x2 - 15} Q ${x2} ${y1} ${x2} ${y1 - 15} V ${y2}`;
-    } else if (bend === 'down-right') {
-      d = `M ${x1} ${y1} V ${y2 - 15} Q ${x1} ${y2} ${x1 + 15} ${y2} H ${x2}`;
-    } else {
-      d = `M ${x1} ${y1} L ${x2} ${y2}`;
-    }
+  const Node = ({ id, data }) => {
+    const isSelected = selectedNode === id;
+    const threat = data.threat;
+    const threatLevel = threat?.level || 0;
     
     return (
-      <path 
-        d={d} 
-        fill="none" 
-        stroke={color} 
-        strokeWidth={active ? 6 : 4} 
-        strokeLinecap="round"
-        opacity={active ? 1 : 0.4}
-        style={{ transition: 'all 0.3s ease' }}
-      />
+      <g 
+        transform={`translate(${data.x}, ${data.y})`} 
+        style={{ cursor: 'pointer' }}
+        onClick={() => onNodeClick(id)}
+      >
+        {/* Threat ring */}
+        {threatLevel > 0 && (
+          <circle
+            r={28}
+            fill="none"
+            stroke={threatLevel === 2 ? T.red : T.yellow}
+            strokeWidth={2}
+            strokeDasharray="4,4"
+            opacity={0.6}
+          >
+            <animateTransform
+              attributeName="transform"
+              type="rotate"
+              from="0"
+              to="360"
+              dur="10s"
+              repeatCount="indefinite"
+            />
+          </circle>
+        )}
+        
+        {/* Main node */}
+        <circle
+          r={isSelected ? 24 : 20}
+          fill={T.panel}
+          stroke={isSelected ? T.textBright : data.color}
+          strokeWidth={isSelected ? 2 : 1.5}
+          style={{
+            filter: `drop-shadow(0 0 ${isSelected ? 15 : 8}px ${data.color}60)`,
+            transition: 'all 0.2s ease',
+          }}
+        />
+        
+        {/* Icon */}
+        <text
+          y={4}
+          textAnchor="middle"
+          fontSize={14}
+          fill={data.color}
+          style={{ fontFamily: 'monospace' }}
+        >
+          {data.icon}
+        </text>
+        
+        {/* Label */}
+        <text
+          y={38}
+          textAnchor="middle"
+          fontSize={8}
+          fill={T.textDim}
+          style={{ fontFamily: 'monospace', letterSpacing: '0.05em' }}
+        >
+          {data.label}
+        </text>
+        
+        {/* Encrypted badge */}
+        {data.encrypted && (
+          <g transform="translate(14, -14)">
+            <circle r={7} fill={T.panel} stroke={T.yellow} strokeWidth={1} />
+            <text y={3} textAnchor="middle" fontSize={7} fill={T.yellow}>🔒</text>
+          </g>
+        )}
+        
+        {/* Status indicator */}
+        <circle
+          cx={-14}
+          cy={-14}
+          r={4}
+          fill={threatLevel === 2 ? T.red : threatLevel === 1 ? T.yellow : T.green}
+          style={{ filter: `drop-shadow(0 0 4px ${threatLevel === 2 ? T.red : threatLevel === 1 ? T.yellow : T.green})` }}
+        />
+      </g>
     );
   };
 
   return (
-    <div style={{
-      background: COLORS.cardBg,
-      borderRadius: 16,
-      padding: '1.5rem',
-      border: `1px solid ${COLORS.border}`,
-      boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-    }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-        <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: COLORS.text }}>
-          System Map
-        </h2>
-        <div style={{ display: 'flex', gap: '1rem', fontSize: '0.65rem' }}>
-          {Object.entries(LINES).map(([key, line]) => (
-            <div key={key} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-              <div style={{ width: 16, height: 4, background: line.color, borderRadius: 2 }} />
-              <span style={{ color: COLORS.textMuted }}>{line.name}</span>
-            </div>
-          ))}
-        </div>
-      </div>
+    <Panel title="SYSTEM TOPOLOGY" style={{ gridColumn: 'span 2' }}>
+      <svg width="100%" height="280" viewBox="0 0 780 280">
+        {/* Zone backgrounds */}
+        <rect x="550" y="40" width="220" height="80" rx={4} fill={T.cyan} opacity={0.03} stroke={T.cyan} strokeWidth={0.5} strokeOpacity={0.2} />
+        <text x="560" y={55} fontSize={8} fill={T.cyanDim} style={{ fontFamily: 'monospace' }}>CLOUD ZONE</text>
+        
+        <rect x="550" y="140" width="220" height="100" rx={4} fill={T.green} opacity={0.03} stroke={T.green} strokeWidth={0.5} strokeOpacity={0.2} />
+        <text x="560" y={155} fontSize={8} fill={T.greenDim} style={{ fontFamily: 'monospace' }}>LOCAL ZONE</text>
 
-      <svg width="100%" height="320" viewBox="0 0 900 320">
-        {/* Background zones */}
-        <rect x="580" y="20" width="300" height="130" rx="12" fill={COLORS.cloudLine} opacity="0.06" />
-        <text x="590" y="40" fontSize="10" fill={COLORS.cloudLine} fontWeight="600">CLOUD ZONE</text>
-        
-        <rect x="580" y="170" width="300" height="130" rx="12" fill={COLORS.localLine} opacity="0.06" />
-        <text x="590" y="190" fontSize="10" fill={COLORS.localLine} fontWeight="600">LOCAL ZONE (RunPod)</text>
+        {/* Connections */}
+        {connections.map((conn, i) => {
+          const from = nodes[conn.from];
+          const to = nodes[conn.to];
+          const mx = (from.x + to.x) / 2;
+          const my = (from.y + to.y) / 2;
+          
+          return (
+            <g key={i}>
+              <line
+                x1={from.x}
+                y1={from.y}
+                x2={to.x}
+                y2={to.y}
+                stroke={conn.active ? conn.color : T.panelBorder}
+                strokeWidth={conn.active ? 2 : 1}
+                opacity={conn.active ? 0.8 : 0.3}
+                style={{ 
+                  filter: conn.active ? `drop-shadow(0 0 4px ${conn.color})` : 'none',
+                  transition: 'all 0.3s ease',
+                }}
+              />
+              {conn.label && (
+                <text
+                  x={mx}
+                  y={my - 6}
+                  textAnchor="middle"
+                  fontSize={6}
+                  fill={T.textDim}
+                  style={{ fontFamily: 'monospace' }}
+                >
+                  {conn.label}
+                </text>
+              )}
+            </g>
+          );
+        })}
 
-        {/* === LINES === */}
-        
-        {/* User Line (Blue) - User to API */}
-        <Line x1={60} y1={160} x2={180} y2={160} color={LINES.user.color} active={flow.userToApi} />
-        
-        {/* Auth Line (Pink) - API down to Supabase */}
-        <Line x1={180} y1={180} x2={180} y2={280} color={LINES.auth.color} active={flow.apiToAuth} />
-        
-        {/* Structured Line (Purple) - API to DuckDB */}
-        <Line x1={200} y1={160} x2={400} y2={160} color={LINES.structured.color} active={flow.apiToStructured} bend="" />
-        <Line x1={400} y1={160} x2={400} y2={80} color={LINES.structured.color} active={flow.apiToStructured} />
-        
-        {/* Semantic Line (Orange) - API to RAG */}
-        <Line x1={200} y1={160} x2={400} y2={160} color={LINES.semantic.color} active={flow.apiToSemantic} />
-        <Line x1={400} y1={160} x2={550} y2={160} color={LINES.semantic.color} active={flow.apiToSemantic} />
-        
-        {/* Storage Line (Indigo) - RAG to ChromaDB */}
-        <Line x1={400} y1={140} x2={400} y2={80} color={COLORS.storageLine} active={flow.ragToStorage} />
-        <Line x1={420} y1={80} x2={550} y2={80} color={COLORS.storageLine} active={flow.ragToStorage} />
-        
-        {/* Cloud Line (Cyan) - RAG to Claude */}
-        <Line x1={550} y1={140} x2={550} y2={80} color={LINES.cloud.color} active={flow.toCloud} />
-        <Line x1={570} y1={80} x2={700} y2={80} color={LINES.cloud.color} active={flow.toCloud} />
-        
-        {/* Local Line (Emerald) - RAG to RunPod LLMs */}
-        <Line x1={550} y1={180} x2={550} y2={240} color={LINES.local.color} active={flow.toLocal} />
-        <Line x1={570} y1={240} x2={850} y2={240} color={LINES.local.color} active={flow.toLocal} />
-
-        {/* === STATIONS === */}
-        
-        {/* User */}
-        <Station x={60} y={160} name="User" icon="👤" lines={[LINES.user.color]} active={flow.userToApi} />
-        
-        {/* API - Major interchange */}
-        <Station x={180} y={160} name="API" icon="⚙️" lines={[LINES.user.color, LINES.structured.color, LINES.semantic.color, LINES.auth.color]} interchange encrypted active />
-        
-        {/* Supabase */}
-        <Station x={180} y={280} name="Supabase" icon="🔐" lines={[LINES.auth.color]} encrypted active={flow.apiToAuth} />
-        
-        {/* RAG - Major interchange */}
-        <Station x={400} y={160} name="RAG" icon="🎯" lines={[LINES.structured.color, LINES.semantic.color]} interchange active={flow.apiToSemantic} />
-        
-        {/* DuckDB */}
-        <Station x={400} y={80} name="DuckDB" icon="🦆" lines={[LINES.structured.color]} encrypted active={flow.apiToStructured} />
-        
-        {/* ChromaDB */}
-        <Station x={550} y={80} name="ChromaDB" icon="🔍" lines={[COLORS.storageLine]} active={flow.ragToStorage} />
-        
-        {/* LLM Junction - interchange between cloud and local */}
-        <Station x={550} y={160} name="LLM Router" icon="🔀" lines={[LINES.cloud.color, LINES.local.color]} interchange active={flow.toCloud || flow.toLocal} />
-        
-        {/* Claude */}
-        <Station x={700} y={80} name="Claude" icon="🤖" lines={[LINES.cloud.color]} active={flow.toCloud} />
-        
-        {/* Local LLMs */}
-        <Station x={630} y={240} name="Llama" icon="🦙" lines={[LINES.local.color]} active={flow.toLocal} />
-        <Station x={710} y={240} name="Mistral" icon="🌬️" lines={[LINES.local.color]} active={flow.toLocal} />
-        <Station x={790} y={240} name="DeepSeek" icon="🔮" lines={[LINES.local.color]} active={flow.toLocal} />
-        <Station x={850} y={240} name="Qwen" icon="❄️" lines={[LINES.local.color]} active={false} />
+        {/* Nodes */}
+        {Object.entries(nodes).map(([id, data]) => (
+          <Node key={id} id={id} data={data} />
+        ))}
 
         {/* Legend */}
-        <g transform="translate(20, 300)">
-          <circle cx={8} cy={0} r={6} fill="#fef3c7" stroke="#f59e0b" strokeWidth={1.5} />
-          <text x={8} y={3} textAnchor="middle" fontSize="7">🔒</text>
-          <text x={20} y={3} fontSize="8" fill={COLORS.textMuted}>= Encrypted at rest</text>
+        <g transform="translate(20, 260)">
+          <circle cx={5} cy={0} r={4} fill={T.green} />
+          <text x={14} y={3} fontSize={7} fill={T.textDim}>SECURE</text>
           
-          <g transform="translate(120, 0)">
-            <circle cx={8} cy={0} r={8} fill={COLORS.cardBg} stroke={COLORS.text} strokeWidth={2} />
-            <circle cx={8} cy={0} r={4} fill={COLORS.cardBg} stroke={COLORS.text} strokeWidth={1.5} />
+          <circle cx={70} cy={0} r={4} fill={T.yellow} />
+          <text x={79} y={3} fontSize={7} fill={T.textDim}>REVIEW</text>
+          
+          <circle cx={130} cy={0} r={4} fill={T.red} />
+          <text x={139} y={3} fontSize={7} fill={T.textDim}>ACTION REQ</text>
+          
+          <g transform="translate(200, -3)">
+            <circle r={5} fill="none" stroke={T.yellow} strokeWidth={1} strokeDasharray="2,2" />
           </g>
-          <text x={140} y={3} fontSize="8" fill={COLORS.textMuted}>= Interchange (routing)</text>
-          
-          <circle cx={260} cy={0} r={4} fill={COLORS.green} />
-          <text x={270} y={3} fontSize="8" fill={COLORS.textMuted}>= Healthy</text>
+          <text x={210} y={3} fontSize={7} fill={T.textDim}>THREAT DETECTED</text>
         </g>
       </svg>
+    </Panel>
+  );
+}
+
+// =============================================================================
+// THREAT DETAILS PANEL
+// =============================================================================
+
+function ThreatPanel({ nodeId, onClose }) {
+  const threat = THREATS[nodeId];
+  if (!threat) return null;
+
+  return (
+    <div style={{
+      position: 'absolute',
+      right: 0,
+      top: 0,
+      bottom: 0,
+      width: 320,
+      background: T.panel,
+      borderLeft: `1px solid ${T.panelBorder}`,
+      display: 'flex',
+      flexDirection: 'column',
+      zIndex: 10,
+    }}>
+      <div style={{
+        padding: '1rem',
+        borderBottom: `1px solid ${T.panelBorder}`,
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+      }}>
+        <div>
+          <div style={{ fontSize: '0.7rem', color: T.textDim, fontFamily: 'monospace', marginBottom: '0.2rem' }}>
+            THREAT ASSESSMENT
+          </div>
+          <div style={{ fontSize: '1rem', color: T.text, fontWeight: 600 }}>{threat.label}</div>
+        </div>
+        <button
+          onClick={onClose}
+          style={{
+            background: 'none',
+            border: `1px solid ${T.panelBorder}`,
+            borderRadius: 4,
+            color: T.textDim,
+            padding: '0.25rem 0.5rem',
+            cursor: 'pointer',
+            fontFamily: 'monospace',
+            fontSize: '0.7rem',
+          }}
+        >
+          CLOSE
+        </button>
+      </div>
+
+      <div style={{ padding: '1rem', flex: 1, overflowY: 'auto' }}>
+        {/* Risk level */}
+        <div style={{
+          padding: '0.75rem',
+          background: threat.level === 2 ? T.redGlow : threat.level === 1 ? T.yellowGlow : T.greenGlow,
+          borderRadius: 4,
+          marginBottom: '1rem',
+          border: `1px solid ${threat.level === 2 ? T.redDim : threat.level === 1 ? T.yellowDim : T.greenDim}`,
+        }}>
+          <div style={{ fontSize: '0.6rem', color: T.textDim, marginBottom: '0.3rem', fontFamily: 'monospace' }}>RISK LEVEL</div>
+          <GlowText 
+            size="1.2rem" 
+            color={threat.level === 2 ? T.red : threat.level === 1 ? T.yellow : T.green}
+            mono
+          >
+            {threat.level === 2 ? 'HIGH' : threat.level === 1 ? 'MEDIUM' : 'LOW'}
+          </GlowText>
+        </div>
+
+        {/* Issues */}
+        {threat.issues.length > 0 && (
+          <>
+            <div style={{ fontSize: '0.6rem', color: T.textDim, marginBottom: '0.5rem', fontFamily: 'monospace' }}>
+              IDENTIFIED ISSUES
+            </div>
+            {threat.issues.map((issue, i) => (
+              <div key={i} style={{
+                padding: '0.6rem',
+                background: T.panelLight,
+                borderRadius: 4,
+                marginBottom: '0.5rem',
+                borderLeft: `2px solid ${T.yellow}`,
+              }}>
+                <div style={{ fontSize: '0.75rem', color: T.text }}>{issue}</div>
+              </div>
+            ))}
+          </>
+        )}
+
+        {/* Recommended action */}
+        {threat.action && (
+          <div style={{ marginTop: '1rem' }}>
+            <div style={{ fontSize: '0.6rem', color: T.textDim, marginBottom: '0.5rem', fontFamily: 'monospace' }}>
+              RECOMMENDED ACTION
+            </div>
+            <div style={{
+              padding: '0.75rem',
+              background: T.greenGlow,
+              borderRadius: 4,
+              borderLeft: `2px solid ${T.green}`,
+            }}>
+              <div style={{ fontSize: '0.75rem', color: T.green }}>{threat.action}</div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
 // =============================================================================
-// SETTINGS MODAL
+// ACTIVITY LOG
 // =============================================================================
 
-function SettingsModal({ open, onClose, items, onSave }) {
-  const [data, setData] = useState([]);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => { if (items) setData([...items]); }, [items]);
-  if (!open) return null;
-
-  const update = (idx, field, value) => {
-    const d = [...data];
-    d[idx] = { ...d[idx], [field]: field === 'quantity' ? parseInt(value) || 0 : parseFloat(value) || 0 };
-    setData(d);
-  };
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      for (const item of data.filter(i => i.category === 'subscription')) {
-        await api.put(`/status/costs/fixed/${encodeURIComponent(item.name)}`, null, {
-          params: { cost_per_unit: item.cost_per_unit, quantity: item.quantity }
-        });
-      }
-      onSave();
-      onClose();
-    } catch (e) {
-      console.error('Save failed:', e);
-      alert('Failed to save');
-    }
-    setSaving(false);
-  };
-
+function ActivityLog({ entries }) {
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={onClose}>
-      <div style={{ background: COLORS.cardBg, borderRadius: 16, padding: '1.5rem', width: 420, maxHeight: '80vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
-        <h3 style={{ margin: '0 0 1rem', color: COLORS.text, fontSize: '1.1rem' }}>⚙️ Subscription Settings</h3>
-        
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          {data.filter(i => i.category === 'subscription').map((item, idx) => (
-            <div key={item.name} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span style={{ flex: 1, fontSize: '0.85rem', color: COLORS.text }}>{item.name}</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                <span style={{ fontSize: '0.75rem', color: COLORS.textMuted }}>$</span>
-                <input
-                  type="number"
-                  value={item.cost_per_unit}
-                  onChange={e => update(idx, 'cost_per_unit', e.target.value)}
-                  style={{ width: 60, padding: '0.4rem', borderRadius: 6, border: `1px solid ${COLORS.border}`, fontSize: '0.85rem' }}
-                  step="0.01"
-                />
-                <span style={{ fontSize: '0.75rem', color: COLORS.textMuted }}>×</span>
-                <input
-                  type="number"
-                  value={item.quantity}
-                  onChange={e => update(idx, 'quantity', e.target.value)}
-                  style={{ width: 45, padding: '0.4rem', borderRadius: 6, border: `1px solid ${COLORS.border}`, fontSize: '0.85rem' }}
-                />
-                <span style={{ fontSize: '0.75rem', color: COLORS.textMuted, width: 55, textAlign: 'right' }}>
-                  = ${(item.cost_per_unit * item.quantity).toFixed(2)}
+    <Panel title="ACTIVITY LOG" style={{ flex: 1 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: 200, overflowY: 'auto' }}>
+        {entries.length === 0 ? (
+          <div style={{ color: T.textDim, fontSize: '0.7rem', fontFamily: 'monospace', textAlign: 'center', padding: '1rem' }}>
+            AWAITING DATA...
+          </div>
+        ) : (
+          entries.slice(0, 10).map((entry, i) => (
+            <div key={i} style={{
+              display: 'flex',
+              gap: '0.5rem',
+              padding: '0.4rem',
+              background: i === 0 ? T.panelLight : 'transparent',
+              borderRadius: 3,
+            }}>
+              <span style={{ 
+                fontSize: '0.6rem', 
+                color: T.textDim, 
+                fontFamily: 'monospace',
+                minWidth: 55,
+              }}>
+                {entry.time}
+              </span>
+              <StatusDot status={entry.status} size={6} />
+              <span style={{ fontSize: '0.7rem', color: T.text, fontFamily: 'monospace' }}>
+                {entry.message}
+              </span>
+              {entry.cost && (
+                <span style={{ fontSize: '0.65rem', color: T.green, fontFamily: 'monospace', marginLeft: 'auto' }}>
+                  ${entry.cost.toFixed(4)}
                 </span>
-              </div>
+              )}
             </div>
-          ))}
-        </div>
-
-        <div style={{ borderTop: `1px solid ${COLORS.border}`, marginTop: '1rem', paddingTop: '1rem' }}>
-          <div style={{ fontSize: '0.75rem', color: COLORS.textMuted, marginBottom: '0.5rem' }}>API Rates (reference)</div>
-          {data.filter(i => i.category === 'api_rate').slice(0, 3).map(item => (
-            <div key={item.name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: COLORS.textMuted }}>
-              <span>{item.name}</span>
-              <span>${item.cost_per_unit}/{item.unit_type}</span>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1.5rem', justifyContent: 'flex-end' }}>
-          <button onClick={onClose} style={{
-            padding: '0.5rem 1rem', borderRadius: 8, border: `1px solid ${COLORS.border}`,
-            background: 'white', cursor: 'pointer', fontSize: '0.85rem'
-          }}>Cancel</button>
-          <button onClick={save} disabled={saving} style={{
-            padding: '0.5rem 1rem', borderRadius: 8, border: 'none',
-            background: COLORS.userLine, color: 'white', cursor: 'pointer', fontSize: '0.85rem'
-          }}>{saving ? 'Saving...' : 'Save'}</button>
-        </div>
+          ))
+        )}
       </div>
-    </div>
+    </Panel>
   );
 }
 
@@ -487,57 +537,53 @@ function SettingsModal({ open, onClose, items, onSave }) {
 // =============================================================================
 
 export default function SystemMonitor() {
-  // State
-  const [monthCosts, setMonthCosts] = useState({ total: 0, fixed_costs: 0, api_usage: 0, month_name: '', fixed_items: [] });
-  const [usage, setUsage] = useState({ total_cost: 0, by_service: {}, record_count: 0 });
-  const [dailyCosts, setDailyCosts] = useState([]);
-  const [stats, setStats] = useState({ totalFiles: 0, totalRows: 0, chunks: 0, localPct: 62 });
-  const [loading, setLoading] = useState(true);
-  const [showSettings, setShowSettings] = useState(false);
-
-  const [status, setStatus] = useState({
-    user: 'healthy', api: 'healthy', supabase: 'healthy', duckdb: 'healthy',
-    rag: 'healthy', chromadb: 'healthy', llmrouter: 'healthy', claude: 'healthy',
-    llama: 'healthy', mistral: 'healthy', deepseek: 'healthy', qwen: 'healthy',
+  const [data, setData] = useState({
+    month: { total: 0, fixed: 0, api: 0, month_name: 'DEC' },
+    usage: { total: 0, claude: 0, runpod: 0, textract: 0, calls: 0 },
+    stats: { files: 0, rows: 0, chunks: 0 },
   });
+  const [flow, setFlow] = useState({});
+  const [selectedNode, setSelectedNode] = useState(null);
+  const [activity, setActivity] = useState([]);
+  const [time, setTime] = useState(new Date());
 
-  const [flow, setFlow] = useState({
-    userToApi: false, apiToAuth: false, apiToStructured: false, apiToSemantic: false,
-    ragToStorage: false, toCloud: false, toLocal: false,
-  });
+  // Clock
+  useEffect(() => {
+    const interval = setInterval(() => setTime(new Date()), 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Fetch data
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [monthRes, usageRes, dailyRes, structuredRes, chromaRes] = await Promise.all([
+        const [monthRes, usageRes, structRes] = await Promise.all([
           api.get('/status/costs/month').catch(() => ({ data: {} })),
           api.get('/status/costs?days=30').catch(() => ({ data: {} })),
-          api.get('/status/costs/daily?days=14').catch(() => ({ data: [] })),
           api.get('/status/structured').catch(() => ({ data: {} })),
-          api.get('/status/chromadb').catch(() => ({ data: {} })),
         ]);
 
-        setMonthCosts(monthRes.data || {});
-        setUsage(usageRes.data || {});
-        setDailyCosts(Array.isArray(dailyRes.data) ? dailyRes.data : []);
-        setStats({
-          totalFiles: structuredRes.data?.total_files || 0,
-          totalRows: structuredRes.data?.total_rows || 0,
-          chunks: chromaRes.data?.total_chunks || 0,
-          localPct: 62, // Calculate from usage data
+        setData({
+          month: {
+            total: monthRes.data?.total || 0,
+            fixed: monthRes.data?.fixed_costs || 0,
+            api: monthRes.data?.api_usage || 0,
+            month_name: monthRes.data?.month_name?.toUpperCase()?.slice(0, 3) || 'DEC',
+          },
+          usage: {
+            total: usageRes.data?.total_cost || 0,
+            claude: usageRes.data?.by_service?.claude || 0,
+            runpod: usageRes.data?.by_service?.runpod || 0,
+            textract: usageRes.data?.by_service?.textract || 0,
+            calls: usageRes.data?.record_count || 0,
+          },
+          stats: {
+            files: structRes.data?.total_files || 0,
+            rows: structRes.data?.total_rows || 0,
+          },
         });
-        
-        setStatus(prev => ({
-          ...prev,
-          duckdb: structuredRes.data?.available !== false ? 'healthy' : 'warning',
-          chromadb: chromaRes.data?.status === 'operational' ? 'healthy' : 'warning',
-        }));
-        
-        setLoading(false);
       } catch (err) {
         console.error('Fetch error:', err);
-        setLoading(false);
       }
     };
 
@@ -546,109 +592,171 @@ export default function SystemMonitor() {
     return () => clearInterval(interval);
   }, []);
 
-  // Animate flow
+  // Simulate flow animation
   useEffect(() => {
-    const flows = ['userToApi', 'apiToAuth', 'apiToStructured', 'apiToSemantic', 'ragToStorage', 'toCloud', 'toLocal'];
-    
     const animate = () => {
-      const activeFlows = flows.filter(() => Math.random() > 0.6);
-      const newFlow = {};
-      flows.forEach(f => newFlow[f] = activeFlows.includes(f));
-      setFlow(newFlow);
+      const flows = ['user', 'auth', 'struct', 'semantic', 'vector', 'llm', 'cloud', 'local'];
+      const active = {};
+      flows.forEach(f => active[f] = Math.random() > 0.5);
+      setFlow(active);
     };
-
-    const interval = setInterval(animate, 2000);
+    
+    const interval = setInterval(animate, 2500);
+    animate();
     return () => clearInterval(interval);
   }, []);
 
-  // Calculate trends
-  const prevMonthTotal = (monthCosts.total || 0) * 0.92; // Placeholder
-  const trendPct = prevMonthTotal > 0 ? Math.abs(((monthCosts.total - prevMonthTotal) / prevMonthTotal) * 100).toFixed(0) + '%' : null;
-  const trendUp = (monthCosts.total || 0) > prevMonthTotal;
+  // Simulate activity
+  useEffect(() => {
+    const messages = [
+      { message: 'CLAUDE: Response generated', status: 0, cost: 0.0034 },
+      { message: 'DUCKDB: Query executed', status: 0 },
+      { message: 'RAG: Context retrieved', status: 0 },
+      { message: 'LLAMA: Inference complete', status: 0, cost: 0.0012 },
+      { message: 'AUTH: Session validated', status: 0 },
+      { message: 'VECTOR: Similarity search', status: 0 },
+    ];
 
-  const costPerDoc = stats.totalFiles > 0 ? (monthCosts.api_usage || 0) / stats.totalFiles : 0;
+    const addEntry = () => {
+      const msg = messages[Math.floor(Math.random() * messages.length)];
+      setActivity(prev => [{
+        ...msg,
+        time: new Date().toLocaleTimeString('en-US', { hour12: false }),
+        id: Date.now(),
+      }, ...prev].slice(0, 20));
+    };
 
-  const allHealthy = Object.values(status).every(s => s === 'healthy');
+    const interval = setInterval(addEntry, 3000);
+    return () => clearInterval(interval);
+  }, []);
 
-  const refreshData = async () => {
-    const monthRes = await api.get('/status/costs/month').catch(() => ({ data: {} }));
-    setMonthCosts(monthRes.data || {});
-  };
+  // Count threats
+  const threatCount = Object.values(THREATS).filter(t => t.level > 0).length;
 
   return (
-    <div style={{ background: COLORS.bg, minHeight: '100vh' }}>
+    <div style={{
+      background: T.bg,
+      minHeight: '100vh',
+      color: T.text,
+      fontFamily: "'Inter', -apple-system, sans-serif",
+      position: 'relative',
+    }}>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: '1.4rem', fontWeight: 700, color: COLORS.text }}>System Monitor</h1>
-          <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: COLORS.textMuted }}>
-            {monthCosts.month_name || 'December'} 2025
-          </p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <span style={{ 
-            fontSize: '0.75rem', 
-            color: allHealthy ? COLORS.green : COLORS.yellow,
-            fontWeight: 600,
-            display: 'flex', alignItems: 'center', gap: '0.3rem'
+      <div style={{
+        padding: '0.75rem 1rem',
+        borderBottom: `1px solid ${T.panelBorder}`,
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        background: T.panel,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+          <div>
+            <div style={{ fontSize: '0.6rem', color: T.textDim, fontFamily: 'monospace', letterSpacing: '0.2em' }}>
+              XLR8 PLATFORM
+            </div>
+            <div style={{ fontSize: '1.1rem', fontWeight: 600, color: T.textBright }}>
+              OPERATIONS CENTER
+            </div>
+          </div>
+          
+          <div style={{ 
+            padding: '0.4rem 0.75rem', 
+            background: threatCount > 0 ? T.yellowGlow : T.greenGlow,
+            borderRadius: 4,
+            border: `1px solid ${threatCount > 0 ? T.yellowDim : T.greenDim}`,
           }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: allHealthy ? COLORS.green : COLORS.yellow }} />
-            {allHealthy ? 'All Systems Operational' : 'Degraded Performance'}
-          </span>
-          <button onClick={() => setShowSettings(true)} style={{
-            padding: '0.4rem 0.75rem', borderRadius: 6, border: `1px solid ${COLORS.border}`,
-            background: COLORS.cardBg, cursor: 'pointer', fontSize: '0.75rem', color: COLORS.text
-          }}>⚙️ Settings</button>
+            <GlowText size="0.7rem" color={threatCount > 0 ? T.yellow : T.green} mono>
+              {threatCount > 0 ? `${threatCount} ITEMS NEED REVIEW` : 'ALL SYSTEMS NOMINAL'}
+            </GlowText>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2rem' }}>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: '1.2rem', fontFamily: 'monospace', color: T.green }}>
+              {time.toLocaleTimeString('en-US', { hour12: false })}
+            </div>
+            <div style={{ fontSize: '0.6rem', color: T.textDim, fontFamily: 'monospace' }}>
+              {time.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }).toUpperCase()}
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Executive KPIs */}
-      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
-        <KPICard 
-          label="Total Spend" 
-          value={`$${(monthCosts.total || 0).toFixed(2)}`}
-          trend={trendPct}
-          trendUp={trendUp}
-          color={COLORS.green}
-          large
+      {/* Main Grid */}
+      <div style={{ 
+        padding: '1rem', 
+        display: 'grid', 
+        gridTemplateColumns: 'repeat(5, 1fr)', 
+        gap: '0.75rem',
+        paddingRight: selectedNode ? '340px' : '1rem',
+        transition: 'padding-right 0.3s ease',
+      }}>
+        {/* Top metrics row */}
+        <MetricCard label={`${data.month.month_name} SPEND`} value={`$${data.month.total.toFixed(0)}`} sublabel="Total" />
+        <MetricCard label="API USAGE" value={`$${data.usage.total.toFixed(2)}`} sublabel={`${data.usage.calls} calls`} status={0} />
+        <MetricCard label="DOCUMENTS" value={data.stats.files.toLocaleString()} sublabel="Processed" status={0} />
+        <MetricCard label="LOCAL %" value="62%" sublabel="Cost savings" status={0} />
+        <MetricCard label="UPTIME" value="99.9%" sublabel="30 days" status={0} />
+
+        {/* Second row */}
+        <SpendBreakdown data={{
+          fixed: data.month.fixed,
+          claude: data.usage.claude,
+          runpod: data.usage.runpod,
+          textract: data.usage.textract,
+        }} />
+        
+        <SystemTopology 
+          status={{}} 
+          flow={flow} 
+          onNodeClick={setSelectedNode}
+          selectedNode={selectedNode}
         />
-        <KPICard 
-          label="Cost / Document" 
-          value={`$${costPerDoc.toFixed(4)}`}
-          subValue={`${stats.totalFiles.toLocaleString()} docs`}
-          color={COLORS.cloudLine}
-        />
-        <KPICard 
-          label="API Calls" 
-          value={(usage.record_count || 0).toLocaleString()}
-          subValue="Last 30 days"
-          color={COLORS.text}
-        />
-        <KPICard 
-          label="Local AI %" 
-          value={`${stats.localPct}%`}
-          subValue="Cost savings"
-          color={COLORS.localLine}
-        />
+
+        {/* Third row */}
+        <Panel title="STORAGE" style={{ gridColumn: 'span 2' }}>
+          <div style={{ display: 'flex', gap: '1.5rem' }}>
+            <div>
+              <div style={{ fontSize: '0.6rem', color: T.textDim, fontFamily: 'monospace', marginBottom: '0.3rem' }}>STRUCTURED</div>
+              <GlowText size="1.2rem" color={T.purple} mono>{data.stats.rows.toLocaleString()}</GlowText>
+              <div style={{ fontSize: '0.6rem', color: T.textDim }}>rows</div>
+            </div>
+            <div>
+              <div style={{ fontSize: '0.6rem', color: T.textDim, fontFamily: 'monospace', marginBottom: '0.3rem' }}>VECTOR</div>
+              <GlowText size="1.2rem" color={T.cyan} mono>{(data.stats.chunks || 0).toLocaleString()}</GlowText>
+              <div style={{ fontSize: '0.6rem', color: T.textDim }}>chunks</div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '0.6rem', color: T.textDim, fontFamily: 'monospace', marginBottom: '0.3rem' }}>RATIO</div>
+              <div style={{ height: 6, background: T.panelBorder, borderRadius: 3, marginTop: '0.5rem' }}>
+                <div style={{ 
+                  height: '100%', 
+                  width: '60%', 
+                  background: `linear-gradient(90deg, ${T.purple}, ${T.cyan})`,
+                  borderRadius: 3,
+                }} />
+              </div>
+            </div>
+          </div>
+        </Panel>
+
+        <ActivityLog entries={activity} />
       </div>
 
-      {/* Secondary metrics */}
-      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
-        <SpendBreakdown monthCosts={monthCosts} usage={usage} />
-        <TrendChart dailyCosts={dailyCosts} />
-        <EfficiencyMetrics stats={stats} costs={usage} />
-      </div>
+      {/* Threat Panel */}
+      {selectedNode && (
+        <ThreatPanel nodeId={selectedNode} onClose={() => setSelectedNode(null)} />
+      )}
 
-      {/* Tube Map */}
-      <TubeMap status={status} flow={flow} />
-
-      {/* Settings Modal */}
-      <SettingsModal
-        open={showSettings}
-        onClose={() => setShowSettings(false)}
-        items={monthCosts.fixed_items || []}
-        onSave={refreshData}
-      />
+      {/* CSS for pulse animation */}
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
+      `}</style>
     </div>
   );
 }
