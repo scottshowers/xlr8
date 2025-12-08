@@ -1,18 +1,11 @@
 /**
  * UserManagement - Admin component for managing users
  * 
- * Features:
- * - List all users
- * - Create new users
- * - Edit user roles
- * - Assign users to projects
- * - Delete users
+ * Reads directly from Supabase profiles table
  */
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-
-const API_URL = import.meta.env.VITE_API_URL || '';
 
 // Styles
 const styles = {
@@ -58,7 +51,7 @@ const styles = {
     borderBottom: '2px solid #e1e8ed',
     fontWeight: '600',
     color: '#2a3441',
-    fontSize: '0.85rem',
+    fontSize: '0.8rem',
   },
   td: {
     padding: '1rem',
@@ -76,29 +69,23 @@ const styles = {
   }),
   actionButton: {
     padding: '0.375rem 0.75rem',
-    background: 'transparent',
-    border: '1px solid #e1e8ed',
-    borderRadius: '6px',
-    color: '#5f6c7b',
     fontSize: '0.8rem',
+    border: 'none',
+    borderRadius: '6px',
     cursor: 'pointer',
     marginRight: '0.5rem',
   },
+  editButton: {
+    background: '#e0e7ff',
+    color: '#4338ca',
+  },
   deleteButton: {
-    padding: '0.375rem 0.75rem',
     background: '#fee2e2',
-    border: '1px solid #fecaca',
-    borderRadius: '6px',
     color: '#dc2626',
-    fontSize: '0.8rem',
-    cursor: 'pointer',
   },
   modal: {
     position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    inset: 0,
     background: 'rgba(0,0,0,0.5)',
     display: 'flex',
     alignItems: 'center',
@@ -109,9 +96,9 @@ const styles = {
     background: 'white',
     borderRadius: '16px',
     padding: '2rem',
-    maxWidth: '500px',
-    width: '90%',
-    maxHeight: '80vh',
+    width: '100%',
+    maxWidth: '450px',
+    maxHeight: '90vh',
     overflow: 'auto',
   },
   modalTitle: {
@@ -125,55 +112,63 @@ const styles = {
   },
   label: {
     display: 'block',
-    marginBottom: '0.5rem',
-    fontWeight: '500',
-    color: '#2a3441',
-    fontSize: '0.9rem',
+    fontSize: '0.8rem',
+    fontWeight: '600',
+    color: '#5f6c7b',
+    marginBottom: '0.375rem',
   },
   input: {
     width: '100%',
     padding: '0.75rem',
+    fontSize: '0.95rem',
     border: '1px solid #e1e8ed',
     borderRadius: '8px',
-    fontSize: '1rem',
     boxSizing: 'border-box',
   },
   select: {
     width: '100%',
     padding: '0.75rem',
+    fontSize: '0.95rem',
     border: '1px solid #e1e8ed',
     borderRadius: '8px',
-    fontSize: '1rem',
     background: 'white',
+    boxSizing: 'border-box',
   },
   modalButtons: {
     display: 'flex',
     gap: '0.75rem',
     marginTop: '1.5rem',
-    justifyContent: 'flex-end',
   },
   cancelButton: {
-    padding: '0.75rem 1.25rem',
-    background: 'transparent',
+    flex: 1,
+    padding: '0.75rem',
+    fontSize: '0.95rem',
+    fontWeight: '600',
     border: '1px solid #e1e8ed',
     borderRadius: '8px',
+    background: 'white',
     color: '#5f6c7b',
-    fontWeight: '600',
     cursor: 'pointer',
   },
   submitButton: {
-    padding: '0.75rem 1.25rem',
-    background: '#83b16d',
+    flex: 1,
+    padding: '0.75rem',
+    fontSize: '0.95rem',
+    fontWeight: '600',
     border: 'none',
     borderRadius: '8px',
+    background: '#83b16d',
     color: 'white',
-    fontWeight: '600',
     cursor: 'pointer',
   },
-  loading: {
-    textAlign: 'center',
-    padding: '3rem',
-    color: '#5f6c7b',
+  error: {
+    background: '#fef2f2',
+    border: '1px solid #fecaca',
+    color: '#dc2626',
+    padding: '0.75rem',
+    borderRadius: '8px',
+    marginBottom: '1rem',
+    fontSize: '0.875rem',
   },
   empty: {
     textAlign: 'center',
@@ -183,7 +178,7 @@ const styles = {
 };
 
 export default function UserManagement() {
-  const { getAuthHeader, user: currentUser } = useAuth();
+  const { user: currentUser, supabase, isAdmin } = useAuth();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -195,32 +190,37 @@ export default function UserManagement() {
     phone: '',
     role: 'customer',
     project_id: '',
-    mfa_method: 'totp',  // 'totp' or 'sms'
+    mfa_method: 'totp',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
-  // Fetch users
+  // Fetch users directly from Supabase
   useEffect(() => {
     const fetchUsers = async () => {
+      if (!supabase || !isAdmin) {
+        setLoading(false);
+        return;
+      }
+
       try {
-        const response = await fetch(`${API_URL}/api/auth/users`, {
-          headers: getAuthHeader(),
-        });
-        
-        if (response.ok) {
-          const data = await response.json();
-          setUsers(data);
-        }
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+        setUsers(data || []);
       } catch (err) {
         console.error('Failed to fetch users:', err);
+        setError(err.message);
       } finally {
         setLoading(false);
       }
     };
 
     fetchUsers();
-  }, [getAuthHeader]);
+  }, [supabase, isAdmin]);
 
   // Open modal for new user
   const handleAddUser = () => {
@@ -254,75 +254,48 @@ export default function UserManagement() {
     setShowModal(true);
   };
 
-  // Save user
+  // Save user (create or update)
   const handleSave = async () => {
+    if (!supabase) return;
+    
     setSaving(true);
     setError(null);
 
     try {
       if (editingUser) {
-        // Update existing user
-        const response = await fetch(`${API_URL}/api/auth/users/${editingUser.id}`, {
-          method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-            ...getAuthHeader(),
-          },
-          body: JSON.stringify({
+        // Update existing user profile
+        const { error: updateError } = await supabase
+          .from('profiles')
+          .update({
             full_name: formData.full_name,
             phone: formData.phone || null,
             role: formData.role,
             project_id: formData.project_id || null,
             mfa_method: formData.mfa_method,
-          }),
-        });
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', editingUser.id);
 
-        if (!response.ok) {
-          const data = await response.json();
-          throw new Error(data.detail || 'Failed to update user');
-        }
+        if (updateError) throw updateError;
 
         // Update local state
         setUsers(prev => prev.map(u => 
           u.id === editingUser.id 
-            ? { ...u, full_name: formData.full_name, phone: formData.phone, role: formData.role, project_id: formData.project_id, mfa_method: formData.mfa_method }
+            ? { ...u, ...formData, updated_at: new Date().toISOString() }
             : u
         ));
       } else {
-        // Create new user
-        if (!formData.email || !formData.password) {
-          throw new Error('Email and password are required');
-        }
-
-        const response = await fetch(`${API_URL}/api/auth/users`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...getAuthHeader(),
-          },
-          body: JSON.stringify(formData),
-        });
-
-        if (!response.ok) {
-          const data = await response.json();
-          throw new Error(data.detail || 'Failed to create user');
-        }
-
-        const result = await response.json();
-        
-        // Add to local state
-        setUsers(prev => [...prev, {
-          id: result.user_id,
-          email: formData.email,
-          full_name: formData.full_name,
-          role: formData.role,
-          project_id: formData.project_id || null,
-        }]);
+        // Create new user - this requires admin API
+        // For now, show a message that users should be created via Supabase dashboard
+        setError('To create new users, use the Supabase Dashboard → Authentication → Users → Add user. Then they will appear here after logging in.');
+        setSaving(false);
+        return;
       }
 
       setShowModal(false);
     } catch (err) {
-      setError(err.message);
+      console.error('Save error:', err);
+      setError(err.message || 'Failed to save user');
     } finally {
       setSaving(false);
     }
@@ -330,53 +303,76 @@ export default function UserManagement() {
 
   // Delete user
   const handleDelete = async (userId) => {
-    if (!confirm('Are you sure you want to delete this user?')) return;
+    if (!supabase) return;
+    if (userId === currentUser?.id) {
+      setError("You can't delete yourself");
+      return;
+    }
+
+    if (!window.confirm('Are you sure you want to delete this user?')) {
+      return;
+    }
 
     try {
-      const response = await fetch(`${API_URL}/api/auth/users/${userId}`, {
-        method: 'DELETE',
-        headers: getAuthHeader(),
-      });
+      // Note: Deleting from profiles only - actual auth user deletion requires admin API
+      const { error: deleteError } = await supabase
+        .from('profiles')
+        .delete()
+        .eq('id', userId);
 
-      if (response.ok) {
-        setUsers(prev => prev.filter(u => u.id !== userId));
-      }
+      if (deleteError) throw deleteError;
+
+      setUsers(prev => prev.filter(u => u.id !== userId));
     } catch (err) {
-      console.error('Failed to delete user:', err);
+      console.error('Delete error:', err);
+      setError(err.message || 'Failed to delete user');
     }
   };
 
+  if (!isAdmin) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.error}>Access denied. Admin role required.</div>
+      </div>
+    );
+  }
+
   if (loading) {
-    return <div style={styles.loading}>Loading users...</div>;
+    return (
+      <div style={styles.container}>
+        <div style={styles.empty}>Loading users...</div>
+      </div>
+    );
   }
 
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <h3 style={styles.title}>User Management</h3>
+        <h2 style={styles.title}>User Management</h2>
         <button style={styles.addButton} onClick={handleAddUser}>
-          <span>+</span> Add User
+          + Add User
         </button>
       </div>
 
-      {users.length === 0 ? (
-        <div style={styles.empty}>
-          <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>👥</div>
-          <p>No users found. Click "Add User" to create the first one.</p>
-        </div>
-      ) : (
-        <table style={styles.table}>
-          <thead>
+      {error && <div style={styles.error}>{error}</div>}
+
+      <table style={styles.table}>
+        <thead>
+          <tr>
+            <th style={styles.th}>Name</th>
+            <th style={styles.th}>Email</th>
+            <th style={styles.th}>Role</th>
+            <th style={styles.th}>MFA</th>
+            <th style={styles.th}>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {users.length === 0 ? (
             <tr>
-              <th style={styles.th}>Name</th>
-              <th style={styles.th}>Email</th>
-              <th style={styles.th}>Role</th>
-              <th style={styles.th}>MFA</th>
-              <th style={styles.th}>Actions</th>
+              <td colSpan={5} style={styles.empty}>No users found</td>
             </tr>
-          </thead>
-          <tbody>
-            {users.map(user => (
+          ) : (
+            users.map(user => (
               <tr key={user.id}>
                 <td style={styles.td}>{user.full_name || '—'}</td>
                 <td style={styles.td}>{user.email}</td>
@@ -389,15 +385,15 @@ export default function UserManagement() {
                   {user.mfa_method === 'sms' ? '💬 SMS' : '📱 App'}
                 </td>
                 <td style={styles.td}>
-                  <button 
-                    style={styles.actionButton}
+                  <button
+                    style={{ ...styles.actionButton, ...styles.editButton }}
                     onClick={() => handleEditUser(user)}
                   >
                     Edit
                   </button>
                   {user.id !== currentUser?.id && (
-                    <button 
-                      style={styles.deleteButton}
+                    <button
+                      style={{ ...styles.actionButton, ...styles.deleteButton }}
                       onClick={() => handleDelete(user.id)}
                     >
                       Delete
@@ -405,37 +401,26 @@ export default function UserManagement() {
                   )}
                 </td>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+            ))
+          )}
+        </tbody>
+      </table>
 
       {/* Modal */}
       {showModal && (
         <div style={styles.modal} onClick={() => setShowModal(false)}>
           <div style={styles.modalContent} onClick={e => e.stopPropagation()}>
             <h3 style={styles.modalTitle}>
-              {editingUser ? 'Edit User' : 'Add New User'}
+              {editingUser ? 'Edit User' : 'Add User'}
             </h3>
 
-            {error && (
-              <div style={{ 
-                padding: '0.75rem', 
-                background: '#fee2e2', 
-                color: '#dc2626', 
-                borderRadius: '8px',
-                marginBottom: '1rem',
-                fontSize: '0.9rem',
-              }}>
-                {error}
-              </div>
-            )}
+            {error && <div style={styles.error}>{error}</div>}
 
             <div style={styles.formGroup}>
               <label style={styles.label}>Email</label>
               <input
                 type="email"
-                style={styles.input}
+                style={{ ...styles.input, background: editingUser ? '#f5f5f5' : 'white' }}
                 value={formData.email}
                 onChange={e => setFormData(prev => ({ ...prev, email: e.target.value }))}
                 disabled={!!editingUser}
@@ -505,9 +490,6 @@ export default function UserManagement() {
                 onChange={e => setFormData(prev => ({ ...prev, phone: e.target.value }))}
                 placeholder="+1 555-123-4567"
               />
-              <small style={{ color: '#5f6c7b', fontSize: '0.8rem' }}>
-                Required if using SMS for two-factor authentication
-              </small>
             </div>
 
             <div style={styles.formGroup}>
@@ -520,12 +502,6 @@ export default function UserManagement() {
                 <option value="totp">📱 Authenticator App (TOTP)</option>
                 <option value="sms">💬 SMS Text Message</option>
               </select>
-              <small style={{ color: '#5f6c7b', fontSize: '0.8rem' }}>
-                {formData.mfa_method === 'totp' 
-                  ? 'Uses Google Authenticator, Authy, or similar apps'
-                  : 'Sends a code via text message (requires phone number)'
-                }
-              </small>
             </div>
 
             <div style={styles.modalButtons}>
