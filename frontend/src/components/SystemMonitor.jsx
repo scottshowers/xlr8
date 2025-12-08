@@ -624,19 +624,19 @@ function SystemTopology({ flow, onNodeClick, selectedNode, T, fullWidth = false,
 
   const handleMouseUp = () => setIsPanning(false);
 
-  // Node positions - adjusted to prevent overlap with legend
+  // Node positions - adjusted to prevent overlap with legend and connection lines
   const nodes = {
-    user: { x: 60, y: 100, icon: '◉', label: 'USER', color: T.blue },
-    api: { x: 180, y: 100, icon: '⬡', label: 'API', color: T.blue, encrypted: true, threat: threatData?.api },
-    supabase: { x: 80, y: 180, icon: '◈', label: 'AUTH', color: T.purple, encrypted: true, threat: threatData?.supabase },
-    duckdb: { x: 340, y: 50, icon: '▣', label: 'STRUCT', color: T.purple, encrypted: true, threat: threatData?.duckdb },
-    rag: { x: 340, y: 120, icon: '◎', label: 'RAG', color: T.orange, threat: threatData?.rag },
-    chromadb: { x: 340, y: 190, icon: '◇', label: 'VECTOR', color: T.cyan, threat: threatData?.chromadb },
-    router: { x: 480, y: 120, icon: '⬢', label: 'ROUTER', color: T.yellow },
-    claude: { x: 620, y: 65, icon: '●', label: 'CLAUDE', color: T.cyan, threat: threatData?.claude },
-    llama: { x: 580, y: 175, icon: '○', label: 'LLAMA', color: T.green },
-    mistral: { x: 650, y: 175, icon: '○', label: 'MISTRAL', color: T.green },
-    deepseek: { x: 720, y: 175, icon: '○', label: 'DEEP', color: T.green },
+    user: { x: 50, y: 130, icon: '◉', label: 'USER', color: T.blue },
+    api: { x: 160, y: 130, icon: '⬡', label: 'API', color: T.blue, encrypted: true, threat: threatData?.api },
+    supabase: { x: 70, y: 210, icon: '◈', label: 'AUTH', color: T.purple, encrypted: true, threat: threatData?.supabase },
+    duckdb: { x: 280, y: 45, icon: '▣', label: 'STRUCT', color: T.purple, encrypted: true, threat: threatData?.duckdb },
+    rag: { x: 280, y: 130, icon: '◎', label: 'RAG', color: T.orange, threat: threatData?.rag },
+    chromadb: { x: 280, y: 210, icon: '◇', label: 'VECTOR', color: T.cyan, threat: threatData?.chromadb },
+    router: { x: 420, y: 130, icon: '⬢', label: 'ROUTER', color: T.yellow },
+    claude: { x: 560, y: 70, icon: '●', label: 'CLAUDE', color: T.cyan, threat: threatData?.claude },
+    llama: { x: 520, y: 185, icon: '○', label: 'LLAMA', color: T.green },
+    mistral: { x: 590, y: 185, icon: '○', label: 'MISTRAL', color: T.green },
+    deepseek: { x: 660, y: 185, icon: '○', label: 'DEEP', color: T.green },
   };
 
   const connections = [
@@ -694,16 +694,16 @@ function SystemTopology({ flow, onNodeClick, selectedNode, T, fullWidth = false,
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
       >
-        <svg width="100%" height="260" viewBox="0 0 780 260"
+        <svg width="100%" height="280" viewBox="0 0 720 280"
           style={{ transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`, transformOrigin: 'center center', transition: isPanning ? 'none' : 'transform 0.1s ease-out' }}
         >
           {/* Cloud zone - top right */}
-          <rect x="550" y="30" width="220" height="70" rx={6} fill={T.cyan} opacity={0.08} stroke={T.cyan} strokeWidth={1} strokeOpacity={0.3} />
-          <text x="560" y={45} fontSize={8} fill={T.cyanDim} style={{ fontFamily: 'monospace' }}>CLOUD ZONE</text>
+          <rect x="490" y="35" width="180" height="75" rx={6} fill={T.cyan} opacity={0.08} stroke={T.cyan} strokeWidth={1} strokeOpacity={0.3} />
+          <text x="500" y={50} fontSize={8} fill={T.cyanDim} style={{ fontFamily: 'monospace' }}>CLOUD ZONE</text>
           
           {/* Local zone - bottom right */}
-          <rect x="550" y="120" width="220" height="90" rx={6} fill={T.green} opacity={0.08} stroke={T.green} strokeWidth={1} strokeOpacity={0.3} />
-          <text x="560" y={135} fontSize={8} fill={T.greenDim} style={{ fontFamily: 'monospace' }}>LOCAL ZONE</text>
+          <rect x="490" y="145" width="200" height="80" rx={6} fill={T.green} opacity={0.08} stroke={T.green} strokeWidth={1} strokeOpacity={0.3} />
+          <text x="500" y={160} fontSize={8} fill={T.greenDim} style={{ fontFamily: 'monospace' }}>LOCAL ZONE</text>
           
           {connections.map((conn, i) => {
             const from = nodes[conn.from];
@@ -721,13 +721,13 @@ function SystemTopology({ flow, onNodeClick, selectedNode, T, fullWidth = false,
           {Object.entries(nodes).map(([id, data]) => <Node key={id} id={id} data={data} />)}
           
           {/* Legend - positioned at bottom with proper spacing */}
-          <g transform="translate(20, 240)">
+          <g transform="translate(20, 255)">
             <circle cx={5} cy={0} r={4} fill={T.green} /><text x={14} y={3} fontSize={7} fill={T.textDim}>SECURE</text>
             <circle cx={70} cy={0} r={4} fill={T.yellow} /><text x={79} y={3} fontSize={7} fill={T.textDim}>REVIEW</text>
             <circle cx={130} cy={0} r={4} fill={T.red} /><text x={139} y={3} fontSize={7} fill={T.textDim}>ACTION</text>
             <g transform="translate(190, -3)"><circle r={5} fill="none" stroke={T.yellow} strokeWidth={1.5} strokeDasharray="2,2" /></g>
             <text x={200} y={3} fontSize={7} fill={T.textDim}>THREAT</text>
-            <text x={520} y={3} fontSize={7} fill={T.textDim} textAnchor="end">SCROLL TO ZOOM • DRAG TO PAN</text>
+            <text x={460} y={3} fontSize={7} fill={T.textDim} textAnchor="end">SCROLL TO ZOOM • DRAG TO PAN</text>
           </g>
         </svg>
       </div>
