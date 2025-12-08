@@ -118,11 +118,14 @@ class LocalLLMClient:
             logger.warning(f"[HYBRID] LLM not reachable: {e}")
             return False
     
-    def extract(self, text: str, prompt: str) -> Tuple[Optional[str], bool]:
+    def extract(self, text: str, prompt: str, operation: str = "scan", project_id: str = None) -> Tuple[Optional[str], bool]:
         """Call local LLM for extraction"""
         if not self.ollama_url:
             logger.warning("[HYBRID] No LLM URL configured, skipping local extraction")
             return None, False
+        
+        import time
+        start_time = time.time()
         
         try:
             url = f"{self.ollama_url}/api/generate"
@@ -151,6 +154,21 @@ class LocalLLMClient:
             
             result = response.json().get("response", "")
             logger.info(f"[HYBRID] Local LLM response: {len(result)} chars")
+            
+            # Track cost
+            duration_ms = int((time.time() - start_time) * 1000)
+            try:
+                from backend.utils.cost_tracker import log_cost, CostService
+                log_cost(
+                    service=CostService.RUNPOD,
+                    operation=operation,
+                    duration_ms=duration_ms,
+                    project_id=project_id,
+                    metadata={"model": self.model, "prompt_len": len(prompt), "response_len": len(result)}
+                )
+            except Exception as cost_err:
+                logger.debug(f"Cost tracking failed: {cost_err}")
+            
             return result, True
             
         except requests.Timeout:
