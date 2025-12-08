@@ -5,6 +5,8 @@
  * - System Monitor: System health and status
  * - Personas: AI persona management
  * - Security: Security settings and toggles
+ * - Users: User management (admin only)
+ * - Permissions: Role permission grid (admin only)
  * - Settings: System configuration
  */
 
@@ -12,14 +14,9 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import PersonaManagement from '../components/PersonaManagement';
 import SecurityTab from '../components/SecurityTab';
-
-// Tab definitions
-const TABS = [
-  { id: 'system', label: 'System Monitor', icon: '📊', link: '/system' },
-  { id: 'personas', label: 'Personas', icon: '🎭' },
-  { id: 'security', label: 'Security', icon: '🔒' },
-  { id: 'settings', label: 'Settings', icon: '⚙️' },
-];
+import RolePermissions from '../components/RolePermissions';
+import UserManagement from '../components/UserManagement';
+import { useAuth, Permissions } from '../context/AuthContext';
 
 // ==================== SETTINGS TAB ====================
 function SettingsTab() {
@@ -36,6 +33,24 @@ function SettingsTab() {
 export default function AdminPage() {
   const [activeTab, setActiveTab] = useState('settings');
   const navigate = useNavigate();
+  const { hasPermission, isAdmin } = useAuth();
+
+  // Tab definitions with permissions
+  const ALL_TABS = [
+    { id: 'system', label: 'System Monitor', icon: '📊', link: '/system', permission: Permissions.OPS_CENTER },
+    { id: 'personas', label: 'Personas', icon: '🎭', permission: null },
+    { id: 'security', label: 'Security', icon: '🔒', permission: Permissions.SECURITY_SETTINGS },
+    { id: 'users', label: 'Users', icon: '👥', permission: Permissions.USER_MANAGEMENT },
+    { id: 'permissions', label: 'Permissions', icon: '🛡️', permission: Permissions.ROLE_PERMISSIONS },
+    { id: 'settings', label: 'Settings', icon: '⚙️', permission: null },
+  ];
+
+  // Filter tabs based on permissions
+  const visibleTabs = ALL_TABS.filter(tab => {
+    if (!tab.permission) return true;
+    if (isAdmin) return true;
+    return hasPermission(tab.permission);
+  });
 
   const handleTabClick = (tab) => {
     if (tab.link) {
@@ -59,6 +74,8 @@ export default function AdminPage() {
     switch (activeTab) {
       case 'personas': return <PersonaManagement />;
       case 'security': return <SecurityTab />;
+      case 'users': return <UserManagement />;
+      case 'permissions': return <RolePermissions />;
       case 'settings': return <SettingsTab />;
       default: return null;
     }
@@ -73,7 +90,7 @@ export default function AdminPage() {
 
       <div style={styles.card}>
         <div style={styles.tabs}>
-          {TABS.map(tab => (
+          {visibleTabs.map(tab => (
             <button key={tab.id} style={styles.tab(activeTab === tab.id)} onClick={() => handleTabClick(tab)}>
               <span>{tab.icon}</span>
               {tab.label}
