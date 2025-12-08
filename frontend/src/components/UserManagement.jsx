@@ -6,6 +6,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import api from '../services/api';
 
 // Styles
 const styles = {
@@ -178,7 +179,7 @@ const styles = {
 };
 
 export default function UserManagement() {
-  const { user: currentUser, supabase, isAdmin } = useAuth();
+  const { user: currentUser, isAdmin } = useAuth();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -195,32 +196,27 @@ export default function UserManagement() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
-  // Fetch users directly from Supabase
+  // Fetch users from backend API
   useEffect(() => {
     const fetchUsers = async () => {
-      if (!supabase || !isAdmin) {
+      if (!isAdmin) {
         setLoading(false);
         return;
       }
 
       try {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (error) throw error;
-        setUsers(data || []);
+        const response = await api.get('/api/auth/users');
+        setUsers(response.data || []);
       } catch (err) {
         console.error('Failed to fetch users:', err);
-        setError(err.message);
+        setError(err.response?.data?.detail || 'Failed to load users');
       } finally {
         setLoading(false);
       }
     };
 
     fetchUsers();
-  }, [supabase, isAdmin]);
+  }, [isAdmin]);
 
   // Open modal for new user
   const handleAddUser = () => {
@@ -256,46 +252,66 @@ export default function UserManagement() {
 
   // Save user (create or update)
   const handleSave = async () => {
-    if (!supabase) return;
-    
     setSaving(true);
     setError(null);
 
     try {
       if (editingUser) {
-        // Update existing user profile
-        const { error: updateError } = await supabase
-          .from('profiles')
-          .update({
-            full_name: formData.full_name,
-            phone: formData.phone || null,
-            role: formData.role,
-            project_id: formData.project_id || null,
-            mfa_method: formData.mfa_method,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', editingUser.id);
+        // Update existing user via backend API
+        const response = await api.patch(`/api/auth/users/${editingUser.id}`, {
+          full_name: formData.full_name,
+          phone: formData.phone || null,
+          role: formData.role,
+          project_id: formData.project_id || null,
+          mfa_method: formData.mfa_method,
+        });
 
-        if (updateError) throw updateError;
-
-        // Update local state
-        setUsers(prev => prev.map(u => 
-          u.id === editingUser.id 
-            ? { ...u, ...formData, updated_at: new Date().toISOString() }
-            : u
-        ));
+        if (response.data?.status === 'updated') {
+          // Update local state
+          setUsers(prev => prev.map(u => 
+            u.id === editingUser.id 
+              ? { ...u, ...formData, updated_at: new Date().toISOString() }
+              : u
+          ));
+        }
       } else {
-        // Create new user - this requires admin API
-        // For now, show a message that users should be created via Supabase dashboard
-        setError('To create new users, use the Supabase Dashboard → Authentication → Users → Add user. Then they will appear here after logging in.');
-        setSaving(false);
-        return;
+        // Create new user via backend API
+        if (!formData.email || !formData.password) {
+          setError('Email and password are required');
+          setSaving(false);
+          return;
+        }
+
+        const response = await api.post('/api/auth/users', {
+          email: formData.email,
+          password: formData.password,
+          full_name: formData.full_name,
+          phone: formData.phone || null,
+          role: formData.role,
+          project_id: formData.project_id || null,
+          mfa_method: formData.mfa_method,
+        });
+
+        if (response.data?.status === 'created') {
+          // Add new user to local state
+          setUsers(prev => [...prev, {
+            id: response.data.user_id,
+            email: formData.email,
+            full_name: formData.full_name,
+            phone: formData.phone,
+            role: formData.role,
+            project_id: formData.project_id,
+            mfa_method: formData.mfa_method,
+            created_at: new Date().toISOString(),
+          }]);
+        }
       }
 
       setShowModal(false);
     } catch (err) {
       console.error('Save error:', err);
-      setError(err.message || 'Failed to save user');
+      const message = err.response?.data?.detail || err.message || 'Failed to save user';
+      setError(message);
     } finally {
       setSaving(false);
     }
@@ -303,29 +319,22 @@ export default function UserManagement() {
 
   // Delete user
   const handleDelete = async (userId) => {
-    if (!supabase) return;
     if (userId === currentUser?.id) {
       setError("You can't delete yourself");
       return;
     }
 
-    if (!window.confirm('Are you sure you want to delete this user?')) {
+    if (!window.confirm('Are you sure you want to delete this user? This will remove them from the system.')) {
       return;
     }
 
     try {
-      // Note: Deleting from profiles only - actual auth user deletion requires admin API
-      const { error: deleteError } = await supabase
-        .from('profiles')
-        .delete()
-        .eq('id', userId);
-
-      if (deleteError) throw deleteError;
-
+      await api.delete(`/api/auth/users/${userId}`);
       setUsers(prev => prev.filter(u => u.id !== userId));
     } catch (err) {
       console.error('Delete error:', err);
-      setError(err.message || 'Failed to delete user');
+      const message = err.response?.data?.detail || err.message || 'Failed to delete user';
+      setError(message);
     }
   };
 
