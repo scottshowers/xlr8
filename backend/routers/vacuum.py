@@ -94,11 +94,11 @@ class PIIRedactor:
 def get_supabase():
     """Get Supabase client"""
     try:
-        from utils.supabase_client import get_supabase as _get_supabase
+        from utils.database.supabase_client import get_supabase as _get_supabase
         return _get_supabase()
     except ImportError:
         try:
-            from backend.utils.supabase_client import get_supabase as _get_supabase
+            from backend.utils.database.supabase_client import get_supabase as _get_supabase
             return _get_supabase()
         except ImportError:
             logger.warning("Supabase client not available")
