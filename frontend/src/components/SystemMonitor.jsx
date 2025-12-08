@@ -1,6 +1,6 @@
 /**
- * SystemMonitor - Real-time Data Flow Visualization
- * Light theme matching app design
+ * SystemMonitor - Real-time Data Flow & Cost Tracking Visualization
+ * Updated: December 2025 - Added real cost tracking from Supabase
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -41,9 +41,10 @@ function StatusLight({ status, size = 12 }) {
   );
 }
 
-function MetricCard({ icon, label, value, subValue, color }) {
+function MetricCard({ icon, label, value, subValue, color, onClick }) {
   return (
     <div
+      onClick={onClick}
       style={{
         background: COLORS.cardBg,
         borderRadius: 12,
@@ -51,7 +52,11 @@ function MetricCard({ icon, label, value, subValue, color }) {
         border: '1px solid ' + COLORS.border,
         boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
         minWidth: 130,
+        cursor: onClick ? 'pointer' : 'default',
+        transition: 'transform 0.1s, box-shadow 0.1s',
       }}
+      onMouseEnter={(e) => onClick && (e.currentTarget.style.transform = 'translateY(-2px)')}
+      onMouseLeave={(e) => onClick && (e.currentTarget.style.transform = 'translateY(0)')}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
         <span style={{ fontSize: '1.1rem' }}>{icon}</span>
@@ -69,13 +74,142 @@ function MetricCard({ icon, label, value, subValue, color }) {
   );
 }
 
+function CostBreakdownCard({ costs, loading }) {
+  if (loading) {
+    return (
+      <div style={{
+        background: COLORS.cardBg,
+        borderRadius: 12,
+        padding: '1rem',
+        border: '1px solid ' + COLORS.border,
+        minWidth: 200,
+      }}>
+        <div style={{ color: COLORS.textMuted, fontSize: '0.85rem' }}>Loading costs...</div>
+      </div>
+    );
+  }
+
+  const serviceColors = {
+    claude: COLORS.cyan,
+    runpod: COLORS.orange,
+    textract: COLORS.purple,
+  };
+
+  const serviceIcons = {
+    claude: '🤖',
+    runpod: '⚡',
+    textract: '📄',
+  };
+
+  return (
+    <div style={{
+      background: COLORS.cardBg,
+      borderRadius: 12,
+      padding: '1rem',
+      border: '1px solid ' + COLORS.border,
+      boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+      minWidth: 220,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+        <span style={{ fontSize: '1.1rem' }}>📊</span>
+        <span style={{ color: COLORS.textMuted, fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase' }}>Cost Breakdown</span>
+      </div>
+      
+      <div style={{ fontSize: '1.5rem', fontWeight: 700, color: COLORS.grassGreen, marginBottom: '0.75rem' }}>
+        ${(costs.total_cost || 0).toFixed(2)}
+        <span style={{ fontSize: '0.7rem', color: COLORS.textMuted, fontWeight: 400, marginLeft: '0.5rem' }}>
+          {costs.days || 30} days
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+        {Object.entries(costs.by_service || {}).map(([service, amount]) => (
+          <div key={service} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.75rem', color: COLORS.textMuted }}>
+              {serviceIcons[service] || '💵'} {service}
+            </span>
+            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: serviceColors[service] || COLORS.text }}>
+              ${(amount || 0).toFixed(4)}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {costs.record_count > 0 && (
+        <div style={{ fontSize: '0.65rem', color: COLORS.textMuted, marginTop: '0.5rem', borderTop: '1px solid ' + COLORS.border, paddingTop: '0.5rem' }}>
+          {costs.record_count} API calls tracked
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CostActivityPanel({ recentCosts, loading }) {
+  if (loading) {
+    return <div style={{ color: COLORS.textMuted, fontSize: '0.85rem', padding: '1rem' }}>Loading...</div>;
+  }
+
+  if (!recentCosts || recentCosts.length === 0) {
+    return (
+      <div style={{ color: COLORS.textMuted, fontSize: '0.85rem', textAlign: 'center', padding: '2rem 0' }}>
+        No cost activity yet. Use the app to generate tracked calls.
+      </div>
+    );
+  }
+
+  const serviceColors = {
+    claude: COLORS.cyan,
+    runpod: COLORS.orange,
+    textract: COLORS.purple,
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+      {recentCosts.slice(0, 15).map((item, idx) => (
+        <div
+          key={item.id || idx}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            padding: '0.4rem 0',
+            borderBottom: '1px solid ' + COLORS.border,
+          }}
+        >
+          <div
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: serviceColors[item.service] || COLORS.blue,
+              flexShrink: 0,
+            }}
+          />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: '0.75rem', color: COLORS.text, display: 'flex', justifyContent: 'space-between' }}>
+              <span>{item.service}/{item.operation}</span>
+              <span style={{ color: COLORS.grassGreen, fontWeight: 600 }}>${(item.estimated_cost || 0).toFixed(5)}</span>
+            </div>
+            <div style={{ fontSize: '0.6rem', color: COLORS.textMuted }}>
+              {item.tokens_in ? `${item.tokens_in} in / ${item.tokens_out} out` : ''}
+              {item.duration_ms ? `${item.duration_ms}ms` : ''}
+              {item.pages ? `${item.pages} pages` : ''}
+              {' • '}
+              {new Date(item.created_at).toLocaleTimeString()}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ActivityItem({ time, type, message }) {
   const typeColors = {
     upload: COLORS.blue,
     query: COLORS.purple,
     claude: COLORS.cyan,
-    deepseek: '#4f46e5',
-    mistral: '#ea580c',
+    runpod: COLORS.orange,
     rag: COLORS.orange,
     auth: COLORS.pink,
     error: COLORS.red,
@@ -166,15 +300,18 @@ export default function SystemMonitor() {
     totalRows: 0,
     uptime: '0h 0m',
     latency: 0,
-    monthlyCost: 0,
   });
 
-  // Cost rates (approximate per call)
-  const COST_RATES = {
-    claude: 0.015,      // ~$0.015 per call average
-    deepseek: 0.002,    // ~$0.002 per call
-    mistral: 0.004,     // ~$0.004 per call
-  };
+  const [costs, setCosts] = useState({
+    total_cost: 0,
+    by_service: {},
+    by_operation: {},
+    record_count: 0,
+    days: 30,
+  });
+  const [recentCosts, setRecentCosts] = useState([]);
+  const [costsLoading, setCostsLoading] = useState(true);
+  const [showCostDetails, setShowCostDetails] = useState(false);
 
   const [componentStatus, setComponentStatus] = useState({
     frontend: 'healthy',
@@ -184,8 +321,7 @@ export default function SystemMonitor() {
     chromadb: 'healthy',
     rag: 'healthy',
     claude: 'healthy',
-    deepseek: 'healthy',
-    mistral: 'healthy',
+    runpod: 'healthy',
   });
 
   const [activity, setActivity] = useState([]);
@@ -196,12 +332,35 @@ export default function SystemMonitor() {
     apiToRag: false,
     ragToChroma: false,
     ragToClaude: false,
-    ragToDeepseek: false,
-    ragToMistral: false,
+    ragToRunpod: false,
   });
 
   const requestCountRef = useRef(0);
   const startTimeRef = useRef(Date.now());
+
+  // Fetch real cost data
+  useEffect(function fetchCostsEffect() {
+    const fetchCosts = async function() {
+      try {
+        setCostsLoading(true);
+        const [summaryRes, recentRes] = await Promise.all([
+          api.get('/status/costs?days=30').catch(() => ({ data: {} })),
+          api.get('/status/costs/recent?limit=20').catch(() => ({ data: { records: [] } })),
+        ]);
+        
+        setCosts(summaryRes.data || {});
+        setRecentCosts(recentRes.data?.records || []);
+      } catch (err) {
+        console.error('Cost fetch error:', err);
+      } finally {
+        setCostsLoading(false);
+      }
+    };
+
+    fetchCosts();
+    const interval = setInterval(fetchCosts, 30000); // Refresh every 30s
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(function fetchMetricsEffect() {
     const fetchMetrics = async function() {
@@ -249,8 +408,7 @@ export default function SystemMonitor() {
           chromadb: chromaRes.data?.status === 'operational' ? 'healthy' : 'warning',
           rag: 'healthy',
           claude: 'healthy',
-          deepseek: 'healthy',
-          mistral: 'healthy',
+          runpod: 'healthy',
         });
 
         setDataFlowActive(function(prev) {
@@ -279,11 +437,10 @@ export default function SystemMonitor() {
       { type: 'query', message: 'DuckDB: SELECT query executed' },
       { type: 'upload', message: 'File ingested to structured store' },
       { type: 'claude', message: 'Claude: Response generated' },
-      { type: 'deepseek', message: 'DeepSeek: Code analysis complete' },
-      { type: 'mistral', message: 'Mistral: Fast inference returned' },
+      { type: 'runpod', message: 'RunPod: Local LLM inference' },
       { type: 'rag', message: 'RAG: Context retrieved (5 docs)' },
       { type: 'auth', message: 'Supabase: Session validated' },
-      { type: 'success', message: 'Mapping inference completed' },
+      { type: 'success', message: 'Analysis completed' },
     ];
 
     const addActivity = function() {
@@ -298,86 +455,32 @@ export default function SystemMonitor() {
       });
 
       if (randomActivity.type === 'claude') {
-        setDataFlowActive(function(prev) {
-          return { ...prev, ragToClaude: true };
-        });
-        setTimeout(function() {
-          setDataFlowActive(function(prev) {
-            return { ...prev, ragToClaude: false };
-          });
-        }, 800);
-        setMetrics(function(prev) {
-          return { ...prev, llmCalls: prev.llmCalls + 1, monthlyCost: prev.monthlyCost + 0.015 };
-        });
-      } else if (randomActivity.type === 'deepseek') {
-        setDataFlowActive(function(prev) {
-          return { ...prev, ragToDeepseek: true };
-        });
-        setTimeout(function() {
-          setDataFlowActive(function(prev) {
-            return { ...prev, ragToDeepseek: false };
-          });
-        }, 700);
-        setMetrics(function(prev) {
-          return { ...prev, llmCalls: prev.llmCalls + 1, monthlyCost: prev.monthlyCost + 0.002 };
-        });
-      } else if (randomActivity.type === 'mistral') {
-        setDataFlowActive(function(prev) {
-          return { ...prev, ragToMistral: true };
-        });
-        setTimeout(function() {
-          setDataFlowActive(function(prev) {
-            return { ...prev, ragToMistral: false };
-          });
-        }, 500);
-        setMetrics(function(prev) {
-          return { ...prev, llmCalls: prev.llmCalls + 1, monthlyCost: prev.monthlyCost + 0.004 };
-        });
+        setDataFlowActive(prev => ({ ...prev, ragToClaude: true }));
+        setTimeout(() => setDataFlowActive(prev => ({ ...prev, ragToClaude: false })), 800);
+        setMetrics(prev => ({ ...prev, llmCalls: prev.llmCalls + 1 }));
+      } else if (randomActivity.type === 'runpod') {
+        setDataFlowActive(prev => ({ ...prev, ragToRunpod: true }));
+        setTimeout(() => setDataFlowActive(prev => ({ ...prev, ragToRunpod: false })), 700);
+        setMetrics(prev => ({ ...prev, llmCalls: prev.llmCalls + 1 }));
       } else if (randomActivity.type === 'rag') {
-        setDataFlowActive(function(prev) {
-          return { ...prev, apiToRag: true, ragToChroma: true };
-        });
-        setTimeout(function() {
-          setDataFlowActive(function(prev) {
-            return { ...prev, apiToRag: false, ragToChroma: false };
-          });
-        }, 600);
-        setMetrics(function(prev) {
-          return { ...prev, ragQueries: prev.ragQueries + 1 };
-        });
+        setDataFlowActive(prev => ({ ...prev, apiToRag: true, ragToChroma: true }));
+        setTimeout(() => setDataFlowActive(prev => ({ ...prev, apiToRag: false, ragToChroma: false })), 600);
+        setMetrics(prev => ({ ...prev, ragQueries: prev.ragQueries + 1 }));
       } else if (randomActivity.type === 'auth') {
-        setDataFlowActive(function(prev) {
-          return { ...prev, apiToSupabase: true };
-        });
-        setTimeout(function() {
-          setDataFlowActive(function(prev) {
-            return { ...prev, apiToSupabase: false };
-          });
-        }, 400);
+        setDataFlowActive(prev => ({ ...prev, apiToSupabase: true }));
+        setTimeout(() => setDataFlowActive(prev => ({ ...prev, apiToSupabase: false })), 400);
       } else if (randomActivity.type === 'query') {
-        setDataFlowActive(function(prev) {
-          return { ...prev, apiToDuckdb: true };
-        });
-        setTimeout(function() {
-          setDataFlowActive(function(prev) {
-            return { ...prev, apiToDuckdb: false };
-          });
-        }, 500);
-        setMetrics(function(prev) {
-          return { ...prev, dbQueries: prev.dbQueries + 1 };
-        });
+        setDataFlowActive(prev => ({ ...prev, apiToDuckdb: true }));
+        setTimeout(() => setDataFlowActive(prev => ({ ...prev, apiToDuckdb: false })), 500);
+        setMetrics(prev => ({ ...prev, dbQueries: prev.dbQueries + 1 }));
       }
     };
 
     const interval = setInterval(addActivity, 2500);
-    return function() {
-      clearInterval(interval);
-    };
+    return () => clearInterval(interval);
   }, []);
 
-  const allHealthy = Object.values(componentStatus).every(function(s) {
-    return s === 'healthy';
-  });
+  const allHealthy = Object.values(componentStatus).every(s => s === 'healthy');
 
   var getLineStyle = function(active, color) {
     return {
@@ -399,21 +502,23 @@ export default function SystemMonitor() {
           <StatusLight status={allHealthy ? 'healthy' : 'warning'} size={10} />
         </div>
         <p style={{ color: COLORS.textMuted, fontSize: '0.85rem', margin: 0 }}>
-          Real-time data flow across the XLR8 stack
+          Real-time data flow & cost tracking across the XLR8 stack
         </p>
       </div>
 
+      {/* Metrics Row */}
       <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
-        <MetricCard icon="💰" label="Monthly Cost" value={'$' + metrics.monthlyCost.toFixed(2)} subValue={new Date().toLocaleString('default', { month: 'short' }) + ' LLM usage'} color={COLORS.grassGreen} />
+        <CostBreakdownCard costs={costs} loading={costsLoading} />
         <MetricCard icon="📡" label="API Calls" value={metrics.apiRequests} subValue="This session" color={COLORS.blue} />
         <MetricCard icon="🦆" label="DB Queries" value={metrics.dbQueries} subValue="DuckDB" color={COLORS.purple} />
         <MetricCard icon="🔍" label="RAG Queries" value={metrics.ragQueries} subValue="Vector search" color={COLORS.orange} />
-        <MetricCard icon="🤖" label="LLM Calls" value={metrics.llmCalls} subValue="Claude API" color={COLORS.cyan} />
-        <MetricCard icon="⚡" label="Latency" value={metrics.latency + 'ms'} subValue="Avg response" color={COLORS.green} />
+        <MetricCard icon="🤖" label="LLM Calls" value={metrics.llmCalls} subValue="This session" color={COLORS.cyan} />
         <MetricCard icon="📊" label="Data" value={metrics.totalRows.toLocaleString()} subValue={metrics.totalFiles + ' files'} color={COLORS.yellow} />
       </div>
 
+      {/* Main Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: '1.5rem' }}>
+        {/* Architecture Diagram */}
         <div
           style={{
             background: COLORS.archBg,
@@ -427,7 +532,7 @@ export default function SystemMonitor() {
             Tech Stack
           </h2>
 
-          <svg width="100%" height="470" viewBox="0 0 750 470">
+          <svg width="100%" height="400" viewBox="0 0 750 400">
             {/* Frontend to API */}
             <path d="M 100 80 L 200 160" style={getLineStyle(dataFlowActive.frontendToApi, COLORS.blue)} />
             
@@ -446,11 +551,8 @@ export default function SystemMonitor() {
             {/* RAG to Claude */}
             <path d="M 470 200 L 570 200" style={getLineStyle(dataFlowActive.ragToClaude, COLORS.cyan)} />
             
-            {/* RAG to DeepSeek */}
-            <path d="M 470 210 L 570 280" style={getLineStyle(dataFlowActive.ragToDeepseek, COLORS.indigo)} />
-            
-            {/* RAG to Mistral */}
-            <path d="M 470 220 L 570 375" style={getLineStyle(dataFlowActive.ragToMistral, COLORS.amber)} />
+            {/* RAG to RunPod */}
+            <path d="M 470 210 L 570 280" style={getLineStyle(dataFlowActive.ragToRunpod, COLORS.orange)} />
 
             {/* Nodes - Left Column */}
             <SystemNode x={70} y={80} icon="🖥️" label="FRONTEND" status={componentStatus.frontend} color={COLORS.blue} isActive={dataFlowActive.frontendToApi} />
@@ -468,8 +570,7 @@ export default function SystemMonitor() {
             
             {/* Far Right - LLMs */}
             <SystemNode x={620} y={200} icon="🤖" label="CLAUDE" status={componentStatus.claude} color={COLORS.cyan} isActive={dataFlowActive.ragToClaude} />
-            <SystemNode x={620} y={280} icon="🧠" label="DEEPSEEK" status={componentStatus.deepseek} color={COLORS.indigo} isActive={dataFlowActive.ragToDeepseek} />
-            <SystemNode x={620} y={375} icon="⚡" label="MISTRAL" status={componentStatus.mistral} color={COLORS.amber} isActive={dataFlowActive.ragToMistral} />
+            <SystemNode x={620} y={280} icon="⚡" label="RUNPOD" status={componentStatus.runpod} color={COLORS.orange} isActive={dataFlowActive.ragToRunpod} />
 
             {/* Connection Labels */}
             <text x="135" y="110" fontSize="8" fill={COLORS.textMuted}>REST</text>
@@ -478,22 +579,16 @@ export default function SystemMonitor() {
             <text x="315" y="190" fontSize="8" fill={COLORS.textMuted}>Query</text>
             <text x="510" y="130" fontSize="8" fill={COLORS.textMuted}>Vector</text>
             
-            {/* HTTPS indicators */}
-            <text x="155" y="125" fontSize="7" fill="#f59e0b">HTTPS</text>
-            <text x="135" y="260" fontSize="7" fill="#f59e0b">HTTPS</text>
-            <text x="320" y="145" fontSize="7" fill="#f59e0b">HTTPS</text>
-            
             {/* Legend */}
-            <g transform="translate(20, 410)">
+            <g transform="translate(20, 360)">
               <circle cx={8} cy={0} r={6} fill="#fef3c7" stroke="#f59e0b" strokeWidth={1} />
               <text x={8} y={4} textAnchor="middle" fontSize="8">🔒</text>
               <text x={20} y={3} fontSize="8" fill={COLORS.textMuted}>= Encryption at rest</text>
-              <text x={130} y={3} fontSize="8" fill="#f59e0b">HTTPS</text>
-              <text x={160} y={3} fontSize="8" fill={COLORS.textMuted}>= Encryption in transit</text>
             </g>
           </svg>
         </div>
 
+        {/* Right Panel - Cost Activity */}
         <div
           style={{
             background: COLORS.cardBg,
@@ -503,45 +598,48 @@ export default function SystemMonitor() {
             boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
             display: 'flex',
             flexDirection: 'column',
-            maxHeight: 530,
+            maxHeight: 480,
           }}
         >
-          <h2
-            style={{
-              color: COLORS.text,
-              fontSize: '1rem',
-              fontWeight: 600,
-              margin: '0 0 1rem 0',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-            }}
-          >
-            <span
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h2 style={{ color: COLORS.text, fontSize: '1rem', fontWeight: 600, margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: COLORS.grassGreen }} />
+              {showCostDetails ? 'Cost Activity' : 'Live Activity'}
+            </h2>
+            <button
+              onClick={() => setShowCostDetails(!showCostDetails)}
               style={{
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                background: COLORS.green,
+                background: 'none',
+                border: 'none',
+                color: COLORS.blue,
+                fontSize: '0.7rem',
+                cursor: 'pointer',
+                textDecoration: 'underline',
               }}
-            />
-            Live Activity
-          </h2>
+            >
+              {showCostDetails ? 'Show Live' : 'Show Costs'}
+            </button>
+          </div>
 
           <div style={{ flex: 1, overflowY: 'auto' }}>
-            {activity.length === 0 ? (
-              <div style={{ color: COLORS.textMuted, fontSize: '0.85rem', textAlign: 'center', padding: '2rem 0' }}>
-                Waiting for activity...
-              </div>
+            {showCostDetails ? (
+              <CostActivityPanel recentCosts={recentCosts} loading={costsLoading} />
             ) : (
-              activity.map(function(item) {
-                return <ActivityItem key={item.id} time={item.time} type={item.type} message={item.message} />;
-              })
+              activity.length === 0 ? (
+                <div style={{ color: COLORS.textMuted, fontSize: '0.85rem', textAlign: 'center', padding: '2rem 0' }}>
+                  Waiting for activity...
+                </div>
+              ) : (
+                activity.map(item => (
+                  <ActivityItem key={item.id} time={item.time} type={item.type} message={item.message} />
+                ))
+              )
             )}
           </div>
         </div>
       </div>
 
+      {/* Status Bar */}
       <div
         style={{
           marginTop: '1.5rem',
@@ -557,21 +655,12 @@ export default function SystemMonitor() {
           gap: '0.5rem',
         }}
       >
-        {Object.entries(componentStatus).map(function(entry) {
-          var name = entry[0];
-          var status = entry[1];
-          var statusColor = status === 'healthy' ? COLORS.green : status === 'warning' ? COLORS.yellow : COLORS.red;
+        {Object.entries(componentStatus).map(([name, status]) => {
+          const statusColor = status === 'healthy' ? COLORS.green : status === 'warning' ? COLORS.yellow : COLORS.red;
           return (
             <div key={name} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
               <StatusLight status={status} size={6} />
-              <span
-                style={{
-                  color: statusColor,
-                  fontSize: '0.7rem',
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                }}
-              >
+              <span style={{ color: statusColor, fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase' }}>
                 {name}
               </span>
             </div>
