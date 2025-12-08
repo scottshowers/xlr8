@@ -2,7 +2,7 @@
  * App.jsx - Main Application Entry
  * 
  * Routes:
- * /           → Landing (public, no layout)
+ * /           → LoginPage (public)
  * /dashboard  → DashboardPage (overview hub)
  * /workspace  → WorkspacePage (Chat + Personas)
  * /projects   → ProjectsPage (Project management)
@@ -11,8 +11,9 @@
  * /vacuum/explore → VacuumExplore (intelligent detection UI)
  * /vacuum/map → VacuumColumnMapping (column mapping interface)
  * /playbooks  → PlaybooksPage (Analysis Playbooks)
- * /admin      → AdminPage (System Monitor + Settings only)
+ * /admin      → AdminPage (System Monitor + Settings only) - Admin only
  * /data-model → DataModelPage (Visual ERD for relationships)
+ * /system     → SystemMonitorPage - Admin only
  */
 
 import React from 'react';
@@ -20,12 +21,16 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 
 // Context
 import { ProjectProvider } from './context/ProjectContext';
+import { AuthProvider } from './context/AuthContext';
+
+// Auth Components
+import ProtectedRoute from './components/ProtectedRoute';
+import LoginPage from './pages/LoginPage';
 
 // Layout
 import Layout from './components/Layout';
 
 // Pages
-import Landing from './pages/Landing';
 import DashboardPage from './pages/DashboardPage';
 import WorkspacePage from './pages/WorkspacePage';
 import ProjectsPage from './pages/ProjectsPage';
@@ -43,37 +48,100 @@ import './index.css';
 
 function App() {
   return (
-    <ProjectProvider>
-      <Router>
-        <Routes>
-          {/* Landing page - no layout wrapper */}
-          <Route path="/" element={<Landing />} />
-          
-          {/* App routes - with layout */}
-          <Route path="/dashboard" element={<Layout><DashboardPage /></Layout>} />
-          <Route path="/workspace" element={<Layout><WorkspacePage /></Layout>} />
-          <Route path="/projects" element={<Layout><ProjectsPage /></Layout>} />
-          <Route path="/data" element={<Layout><DataPage /></Layout>} />
-          <Route path="/vacuum" element={<Layout><VacuumUploadPage /></Layout>} />
-          <Route path="/vacuum/explore" element={<Layout><VacuumExplore /></Layout>} />
-          <Route path="/vacuum/map" element={<Layout><VacuumColumnMapping /></Layout>} />
-          <Route path="/playbooks" element={<Layout><PlaybooksPage /></Layout>} />
-          <Route path="/admin" element={<Layout><AdminPage /></Layout>} />
-          <Route path="/data-model" element={<Layout><DataModelPage /></Layout>} />
-          <Route path="/system" element={<Layout><SystemMonitorPage /></Layout>} />
-          
-          {/* Legacy redirects */}
-          <Route path="/chat" element={<Navigate to="/workspace" replace />} />
-          <Route path="/upload" element={<Navigate to="/data" replace />} />
-          <Route path="/status" element={<Navigate to="/data" replace />} />
-          <Route path="/secure20" element={<Navigate to="/playbooks" replace />} />
-          <Route path="/packs" element={<Navigate to="/playbooks" replace />} />
-          
-          {/* 404 fallback */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Router>
-    </ProjectProvider>
+    <AuthProvider>
+      <ProjectProvider>
+        <Router>
+          <Routes>
+            {/* Public route - Login */}
+            <Route path="/login" element={<LoginPage />} />
+            
+            {/* Protected routes - require authentication */}
+            <Route path="/" element={
+              <ProtectedRoute>
+                <Navigate to="/dashboard" replace />
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/dashboard" element={
+              <ProtectedRoute>
+                <Layout><DashboardPage /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/workspace" element={
+              <ProtectedRoute>
+                <Layout><WorkspacePage /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/projects" element={
+              <ProtectedRoute>
+                <Layout><ProjectsPage /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/data" element={
+              <ProtectedRoute permission="upload">
+                <Layout><DataPage /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/vacuum" element={
+              <ProtectedRoute permission="vacuum">
+                <Layout><VacuumUploadPage /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/vacuum/explore" element={
+              <ProtectedRoute permission="vacuum">
+                <Layout><VacuumExplore /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/vacuum/map" element={
+              <ProtectedRoute permission="vacuum">
+                <Layout><VacuumColumnMapping /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/playbooks" element={
+              <ProtectedRoute permission="playbooks">
+                <Layout><PlaybooksPage /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/data-model" element={
+              <ProtectedRoute permission="data_model">
+                <Layout><DataModelPage /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            {/* Admin only routes */}
+            <Route path="/admin" element={
+              <ProtectedRoute permission="ops_center">
+                <Layout><AdminPage /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/system" element={
+              <ProtectedRoute permission="ops_center">
+                <Layout><SystemMonitorPage /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            {/* Legacy redirects */}
+            <Route path="/chat" element={<Navigate to="/workspace" replace />} />
+            <Route path="/upload" element={<Navigate to="/data" replace />} />
+            <Route path="/status" element={<Navigate to="/data" replace />} />
+            <Route path="/secure20" element={<Navigate to="/playbooks" replace />} />
+            <Route path="/packs" element={<Navigate to="/playbooks" replace />} />
+            
+            {/* 404 fallback */}
+            <Route path="*" element={<Navigate to="/login" replace />} />
+          </Routes>
+        </Router>
+      </ProjectProvider>
+    </AuthProvider>
   );
 }
 
