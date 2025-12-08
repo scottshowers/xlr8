@@ -35,6 +35,14 @@ try:
 except ImportError:
     PROGRESS_AVAILABLE = False
 
+# Import security config router
+try:
+    from backend.utils.security_config import create_config_router
+    SECURITY_AVAILABLE = True
+except ImportError as e:
+    SECURITY_AVAILABLE = False
+    print(f"Security config not available: {e}")
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -84,6 +92,13 @@ if PROGRESS_AVAILABLE:
 else:
     logger.warning("Progress router not available")
 
+# Register security config router if available
+if SECURITY_AVAILABLE:
+    app.include_router(create_config_router(), tags=["security"])
+    logger.info("Security config router registered at /api/security/config")
+else:
+    logger.warning("Security config router not available")
+
 @app.get("/api/health")
 async def health():
     try:
@@ -99,6 +114,7 @@ async def health():
                 "vacuum": VACUUM_AVAILABLE,
                 "playbooks": PLAYBOOKS_AVAILABLE,
                 "progress_streaming": PROGRESS_AVAILABLE,
+                "security": SECURITY_AVAILABLE,
             }
         }
     except Exception as e:
@@ -132,6 +148,14 @@ async def debug_imports():
         results['parallel_processing'] = 'OK'
     except Exception as e:
         results['parallel_processing'] = f'ERROR: {e}'
+    
+    # Check security config
+    try:
+        from backend.utils.security_config import get_security_config
+        config = get_security_config()
+        results['security_config'] = 'OK'
+    except Exception as e:
+        results['security_config'] = f'ERROR: {e}'
     
     return results
 
