@@ -369,7 +369,7 @@ function NoPlaybooksPrompt({ isAdmin }) {
 
 export default function PlaybooksPage() {
   const { activeProject, projectName, customerName, hasActiveProject, loading } = useProject();
-  const { isAdmin, isConsultant } = useAuth();
+  const { isAdmin } = useAuth();
   const navigate = useNavigate();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('all');
@@ -417,17 +417,12 @@ export default function PlaybooksPage() {
     }
   }
 
-  // Get assigned playbooks for this project
+  // Get assigned playbooks for this project - ONLY show assigned ones
   const assignedPlaybookIds = activeProject?.playbooks || [];
-  
-  // Admins and consultants see all playbooks, customers only see assigned ones
-  const canSeeAll = isAdmin || isConsultant;
-  const availablePlaybooks = canSeeAll 
-    ? PLAYBOOKS 
-    : PLAYBOOKS.filter(p => assignedPlaybookIds.includes(p.id));
+  const availablePlaybooks = PLAYBOOKS.filter(p => assignedPlaybookIds.includes(p.id));
 
-  // Show "no playbooks" message if customer has none assigned
-  if (!canSeeAll && availablePlaybooks.length === 0) {
+  // Show "no playbooks" message if none assigned
+  if (availablePlaybooks.length === 0) {
     return <NoPlaybooksPrompt isAdmin={isAdmin} />;
   }
 
@@ -505,18 +500,6 @@ export default function PlaybooksPage() {
       gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
       gap: '1.5rem',
     },
-    assignedInfo: {
-      background: '#f0fdf4',
-      border: '1px solid #bbf7d0',
-      borderRadius: '8px',
-      padding: '0.75rem 1rem',
-      marginBottom: '1.5rem',
-      fontSize: '0.85rem',
-      color: '#166534',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.5rem',
-    },
   };
 
   return (
@@ -535,20 +518,13 @@ export default function PlaybooksPage() {
               Run pre-built analysis templates to generate deliverables.
             </p>
           </div>
-          {canSeeAll && (
+          {isAdmin && (
             <button style={styles.createButton} onClick={() => setShowCreateModal(true)}>
               ➕ Create Playbook
             </button>
           )}
         </div>
       </div>
-
-      {/* Show assigned count for admins/consultants */}
-      {canSeeAll && assignedPlaybookIds.length > 0 && (
-        <div style={styles.assignedInfo}>
-          ✓ {assignedPlaybookIds.length} playbook{assignedPlaybookIds.length !== 1 ? 's' : ''} assigned to this project
-        </div>
-      )}
 
       {/* Category Filters */}
       <div style={styles.filters}>
@@ -565,38 +541,16 @@ export default function PlaybooksPage() {
 
       {/* Playbooks Grid */}
       <div style={styles.grid}>
-        {filteredPlaybooks.map(playbook => {
-          const isAssigned = assignedPlaybookIds.includes(playbook.id);
-          return (
-            <div key={playbook.id} style={{ position: 'relative' }}>
-              {/* Show "Not Assigned" badge for admins viewing unassigned playbooks */}
-              {canSeeAll && !isAssigned && (
-                <div style={{
-                  position: 'absolute',
-                  top: '-8px',
-                  left: '12px',
-                  background: '#fef3c7',
-                  color: '#92400e',
-                  fontSize: '0.65rem',
-                  fontWeight: '700',
-                  padding: '0.15rem 0.4rem',
-                  borderRadius: '4px',
-                  zIndex: 1,
-                  textTransform: 'uppercase',
-                }}>
-                  Not Assigned
-                </div>
-              )}
-              <PlaybookCard 
-                playbook={playbook} 
-                onRun={handleRunPlaybook}
-                isActive={playbook.hasRunner && isAssigned}
-                hasProgress={playbookProgress[playbook.id] || false}
-                isAssigned={isAssigned}
-              />
-            </div>
-          );
-        })}
+        {filteredPlaybooks.map(playbook => (
+          <PlaybookCard 
+            key={playbook.id}
+            playbook={playbook} 
+            onRun={handleRunPlaybook}
+            isActive={playbook.hasRunner}
+            hasProgress={playbookProgress[playbook.id] || false}
+            isAssigned={true}
+          />
+        ))}
       </div>
 
       {/* Create Modal */}
