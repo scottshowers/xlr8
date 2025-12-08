@@ -95,7 +95,7 @@ const PLAYBOOKS = [
 ];
 
 // Playbook Card Component
-function PlaybookCard({ playbook, onRun, isActive, hasProgress }) {
+function PlaybookCard({ playbook, onRun, isActive, hasProgress, isAssigned }) {
   const styles = {
     card: {
       background: 'white',
@@ -202,7 +202,7 @@ function PlaybookCard({ playbook, onRun, isActive, hasProgress }) {
         e.currentTarget.style.transform = 'translateY(0)';
       }}
     >
-      {playbook.hasRunner && (
+      {playbook.hasRunner && isAssigned && (
         <span style={{
           ...styles.activeBadge,
           background: hasProgress ? '#FFEB9C' : '#C6EFCE',
@@ -592,6 +592,7 @@ export default function PlaybooksPage() {
                 onRun={handleRunPlaybook}
                 isActive={playbook.hasRunner && isAssigned}
                 hasProgress={playbookProgress[playbook.id] || false}
+                isAssigned={isAssigned}
               />
             </div>
           );
