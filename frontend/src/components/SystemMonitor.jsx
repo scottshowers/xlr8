@@ -361,7 +361,8 @@ function SettingsModal({ open, onClose, T, onSave }) {
   const [subscriptions, setSubscriptions] = useState([
     { name: 'Claude Team', cost: 25, quantity: 7 },
     { name: 'Railway', cost: 20, quantity: 1 },
-    { name: 'Supabase', cost: 25, quantity: 1 },
+    { name: 'Supabase Pro', cost: 25, quantity: 1 },
+    { name: 'Twilio', cost: 15, quantity: 1 },
     { name: 'RunPod', cost: 0.06, quantity: 1, unit: 'per hour' },
   ]);
   const [saving, setSaving] = useState(false);
@@ -629,6 +630,7 @@ function SystemTopology({ flow, onNodeClick, selectedNode, T, fullWidth = false,
     user: { x: 50, y: 130, icon: '◉', label: 'USER', color: T.blue },
     api: { x: 160, y: 130, icon: '⬡', label: 'API', color: T.blue, encrypted: true, threat: threatData?.api },
     supabase: { x: 70, y: 210, icon: '◈', label: 'AUTH', color: T.purple, encrypted: true, threat: threatData?.supabase },
+    twilio: { x: 160, y: 210, icon: '📱', label: 'SMS', color: T.purple, encrypted: true },
     duckdb: { x: 280, y: 45, icon: '▣', label: 'STRUCT', color: T.purple, encrypted: true, threat: threatData?.duckdb },
     rag: { x: 280, y: 130, icon: '◎', label: 'RAG', color: T.orange, threat: threatData?.rag },
     chromadb: { x: 280, y: 210, icon: '◇', label: 'VECTOR', color: T.cyan, threat: threatData?.chromadb },
@@ -642,6 +644,7 @@ function SystemTopology({ flow, onNodeClick, selectedNode, T, fullWidth = false,
   const connections = [
     { from: 'user', to: 'api', color: T.blue, label: 'HTTPS', active: flow.user },
     { from: 'api', to: 'supabase', color: T.purple, label: 'AUTH', active: flow.auth },
+    { from: 'supabase', to: 'twilio', color: T.purple, label: 'MFA', active: flow.auth },
     { from: 'api', to: 'duckdb', color: T.purple, label: 'SQL', active: flow.struct },
     { from: 'api', to: 'rag', color: T.orange, active: flow.semantic },
     { from: 'rag', to: 'chromadb', color: T.cyan, label: 'EMBED', active: flow.vector },
