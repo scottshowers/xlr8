@@ -111,7 +111,7 @@ async def list_users(
     user: User = Depends(require_permission(Permissions.USER_MANAGEMENT))
 ) -> List[Dict[str, Any]]:
     """List all users (admin only)."""
-    if not SUPABASE_URL or not SUPABASE_KEY:
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
         # Dev mode - return mock users
         return [
             {"id": "1", "email": "admin@xlr8.com", "full_name": "Admin User", "role": "admin", "project_id": None},
@@ -123,8 +123,8 @@ async def list_users(
         response = await client.get(
             f"{SUPABASE_URL}/rest/v1/profiles?select=*&order=created_at.desc",
             headers={
-                "apikey": SUPABASE_KEY,
-                "Authorization": f"Bearer {SUPABASE_KEY}",
+                "apikey": SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
             }
         )
         
@@ -203,7 +203,7 @@ async def update_user(
     user: User = Depends(require_permission(Permissions.USER_MANAGEMENT))
 ) -> Dict[str, Any]:
     """Update a user's profile (admin only)."""
-    if not SUPABASE_URL or not SUPABASE_KEY:
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
         return {"status": "updated", "user_id": user_id}
     
     update_data = {}
@@ -229,8 +229,8 @@ async def update_user(
         response = await client.patch(
             f"{SUPABASE_URL}/rest/v1/profiles?id=eq.{user_id}",
             headers={
-                "apikey": SUPABASE_KEY,
-                "Authorization": f"Bearer {SUPABASE_KEY}",
+                "apikey": SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                 "Content-Type": "application/json",
                 "Prefer": "return=representation",
             },
