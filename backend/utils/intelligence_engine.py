@@ -271,8 +271,8 @@ class IntelligenceEngine:
         domains = []
         
         domain_patterns = {
-            'employees': r'\b(employee|worker|staff|people|person)\b',
-            'earnings': r'\b(earning|pay|salary|wage|compensation|overtime|ot)\b',
+            'employees': r'\b(employee|worker|staff|people|person|pt|ft|part.?time|full.?time)\b',
+            'earnings': r'\b(earning|pay|salary|wage|compensation|overtime|ot|hour|rate|hourly)\b',
             'deductions': r'\b(deduction|benefit|401k|insurance|health|dental)\b',
             'taxes': r'\b(tax|withhold|federal|state|local|w-?4|fit|sit)\b',
             'jobs': r'\b(job|position|title|department|location)\b',
@@ -283,6 +283,112 @@ class IntelligenceEngine:
                 domains.append(domain)
         
         return domains if domains else ['general']
+    
+    def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
+        """Generate SQL query based on the question."""
+        if not self.structured_handler or not self.schema:
+            return None
+        
+        q_lower = question.lower()
+        tables = self.schema.get('tables', [])
+        
+        # Detect query type
+        query_type = 'list'  # default
+        if any(w in q_lower for w in ['how many', 'count', 'number of', 'total number']):
+            query_type = 'count'
+        elif any(w in q_lower for w in ['total', 'sum of']):
+            query_type = 'sum'
+        elif any(w in q_lower for w in ['average', 'avg', 'mean']):
+            query_type = 'average'
+        
+        # Find relevant table and columns
+        target_table = None
+        target_columns = []
+        where_conditions = []
+        
+        # Keywords to match against columns
+        keywords = {
+            'pt': ['fullpart', 'full_part', 'ft_pt', 'emp_type', 'employee_type', 'status'],
+            'part-time': ['fullpart', 'full_part', 'ft_pt', 'emp_type'],
+            'part time': ['fullpart', 'full_part', 'ft_pt', 'emp_type'],
+            'full-time': ['fullpart', 'full_part', 'ft_pt', 'emp_type'],
+            'full time': ['fullpart', 'full_part', 'ft_pt', 'emp_type'],
+            'hourly': ['hourly', 'hour_rate', 'rate', 'pay_rate', 'hrly'],
+            'hour': ['hourly', 'hour_rate', 'rate', 'pay_rate', 'hrly'],
+            'rate': ['rate', 'hourly', 'pay_rate', 'salary'],
+            'salary': ['salary', 'annual', 'pay'],
+            'active': ['status', 'emp_status', 'active'],
+            'employee': ['emp', 'employee', 'worker', 'person'],
+        }
+        
+        # Find tables with relevant columns
+        for table in tables:
+            table_name = table.get('table_name', '')
+            columns = table.get('columns', [])
+            col_names = [c.lower() if isinstance(c, str) else c.get('name', '').lower() for c in columns]
+            
+            # Check for PT/FT column
+            pt_col = None
+            rate_col = None
+            
+            for col in col_names:
+                # Check for PT/FT type column
+                if any(kw in col for kw in ['fullpart', 'full_part', 'ft_pt', 'emp_type', 'parttime', 'part_time']):
+                    pt_col = col
+                # Check for rate/hourly column  
+                if any(kw in col for kw in ['hourly', 'hour_rate', 'rate', 'hrly', 'pay_rate']):
+                    rate_col = col
+            
+            if pt_col or rate_col:
+                target_table = table_name
+                if pt_col:
+                    target_columns.append(pt_col)
+                if rate_col:
+                    target_columns.append(rate_col)
+                
+                # Build WHERE conditions
+                if 'pt' in q_lower or 'part-time' in q_lower or 'part time' in q_lower:
+                    if pt_col:
+                        where_conditions.append(f'LOWER("{pt_col}") IN (\'p\', \'pt\', \'part-time\', \'part time\', \'parttime\')')
+                elif 'ft' in q_lower or 'full-time' in q_lower or 'full time' in q_lower:
+                    if pt_col:
+                        where_conditions.append(f'LOWER("{pt_col}") IN (\'f\', \'ft\', \'full-time\', \'full time\', \'fulltime\')')
+                
+                # Check for numeric conditions
+                money_match = re.search(r'(?:more than|over|greater than|above|>)\s*\$?(\d+(?:\.\d+)?)', q_lower)
+                if money_match and rate_col:
+                    amount = money_match.group(1)
+                    where_conditions.append(f'CAST("{rate_col}" AS DOUBLE) > {amount}')
+                
+                money_match_less = re.search(r'(?:less than|under|below|<)\s*\$?(\d+(?:\.\d+)?)', q_lower)
+                if money_match_less and rate_col:
+                    amount = money_match_less.group(1)
+                    where_conditions.append(f'CAST("{rate_col}" AS DOUBLE) < {amount}')
+                
+                break  # Use first matching table
+        
+        if not target_table:
+            return None
+        
+        # Build SQL
+        where_clause = ' AND '.join(where_conditions) if where_conditions else '1=1'
+        
+        if query_type == 'count':
+            sql = f'SELECT COUNT(*) as count FROM "{target_table}" WHERE {where_clause}'
+        elif query_type == 'sum' and target_columns:
+            sql = f'SELECT SUM(CAST("{target_columns[0]}" AS DOUBLE)) as total FROM "{target_table}" WHERE {where_clause}'
+        elif query_type == 'average' and target_columns:
+            sql = f'SELECT AVG(CAST("{target_columns[0]}" AS DOUBLE)) as average FROM "{target_table}" WHERE {where_clause}'
+        else:
+            sql = f'SELECT * FROM "{target_table}" WHERE {where_clause} LIMIT 100'
+        
+        return {
+            'sql': sql,
+            'table': target_table,
+            'columns': target_columns,
+            'query_type': query_type,
+            'conditions': where_conditions
+        }
     
     def _needs_clarification(self, mode, entities, domains, q_lower) -> bool:
         """Determine if we need to ask clarifying questions."""
@@ -355,6 +461,37 @@ class IntelligenceEngine:
         entities = analysis['entities']
         
         try:
+            # FIRST: Try to generate and execute targeted SQL
+            sql_info = self._generate_sql_for_question(question, analysis)
+            if sql_info:
+                try:
+                    sql = sql_info['sql']
+                    logger.info(f"[INTELLIGENCE] Generated SQL: {sql}")
+                    rows, cols = self.structured_handler.execute_query(sql)
+                    
+                    if rows:
+                        truths.append(Truth(
+                            source_type='reality',
+                            source_name=f"SQL Query: {sql_info['table']}",
+                            content={
+                                'sql': sql,
+                                'columns': cols,
+                                'rows': rows,
+                                'total': len(rows),
+                                'query_type': sql_info['query_type'],
+                                'table': sql_info['table'],
+                                'is_targeted_query': True
+                            },
+                            confidence=0.98,
+                            location=f"Query: {sql}"
+                        ))
+                        logger.info(f"[INTELLIGENCE] SQL returned {len(rows)} rows")
+                        # If we got a targeted result, prioritize it
+                        return truths
+                except Exception as sql_e:
+                    logger.warning(f"[INTELLIGENCE] SQL query failed: {sql_e}")
+            
+            # FALLBACK: Sample data from relevant tables
             tables = self.schema.get('tables', [])
             
             for table in tables:
@@ -365,7 +502,7 @@ class IntelligenceEngine:
                 relevant = False
                 if 'employees' in domains and any(c in table_name.lower() for c in ['personal', 'employee', 'demographic']):
                     relevant = True
-                if 'earnings' in domains and 'earning' in table_name.lower():
+                if 'earnings' in domains and any(c in table_name.lower() for c in ['earning', 'pay', 'rate', 'salary', 'compensation']):
                     relevant = True
                 if 'deductions' in domains and 'deduction' in table_name.lower():
                     relevant = True
@@ -385,7 +522,8 @@ class IntelligenceEngine:
                                 'columns': cols,
                                 'rows': rows,
                                 'total': len(rows),
-                                'table': table_name
+                                'table': table_name,
+                                'is_targeted_query': False
                             },
                             confidence=0.95,
                             location=f"Table: {table_name}"
