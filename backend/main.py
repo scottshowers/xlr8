@@ -64,6 +64,14 @@ except ImportError as e:
     DATA_MODEL_AVAILABLE = False
     logging.warning(f"Data model router import failed: {e}")
 
+# Import intelligent_chat router (revolutionary AI chat)
+try:
+    from backend.routers import intelligent_chat
+    INTELLIGENT_CHAT_AVAILABLE = True
+except ImportError as e:
+    INTELLIGENT_CHAT_AVAILABLE = False
+    logging.warning(f"Intelligent chat router import failed: {e}")
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -182,6 +190,13 @@ if DATA_MODEL_AVAILABLE:
 else:
     logger.warning("Data model router not available")
 
+# Register intelligent_chat router if available (revolutionary AI chat)
+if INTELLIGENT_CHAT_AVAILABLE:
+    app.include_router(intelligent_chat.router, prefix="/api", tags=["intelligent-chat"])
+    logger.info("✓ Intelligent chat router registered at /api/chat/intelligent")
+else:
+    logger.warning("Intelligent chat router not available")
+
 
 @app.get("/api/health")
 async def health():
@@ -202,6 +217,7 @@ async def health():
             "security": SECURITY_AVAILABLE,
             "auth": AUTH_AVAILABLE,
             "data_model": DATA_MODEL_AVAILABLE,
+            "intelligent_chat": INTELLIGENT_CHAT_AVAILABLE,
         }
         
         return {
@@ -220,6 +236,7 @@ async def health():
                 "playbooks": PLAYBOOKS_AVAILABLE,
                 "progress": PROGRESS_AVAILABLE,
                 "security": SECURITY_AVAILABLE,
+                "intelligent_chat": INTELLIGENT_CHAT_AVAILABLE,
             }
         }
 
