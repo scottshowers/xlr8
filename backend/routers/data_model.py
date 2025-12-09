@@ -41,8 +41,11 @@ async def analyze_data_model(project_name: str):
     """
     Auto-detect relationships between tables in a project.
     
-    Uses rule-based matching + optional local LLM for ambiguous cases.
-    Returns relationships with confidence scores and needs_review flags.
+    INTELLIGENT APPROACH:
+    1. Load global mappings (cross-customer knowledge)
+    2. Load project-specific confirmed relationships
+    3. Run analysis with global knowledge
+    4. Only flag as "needs review" what's truly unknown
     """
     try:
         # Get tables from DuckDB via structured data handler
@@ -63,23 +66,101 @@ async def analyze_data_model(project_name: str):
                 "message": "No tables found for project. Upload data files first."
             }
         
-        # Get local LLM client (optional - continues without if unavailable)
+        # Load global mappings from Supabase (cross-customer learning)
+        global_mappings = {}
+        project_confirmed = []
+        
+        try:
+            from utils.supabase_client import get_supabase_client
+            supabase = get_supabase_client()
+            
+            # Get global mappings
+            global_result = supabase.table('global_column_mappings').select('*').execute()
+            if global_result.data:
+                for row in global_result.data:
+                    key = (row['column_pattern_1'], row['column_pattern_2'])
+                    global_mappings[key] = row['confidence']
+                    # Also add reverse
+                    global_mappings[(row['column_pattern_2'], row['column_pattern_1'])] = row['confidence']
+                logger.info(f"Loaded {len(global_result.data)} global mappings")
+            
+            # Get project-specific confirmed relationships
+            project_result = supabase.table('project_relationships').select('*').eq('project_name', project_name).execute()
+            if project_result.data:
+                project_confirmed = project_result.data
+                logger.info(f"Loaded {len(project_confirmed)} project-specific relationships")
+                
+        except Exception as db_e:
+            logger.warning(f"Could not load from database: {db_e}")
+        
+        # Get local LLM client (optional)
         llm_client = get_llm_client()
         
-        # Run analysis
+        # Run analysis with global knowledge
         try:
             from utils.relationship_detector import analyze_project_relationships
         except ImportError:
             from backend.utils.relationship_detector import analyze_project_relationships
+        
         result = await analyze_project_relationships(project_name, tables, llm_client)
         
+        # Apply global mappings - auto-confirm known relationships
+        if global_mappings:
+            for rel in result.get('relationships', []):
+                col1 = rel['source_column'].lower().replace(' ', '_')
+                col2 = rel['target_column'].lower().replace(' ', '_')
+                
+                # Check if this pair is in global mappings
+                if (col1, col2) in global_mappings or (col2, col1) in global_mappings:
+                    rel['needs_review'] = False
+                    rel['confidence'] = max(rel['confidence'], 0.95)
+                    rel['method'] = 'global'
+        
+        # Apply project-specific confirmed relationships
+        if project_confirmed:
+            confirmed_pairs = set()
+            rejected_pairs = set()
+            
+            for pc in project_confirmed:
+                pair = (pc['source_column'], pc['target_column'])
+                if pc['status'] == 'confirmed':
+                    confirmed_pairs.add(pair)
+                    confirmed_pairs.add((pair[1], pair[0]))  # Reverse
+                elif pc['status'] == 'rejected':
+                    rejected_pairs.add(pair)
+                    rejected_pairs.add((pair[1], pair[0]))
+            
+            # Filter out rejected and auto-confirm previously confirmed
+            filtered_rels = []
+            for rel in result.get('relationships', []):
+                pair = (rel['source_column'], rel['target_column'])
+                
+                if pair in rejected_pairs:
+                    continue  # Skip rejected
+                
+                if pair in confirmed_pairs:
+                    rel['needs_review'] = False
+                    rel['confirmed'] = True
+                
+                filtered_rels.append(rel)
+            
+            result['relationships'] = filtered_rels
+        
+        # Recalculate stats
+        result['stats']['high_confidence'] = sum(1 for r in result['relationships'] if not r.get('needs_review'))
+        result['stats']['needs_review'] = sum(1 for r in result['relationships'] if r.get('needs_review'))
+        result['stats']['global_mappings_applied'] = len(global_mappings)
+        
         logger.info(f"Analyzed {result['stats']['tables_analyzed']} tables for {project_name}, "
-                   f"found {result['stats']['relationships_found']} relationships")
+                   f"found {result['stats']['relationships_found']} relationships "
+                   f"({result['stats']['needs_review']} need review)")
         
         return result
         
     except Exception as e:
         logger.error(f"Data model analysis failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -108,17 +189,61 @@ async def confirm_relationship(project_name: str, confirmation: RelationshipConf
     """
     Confirm or reject a suggested relationship.
     
-    Updates the stored relationship status.
+    When confirmed:
+    1. Saves to project_relationships table
+    2. Adds to global_column_mappings (cross-customer learning!)
+    
+    When rejected:
+    Records to avoid re-suggesting for this project.
     """
     try:
-        # Future: Store confirmation in database
         logger.info(f"Relationship {'confirmed' if confirmation.confirmed else 'rejected'}: "
                    f"{confirmation.source_table}.{confirmation.source_column} -> "
                    f"{confirmation.target_table}.{confirmation.target_column}")
         
+        # Save to Supabase for persistence and learning
+        try:
+            from utils.supabase_client import get_supabase_client
+            supabase = get_supabase_client()
+            
+            if confirmation.confirmed:
+                # Save to project_relationships
+                supabase.table('project_relationships').upsert({
+                    'project_name': project_name,
+                    'source_table': confirmation.source_table,
+                    'source_column': confirmation.source_column,
+                    'target_table': confirmation.target_table,
+                    'target_column': confirmation.target_column,
+                    'status': 'confirmed',
+                    'method': 'manual'
+                }).execute()
+                
+                # Add to GLOBAL mappings (future customers get auto-match!)
+                supabase.rpc('add_global_mapping', {
+                    'p_col1': confirmation.source_column,
+                    'p_col2': confirmation.target_column
+                }).execute()
+                
+                logger.info(f"✅ Saved to global mappings: {confirmation.source_column} <-> {confirmation.target_column}")
+            else:
+                # Save rejection to avoid re-suggesting
+                supabase.table('project_relationships').upsert({
+                    'project_name': project_name,
+                    'source_table': confirmation.source_table,
+                    'source_column': confirmation.source_column,
+                    'target_table': confirmation.target_table,
+                    'target_column': confirmation.target_column,
+                    'status': 'rejected',
+                    'method': 'manual'
+                }).execute()
+                
+        except Exception as db_e:
+            logger.warning(f"Could not save to database (will work locally): {db_e}")
+        
         return {
             "status": "updated",
             "confirmed": confirmation.confirmed,
+            "global_learning": confirmation.confirmed,  # Indicates saved to global
             "relationship": {
                 "source_table": confirmation.source_table,
                 "source_column": confirmation.source_column,
