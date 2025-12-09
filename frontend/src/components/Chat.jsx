@@ -41,6 +41,7 @@ export default function Chat({ functionalAreas = [] }) {
   const [intelligentMode, setIntelligentMode] = useState(true)  // ON by default!
   const [sessionId, setSessionId] = useState(null)
   const [pendingClarification, setPendingClarification] = useState(null)
+  const [learningStats, setLearningStats] = useState(null)
   
   // Persona state
   const [currentPersona, setCurrentPersona] = useState({
@@ -59,6 +60,7 @@ export default function Chat({ functionalAreas = [] }) {
 
   useEffect(() => {
     loadModelInfo()
+    loadLearningStats()
     // Generate session ID for intelligent mode
     setSessionId(`session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
   }, [])
@@ -75,6 +77,15 @@ export default function Chat({ functionalAreas = [] }) {
   const scrollToBottom = () => {
     if (messagesAreaRef.current) {
       messagesAreaRef.current.scrollTop = messagesAreaRef.current.scrollHeight
+    }
+  }
+
+  const loadLearningStats = async () => {
+    try {
+      const response = await api.get('/chat/intelligent/learning/stats')
+      setLearningStats(response.data)
+    } catch (err) {
+      console.log('Learning stats not available')
     }
   }
 
@@ -314,13 +325,31 @@ export default function Chat({ functionalAreas = [] }) {
     setSessionId(`session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
   }
 
-  const handleFeedback = (messageIndex, feedbackType) => {
+  const handleFeedback = async (messageIndex, feedbackType) => {
     const message = messages[messageIndex]
-    if (message?.job_id) {
+    
+    // Update UI immediately
+    setMessages(prev => prev.map((msg, idx) => 
+      idx === messageIndex ? { ...msg, feedbackGiven: feedbackType } : msg
+    ))
+    
+    // Send feedback to appropriate endpoint
+    if (message?.type === 'intelligent') {
+      // Use learning feedback endpoint
+      try {
+        await api.post('/chat/intelligent/feedback', {
+          question: message.question || messages[messageIndex - 1]?.content || '',
+          feedback: feedbackType,
+          project: projectName,
+          intent: message.structured_output?.detected_mode
+        })
+        console.log(`✅ Learning feedback recorded: ${feedbackType}`)
+      } catch (err) {
+        console.error('Failed to submit learning feedback:', err)
+      }
+    } else if (message?.job_id) {
+      // Use standard feedback endpoint
       submitFeedback(message.job_id, feedbackType, message.userQuery, message.content)
-      setMessages(prev => prev.map((msg, idx) => 
-        idx === messageIndex ? { ...msg, feedbackGiven: feedbackType } : msg
-      ))
     }
   }
 
@@ -375,11 +404,23 @@ export default function Chat({ functionalAreas = [] }) {
 
       {/* Intelligent Mode Banner */}
       {intelligentMode && (
-        <div className="px-4 py-2 bg-purple-50 border-b border-purple-100 flex items-center gap-2 text-sm">
-          <Zap className="text-purple-600" size={16} />
-          <span className="text-purple-700">
-            <strong>Intelligent Mode:</strong> Synthesizes customer data + documents + UKG best practices
-          </span>
+        <div className="px-4 py-2 bg-purple-50 border-b border-purple-100 flex items-center justify-between text-sm">
+          <div className="flex items-center gap-2">
+            <Zap className="text-purple-600" size={16} />
+            <span className="text-purple-700">
+              <strong>Intelligent Mode:</strong> Synthesizes data + documents + best practices
+            </span>
+          </div>
+          {learningStats?.available && (
+            <div className="flex items-center gap-3 text-xs text-purple-600">
+              <span title="Learned query patterns">
+                🧠 {learningStats.learned_queries || 0} patterns
+              </span>
+              <span title="Feedback records">
+                👍 {learningStats.feedback_records || 0} feedback
+              </span>
+            </div>
+          )}
         </div>
       )}
 
@@ -720,6 +761,11 @@ function IntelligentResponse({ message, index, onFeedback }) {
         <div className="flex items-center gap-2">
           <Brain className="text-purple-600" size={16} />
           <span className="text-sm font-medium text-purple-800">Intelligent Analysis</span>
+          {message.used_learning && (
+            <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full flex items-center gap-1">
+              🧠 Learned
+            </span>
+          )}
         </div>
         <div className={`px-2 py-0.5 rounded text-xs font-medium ${
           message.confidence >= 0.8 ? 'bg-green-100 text-green-700' :
@@ -836,6 +882,35 @@ function IntelligentResponse({ message, index, onFeedback }) {
           )}
         </div>
       )}
+      
+      {/* Feedback Buttons */}
+      <div className="px-4 py-2 border-t bg-gray-50 flex items-center justify-between">
+        <span className="text-xs text-gray-500">Was this helpful?</span>
+        <div className="flex gap-2">
+          <button
+            onClick={() => onFeedback(index, 'positive')}
+            className={`p-1.5 rounded-lg transition-all ${
+              message.feedbackGiven === 'positive' 
+                ? 'bg-green-100 text-green-600' 
+                : 'text-gray-400 hover:text-green-600 hover:bg-green-50'
+            }`}
+            title="This was helpful"
+          >
+            <ThumbsUp size={16} />
+          </button>
+          <button
+            onClick={() => onFeedback(index, 'negative')}
+            className={`p-1.5 rounded-lg transition-all ${
+              message.feedbackGiven === 'negative' 
+                ? 'bg-red-100 text-red-600' 
+                : 'text-gray-400 hover:text-red-600 hover:bg-red-50'
+            }`}
+            title="This needs improvement"
+          >
+            <ThumbsDown size={16} />
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
