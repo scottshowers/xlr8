@@ -56,6 +56,14 @@ except ImportError as e:
     AUTH_AVAILABLE = False
     logging.warning(f"Auth router import failed: {e}")
 
+# Import data_model router (relationship detection)
+try:
+    from backend.routers import data_model
+    DATA_MODEL_AVAILABLE = True
+except ImportError as e:
+    DATA_MODEL_AVAILABLE = False
+    logging.warning(f"Data model router import failed: {e}")
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -167,6 +175,13 @@ if AUTH_AVAILABLE:
 else:
     logger.warning("Auth router not available")
 
+# Register data_model router if available (relationship detection)
+if DATA_MODEL_AVAILABLE:
+    app.include_router(data_model.router, prefix="/api", tags=["data-model"])
+    logger.info("✓ Data model router registered at /api/data-model")
+else:
+    logger.warning("Data model router not available")
+
 
 @app.get("/api/health")
 async def health():
@@ -186,6 +201,7 @@ async def health():
             "progress": PROGRESS_AVAILABLE,
             "security": SECURITY_AVAILABLE,
             "auth": AUTH_AVAILABLE,
+            "data_model": DATA_MODEL_AVAILABLE,
         }
         
         return {
