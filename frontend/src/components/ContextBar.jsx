@@ -1,15 +1,17 @@
 /**
  * ContextBar - Sticky Project Selector
  * 
- * Sits at top of all app pages (not Landing)
- * Shows current project, allows quick switch
+ * Single source of truth for project selection.
+ * Customer colors derived from customer name (consistent across app).
  * 
- * Colors: Grass Green (#83b16d) solid background
- * Icons: Solid colors (Sky Blue, Aquamarine, Clearwater)
+ * For Admin/Consultant: Can navigate without project selected
+ * For Customer: Auto-locked to their project (selector hidden)
  */
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useProject } from '../context/ProjectContext';
+import { useAuth } from '../context/AuthContext';
+import { getCustomerColor, getCustomerInitials, getContrastText } from '../utils/customerColors';
 
 // Brand Colors
 const COLORS = {
@@ -23,20 +25,15 @@ const COLORS = {
   textLight: '#5f6c7b',
 };
 
-// Color palette for project icons (solid colors, rotating)
-const PROJECT_COLORS = [
-  COLORS.skyBlue,
-  COLORS.aquamarine,
-  COLORS.clearwater,
-  '#93abd9',  // sky blue variant
-  '#a1c3d4',  // aquamarine variant
-];
-
 export default function ContextBar() {
-  const { activeProject, projects, selectProject, loading } = useProject();
+  const { activeProject, projects, selectProject, clearProject, loading } = useProject();
+  const { userRole } = useAuth();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const dropdownRef = useRef(null);
+
+  // Customers are locked to their project - hide selector
+  const isCustomer = userRole === 'customer';
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -56,22 +53,20 @@ export default function ContextBar() {
     p.customer?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // Get initials for project icon
-  const getInitials = (name) => {
-    if (!name) return '??';
-    return name.slice(0, 2).toUpperCase();
-  };
-
-  // Get consistent color for project (based on index)
-  const getProjectColor = (projectId) => {
-    const index = projects.findIndex(p => p.id === projectId);
-    return PROJECT_COLORS[index % PROJECT_COLORS.length];
-  };
-
   const handleSelectProject = (project) => {
     selectProject(project);
     setDropdownOpen(false);
     setSearchTerm('');
+  };
+
+  const handleClearProject = (e) => {
+    e.stopPropagation();
+    if (clearProject) {
+      clearProject();
+    } else {
+      selectProject(null);
+    }
+    setDropdownOpen(false);
   };
 
   const styles = {
@@ -112,20 +107,21 @@ export default function ContextBar() {
       minWidth: '240px',
       transition: 'background 0.2s ease',
     },
-    selectorHover: {
-      background: 'rgba(255,255,255,0.25)',
+    selectorLocked: {
+      cursor: 'default',
+      background: 'rgba(255,255,255,0.1)',
     },
-    projectIcon: (color) => ({
+    projectIcon: (bgColor) => ({
       width: '32px',
       height: '32px',
-      background: color,
+      background: bgColor,
       borderRadius: '6px',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       fontWeight: '700',
       fontSize: '0.8rem',
-      color: 'white',
+      color: getContrastText(bgColor),
       flexShrink: 0,
     }),
     projectInfo: {
@@ -152,6 +148,16 @@ export default function ContextBar() {
       opacity: 0.8,
       transition: 'transform 0.2s ease',
     },
+    clearBtn: {
+      background: 'rgba(255,255,255,0.2)',
+      border: 'none',
+      borderRadius: '4px',
+      color: 'white',
+      padding: '0.25rem 0.5rem',
+      fontSize: '0.7rem',
+      cursor: 'pointer',
+      marginLeft: '0.5rem',
+    },
     dropdown: {
       position: 'absolute',
       top: '100%',
@@ -163,6 +169,7 @@ export default function ContextBar() {
       boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
       overflow: 'hidden',
       zIndex: 200,
+      minWidth: '280px',
     },
     searchInput: {
       width: '100%',
@@ -171,9 +178,10 @@ export default function ContextBar() {
       borderBottom: '1px solid #e1e8ed',
       fontSize: '0.9rem',
       outline: 'none',
+      boxSizing: 'border-box',
     },
     projectList: {
-      maxHeight: '280px',
+      maxHeight: '320px',
       overflowY: 'auto',
     },
     projectItem: (isActive) => ({
@@ -201,6 +209,27 @@ export default function ContextBar() {
       color: COLORS.textLight,
       fontSize: '0.9rem',
     },
+    allProjectsOption: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.75rem',
+      padding: '0.75rem 1rem',
+      cursor: 'pointer',
+      background: !activeProject ? COLORS.iceFlow : 'white',
+      borderBottom: '2px solid #e1e8ed',
+      transition: 'background 0.15s ease',
+    },
+    allProjectsIcon: {
+      width: '32px',
+      height: '32px',
+      background: COLORS.textLight,
+      borderRadius: '6px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: '0.9rem',
+      color: 'white',
+    },
     status: {
       display: 'flex',
       alignItems: 'center',
@@ -208,17 +237,50 @@ export default function ContextBar() {
       color: 'white',
       fontSize: '0.85rem',
     },
-    statusDot: {
+    statusDot: (color) => ({
       width: '8px',
       height: '8px',
-      background: '#90EE90',
+      background: color || '#90EE90',
       borderRadius: '50%',
-    },
+      border: '1px solid rgba(255,255,255,0.3)',
+    }),
     placeholder: {
       color: 'rgba(255,255,255,0.7)',
       fontStyle: 'italic',
     },
+    globalMode: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.5rem',
+      color: 'white',
+      opacity: 0.9,
+    },
   };
+
+  // Customer role: show locked project, no dropdown
+  if (isCustomer && activeProject) {
+    const customerColor = getCustomerColor(activeProject.customer);
+    return (
+      <div style={styles.bar}>
+        <div style={styles.left}>
+          <span style={styles.label}>Project:</span>
+          <div style={{ ...styles.selector, ...styles.selectorLocked }}>
+            <div style={styles.projectIcon(customerColor)}>
+              {getCustomerInitials(activeProject.customer)}
+            </div>
+            <div style={styles.projectInfo}>
+              <div style={styles.projectName}>{activeProject.name}</div>
+              <div style={styles.projectCustomer}>{activeProject.customer}</div>
+            </div>
+          </div>
+        </div>
+        <div style={styles.status}>
+          <div style={styles.statusDot(customerColor)} />
+          Active
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={styles.bar}>
@@ -232,8 +294,8 @@ export default function ContextBar() {
           >
             {activeProject ? (
               <>
-                <div style={styles.projectIcon(getProjectColor(activeProject.id))}>
-                  {getInitials(activeProject.name)}
+                <div style={styles.projectIcon(getCustomerColor(activeProject.customer))}>
+                  {getCustomerInitials(activeProject.customer)}
                 </div>
                 <div style={styles.projectInfo}>
                   <div style={styles.projectName}>{activeProject.name}</div>
@@ -241,14 +303,17 @@ export default function ContextBar() {
                 </div>
               </>
             ) : (
-              <span style={styles.placeholder}>Select a project...</span>
+              <div style={styles.globalMode}>
+                <span style={{ fontSize: '1.1rem' }}>🌐</span>
+                <span>All Projects</span>
+              </div>
             )}
             <span style={{ ...styles.arrow, transform: dropdownOpen ? 'rotate(180deg)' : 'rotate(0)' }}>▼</span>
           </div>
 
           {dropdownOpen && (
             <div style={styles.dropdown}>
-              {projects.length > 3 && (
+              {projects.length > 5 && (
                 <input
                   type="text"
                   placeholder="Search projects..."
@@ -260,6 +325,26 @@ export default function ContextBar() {
               )}
               
               <div style={styles.projectList}>
+                {/* "All Projects" option for admin/consultant */}
+                {!searchTerm && (
+                  <div
+                    style={styles.allProjectsOption}
+                    onClick={() => handleSelectProject(null)}
+                    onMouseEnter={(e) => {
+                      if (activeProject) e.currentTarget.style.background = '#f8fafc';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = !activeProject ? COLORS.iceFlow : 'white';
+                    }}
+                  >
+                    <div style={styles.allProjectsIcon}>🌐</div>
+                    <div>
+                      <div style={styles.projectItemName}>All Projects</div>
+                      <div style={styles.projectItemCustomer}>View global / aggregate data</div>
+                    </div>
+                  </div>
+                )}
+
                 {loading ? (
                   <div style={styles.noProjects}>Loading...</div>
                 ) : filteredProjects.length === 0 ? (
@@ -267,29 +352,35 @@ export default function ContextBar() {
                     {searchTerm ? 'No matching projects' : 'No projects yet'}
                   </div>
                 ) : (
-                  filteredProjects.map((project) => (
-                    <div
-                      key={project.id}
-                      style={styles.projectItem(activeProject?.id === project.id)}
-                      onClick={() => handleSelectProject(project)}
-                      onMouseEnter={(e) => {
-                        if (activeProject?.id !== project.id) {
-                          e.currentTarget.style.background = '#f8fafc';
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.background = activeProject?.id === project.id ? COLORS.iceFlow : 'white';
-                      }}
-                    >
-                      <div style={styles.projectIcon(getProjectColor(project.id))}>
-                        {getInitials(project.name)}
+                  filteredProjects.map((project) => {
+                    const color = getCustomerColor(project.customer);
+                    return (
+                      <div
+                        key={project.id}
+                        style={styles.projectItem(activeProject?.id === project.id)}
+                        onClick={() => handleSelectProject(project)}
+                        onMouseEnter={(e) => {
+                          if (activeProject?.id !== project.id) {
+                            e.currentTarget.style.background = '#f8fafc';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = activeProject?.id === project.id ? COLORS.iceFlow : 'white';
+                        }}
+                      >
+                        <div style={styles.projectIcon(color)}>
+                          {getCustomerInitials(project.customer)}
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={styles.projectItemName}>{project.name}</div>
+                          <div style={styles.projectItemCustomer}>{project.customer}</div>
+                        </div>
+                        {activeProject?.id === project.id && (
+                          <span style={{ color: COLORS.grassGreen, fontSize: '0.8rem' }}>✓</span>
+                        )}
                       </div>
-                      <div>
-                        <div style={styles.projectItemName}>{project.name}</div>
-                        <div style={styles.projectItemCustomer}>{project.customer}</div>
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -298,10 +389,15 @@ export default function ContextBar() {
       </div>
 
       {/* Status indicator */}
-      {activeProject && (
+      {activeProject ? (
         <div style={styles.status}>
-          <div style={styles.statusDot} />
+          <div style={styles.statusDot(getCustomerColor(activeProject.customer))} />
           Active
+        </div>
+      ) : (
+        <div style={styles.status}>
+          <div style={styles.statusDot('#90EE90')} />
+          Global View
         </div>
       )}
     </div>
