@@ -42,7 +42,7 @@ class LearningModule:
             logger.info("[LEARNING] Connected to Supabase")
         except Exception as e:
             try:
-                from backend.utils.database.supabase_client import get_supabase_client
+                from utils.database.supabase_client import get_supabase_client
                 self.supabase = get_supabase_client()
                 logger.info("[LEARNING] Connected to Supabase (alt path)")
             except Exception as e2:
