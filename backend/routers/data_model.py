@@ -180,7 +180,6 @@ async def analyze_data_model(project_name: str):
                     'target_table': rel['target_table'],
                     'target_column': rel['target_column'],
                     'confidence': rel.get('confidence', 0.9),
-                    'semantic_type': rel.get('semantic_type', 'unknown'),
                     'method': rel.get('method', 'auto'),
                     'status': status
                 }, on_conflict='project_name,source_table,source_column,target_table,target_column').execute()
