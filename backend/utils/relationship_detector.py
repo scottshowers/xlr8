@@ -37,6 +37,13 @@ KEY_COLUMN_PATTERNS = [
     r'^tax.*', r'^pay.*group',
 ]
 
+# NEVER treat these as join keys - they're descriptions, not codes
+EXCLUDED_COLUMN_PATTERNS = [
+    r'.*_desc$', r'.*_description$', r'.*description$',
+    r'.*_name$', r'.*_text$', r'.*_comment$', r'.*_note$',
+    r'^desc_', r'^description_', r'^name_',
+]
+
 # Strip these prefixes before comparing
 STRIP_PREFIXES = [
     'home_', 'work_', 'primary_', 'current_', 'original_',
@@ -56,42 +63,59 @@ CONFIG_FILE_PATTERNS = [
 ]
 
 # Semantic type patterns for grouping columns
+# IMPORTANT: These patterns must be PRECISE - only match exact concepts
 SEMANTIC_TYPES = {
     'employee_id': [
-        r'^emp.*id', r'^ee.*num', r'^employee.*number', r'^worker.*id',
-        r'^person.*id', r'^emp.*num', r'^emp.*no$', r'^ee.*id',
-        r'^employee.*id', r'^staff.*id', r'^associate.*id', r'^emp.*key',
+        r'^emp.*id$', r'^ee.*num$', r'^employee.*number$', r'^worker.*id$',
+        r'^person.*id$', r'^emp.*num$', r'^emp.*no$', r'^ee.*id$',
+        r'^employee.*id$', r'^staff.*id$', r'^associate.*id$', r'^emp.*key$',
+        r'^employee_number$', r'^emp_id$', r'^ee_id$',
     ],
     'company_code': [
-        r'^comp.*code', r'^co.*code', r'^company.*id', r'^org.*code',
-        r'^entity.*code', r'^legal.*entity', r'^business.*unit',
-        r'^company$', r'^comp$',
+        r'^comp.*code$', r'^co.*code$', r'^company.*id$', r'^company.*code$',
+        r'^entity.*code$', r'^legal.*entity$', r'^business.*unit.*code$',
+        r'^company$', r'^comp$', r'^home.*company.*code$', r'^work.*company.*code$',
     ],
     'department': [
-        r'dept.*code', r'department.*code', r'^div.*code', r'division.*code',
-        r'cost.*center', r'^dept$', r'^department$',
+        r'^dept.*code$', r'^department.*code$', r'^div.*code$', r'^division.*code$',
+        r'^cost.*center$', r'^dept$', r'^department$', r'^dept_id$',
     ],
     'job_code': [
-        r'^job.*code', r'^job.*id', r'^position.*code', r'^title.*code',
-        r'^job.*class', r'^occupation', r'^job$',
+        r'^job.*code$', r'^job.*id$', r'^position.*code$', r'^title.*code$',
+        r'^job.*class$', r'^occupation.*code$', r'^job$',
     ],
     'location': [
-        r'^loc.*code', r'^location.*code', r'^work.*loc', r'^site.*code',
-        r'^branch.*code', r'^office.*code', r'^location$',
+        r'^loc.*code$', r'^location.*code$', r'^work.*loc.*code$', r'^site.*code$',
+        r'^branch.*code$', r'^office.*code$', r'^location$', r'^loc_id$',
     ],
     'pay_group': [
-        r'^pay.*group', r'^paygroup', r'^pay.*grp',
+        r'^pay.*group$', r'^paygroup$', r'^pay.*grp$', r'^pay_group_code$',
+    ],
+    'pay_frequency': [
+        r'^pay.*freq.*code$', r'^pay.*frequency$', r'^payfreq$', r'^pay_freq$',
+        r'^frequency.*code$', r'^pay_frequency_code$',
     ],
     'earning_code': [
-        r'^earn.*code', r'^earning.*type', r'^pay.*code', r'^wage.*type',
-        r'^earning$', r'^earn_cd',
+        r'^earn.*code$', r'^earning.*code$', r'^earnings.*code$', 
+        r'^wage.*code$', r'^earning$', r'^earn_cd$',
     ],
     'deduction_code': [
-        r'^ded.*code', r'^deduction.*type', r'^deduct.*code',
-        r'^deduction$', r'^ded_cd', r'^benefit.*code',
+        r'^ded.*code$', r'^deduction.*code$', r'^deduct.*code$',
+        r'^deduction$', r'^ded_cd$', r'^benefit.*code$',
     ],
     'tax_code': [
-        r'^tax.*code', r'^tax.*type', r'^withhold.*code',
+        r'^tax.*code$', r'^tax_code$', r'^withhold.*code$',
+        r'^tax.*type.*code$',  # tax_type_code but NOT tax_type (ambiguous)
+    ],
+    'org_level': [
+        r'^org.*level.*\d.*code$', r'^org_level_\d$', r'^org_level_\d_code$',
+        r'^organization.*level', r'^org_lvl_\d',
+    ],
+    'work_state': [
+        r'^work.*state$', r'^state.*code$', r'^work_state$', r'^sui.*state$',
+    ],
+    'status_code': [
+        r'^status.*code$', r'^emp.*status$', r'^employee.*status$', r'^status$',
     ],
 }
 
@@ -112,6 +136,12 @@ def is_key_column(col_name: str) -> bool:
     """Check if column is likely a JOIN key (not just any field)."""
     normalized = col_name.lower().strip()
     
+    # First check if it's an excluded pattern (descriptions, names, etc.)
+    for pattern in EXCLUDED_COLUMN_PATTERNS:
+        if re.match(pattern, normalized) or re.search(pattern, normalized):
+            return False
+    
+    # Then check if it matches key patterns
     for pattern in KEY_COLUMN_PATTERNS:
         if re.match(pattern, normalized) or re.search(pattern, normalized):
             return True
@@ -153,6 +183,11 @@ def get_semantic_type(column_name: str) -> Tuple[str, float]:
     """Detect semantic type from column name patterns."""
     normalized = normalize_column_name(column_name)
     stripped = strip_prefixes_suffixes(column_name)
+    
+    # First check if it's an excluded pattern (descriptions should never match)
+    for pattern in EXCLUDED_COLUMN_PATTERNS:
+        if re.match(pattern, normalized) or re.search(pattern, normalized):
+            return 'excluded', 0.0
     
     for sem_type, patterns in SEMANTIC_TYPES.items():
         for pattern in patterns:
