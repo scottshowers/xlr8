@@ -126,54 +126,50 @@ async def intelligent_chat(request: IntelligentChatRequest):
                 "insights": [],
             }
         
-        # Get or create engine for this session
-        if session_id in intelligence_sessions:
-            engine = intelligence_sessions[session_id]
-        else:
-            engine = IntelligenceEngine(project or 'default')
+        # ALWAYS create fresh engine - don't cache broken state
+        engine = IntelligenceEngine(project or 'default')
+        
+        # Load structured data handler - REQUIRED for SQL generation
+        structured_loaded = False
+        try:
+            from utils.structured_data_handler import get_structured_handler
+            handler = get_structured_handler()
             
-            # Load structured data handler
-            try:
-                from utils.structured_data_handler import get_structured_handler
-                handler = get_structured_handler()
+            if handler and handler.conn:
+                # Get schema for project - direct query, no metadata dependency
+                schema = await get_project_schema_direct(project, request.scope, handler)
                 
-                # Get schema for project
-                schema = await get_project_schema(project, request.scope)
-                engine.load_context(structured_handler=handler, schema=schema)
-                logger.info(f"[INTELLIGENT] Loaded structured handler with {len(schema.get('tables', []))} tables")
-            except Exception as e:
-                logger.warning(f"[INTELLIGENT] Could not load structured handler: {e}")
-            
-            # Load RAG handler
+                if schema.get('tables'):
+                    engine.load_context(structured_handler=handler, schema=schema)
+                    structured_loaded = True
+                    logger.info(f"[INTELLIGENT] Loaded {len(schema['tables'])} tables for {project}")
+                else:
+                    logger.warning(f"[INTELLIGENT] No tables found for project {project}")
+        except Exception as e:
+            logger.error(f"[INTELLIGENT] Structured handler failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+        
+        # Load RAG handler
+        try:
+            from utils.rag_handler import RAGHandler
+            rag = RAGHandler()
+            engine.rag_handler = rag
+        except Exception as e:
+            logger.warning(f"[INTELLIGENT] Could not load RAG handler: {e}")
+        
+        # Load relationships from data model
+        try:
             try:
-                from utils.rag_handler import RAGHandler
-                rag = RAGHandler()
-                engine.rag_handler = rag
-                logger.info("[INTELLIGENT] Loaded RAG handler")
-            except Exception as e:
-                logger.warning(f"[INTELLIGENT] Could not load RAG handler: {e}")
-            
-            # Load relationships from data model
-            try:
-                try:
-                    from utils.database.supabase_client import get_supabase
-                except ImportError:
-                    from utils.database.supabase_client import get_supabase
-                supabase = get_supabase()
-                result = supabase.table('project_relationships').select('*').eq('project_name', project).eq('status', 'confirmed').execute()
-                if result.data:
-                    engine.relationships = result.data
-                    logger.info(f"[INTELLIGENT] Loaded {len(result.data)} confirmed relationships")
-            except Exception as e:
-                logger.warning(f"[INTELLIGENT] Could not load relationships: {e}")
-            
-            # Store session
-            intelligence_sessions[session_id] = engine
-            
-            # Cleanup old sessions (keep last 50)
-            if len(intelligence_sessions) > 50:
-                oldest = list(intelligence_sessions.keys())[0]
-                del intelligence_sessions[oldest]
+                from utils.database.supabase_client import get_supabase
+            except ImportError:
+                from utils.database.supabase_client import get_supabase
+            supabase = get_supabase()
+            result = supabase.table('project_relationships').select('*').eq('project_name', project).eq('status', 'confirmed').execute()
+            if result.data:
+                engine.relationships = result.data
+        except Exception as e:
+            pass  # Non-critical
         
         # Apply any clarification answers
         if request.clarifications:
@@ -421,6 +417,115 @@ def serialize_truth(truth) -> Dict:
         "confidence": truth.confidence,
         "location": truth.location
     }
+
+
+async def get_project_schema_direct(project: str, scope: str, handler) -> Dict:
+    """Get schema by querying DuckDB directly - no metadata tables needed."""
+    tables = []
+    
+    if not handler or not handler.conn:
+        logger.error("[SCHEMA] No handler connection")
+        return {'tables': []}
+    
+    try:
+        # Get all tables directly from DuckDB
+        all_tables = handler.conn.execute("SHOW TABLES").fetchall()
+        logger.info(f"[SCHEMA] DuckDB has {len(all_tables)} total tables")
+        
+        # Build project prefix for filtering (try multiple formats)
+        project_clean = (project or '').strip()
+        project_prefixes = [
+            project_clean.lower(),
+            project_clean.lower().replace(' ', '_'),
+            project_clean.lower().replace(' ', '_').replace('-', '_'),
+            project_clean.upper(),
+            project_clean,
+        ]
+        
+        matched_tables = []
+        all_valid_tables = []
+        
+        for (table_name,) in all_tables:
+            # Skip system/metadata tables
+            if table_name.startswith('_'):
+                continue
+            
+            all_valid_tables.append(table_name)
+            
+            # Check if matches any project prefix
+            table_lower = table_name.lower()
+            matches_project = any(table_lower.startswith(prefix.lower()) for prefix in project_prefixes if prefix)
+            
+            if matches_project:
+                matched_tables.append(table_name)
+        
+        # Use matched tables if found, otherwise use ALL tables (better than nothing)
+        tables_to_process = matched_tables if matched_tables else all_valid_tables
+        
+        if not matched_tables and all_valid_tables:
+            logger.warning(f"[SCHEMA] No tables match project '{project}', using all {len(all_valid_tables)} tables")
+        
+        for table_name in tables_to_process:
+            try:
+                # Get columns - try multiple methods
+                columns = []
+                
+                # Method 1: PRAGMA
+                try:
+                    col_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
+                    columns = [row[1] for row in col_result]
+                except:
+                    pass
+                
+                # Method 2: DESCRIBE
+                if not columns:
+                    try:
+                        col_result = handler.conn.execute(f'DESCRIBE "{table_name}"').fetchall()
+                        columns = [row[0] for row in col_result]
+                    except:
+                        pass
+                
+                # Method 3: SELECT * LIMIT 0
+                if not columns:
+                    try:
+                        result = handler.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 0')
+                        columns = [desc[0] for desc in result.description]
+                    except:
+                        pass
+                
+                if not columns:
+                    logger.warning(f"[SCHEMA] Could not get columns for {table_name}")
+                    continue
+                
+                # Get row count
+                try:
+                    count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
+                    row_count = count_result[0] if count_result else 0
+                except:
+                    row_count = 0
+                
+                tables.append({
+                    'table_name': table_name,
+                    'project': project or 'unknown',
+                    'columns': columns,
+                    'row_count': row_count
+                })
+                
+                # Log first few columns
+                col_preview = columns[:8]
+                logger.info(f"[SCHEMA] {table_name}: {col_preview}{'...' if len(columns) > 8 else ''} ({row_count} rows)")
+                
+            except Exception as col_e:
+                logger.warning(f"[SCHEMA] Error processing {table_name}: {col_e}")
+        
+        logger.info(f"[SCHEMA] Returning {len(tables)} tables for project '{project}'")
+        
+    except Exception as e:
+        logger.error(f"[SCHEMA] Failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+    
+    return {'tables': tables}
 
 
 async def get_project_schema(project: str, scope: str) -> Dict:
