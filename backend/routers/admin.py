@@ -33,10 +33,10 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 def get_supabase():
     """Get Supabase client."""
     try:
-        from utils.supabase_client import get_supabase_client
+        from utils.database.supabase_client import get_supabase_client
         return get_supabase_client()
     except ImportError:
-        from backend.utils.supabase_client import get_supabase_client
+        from backend.utils.database.supabase_client import get_supabase_client
         return get_supabase_client()
 
 
