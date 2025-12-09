@@ -23,6 +23,7 @@ from pydantic import BaseModel
 from typing import Dict, List, Optional, Any
 import logging
 import uuid
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -349,7 +350,6 @@ async def get_project_schema(project: str, scope: str) -> Dict:
             if scope == 'project' and proj.lower() != (project or '').lower():
                 continue
             
-            import json
             columns = json.loads(columns_json) if columns_json else []
             
             tables.append({
