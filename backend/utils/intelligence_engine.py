@@ -164,8 +164,12 @@ class IntelligenceEngine:
         if analysis['needs_clarification']:
             return self._request_clarification(question, analysis)
         
+        logger.info(f"[INTELLIGENCE] Gathering truths - no clarification needed")
+        
         # Gather the three truths
         reality = self._gather_reality(question, analysis)
+        logger.info(f"[INTELLIGENCE] Reality gathered: {len(reality)} truths")
+        
         intent = self._gather_intent(question, analysis)
         best_practice = self._gather_best_practice(question, analysis)
         
@@ -286,18 +290,24 @@ class IntelligenceEngine:
     
     def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
         """Generate SQL query based on the question - SMART schema scanning."""
-        if not self.structured_handler or not self.schema:
+        logger.info(f"[SQL-GEN] Starting - handler: {self.structured_handler is not None}, schema: {self.schema is not None}")
+        
+        if not self.structured_handler:
+            logger.warning("[SQL-GEN] No structured handler")
+            return None
+        
+        if not self.schema:
+            logger.warning("[SQL-GEN] No schema")
             return None
         
         q_lower = question.lower()
         tables = self.schema.get('tables', [])
         
         if not tables:
-            logger.warning("[INTELLIGENCE] No tables in schema")
+            logger.warning("[SQL-GEN] Schema has no tables")
             return None
         
-        # Log what we're working with
-        logger.info(f"[INTELLIGENCE] Scanning {len(tables)} tables for relevant columns")
+        logger.info(f"[SQL-GEN] Scanning {len(tables)} tables: {[t.get('table_name') for t in tables[:5]]}...")
         
         # Detect query type
         query_type = 'list'
@@ -515,7 +525,14 @@ class IntelligenceEngine:
     
     def _gather_reality(self, question: str, analysis: Dict) -> List[Truth]:
         """Gather REALITY - what the customer's DATA shows."""
+        logger.info(f"[REALITY] Starting - handler: {self.structured_handler is not None}, schema tables: {len(self.schema.get('tables', [])) if self.schema else 0}")
+        
         if not self.structured_handler:
+            logger.warning("[REALITY] No structured handler - returning empty")
+            return []
+        
+        if not self.schema or not self.schema.get('tables'):
+            logger.warning("[REALITY] No schema tables - returning empty")
             return []
         
         truths = []
