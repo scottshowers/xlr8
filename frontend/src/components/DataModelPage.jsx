@@ -1,17 +1,17 @@
 /**
  * DataModelPage - Simplified Relationship Review + ERD
  * 
- * Primary View: Clean summary + just the items needing review
- * Advanced View: Full ERD for power users / sales demos
+ * All sections COLLAPSED by default
+ * ERD only shows QUESTIONABLE matches (not everything)
  * 
  * Deploy to: frontend/src/pages/DataModelPage.jsx
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useProject } from '../context/ProjectContext';
 import { 
   CheckCircle, AlertTriangle, RefreshCw, Zap, ChevronDown, ChevronRight,
-  Database, Link2, Eye, EyeOff, X, Check
+  Database, Link2, Eye, EyeOff, X, Check, HelpCircle
 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
@@ -24,8 +24,12 @@ export default function DataModelPage() {
   const [semanticTypes, setSemanticTypes] = useState([]);
   const [stats, setStats] = useState(null);
   const [error, setError] = useState(null);
+  
+  // ALL sections collapsed by default
   const [showERD, setShowERD] = useState(false);
-  const [showAutoMatched, setShowAutoMatched] = useState(false);
+  const [showHighConfidence, setShowHighConfidence] = useState(false);
+  const [showNeedsReview, setShowNeedsReview] = useState(false);
+  const [showSemanticTypes, setShowSemanticTypes] = useState(false);
 
   // Separate relationships
   const needsReview = relationships.filter(r => r.needs_review && !r.confirmed);
@@ -61,12 +65,10 @@ export default function DataModelPage() {
     setRelationships(prev => prev.map(r => 
       r === rel ? { ...r, confirmed, needs_review: false } : r
     ));
-    // TODO: POST to backend to persist
   };
 
   const rejectRelationship = (rel) => {
     setRelationships(prev => prev.filter(r => r !== rel));
-    // TODO: DELETE to backend
   };
 
   if (!activeProject) {
@@ -84,28 +86,30 @@ export default function DataModelPage() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b px-6 py-4">
-        <div className="max-w-5xl mx-auto flex items-center justify-between">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Data Model</h1>
             <p className="text-sm text-gray-500 mt-1">
-              {activeProject.name} • Auto-detect relationships between tables
+              {activeProject.name} • Auto-detect relationships between uploaded tables
             </p>
           </div>
           
           <div className="flex items-center gap-3">
-            {analyzed && (
+            {/* ERD Button - Only shows questionable matches */}
+            {analyzed && needsReview.length > 0 && (
               <button
                 onClick={() => setShowERD(!showERD)}
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                   showERD 
-                    ? 'bg-purple-100 text-purple-700 hover:bg-purple-200' 
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300'
+                    ? 'bg-purple-600 text-white hover:bg-purple-700' 
+                    : 'bg-purple-100 text-purple-700 hover:bg-purple-200 border border-purple-300'
                 }`}
               >
                 {showERD ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                {showERD ? 'Hide ERD' : '🔗 Show ERD'}
+                {showERD ? 'Hide ERD' : '🔗 Visual ERD'}
               </button>
             )}
+            
             <button
               onClick={analyzeProject}
               disabled={loading}
@@ -121,7 +125,7 @@ export default function DataModelPage() {
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto p-6">
+      <div className="max-w-6xl mx-auto p-6">
         {error && (
           <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
             {error}
@@ -141,163 +145,269 @@ export default function DataModelPage() {
 
         {/* Results */}
         {analyzed && (
-          <div className="space-y-6">
+          <div className="space-y-4">
             
-            {/* Summary Cards */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-white rounded-xl border p-6">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
-                    <CheckCircle className="w-6 h-6 text-green-600" />
-                  </div>
-                  <div>
-                    <div className="text-3xl font-bold text-gray-900">{autoMatched.length}</div>
-                    <div className="text-sm text-gray-500">Auto-matched</div>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="bg-white rounded-xl border p-6">
-                <div className="flex items-center gap-3">
-                  <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
-                    needsReview.length > 0 ? 'bg-amber-100' : 'bg-green-100'
-                  }`}>
-                    {needsReview.length > 0 ? (
-                      <AlertTriangle className="w-6 h-6 text-amber-600" />
-                    ) : (
-                      <CheckCircle className="w-6 h-6 text-green-600" />
-                    )}
-                  </div>
-                  <div>
-                    <div className="text-3xl font-bold text-gray-900">{needsReview.length}</div>
-                    <div className="text-sm text-gray-500">
-                      {needsReview.length > 0 ? 'Need review' : 'All confirmed!'}
-                    </div>
-                  </div>
-                </div>
-              </div>
+            {/* Summary Stats Row */}
+            <div className="grid grid-cols-5 gap-4">
+              <StatCard label="Tables" value={stats?.tables_analyzed || 0} />
+              <StatCard label="Columns" value={stats?.columns_analyzed || 0} />
+              <StatCard label="Relationships" value={relationships.length} color="blue" />
+              <StatCard label="Auto-matched" value={autoMatched.length} color="green" />
+              <StatCard label="Needs Review" value={needsReview.length} color={needsReview.length > 0 ? 'amber' : 'green'} />
             </div>
 
-            {/* Needs Review Section */}
-            {needsReview.length > 0 && (
+            {/* ERD View - Only Questionable Matches */}
+            {showERD && needsReview.length > 0 && (
               <div className="bg-white rounded-xl border overflow-hidden">
-                <div className="px-6 py-4 border-b bg-amber-50">
-                  <h2 className="font-semibold text-amber-800">
-                    Please confirm these relationships
-                  </h2>
-                  <p className="text-sm text-amber-600 mt-1">
-                    We're not sure if these columns refer to the same data
-                  </p>
+                <div className="px-6 py-4 border-b bg-amber-50 flex items-center justify-between">
+                  <div>
+                    <h2 className="font-semibold text-amber-800">Questionable Relationships</h2>
+                    <p className="text-sm text-amber-600">Drag tables to rearrange • Only showing uncertain matches</p>
+                  </div>
+                  <div className="text-sm font-medium text-amber-700">
+                    {needsReview.length} to review
+                  </div>
                 </div>
-                
-                <div className="divide-y">
-                  {needsReview.map((rel, i) => (
-                    <ReviewCard 
-                      key={i} 
-                      rel={rel}
-                      onConfirm={() => confirmRelationship(rel, true)}
-                      onReject={() => rejectRelationship(rel)}
-                    />
-                  ))}
-                </div>
+                <ERDCanvas relationships={needsReview} />
               </div>
             )}
 
-            {/* All done message */}
-            {needsReview.length === 0 && (
-              <div className="bg-green-50 border border-green-200 rounded-xl p-6 text-center">
-                <CheckCircle className="w-10 h-10 text-green-500 mx-auto mb-3" />
-                <h3 className="font-semibold text-green-800">All relationships confirmed!</h3>
-                <p className="text-sm text-green-600 mt-1">
-                  Your data model is ready. Chat queries will use these connections automatically.
-                </p>
-              </div>
-            )}
-
-            {/* Collapsed Auto-matched Section */}
-            <div className="bg-white rounded-xl border overflow-hidden">
-              <button
-                onClick={() => setShowAutoMatched(!showAutoMatched)}
-                className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
-              >
-                <div className="flex items-center gap-2">
-                  {showAutoMatched ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
-                  <span className="font-medium">View {autoMatched.length} auto-detected relationships</span>
-                </div>
-                <span className="text-sm text-gray-400">Click to {showAutoMatched ? 'hide' : 'expand'}</span>
-              </button>
-              
-              {showAutoMatched && (
-                <div className="border-t max-h-96 overflow-y-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 sticky top-0">
+            {/* High Confidence Matches - COLLAPSED */}
+            <CollapsibleSection
+              title="High Confidence Matches"
+              count={autoMatched.length}
+              icon={<CheckCircle className="w-5 h-5 text-green-500" />}
+              badge="Auto-accepted"
+              badgeColor="green"
+              expanded={showHighConfidence}
+              onToggle={() => setShowHighConfidence(!showHighConfidence)}
+            >
+              <div className="max-h-80 overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr>
+                      <th className="text-left px-4 py-2 font-medium text-gray-600">Source</th>
+                      <th className="px-4 py-2 w-10"></th>
+                      <th className="text-left px-4 py-2 font-medium text-gray-600">Target</th>
+                      <th className="text-right px-4 py-2 font-medium text-gray-600">Confidence</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {autoMatched.slice(0, 100).map((rel, i) => (
+                      <RelationshipRow key={i} rel={rel} />
+                    ))}
+                    {autoMatched.length > 100 && (
                       <tr>
-                        <th className="text-left px-4 py-2 font-medium text-gray-600">Source</th>
-                        <th className="px-4 py-2"></th>
-                        <th className="text-left px-4 py-2 font-medium text-gray-600">Target</th>
-                        <th className="text-right px-4 py-2 font-medium text-gray-600">Confidence</th>
+                        <td colSpan={4} className="px-4 py-2 text-center text-gray-400 text-sm">
+                          +{autoMatched.length - 100} more matches
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {autoMatched.map((rel, i) => (
-                        <tr key={i} className="hover:bg-gray-50">
-                          <td className="px-4 py-2">
-                            <div className="font-medium text-gray-900">{getShortTableName(rel.source_table)}</div>
-                            <div className="text-blue-600 font-mono text-xs">{rel.source_column}</div>
-                          </td>
-                          <td className="px-4 py-2 text-gray-300">
-                            <Link2 className="w-4 h-4" />
-                          </td>
-                          <td className="px-4 py-2">
-                            <div className="font-medium text-gray-900">{getShortTableName(rel.target_table)}</div>
-                            <div className="text-blue-600 font-mono text-xs">{rel.target_column}</div>
-                          </td>
-                          <td className="px-4 py-2 text-right">
-                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                              rel.confidence >= 0.9 ? 'bg-green-100 text-green-700' :
-                              rel.confidence >= 0.7 ? 'bg-blue-100 text-blue-700' :
-                              'bg-gray-100 text-gray-700'
-                            }`}>
-                              {Math.round(rel.confidence * 100)}%
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </CollapsibleSection>
 
-            {/* ERD View (Advanced) */}
-            {showERD && (
-              <div className="bg-white rounded-xl border overflow-hidden">
-                <div className="px-6 py-4 border-b bg-gray-50 flex items-center justify-between">
-                  <div>
-                    <h2 className="font-semibold">Entity Relationship Diagram</h2>
-                    <p className="text-sm text-gray-500">Drag tables to rearrange</p>
-                  </div>
-                  <div className="text-sm text-gray-400">
-                    {relationships.length} relationships
-                  </div>
-                </div>
-                {relationships.length > 0 ? (
-                  <ERDCanvas 
-                    relationships={relationships}
-                    stats={stats}
+            {/* Needs Review - COLLAPSED */}
+            <CollapsibleSection
+              title="Needs Review"
+              count={needsReview.length}
+              icon={<AlertTriangle className="w-5 h-5 text-amber-500" />}
+              badge="Confirm or reject"
+              badgeColor="amber"
+              expanded={showNeedsReview}
+              onToggle={() => setShowNeedsReview(!showNeedsReview)}
+            >
+              <div className="max-h-96 overflow-y-auto divide-y">
+                {needsReview.slice(0, 50).map((rel, i) => (
+                  <ReviewCard 
+                    key={i} 
+                    rel={rel}
+                    onConfirm={() => confirmRelationship(rel, true)}
+                    onReject={() => rejectRelationship(rel)}
                   />
-                ) : (
-                  <div className="p-12 text-center text-gray-500">
-                    <Database className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                    <p>No relationships detected yet.</p>
-                    <p className="text-sm mt-1">Run analysis to detect table connections.</p>
+                ))}
+                {needsReview.length > 50 && (
+                  <div className="px-4 py-3 text-center text-gray-400 text-sm bg-gray-50">
+                    +{needsReview.length - 50} more items to review
                   </div>
                 )}
               </div>
+            </CollapsibleSection>
+
+            {/* Semantic Types - COLLAPSED */}
+            {semanticTypes.length > 0 && (
+              <CollapsibleSection
+                title="Semantic Types Detected"
+                count={`${semanticTypes.length} columns`}
+                icon={<Database className="w-5 h-5 text-purple-500" />}
+                expanded={showSemanticTypes}
+                onToggle={() => setShowSemanticTypes(!showSemanticTypes)}
+              >
+                <div className="p-4 max-h-64 overflow-y-auto">
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(groupByType(semanticTypes)).map(([type, items]) => (
+                      <div key={type} className="px-3 py-1 bg-purple-50 text-purple-700 rounded-full text-sm">
+                        {type}: {items.length}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </CollapsibleSection>
             )}
+
+            {/* Help Text */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <HelpCircle className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="font-medium text-blue-800">How relationships improve chat queries:</h4>
+                  <p className="text-sm text-blue-700 mt-1">
+                    When you ask questions like "Show employees hired in 2024 with earnings over $100K", 
+                    the system uses these relationships to JOIN data across your uploaded files automatically. 
+                    Confirming matches ensures accurate cross-table queries.
+                  </p>
+                </div>
+              </div>
+            </div>
 
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+
+// Stat Card Component
+function StatCard({ label, value, color = 'gray' }) {
+  const colors = {
+    gray: 'text-gray-900',
+    blue: 'text-blue-600',
+    green: 'text-green-600',
+    amber: 'text-amber-600',
+  };
+  
+  return (
+    <div className="bg-white rounded-xl border p-4 text-center">
+      <div className={`text-2xl font-bold ${colors[color]}`}>{value}</div>
+      <div className="text-sm text-gray-500">{label}</div>
+    </div>
+  );
+}
+
+
+// Collapsible Section Component
+function CollapsibleSection({ title, count, icon, badge, badgeColor, expanded, onToggle, children }) {
+  const badgeColors = {
+    green: 'text-green-600',
+    amber: 'text-amber-600',
+    blue: 'text-blue-600',
+  };
+  
+  return (
+    <div className="bg-white rounded-xl border overflow-hidden">
+      <button
+        onClick={onToggle}
+        className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          {expanded ? <ChevronDown className="w-5 h-5 text-gray-400" /> : <ChevronRight className="w-5 h-5 text-gray-400" />}
+          {icon}
+          <span className="font-medium text-gray-800">{title}</span>
+          <span className="text-gray-400">({count})</span>
+        </div>
+        {badge && (
+          <span className={`text-sm ${badgeColors[badgeColor] || 'text-gray-500'}`}>
+            {badge}
+          </span>
+        )}
+      </button>
+      
+      {expanded && (
+        <div className="border-t">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// Relationship Row (for table view)
+function RelationshipRow({ rel }) {
+  return (
+    <tr className="hover:bg-gray-50">
+      <td className="px-4 py-2">
+        <div className="font-medium text-gray-900 text-xs">{getShortTableName(rel.source_table)}</div>
+        <div className="text-blue-600 font-mono text-xs">{rel.source_column}</div>
+      </td>
+      <td className="px-4 py-2 text-gray-300">
+        <Link2 className="w-4 h-4" />
+      </td>
+      <td className="px-4 py-2">
+        <div className="font-medium text-gray-900 text-xs">{getShortTableName(rel.target_table)}</div>
+        <div className="text-blue-600 font-mono text-xs">{rel.target_column}</div>
+      </td>
+      <td className="px-4 py-2 text-right">
+        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+          rel.confidence >= 0.9 ? 'bg-green-100 text-green-700' :
+          rel.confidence >= 0.7 ? 'bg-blue-100 text-blue-700' :
+          'bg-gray-100 text-gray-700'
+        }`}>
+          {Math.round(rel.confidence * 100)}%
+        </span>
+      </td>
+    </tr>
+  );
+}
+
+
+// Review Card with actions
+function ReviewCard({ rel, onConfirm, onReject }) {
+  return (
+    <div className="px-4 py-3 flex items-center justify-between hover:bg-gray-50">
+      <div className="flex items-center gap-4 flex-1 min-w-0">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="font-mono text-blue-600 truncate">{rel.source_column}</span>
+            <span className="text-gray-400">in</span>
+            <span className="text-gray-600 truncate">{getShortTableName(rel.source_table)}</span>
+          </div>
+        </div>
+        
+        <div className="text-amber-400 px-2">↔</div>
+        
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="font-mono text-blue-600 truncate">{rel.target_column}</span>
+            <span className="text-gray-400">in</span>
+            <span className="text-gray-600 truncate">{getShortTableName(rel.target_table)}</span>
+          </div>
+        </div>
+        
+        <span className={`px-2 py-0.5 rounded text-xs font-medium flex-shrink-0 ${
+          rel.confidence >= 0.7 ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'
+        }`}>
+          {Math.round(rel.confidence * 100)}%
+        </span>
+      </div>
+      
+      <div className="flex items-center gap-2 ml-4 flex-shrink-0">
+        <button
+          onClick={onConfirm}
+          className="p-1.5 rounded bg-green-100 text-green-600 hover:bg-green-200"
+          title="Yes, same data"
+        >
+          <Check className="w-4 h-4" />
+        </button>
+        <button
+          onClick={onReject}
+          className="p-1.5 rounded bg-red-100 text-red-600 hover:bg-red-200"
+          title="No, different data"
+        >
+          <X className="w-4 h-4" />
+        </button>
       </div>
     </div>
   );
@@ -312,74 +422,25 @@ function getShortTableName(fullName) {
 }
 
 
-// Review Card with mini ERD
-function ReviewCard({ rel, onConfirm, onReject }) {
-  return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-4">
-        <div className="text-sm text-gray-500">
-          Is <span className="font-mono font-semibold text-gray-800">{rel.source_column}</span> the same as <span className="font-mono font-semibold text-gray-800">{rel.target_column}</span>?
-        </div>
-        <div className="text-xs text-gray-400">
-          {Math.round(rel.confidence * 100)}% match
-        </div>
-      </div>
-      
-      {/* Mini ERD */}
-      <div className="flex items-center justify-center gap-4 mb-6">
-        <div className="bg-gray-50 border rounded-lg p-3 min-w-[160px]">
-          <div className="text-xs text-gray-400 mb-1">Table</div>
-          <div className="font-medium text-sm truncate" title={rel.source_table}>
-            {getShortTableName(rel.source_table)}
-          </div>
-          <div className="mt-2 text-xs text-gray-400">Column</div>
-          <div className="font-mono text-blue-600 text-sm">{rel.source_column}</div>
-        </div>
-        
-        <div className="flex flex-col items-center">
-          <div className="text-amber-500 text-lg">?</div>
-          <div className="w-16 border-t-2 border-dashed border-amber-300"></div>
-        </div>
-        
-        <div className="bg-gray-50 border rounded-lg p-3 min-w-[160px]">
-          <div className="text-xs text-gray-400 mb-1">Table</div>
-          <div className="font-medium text-sm truncate" title={rel.target_table}>
-            {getShortTableName(rel.target_table)}
-          </div>
-          <div className="mt-2 text-xs text-gray-400">Column</div>
-          <div className="font-mono text-blue-600 text-sm">{rel.target_column}</div>
-        </div>
-      </div>
-      
-      {/* Actions */}
-      <div className="flex gap-3 justify-center">
-        <button
-          onClick={onConfirm}
-          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
-        >
-          <Check className="w-4 h-4" /> Yes, same data
-        </button>
-        <button
-          onClick={onReject}
-          className="flex items-center gap-2 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium"
-        >
-          <X className="w-4 h-4" /> No, different
-        </button>
-      </div>
-    </div>
-  );
+// Group semantic types by type
+function groupByType(semanticTypes) {
+  return semanticTypes.reduce((acc, item) => {
+    const type = item.type || 'unknown';
+    if (!acc[type]) acc[type] = [];
+    acc[type].push(item);
+    return acc;
+  }, {});
 }
 
 
-// Full ERD Canvas (for power users / demos)
-function ERDCanvas({ relationships, stats }) {
+// ERD Canvas - Shows only passed relationships (questionable ones)
+function ERDCanvas({ relationships }) {
   const canvasRef = useRef(null);
   const [tables, setTables] = useState([]);
   const [positions, setPositions] = useState({});
   const [dragging, setDragging] = useState(null);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
 
-  // Extract unique tables from relationships
   useEffect(() => {
     const tableSet = new Set();
     const tableColumns = {};
@@ -402,19 +463,20 @@ function ERDCanvas({ relationships, stats }) {
     
     setTables(tableList);
     
-    // Initialize positions in grid
+    // Grid layout
     const cols = Math.ceil(Math.sqrt(tableList.length));
     const newPositions = {};
     tableList.forEach((t, i) => {
       newPositions[t.name] = {
-        x: 50 + (i % cols) * 280,
-        y: 50 + Math.floor(i / cols) * 180
+        x: 50 + (i % cols) * 300,
+        y: 50 + Math.floor(i / cols) * 200
       };
     });
     setPositions(newPositions);
   }, [relationships]);
 
   const handleMouseDown = (e, tableName) => {
+    if (!canvasRef.current) return;
     const rect = canvasRef.current.getBoundingClientRect();
     setDragging(tableName);
     setOffset({
@@ -424,59 +486,82 @@ function ERDCanvas({ relationships, stats }) {
   };
 
   const handleMouseMove = (e) => {
-    if (!dragging) return;
+    if (!dragging || !canvasRef.current) return;
     const rect = canvasRef.current.getBoundingClientRect();
     setPositions(prev => ({
       ...prev,
       [dragging]: {
-        x: e.clientX - rect.left - offset.x,
-        y: e.clientY - rect.top - offset.y
+        x: Math.max(0, e.clientX - rect.left - offset.x),
+        y: Math.max(0, e.clientY - rect.top - offset.y)
       }
     }));
   };
 
   const handleMouseUp = () => setDragging(null);
 
-  // Get line coordinates
   const getLineCoords = (rel) => {
     const source = positions[rel.source_table];
     const target = positions[rel.target_table];
     if (!source || !target) return null;
     
     return {
-      x1: source.x + 240,
-      y1: source.y + 50,
+      x1: source.x + 260,
+      y1: source.y + 60,
       x2: target.x,
-      y2: target.y + 50
+      y2: target.y + 60
     };
   };
+
+  if (tables.length === 0) {
+    return (
+      <div className="p-12 text-center text-gray-500">
+        <Database className="w-12 h-12 mx-auto mb-3 opacity-30" />
+        <p>No questionable relationships to visualize.</p>
+      </div>
+    );
+  }
 
   return (
     <div 
       ref={canvasRef}
-      className="relative bg-gray-50 overflow-auto"
-      style={{ height: '500px', minWidth: '100%' }}
+      className="relative bg-slate-50 overflow-auto cursor-grab"
+      style={{ height: '450px', minWidth: '100%' }}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
     >
-      {/* SVG Lines */}
-      <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ minWidth: '1500px', minHeight: '800px' }}>
+      {/* Connection Lines */}
+      <svg 
+        className="absolute inset-0 pointer-events-none" 
+        style={{ width: '2000px', height: '1000px' }}
+      >
         {relationships.map((rel, i) => {
           const coords = getLineCoords(rel);
           if (!coords) return null;
           return (
-            <line
-              key={i}
-              x1={coords.x1}
-              y1={coords.y1}
-              x2={coords.x2}
-              y2={coords.y2}
-              stroke={rel.needs_review ? '#f59e0b' : '#3b82f6'}
-              strokeWidth={rel.needs_review ? 2 : 1.5}
-              strokeDasharray={rel.needs_review ? '5,5' : 'none'}
-              opacity={0.6}
-            />
+            <g key={i}>
+              <line
+                x1={coords.x1}
+                y1={coords.y1}
+                x2={coords.x2}
+                y2={coords.y2}
+                stroke="#f59e0b"
+                strokeWidth={2}
+                strokeDasharray="6,4"
+                opacity={0.7}
+              />
+              {/* Question mark at midpoint */}
+              <text 
+                x={(coords.x1 + coords.x2) / 2} 
+                y={(coords.y1 + coords.y2) / 2 - 5}
+                fill="#d97706"
+                fontSize="16"
+                fontWeight="bold"
+                textAnchor="middle"
+              >
+                ?
+              </text>
+            </g>
           );
         })}
       </svg>
@@ -489,27 +574,24 @@ function ERDCanvas({ relationships, stats }) {
         return (
           <div
             key={table.name}
-            className="absolute bg-white border rounded-lg shadow-sm cursor-move select-none"
+            className="absolute bg-white border-2 border-amber-300 rounded-lg shadow-md cursor-move select-none"
             style={{ 
               left: pos.x, 
               top: pos.y, 
-              width: 240,
+              width: 260,
               zIndex: dragging === table.name ? 10 : 1
             }}
             onMouseDown={(e) => handleMouseDown(e, table.name)}
           >
-            <div className="px-3 py-2 bg-slate-800 text-white rounded-t-lg text-sm font-medium truncate">
+            <div className="px-3 py-2 bg-amber-500 text-white rounded-t-md text-sm font-medium truncate">
               {getShortTableName(table.name)}
             </div>
-            <div className="p-2 text-xs space-y-1 max-h-32 overflow-y-auto">
-              {table.columns.slice(0, 8).map(col => (
-                <div key={col} className="text-gray-600 truncate font-mono">
+            <div className="p-2 text-xs space-y-1">
+              {table.columns.map(col => (
+                <div key={col} className="text-amber-700 font-mono bg-amber-50 px-2 py-1 rounded">
                   {col}
                 </div>
               ))}
-              {table.columns.length > 8 && (
-                <div className="text-gray-400 italic">+{table.columns.length - 8} more</div>
-              )}
             </div>
           </div>
         );
