@@ -181,105 +181,98 @@ async def delete_relationship(
 
 async def get_project_tables(project_name: str) -> List[Dict]:
     """
-    Get table schemas for a project from the structured data handler.
-    
-    Returns list of tables with columns.
+    Get table schemas for a project - copies exact logic from status.py /status/structured
     """
-    try:
-        # Use the existing structured data handler
-        from utils.structured_data_handler import StructuredDataHandler
-        handler = StructuredDataHandler()
-        
-        # Try with project argument first, then without
-        try:
-            all_files = handler.list_files(project_name)
-        except TypeError:
-            all_files = handler.list_files()
-        
-        tables = []
-        project_lower = project_name.lower()
-        
-        for file_info in all_files:
-            # Match by project field (in case list_files returned all)
-            file_project = file_info.get('project', '').lower()
-            if file_project != project_lower:
-                continue
-            
-            # Extract sheets/tables from this file
-            for sheet in file_info.get('sheets', []):
-                tables.append({
-                    'table_name': sheet.get('table_name', ''),
-                    'columns': sheet.get('columns', []),
-                    'row_count': sheet.get('row_count', 0),
-                    'sheet_name': sheet.get('sheet_name', ''),
-                    'filename': file_info.get('filename', '')
-                })
-        
-        logger.info(f"Found {len(tables)} tables for project {project_name}")
-        return tables
-        
-    except ImportError as e:
-        logger.warning(f"StructuredDataHandler import failed: {e}")
-    except Exception as e:
-        logger.warning(f"StructuredDataHandler failed: {e}")
+    import json
     
-    # Fallback: Query DuckDB directly
     try:
-        import duckdb
-        import os
-        
-        db_path = os.environ.get('DUCKDB_PATH', '/data/structured.duckdb')
-        if not os.path.exists(db_path):
-            db_path = './data/structured.duckdb'
-        if not os.path.exists(db_path):
-            logger.error(f"DuckDB not found at {db_path}")
+        from utils.structured_data_handler import get_structured_handler
+    except ImportError:
+        try:
+            from backend.utils.structured_data_handler import get_structured_handler
+        except ImportError:
+            logger.error("Cannot import get_structured_handler")
             return []
-        
-        conn = duckdb.connect(db_path, read_only=True)
-        
-        # Get all tables that start with project name (case insensitive)
-        project_prefix = project_name.lower()
-        
-        tables_query = """
-            SELECT table_name 
-            FROM information_schema.tables 
-            WHERE table_schema = 'main'
-        """
-        all_tables = conn.execute(tables_query).fetchall()
-        
+    
+    try:
+        handler = get_structured_handler()
         tables = []
-        for (table_name,) in all_tables:
-            # Match tables starting with project prefix
-            if not table_name.lower().startswith(project_prefix):
-                continue
-            
-            # Get columns
-            cols_query = f"""
-                SELECT column_name
-                FROM information_schema.columns
-                WHERE table_name = '{table_name}'
-                ORDER BY ordinal_position
-            """
-            columns = [row[0] for row in conn.execute(cols_query).fetchall()]
-            
-            # Get row count
-            try:
-                row_count = conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
-            except:
-                row_count = 0
-            
-            tables.append({
-                'table_name': table_name,
-                'columns': columns,
-                'row_count': row_count
-            })
         
-        conn.close()
-        logger.info(f"Found {len(tables)} tables for project {project_name} via DuckDB")
+        # Query _schema_metadata for Excel files
+        try:
+            metadata_result = handler.conn.execute("""
+                SELECT table_name, project, file_name, sheet_name, columns, row_count
+                FROM _schema_metadata 
+                WHERE is_current = TRUE
+            """).fetchall()
+            
+            for row in metadata_result:
+                table_name, proj, filename, sheet, columns_json, row_count = row
+                
+                if proj.lower() != project_name.lower():
+                    continue
+                
+                try:
+                    columns_data = json.loads(columns_json) if columns_json else []
+                    columns = [c.get('name', c) if isinstance(c, dict) else c for c in columns_data]
+                except:
+                    columns = []
+                
+                tables.append({
+                    'table_name': table_name,
+                    'columns': columns,
+                    'row_count': row_count or 0,
+                    'sheet_name': sheet,
+                    'filename': filename
+                })
+            
+            logger.info(f"Found {len(tables)} Excel tables for {project_name}")
+            
+        except Exception as e:
+            logger.warning(f"Metadata query failed: {e}")
+        
+        # Query _pdf_tables for PDF files
+        try:
+            table_check = handler.conn.execute("""
+                SELECT COUNT(*) FROM information_schema.tables 
+                WHERE table_name = '_pdf_tables'
+            """).fetchone()
+            
+            if table_check[0] > 0:
+                pdf_result = handler.conn.execute("""
+                    SELECT table_name, source_file, project, row_count, columns
+                    FROM _pdf_tables
+                """).fetchall()
+                
+                for row in pdf_result:
+                    table_name, source_file, proj, row_count, columns_json = row
+                    
+                    if not proj or proj.lower() != project_name.lower():
+                        continue
+                    
+                    try:
+                        columns = json.loads(columns_json) if columns_json else []
+                    except:
+                        columns = []
+                    
+                    tables.append({
+                        'table_name': table_name,
+                        'columns': columns,
+                        'row_count': row_count or 0,
+                        'sheet_name': 'PDF Data',
+                        'filename': source_file
+                    })
+                
+                logger.info(f"Found {len([t for t in tables if t.get('sheet_name') == 'PDF Data'])} PDF tables for {project_name}")
+                
+        except Exception as e:
+            logger.debug(f"PDF tables query: {e}")
+        
+        logger.info(f"Total {len(tables)} tables for project {project_name}")
         return tables
         
     except Exception as e:
-        logger.error(f"DuckDB fallback failed: {e}")
+        logger.error(f"Failed to get tables: {e}")
         return []
 
 
