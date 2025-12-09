@@ -72,9 +72,9 @@ async def analyze_data_model(project_name: str):
         
         try:
             try:
-                from utils.supabase_client import get_supabase_client
+                from utils.database.supabase_client import get_supabase_client
             except ImportError:
-                from backend.utils.supabase_client import get_supabase_client
+                from backend.utils.database.supabase_client import get_supabase_client
             supabase = get_supabase_client()
             
             # Get global mappings
@@ -181,9 +181,9 @@ async def get_relationships(project_name: str):
         # Load from Supabase
         try:
             try:
-                from utils.supabase_client import get_supabase_client
+                from utils.database.supabase_client import get_supabase_client
             except ImportError:
-                from backend.utils.supabase_client import get_supabase_client
+                from backend.utils.database.supabase_client import get_supabase_client
             
             supabase = get_supabase_client()
             
@@ -253,9 +253,9 @@ async def confirm_relationship(project_name: str, confirmation: RelationshipConf
         # Save to Supabase for persistence and learning
         try:
             try:
-                from utils.supabase_client import get_supabase_client
+                from utils.database.supabase_client import get_supabase_client
             except ImportError:
-                from backend.utils.supabase_client import get_supabase_client
+                from backend.utils.database.supabase_client import get_supabase_client
             supabase = get_supabase_client()
             
             if confirmation.confirmed:
