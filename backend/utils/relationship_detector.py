@@ -1,142 +1,173 @@
 """
-Relationship Detector - Auto-detect table relationships using rules + local LLM.
+Relationship Detector v2 - INTELLIGENT table relationship detection.
+
+Key Improvements:
+1. Configuration Validation file is SOURCE OF TRUTH - other tables map to it
+2. Only analyzes KEY columns (IDs, codes, numbers) - not every field
+3. Strips common prefixes (home_, work_, etc.) before comparing
+4. Limits to top 3 relationships per table pair
+5. Much higher confidence thresholds
+6. Prepares for global learning (cross-customer mappings)
 
 Deploy to: backend/utils/relationship_detector.py
-
-Features:
-- Rule-based exact/normalized matching (free, instant)
-- Fuzzy matching with Levenshtein + token overlap (free, instant)
-- Semantic type detection from column name patterns (free, instant)
-- Local LLM for ambiguous pairs (free, ~2-5 sec)
-- Confidence scores for all matches
-- needs_review flag for uncertain matches
 """
 
 import re
 from difflib import SequenceMatcher
-from typing import List, Dict, Tuple, Optional
-import json
+from typing import List, Dict, Tuple, Optional, Set
 import logging
 
 logger = logging.getLogger(__name__)
 
-# Common patterns that indicate column purpose
-SEMANTIC_PATTERNS = {
+
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+
+# Only these column patterns are potential JOIN keys
+KEY_COLUMN_PATTERNS = [
+    r'.*_id$', r'.*_code$', r'.*_num$', r'.*_number$', r'.*_key$',
+    r'^id$', r'^code$', r'^number$',
+    r'^emp.*', r'^employee.*', r'^ee_.*',
+    r'^company.*', r'^comp_.*', r'^co_.*',
+    r'^dept.*', r'^department.*',
+    r'^job.*', r'^position.*',
+    r'^location.*', r'^loc_.*',
+    r'^earn.*', r'^deduct.*', r'^ded_.*',
+    r'^tax.*', r'^pay.*group',
+]
+
+# Strip these prefixes before comparing
+STRIP_PREFIXES = [
+    'home_', 'work_', 'primary_', 'current_', 'original_',
+    'old_', 'new_', 'src_', 'tgt_', 'legacy_', 'default_',
+    'main_', 'alt_', 'alternate_', 'secondary_',
+]
+
+# Strip these suffixes before comparing  
+STRIP_SUFFIXES = [
+    '_1', '_2', '_old', '_new', '_orig', '_current',
+]
+
+# These files are likely the CONFIG/REFERENCE files (source of truth)
+CONFIG_FILE_PATTERNS = [
+    r'config.*valid', r'validation', r'configuration',
+    r'setup', r'reference', r'master', r'lookup',
+]
+
+# Semantic type patterns for grouping columns
+SEMANTIC_TYPES = {
     'employee_id': [
-        r'^emp.*id$', r'^ee.*num', r'^employee.*number', r'^worker.*id', 
-        r'^person.*id', r'^emp.*num', r'^emp.*no$', r'^ee.*id$',
-        r'^employee.*id$', r'^staff.*id', r'^associate.*id'
+        r'^emp.*id', r'^ee.*num', r'^employee.*number', r'^worker.*id',
+        r'^person.*id', r'^emp.*num', r'^emp.*no$', r'^ee.*id',
+        r'^employee.*id', r'^staff.*id', r'^associate.*id', r'^emp.*key',
     ],
     'company_code': [
         r'^comp.*code', r'^co.*code', r'^company.*id', r'^org.*code',
-        r'^entity.*code', r'^legal.*entity', r'^business.*unit'
+        r'^entity.*code', r'^legal.*entity', r'^business.*unit',
+        r'^company$', r'^comp$',
     ],
     'department': [
-        r'dept', r'department', r'^div.*code', r'division', r'cost.*center',
-        r'home.*dept', r'work.*dept'
+        r'dept.*code', r'department.*code', r'^div.*code', r'division.*code',
+        r'cost.*center', r'^dept$', r'^department$',
     ],
     'job_code': [
         r'^job.*code', r'^job.*id', r'^position.*code', r'^title.*code',
-        r'^job.*class', r'^occupation'
+        r'^job.*class', r'^occupation', r'^job$',
     ],
     'location': [
-        r'^loc.*code', r'^location', r'^work.*loc', r'^site.*code',
-        r'^branch.*code', r'^office.*code'
+        r'^loc.*code', r'^location.*code', r'^work.*loc', r'^site.*code',
+        r'^branch.*code', r'^office.*code', r'^location$',
     ],
-    'date': [
-        r'.*_date$', r'.*_dt$', r'^date_.*', r'.*_on$', r'.*_when$',
-        r'^eff.*date', r'^effective', r'^start.*date', r'^end.*date',
-        r'^hire.*date', r'^term.*date', r'^birth.*date', r'^check.*date'
-    ],
-    'amount': [
-        r'.*_amt$', r'.*_amount$', r'.*_pay$', r'^gross.*', r'^net.*', 
-        r'^total.*', r'.*_sum$', r'^salary', r'^wage', r'^bonus'
-    ],
-    'code': [
-        r'.*_code$', r'.*_cd$', r'.*_type$', r'.*_key$'
-    ],
-    'rate': [
-        r'.*_rate$', r'.*_rt$', r'^hourly.*', r'^annual.*', r'^pay.*rate',
-        r'^comp.*rate'
-    ],
-    'hours': [
-        r'.*_hrs$', r'.*_hours$', r'^hours.*', r'^hrs_.*', r'^worked.*hrs'
-    ],
-    'status': [
-        r'.*_status$', r'.*_stat$', r'^active.*', r'^status.*', 
-        r'^emp.*status', r'^employment.*status'
-    ],
-    'name': [
-        r'.*_name$', r'^first.*', r'^last.*', r'^full.*name', 
-        r'^fname', r'^lname', r'^middle.*'
-    ],
-    'ssn': [
-        r'^ssn', r'^social.*sec', r'^ss_num', r'^tax.*id'
-    ],
-    'email': [
-        r'^email', r'^e_mail', r'.*_email$'
-    ],
-    'phone': [
-        r'^phone', r'^tel', r'^mobile', r'^cell', r'.*_phone$'
-    ],
-    'address': [
-        r'^address', r'^street', r'^city', r'^state', r'^zip', r'^postal'
+    'pay_group': [
+        r'^pay.*group', r'^paygroup', r'^pay.*grp',
     ],
     'earning_code': [
-        r'^earn.*code', r'^earning.*type', r'^pay.*code', r'^wage.*type'
+        r'^earn.*code', r'^earning.*type', r'^pay.*code', r'^wage.*type',
+        r'^earning$', r'^earn_cd',
     ],
     'deduction_code': [
-        r'^ded.*code', r'^deduction.*type', r'^deduct.*code'
+        r'^ded.*code', r'^deduction.*type', r'^deduct.*code',
+        r'^deduction$', r'^ded_cd', r'^benefit.*code',
     ],
     'tax_code': [
-        r'^tax.*code', r'^tax.*type', r'^withhold'
+        r'^tax.*code', r'^tax.*type', r'^withhold.*code',
     ],
 }
 
-# Key fields that should be used for relationships (JOINs)
-KEY_SEMANTIC_TYPES = [
-    'employee_id', 'company_code', 'department', 'job_code', 
-    'location', 'earning_code', 'deduction_code', 'tax_code'
-]
+# Max relationships to suggest per table pair
+MAX_PER_TABLE_PAIR = 3
+
+# Confidence thresholds
+THRESHOLD_AUTO_ACCEPT = 0.90   # This high = auto-accept
+THRESHOLD_NEEDS_REVIEW = 0.70  # Between this and auto = needs review
+THRESHOLD_DISCARD = 0.70       # Below this = ignore completely
+
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+def is_key_column(col_name: str) -> bool:
+    """Check if column is likely a JOIN key (not just any field)."""
+    normalized = col_name.lower().strip()
+    
+    for pattern in KEY_COLUMN_PATTERNS:
+        if re.match(pattern, normalized) or re.search(pattern, normalized):
+            return True
+    return False
 
 
 def normalize_column_name(name: str) -> str:
     """Normalize column name for comparison."""
     if not name:
         return ''
-    # Lowercase, remove special chars, normalize separators
-    normalized = name.lower()
+    
+    normalized = name.lower().strip()
     normalized = re.sub(r'[^a-z0-9]', '_', normalized)
     normalized = re.sub(r'_+', '_', normalized)
     normalized = normalized.strip('_')
     return normalized
 
 
-def get_column_tokens(name: str) -> set:
-    """Extract meaningful tokens from column name."""
+def strip_prefixes_suffixes(name: str) -> str:
+    """Strip common prefixes/suffixes to get core name."""
     normalized = normalize_column_name(name)
-    tokens = set(normalized.split('_'))
-    # Remove common noise tokens
-    noise = {'id', 'num', 'no', 'code', 'cd', 'key', 'the', 'a', 'an'}
-    return tokens - noise
+    
+    # Strip prefixes
+    for prefix in STRIP_PREFIXES:
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix):]
+            break
+    
+    # Strip suffixes
+    for suffix in STRIP_SUFFIXES:
+        if normalized.endswith(suffix):
+            normalized = normalized[:-len(suffix)]
+            break
+    
+    return normalized
 
 
 def get_semantic_type(column_name: str) -> Tuple[str, float]:
     """Detect semantic type from column name patterns."""
     normalized = normalize_column_name(column_name)
+    stripped = strip_prefixes_suffixes(column_name)
     
-    for sem_type, patterns in SEMANTIC_PATTERNS.items():
+    for sem_type, patterns in SEMANTIC_TYPES.items():
         for pattern in patterns:
-            if re.match(pattern, normalized) or re.search(pattern, normalized):
-                # Higher confidence for exact pattern match at start
-                confidence = 0.95 if re.match(pattern, normalized) else 0.85
-                return sem_type, confidence
+            # Check both normalized and stripped versions
+            if re.match(pattern, normalized) or re.match(pattern, stripped):
+                return sem_type, 0.95
+            if re.search(pattern, normalized) or re.search(pattern, stripped):
+                return sem_type, 0.85
     
     return 'unknown', 0.0
 
 
 def similarity_score(name1: str, name2: str) -> float:
     """Calculate similarity between two column names."""
+    # Normalize both
     n1 = normalize_column_name(name1)
     n2 = normalize_column_name(name2)
     
@@ -147,379 +178,350 @@ def similarity_score(name1: str, name2: str) -> float:
     if n1 == n2:
         return 1.0
     
-    # Sequence matcher (handles insertions/deletions)
-    seq_score = SequenceMatcher(None, n1, n2).ratio()
+    # Try with prefixes/suffixes stripped
+    s1 = strip_prefixes_suffixes(name1)
+    s2 = strip_prefixes_suffixes(name2)
     
-    # Token overlap (handles word reordering)
-    tokens1 = get_column_tokens(name1)
-    tokens2 = get_column_tokens(name2)
+    if s1 == s2 and len(s1) > 2:
+        return 0.95  # Very high - just prefix difference
+    
+    # Check semantic type match
+    type1, _ = get_semantic_type(name1)
+    type2, _ = get_semantic_type(name2)
+    
+    if type1 != 'unknown' and type1 == type2:
+        # Same semantic type - boost score significantly
+        base_score = SequenceMatcher(None, s1, s2).ratio()
+        return min(0.95, base_score + 0.3)  # Boost by 0.3
+    
+    # Sequence matcher on stripped names
+    seq_score = SequenceMatcher(None, s1, s2).ratio()
+    
+    # Token overlap
+    tokens1 = set(s1.split('_'))
+    tokens2 = set(s2.split('_'))
     
     if tokens1 and tokens2:
-        intersection = tokens1 & tokens2
-        union = tokens1 | tokens2
-        # Jaccard similarity
-        token_score = len(intersection) / len(union) if union else 0
-        # Bonus for having the important tokens match
-        important_tokens = {'emp', 'employee', 'dept', 'department', 'company', 'job', 'loc'}
-        important_match = bool(intersection & important_tokens)
-        if important_match:
-            token_score = min(1.0, token_score + 0.2)
+        overlap = len(tokens1 & tokens2)
+        total = len(tokens1 | tokens2)
+        token_score = overlap / total if total > 0 else 0
     else:
         token_score = 0
     
-    # Combined score - take the best
+    # Combined score
     return max(seq_score, token_score)
 
 
-class RelationshipDetector:
-    """Detect relationships between tables in a project."""
+def is_config_table(table_name: str, filename: str = '') -> bool:
+    """Check if this table is likely a configuration/reference table."""
+    check_str = f"{table_name} {filename}".lower()
     
-    def __init__(self, llm_client=None):
-        """
-        Initialize detector.
-        
-        Args:
-            llm_client: Optional local LLM client with .generate(prompt) method
-        """
-        self.llm = llm_client
-    
-    def analyze_project(self, tables: List[Dict]) -> Dict:
-        """
-        Analyze all tables in a project and detect relationships.
-        
-        Args:
-            tables: List of table dictionaries with structure:
-                {
-                    "table_name": "payroll_data",
-                    "columns": ["Employee_ID", "Dept_Code", ...] or 
-                               [{"name": "Employee_ID", "type": "TEXT"}, ...]
-                }
-        
-        Returns:
-            {
-                "relationships": [...],
-                "semantic_types": [...],
-                "unmatched_columns": [...]
-            }
-        """
-        relationships = []
-        semantic_types = []
-        uncertain_pairs = []
-        
-        logger.info(f"Analyzing {len(tables)} tables for relationships")
-        
-        # Step 1: Detect semantic types for all columns
-        for table in tables:
-            table_name = table.get('table_name', table.get('name', 'unknown'))
-            columns = table.get('columns', [])
-            
-            for col in columns:
-                col_name = col if isinstance(col, str) else col.get('name', '')
-                if not col_name:
-                    continue
-                    
-                sem_type, confidence = get_semantic_type(col_name)
-                if sem_type != 'unknown':
-                    semantic_types.append({
-                        'table': table_name,
-                        'column': col_name,
-                        'type': sem_type,
-                        'confidence': round(confidence, 2)
-                    })
-        
-        logger.info(f"Found {len(semantic_types)} semantic type matches")
-        
-        # Step 2: Find relationships by comparing columns across tables
-        for i, table1 in enumerate(tables):
-            table1_name = table1.get('table_name', table1.get('name', 'unknown'))
-            cols1 = table1.get('columns', [])
-            
-            for table2 in tables[i+1:]:
-                table2_name = table2.get('table_name', table2.get('name', 'unknown'))
-                cols2 = table2.get('columns', [])
-                
-                for col1 in cols1:
-                    col1_name = col1 if isinstance(col1, str) else col1.get('name', '')
-                    if not col1_name:
-                        continue
-                    
-                    for col2 in cols2:
-                        col2_name = col2 if isinstance(col2, str) else col2.get('name', '')
-                        if not col2_name:
-                            continue
-                        
-                        score = similarity_score(col1_name, col2_name)
-                        
-                        if score >= 0.85:
-                            # High confidence - auto-accept
-                            relationships.append({
-                                'source_table': table1_name,
-                                'source_column': col1_name,
-                                'target_table': table2_name,
-                                'target_column': col2_name,
-                                'confidence': round(score, 2),
-                                'method': 'exact' if score == 1.0 else 'fuzzy',
-                                'needs_review': False,
-                                'confirmed': False
-                            })
-                        elif score >= 0.55:
-                            # Medium confidence - queue for LLM review or mark uncertain
-                            uncertain_pairs.append({
-                                'table1': table1_name,
-                                'col1': col1_name,
-                                'table2': table2_name,
-                                'col2': col2_name,
-                                'score': score
-                            })
-        
-        logger.info(f"Found {len(relationships)} high-confidence matches, {len(uncertain_pairs)} uncertain")
-        
-        # Step 3: Use local LLM to resolve uncertain pairs (if available)
-        if uncertain_pairs and self.llm:
-            try:
-                llm_results = self._llm_analyze_pairs(uncertain_pairs)
-                for result in llm_results:
-                    relationships.append({
-                        'source_table': result['table1'],
-                        'source_column': result['col1'],
-                        'target_table': result['table2'],
-                        'target_column': result['col2'],
-                        'confidence': round(result['confidence'], 2),
-                        'method': 'llm',
-                        'needs_review': result['confidence'] < 0.8,
-                        'confirmed': False,
-                        'llm_reason': result.get('reason', '')
-                    })
-                logger.info(f"LLM confirmed {len(llm_results)} additional relationships")
-            except Exception as e:
-                logger.warning(f"LLM analysis failed: {e}, marking pairs as needs_review")
-                for pair in uncertain_pairs:
-                    relationships.append({
-                        'source_table': pair['table1'],
-                        'source_column': pair['col1'],
-                        'target_table': pair['table2'],
-                        'target_column': pair['col2'],
-                        'confidence': round(pair['score'], 2),
-                        'method': 'fuzzy',
-                        'needs_review': True,
-                        'confirmed': False
-                    })
-        elif uncertain_pairs:
-            # No LLM available - mark as needs review
-            for pair in uncertain_pairs:
-                relationships.append({
-                    'source_table': pair['table1'],
-                    'source_column': pair['col1'],
-                    'target_table': pair['table2'],
-                    'target_column': pair['col2'],
-                    'confidence': round(pair['score'], 2),
-                    'method': 'fuzzy',
-                    'needs_review': True,
-                    'confirmed': False
-                })
-        
-        # Step 4: Also suggest relationships based on semantic type matches
-        relationships = self._add_semantic_relationships(relationships, semantic_types)
-        
-        # Step 5: Find unmatched key columns (might need manual mapping)
-        unmatched = self._find_unmatched_keys(tables, relationships, semantic_types)
-        
-        # Deduplicate relationships
-        relationships = self._deduplicate_relationships(relationships)
-        
-        return {
-            'relationships': relationships,
-            'semantic_types': semantic_types,
-            'unmatched_columns': unmatched
-        }
-    
-    def _add_semantic_relationships(
-        self, 
-        relationships: List[Dict], 
-        semantic_types: List[Dict]
-    ) -> List[Dict]:
-        """Add relationships based on matching semantic types."""
-        
-        # Build set of existing pairs
-        existing_pairs = set()
-        for r in relationships:
-            pair = tuple(sorted([
-                f"{r['source_table']}.{r['source_column']}",
-                f"{r['target_table']}.{r['target_column']}"
-            ]))
-            existing_pairs.add(pair)
-        
-        # Group columns by semantic type
-        by_type = {}
-        for st in semantic_types:
-            key = st['type']
-            if key not in by_type:
-                by_type[key] = []
-            by_type[key].append(st)
-        
-        # Connect columns with same key semantic type
-        for sem_type in KEY_SEMANTIC_TYPES:
-            cols = by_type.get(sem_type, [])
-            for i, col1 in enumerate(cols):
-                for col2 in cols[i+1:]:
-                    if col1['table'] != col2['table']:
-                        pair = tuple(sorted([
-                            f"{col1['table']}.{col1['column']}",
-                            f"{col2['table']}.{col2['column']}"
-                        ]))
-                        
-                        if pair not in existing_pairs:
-                            confidence = min(col1['confidence'], col2['confidence']) * 0.85
-                            relationships.append({
-                                'source_table': col1['table'],
-                                'source_column': col1['column'],
-                                'target_table': col2['table'],
-                                'target_column': col2['column'],
-                                'confidence': round(confidence, 2),
-                                'method': 'semantic',
-                                'needs_review': True,
-                                'confirmed': False,
-                                'semantic_type': sem_type
-                            })
-                            existing_pairs.add(pair)
-        
-        return relationships
-    
-    def _find_unmatched_keys(
-        self,
-        tables: List[Dict],
-        relationships: List[Dict],
-        semantic_types: List[Dict]
-    ) -> List[Dict]:
-        """Find key columns that don't have any relationships."""
-        
-        # Columns that are in relationships
-        matched = set()
-        for r in relationships:
-            matched.add(f"{r['source_table']}.{r['source_column']}")
-            matched.add(f"{r['target_table']}.{r['target_column']}")
-        
-        # Find key semantic type columns not in relationships
-        unmatched = []
-        for st in semantic_types:
-            if st['type'] in KEY_SEMANTIC_TYPES:
-                key = f"{st['table']}.{st['column']}"
-                if key not in matched:
-                    unmatched.append({
-                        'table': st['table'],
-                        'column': st['column'],
-                        'semantic_type': st['type'],
-                        'confidence': st['confidence']
-                    })
-        
-        return unmatched
-    
-    def _deduplicate_relationships(self, relationships: List[Dict]) -> List[Dict]:
-        """Remove duplicate relationships, keeping highest confidence."""
-        seen = {}
-        for r in relationships:
-            # Create canonical key (sorted to handle A->B and B->A)
-            pair = tuple(sorted([
-                f"{r['source_table']}.{r['source_column']}",
-                f"{r['target_table']}.{r['target_column']}"
-            ]))
-            
-            if pair not in seen or r['confidence'] > seen[pair]['confidence']:
-                seen[pair] = r
-        
-        return list(seen.values())
-    
-    def _llm_analyze_pairs(self, pairs: List[Dict]) -> List[Dict]:
-        """Use local LLM to analyze uncertain column pairs."""
-        if not pairs or not self.llm:
-            return []
-        
-        # Batch in groups of 15 to keep prompt manageable
-        batch_size = 15
-        all_results = []
-        
-        for batch_start in range(0, len(pairs), batch_size):
-            batch = pairs[batch_start:batch_start + batch_size]
-            
-            prompt = """You are analyzing database column names to determine if they refer to the same data.
-For each pair, determine if they likely represent the same field (could be JOINed).
-
-Pairs to analyze:
-"""
-            for i, pair in enumerate(batch):
-                prompt += f"{i+1}. '{pair['col1']}' (from {pair['table1']}) vs '{pair['col2']}' (from {pair['table2']})\n"
-            
-            prompt += """
-Return ONLY a JSON array with your assessment. No other text.
-Format:
-[
-  {"pair": 1, "same_data": true, "confidence": 0.85, "reason": "Both appear to be employee identifiers"},
-  {"pair": 2, "same_data": false, "confidence": 0.90, "reason": "Different concepts - department vs division level"}
-]
-"""
-            try:
-                response = self.llm.generate(prompt, max_tokens=1500)
-                
-                # Clean response - extract JSON
-                response = response.strip()
-                if response.startswith('```'):
-                    response = re.sub(r'^```\w*\n?', '', response)
-                    response = re.sub(r'\n?```$', '', response)
-                
-                results = json.loads(response)
-                
-                for r in results:
-                    idx = r.get('pair', 0) - 1
-                    if 0 <= idx < len(batch) and r.get('same_data'):
-                        all_results.append({
-                            'table1': batch[idx]['table1'],
-                            'col1': batch[idx]['col1'],
-                            'table2': batch[idx]['table2'],
-                            'col2': batch[idx]['col2'],
-                            'confidence': r.get('confidence', 0.7),
-                            'reason': r.get('reason', '')
-                        })
-                        
-            except json.JSONDecodeError as e:
-                logger.warning(f"Failed to parse LLM response: {e}")
-            except Exception as e:
-                logger.warning(f"LLM batch analysis failed: {e}")
-        
-        return all_results
+    for pattern in CONFIG_FILE_PATTERNS:
+        if re.search(pattern, check_str):
+            return True
+    return False
 
 
-# Convenience function for router
+# =============================================================================
+# MAIN ANALYSIS FUNCTION
+# =============================================================================
+
 async def analyze_project_relationships(
-    project_name: str, 
-    tables: List[Dict], 
+    project_name: str,
+    tables: List[Dict],
     llm_client=None
 ) -> Dict:
     """
-    Main entry point for relationship detection.
+    Analyze tables and detect relationships.
+    
+    INTELLIGENT APPROACH:
+    1. Identify config/reference tables (source of truth)
+    2. Filter to only KEY columns
+    3. Strip prefixes before comparing
+    4. Match data tables TO config tables first
+    5. Then match data tables to each other
+    6. Limit per-pair matches
+    7. High thresholds to reduce noise
     
     Args:
         project_name: Project identifier
-        tables: List of table schemas
-        llm_client: Optional LLM client for ambiguous matches
+        tables: List of table dicts with 'table_name', 'columns', etc.
+        llm_client: Optional local LLM for ambiguous cases
     
     Returns:
-        Analysis results with relationships, semantic types, and stats
+        {
+            "relationships": [...],
+            "semantic_types": [...],
+            "unmatched_columns": [...],
+            "stats": {...}
+        }
     """
-    detector = RelationshipDetector(llm_client)
-    result = detector.analyze_project(tables)
+    logger.info(f"[RELATIONSHIP] Analyzing {len(tables)} tables for {project_name}")
+    
+    relationships = []
+    semantic_types = []
+    
+    # Step 1: Categorize tables and extract key columns
+    config_tables = []
+    data_tables = []
+    
+    for table in tables:
+        table_name = table.get('table_name', '')
+        filename = table.get('filename', table.get('file', ''))
+        columns = table.get('columns', [])
+        
+        # Get only key columns
+        key_cols = []
+        for col in columns:
+            col_name = col if isinstance(col, str) else col.get('name', '')
+            if col_name and is_key_column(col_name):
+                key_cols.append(col_name)
+        
+        table_info = {
+            'table_name': table_name,
+            'filename': filename,
+            'all_columns': columns,
+            'key_columns': key_cols,
+        }
+        
+        if is_config_table(table_name, filename):
+            config_tables.append(table_info)
+            logger.info(f"[RELATIONSHIP] Config table: {table_name} ({len(key_cols)} keys)")
+        else:
+            data_tables.append(table_info)
+    
+    logger.info(f"[RELATIONSHIP] Found {len(config_tables)} config tables, {len(data_tables)} data tables")
+    
+    # Step 2: Detect semantic types for all key columns
+    for table in tables:
+        table_name = table.get('table_name', '')
+        columns = table.get('columns', [])
+        
+        for col in columns:
+            col_name = col if isinstance(col, str) else col.get('name', '')
+            if not col_name or not is_key_column(col_name):
+                continue
+            
+            sem_type, confidence = get_semantic_type(col_name)
+            if sem_type != 'unknown':
+                semantic_types.append({
+                    'table': table_name,
+                    'column': col_name,
+                    'type': sem_type,
+                    'confidence': round(confidence, 2)
+                })
+    
+    # Step 3: Match data tables TO config tables (primary relationships)
+    if config_tables:
+        for config in config_tables:
+            for data in data_tables:
+                pair_matches = find_column_matches(
+                    config['table_name'], config['key_columns'],
+                    data['table_name'], data['key_columns']
+                )
+                
+                # Take top N matches for this pair
+                for match in pair_matches[:MAX_PER_TABLE_PAIR]:
+                    relationships.append(match)
+    
+    # Step 4: Match data tables to each other (secondary relationships)
+    for i, table1 in enumerate(data_tables):
+        for table2 in data_tables[i+1:]:
+            pair_matches = find_column_matches(
+                table1['table_name'], table1['key_columns'],
+                table2['table_name'], table2['key_columns']
+            )
+            
+            # Take top N matches for this pair
+            for match in pair_matches[:MAX_PER_TABLE_PAIR]:
+                relationships.append(match)
+    
+    # Step 5: Also match config tables to each other (if multiple)
+    if len(config_tables) > 1:
+        for i, config1 in enumerate(config_tables):
+            for config2 in config_tables[i+1:]:
+                pair_matches = find_column_matches(
+                    config1['table_name'], config1['key_columns'],
+                    config2['table_name'], config2['key_columns']
+                )
+                for match in pair_matches[:MAX_PER_TABLE_PAIR]:
+                    relationships.append(match)
+    
+    # Step 6: Deduplicate
+    relationships = deduplicate_relationships(relationships)
+    
+    # Step 7: Find unmatched key columns
+    matched_cols = set()
+    for r in relationships:
+        matched_cols.add(f"{r['source_table']}.{r['source_column']}")
+        matched_cols.add(f"{r['target_table']}.{r['target_column']}")
+    
+    unmatched = []
+    for table in tables:
+        table_name = table.get('table_name', '')
+        for col in table.get('columns', []):
+            col_name = col if isinstance(col, str) else col.get('name', '')
+            if col_name and is_key_column(col_name):
+                full_name = f"{table_name}.{col_name}"
+                if full_name not in matched_cols:
+                    sem_type, _ = get_semantic_type(col_name)
+                    unmatched.append({
+                        'table': table_name,
+                        'column': col_name,
+                        'semantic_type': sem_type
+                    })
+    
+    # Stats
+    total_cols = sum(len(t.get('columns', [])) for t in tables)
+    key_cols = sum(
+        sum(1 for c in t.get('columns', []) 
+            if is_key_column(c if isinstance(c, str) else c.get('name', '')))
+        for t in tables
+    )
+    high_conf = sum(1 for r in relationships if not r['needs_review'])
+    needs_review = sum(1 for r in relationships if r['needs_review'])
+    
+    logger.info(f"[RELATIONSHIP] Results: {len(relationships)} total, {high_conf} high-conf, {needs_review} needs review")
     
     return {
-        'project': project_name,
-        'relationships': result['relationships'],
-        'semantic_types': result['semantic_types'],
-        'unmatched_columns': result['unmatched_columns'],
+        'relationships': relationships,
+        'semantic_types': semantic_types,
+        'unmatched_columns': unmatched[:50],  # Limit unmatched list
         'stats': {
             'tables_analyzed': len(tables),
-            'columns_analyzed': sum(len(t.get('columns', [])) for t in tables),
-            'relationships_found': len(result['relationships']),
-            'high_confidence': sum(1 for r in result['relationships'] if r['confidence'] >= 0.85),
-            'needs_review': sum(1 for r in result['relationships'] if r.get('needs_review')),
-            'semantic_types_detected': len(result['semantic_types']),
-            'unmatched_keys': len(result['unmatched_columns'])
+            'columns_analyzed': total_cols,
+            'key_columns_found': key_cols,
+            'relationships_found': len(relationships),
+            'high_confidence': high_conf,
+            'needs_review': needs_review,
+            'config_tables': len(config_tables),
         }
     }
+
+
+def find_column_matches(
+    table1_name: str, 
+    cols1: List[str],
+    table2_name: str, 
+    cols2: List[str]
+) -> List[Dict]:
+    """
+    Find matching columns between two tables.
+    Returns list of matches sorted by confidence.
+    """
+    matches = []
+    seen_pairs = set()
+    
+    for col1 in cols1:
+        for col2 in cols2:
+            # Skip if same column name in same comparison
+            pair_key = tuple(sorted([col1.lower(), col2.lower()]))
+            if pair_key in seen_pairs:
+                continue
+            seen_pairs.add(pair_key)
+            
+            score = similarity_score(col1, col2)
+            
+            if score >= THRESHOLD_DISCARD:
+                matches.append({
+                    'source_table': table1_name,
+                    'source_column': col1,
+                    'target_table': table2_name,
+                    'target_column': col2,
+                    'confidence': round(score, 2),
+                    'method': 'exact' if score == 1.0 else 'semantic' if score >= 0.9 else 'fuzzy',
+                    'needs_review': score < THRESHOLD_AUTO_ACCEPT,
+                    'confirmed': False,
+                })
+    
+    # Sort by confidence descending
+    matches.sort(key=lambda x: x['confidence'], reverse=True)
+    
+    return matches
+
+
+def deduplicate_relationships(relationships: List[Dict]) -> List[Dict]:
+    """Remove duplicate relationships (same pair of columns)."""
+    seen = set()
+    unique = []
+    
+    for r in relationships:
+        # Create canonical pair key
+        pair = tuple(sorted([
+            f"{r['source_table']}.{r['source_column']}",
+            f"{r['target_table']}.{r['target_column']}"
+        ]))
+        
+        if pair not in seen:
+            seen.add(pair)
+            unique.append(r)
+    
+    return unique
+
+
+# =============================================================================
+# GLOBAL MAPPINGS (for cross-customer learning)
+# =============================================================================
+
+# These are "known good" mappings that apply across customers
+# In production, this would come from Supabase global_column_mappings table
+KNOWN_GLOBAL_MAPPINGS = {
+    # (normalized_name1, normalized_name2): confidence
+    ('employee_number', 'ee_num'): 1.0,
+    ('employee_number', 'emp_id'): 1.0,
+    ('employee_number', 'employee_id'): 1.0,
+    ('company_code', 'home_company_code'): 1.0,
+    ('company_code', 'co_code'): 1.0,
+    ('department_code', 'dept_code'): 1.0,
+    ('department_code', 'home_department_code'): 1.0,
+    ('job_code', 'position_code'): 0.95,
+    ('location_code', 'loc_code'): 1.0,
+    ('location_code', 'work_location_code'): 1.0,
+    ('earning_code', 'earn_code'): 1.0,
+    ('deduction_code', 'ded_code'): 1.0,
+    ('pay_group', 'paygroup'): 1.0,
+    ('pay_group', 'pay_grp'): 1.0,
+}
+
+
+def check_global_mapping(col1: str, col2: str) -> Optional[float]:
+    """
+    Check if this column pair has a known global mapping.
+    Returns confidence if found, None if not.
+    """
+    n1 = strip_prefixes_suffixes(col1)
+    n2 = strip_prefixes_suffixes(col2)
+    
+    # Check both orderings
+    pair1 = (n1, n2)
+    pair2 = (n2, n1)
+    
+    if pair1 in KNOWN_GLOBAL_MAPPINGS:
+        return KNOWN_GLOBAL_MAPPINGS[pair1]
+    if pair2 in KNOWN_GLOBAL_MAPPINGS:
+        return KNOWN_GLOBAL_MAPPINGS[pair2]
+    
+    return None
+
+
+async def save_confirmed_mapping(col1: str, col2: str, project: str = None):
+    """
+    Save a confirmed mapping to global mappings.
+    
+    TODO: Implement Supabase storage
+    """
+    n1 = strip_prefixes_suffixes(col1)
+    n2 = strip_prefixes_suffixes(col2)
+    
+    logger.info(f"[GLOBAL] Would save mapping: {n1} <-> {n2}")
+    # Future: INSERT INTO global_column_mappings ...
+
+
+async def get_confirmed_relationships(project: str) -> List[Dict]:
+    """
+    Get previously confirmed relationships for a project.
+    
+    TODO: Implement Supabase storage
+    """
+    # Future: SELECT * FROM project_relationships WHERE project = ...
+    return []
