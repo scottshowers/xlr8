@@ -21,13 +21,15 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import ConsultantAssist from './ConsultantAssist';
+import { useProject } from '../context/ProjectContext';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
 export default function VacuumUploadPage() {
+  // Use project from context (no local selector)
+  const { activeProject } = useProject();
+  
   // State
-  const [projects, setProjects] = useState([]);
-  const [selectedProject, setSelectedProject] = useState('');
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState(null);
@@ -45,38 +47,11 @@ export default function VacuumUploadPage() {
   const [jobStatus, setJobStatus] = useState(null);
   const pollIntervalRef = useRef(null);
 
-  // Load projects
-  useEffect(() => {
-    const loadProjects = async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/projects/list`);
-        if (!res.ok) {
-          console.error('Projects endpoint returned:', res.status);
-          setProjects([]);
-          return;
-        }
-        const data = await res.json();
-        if (Array.isArray(data)) {
-          setProjects(data);
-        } else if (data.projects && Array.isArray(data.projects)) {
-          setProjects(data.projects);
-        } else {
-          console.error('Unexpected projects format:', data);
-          setProjects([]);
-        }
-      } catch (err) {
-        console.error('Failed to load projects:', err);
-        setProjects([]);
-      }
-    };
-    loadProjects();
-  }, []);
-
   // Load extraction history
   const loadExtracts = useCallback(async () => {
     try {
-      const url = selectedProject 
-        ? `${API_BASE}/api/vacuum/extracts?project_id=${selectedProject}`
+      const url = activeProject?.id 
+        ? `${API_BASE}/api/vacuum/extracts?project_id=${activeProject.id}`
         : `${API_BASE}/api/vacuum/extracts`;
       const res = await fetch(url);
       const data = await res.json();
@@ -84,7 +59,7 @@ export default function VacuumUploadPage() {
     } catch (err) {
       console.error('Failed to load extracts:', err);
     }
-  }, [selectedProject]);
+  }, [activeProject?.id]);
 
   useEffect(() => {
     loadExtracts();
@@ -133,8 +108,8 @@ export default function VacuumUploadPage() {
       setError('Please select a file');
       return;
     }
-    if (!selectedProject) {
-      setError('Please select a project');
+    if (!activeProject) {
+      setError('Please select a project from the header');
       return;
     }
     
@@ -147,7 +122,7 @@ export default function VacuumUploadPage() {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('max_pages', maxPages.toString());
-      formData.append('project_id', selectedProject);
+      formData.append('project_id', activeProject.id);
       formData.append('use_textract', useTextract.toString());
       formData.append('vendor_type', vendorType);
       formData.append('async_mode', 'true');
@@ -466,25 +441,24 @@ export default function VacuumUploadPage() {
             </div>
           </div>
           
-          <div className="grid md:grid-cols-5 gap-4 mb-4">
-            {/* Project Selector */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Project <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={selectedProject}
-                onChange={(e) => setSelectedProject(e.target.value)}
-                className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              >
-                <option value="">Select a project...</option>
-                {projects.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} {p.customer ? `(${p.customer})` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <div className="grid md:grid-cols-4 gap-4 mb-4">
+            {/* Current Project Badge */}
+            {activeProject ? (
+              <div className="md:col-span-4 mb-2">
+                <div className="inline-flex items-center gap-2 px-3 py-2 bg-green-50 border border-green-200 rounded-lg">
+                  <span className="text-green-600">📁</span>
+                  <span className="font-semibold text-green-800">{activeProject.name}</span>
+                  <span className="text-green-600 text-sm">{activeProject.customer}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="md:col-span-4 mb-2">
+                <div className="inline-flex items-center gap-2 px-3 py-2 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800">
+                  <AlertTriangle className="w-4 h-4" />
+                  <span>Select a project from the header to continue</span>
+                </div>
+              </div>
+            )}
             
             {/* File Input */}
             <div>
@@ -555,7 +529,7 @@ export default function VacuumUploadPage() {
             <div className="flex items-end">
               <button
                 onClick={handleUpload}
-                disabled={!file || !selectedProject || uploading}
+                disabled={!file || !activeProject || uploading}
                 className="w-full px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 {uploading ? (
