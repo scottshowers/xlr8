@@ -67,7 +67,10 @@ async def analyze_data_model(project_name: str):
         llm_client = get_llm_client()
         
         # Run analysis
-        from utils.relationship_detector import analyze_project_relationships
+        try:
+            from utils.relationship_detector import analyze_project_relationships
+        except ImportError:
+            from backend.utils.relationship_detector import analyze_project_relationships
         result = await analyze_project_relationships(project_name, tables, llm_client)
         
         logger.info(f"Analyzed {result['stats']['tables_analyzed']} tables for {project_name}, "
