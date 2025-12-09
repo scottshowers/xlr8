@@ -431,30 +431,33 @@ async def get_project_schema(project: str, scope: str) -> Dict:
         from utils.structured_data_handler import get_structured_handler
         handler = get_structured_handler()
         
-        # Query _schema_metadata
-        result = handler.conn.execute("""
-            SELECT table_name, project, columns, row_count
-            FROM _schema_metadata 
-            WHERE is_current = TRUE
-        """).fetchall()
+        # FIRST: Try _schema_metadata
+        try:
+            result = handler.conn.execute("""
+                SELECT table_name, project, columns, row_count
+                FROM _schema_metadata 
+                WHERE is_current = TRUE
+            """).fetchall()
+            
+            for row in result:
+                table_name, proj, columns_json, row_count = row
+                
+                # Filter by scope
+                if scope == 'project' and proj.lower() != (project or '').lower():
+                    continue
+                
+                columns = json.loads(columns_json) if columns_json else []
+                
+                tables.append({
+                    'table_name': table_name,
+                    'project': proj,
+                    'columns': columns,
+                    'row_count': row_count
+                })
+        except Exception as meta_e:
+            logger.warning(f"Could not query _schema_metadata: {meta_e}")
         
-        for row in result:
-            table_name, proj, columns_json, row_count = row
-            
-            # Filter by scope
-            if scope == 'project' and proj.lower() != (project or '').lower():
-                continue
-            
-            columns = json.loads(columns_json) if columns_json else []
-            
-            tables.append({
-                'table_name': table_name,
-                'project': proj,
-                'columns': columns,
-                'row_count': row_count
-            })
-        
-        # Also check _pdf_tables
+        # SECOND: Also check _pdf_tables
         try:
             pdf_result = handler.conn.execute("""
                 SELECT table_name, project, columns, row_count
@@ -477,10 +480,53 @@ async def get_project_schema(project: str, scope: str) -> Dict:
                 })
         except:
             pass  # _pdf_tables might not exist
+        
+        # THIRD: DIRECT QUERY - If we found nothing, query DuckDB directly for tables
+        if not tables:
+            logger.warning(f"[SCHEMA] No tables from metadata - querying DuckDB directly")
+            try:
+                # Get all tables
+                all_tables = handler.conn.execute("SHOW TABLES").fetchall()
+                project_prefix = (project or '').lower().replace(' ', '_').replace('-', '_')
+                
+                for (table_name,) in all_tables:
+                    # Skip system tables
+                    if table_name.startswith('_'):
+                        continue
+                    
+                    # Filter by project prefix if scope is project
+                    if scope == 'project' and project_prefix:
+                        if not table_name.lower().startswith(project_prefix.lower()):
+                            continue
+                    
+                    # Get columns for this table
+                    try:
+                        col_result = handler.conn.execute(f'DESCRIBE "{table_name}"').fetchall()
+                        columns = [row[0] for row in col_result]  # column_name is first field
+                        
+                        # Get row count
+                        count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
+                        row_count = count_result[0] if count_result else 0
+                        
+                        tables.append({
+                            'table_name': table_name,
+                            'project': project or 'unknown',
+                            'columns': columns,
+                            'row_count': row_count
+                        })
+                        logger.info(f"[SCHEMA] Found table {table_name} with {len(columns)} columns, {row_count} rows")
+                    except Exception as col_e:
+                        logger.warning(f"[SCHEMA] Could not describe {table_name}: {col_e}")
+                
+                logger.info(f"[SCHEMA] Direct query found {len(tables)} tables for project {project}")
+                
+            except Exception as direct_e:
+                logger.error(f"[SCHEMA] Direct table query failed: {direct_e}")
             
     except Exception as e:
         logger.warning(f"Could not get project schema: {e}")
     
+    logger.info(f"[SCHEMA] Returning {len(tables)} tables for project {project}")
     return {'tables': tables}
 
 
