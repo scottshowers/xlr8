@@ -189,13 +189,18 @@ async def get_project_tables(project_name: str) -> List[Dict]:
         # Use the existing structured data handler
         from utils.structured_data_handler import StructuredDataHandler
         handler = StructuredDataHandler()
-        all_files = handler.list_files()
+        
+        # Try with project argument first, then without
+        try:
+            all_files = handler.list_files(project_name)
+        except TypeError:
+            all_files = handler.list_files()
         
         tables = []
         project_lower = project_name.lower()
         
         for file_info in all_files:
-            # Match by project field
+            # Match by project field (in case list_files returned all)
             file_project = file_info.get('project', '').lower()
             if file_project != project_lower:
                 continue
@@ -213,39 +218,68 @@ async def get_project_tables(project_name: str) -> List[Dict]:
         logger.info(f"Found {len(tables)} tables for project {project_name}")
         return tables
         
-    except ImportError:
-        logger.warning("StructuredDataHandler not available, trying alt import")
+    except ImportError as e:
+        logger.warning(f"StructuredDataHandler import failed: {e}")
     except Exception as e:
         logger.warning(f"StructuredDataHandler failed: {e}")
     
-    # Fallback: try backend.utils path
+    # Fallback: Query DuckDB directly
     try:
-        from backend.utils.structured_data_handler import StructuredDataHandler
-        handler = StructuredDataHandler()
-        all_files = handler.list_files()
+        import duckdb
+        import os
+        
+        db_path = os.environ.get('DUCKDB_PATH', '/data/structured.duckdb')
+        if not os.path.exists(db_path):
+            db_path = './data/structured.duckdb'
+        if not os.path.exists(db_path):
+            logger.error(f"DuckDB not found at {db_path}")
+            return []
+        
+        conn = duckdb.connect(db_path, read_only=True)
+        
+        # Get all tables that start with project name (case insensitive)
+        project_prefix = project_name.lower()
+        
+        tables_query = """
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'main'
+        """
+        all_tables = conn.execute(tables_query).fetchall()
         
         tables = []
-        project_lower = project_name.lower()
-        
-        for file_info in all_files:
-            file_project = file_info.get('project', '').lower()
-            if file_project != project_lower:
+        for (table_name,) in all_tables:
+            # Match tables starting with project prefix
+            if not table_name.lower().startswith(project_prefix):
                 continue
             
-            for sheet in file_info.get('sheets', []):
-                tables.append({
-                    'table_name': sheet.get('table_name', ''),
-                    'columns': sheet.get('columns', []),
-                    'row_count': sheet.get('row_count', 0),
-                    'sheet_name': sheet.get('sheet_name', ''),
-                    'filename': file_info.get('filename', '')
-                })
+            # Get columns
+            cols_query = f"""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = '{table_name}'
+                ORDER BY ordinal_position
+            """
+            columns = [row[0] for row in conn.execute(cols_query).fetchall()]
+            
+            # Get row count
+            try:
+                row_count = conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
+            except:
+                row_count = 0
+            
+            tables.append({
+                'table_name': table_name,
+                'columns': columns,
+                'row_count': row_count
+            })
         
-        logger.info(f"Found {len(tables)} tables for project {project_name}")
+        conn.close()
+        logger.info(f"Found {len(tables)} tables for project {project_name} via DuckDB")
         return tables
         
     except Exception as e:
-        logger.error(f"Failed to get tables: {e}")
+        logger.error(f"DuckDB fallback failed: {e}")
         return []
 
 
