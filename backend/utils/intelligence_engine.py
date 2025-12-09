@@ -406,34 +406,82 @@ class IntelligenceEngine:
         truths = []
         
         try:
-            collection = self.rag_handler.client.get_or_create_collection(name="documents")
+            # Try to find the right collection name
+            collection_name = self._get_document_collection_name()
+            if not collection_name:
+                logger.warning("No document collection found")
+                return []
             
-            results = collection.query(
-                query_texts=[question],
+            # Use rag_handler.search() which properly handles embeddings
+            # Filter by project to get customer-specific docs (excludes Global/Universal)
+            results = self.rag_handler.search(
+                collection_name=collection_name,
+                query=question,
                 n_results=10,
-                where={"project": self.project} if self.project else None
+                project_id=self.project if self.project else None
             )
             
-            if results and results.get('documents') and results['documents'][0]:
-                for i, doc in enumerate(results['documents'][0]):
-                    metadata = results['metadatas'][0][i] if results.get('metadatas') else {}
-                    distance = results['distances'][0][i] if results.get('distances') else 1.0
-                    
-                    if metadata.get('project', '').lower() in ['global', '__global__', 'global/universal']:
-                        continue
-                    
-                    truths.append(Truth(
-                        source_type='intent',
-                        source_name=metadata.get('filename', 'Document'),
-                        content=doc,
-                        confidence=max(0.3, 1.0 - distance),
-                        location=f"Page {metadata.get('page', '?')}"
-                    ))
+            for result in results:
+                metadata = result.get('metadata', {})
+                distance = result.get('distance', 1.0)
+                doc = result.get('document', '')
+                
+                # Skip global docs - we want customer-specific intent
+                project_id = metadata.get('project_id', '').lower()
+                if project_id in ['global', '__global__', 'global/universal']:
+                    continue
+                
+                truths.append(Truth(
+                    source_type='intent',
+                    source_name=metadata.get('filename', 'Document'),
+                    content=doc,
+                    confidence=max(0.3, 1.0 - distance) if distance else 0.7,
+                    location=f"Page {metadata.get('page', '?')}"
+                ))
         
         except Exception as e:
             logger.error(f"Error gathering intent: {e}")
         
         return truths
+    
+    def _get_document_collection_name(self) -> Optional[str]:
+        """Find the document collection name from available collections."""
+        if not self.rag_handler:
+            return None
+        
+        # Cache the result
+        if hasattr(self, '_doc_collection_name'):
+            return self._doc_collection_name
+        
+        try:
+            collections = self.rag_handler.list_collections()
+            
+            # Priority order for document collections
+            preferred = ['hcmpact_docs', 'documents', 'hcm_docs', 'xlr8_docs']
+            
+            for name in preferred:
+                if name in collections:
+                    self._doc_collection_name = name
+                    logger.info(f"Using document collection: {name}")
+                    return name
+            
+            # Fall back to any collection that might have docs
+            for name in collections:
+                if 'doc' in name.lower() or 'hcm' in name.lower():
+                    self._doc_collection_name = name
+                    logger.info(f"Using document collection (fallback): {name}")
+                    return name
+            
+            # Last resort - use first collection if any
+            if collections:
+                self._doc_collection_name = collections[0]
+                logger.warning(f"Using first available collection: {collections[0]}")
+                return collections[0]
+                
+        except Exception as e:
+            logger.error(f"Error finding document collection: {e}")
+        
+        return None
     
     def _gather_best_practice(self, question: str, analysis: Dict) -> List[Truth]:
         """Gather BEST PRACTICE - what UKG docs say SHOULD be done."""
@@ -443,26 +491,32 @@ class IntelligenceEngine:
         truths = []
         
         try:
-            collection = self.rag_handler.client.get_or_create_collection(name="documents")
+            # Try to find the right collection name
+            collection_name = self._get_document_collection_name()
+            if not collection_name:
+                logger.warning("No document collection found for best practices")
+                return []
             
-            results = collection.query(
-                query_texts=[question],
+            # Use rag_handler.search() with Global/Universal to get only UKG best practices
+            results = self.rag_handler.search(
+                collection_name=collection_name,
+                query=question,
                 n_results=10,
-                where={"project": {"$in": ["global", "__global__", "Global/Universal"]}}
+                project_id="Global/Universal"  # Only get global/UKG docs
             )
             
-            if results and results.get('documents') and results['documents'][0]:
-                for i, doc in enumerate(results['documents'][0]):
-                    metadata = results['metadatas'][0][i] if results.get('metadatas') else {}
-                    distance = results['distances'][0][i] if results.get('distances') else 1.0
-                    
-                    truths.append(Truth(
-                        source_type='best_practice',
-                        source_name=metadata.get('filename', 'UKG Documentation'),
-                        content=doc,
-                        confidence=max(0.3, 1.0 - distance),
-                        location=f"Page {metadata.get('page', '?')}"
-                    ))
+            for result in results:
+                metadata = result.get('metadata', {})
+                distance = result.get('distance', 1.0)
+                doc = result.get('document', '')
+                
+                truths.append(Truth(
+                    source_type='best_practice',
+                    source_name=metadata.get('filename', 'UKG Documentation'),
+                    content=doc,
+                    confidence=max(0.3, 1.0 - distance) if distance else 0.7,
+                    location=f"Page {metadata.get('page', '?')}"
+                ))
         
         except Exception as e:
             logger.error(f"Error gathering best practice: {e}")
