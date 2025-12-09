@@ -154,6 +154,45 @@ async def analyze_data_model(project_name: str):
         result['stats']['needs_review'] = sum(1 for r in result['relationships'] if r.get('needs_review'))
         result['stats']['global_mappings_applied'] = len(global_mappings)
         
+        # AUTO-SAVE all relationships to database
+        try:
+            try:
+                from utils.database.supabase_client import get_supabase
+            except ImportError:
+                from utils.database.supabase_client import get_supabase
+            supabase = get_supabase()
+            
+            saved_count = 0
+            for rel in result['relationships']:
+                # Determine status
+                if rel.get('confirmed'):
+                    status = 'confirmed'
+                elif rel.get('needs_review'):
+                    status = 'needs_review'
+                else:
+                    status = 'auto_confirmed'  # High confidence, no review needed
+                
+                # Upsert to avoid duplicates
+                supabase.table('project_relationships').upsert({
+                    'project_name': project_name,
+                    'source_table': rel['source_table'],
+                    'source_column': rel['source_column'],
+                    'target_table': rel['target_table'],
+                    'target_column': rel['target_column'],
+                    'confidence': rel.get('confidence', 0.9),
+                    'semantic_type': rel.get('semantic_type', 'unknown'),
+                    'method': rel.get('method', 'auto'),
+                    'status': status
+                }, on_conflict='project_name,source_table,source_column,target_table,target_column').execute()
+                saved_count += 1
+            
+            logger.info(f"Auto-saved {saved_count} relationships to database for {project_name}")
+            result['stats']['saved_to_db'] = saved_count
+            
+        except Exception as save_e:
+            logger.warning(f"Could not auto-save relationships: {save_e}")
+            result['stats']['saved_to_db'] = 0
+        
         logger.info(f"Analyzed {result['stats']['tables_analyzed']} tables for {project_name}, "
                    f"found {result['stats']['relationships_found']} relationships "
                    f"({result['stats']['needs_review']} need review)")
