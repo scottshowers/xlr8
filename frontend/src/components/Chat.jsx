@@ -1,43 +1,42 @@
 /**
  * Chat.jsx - Enhanced with Scope Selection & Feedback
  * 
- * NEW FEATURES:
+ * UPDATED: Now uses ProjectContext for project selection.
+ * No internal project selector - uses header context bar.
+ * 
+ * FEATURES:
  * - Scope selector: project, global, all
  * - Thumbs up/down feedback buttons
  * - Routing indicator showing what was searched
  * - Learning integration
- * 
- * PRESERVED:
  * - Personas
  * - Excel export
- * - Project selector
  * - PII indicators
  * - Source citations
  */
 
 import { useState, useEffect, useRef } from 'react'
 import api from '../services/api'
+import { useProject } from '../context/ProjectContext'
 import PersonaSwitcher from './PersonaSwitcher'
 import PersonaCreator from './PersonaCreator'
 
 export default function Chat({ 
-  projects = [], 
   functionalAreas = [],
-  selectedProject: externalProject = null,
-  hideProjectSelector = false
 }) {
+  // Use project from context
+  const { activeProject, projectName } = useProject()
+  
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [selectedProject, setSelectedProject] = useState(externalProject || '')
-  const [projectList, setProjectList] = useState(projects)
   const [error, setError] = useState(null)
   const [expandedSources, setExpandedSources] = useState({})
   const [modelInfo, setModelInfo] = useState(null)
   const messagesEndRef = useRef(null)
   const messagesAreaRef = useRef(null)
   
-  // NEW: Scope state - project, global, all
+  // Scope state - project, global, all
   const [scope, setScope] = useState('project')
   
   // Persona state
@@ -45,25 +44,20 @@ export default function Chat({
     id: 'bessie',
     name: 'Bessie',
     icon: '🐮',
-    description: 'Your friendly UKG payroll expert'
+    description: 'Your friendly payroll expert'
   })
   const [showPersonaCreator, setShowPersonaCreator] = useState(false)
 
-  // Sync external project when it changes
-  useEffect(() => {
-    if (externalProject) {
-      setSelectedProject(externalProject)
-    }
-  }, [externalProject])
+  // Scope labels
+  const scopeLabels = {
+    project: '📁 This Project',
+    global: '🌐 Global',
+    all: '📊 All Data'
+  }
 
   useEffect(() => {
-    if (projects.length > 0) {
-      setProjectList(projects)
-    } else if (!hideProjectSelector) {
-      loadProjects()
-    }
     loadModelInfo()
-  }, [projects, hideProjectSelector])
+  }, [])
 
   useEffect(() => {
     scrollToBottom()
@@ -83,15 +77,6 @@ export default function Chat({
     }
   }
 
-  const loadProjects = async () => {
-    try {
-      const response = await api.get('/projects/list')
-      setProjectList(response.data || [])
-    } catch (err) {
-      console.error('Failed to load projects:', err)
-    }
-  }
-
   const loadModelInfo = async () => {
     try {
       const response = await api.get('/chat/models')
@@ -108,7 +93,7 @@ export default function Chat({
     }))
   }
 
-  // NEW: Submit feedback
+  // Submit feedback
   const submitFeedback = async (jobId, feedbackType, messageContent, responseContent) => {
     try {
       await api.post('/chat/feedback', {
@@ -150,13 +135,13 @@ export default function Chat({
     setMessages(prev => [...prev, statusMessage])
 
     try {
-      // Start the chat job - NOW WITH SCOPE
+      // Start the chat job - use project from context
       const startResponse = await api.post('/chat/start', {
         message: userMessage.content,
-        project: selectedProject || null,
+        project: projectName || null,
         max_results: 50,
         persona: currentPersona?.id || 'bessie',
-        scope: scope  // NEW: Pass scope
+        scope: scope
       })
 
       const { job_id } = startResponse.data
@@ -191,41 +176,33 @@ export default function Chat({
               models_used: jobStatus.models_used || [],
               query_type: jobStatus.query_type || 'unknown',
               sanitized: jobStatus.sanitized || false,
-              routing_info: jobStatus.routing_info || null,  // NEW
-              scope: jobStatus.scope || scope,  // NEW
-              pii_redacted: jobStatus.pii_redacted || false,  // NEW
-              job_id: job_id,  // NEW: Store for feedback
-              userQuery: userMessage.content,  // NEW: Store for feedback
+              routing_info: jobStatus.routing_info || null,
+              scope: jobStatus.scope || scope,
+              pii_redacted: jobStatus.pii_redacted || false,
+              job_id: job_id,
+              userQuery: userMessage.content,
               timestamp: new Date().toISOString(),
-              feedbackGiven: null  // NEW: Track feedback state
+              feedbackGiven: null
             }
 
             setMessages(prev => prev.map(msg =>
               msg.tempId === tempId ? finalMessage : msg
             ))
-
             setLoading(false)
+          }
 
-            // Clean up job
-            api.delete(`/chat/job/${job_id}`).catch(() => {})
-          } else if (jobStatus.status === 'error') {
+          // Check if failed
+          if (jobStatus.status === 'failed') {
             clearInterval(pollInterval)
-            setError(jobStatus.error || 'Unknown error')
             setMessages(prev => prev.map(msg =>
               msg.tempId === tempId
-                ? {
-                    ...msg,
-                    content: `Error: ${jobStatus.error}`,
-                    error: true
-                  }
+                ? { ...msg, content: '❌ ' + (jobStatus.error || 'Request failed'), error: true }
                 : msg
             ))
             setLoading(false)
           }
-        } catch (pollError) {
-          console.error('Polling error:', pollError)
-          clearInterval(pollInterval)
-          setLoading(false)
+        } catch (pollErr) {
+          console.error('Poll error:', pollErr)
         }
       }, 500)
 
@@ -233,22 +210,20 @@ export default function Chat({
       setTimeout(() => {
         clearInterval(pollInterval)
         if (loading) {
-          setError('Request timed out')
+          setMessages(prev => prev.map(msg =>
+            msg.tempId === tempId
+              ? { ...msg, content: '⚠️ Request timed out', error: true }
+              : msg
+          ))
           setLoading(false)
         }
       }, 120000)
 
     } catch (err) {
       console.error('Chat error:', err)
-      setError(err.response?.data?.detail || err.message || 'Failed to get response')
-      
       setMessages(prev => prev.map(msg =>
         msg.tempId === tempId
-          ? {
-              ...msg,
-              content: `Sorry, I encountered an error: ${err.response?.data?.detail || err.message}`,
-              error: true
-            }
+          ? { ...msg, content: '❌ ' + (err.response?.data?.detail || err.message || 'Failed to send'), error: true }
           : msg
       ))
       setLoading(false)
@@ -265,37 +240,28 @@ export default function Chat({
   const clearChat = () => {
     setMessages([])
     setError(null)
-    setExpandedSources({})
   }
 
-  const formatTimestamp = (ts) => {
-    return new Date(ts).toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit'
-    })
-  }
-
-  const getModelBadge = (model) => {
-    const badges = {
-      'claude': { icon: '🧠', color: '#a855f7' },
-      'cache': { icon: '⚡', color: '#22c55e' },
-      'local': { icon: '🏠', color: '#3b82f6' },
-      'none': { icon: '❌', color: '#ef4444' },
-      'error': { icon: '⚠️', color: '#f59e0b' }
+  // Handle feedback click
+  const handleFeedback = (messageIndex, feedbackType) => {
+    const message = messages[messageIndex]
+    if (message && message.job_id) {
+      submitFeedback(message.job_id, feedbackType, message.userQuery, message.content)
+      
+      // Update message to show feedback was given
+      setMessages(prev => prev.map((msg, idx) => 
+        idx === messageIndex ? { ...msg, feedbackGiven: feedbackType } : msg
+      ))
     }
-    return badges[model] || badges['claude']
   }
 
-  // Scope labels
-  const scopeLabels = {
-    'project': '📁 This Project',
-    'global': '🌐 Global Knowledge',
-    'all': '📊 All Projects'
-  }
+  // Check if send should be disabled
+  const isDisabled = loading || (!input.trim()) || (scope === 'project' && !activeProject)
 
   const styles = {
     container: {
-      height: '100%',
+      height: '70vh',
+      minHeight: '500px',
       display: 'flex',
       flexDirection: 'column',
       background: 'linear-gradient(135deg, rgba(131, 177, 109, 0.02) 0%, rgba(147, 171, 217, 0.02) 100%)',
@@ -319,16 +285,6 @@ export default function Chat({
       alignItems: 'center',
       gap: '0.75rem',
       flexWrap: 'wrap'
-    },
-    select: {
-      padding: '0.5rem 1rem',
-      fontSize: '0.875rem',
-      border: '1px solid #e1e8ed',
-      borderRadius: '8px',
-      background: 'white',
-      cursor: 'pointer',
-      outline: 'none',
-      color: '#2a3441'
     },
     scopeSelect: {
       padding: '0.5rem 0.75rem',
@@ -448,165 +404,127 @@ export default function Chat({
       padding: '0.25rem 0.5rem',
       background: 'rgba(59, 130, 246, 0.1)',
       color: '#3b82f6',
-      borderRadius: '4px',
       fontSize: '0.7rem',
+      borderRadius: '4px',
       marginTop: '0.5rem'
-    },
-    feedbackButtons: {
-      display: 'flex',
-      gap: '0.5rem',
-      marginTop: '0.75rem',
-      paddingTop: '0.75rem',
-      borderTop: '1px solid #e1e8ed'
-    },
-    feedbackButton: {
-      padding: '0.25rem 0.5rem',
-      fontSize: '0.8rem',
-      border: '1px solid #e1e8ed',
-      borderRadius: '6px',
-      cursor: 'pointer',
-      background: 'white',
-      transition: 'all 0.2s ease'
-    },
-    feedbackButtonActive: {
-      background: 'rgba(131, 177, 109, 0.2)',
-      borderColor: '#83b16d'
     },
     sourcesSection: {
       marginTop: '1rem',
-      paddingTop: '1rem',
+      paddingTop: '0.75rem',
       borderTop: '1px solid #e1e8ed'
     },
     sourcesHeader: {
-      fontSize: '0.9rem',
-      fontWeight: '600',
-      color: '#2a3441',
-      marginBottom: '0.75rem'
+      fontSize: '0.8rem',
+      color: '#5f6c7b',
+      marginBottom: '0.5rem',
+      fontWeight: '600'
     },
     sourcesList: {
       display: 'flex',
       flexDirection: 'column',
-      gap: '0.5rem',
-      maxHeight: '300px',
-      overflowY: 'auto'
+      gap: '0.5rem'
     },
     sourceItem: {
-      background: '#f6f5fa',
-      borderRadius: '8px',
-      padding: '0.75rem',
-      fontSize: '0.8rem',
-      border: '1px solid #e1e8ed'
+      padding: '0.5rem',
+      background: '#f8fafc',
+      borderRadius: '6px'
     },
     sourceHeader: {
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'center',
-      marginBottom: '0.5rem'
+      marginBottom: '0.25rem'
     },
     sourceFilename: {
-      color: '#83b16d',
       fontWeight: '600',
-      fontSize: '0.85rem'
+      fontSize: '0.8rem',
+      color: '#2a3441'
     },
     sourceRelevance: {
-      fontSize: '0.75rem'
+      fontSize: '0.7rem'
     },
     sourceMetadata: {
       display: 'flex',
-      gap: '0.75rem',
-      marginBottom: '0.5rem',
+      gap: '0.5rem',
       flexWrap: 'wrap'
     },
     metadataTag: {
       fontSize: '0.7rem',
       color: '#5f6c7b',
-      background: 'rgba(131, 177, 109, 0.1)',
-      padding: '0.125rem 0.5rem',
+      padding: '0.125rem 0.375rem',
+      background: 'white',
       borderRadius: '4px'
     },
-    loadingBubble: {
-      background: 'white',
-      borderRadius: '12px',
-      padding: '1rem 1.25rem',
-      boxShadow: '0 1px 3px rgba(42, 52, 65, 0.08)',
+    feedbackButtons: {
       display: 'flex',
-      alignItems: 'center',
-      gap: '0.75rem',
-      color: '#5f6c7b'
+      gap: '0.5rem',
+      marginTop: '0.75rem'
     },
+    feedbackBtn: (isActive, type) => ({
+      padding: '0.25rem 0.5rem',
+      fontSize: '0.75rem',
+      border: '1px solid #e1e8ed',
+      borderRadius: '4px',
+      background: isActive ? (type === 'positive' ? '#dcfce7' : '#fee2e2') : 'white',
+      cursor: isActive ? 'default' : 'pointer',
+      opacity: isActive ? 1 : 0.7
+    }),
     inputArea: {
-      background: 'white',
-      borderRadius: '0 0 16px 16px',
       padding: '1rem 1.5rem',
-      borderTop: '1px solid #e1e8ed',
-      boxShadow: '0 -1px 3px rgba(42, 52, 65, 0.04)'
+      background: 'white',
+      borderTop: '1px solid #e1e8ed'
     },
     inputRow: {
       display: 'flex',
-      gap: '0.75rem'
+      gap: '0.75rem',
+      alignItems: 'flex-end'
     },
     textarea: {
       flex: 1,
       padding: '0.75rem 1rem',
-      fontSize: '1rem',
+      fontSize: '0.95rem',
       border: '1px solid #e1e8ed',
       borderRadius: '10px',
       resize: 'none',
       outline: 'none',
       fontFamily: 'inherit',
-      lineHeight: 1.4
+      lineHeight: 1.5
     },
     sendButton: {
-      padding: '0.75rem 1.5rem',
-      fontSize: '1rem',
-      fontWeight: '600',
+      padding: '0.75rem 1.25rem',
+      fontSize: '1.25rem',
+      background: 'linear-gradient(135deg, #83b16d 0%, #6b9956 100%)',
       color: 'white',
-      background: 'linear-gradient(135deg, #83b16d, #6b9956)',
       border: 'none',
       borderRadius: '10px',
       cursor: 'pointer',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      transition: 'all 0.2s ease',
-      boxShadow: '0 2px 8px rgba(131, 177, 109, 0.3)'
+      transition: 'all 0.2s ease'
     },
     sendButtonDisabled: {
-      background: '#d1d9e0',
-      cursor: 'not-allowed',
-      boxShadow: 'none'
+      opacity: 0.5,
+      cursor: 'not-allowed'
     },
     inputHint: {
       fontSize: '0.75rem',
-      color: '#8896a4',
-      marginTop: '0.5rem',
-      textAlign: 'center'
+      color: '#9ca3af',
+      marginTop: '0.5rem'
     },
     errorBanner: {
-      background: '#fef2f2',
-      border: '1px solid #fecaca',
-      borderRadius: '8px',
-      padding: '0.75rem 1rem',
-      margin: '0 1.5rem',
       display: 'flex',
       alignItems: 'center',
-      fontSize: '0.875rem',
-      color: '#dc2626'
-    }
-  }
-
-  const isDisabled = loading || !input.trim()
-
-  // NEW: Handle feedback click
-  const handleFeedback = (messageIndex, feedbackType) => {
-    const message = messages[messageIndex]
-    if (message && message.job_id) {
-      submitFeedback(message.job_id, feedbackType, message.userQuery, message.content)
-      
-      // Update message to show feedback was given
-      setMessages(prev => prev.map((msg, idx) => 
-        idx === messageIndex ? { ...msg, feedbackGiven: feedbackType } : msg
-      ))
+      padding: '0.75rem 1.5rem',
+      background: '#fef2f2',
+      color: '#dc2626',
+      fontSize: '0.9rem'
+    },
+    loadingBubble: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.5rem',
+      padding: '1rem',
+      background: '#f0f4f7',
+      borderRadius: '12px',
+      color: '#5f6c7b'
     }
   }
 
@@ -623,7 +541,7 @@ export default function Chat({
         </div>
         
         <div style={styles.headerControls}>
-          {/* NEW: Scope Selector */}
+          {/* Scope Selector */}
           <select
             value={scope}
             onChange={(e) => setScope(e.target.value)}
@@ -652,22 +570,6 @@ export default function Chat({
             <span title="PII is redacted before sending to Claude">🔒 PII Safe</span>
           </div>
 
-          {/* Project selector */}
-          {!hideProjectSelector && (
-            <select
-              value={selectedProject}
-              onChange={(e) => setSelectedProject(e.target.value)}
-              style={styles.select}
-            >
-              <option value="">Select Project</option>
-              {projectList.map(project => (
-                <option key={project.id} value={project.name}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-          )}
-
           <button onClick={clearChat} style={styles.clearButton}>
             🔄 Clear
           </button>
@@ -681,11 +583,13 @@ export default function Chat({
             <div style={styles.emptyIcon}>💬</div>
             <p style={styles.emptyTitle}>Start a conversation</p>
             <p style={styles.emptyText}>
-              {selectedProject 
-                ? `Searching ${scopeLabels[scope]} for: ${selectedProject}` 
-                : scope === 'global' 
-                  ? 'Searching global knowledge base'
-                  : 'Select a project or search globally'}
+              {scope === 'project' && !activeProject
+                ? 'Select a project from the header to search project data'
+                : scope === 'project' && activeProject
+                  ? `Ready to search ${activeProject.name}`
+                  : scope === 'global'
+                    ? 'Searching global knowledge base'
+                    : 'Searching across all projects'}
             </p>
           </div>
         ) : (
@@ -736,7 +640,7 @@ export default function Chat({
                     )}
                   </div>
                   
-                  {/* NEW: Routing indicator */}
+                  {/* Routing indicator */}
                   {message.role === 'assistant' && message.routing_info && !message.isStatus && (
                     <div style={styles.routingBadge}>
                       🔍 {message.routing_info.route || 'hybrid'}
@@ -820,7 +724,7 @@ export default function Chat({
                           
                           const response = await api.post('/chat/export-excel', {
                             query: userQuery,
-                            project: selectedProject
+                            project: projectName
                           }, {
                             responseType: 'blob'
                           });
@@ -848,105 +752,49 @@ export default function Chat({
                         color: 'white',
                         border: 'none',
                         borderRadius: '6px',
+                        fontSize: '0.8rem',
+                        fontWeight: '600',
                         cursor: 'pointer',
-                        fontSize: '0.85rem',
-                        fontWeight: '500',
-                        display: 'flex',
+                        display: 'inline-flex',
                         alignItems: 'center',
-                        gap: '0.5rem',
-                        transition: 'all 0.2s ease'
+                        gap: '0.5rem'
                       }}
-                      onMouseOver={(e) => e.target.style.transform = 'scale(1.02)'}
-                      onMouseOut={(e) => e.target.style.transform = 'scale(1)'}
                     >
                       📥 Download as Excel
                     </button>
                   )}
-                  
-                  {/* NEW: Feedback buttons */}
-                  {message.role === 'assistant' && !message.isStatus && !message.error && message.job_id && (
+
+                  {/* Feedback Buttons */}
+                  {message.role === 'assistant' && !message.isStatus && message.job_id && (
                     <div style={styles.feedbackButtons}>
-                      <span style={{ fontSize: '0.75rem', color: '#5f6c7b', marginRight: '0.5rem' }}>
-                        Was this helpful?
-                      </span>
                       <button
-                        onClick={() => handleFeedback(index, 'up')}
-                        style={{
-                          ...styles.feedbackButton,
-                          ...(message.feedbackGiven === 'up' ? styles.feedbackButtonActive : {})
-                        }}
-                        disabled={message.feedbackGiven !== null}
+                        onClick={() => !message.feedbackGiven && handleFeedback(index, 'positive')}
+                        style={styles.feedbackBtn(message.feedbackGiven === 'positive', 'positive')}
+                        disabled={message.feedbackGiven}
                       >
-                        👍
+                        👍 {message.feedbackGiven === 'positive' ? 'Thanks!' : 'Helpful'}
                       </button>
                       <button
-                        onClick={() => handleFeedback(index, 'down')}
-                        style={{
-                          ...styles.feedbackButton,
-                          ...(message.feedbackGiven === 'down' ? { background: 'rgba(220, 38, 38, 0.1)', borderColor: '#dc2626' } : {})
-                        }}
-                        disabled={message.feedbackGiven !== null}
+                        onClick={() => !message.feedbackGiven && handleFeedback(index, 'negative')}
+                        style={styles.feedbackBtn(message.feedbackGiven === 'negative', 'negative')}
+                        disabled={message.feedbackGiven}
                       >
-                        👎
+                        👎 {message.feedbackGiven === 'negative' ? 'Noted' : 'Not helpful'}
                       </button>
-                      {message.feedbackGiven && (
-                        <span style={{ fontSize: '0.7rem', color: '#83b16d', marginLeft: '0.5rem' }}>
-                          ✓ Thanks!
-                        </span>
-                      )}
                     </div>
                   )}
                 </div>
                 
-                <div style={{
-                  ...styles.messageTime,
-                  textAlign: message.role === 'user' ? 'right' : 'left'
-                }}>
-                  {formatTimestamp(message.timestamp)}
-                  {message.query_type && message.query_type !== 'unknown' && (
-                    <span style={{ 
-                      marginLeft: '0.5rem',
-                      padding: '0.125rem 0.5rem',
-                      borderRadius: '4px',
-                      fontSize: '0.7rem',
-                      background: message.query_type === 'cached' ? 'rgba(34, 197, 94, 0.1)' :
-                                 message.query_type === 'structured' ? 'rgba(59, 130, 246, 0.1)' : 
-                                 'rgba(168, 85, 247, 0.1)',
-                      color: message.query_type === 'cached' ? '#22c55e' :
-                             message.query_type === 'structured' ? '#3b82f6' : '#a855f7'
-                    }}>
-                      {message.query_type === 'cached' ? '⚡ CACHED' : 
-                       message.query_type === 'structured' ? '📊 SQL' : 
-                       message.query_type.toUpperCase()}
-                    </span>
-                  )}
-                  {message.models_used && message.models_used.length > 0 && (
-                    <span style={{ marginLeft: '0.5rem' }}>
-                      {message.models_used.map((model, idx) => {
-                        const badge = getModelBadge(model)
-                        return (
-                          <span key={idx} style={{ marginLeft: '0.25rem' }} title={model}>
-                            {badge.icon}
-                          </span>
-                        )
-                      })}
-                      {message.pii_redacted && (
-                        <span style={{ marginLeft: '0.25rem' }} title="PII was safely handled">
-                          🔒
-                        </span>
-                      )}
-                    </span>
-                  )}
+                <div style={styles.messageTime}>
+                  {new Date(message.timestamp).toLocaleTimeString()}
                 </div>
               </div>
             </div>
           ))
         )}
         
-        {/* Loading Indicator */}
-        {loading && (
+        {loading && messages[messages.length - 1]?.role !== 'assistant' && (
           <div style={styles.messageRow}>
-            <div style={{ ...styles.avatar, ...styles.avatarAssistant }}>{currentPersona?.icon || '🐮'}</div>
             <div style={styles.loadingBubble}>
               ⏳ Searching documents and generating response...
             </div>
@@ -977,11 +825,13 @@ export default function Chat({
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={handleKeyPress}
             placeholder={
-              scope === 'global' 
-                ? "Ask about global knowledge..." 
-                : selectedProject 
-                  ? `Ask about ${selectedProject}...` 
-                  : "Select a project or search globally..."
+              scope === 'project' && !activeProject
+                ? "Select a project to search..."
+                : scope === 'global' 
+                  ? "Ask about global knowledge..." 
+                  : activeProject 
+                    ? `Ask about ${activeProject.name}...` 
+                    : "Ask a question..."
             }
             style={styles.textarea}
             rows={2}
