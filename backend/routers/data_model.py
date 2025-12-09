@@ -181,73 +181,71 @@ async def delete_relationship(
 
 async def get_project_tables(project_name: str) -> List[Dict]:
     """
-    Get table schemas for a project from DuckDB.
+    Get table schemas for a project from the structured data handler.
     
     Returns list of tables with columns.
     """
     try:
-        # Try to use structured data handler
-        from utils.structured_data_handler import get_project_tables as get_tables
-        tables = get_tables(project_name)
-        if tables:
-            return tables
-    except ImportError:
-        logger.debug("structured_data_handler not available, trying direct DuckDB")
-    except Exception as e:
-        logger.warning(f"structured_data_handler failed: {e}")
-    
-    # Fallback: Query DuckDB directly
-    try:
-        import duckdb
-        import os
-        
-        db_path = os.environ.get('DUCKDB_PATH', './data/structured.duckdb')
-        if not os.path.exists(db_path):
-            return []
-        
-        conn = duckdb.connect(db_path, read_only=True)
-        
-        # Get all tables for project
-        project_prefix = project_name.lower().replace(' ', '_').replace('-', '_')
-        
-        # Get table names
-        tables_query = f"""
-            SELECT table_name 
-            FROM information_schema.tables 
-            WHERE table_schema = 'main' 
-            AND table_name LIKE '{project_prefix}%'
-        """
-        table_names = conn.execute(tables_query).fetchall()
+        # Use the existing structured data handler
+        from utils.structured_data_handler import StructuredDataHandler
+        handler = StructuredDataHandler()
+        all_files = handler.list_files()
         
         tables = []
-        for (table_name,) in table_names:
-            # Get columns for each table
-            cols_query = f"""
-                SELECT column_name, data_type
-                FROM information_schema.columns
-                WHERE table_name = '{table_name}'
-                ORDER BY ordinal_position
-            """
-            columns = conn.execute(cols_query).fetchall()
-            
-            # Get row count
-            try:
-                count_query = f"SELECT COUNT(*) FROM \"{table_name}\""
-                row_count = conn.execute(count_query).fetchone()[0]
-            except:
-                row_count = 0
-            
-            tables.append({
-                'table_name': table_name,
-                'columns': [{'name': col[0], 'type': col[1]} for col in columns],
-                'row_count': row_count
-            })
+        project_lower = project_name.lower()
         
-        conn.close()
+        for file_info in all_files:
+            # Match by project field
+            file_project = file_info.get('project', '').lower()
+            if file_project != project_lower:
+                continue
+            
+            # Extract sheets/tables from this file
+            for sheet in file_info.get('sheets', []):
+                tables.append({
+                    'table_name': sheet.get('table_name', ''),
+                    'columns': sheet.get('columns', []),
+                    'row_count': sheet.get('row_count', 0),
+                    'sheet_name': sheet.get('sheet_name', ''),
+                    'filename': file_info.get('filename', '')
+                })
+        
+        logger.info(f"Found {len(tables)} tables for project {project_name}")
+        return tables
+        
+    except ImportError:
+        logger.warning("StructuredDataHandler not available, trying alt import")
+    except Exception as e:
+        logger.warning(f"StructuredDataHandler failed: {e}")
+    
+    # Fallback: try backend.utils path
+    try:
+        from backend.utils.structured_data_handler import StructuredDataHandler
+        handler = StructuredDataHandler()
+        all_files = handler.list_files()
+        
+        tables = []
+        project_lower = project_name.lower()
+        
+        for file_info in all_files:
+            file_project = file_info.get('project', '').lower()
+            if file_project != project_lower:
+                continue
+            
+            for sheet in file_info.get('sheets', []):
+                tables.append({
+                    'table_name': sheet.get('table_name', ''),
+                    'columns': sheet.get('columns', []),
+                    'row_count': sheet.get('row_count', 0),
+                    'sheet_name': sheet.get('sheet_name', ''),
+                    'filename': file_info.get('filename', '')
+                })
+        
+        logger.info(f"Found {len(tables)} tables for project {project_name}")
         return tables
         
     except Exception as e:
-        logger.error(f"Failed to get tables from DuckDB: {e}")
+        logger.error(f"Failed to get tables: {e}")
         return []
 
 
