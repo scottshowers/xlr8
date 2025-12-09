@@ -37,13 +37,13 @@ class LearningModule:
     def _init_supabase(self):
         """Initialize Supabase connection."""
         try:
-            from utils.database.supabase_client import get_supabase_client
-            self.supabase = get_supabase_client()
+            from utils.database.supabase_client import get_supabase
+            self.supabase = get_supabase()
             logger.info("[LEARNING] Connected to Supabase")
         except Exception as e:
             try:
-                from utils.database.supabase_client import get_supabase_client
-                self.supabase = get_supabase_client()
+                from utils.database.supabase_client import get_supabase
+                self.supabase = get_supabase()
                 logger.info("[LEARNING] Connected to Supabase (alt path)")
             except Exception as e2:
                 logger.warning(f"[LEARNING] Supabase not available: {e2}")
