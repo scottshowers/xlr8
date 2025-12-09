@@ -285,15 +285,22 @@ class IntelligenceEngine:
         return domains if domains else ['general']
     
     def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
-        """Generate SQL query based on the question."""
+        """Generate SQL query based on the question - SMART schema scanning."""
         if not self.structured_handler or not self.schema:
             return None
         
         q_lower = question.lower()
         tables = self.schema.get('tables', [])
         
+        if not tables:
+            logger.warning("[INTELLIGENCE] No tables in schema")
+            return None
+        
+        # Log what we're working with
+        logger.info(f"[INTELLIGENCE] Scanning {len(tables)} tables for relevant columns")
+        
         # Detect query type
-        query_type = 'list'  # default
+        query_type = 'list'
         if any(w in q_lower for w in ['how many', 'count', 'number of', 'total number']):
             query_type = 'count'
         elif any(w in q_lower for w in ['total', 'sum of']):
@@ -301,91 +308,138 @@ class IntelligenceEngine:
         elif any(w in q_lower for w in ['average', 'avg', 'mean']):
             query_type = 'average'
         
-        # Find relevant table and columns
-        target_table = None
-        target_columns = []
-        where_conditions = []
+        # SMART: Scan ALL tables and columns to find relevant ones
+        best_table = None
+        best_score = 0
+        pt_col = None
+        rate_col = None
         
-        # Keywords to match against columns
-        keywords = {
-            'pt': ['fullpart', 'full_part', 'ft_pt', 'emp_type', 'employee_type', 'status'],
-            'part-time': ['fullpart', 'full_part', 'ft_pt', 'emp_type'],
-            'part time': ['fullpart', 'full_part', 'ft_pt', 'emp_type'],
-            'full-time': ['fullpart', 'full_part', 'ft_pt', 'emp_type'],
-            'full time': ['fullpart', 'full_part', 'ft_pt', 'emp_type'],
-            'hourly': ['hourly', 'hour_rate', 'rate', 'pay_rate', 'hrly'],
-            'hour': ['hourly', 'hour_rate', 'rate', 'pay_rate', 'hrly'],
-            'rate': ['rate', 'hourly', 'pay_rate', 'salary'],
-            'salary': ['salary', 'annual', 'pay'],
-            'active': ['status', 'emp_status', 'active'],
-            'employee': ['emp', 'employee', 'worker', 'person'],
-        }
+        # Keywords that indicate PT/FT columns
+        pt_keywords = ['fullpart', 'full_part', 'ft_pt', 'ptft', 'part_time', 'parttime', 
+                       'emp_type', 'employee_type', 'work_status', 'schedule_type', 'fte']
         
-        # Find tables with relevant columns
+        # Keywords that indicate rate/pay columns
+        rate_keywords = ['hourly', 'hour_rate', 'hrly', 'pay_rate', 'rate', 'wage', 
+                         'salary', 'compensation', 'annual', 'pay', 'amount']
+        
         for table in tables:
             table_name = table.get('table_name', '')
             columns = table.get('columns', [])
-            col_names = [c.lower() if isinstance(c, str) else c.get('name', '').lower() for c in columns]
             
-            # Check for PT/FT column
-            pt_col = None
-            rate_col = None
+            # Get column names
+            col_names = []
+            for c in columns:
+                if isinstance(c, str):
+                    col_names.append(c.lower())
+                elif isinstance(c, dict):
+                    col_names.append(c.get('name', '').lower())
+            
+            logger.debug(f"[INTELLIGENCE] Table {table_name} has columns: {col_names[:10]}...")
+            
+            # Score this table
+            table_score = 0
+            found_pt = None
+            found_rate = None
             
             for col in col_names:
-                # Check for PT/FT type column
-                if any(kw in col for kw in ['fullpart', 'full_part', 'ft_pt', 'emp_type', 'parttime', 'part_time']):
-                    pt_col = col
-                # Check for rate/hourly column  
-                if any(kw in col for kw in ['hourly', 'hour_rate', 'rate', 'hrly', 'pay_rate']):
-                    rate_col = col
+                # Check for PT/FT column
+                for kw in pt_keywords:
+                    if kw in col:
+                        found_pt = col
+                        table_score += 10
+                        break
+                
+                # Check for rate/pay column
+                for kw in rate_keywords:
+                    if kw in col and 'date' not in col and 'code' not in col:
+                        found_rate = col
+                        table_score += 10
+                        break
+                
+                # Bonus for employee-related tables
+                if any(x in table_name.lower() for x in ['employee', 'personal', 'worker', 'staff']):
+                    table_score += 5
             
-            if pt_col or rate_col:
-                target_table = table_name
-                if pt_col:
-                    target_columns.append(pt_col)
-                if rate_col:
-                    target_columns.append(rate_col)
-                
-                # Build WHERE conditions
-                if 'pt' in q_lower or 'part-time' in q_lower or 'part time' in q_lower:
-                    if pt_col:
-                        where_conditions.append(f'LOWER("{pt_col}") IN (\'p\', \'pt\', \'part-time\', \'part time\', \'parttime\')')
-                elif 'ft' in q_lower or 'full-time' in q_lower or 'full time' in q_lower:
-                    if pt_col:
-                        where_conditions.append(f'LOWER("{pt_col}") IN (\'f\', \'ft\', \'full-time\', \'full time\', \'fulltime\')')
-                
-                # Check for numeric conditions
-                money_match = re.search(r'(?:more than|over|greater than|above|>)\s*\$?(\d+(?:\.\d+)?)', q_lower)
-                if money_match and rate_col:
-                    amount = money_match.group(1)
-                    where_conditions.append(f'CAST("{rate_col}" AS DOUBLE) > {amount}')
-                
-                money_match_less = re.search(r'(?:less than|under|below|<)\s*\$?(\d+(?:\.\d+)?)', q_lower)
-                if money_match_less and rate_col:
-                    amount = money_match_less.group(1)
-                    where_conditions.append(f'CAST("{rate_col}" AS DOUBLE) < {amount}')
-                
-                break  # Use first matching table
+            if table_score > best_score:
+                best_score = table_score
+                best_table = table_name
+                pt_col = found_pt
+                rate_col = found_rate
         
-        if not target_table:
+        if not best_table:
+            logger.warning("[INTELLIGENCE] Could not find suitable table")
             return None
+        
+        logger.info(f"[INTELLIGENCE] Best table: {best_table} (score: {best_score})")
+        logger.info(f"[INTELLIGENCE] PT column: {pt_col}, Rate column: {rate_col}")
+        
+        # If we didn't find the specific columns, try to get table info directly
+        if not pt_col and not rate_col:
+            # Query the table to see what columns exist
+            try:
+                check_sql = f'SELECT * FROM "{best_table}" LIMIT 1'
+                rows, cols = self.structured_handler.execute_query(check_sql)
+                logger.info(f"[INTELLIGENCE] Direct column check: {cols}")
+                
+                # Search in actual returned columns
+                for col in cols:
+                    col_lower = col.lower()
+                    if not pt_col:
+                        for kw in pt_keywords:
+                            if kw in col_lower:
+                                pt_col = col
+                                break
+                    if not rate_col:
+                        for kw in rate_keywords:
+                            if kw in col_lower and 'date' not in col_lower and 'code' not in col_lower:
+                                rate_col = col
+                                break
+            except Exception as e:
+                logger.warning(f"[INTELLIGENCE] Column check failed: {e}")
+        
+        # Build WHERE conditions
+        where_conditions = []
+        
+        # PT/FT filter
+        if 'pt' in q_lower or 'part-time' in q_lower or 'part time' in q_lower:
+            if pt_col:
+                where_conditions.append(f'LOWER(CAST("{pt_col}" AS VARCHAR)) IN (\'p\', \'pt\', \'part-time\', \'part time\', \'parttime\', \'part\')')
+            else:
+                logger.warning("[INTELLIGENCE] No PT/FT column found for filtering")
+        elif 'ft' in q_lower or 'full-time' in q_lower or 'full time' in q_lower:
+            if pt_col:
+                where_conditions.append(f'LOWER(CAST("{pt_col}" AS VARCHAR)) IN (\'f\', \'ft\', \'full-time\', \'full time\', \'fulltime\', \'full\')')
+        
+        # Numeric conditions (more than, less than)
+        money_match = re.search(r'(?:more than|over|greater than|above|>|make\s+)\s*\$?(\d+(?:\.\d+)?)', q_lower)
+        if money_match and rate_col:
+            amount = money_match.group(1)
+            where_conditions.append(f'TRY_CAST("{rate_col}" AS DOUBLE) > {amount}')
+            logger.info(f"[INTELLIGENCE] Adding rate filter: > {amount}")
+        
+        money_match_less = re.search(r'(?:less than|under|below|<)\s*\$?(\d+(?:\.\d+)?)', q_lower)
+        if money_match_less and rate_col:
+            amount = money_match_less.group(1)
+            where_conditions.append(f'TRY_CAST("{rate_col}" AS DOUBLE) < {amount}')
         
         # Build SQL
         where_clause = ' AND '.join(where_conditions) if where_conditions else '1=1'
         
         if query_type == 'count':
-            sql = f'SELECT COUNT(*) as count FROM "{target_table}" WHERE {where_clause}'
-        elif query_type == 'sum' and target_columns:
-            sql = f'SELECT SUM(CAST("{target_columns[0]}" AS DOUBLE)) as total FROM "{target_table}" WHERE {where_clause}'
-        elif query_type == 'average' and target_columns:
-            sql = f'SELECT AVG(CAST("{target_columns[0]}" AS DOUBLE)) as average FROM "{target_table}" WHERE {where_clause}'
+            sql = f'SELECT COUNT(*) as count FROM "{best_table}" WHERE {where_clause}'
+        elif query_type == 'sum' and rate_col:
+            sql = f'SELECT SUM(TRY_CAST("{rate_col}" AS DOUBLE)) as total FROM "{best_table}" WHERE {where_clause}'
+        elif query_type == 'average' and rate_col:
+            sql = f'SELECT AVG(TRY_CAST("{rate_col}" AS DOUBLE)) as average FROM "{best_table}" WHERE {where_clause}'
         else:
-            sql = f'SELECT * FROM "{target_table}" WHERE {where_clause} LIMIT 100'
+            sql = f'SELECT * FROM "{best_table}" WHERE {where_clause} LIMIT 100'
+        
+        logger.info(f"[INTELLIGENCE] Generated SQL: {sql}")
         
         return {
             'sql': sql,
-            'table': target_table,
-            'columns': target_columns,
+            'table': best_table,
+            'columns': [c for c in [pt_col, rate_col] if c],
             'query_type': query_type,
             'conditions': where_conditions
         }
