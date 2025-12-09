@@ -1,15 +1,23 @@
+/**
+ * Upload Component - Document Upload
+ * 
+ * Uses ProjectContext for project selection (no local selector).
+ * Parent page handles "no project" state.
+ */
+
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useProject } from '../context/ProjectContext'
 import api from '../services/api'
 
-export default function Upload({ projects = [], functionalAreas = [], onProjectCreated }) {
+export default function Upload({ functionalAreas = [] }) {
   const navigate = useNavigate()
+  const { activeProject } = useProject()
+  
   const [files, setFiles] = useState([])
   const [selectedArea, setSelectedArea] = useState('')
-  const [selectedProject, setSelectedProject] = useState('')
-  const [projectList, setProjectList] = useState(projects)
   const [uploading, setUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState([]) // Track each file's status
+  const [uploadProgress, setUploadProgress] = useState([])
   const [error, setError] = useState(null)
 
   const defaultAreas = [
@@ -26,23 +34,6 @@ export default function Upload({ projects = [], functionalAreas = [], onProjectC
   ]
 
   const areas = functionalAreas.length > 0 ? functionalAreas : defaultAreas
-
-  useEffect(() => {
-    if (projects.length > 0) {
-      setProjectList(projects)
-    } else {
-      loadProjects()
-    }
-  }, [projects])
-
-  const loadProjects = async () => {
-    try {
-      const response = await api.get('/projects/list')
-      setProjectList(response.data || [])
-    } catch (err) {
-      console.error('Failed to load projects:', err)
-    }
-  }
 
   const handleFileChange = (e) => {
     const selectedFiles = Array.from(e.target.files)
@@ -61,8 +52,8 @@ export default function Upload({ projects = [], functionalAreas = [], onProjectC
       return
     }
 
-    if (!selectedProject) {
-      setError('Please select a project')
+    if (!activeProject) {
+      setError('Please select a project from the header')
       return
     }
 
@@ -88,7 +79,7 @@ export default function Upload({ projects = [], functionalAreas = [], onProjectC
       try {
         const formData = new FormData()
         formData.append('file', file)
-        formData.append('project', selectedProject)
+        formData.append('project', activeProject.name)
         if (selectedArea) {
           formData.append('functional_area', selectedArea)
         }
@@ -129,7 +120,7 @@ export default function Upload({ projects = [], functionalAreas = [], onProjectC
     
     // Redirect to status page after brief delay
     setTimeout(() => {
-      navigate('/status')
+      navigate('/data?tab=status')
     }, 2000)
   }
 
@@ -145,25 +136,32 @@ export default function Upload({ projects = [], functionalAreas = [], onProjectC
       margin: '0 auto'
     },
     header: {
-      marginBottom: '2rem'
+      marginBottom: '1.5rem'
     },
     title: {
-      fontSize: '1.75rem',
+      fontSize: '1.25rem',
       fontWeight: '700',
       color: '#2a3441',
-      marginBottom: '0.5rem',
+      marginBottom: '0.25rem',
       fontFamily: "'Sora', sans-serif"
     },
     subtitle: {
-      fontSize: '1rem',
+      fontSize: '0.9rem',
       color: '#5f6c7b'
     },
-    card: {
-      background: 'white',
-      borderRadius: '16px',
-      padding: '2rem',
-      boxShadow: '0 1px 3px rgba(42, 52, 65, 0.08)',
-      marginBottom: '1.5rem'
+    projectBadge: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: '0.5rem',
+      padding: '0.5rem 1rem',
+      background: '#f0fdf4',
+      border: '1px solid #bbf7d0',
+      borderRadius: '8px',
+      marginBottom: '1rem',
+    },
+    projectName: {
+      fontWeight: '600',
+      color: '#166534',
     },
     label: {
       display: 'block',
@@ -171,10 +169,6 @@ export default function Upload({ projects = [], functionalAreas = [], onProjectC
       fontWeight: '600',
       color: '#2a3441',
       marginBottom: '0.5rem'
-    },
-    required: {
-      color: '#e53e3e',
-      marginLeft: '2px'
     },
     select: {
       width: '100%',
@@ -326,7 +320,8 @@ export default function Upload({ projects = [], functionalAreas = [], onProjectC
     formatsGrid: {
       display: 'grid',
       gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))',
-      gap: '0.75rem'
+      gap: '0.75rem',
+      marginTop: '1rem'
     },
     formatBadge: {
       background: 'linear-gradient(135deg, rgba(131, 177, 109, 0.1), rgba(147, 171, 217, 0.08))',
@@ -355,189 +350,173 @@ export default function Upload({ projects = [], functionalAreas = [], onProjectC
     }
   }
 
-  const isDisabled = uploading || files.length === 0 || !selectedProject
+  const isDisabled = uploading || files.length === 0 || !activeProject
 
   return (
     <div style={styles.container}>
       {/* Header */}
       <div style={styles.header}>
-        <h1 style={styles.title}>Upload Documents</h1>
+        <h2 style={styles.title}>Upload Documents</h2>
         <p style={styles.subtitle}>
-          Upload multiple files for analysis. Files process in the background.
+          Files will be uploaded to the selected project and processed in the background.
         </p>
       </div>
 
-      {/* Upload Form Card */}
-      <div style={styles.card}>
-        {/* Project Selection */}
-        <div>
-          <label style={styles.label}>
-            Project <span style={styles.required}>*</span>
-          </label>
-          <select
-            value={selectedProject}
-            onChange={(e) => setSelectedProject(e.target.value)}
-            style={styles.select}
-          >
-            <option value="">Select a project...</option>
-            {projectList.map(project => (
-              <option key={project.id} value={project.name}>
-                {project.name}
-              </option>
-            ))}
-          </select>
+      {/* Current Project Indicator */}
+      {activeProject && (
+        <div style={styles.projectBadge}>
+          <span>📁</span>
+          <span style={styles.projectName}>{activeProject.name}</span>
+          <span style={{ color: '#5f6c7b', fontSize: '0.85rem' }}>
+            {activeProject.customer}
+          </span>
         </div>
+      )}
 
-        {/* Functional Area */}
-        <div>
-          <label style={styles.label}>
-            Functional Area
-          </label>
-          <select
-            value={selectedArea}
-            onChange={(e) => setSelectedArea(e.target.value)}
-            style={styles.select}
-          >
-            <option value="">Select area (optional)...</option>
-            {areas.map(area => (
-              <option key={area} value={area}>{area}</option>
-            ))}
-          </select>
-        </div>
-
-        {/* File Drop Zone */}
-        <div>
-          <label style={styles.label}>
-            Files <span style={styles.required}>*</span>
-            {files.length > 0 && (
-              <span style={{ ...styles.fileCount, marginLeft: '0.75rem' }}>
-                {files.length} selected
-              </span>
-            )}
-          </label>
-          <div 
-            style={styles.dropzone}
-            onClick={() => document.getElementById('file-upload').click()}
-          >
-            <input
-              type="file"
-              onChange={handleFileChange}
-              style={{ display: 'none' }}
-              id="file-upload"
-              accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.txt,.md"
-              multiple
-            />
-            <div style={styles.dropzoneIcon}>📄</div>
-            <p style={styles.dropzoneText}>
-              Click to select files
-            </p>
-            <p style={styles.dropzoneSubtext}>
-              Select multiple files at once • PDF, Word, Excel, CSV, or Text
-            </p>
-          </div>
-        </div>
-
-        {/* Selected Files List */}
-        {files.length > 0 && !uploading && (
-          <div style={styles.fileList}>
-            {files.map((file, index) => (
-              <div key={index} style={styles.fileItem}>
-                <span style={styles.fileIcon}>📄</span>
-                <span style={styles.fileName}>{file.name}</span>
-                <span style={styles.fileSize}>{formatFileSize(file.size)}</span>
-                <button 
-                  style={styles.removeBtn}
-                  onClick={() => removeFile(index)}
-                  title="Remove file"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Upload Progress */}
-        {uploadProgress.length > 0 && (
-          <div style={styles.progressList}>
-            {uploadProgress.map((item, index) => (
-              <div 
-                key={index} 
-                style={{
-                  ...styles.progressItem,
-                  ...(item.status === 'pending' ? styles.progressPending : {}),
-                  ...(item.status === 'uploading' ? styles.progressUploading : {}),
-                  ...(item.status === 'success' ? styles.progressSuccess : {}),
-                  ...(item.status === 'error' ? styles.progressError : {})
-                }}
-              >
-                <span style={styles.fileIcon}>
-                  {item.status === 'pending' && '⏳'}
-                  {item.status === 'uploading' && '⬆️'}
-                  {item.status === 'success' && '✅'}
-                  {item.status === 'error' && '❌'}
-                </span>
-                <span style={styles.fileName}>{item.name}</span>
-                <span style={styles.progressMessage}>{item.message}</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Upload Button */}
-        <button
-          onClick={handleUpload}
-          disabled={isDisabled}
-          style={{
-            ...styles.button,
-            ...(isDisabled ? styles.buttonDisabled : {})
-          }}
+      {/* Functional Area */}
+      <div>
+        <label style={styles.label}>
+          Functional Area
+        </label>
+        <select
+          value={selectedArea}
+          onChange={(e) => setSelectedArea(e.target.value)}
+          style={styles.select}
         >
-          {uploading ? (
-            <>⏳ Uploading {uploadProgress.filter(p => p.status === 'success').length}/{uploadProgress.length}...</>
-          ) : (
-            <>📤 Upload {files.length > 1 ? `${files.length} Files` : 'File'}</>
-          )}
-        </button>
-
-        {/* Info Box */}
-        <div style={styles.infoBox}>
-          <p style={styles.infoText}>
-            <span style={styles.infoLabel}>How it works: </span>
-            Files are uploaded sequentially and queued for background processing. 
-            Check the Status page to monitor progress.
-          </p>
-        </div>
-
-        {/* Error Message */}
-        {error && (
-          <div style={styles.errorBox}>
-            <span style={styles.errorIcon}>⚠️</span>
-            <span style={styles.errorText}>{error}</span>
-          </div>
-        )}
+          <option value="">Select area (optional)...</option>
+          {areas.map(area => (
+            <option key={area} value={area}>{area}</option>
+          ))}
+        </select>
       </div>
 
-      {/* Supported Formats Card */}
-      <div style={styles.card}>
-        <h2 style={{ ...styles.title, fontSize: '1.1rem', marginBottom: '1rem' }}>
-          Supported Formats
-        </h2>
-        <div style={styles.formatsGrid}>
-          {[
-            { ext: '.PDF', desc: 'Documents' },
-            { ext: '.DOCX', desc: 'Word files' },
-            { ext: '.XLSX', desc: 'Excel files' },
-            { ext: '.CSV', desc: 'Data files' },
-            { ext: '.TXT', desc: 'Text files' },
-            { ext: '.MD', desc: 'Markdown' },
-          ].map(format => (
-            <div key={format.ext} style={styles.formatBadge}>
-              <div style={styles.formatExt}>{format.ext}</div>
-              <div style={styles.formatDesc}>{format.desc}</div>
+      {/* File Drop Zone */}
+      <div>
+        <label style={styles.label}>
+          Files
+          {files.length > 0 && (
+            <span style={{ ...styles.fileCount, marginLeft: '0.75rem' }}>
+              {files.length} selected
+            </span>
+          )}
+        </label>
+        <div 
+          style={styles.dropzone}
+          onClick={() => document.getElementById('file-upload').click()}
+        >
+          <input
+            type="file"
+            onChange={handleFileChange}
+            style={{ display: 'none' }}
+            id="file-upload"
+            accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.txt,.md"
+            multiple
+          />
+          <div style={styles.dropzoneIcon}>📄</div>
+          <p style={styles.dropzoneText}>
+            Click to select files
+          </p>
+          <p style={styles.dropzoneSubtext}>
+            Select multiple files at once • PDF, Word, Excel, CSV, or Text
+          </p>
+        </div>
+      </div>
+
+      {/* Selected Files List */}
+      {files.length > 0 && !uploading && (
+        <div style={styles.fileList}>
+          {files.map((file, index) => (
+            <div key={index} style={styles.fileItem}>
+              <span style={styles.fileIcon}>📄</span>
+              <span style={styles.fileName}>{file.name}</span>
+              <span style={styles.fileSize}>{formatFileSize(file.size)}</span>
+              <button 
+                style={styles.removeBtn}
+                onClick={() => removeFile(index)}
+                title="Remove file"
+              >
+                ×
+              </button>
             </div>
           ))}
         </div>
+      )}
+
+      {/* Upload Progress */}
+      {uploadProgress.length > 0 && (
+        <div style={styles.progressList}>
+          {uploadProgress.map((item, index) => (
+            <div 
+              key={index} 
+              style={{
+                ...styles.progressItem,
+                ...(item.status === 'pending' ? styles.progressPending : {}),
+                ...(item.status === 'uploading' ? styles.progressUploading : {}),
+                ...(item.status === 'success' ? styles.progressSuccess : {}),
+                ...(item.status === 'error' ? styles.progressError : {})
+              }}
+            >
+              <span style={styles.fileIcon}>
+                {item.status === 'pending' && '⏳'}
+                {item.status === 'uploading' && '⬆️'}
+                {item.status === 'success' && '✅'}
+                {item.status === 'error' && '❌'}
+              </span>
+              <span style={styles.fileName}>{item.name}</span>
+              <span style={styles.progressMessage}>{item.message}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Upload Button */}
+      <button
+        onClick={handleUpload}
+        disabled={isDisabled}
+        style={{
+          ...styles.button,
+          ...(isDisabled ? styles.buttonDisabled : {})
+        }}
+      >
+        {uploading ? (
+          <>⏳ Uploading {uploadProgress.filter(p => p.status === 'success').length}/{uploadProgress.length}...</>
+        ) : (
+          <>📤 Upload {files.length > 1 ? `${files.length} Files` : 'File'}</>
+        )}
+      </button>
+
+      {/* Info Box */}
+      <div style={styles.infoBox}>
+        <p style={styles.infoText}>
+          <span style={styles.infoLabel}>How it works: </span>
+          Files are uploaded sequentially and queued for background processing. 
+          Check the Processing Status tab to monitor progress.
+        </p>
+      </div>
+
+      {/* Error Message */}
+      {error && (
+        <div style={styles.errorBox}>
+          <span style={styles.errorIcon}>⚠️</span>
+          <span style={styles.errorText}>{error}</span>
+        </div>
+      )}
+
+      {/* Supported Formats */}
+      <div style={styles.formatsGrid}>
+        {[
+          { ext: '.PDF', desc: 'Documents' },
+          { ext: '.DOCX', desc: 'Word files' },
+          { ext: '.XLSX', desc: 'Excel files' },
+          { ext: '.CSV', desc: 'Data files' },
+          { ext: '.TXT', desc: 'Text files' },
+          { ext: '.MD', desc: 'Markdown' },
+        ].map(format => (
+          <div key={format.ext} style={styles.formatBadge}>
+            <div style={styles.formatExt}>{format.ext}</div>
+            <div style={styles.formatDesc}>{format.desc}</div>
+          </div>
+        ))}
       </div>
     </div>
   )
