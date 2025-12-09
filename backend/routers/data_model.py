@@ -72,10 +72,10 @@ async def analyze_data_model(project_name: str):
         
         try:
             try:
-                from utils.database.supabase_client import get_supabase_client
+                from utils.database.supabase_client import get_supabase
             except ImportError:
-                from utils.database.supabase_client import get_supabase_client
-            supabase = get_supabase_client()
+                from utils.database.supabase_client import get_supabase
+            supabase = get_supabase()
             
             # Get global mappings
             global_result = supabase.table('global_column_mappings').select('*').execute()
@@ -181,11 +181,11 @@ async def get_relationships(project_name: str):
         # Load from Supabase
         try:
             try:
-                from utils.database.supabase_client import get_supabase_client
+                from utils.database.supabase_client import get_supabase
             except ImportError:
-                from utils.database.supabase_client import get_supabase_client
+                from utils.database.supabase_client import get_supabase
             
-            supabase = get_supabase_client()
+            supabase = get_supabase()
             
             # Get all relationships for this project
             result = supabase.table('project_relationships') \
@@ -253,10 +253,10 @@ async def confirm_relationship(project_name: str, confirmation: RelationshipConf
         # Save to Supabase for persistence and learning
         try:
             try:
-                from utils.database.supabase_client import get_supabase_client
+                from utils.database.supabase_client import get_supabase
             except ImportError:
-                from utils.database.supabase_client import get_supabase_client
-            supabase = get_supabase_client()
+                from utils.database.supabase_client import get_supabase
+            supabase = get_supabase()
             
             if confirmation.confirmed:
                 # Save to project_relationships
