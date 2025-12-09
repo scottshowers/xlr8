@@ -13,6 +13,7 @@
  * /vacuum/map → VacuumColumnMapping (column mapping interface)
  * /playbooks  → PlaybooksPage (Analysis Playbooks)
  * /admin      → AdminPage (System Monitor + Settings only) - Admin only
+ * /learning-admin → AdminDashboard (Learning System Management) - Admin only
  * /data-model → DataModelPage (Visual ERD for relationships)
  * /system     → SystemMonitorPage - Admin only
  */
@@ -42,6 +43,7 @@ import VacuumExplore from './pages/VacuumExplore';
 import VacuumColumnMapping from './pages/VacuumColumnMapping';
 import PlaybooksPage from './pages/PlaybooksPage';
 import AdminPage from './pages/AdminPage';
+import AdminDashboard from './pages/AdminDashboard';
 import DataModelPage from './pages/DataModelPage';
 import SystemMonitorPage from './pages/SystemMonitorPage';
 
@@ -117,6 +119,12 @@ function App() {
             <Route path="/admin" element={
               <ProtectedRoute permission="ops_center">
                 <Layout><AdminPage /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/learning-admin" element={
+              <ProtectedRoute permission="ops_center">
+                <Layout><AdminDashboard /></Layout>
               </ProtectedRoute>
             } />
             
