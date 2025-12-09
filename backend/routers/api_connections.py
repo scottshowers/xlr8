@@ -81,10 +81,10 @@ class ReportExecuteRequest(BaseModel):
 def get_supabase():
     """Get Supabase client."""
     try:
-        from utils.database.supabase_client import get_supabase_client
+        from utils.database.supabase_client import get_supabase
     except ImportError:
-        from utils.database.supabase_client import get_supabase_client
-    return get_supabase_client()
+        from utils.database.supabase_client import get_supabase
+    return get_supabase()
 
 
 def get_raas_client(connection_data: Dict):
