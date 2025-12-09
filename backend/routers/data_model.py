@@ -71,7 +71,10 @@ async def analyze_data_model(project_name: str):
         project_confirmed = []
         
         try:
-            from utils.supabase_client import get_supabase_client
+            try:
+                from utils.supabase_client import get_supabase_client
+            except ImportError:
+                from backend.utils.supabase_client import get_supabase_client
             supabase = get_supabase_client()
             
             # Get global mappings
@@ -169,16 +172,62 @@ async def get_relationships(project_name: str):
     """
     Get stored relationships for a project.
     
-    Returns previously analyzed/confirmed relationships.
+    Returns previously analyzed/confirmed relationships from Supabase.
     """
     try:
-        # For now, return empty - relationships are computed on-demand
-        # Future: Store confirmed relationships in Supabase/DuckDB
+        relationships = []
+        semantic_types = []
+        
+        # Load from Supabase
+        try:
+            try:
+                from utils.supabase_client import get_supabase_client
+            except ImportError:
+                from backend.utils.supabase_client import get_supabase_client
+            
+            supabase = get_supabase_client()
+            
+            # Get all relationships for this project
+            result = supabase.table('project_relationships') \
+                .select('*') \
+                .eq('project_name', project_name) \
+                .execute()
+            
+            if result.data:
+                for row in result.data:
+                    relationships.append({
+                        'source_table': row.get('source_table', ''),
+                        'source_column': row.get('source_column', ''),
+                        'target_table': row.get('target_table', ''),
+                        'target_column': row.get('target_column', ''),
+                        'confidence': row.get('confidence', 0.9),
+                        'semantic_type': row.get('semantic_type', 'unknown'),
+                        'method': row.get('method', 'saved'),
+                        'needs_review': row.get('status') == 'needs_review',
+                        'confirmed': row.get('status') == 'confirmed',
+                        'id': row.get('id'),
+                    })
+                
+                logger.info(f"Loaded {len(relationships)} relationships for {project_name}")
+            
+        except Exception as db_e:
+            logger.warning(f"Could not load relationships from database: {db_e}")
+        
+        # Calculate stats
+        high_conf = sum(1 for r in relationships if r.get('confirmed') or not r.get('needs_review'))
+        needs_review = sum(1 for r in relationships if r.get('needs_review') and not r.get('confirmed'))
+        
         return {
             "project": project_name,
-            "relationships": [],
-            "message": "Use POST /data-model/analyze/{project_name} to detect relationships"
+            "relationships": relationships,
+            "semantic_types": semantic_types,
+            "stats": {
+                "relationships_found": len(relationships),
+                "high_confidence": high_conf,
+                "needs_review": needs_review,
+            }
         }
+        
     except Exception as e:
         logger.error(f"Failed to get relationships: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -203,7 +252,10 @@ async def confirm_relationship(project_name: str, confirmation: RelationshipConf
         
         # Save to Supabase for persistence and learning
         try:
-            from utils.supabase_client import get_supabase_client
+            try:
+                from utils.supabase_client import get_supabase_client
+            except ImportError:
+                from backend.utils.supabase_client import get_supabase_client
             supabase = get_supabase_client()
             
             if confirmation.confirmed:
