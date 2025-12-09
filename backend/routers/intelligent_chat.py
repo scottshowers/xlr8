@@ -158,7 +158,7 @@ async def intelligent_chat(request: IntelligentChatRequest):
                 try:
                     from utils.database.supabase_client import get_supabase_client
                 except ImportError:
-                    from backend.utils.database.supabase_client import get_supabase_client
+                    from utils.database.supabase_client import get_supabase_client
                 supabase = get_supabase_client()
                 result = supabase.table('project_relationships').select('*').eq('project_name', project).eq('status', 'confirmed').execute()
                 if result.data:
