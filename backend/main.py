@@ -80,6 +80,14 @@ except ImportError as e:
     ADMIN_AVAILABLE = False
     logging.warning(f"Admin router import failed: {e}")
 
+# Import api_connections router (UKG Pro/WFM/Ready integration)
+try:
+    from backend.routers import api_connections
+    API_CONNECTIONS_AVAILABLE = True
+except ImportError as e:
+    API_CONNECTIONS_AVAILABLE = False
+    logging.warning(f"API connections router import failed: {e}")
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -212,6 +220,13 @@ if ADMIN_AVAILABLE:
 else:
     logger.warning("Admin router not available")
 
+# Register api_connections router if available (UKG Pro/WFM/Ready integration)
+if API_CONNECTIONS_AVAILABLE:
+    app.include_router(api_connections.router, prefix="/api", tags=["connections"])
+    logger.info("✓ API connections router registered at /api/connections")
+else:
+    logger.warning("API connections router not available")
+
 
 @app.get("/api/health")
 async def health():
@@ -234,6 +249,7 @@ async def health():
             "data_model": DATA_MODEL_AVAILABLE,
             "intelligent_chat": INTELLIGENT_CHAT_AVAILABLE,
             "admin": ADMIN_AVAILABLE,
+            "api_connections": API_CONNECTIONS_AVAILABLE,
         }
         
         return {
@@ -254,6 +270,7 @@ async def health():
                 "security": SECURITY_AVAILABLE,
                 "intelligent_chat": INTELLIGENT_CHAT_AVAILABLE,
                 "admin": ADMIN_AVAILABLE,
+                "api_connections": API_CONNECTIONS_AVAILABLE,
             }
         }
 
