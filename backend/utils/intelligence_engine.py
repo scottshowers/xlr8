@@ -324,13 +324,14 @@ class IntelligenceEngine:
         pt_col = None
         rate_col = None
         
-        # Keywords that indicate PT/FT columns
-        pt_keywords = ['fullpart', 'full_part', 'ft_pt', 'ptft', 'part_time', 'parttime', 
-                       'emp_type', 'employee_type', 'work_status', 'schedule_type', 'fte']
+        # Keywords that indicate PT/FT columns (by NAME)
+        pt_name_keywords = ['fullpart', 'full_part', 'ft_pt', 'ptft', 'part_time', 'parttime', 
+                           'emp_type', 'employee_type', 'work_status', 'schedule_type', 'fte',
+                           'employment_type', 'emp_status', 'work_type', 'status_type']
         
-        # Keywords that indicate rate/pay columns
-        rate_keywords = ['hourly', 'hour_rate', 'hrly', 'pay_rate', 'rate', 'wage', 
-                         'salary', 'compensation', 'annual', 'pay', 'amount']
+        # Keywords that indicate rate/pay columns (by NAME)
+        rate_name_keywords = ['hourly', 'hour_rate', 'hrly', 'pay_rate', 'rate', 'wage', 
+                             'salary', 'compensation', 'annual', 'pay', 'amount', 'per_hour']
         
         for table in tables:
             table_name = table.get('table_name', '')
@@ -340,11 +341,11 @@ class IntelligenceEngine:
             col_names = []
             for c in columns:
                 if isinstance(c, str):
-                    col_names.append(c.lower())
+                    col_names.append(c)
                 elif isinstance(c, dict):
-                    col_names.append(c.get('name', '').lower())
+                    col_names.append(c.get('name', ''))
             
-            logger.debug(f"[INTELLIGENCE] Table {table_name} has columns: {col_names[:10]}...")
+            logger.debug(f"[SQL-GEN] Table {table_name} columns: {col_names[:10]}...")
             
             # Score this table
             table_score = 0
@@ -352,22 +353,26 @@ class IntelligenceEngine:
             found_rate = None
             
             for col in col_names:
-                # Check for PT/FT column
-                for kw in pt_keywords:
-                    if kw in col:
+                col_lower = col.lower()
+                
+                # Check for PT/FT column by name
+                for kw in pt_name_keywords:
+                    if kw in col_lower:
                         found_pt = col
                         table_score += 10
+                        logger.info(f"[SQL-GEN] Found PT column by name: {col}")
                         break
                 
-                # Check for rate/pay column
-                for kw in rate_keywords:
-                    if kw in col and 'date' not in col and 'code' not in col:
+                # Check for rate/pay column by name
+                for kw in rate_name_keywords:
+                    if kw in col_lower and 'date' not in col_lower and 'code' not in col_lower:
                         found_rate = col
                         table_score += 10
+                        logger.info(f"[SQL-GEN] Found rate column by name: {col}")
                         break
                 
                 # Bonus for employee-related tables
-                if any(x in table_name.lower() for x in ['employee', 'personal', 'worker', 'staff']):
+                if any(x in table_name.lower() for x in ['employee', 'personal', 'worker', 'staff', 'demographic']):
                     table_score += 5
             
             if table_score > best_score:
@@ -376,36 +381,26 @@ class IntelligenceEngine:
                 pt_col = found_pt
                 rate_col = found_rate
         
+        # SMART FALLBACK: If we didn't find PT/FT column by name, search by VALUES
+        if not pt_col and best_table:
+            logger.info(f"[SQL-GEN] No PT column by name - searching by values in {best_table}")
+            pt_col = self._find_column_by_values(best_table, ['P', 'F', 'PT', 'FT', 'Part', 'Full', 'Part-Time', 'Full-Time'])
+            if pt_col:
+                logger.info(f"[SQL-GEN] Found PT column by values: {pt_col}")
+        
+        # SMART FALLBACK: If we didn't find rate column by name, search for numeric columns
+        if not rate_col and best_table:
+            logger.info(f"[SQL-GEN] No rate column by name - searching for numeric columns in {best_table}")
+            rate_col = self._find_numeric_column(best_table, ['rate', 'hourly', 'pay', 'wage', 'salary', 'amount'])
+            if rate_col:
+                logger.info(f"[SQL-GEN] Found rate column: {rate_col}")
+        
         if not best_table:
-            logger.warning("[INTELLIGENCE] Could not find suitable table")
+            logger.warning("[SQL-GEN] Could not find suitable table")
             return None
         
-        logger.info(f"[INTELLIGENCE] Best table: {best_table} (score: {best_score})")
-        logger.info(f"[INTELLIGENCE] PT column: {pt_col}, Rate column: {rate_col}")
-        
-        # If we didn't find the specific columns, try to get table info directly
-        if not pt_col and not rate_col:
-            # Query the table to see what columns exist
-            try:
-                check_sql = f'SELECT * FROM "{best_table}" LIMIT 1'
-                rows, cols = self.structured_handler.execute_query(check_sql)
-                logger.info(f"[INTELLIGENCE] Direct column check: {cols}")
-                
-                # Search in actual returned columns
-                for col in cols:
-                    col_lower = col.lower()
-                    if not pt_col:
-                        for kw in pt_keywords:
-                            if kw in col_lower:
-                                pt_col = col
-                                break
-                    if not rate_col:
-                        for kw in rate_keywords:
-                            if kw in col_lower and 'date' not in col_lower and 'code' not in col_lower:
-                                rate_col = col
-                                break
-            except Exception as e:
-                logger.warning(f"[INTELLIGENCE] Column check failed: {e}")
+        logger.info(f"[SQL-GEN] Best table: {best_table} (score: {best_score})")
+        logger.info(f"[SQL-GEN] PT column: {pt_col}, Rate column: {rate_col}")
         
         # Build WHERE conditions
         where_conditions = []
@@ -415,17 +410,17 @@ class IntelligenceEngine:
             if pt_col:
                 where_conditions.append(f'LOWER(CAST("{pt_col}" AS VARCHAR)) IN (\'p\', \'pt\', \'part-time\', \'part time\', \'parttime\', \'part\')')
             else:
-                logger.warning("[INTELLIGENCE] No PT/FT column found for filtering")
+                logger.warning("[SQL-GEN] No PT/FT column found for filtering")
         elif 'ft' in q_lower or 'full-time' in q_lower or 'full time' in q_lower:
             if pt_col:
                 where_conditions.append(f'LOWER(CAST("{pt_col}" AS VARCHAR)) IN (\'f\', \'ft\', \'full-time\', \'full time\', \'fulltime\', \'full\')')
         
         # Numeric conditions (more than, less than)
-        money_match = re.search(r'(?:more than|over|greater than|above|>|make\s+)\s*\$?(\d+(?:\.\d+)?)', q_lower)
+        money_match = re.search(r'(?:more than|over|greater than|above|>|make\s+|makes\s+)\s*\$?(\d+(?:\.\d+)?)', q_lower)
         if money_match and rate_col:
             amount = money_match.group(1)
             where_conditions.append(f'TRY_CAST("{rate_col}" AS DOUBLE) > {amount}')
-            logger.info(f"[INTELLIGENCE] Adding rate filter: > {amount}")
+            logger.info(f"[SQL-GEN] Adding rate filter: > {amount}")
         
         money_match_less = re.search(r'(?:less than|under|below|<)\s*\$?(\d+(?:\.\d+)?)', q_lower)
         if money_match_less and rate_col:
@@ -444,7 +439,7 @@ class IntelligenceEngine:
         else:
             sql = f'SELECT * FROM "{best_table}" WHERE {where_clause} LIMIT 100'
         
-        logger.info(f"[INTELLIGENCE] Generated SQL: {sql}")
+        logger.info(f"[SQL-GEN] Generated SQL: {sql}")
         
         return {
             'sql': sql,
@@ -453,6 +448,88 @@ class IntelligenceEngine:
             'query_type': query_type,
             'conditions': where_conditions
         }
+    
+    def _find_column_by_values(self, table_name: str, search_values: List[str]) -> Optional[str]:
+        """Find a column that contains specific values (e.g., 'P', 'F' for PT/FT)."""
+        if not self.structured_handler:
+            return None
+        
+        try:
+            # Get sample data
+            rows, cols = self.structured_handler.execute_query(f'SELECT * FROM "{table_name}" LIMIT 100')
+            if not rows or not cols:
+                return None
+            
+            search_values_lower = [v.lower() for v in search_values]
+            
+            # Check each column for matching values
+            for i, col in enumerate(cols):
+                col_values = set()
+                for row in rows:
+                    if row[i] is not None:
+                        col_values.add(str(row[i]).strip().lower())
+                
+                # Check if any search values are in this column
+                matches = col_values.intersection(search_values_lower)
+                if matches:
+                    logger.info(f"[SQL-GEN] Column '{col}' contains values: {matches}")
+                    return col
+            
+        except Exception as e:
+            logger.warning(f"[SQL-GEN] Error searching column values: {e}")
+        
+        return None
+    
+    def _find_numeric_column(self, table_name: str, name_hints: List[str]) -> Optional[str]:
+        """Find a numeric column that might be a rate/pay field."""
+        if not self.structured_handler:
+            return None
+        
+        try:
+            # Get sample data
+            rows, cols = self.structured_handler.execute_query(f'SELECT * FROM "{table_name}" LIMIT 100')
+            if not rows or not cols:
+                return None
+            
+            # Look for numeric columns with values in reasonable pay range (0-500)
+            for i, col in enumerate(cols):
+                col_lower = col.lower()
+                
+                # Skip obviously non-pay columns
+                if any(x in col_lower for x in ['date', 'id', 'code', 'number', 'num', 'phone', 'zip', 'ssn']):
+                    continue
+                
+                # Prefer columns with name hints
+                has_hint = any(hint in col_lower for hint in name_hints)
+                
+                # Check if values are numeric and in reasonable range
+                numeric_count = 0
+                in_range_count = 0
+                for row in rows:
+                    val = row[i]
+                    if val is not None:
+                        try:
+                            num_val = float(str(val).replace('$', '').replace(',', ''))
+                            numeric_count += 1
+                            if 0 < num_val < 500:  # Reasonable hourly rate range
+                                in_range_count += 1
+                        except:
+                            pass
+                
+                # If mostly numeric and in range, this might be our column
+                if numeric_count > len(rows) * 0.5 and in_range_count > len(rows) * 0.3:
+                    if has_hint:
+                        logger.info(f"[SQL-GEN] Found numeric column with hint: {col}")
+                        return col
+                    elif not has_hint and numeric_count > len(rows) * 0.8:
+                        # Only use non-hinted columns if very clearly numeric
+                        logger.info(f"[SQL-GEN] Found numeric column without hint: {col}")
+                        return col
+            
+        except Exception as e:
+            logger.warning(f"[SQL-GEN] Error finding numeric column: {e}")
+        
+        return None
     
     def _needs_clarification(self, mode, entities, domains, q_lower) -> bool:
         """Determine if we need to ask clarifying questions."""
