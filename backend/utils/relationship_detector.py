@@ -235,13 +235,11 @@ async def analyze_project_relationships(
     Analyze tables and detect relationships.
     
     INTELLIGENT APPROACH:
-    1. Identify config/reference tables (source of truth)
-    2. Filter to only KEY columns
-    3. Strip prefixes before comparing
-    4. Match data tables TO config tables first
-    5. Then match data tables to each other
-    6. Limit per-pair matches
-    7. High thresholds to reduce noise
+    1. Detect semantic type of each key column
+    2. ONLY compare columns of the SAME type (employee to employee, company to company)
+    3. No cross-type comparisons (employee_id will never match company_code)
+    4. Strip prefixes before comparing
+    5. Use global mappings for known equivalents
     
     Args:
         project_name: Project identifier
@@ -261,48 +259,25 @@ async def analyze_project_relationships(
     relationships = []
     semantic_types = []
     
-    # Step 1: Categorize tables and extract key columns
-    config_tables = []
-    data_tables = []
+    # Step 1: Build a map of semantic_type -> [(table, column), ...]
+    type_to_columns: Dict[str, List[Tuple[str, str]]] = {}
     
-    for table in tables:
-        table_name = table.get('table_name', '')
-        filename = table.get('filename', table.get('file', ''))
-        columns = table.get('columns', [])
-        
-        # Get only key columns
-        key_cols = []
-        for col in columns:
-            col_name = col if isinstance(col, str) else col.get('name', '')
-            if col_name and is_key_column(col_name):
-                key_cols.append(col_name)
-        
-        table_info = {
-            'table_name': table_name,
-            'filename': filename,
-            'all_columns': columns,
-            'key_columns': key_cols,
-        }
-        
-        if is_config_table(table_name, filename):
-            config_tables.append(table_info)
-            logger.info(f"[RELATIONSHIP] Config table: {table_name} ({len(key_cols)} keys)")
-        else:
-            data_tables.append(table_info)
-    
-    logger.info(f"[RELATIONSHIP] Found {len(config_tables)} config tables, {len(data_tables)} data tables")
-    
-    # Step 2: Detect semantic types for all key columns
     for table in tables:
         table_name = table.get('table_name', '')
         columns = table.get('columns', [])
         
         for col in columns:
             col_name = col if isinstance(col, str) else col.get('name', '')
-            if not col_name or not is_key_column(col_name):
+            if not col_name:
                 continue
             
+            # Only process key columns
+            if not is_key_column(col_name):
+                continue
+            
+            # Get semantic type
             sem_type, confidence = get_semantic_type(col_name)
+            
             if sem_type != 'unknown':
                 semantic_types.append({
                     'table': table_name,
@@ -310,74 +285,84 @@ async def analyze_project_relationships(
                     'type': sem_type,
                     'confidence': round(confidence, 2)
                 })
-    
-    # Step 3: Match data tables TO config tables (primary relationships)
-    if config_tables:
-        for config in config_tables:
-            for data in data_tables:
-                pair_matches = find_column_matches(
-                    config['table_name'], config['key_columns'],
-                    data['table_name'], data['key_columns']
-                )
                 
-                # Take top N matches for this pair
-                for match in pair_matches[:MAX_PER_TABLE_PAIR]:
-                    relationships.append(match)
+                # Add to type grouping
+                if sem_type not in type_to_columns:
+                    type_to_columns[sem_type] = []
+                type_to_columns[sem_type].append((table_name, col_name))
     
-    # Step 4: Match data tables to each other (secondary relationships)
-    for i, table1 in enumerate(data_tables):
-        for table2 in data_tables[i+1:]:
-            pair_matches = find_column_matches(
-                table1['table_name'], table1['key_columns'],
-                table2['table_name'], table2['key_columns']
-            )
-            
-            # Take top N matches for this pair
-            for match in pair_matches[:MAX_PER_TABLE_PAIR]:
-                relationships.append(match)
+    logger.info(f"[RELATIONSHIP] Found {len(semantic_types)} typed key columns across {len(type_to_columns)} types")
     
-    # Step 5: Also match config tables to each other (if multiple)
-    if len(config_tables) > 1:
-        for i, config1 in enumerate(config_tables):
-            for config2 in config_tables[i+1:]:
-                pair_matches = find_column_matches(
-                    config1['table_name'], config1['key_columns'],
-                    config2['table_name'], config2['key_columns']
-                )
-                for match in pair_matches[:MAX_PER_TABLE_PAIR]:
-                    relationships.append(match)
+    # Step 2: For each semantic type, find relationships WITHIN that type
+    for sem_type, columns in type_to_columns.items():
+        if len(columns) < 2:
+            continue  # Need at least 2 columns to form a relationship
+        
+        logger.info(f"[RELATIONSHIP] Processing {sem_type}: {len(columns)} columns")
+        
+        # Compare columns of the SAME type across DIFFERENT tables
+        for i, (table1, col1) in enumerate(columns):
+            for table2, col2 in columns[i+1:]:
+                # Skip if same table
+                if table1 == table2:
+                    continue
+                
+                # Calculate similarity
+                score = similarity_score(col1, col2)
+                
+                # Since they're already the same semantic type, boost confidence
+                # They're fundamentally the same kind of data
+                boosted_score = min(1.0, score + 0.15)
+                
+                if boosted_score >= THRESHOLD_DISCARD:
+                    relationships.append({
+                        'source_table': table1,
+                        'source_column': col1,
+                        'target_table': table2,
+                        'target_column': col2,
+                        'confidence': round(boosted_score, 2),
+                        'semantic_type': sem_type,
+                        'method': 'exact' if boosted_score == 1.0 else 'semantic',
+                        'needs_review': boosted_score < THRESHOLD_AUTO_ACCEPT,
+                        'confirmed': False,
+                    })
     
-    # Step 6: Deduplicate
+    # Step 3: Deduplicate and sort by confidence
     relationships = deduplicate_relationships(relationships)
+    relationships.sort(key=lambda x: x['confidence'], reverse=True)
     
-    # Step 7: Find unmatched key columns
+    # Step 4: Limit relationships per table pair
+    limited_relationships = []
+    pair_counts: Dict[Tuple[str, str], int] = {}
+    
+    for rel in relationships:
+        pair = tuple(sorted([rel['source_table'], rel['target_table']]))
+        count = pair_counts.get(pair, 0)
+        
+        if count < MAX_PER_TABLE_PAIR:
+            limited_relationships.append(rel)
+            pair_counts[pair] = count + 1
+    
+    relationships = limited_relationships
+    
+    # Step 5: Find unmatched key columns
     matched_cols = set()
     for r in relationships:
         matched_cols.add(f"{r['source_table']}.{r['source_column']}")
         matched_cols.add(f"{r['target_table']}.{r['target_column']}")
     
     unmatched = []
-    for table in tables:
-        table_name = table.get('table_name', '')
-        for col in table.get('columns', []):
-            col_name = col if isinstance(col, str) else col.get('name', '')
-            if col_name and is_key_column(col_name):
-                full_name = f"{table_name}.{col_name}"
-                if full_name not in matched_cols:
-                    sem_type, _ = get_semantic_type(col_name)
-                    unmatched.append({
-                        'table': table_name,
-                        'column': col_name,
-                        'semantic_type': sem_type
-                    })
+    for st in semantic_types:
+        full_name = f"{st['table']}.{st['column']}"
+        if full_name not in matched_cols:
+            unmatched.append({
+                'table': st['table'],
+                'column': st['column'],
+                'semantic_type': st['type']
+            })
     
     # Stats
     total_cols = sum(len(t.get('columns', [])) for t in tables)
-    key_cols = sum(
-        sum(1 for c in t.get('columns', []) 
-            if is_key_column(c if isinstance(c, str) else c.get('name', '')))
-        for t in tables
-    )
     high_conf = sum(1 for r in relationships if not r['needs_review'])
     needs_review = sum(1 for r in relationships if r['needs_review'])
     
@@ -386,15 +371,15 @@ async def analyze_project_relationships(
     return {
         'relationships': relationships,
         'semantic_types': semantic_types,
-        'unmatched_columns': unmatched[:50],  # Limit unmatched list
+        'unmatched_columns': unmatched[:30],  # Limit list
         'stats': {
             'tables_analyzed': len(tables),
             'columns_analyzed': total_cols,
-            'key_columns_found': key_cols,
+            'key_columns_found': len(semantic_types),
+            'semantic_types_found': len(type_to_columns),
             'relationships_found': len(relationships),
             'high_confidence': high_conf,
             'needs_review': needs_review,
-            'config_tables': len(config_tables),
         }
     }
 
