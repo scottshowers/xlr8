@@ -26,6 +26,7 @@ const NAV_ITEMS = [
   { path: '/data-model', label: 'Data Model', icon: '🔗', permission: Permissions.DATA_MODEL },
   { path: '/playbooks', label: 'Playbooks', icon: '📋', permission: Permissions.PLAYBOOKS },
   { path: '/admin', label: 'Admin', icon: '⚙️', permission: Permissions.OPS_CENTER },
+  { path: '/learning-admin', label: 'Learning', icon: '🧠', permission: Permissions.OPS_CENTER },
 ];
 
 // Full Detail Green H Logo
