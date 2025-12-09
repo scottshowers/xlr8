@@ -72,6 +72,14 @@ except ImportError as e:
     INTELLIGENT_CHAT_AVAILABLE = False
     logging.warning(f"Intelligent chat router import failed: {e}")
 
+# Import admin router (learning system management)
+try:
+    from backend.routers import admin
+    ADMIN_AVAILABLE = True
+except ImportError as e:
+    ADMIN_AVAILABLE = False
+    logging.warning(f"Admin router import failed: {e}")
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -197,6 +205,13 @@ if INTELLIGENT_CHAT_AVAILABLE:
 else:
     logger.warning("Intelligent chat router not available")
 
+# Register admin router if available (learning system management)
+if ADMIN_AVAILABLE:
+    app.include_router(admin.router, prefix="/api", tags=["admin"])
+    logger.info("✓ Admin router registered at /api/admin")
+else:
+    logger.warning("Admin router not available")
+
 
 @app.get("/api/health")
 async def health():
@@ -218,6 +233,7 @@ async def health():
             "auth": AUTH_AVAILABLE,
             "data_model": DATA_MODEL_AVAILABLE,
             "intelligent_chat": INTELLIGENT_CHAT_AVAILABLE,
+            "admin": ADMIN_AVAILABLE,
         }
         
         return {
@@ -237,6 +253,7 @@ async def health():
                 "progress": PROGRESS_AVAILABLE,
                 "security": SECURITY_AVAILABLE,
                 "intelligent_chat": INTELLIGENT_CHAT_AVAILABLE,
+                "admin": ADMIN_AVAILABLE,
             }
         }
 
