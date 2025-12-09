@@ -29,6 +29,18 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["intelligent-chat"])
 
+# Initialize learning module
+try:
+    from utils.learning import get_learning_module
+    LEARNING_AVAILABLE = True
+except ImportError:
+    try:
+        from backend.utils.learning import get_learning_module
+        LEARNING_AVAILABLE = True
+    except ImportError:
+        LEARNING_AVAILABLE = False
+        logger.warning("[INTELLIGENT] Learning module not available")
+
 
 # =============================================================================
 # REQUEST/RESPONSE MODELS
@@ -164,6 +176,22 @@ async def intelligent_chat(request: IntelligentChatRequest):
         if request.clarifications:
             engine.confirmed_facts.update(request.clarifications)
             logger.info(f"[INTELLIGENT] Applied clarifications: {list(request.clarifications.keys())}")
+            
+            # LEARNING: Record clarification choices
+            if LEARNING_AVAILABLE:
+                try:
+                    learning = get_learning_module()
+                    for q_id, choice in request.clarifications.items():
+                        learning.record_clarification_choice(
+                            question_id=q_id,
+                            chosen_option=choice if isinstance(choice, str) else str(choice),
+                            domain=request.clarifications.get('_domain'),
+                            intent=request.clarifications.get('_intent'),
+                            project=project,
+                            user_id=None  # TODO: Get from auth
+                        )
+                except Exception as e:
+                    logger.warning(f"[LEARNING] Failed to record clarification: {e}")
         
         # Determine mode
         mode = None
@@ -173,8 +201,47 @@ async def intelligent_chat(request: IntelligentChatRequest):
             except:
                 pass
         
+        # LEARNING: Check for similar successful query
+        learned_sql = None
+        if LEARNING_AVAILABLE and not request.clarifications:
+            try:
+                learning = get_learning_module()
+                similar = learning.find_similar_query(
+                    question=message,
+                    intent=mode.value if mode else None,
+                    project=project
+                )
+                if similar and similar.get('successful_sql'):
+                    learned_sql = similar['successful_sql']
+                    logger.info(f"[LEARNING] Found learned query pattern (score: {similar.get('match_score', 0):.2f})")
+            except Exception as e:
+                logger.warning(f"[LEARNING] Error checking learned queries: {e}")
+        
         # ASK THE ENGINE
-        answer = engine.ask(message, mode=mode)
+        answer = engine.ask(message, mode=mode, context={'learned_sql': learned_sql} if learned_sql else None)
+        
+        # LEARNING: Check if we can skip clarification
+        if answer.structured_output and answer.structured_output.get('type') == 'clarification_needed':
+            if LEARNING_AVAILABLE:
+                try:
+                    learning = get_learning_module()
+                    questions = answer.structured_output.get('questions', [])
+                    detected_domain = answer.structured_output.get('detected_domains', ['general'])[0]
+                    
+                    can_skip, learned_answers = learning.should_skip_clarification(
+                        questions=questions,
+                        domain=detected_domain,
+                        project=project,
+                        user_id=None  # TODO: Get from auth
+                    )
+                    
+                    if can_skip and learned_answers:
+                        logger.info(f"[LEARNING] Skipping clarification - using learned answers: {learned_answers}")
+                        engine.confirmed_facts.update(learned_answers)
+                        # Re-ask with learned answers
+                        answer = engine.ask(message, mode=mode)
+                except Exception as e:
+                    logger.warning(f"[LEARNING] Error checking skip clarification: {e}")
         
         # Build response
         response = {
@@ -222,6 +289,9 @@ async def intelligent_chat(request: IntelligentChatRequest):
             # Structured output
             "structured_output": answer.structured_output,
             
+            # Learning metadata
+            "used_learning": learned_sql is not None,
+            
             # The synthesized answer
             "answer": None
         }
@@ -236,6 +306,28 @@ async def intelligent_chat(request: IntelligentChatRequest):
                 insights=answer.insights,
                 conflicts=answer.conflicts
             )
+            
+            # LEARNING: Record successful query pattern
+            if LEARNING_AVAILABLE and response["answer"]:
+                try:
+                    learning = get_learning_module()
+                    detected_domain = 'general'
+                    if answer.structured_output and 'detected_domains' in answer.structured_output:
+                        detected_domain = answer.structured_output['detected_domains'][0]
+                    
+                    learning.record_successful_query(
+                        question=message,
+                        sql=learned_sql,  # Will be None if we didn't use SQL
+                        response=response["answer"][:500],
+                        intent=mode.value if mode else 'search',
+                        domain=detected_domain,
+                        project=project,
+                        sources=['reality' if answer.from_reality else None,
+                                'intent' if answer.from_intent else None,
+                                'best_practice' if answer.from_best_practice else None]
+                    )
+                except Exception as e:
+                    logger.warning(f"[LEARNING] Failed to record query: {e}")
         
         return response
         
@@ -472,3 +564,80 @@ Based on all sources above, provide a clear, synthesized answer. Address any iss
         logger.error(f"[INTELLIGENT] Claude generation failed: {e}")
         # Return the raw context as fallback
         return f"Here's what I found:\n\n{context[:3000]}"
+
+
+# =============================================================================
+# LEARNING ENDPOINTS
+# =============================================================================
+
+@router.get("/chat/intelligent/learning/stats")
+async def get_learning_stats():
+    """Get statistics about what the system has learned."""
+    if not LEARNING_AVAILABLE:
+        return {"available": False, "message": "Learning module not available"}
+    
+    try:
+        learning = get_learning_module()
+        return learning.get_learning_stats()
+    except Exception as e:
+        logger.error(f"[LEARNING] Error getting stats: {e}")
+        return {"available": False, "error": str(e)}
+
+
+@router.post("/chat/intelligent/feedback")
+async def record_intelligent_feedback(
+    question: str,
+    feedback: str,  # 'positive' or 'negative'
+    project: str = None,
+    job_id: str = None,
+    intent: str = None
+):
+    """Record feedback for a response to improve future answers."""
+    if not LEARNING_AVAILABLE:
+        return {"success": False, "message": "Learning module not available"}
+    
+    try:
+        learning = get_learning_module()
+        learning.record_feedback(
+            question=question,
+            feedback=feedback,
+            project=project,
+            job_id=job_id,
+            intent=intent,
+            was_intelligent=True
+        )
+        return {"success": True, "message": f"Recorded {feedback} feedback"}
+    except Exception as e:
+        logger.error(f"[LEARNING] Error recording feedback: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/chat/intelligent/preferences/{user_id}")
+async def get_user_preferences(user_id: str, project: str = None):
+    """Get learned preferences for a user."""
+    if not LEARNING_AVAILABLE:
+        return {"preferences": {}}
+    
+    try:
+        from utils.supabase_client import get_supabase_client
+        supabase = get_supabase_client()
+        
+        query = supabase.table('user_preferences').select('*').eq('user_id', user_id)
+        if project:
+            query = query.eq('project', project)
+        
+        result = query.execute()
+        
+        prefs = {}
+        for p in result.data or []:
+            key = p['preference_key']
+            prefs[key] = {
+                'value': p['preference_value'],
+                'confidence': p['confidence'],
+                'learned_from': p['learned_from']
+            }
+        
+        return {"preferences": prefs}
+    except Exception as e:
+        logger.error(f"[LEARNING] Error getting preferences: {e}")
+        return {"preferences": {}, "error": str(e)}
