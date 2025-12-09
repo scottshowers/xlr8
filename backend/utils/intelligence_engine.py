@@ -392,15 +392,23 @@ class IntelligenceEngine:
     
     def _needs_clarification(self, mode, entities, domains, q_lower) -> bool:
         """Determine if we need to ask clarifying questions."""
+        # Skip clarification for simple data queries with clear filters
+        if any(w in q_lower for w in ['how many', 'count', 'list', 'show me', 'what is', 'total']):
+            # If they specified PT/FT, don't ask about employee status
+            if any(w in q_lower for w in ['pt ', 'ft ', 'part-time', 'part time', 'full-time', 'full time']):
+                return False
+            # If they specified active/terminated, don't ask
+            if any(w in q_lower for w in ['active', 'terminated', 'termed', 'all employees']):
+                return False
+        
         if mode == IntelligenceMode.CONFIGURE:
             return True
         
         if mode == IntelligenceMode.VALIDATE and domains == ['general']:
             return True
         
-        if 'employees' in domains and 'status' not in entities:
-            if 'all' not in q_lower:
-                return True
+        # Don't ask for employee status clarification on simple queries
+        # Only ask for complex configuration scenarios
         
         return False
     
