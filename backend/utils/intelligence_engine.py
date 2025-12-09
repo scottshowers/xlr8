@@ -1,428 +1,585 @@
 """
-CHAT INTELLIGENCE INTEGRATION
-==============================
+XLR8 INTELLIGENCE ENGINE
+=========================
 
-This file shows EXACTLY how to integrate the Intelligence Engine into chat.py.
-These are the additions/changes needed.
-
-Deploy: Merge these changes into backend/routers/chat.py
-
-Author: XLR8 Team
+Deploy to: backend/utils/intelligence_engine.py
 """
 
-# =============================================================================
-# STEP 1: ADD IMPORTS (at top of chat.py, around line 50)
-# =============================================================================
+import re
+import json
+import logging
+from typing import Dict, List, Optional, Any, Tuple
+from dataclasses import dataclass, field
+from enum import Enum
+from datetime import datetime
 
-# Add after other imports:
-try:
-    from utils.intelligence_engine import (
-        IntelligenceEngine, 
-        IntelligenceMode,
-        create_engine,
-        SynthesizedAnswer
-    )
-    INTELLIGENCE_AVAILABLE = True
-    logging.getLogger(__name__).info("✅ Intelligence engine loaded")
-except ImportError as e:
-    INTELLIGENCE_AVAILABLE = False
-    logging.getLogger(__name__).warning(f"❌ Intelligence engine NOT available: {e}")
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# STEP 2: ADD NEW REQUEST MODEL (around line 250)
+# DATA CLASSES
 # =============================================================================
 
-class IntelligentChatRequest(BaseModel):
-    """Request for intelligent chat with clarification support."""
-    message: str
-    project: Optional[str] = None
-    persona: Optional[str] = 'bessie'
-    scope: Optional[str] = 'project'
-    
-    # NEW: Intelligence options
-    mode: Optional[str] = None  # Force specific mode
-    clarifications: Optional[Dict[str, Any]] = None  # Answers to clarification questions
-    session_id: Optional[str] = None  # For conversation continuity
-    output_format: Optional[str] = None  # Force output format
+@dataclass
+class Truth:
+    """A piece of information from one source of truth."""
+    source_type: str  # 'reality', 'intent', 'best_practice'
+    source_name: str
+    content: Any
+    confidence: float
+    location: str
+
+
+@dataclass  
+class Conflict:
+    """A detected conflict between sources of truth."""
+    description: str
+    reality: Optional[Truth] = None
+    intent: Optional[Truth] = None
+    best_practice: Optional[Truth] = None
+    severity: str = "medium"
+    recommendation: str = ""
+
+
+@dataclass
+class Insight:
+    """A proactive insight discovered while processing."""
+    type: str
+    title: str
+    description: str
+    data: Any
+    severity: str
+    action_required: bool = False
+
+
+@dataclass
+class SynthesizedAnswer:
+    """A complete answer synthesized from all sources."""
+    question: str
+    answer: str
+    confidence: float
+    from_reality: List[Truth] = field(default_factory=list)
+    from_intent: List[Truth] = field(default_factory=list)
+    from_best_practice: List[Truth] = field(default_factory=list)
+    conflicts: List[Conflict] = field(default_factory=list)
+    insights: List[Insight] = field(default_factory=list)
+    structured_output: Optional[Dict] = None
+    reasoning: List[str] = field(default_factory=list)
+
+
+class IntelligenceMode(Enum):
+    SEARCH = "search"
+    ANALYZE = "analyze"
+    COMPARE = "compare"
+    VALIDATE = "validate"
+    CONFIGURE = "configure"
+    INTERVIEW = "interview"
+    WORKFLOW = "workflow"
+    POPULATE = "populate"
+    REPORT = "report"
 
 
 # =============================================================================
-# STEP 3: ADD INTELLIGENCE ENGINE ENDPOINT (new endpoint)
+# SEMANTIC PATTERNS
 # =============================================================================
 
-# Session storage for conversation continuity
-intelligence_sessions: Dict[str, IntelligenceEngine] = {}
+SEMANTIC_TYPES = {
+    'employee_id': [
+        r'^emp.*id', r'^ee.*num', r'^employee.*number', r'^worker.*id',
+        r'^person.*id', r'^emp.*num', r'^emp.*no$', r'^ee.*id',
+        r'^employee.*id', r'^staff.*id', r'^associate.*id', r'^emp.*key',
+    ],
+    'company_code': [
+        r'^comp.*code', r'^co.*code', r'^company.*id', r'^org.*code',
+        r'^entity.*code', r'^legal.*entity', r'^business.*unit',
+        r'^company$', r'^comp$',
+    ],
+    'department': [
+        r'dept.*code', r'department.*code', r'^div.*code', r'division.*code',
+        r'cost.*center', r'^dept$', r'^department$',
+    ],
+    'job_code': [
+        r'^job.*code', r'^job.*id', r'^position.*code', r'^title.*code',
+        r'^job.*class', r'^occupation', r'^job$',
+    ],
+    'location': [
+        r'^loc.*code', r'^location.*code', r'^work.*loc', r'^site.*code',
+        r'^branch.*code', r'^office.*code', r'^location$',
+    ],
+    'earning_code': [
+        r'^earn.*code', r'^earning.*type', r'^pay.*code', r'^wage.*type',
+        r'^earning$', r'^earn_cd',
+    ],
+    'deduction_code': [
+        r'^ded.*code', r'^deduction.*type', r'^deduct.*code',
+        r'^deduction$', r'^ded_cd', r'^benefit.*code',
+    ],
+}
 
 
-@router.post("/chat/intelligent")
-async def intelligent_chat(request: IntelligentChatRequest):
-    """
-    INTELLIGENT CHAT ENDPOINT
+# =============================================================================
+# INTELLIGENCE ENGINE
+# =============================================================================
+
+class IntelligenceEngine:
+    """The brain of XLR8."""
     
-    This is the REVOLUTIONARY endpoint that:
-    1. Analyzes the question
-    2. Asks clarifying questions if needed
-    3. Gathers from ALL sources (data, docs, UKG knowledge)
-    4. Synthesizes a complete answer
-    5. Shows conflicts and insights proactively
+    def __init__(self, project_name: str):
+        self.project = project_name
+        self.structured_handler = None
+        self.rag_handler = None
+        self.schema = {}
+        self.relationships = []
+        self.conversation_history = []
+        self.confirmed_facts = {}
+        self.pending_questions = []
     
-    Returns a structured response that the frontend can display richly.
-    """
-    if not INTELLIGENCE_AVAILABLE:
-        raise HTTPException(503, "Intelligence engine not available")
+    def load_context(
+        self, 
+        structured_handler=None, 
+        rag_handler=None,
+        schema: Dict = None,
+        relationships: List[Dict] = None
+    ):
+        """Load data context for this project."""
+        self.structured_handler = structured_handler
+        self.rag_handler = rag_handler
+        self.schema = schema or {}
+        self.relationships = relationships or []
     
-    project = request.project
-    message = request.message
-    session_id = request.session_id or f"session_{uuid.uuid4().hex[:8]}"
-    
-    logger.info(f"[INTELLIGENT] Question: {message[:100]}...")
-    logger.info(f"[INTELLIGENT] Project: {project}, Session: {session_id}")
-    
-    try:
-        # Get or create intelligence engine for this session
-        if session_id in intelligence_sessions:
-            engine = intelligence_sessions[session_id]
-        else:
-            # Create new engine with full context
-            engine = IntelligenceEngine(project or 'default')
-            
-            # Load structured data handler
-            if STRUCTURED_QUERIES_AVAILABLE:
-                handler = get_structured_handler()
-                schema = {'tables': get_duckdb_tables_for_scope(project, request.scope)}
-                engine.load_context(
-                    structured_handler=handler,
-                    schema=schema
-                )
-            
-            # Load RAG handler
-            try:
-                rag = RAGHandler()
-                engine.rag_handler = rag
-            except:
-                pass
-            
-            # Load relationships (from data model)
-            try:
-                from utils.relationship_detector import get_confirmed_relationships
-                relationships = get_confirmed_relationships(project)
-                engine.relationships = relationships
-            except:
-                pass
-            
-            # Store session
-            intelligence_sessions[session_id] = engine
-            
-            # Clean old sessions (keep last 100)
-            if len(intelligence_sessions) > 100:
-                oldest = list(intelligence_sessions.keys())[0]
-                del intelligence_sessions[oldest]
+    def ask(
+        self, 
+        question: str,
+        mode: IntelligenceMode = None,
+        context: Dict = None
+    ) -> SynthesizedAnswer:
+        """Main entry point - ask the engine a question."""
+        logger.info(f"[INTELLIGENCE] Question: {question[:100]}...")
         
-        # If user provided clarification answers, add them
-        if request.clarifications:
-            engine.confirmed_facts.update(request.clarifications)
+        # Analyze the question
+        analysis = self._analyze_question(question)
+        mode = mode or analysis['mode']
         
-        # Determine mode
-        mode = None
-        if request.mode:
-            try:
-                mode = IntelligenceMode(request.mode)
-            except:
-                pass
+        # Check if clarification needed
+        if analysis['needs_clarification']:
+            return self._request_clarification(question, analysis)
         
-        # ASK THE ENGINE
-        answer = engine.ask(message, mode=mode)
+        # Gather the three truths
+        reality = self._gather_reality(question, analysis)
+        intent = self._gather_intent(question, analysis)
+        best_practice = self._gather_best_practice(question, analysis)
         
-        # Convert to JSON-serializable response
-        response = {
-            'session_id': session_id,
-            'question': answer.question,
-            'confidence': answer.confidence,
-            'reasoning': answer.reasoning,
-            
-            # Clarification needed?
-            'needs_clarification': answer.structured_output and answer.structured_output.get('type') == 'clarification_needed',
-            'clarification_questions': answer.structured_output.get('questions', []) if answer.structured_output else [],
-            
-            # The three truths
-            'from_reality': [
-                {
-                    'source_type': t.source_type,
-                    'source_name': t.source_name,
-                    'content': _serialize_content(t.content),
-                    'confidence': t.confidence,
-                    'location': t.location
-                }
-                for t in answer.from_reality
-            ],
-            'from_intent': [
-                {
-                    'source_type': t.source_type,
-                    'source_name': t.source_name,
-                    'content': _serialize_content(t.content),
-                    'confidence': t.confidence,
-                    'location': t.location
-                }
-                for t in answer.from_intent
-            ],
-            'from_best_practice': [
-                {
-                    'source_type': t.source_type,
-                    'source_name': t.source_name,
-                    'content': _serialize_content(t.content),
-                    'confidence': t.confidence,
-                    'location': t.location
-                }
-                for t in answer.from_best_practice
-            ],
-            
-            # Conflicts and insights
-            'conflicts': [
-                {
-                    'description': c.description,
-                    'severity': c.severity,
-                    'recommendation': c.recommendation
-                }
-                for c in answer.conflicts
-            ],
-            'insights': [
-                {
-                    'type': i.type,
-                    'title': i.title,
-                    'description': i.description,
-                    'severity': i.severity,
-                    'action_required': i.action_required,
-                    'data': i.data
-                }
-                for i in answer.insights
-            ],
-            
-            # Structured output
-            'structured_output': answer.structured_output,
-            
-            # If clarification NOT needed, generate full answer with Claude
-            'answer': None
-        }
+        # Detect conflicts
+        conflicts = self._detect_conflicts(reality, intent, best_practice)
         
-        # If we have enough context and don't need clarification, generate answer
-        if not response['needs_clarification'] and answer.answer:
-            # Use Claude to synthesize final answer from all sources
-            response['answer'] = await _generate_intelligent_answer(
-                question=message,
-                context=answer.answer,  # The combined context from engine
-                persona=request.persona,
-                insights=answer.insights,
-                conflicts=answer.conflicts
-            )
+        # Run proactive checks
+        insights = self._run_proactive_checks(analysis)
         
-        return response
-        
-    except Exception as e:
-        logger.error(f"[INTELLIGENT] Error: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        raise HTTPException(500, f"Intelligence error: {str(e)}")
-
-
-def _serialize_content(content):
-    """Serialize content for JSON response."""
-    if isinstance(content, dict):
-        # Handle data content
-        if 'rows' in content:
-            return {
-                'columns': content.get('columns', []),
-                'rows': content.get('rows', [])[:20],  # Limit rows
-                'total': content.get('total', len(content.get('rows', [])))
-            }
-        return content
-    return str(content)[:2000]  # Limit text content
-
-
-async def _generate_intelligent_answer(
-    question: str,
-    context: str,
-    persona: str,
-    insights: list,
-    conflicts: list
-) -> str:
-    """
-    Generate the final synthesized answer using Claude.
-    
-    This is where we turn the raw context into a coherent, helpful response.
-    """
-    try:
-        # Build the mega-prompt
-        system_prompt = """You are an expert UKG implementation consultant helping another consultant.
-
-You have access to THREE SOURCES OF TRUTH:
-1. CUSTOMER DATA - What their actual data shows
-2. CUSTOMER DOCUMENTS - What they say they do/want
-3. UKG BEST PRACTICE - How things should be done
-
-Your job is to SYNTHESIZE these into clear, actionable guidance.
-
-IMPORTANT RULES:
-- If sources conflict, point it out clearly
-- If data shows issues, mention them proactively
-- Give specific, actionable recommendations
-- Reference which source supports each claim
-- Be concise but complete
-"""
-        
-        # Add insight context
-        insight_text = ""
-        if insights:
-            insight_text = "\n\n⚠️ PROACTIVE INSIGHTS FOUND:\n"
-            for i in insights:
-                insight_text += f"- [{i.severity.upper()}] {i.title}: {i.description}\n"
-        
-        # Add conflict context
-        conflict_text = ""
-        if conflicts:
-            conflict_text = "\n\n⚡ CONFLICTS DETECTED:\n"
-            for c in conflicts:
-                conflict_text += f"- {c.description}\n  Recommendation: {c.recommendation}\n"
-        
-        user_prompt = f"""QUESTION: {question}
-
-{context}
-{insight_text}
-{conflict_text}
-
-Based on all sources above, provide a clear, synthesized answer. If you found issues or conflicts, address them proactively. Be specific and actionable."""
-
-        # Use orchestrator
-        orchestrator = LLMOrchestrator()
-        
-        import anthropic
-        client = anthropic.Anthropic(api_key=orchestrator.claude_api_key)
-        
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=2000,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}]
+        # Synthesize answer
+        answer = self._synthesize_answer(
+            question=question,
+            mode=mode,
+            reality=reality,
+            intent=intent,
+            best_practice=best_practice,
+            conflicts=conflicts,
+            insights=insights,
+            context=context
         )
         
-        return response.content[0].text
+        # Store in history
+        self.conversation_history.append({
+            'question': question,
+            'answer_preview': answer.answer[:200] if answer.answer else '',
+            'mode': mode.value if mode else 'search',
+            'timestamp': datetime.now().isoformat()
+        })
         
-    except Exception as e:
-        logger.error(f"[INTELLIGENT] Claude error: {e}")
-        return f"I found relevant information but encountered an error generating the response. Here's what I gathered:\n\n{context[:3000]}"
-
-
-# =============================================================================
-# STEP 4: ADD SESSION MANAGEMENT ENDPOINTS
-# =============================================================================
-
-@router.get("/chat/intelligent/session/{session_id}")
-async def get_session_state(session_id: str):
-    """Get current state of an intelligence session."""
-    if session_id not in intelligence_sessions:
-        raise HTTPException(404, "Session not found")
+        return answer
     
-    engine = intelligence_sessions[session_id]
+    def _analyze_question(self, question: str) -> Dict:
+        """Analyze what the question is asking for."""
+        q_lower = question.lower()
+        
+        mode = self._detect_mode(q_lower)
+        entities = self._extract_entities(question)
+        domains = self._detect_domains(q_lower)
+        needs_clarification = self._needs_clarification(mode, entities, domains, q_lower)
+        
+        confidence = 0.7
+        if entities:
+            confidence += 0.1
+        if len(domains) == 1:
+            confidence += 0.1
+        
+        return {
+            'mode': mode,
+            'entities': entities,
+            'domains': domains,
+            'needs_clarification': needs_clarification,
+            'clarification_questions': self._get_clarification_questions(mode, domains) if needs_clarification else [],
+            'confidence': min(confidence, 0.95)
+        }
     
-    return {
-        'session_id': session_id,
-        'project': engine.project,
-        'conversation_length': len(engine.conversation_history),
-        'confirmed_facts': engine.confirmed_facts,
-        'last_activity': engine.conversation_history[-1]['timestamp'] if engine.conversation_history else None
-    }
-
-
-@router.delete("/chat/intelligent/session/{session_id}")
-async def end_session(session_id: str):
-    """End an intelligence session."""
-    if session_id in intelligence_sessions:
-        del intelligence_sessions[session_id]
-    return {'success': True, 'message': 'Session ended'}
-
-
-@router.post("/chat/intelligent/session/{session_id}/confirm")
-async def confirm_facts(session_id: str, facts: Dict[str, Any]):
-    """Confirm facts/answers for a session."""
-    if session_id not in intelligence_sessions:
-        raise HTTPException(404, "Session not found")
+    def _detect_mode(self, q_lower: str) -> IntelligenceMode:
+        """Detect the appropriate intelligence mode."""
+        if any(w in q_lower for w in ['configure', 'set up', 'setup', 'create', 'build']):
+            if any(w in q_lower for w in ['rule', 'business rule', 'earning', 'deduction']):
+                return IntelligenceMode.CONFIGURE
+        
+        if any(w in q_lower for w in ['validate', 'check', 'verify', 'issues', 'problems', 'errors']):
+            return IntelligenceMode.VALIDATE
+        
+        if any(w in q_lower for w in ['compare', 'difference', 'versus', 'vs', 'match']):
+            return IntelligenceMode.COMPARE
+        
+        if any(w in q_lower for w in ['fill in', 'populate', 'template', 'generate']):
+            return IntelligenceMode.POPULATE
+        
+        if any(w in q_lower for w in ['report', 'summary', 'overview', 'status']):
+            return IntelligenceMode.REPORT
+        
+        if any(w in q_lower for w in ['analyze', 'analysis', 'pattern', 'trend', 'insight']):
+            return IntelligenceMode.ANALYZE
+        
+        if any(w in q_lower for w in ['help me', 'walk me through', 'guide', 'step by step']):
+            return IntelligenceMode.WORKFLOW
+        
+        return IntelligenceMode.SEARCH
     
-    engine = intelligence_sessions[session_id]
-    engine.confirmed_facts.update(facts)
+    def _extract_entities(self, question: str) -> Dict[str, Any]:
+        """Extract specific entities from the question."""
+        entities = {}
+        
+        emp_match = re.search(r'employee\s*(?:#|id|number|num)?\s*(\d+)', question, re.I)
+        if emp_match:
+            entities['employee_id'] = emp_match.group(1)
+        
+        company_match = re.search(r'company\s*(?:code)?\s*([A-Z0-9]{2,10})', question, re.I)
+        if company_match:
+            entities['company_code'] = company_match.group(1)
+        
+        if 'active' in question.lower():
+            entities['status'] = 'active'
+        elif 'terminated' in question.lower() or 'termed' in question.lower():
+            entities['status'] = 'terminated'
+        
+        return entities
     
-    return {'success': True, 'confirmed_facts': engine.confirmed_facts}
-
-
-# =============================================================================
-# STEP 5: UPDATE EXISTING /chat/start TO USE INTELLIGENCE (optional)
-# =============================================================================
-
-# In process_chat_job function, around line 527, after STEP 3 (routing):
-#
-# Add this block to optionally use intelligence engine:
-#
-#     # Try intelligence engine first for supported modes
-#     if INTELLIGENCE_AVAILABLE and route_info['route'] in ['structured', 'hybrid']:
-#         try:
-#             engine = IntelligenceEngine(project or 'default')
-#             if STRUCTURED_QUERIES_AVAILABLE:
-#                 handler = get_structured_handler()
-#                 schema = {'tables': get_duckdb_tables_for_scope(project, scope)}
-#                 engine.load_context(structured_handler=handler, schema=schema)
-#             
-#             analysis = engine._analyze_question(message)
-#             
-#             # If high confidence and doesn't need clarification, use intelligence
-#             if analysis['confidence'] > 0.7 and not analysis['needs_clarification']:
-#                 answer = engine.ask(message)
-#                 
-#                 # Add insights to response
-#                 if answer.insights:
-#                     for insight in answer.insights:
-#                         context_parts.append(f"⚠️ {insight.title}: {insight.description}")
-#                 
-#                 logger.info(f"[INTELLIGENCE] Used for query, confidence: {answer.confidence}")
-#         except Exception as ie:
-#             logger.warning(f"[INTELLIGENCE] Failed, falling back: {ie}")
-
-
-# =============================================================================
-# USAGE EXAMPLE FROM FRONTEND
-# =============================================================================
-"""
-// In your Chat.jsx component:
-
-const sendIntelligentMessage = async (message) => {
-  const response = await fetch(`${API_BASE}/api/chat/intelligent`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      message,
-      project: activeProject?.name,
-      session_id: sessionId,
-      clarifications: pendingClarifications  // Any previous answers
-    })
-  });
-  
-  const data = await response.json();
-  
-  if (data.needs_clarification) {
-    // Show clarification UI
-    setClarificationQuestions(data.clarification_questions);
-    setOriginalQuestion(data.question);
-  } else {
-    // Show full intelligent response
-    setMessages(prev => [...prev, {
-      role: 'assistant',
-      type: 'intelligent',
-      content: data.answer,
-      from_reality: data.from_reality,
-      from_intent: data.from_intent,
-      from_best_practice: data.from_best_practice,
-      conflicts: data.conflicts,
-      insights: data.insights,
-      confidence: data.confidence
-    }]);
-  }
-};
-"""
+    def _detect_domains(self, q_lower: str) -> List[str]:
+        """Detect which data domains are relevant."""
+        domains = []
+        
+        domain_patterns = {
+            'employees': r'\b(employee|worker|staff|people|person)\b',
+            'earnings': r'\b(earning|pay|salary|wage|compensation|overtime|ot)\b',
+            'deductions': r'\b(deduction|benefit|401k|insurance|health|dental)\b',
+            'taxes': r'\b(tax|withhold|federal|state|local|w-?4|fit|sit)\b',
+            'jobs': r'\b(job|position|title|department|location)\b',
+        }
+        
+        for domain, pattern in domain_patterns.items():
+            if re.search(pattern, q_lower):
+                domains.append(domain)
+        
+        return domains if domains else ['general']
+    
+    def _needs_clarification(self, mode, entities, domains, q_lower) -> bool:
+        """Determine if we need to ask clarifying questions."""
+        if mode == IntelligenceMode.CONFIGURE:
+            return True
+        
+        if mode == IntelligenceMode.VALIDATE and domains == ['general']:
+            return True
+        
+        if 'employees' in domains and 'status' not in entities:
+            if 'all' not in q_lower:
+                return True
+        
+        return False
+    
+    def _get_clarification_questions(self, mode, domains) -> List[Dict]:
+        """Get clarification questions for the given mode/domains."""
+        questions = []
+        
+        if 'employees' in domains:
+            questions.append({
+                'id': 'employee_status',
+                'question': 'Which employees should I include?',
+                'type': 'radio',
+                'options': [
+                    {'id': 'active', 'label': 'Active only', 'default': True},
+                    {'id': 'termed', 'label': 'Terminated only'},
+                    {'id': 'all', 'label': 'All employees'},
+                ]
+            })
+        
+        if mode == IntelligenceMode.CONFIGURE:
+            questions.append({
+                'id': 'config_type',
+                'question': 'What are you trying to configure?',
+                'type': 'radio',
+                'options': [
+                    {'id': 'earning', 'label': 'Earning code/calculation'},
+                    {'id': 'deduction', 'label': 'Deduction setup'},
+                    {'id': 'tax', 'label': 'Tax configuration'},
+                    {'id': 'other', 'label': 'Something else'},
+                ]
+            })
+        
+        return questions
+    
+    def _request_clarification(self, question: str, analysis: Dict) -> SynthesizedAnswer:
+        """Return a response that asks for clarification."""
+        return SynthesizedAnswer(
+            question=question,
+            answer="",
+            confidence=0.0,
+            structured_output={
+                'type': 'clarification_needed',
+                'questions': analysis['clarification_questions'],
+                'original_question': question,
+                'detected_mode': analysis['mode'].value,
+                'detected_domains': analysis['domains']
+            },
+            reasoning=['Need more information to provide accurate answer']
+        )
+    
+    def _gather_reality(self, question: str, analysis: Dict) -> List[Truth]:
+        """Gather REALITY - what the customer's DATA shows."""
+        if not self.structured_handler:
+            return []
+        
+        truths = []
+        domains = analysis['domains']
+        entities = analysis['entities']
+        
+        try:
+            tables = self.schema.get('tables', [])
+            
+            for table in tables:
+                table_name = table.get('table_name', '')
+                columns = table.get('columns', [])
+                
+                # Filter to relevant tables
+                relevant = False
+                if 'employees' in domains and any(c in table_name.lower() for c in ['personal', 'employee', 'demographic']):
+                    relevant = True
+                if 'earnings' in domains and 'earning' in table_name.lower():
+                    relevant = True
+                if 'deductions' in domains and 'deduction' in table_name.lower():
+                    relevant = True
+                
+                if not relevant and domains != ['general']:
+                    continue
+                
+                try:
+                    sql = f'SELECT * FROM "{table_name}" LIMIT 100'
+                    rows, cols = self.structured_handler.execute_query(sql)
+                    
+                    if rows:
+                        truths.append(Truth(
+                            source_type='reality',
+                            source_name=table_name,
+                            content={
+                                'columns': cols,
+                                'rows': rows,
+                                'total': len(rows),
+                                'table': table_name
+                            },
+                            confidence=0.95,
+                            location=f"Table: {table_name}"
+                        ))
+                except Exception as e:
+                    logger.debug(f"Query failed for {table_name}: {e}")
+        
+        except Exception as e:
+            logger.error(f"Error gathering reality: {e}")
+        
+        return truths
+    
+    def _gather_intent(self, question: str, analysis: Dict) -> List[Truth]:
+        """Gather INTENT - what customer's DOCUMENTS say."""
+        if not self.rag_handler:
+            return []
+        
+        truths = []
+        
+        try:
+            collection = self.rag_handler.client.get_or_create_collection(name="documents")
+            
+            results = collection.query(
+                query_texts=[question],
+                n_results=10,
+                where={"project": self.project} if self.project else None
+            )
+            
+            if results and results.get('documents') and results['documents'][0]:
+                for i, doc in enumerate(results['documents'][0]):
+                    metadata = results['metadatas'][0][i] if results.get('metadatas') else {}
+                    distance = results['distances'][0][i] if results.get('distances') else 1.0
+                    
+                    if metadata.get('project', '').lower() in ['global', '__global__', 'global/universal']:
+                        continue
+                    
+                    truths.append(Truth(
+                        source_type='intent',
+                        source_name=metadata.get('filename', 'Document'),
+                        content=doc,
+                        confidence=max(0.3, 1.0 - distance),
+                        location=f"Page {metadata.get('page', '?')}"
+                    ))
+        
+        except Exception as e:
+            logger.error(f"Error gathering intent: {e}")
+        
+        return truths
+    
+    def _gather_best_practice(self, question: str, analysis: Dict) -> List[Truth]:
+        """Gather BEST PRACTICE - what UKG docs say SHOULD be done."""
+        if not self.rag_handler:
+            return []
+        
+        truths = []
+        
+        try:
+            collection = self.rag_handler.client.get_or_create_collection(name="documents")
+            
+            results = collection.query(
+                query_texts=[question],
+                n_results=10,
+                where={"project": {"$in": ["global", "__global__", "Global/Universal"]}}
+            )
+            
+            if results and results.get('documents') and results['documents'][0]:
+                for i, doc in enumerate(results['documents'][0]):
+                    metadata = results['metadatas'][0][i] if results.get('metadatas') else {}
+                    distance = results['distances'][0][i] if results.get('distances') else 1.0
+                    
+                    truths.append(Truth(
+                        source_type='best_practice',
+                        source_name=metadata.get('filename', 'UKG Documentation'),
+                        content=doc,
+                        confidence=max(0.3, 1.0 - distance),
+                        location=f"Page {metadata.get('page', '?')}"
+                    ))
+        
+        except Exception as e:
+            logger.error(f"Error gathering best practice: {e}")
+        
+        return truths
+    
+    def _detect_conflicts(self, reality, intent, best_practice) -> List[Conflict]:
+        """Detect conflicts between the three truths."""
+        # Placeholder - return empty for now
+        return []
+    
+    def _run_proactive_checks(self, analysis: Dict) -> List[Insight]:
+        """Run proactive checks while answering."""
+        insights = []
+        domains = analysis['domains']
+        
+        if not self.structured_handler:
+            return insights
+        
+        try:
+            tables = self.schema.get('tables', [])
+            
+            if 'employees' in domains or domains == ['general']:
+                for table in tables:
+                    table_name = table.get('table_name', '')
+                    
+                    if any(c in table_name.lower() for c in ['personal', 'employee']):
+                        try:
+                            sql = f'SELECT COUNT(*) as cnt FROM "{table_name}" WHERE ssn IS NULL OR ssn = \'\''
+                            result = self.structured_handler.conn.execute(sql).fetchone()
+                            if result and result[0] > 0:
+                                insights.append(Insight(
+                                    type='anomaly',
+                                    title='Missing SSN',
+                                    description=f'{result[0]} employees missing SSN',
+                                    data={'count': result[0], 'table': table_name},
+                                    severity='high',
+                                    action_required=True
+                                ))
+                        except:
+                            pass
+                        break
+        
+        except Exception as e:
+            logger.error(f"Error in proactive checks: {e}")
+        
+        return insights
+    
+    def _synthesize_answer(
+        self,
+        question: str,
+        mode: IntelligenceMode,
+        reality: List[Truth],
+        intent: List[Truth],
+        best_practice: List[Truth],
+        conflicts: List[Conflict],
+        insights: List[Insight],
+        context: Dict = None
+    ) -> SynthesizedAnswer:
+        """Synthesize a complete answer from all sources."""
+        reasoning = []
+        context_parts = []
+        
+        if reality:
+            context_parts.append("=== CUSTOMER DATA ===")
+            for truth in reality[:3]:
+                if isinstance(truth.content, dict) and 'rows' in truth.content:
+                    rows = truth.content['rows']
+                    cols = truth.content['columns']
+                    context_parts.append(f"\nSource: {truth.source_name}")
+                    context_parts.append(f"Columns: {', '.join(cols[:10])}")
+                    context_parts.append(f"Sample data ({len(rows)} rows):")
+                    for row in rows[:5]:
+                        row_str = " | ".join(f"{k}: {v}" for k, v in list(row.items())[:6])
+                        context_parts.append(f"  {row_str}")
+            reasoning.append(f"Found {len(reality)} relevant data sources")
+        
+        if intent:
+            context_parts.append("\n=== CUSTOMER DOCUMENTS ===")
+            for truth in intent[:3]:
+                context_parts.append(f"\nSource: {truth.source_name} ({truth.location})")
+                context_parts.append(str(truth.content)[:500])
+            reasoning.append(f"Found {len(intent)} relevant customer documents")
+        
+        if best_practice:
+            context_parts.append("\n=== UKG BEST PRACTICE ===")
+            for truth in best_practice[:3]:
+                context_parts.append(f"\nSource: {truth.source_name}")
+                context_parts.append(str(truth.content)[:500])
+            reasoning.append(f"Found {len(best_practice)} UKG best practice documents")
+        
+        if insights:
+            context_parts.append("\n=== PROACTIVE INSIGHTS ===")
+            for insight in insights:
+                icon = '🔴' if insight.severity == 'high' else '🟡'
+                context_parts.append(f"{icon} {insight.title}: {insight.description}")
+        
+        combined_context = '\n'.join(context_parts)
+        
+        confidence = 0.5
+        if reality:
+            confidence += 0.2
+        if intent:
+            confidence += 0.15
+        if best_practice:
+            confidence += 0.1
+        confidence = min(confidence, 0.95)
+        
+        return SynthesizedAnswer(
+            question=question,
+            answer=combined_context,
+            confidence=confidence,
+            from_reality=reality,
+            from_intent=intent,
+            from_best_practice=best_practice,
+            conflicts=conflicts,
+            insights=insights,
+            structured_output=None,
+            reasoning=reasoning
+        )
