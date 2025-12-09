@@ -35,6 +35,42 @@ export default function DataModelPage() {
   const needsReview = relationships.filter(r => r.needs_review && !r.confirmed);
   const autoMatched = relationships.filter(r => !r.needs_review || r.confirmed);
 
+  // Load existing relationships on page load
+  useEffect(() => {
+    if (activeProject?.name) {
+      loadExistingRelationships();
+    }
+  }, [activeProject?.name]);
+
+  const loadExistingRelationships = async () => {
+    if (!activeProject?.name) return;
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const res = await fetch(`${API_BASE}/api/data-model/relationships/${encodeURIComponent(activeProject.name)}`);
+      
+      if (!res.ok) throw new Error(`Failed to load: ${res.status}`);
+      
+      const data = await res.json();
+      
+      if (data.relationships && data.relationships.length > 0) {
+        setRelationships(data.relationships);
+        setSemanticTypes(data.semantic_types || []);
+        setStats(data.stats || null);
+        setAnalyzed(true);
+      }
+      // If no relationships, leave analyzed=false so user sees "Analyze" button
+      
+    } catch (err) {
+      console.warn('No existing relationships:', err.message);
+      // Not an error - just means no analysis done yet
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const analyzeProject = async () => {
     if (!activeProject?.name) return;
     
