@@ -292,8 +292,8 @@ class IntelligenceEngine:
         return domains if domains else ['general']
     
     def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
-        """Generate SQL query using LOCAL LLM - same pattern as working chat.py."""
-        logger.warning(f"[SQL-GEN] Starting LLM SQL generation")
+        """Generate SQL query using LLMOrchestrator with smart model selection and validation."""
+        logger.warning(f"[SQL-GEN] Starting SQL generation via orchestrator")
         
         if not self.structured_handler:
             logger.warning("[SQL-GEN] No structured handler")
@@ -308,26 +308,23 @@ class IntelligenceEngine:
             logger.warning("[SQL-GEN] No tables in schema")
             return None
         
-        # Get LocalLLMClient - same as chat.py uses
+        # Get LLMOrchestrator - smart routing, validation, retry
         try:
             try:
-                from utils.hybrid_analyzer import LocalLLMClient
+                from utils.llm_orchestrator import LLMOrchestrator
             except ImportError:
-                from backend.utils.hybrid_analyzer import LocalLLMClient
+                from backend.utils.llm_orchestrator import LLMOrchestrator
             
-            local_llm = LocalLLMClient()
-            if not local_llm.is_available():
-                logger.warning("[SQL-GEN] Local LLM not available")
-                return None
-            
-            logger.warning("[SQL-GEN] Local LLM available")
-            
+            orchestrator = LLMOrchestrator()
+            logger.warning("[SQL-GEN] LLMOrchestrator loaded")
         except Exception as e:
-            logger.error(f"[SQL-GEN] Could not load LocalLLMClient: {e}")
+            logger.error(f"[SQL-GEN] Could not load LLMOrchestrator: {e}")
             return None
         
-        # Build schema description - show ALL tables so LLM can reason
+        # Build schema and collect all columns for validation
         tables_info = []
+        all_columns = set()
+        
         for table in tables:
             table_name = table.get('table_name', '')
             columns = table.get('columns', [])
@@ -337,81 +334,57 @@ class IntelligenceEngine:
                 col_names = [str(c) for c in columns] if columns else []
             row_count = table.get('row_count', 0)
             
-            # Get sample values to help LLM understand the data
+            # Track all columns for validation
+            all_columns.update(col_names)
+            
+            # Get sample values
             sample_str = ""
             try:
                 rows, cols = self.structured_handler.execute_query(f'SELECT * FROM "{table_name}" LIMIT 5')
                 if rows and cols:
                     samples = []
-                    for col in cols:  # Show ALL columns
-                        # rows are dicts, so access by column name
+                    for col in cols:
                         vals = set(str(row.get(col, ''))[:30] for row in rows if row.get(col) is not None)
                         if vals:
                             samples.append(f"    {col}: {', '.join(list(vals)[:5])}")
                     sample_str = "\n  Sample values:\n" + "\n".join(samples) if samples else ""
             except Exception as sample_e:
-                logger.warning(f"[SQL-GEN] Sample error for {table_name}: {sample_e}")
+                pass  # Non-critical
             
             tables_info.append(f"Table: {table_name}\n  Columns: {', '.join(col_names)}\n  Rows: {row_count}{sample_str}")
         
         schema_text = '\n\n'.join(tables_info)
-        logger.warning(f"[SQL-GEN] Built schema with {len(tables_info)} tables (of {len(tables)} total)")
+        logger.warning(f"[SQL-GEN] Built schema with {len(tables_info)} tables, {len(all_columns)} columns")
         
-        # Log which tables have key columns and what those columns are called
+        # Log key tables for debugging
         for t in tables:
             tname = t.get('table_name', '')
             cols = t.get('columns', [])
             cols_lower = [str(c).lower() for c in cols]
             
-            # Find PT/FT columns
-            ptft_cols = [c for c, cl in zip(cols, cols_lower) if any(x in cl for x in ['part', 'full', 'status', 'emp_type', 'employee_type', 'ft', 'pt'])]
-            if ptft_cols and 'personal' in tname.lower():
-                logger.warning(f"[SQL-GEN] PERSONAL TABLE: {tname}")
-                logger.warning(f"[SQL-GEN] PERSONAL COLUMNS: {cols}")
+            if 'personal' in tname.lower():
+                ptft_cols = [c for c in cols if any(x in str(c).lower() for x in ['part', 'full', 'time', 'ft', 'pt'])]
+                if ptft_cols:
+                    logger.warning(f"[SQL-GEN] PERSONAL PT/FT columns: {ptft_cols}")
             
-            # Find rate columns  
-            rate_cols = [c for c, cl in zip(cols, cols_lower) if any(x in cl for x in ['rate', 'hour', 'pay', 'wage', 'salary'])]
-            if rate_cols and 'company' in tname.lower() and 'master' not in tname.lower():
-                logger.warning(f"[SQL-GEN] COMPANY TABLE: {tname}")
-                logger.warning(f"[SQL-GEN] COMPANY COLUMNS: {cols}")
-                logger.warning(f"[SQL-GEN] RATE COLUMNS FOUND: {rate_cols}")
+            if 'company' in tname.lower() and 'master' not in tname.lower() and 'tax' not in tname.lower():
+                rate_cols = [c for c in cols if any(x in str(c).lower() for x in ['rate', 'hour', 'pay', 'salary'])]
+                if rate_cols:
+                    logger.warning(f"[SQL-GEN] COMPANY rate columns: {rate_cols}")
         
-        # Log what we're sending so we can debug
-        if tables_info:
-            logger.warning(f"[SQL-GEN] First table: {tables[0].get('table_name', '') if tables else 'none'}")
-            # Log first table's full info to see if samples are there
-            logger.warning(f"[SQL-GEN] First table detail: {tables_info[0][:500]}")
-            
-            # Also log the company and personal tables specifically
-            for i, info in enumerate(tables_info):
-                if '__company' in info.lower() and 'master' not in info.lower() and 'tax' not in info.lower():
-                    logger.warning(f"[SQL-GEN] COMPANY TABLE IN PROMPT: {info[:800]}")
-                    break
-            for i, info in enumerate(tables_info):
-                if '__personal' in info.lower():
-                    logger.warning(f"[SQL-GEN] PERSONAL TABLE IN PROMPT: {info[:800]}")
-                    break
-        else:
-            logger.warning(f"[SQL-GEN] NO TABLES IN SCHEMA - LLM has nothing to work with!")
-        
-        # Build relationships text so LLM knows how to JOIN tables
+        # Build relationships text
         relationships_text = ""
         if self.relationships:
             rel_lines = []
-            for rel in self.relationships[:50]:  # Show more relationships
+            for rel in self.relationships[:50]:
                 src = f"{rel.get('source_table')}.{rel.get('source_column')}"
                 tgt = f"{rel.get('target_table')}.{rel.get('target_column')}"
                 rel_lines.append(f"  {src} → {tgt}")
-                # Log key relationships
-                if 'personal' in rel.get('source_table', '').lower() and 'company' in rel.get('target_table', '').lower():
-                    logger.warning(f"[SQL-GEN] KEY RELATIONSHIP: {src} → {tgt}")
-                if 'company' in rel.get('source_table', '').lower() and 'personal' in rel.get('target_table', '').lower():
-                    logger.warning(f"[SQL-GEN] KEY RELATIONSHIP: {src} → {tgt}")
             if rel_lines:
-                relationships_text = "\n\nRELATIONSHIPS (use these to JOIN tables):\n" + "\n".join(rel_lines)
-                logger.warning(f"[SQL-GEN] Including {len(rel_lines)} relationships for JOINs")
+                relationships_text = "\n\nRELATIONSHIPS (use these for JOINs):\n" + "\n".join(rel_lines)
+                logger.warning(f"[SQL-GEN] Including {len(rel_lines)} relationships")
         
-        # Build conversation context if available (for follow-up questions)
+        # Build conversation context
         context_str = ""
         if hasattr(self, 'conversation_context') and self.conversation_context:
             last_q = self.conversation_context.get('last_question', '')
@@ -422,92 +395,63 @@ class IntelligenceEngine:
                 context_str = f"""
 PREVIOUS CONVERSATION:
 Previous question: {last_q}
-Previous SQL used: {last_sql}
-Previous result summary: {last_result[:500] if last_result else 'No result'}
+Previous SQL: {last_sql}
+Previous result: {last_result[:300] if last_result else 'None'}
 
-IMPORTANT: If this question references "the X" or "those" or "them", it refers to the previous query results.
-If asked to "list" or "show" items from a previous count, modify the previous SQL to SELECT * instead of COUNT(*).
+If this references previous results, use the same tables/conditions.
 """
-                logger.warning(f"[SQL-GEN] Including conversation context from previous question")
         
-        # Build prompt - let LLM reason from schema + samples + relationships
-        prompt = f"""Generate a SQL query for DuckDB to answer this question.
-{context_str}
-SCHEMA (with sample values to help you understand the data):
+        # Build prompt for orchestrator
+        prompt = f"""{context_str}
+SCHEMA (with sample values):
 {schema_text}{relationships_text}
 
 QUESTION: {question}
 
-CRITICAL RULES:
-1. Return ONLY the SQL query, nothing else
-2. You MUST ONLY use table names and column names that appear EXACTLY in the schema above
-3. NEVER guess or invent column names - if a column isn't listed above, it doesn't exist
-4. Read the column names carefully - use the EXACT spelling from the schema
-5. Use ILIKE for case-insensitive text matching
-6. LIMIT 1000 unless counting
-7. For "how many" use COUNT(*)
-8. Wrap table/column names in double quotes
-9. If data is in multiple tables, use JOIN with the relationships provided
-10. For numeric comparisons, use TRY_CAST(column AS DOUBLE)
-11. If previous SQL is provided, use the same tables/conditions for follow-up questions
-
-SQL:"""
+RULES:
+1. ONLY use column names from the schema - never invent columns
+2. Use ILIKE for text matching
+3. COUNT(*) for "how many" questions  
+4. Wrap names in double quotes
+5. JOIN tables using the relationships
+6. TRY_CAST for numeric comparisons
+7. LIMIT 1000 unless counting"""
         
-        # Log key parts of the prompt so we can debug
-        logger.warning(f"[SQL-GEN] QUESTION being sent: {question}")
-        logger.warning(f"[SQL-GEN] CONTEXT being sent: {context_str[:200] if context_str else 'None'}")
+        logger.warning(f"[SQL-GEN] Calling orchestrator...")
         
-        # Call LLM - same as chat.py
-        try:
-            result, success = local_llm.extract("", prompt)
+        # Call orchestrator - handles model selection, validation, retry
+        result = orchestrator.generate_sql(prompt, all_columns)
+        
+        if result.get('success') and result.get('sql'):
+            sql = result['sql']
+            model = result.get('model', 'local')
+            logger.warning(f"[SQL-GEN] {model} generated: {sql[:150]}")
             
-            if success and result:
-                sql = result.strip()
-                
-                # Clean up response
-                if sql.startswith('```'):
-                    sql = sql.split('```')[1]
-                    if sql.startswith('sql'):
-                        sql = sql[3:]
-                sql = sql.strip().rstrip(';')
-                
-                if sql.upper().startswith('SELECT'):
-                    logger.warning(f"[SQL-GEN] Generated: {sql}")
-                    
-                    # Detect query type
-                    sql_upper = sql.upper()
-                    if 'COUNT(*)' in sql_upper or 'COUNT(' in sql_upper:
-                        query_type = 'count'
-                    elif 'SUM(' in sql_upper:
-                        query_type = 'sum'
-                    elif 'AVG(' in sql_upper:
-                        query_type = 'average'
-                    else:
-                        query_type = 'list'
-                    
-                    # Extract table name
-                    table_match = re.search(r'FROM\s+"?([^"\s]+)"?', sql, re.IGNORECASE)
-                    table_name = table_match.group(1) if table_match else 'unknown'
-                    
-                    return {
-                        'sql': sql,
-                        'table': table_name,
-                        'columns': [],
-                        'query_type': query_type,
-                        'conditions': [],
-                        'llm_generated': True
-                    }
-                else:
-                    logger.warning(f"[SQL-GEN] LLM returned non-SQL: {sql[:100]}")
+            # Detect query type
+            sql_upper = sql.upper()
+            if 'COUNT(*)' in sql_upper or 'COUNT(' in sql_upper:
+                query_type = 'count'
+            elif 'SUM(' in sql_upper:
+                query_type = 'sum'
+            elif 'AVG(' in sql_upper:
+                query_type = 'average'
             else:
-                logger.warning(f"[SQL-GEN] LLM extraction failed")
-                
-        except Exception as e:
-            logger.error(f"[SQL-GEN] LLM call failed: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-        
-        return None
+                query_type = 'list'
+            
+            # Extract table name
+            table_match = re.search(r'FROM\s+"?([^"\s]+)"?', sql, re.IGNORECASE)
+            table_name = table_match.group(1) if table_match else 'unknown'
+            
+            return {
+                'sql': sql,
+                'table': table_name,
+                'query_type': query_type,
+                'model': model
+            }
+        else:
+            error = result.get('error', 'Unknown')
+            logger.warning(f"[SQL-GEN] Failed: {error}")
+            return None
     
     def _needs_clarification(self, mode, entities, domains, q_lower) -> bool:
         """Determine if we need to ask clarifying questions."""
