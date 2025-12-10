@@ -402,9 +402,30 @@ If this references previous results, use the same tables/conditions.
 """
         
         # Build prompt for orchestrator
+        # Add hints about commonly confused columns
+        column_hints = ""
+        for t in tables:
+            tname = t.get('table_name', '')
+            cols = t.get('columns', [])
+            
+            # If this is the company table with rate columns, note it
+            if 'company' in tname.lower() and 'master' not in tname.lower() and 'tax' not in tname.lower():
+                rate_cols = [str(c) for c in cols if any(x in str(c).lower() for x in ['hourly', 'salary', 'annual', 'period_pay', 'pay_rate'])]
+                if rate_cols:
+                    short_name = tname.split('__')[-1] if '__' in tname else tname
+                    column_hints += f"\nNOTE: Pay/rate columns ({', '.join(rate_cols)}) are in the {short_name} table, NOT in earnings table."
+            
+            # PT/FT status location
+            if 'personal' in tname.lower():
+                ptft_cols = [str(c) for c in cols if 'fullpart' in str(c).lower() or 'part_time' in str(c).lower()]
+                if ptft_cols:
+                    short_name = tname.split('__')[-1] if '__' in tname else tname
+                    column_hints += f"\nNOTE: PT/FT status ({', '.join(ptft_cols)}) is in the {short_name} table."
+        
         prompt = f"""{context_str}
 SCHEMA (with sample values):
 {schema_text}{relationships_text}
+{column_hints}
 
 QUESTION: {question}
 
@@ -412,10 +433,11 @@ RULES:
 1. ONLY use column names from the schema - never invent columns
 2. Use ILIKE for text matching
 3. COUNT(*) for "how many" questions  
-4. Wrap names in double quotes
+4. Wrap column names in double quotes
 5. JOIN tables using the relationships
 6. TRY_CAST for numeric comparisons
-7. LIMIT 1000 unless counting"""
+7. LIMIT 1000 unless counting
+8. Use correct table alias for each column - check which table has it"""
         
         logger.warning(f"[SQL-GEN] Calling orchestrator...")
         
@@ -486,6 +508,12 @@ RULES:
         
         logger.info(f"[SQL-FIX] Attempting to fix column: {bad_col}")
         
+        # CRITICAL: If the column IS VALID, it's a table alias problem, not a column name problem
+        valid_cols_lower = {c.lower() for c in all_columns}
+        if bad_col.lower() in valid_cols_lower:
+            logger.warning(f"[SQL-FIX] Column '{bad_col}' exists but wrong table alias - cannot auto-fix")
+            return None
+        
         # Skip risky single-word partial matches (for fuzzy only, known fixes are OK)
         skip_for_fuzzy = {'employee', 'personal', 'status', 'type', 'code', 'name'}
         
@@ -508,7 +536,7 @@ RULES:
         if bad_col.lower() in known_fixes:
             fix = known_fixes[bad_col.lower()]
             # Verify the fix exists in schema
-            if fix.lower() not in {c.lower() for c in all_columns}:
+            if fix.lower() not in valid_cols_lower:
                 fix = None  # Fix not in schema
         
         # Fuzzy match if no known fix
@@ -701,39 +729,89 @@ RULES:
         domains = analysis['domains']
         entities = analysis['entities']
         
+        # Get pattern cache for this project
+        pattern_cache = None
         try:
-            # FIRST: Try to generate and execute targeted SQL
-            sql_info = self._generate_sql_for_question(question, analysis)
-            if sql_info:
-                sql = sql_info['sql']
-                logger.info(f"[INTELLIGENCE] Generated SQL: {sql}")
-                
-                # Try to execute with self-healing on column errors
+            from utils.sql_pattern_cache import get_sql_pattern_cache, initialize_patterns
+            if hasattr(self, 'project') and self.project:
+                pattern_cache = initialize_patterns(self.project, self.schema)
+        except ImportError:
+            try:
+                from backend.utils.sql_pattern_cache import get_sql_pattern_cache, initialize_patterns
+                if hasattr(self, 'project') and self.project:
+                    pattern_cache = initialize_patterns(self.project, self.schema)
+            except ImportError:
+                logger.debug("[REALITY] SQL pattern cache not available")
+        
+        try:
+            sql = None
+            sql_source = None
+            sql_info = None
+            
+            # STEP 1: CHECK PATTERN CACHE FIRST (no LLM needed!)
+            if pattern_cache:
+                cached_pattern = pattern_cache.find_matching_pattern(question)
+                if cached_pattern and cached_pattern.get('sql'):
+                    sql = cached_pattern['sql']
+                    sql_source = 'pattern_cache'
+                    logger.info(f"[INTELLIGENCE] Pattern cache HIT! Confidence: {cached_pattern.get('confidence', 0):.0%}")
+                    logger.info(f"[INTELLIGENCE] Using cached SQL: {sql[:100]}...")
+            
+            # STEP 2: Only generate via LLM if no cache hit
+            if not sql:
+                sql_info = self._generate_sql_for_question(question, analysis)
+                if sql_info and sql_info.get('sql'):
+                    sql = sql_info['sql']
+                    sql_source = 'llm_generated'
+                    logger.info(f"[INTELLIGENCE] Generated SQL via LLM: {sql[:100]}...")
+            
+            # STEP 3: Execute SQL (from cache or LLM)
+            if sql:
                 max_retries = 2
+                execution_success = False
+                
                 for attempt in range(max_retries + 1):
                     try:
                         rows, cols = self.structured_handler.execute_query(sql)
                         
                         # Store the SQL for session context
                         self.last_executed_sql = sql
+                        execution_success = True
                         
                         if rows:
+                            # Determine table name
+                            table_name = 'query_result'
+                            if sql_info:
+                                table_name = sql_info.get('table', 'query_result')
+                            else:
+                                # Extract from SQL
+                                table_match = re.search(r'FROM\s+"?([^"\s]+)"?', sql, re.IGNORECASE)
+                                if table_match:
+                                    table_name = table_match.group(1)
+                            
                             truths.append(Truth(
                                 source_type='reality',
-                                source_name=f"SQL Query: {sql_info['table']}",
+                                source_name=f"SQL Query: {table_name}",
                                 content={
                                     'sql': sql,
                                     'columns': cols,
                                     'rows': rows,
                                     'total': len(rows),
-                                    'query_type': sql_info['query_type'],
-                                    'table': sql_info['table'],
-                                    'is_targeted_query': True
+                                    'query_type': sql_info.get('query_type', 'unknown') if sql_info else 'cached',
+                                    'table': table_name,
+                                    'is_targeted_query': True,
+                                    'sql_source': sql_source
                                 },
                                 confidence=0.98,
                                 location=f"Query: {sql}"
                             ))
-                            logger.info(f"[INTELLIGENCE] SQL returned {len(rows)} rows")
+                            logger.info(f"[INTELLIGENCE] SQL returned {len(rows)} rows (source: {sql_source})")
+                            
+                            # STEP 4: LEARN from success (if from LLM)
+                            if pattern_cache and sql_source == 'llm_generated':
+                                pattern_cache.learn_pattern(question, sql, success=True)
+                                logger.info(f"[INTELLIGENCE] Learned SQL pattern for future use")
+                            
                             return truths
                         break  # Success but no rows
                         
@@ -741,7 +819,18 @@ RULES:
                         error_msg = str(sql_e)
                         logger.warning(f"[INTELLIGENCE] SQL query failed (attempt {attempt + 1}): {error_msg}")
                         
-                        # Try to extract and fix the column name from the error
+                        # Record failure if from cache
+                        if pattern_cache and sql_source == 'pattern_cache' and attempt == 0:
+                            pattern_cache.record_failure(question)
+                            logger.warning(f"[INTELLIGENCE] Recorded pattern failure, falling back to LLM")
+                            # Try LLM generation as fallback
+                            sql_info = self._generate_sql_for_question(question, analysis)
+                            if sql_info and sql_info.get('sql'):
+                                sql = sql_info['sql']
+                                sql_source = 'llm_fallback'
+                                continue
+                        
+                        # Try to fix column errors
                         column_errors = [
                             'does not have a column named',
                             'not found in FROM clause',
@@ -751,7 +840,7 @@ RULES:
                         is_column_error = any(pattern in error_msg.lower() or re.search(pattern, error_msg, re.IGNORECASE) 
                                               for pattern in column_errors)
                         
-                        if attempt < max_retries and is_column_error:
+                        if attempt < max_retries and is_column_error and sql_info:
                             fixed_sql = self._try_fix_sql_from_error(sql, error_msg, sql_info.get('all_columns', set()))
                             if fixed_sql and fixed_sql != sql:
                                 logger.info(f"[INTELLIGENCE] Attempting auto-fix: {fixed_sql[:100]}...")
