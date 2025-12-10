@@ -526,16 +526,26 @@ Analyze the data. Answer the question with real numbers and real values from the
             return {"sql": None, "error": "No LLM configured", "success": False}
         
         models_to_try = ['deepseek-coder:6.7b', 'mistral:7b']
+        last_invalid_cols = []
         
         for attempt, model in enumerate(models_to_try):
             try:
-                local_prompt = f"""Generate a SQL query for this question. Return ONLY the SQL, no explanation.
-
-CRITICAL: Only use column names that appear in the schema. Never invent column names.
+                # Build prompt - stronger for retries
+                if attempt == 0:
+                    local_prompt = f"""You are a SQL generator. Output ONLY a valid SQL SELECT statement. No explanations, no text, just SQL.
 
 {prompt}
 
-SQL:"""
+IMPORTANT: Output ONLY the SQL query starting with SELECT. Nothing else."""
+                else:
+                    # Retry prompt is more explicit about what went wrong
+                    local_prompt = f"""Output ONLY a SQL SELECT statement. No explanations.
+
+PREVIOUS ATTEMPT FAILED because these columns don't exist: {last_invalid_cols}
+
+{prompt}
+
+You MUST only use columns from the schema above. Start your response with SELECT."""
                 
                 response, success = self._call_ollama(model, local_prompt)
                 
@@ -549,15 +559,29 @@ SQL:"""
                             sql = sql[3:]
                     sql = sql.strip().rstrip(';')
                     
+                    # VALIDATE: Must start with SELECT (or WITH for CTEs)
+                    sql_upper = sql.upper().strip()
+                    if not (sql_upper.startswith('SELECT') or sql_upper.startswith('WITH')):
+                        logger.warning(f"[SQL-LOCAL] {model} returned non-SQL: {sql[:80]}...")
+                        if attempt < len(models_to_try) - 1:
+                            continue
+                        else:
+                            return {
+                                "sql": None,
+                                "error": "Model returned prose instead of SQL",
+                                "success": False,
+                                "model": model
+                            }
+                    
                     # Validate columns if schema provided
-                    if schema_columns and sql.upper().startswith('SELECT'):
+                    if schema_columns:
                         invalid_cols = self._validate_sql_columns(sql, schema_columns)
                         
                         if invalid_cols:
                             logger.warning(f"[SQL-LOCAL] {model} produced invalid columns: {invalid_cols}")
+                            last_invalid_cols = invalid_cols
                             
                             if attempt < len(models_to_try) - 1:
-                                # Retry with next model and explicit column list
                                 logger.info(f"[SQL-LOCAL] Retrying with {models_to_try[attempt + 1]}")
                                 continue
                             else:
