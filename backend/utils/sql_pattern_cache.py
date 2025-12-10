@@ -456,10 +456,10 @@ FT_VALUE: <exact value>"""
     # List employees with high rate (doesn't need PT/FT)
     key_list = make_key('list', ['employees'], ['rate_gt'])
     patterns[key_list] = {
-        'sql_template': f'''SELECT p."{emp_num_col}", c."{rate_col}"
+        'sql_template': f'''SELECT p."{emp_num_col}", DECRYPT(c."{rate_col}") as pay_rate
 FROM "{company_table}" c
 JOIN "{personal_table}" p ON c."{emp_num_col}" = p."{emp_num_col}"
-WHERE TRY_CAST(c."{rate_col}" AS FLOAT) > {{rate_threshold}}
+WHERE DECRYPT_FLOAT(c."{rate_col}") > {{rate_threshold}}
 LIMIT 100''',
         'signature': {'intent': 'list', 'entities': ['employees'], 'filters': ['rate_gt'], 'key': key_list},
         'success_count': 5,
@@ -473,7 +473,7 @@ LIMIT 100''',
         # List PT employees with rates (the missing pattern!)
         key_list_pt = make_key('list', ['employees'], ['pt_status'])
         patterns[key_list_pt] = {
-            'sql_template': f'''SELECT p."{emp_num_col}", p."{ptft_col}", c."{rate_col}"
+            'sql_template': f'''SELECT p."{emp_num_col}", p."{ptft_col}", DECRYPT(c."{rate_col}") as pay_rate
 FROM "{company_table}" c
 JOIN "{personal_table}" p ON c."{emp_num_col}" = p."{emp_num_col}"
 WHERE p."{ptft_col}" = '{pt_value}'
@@ -488,11 +488,11 @@ LIMIT 100''',
         # List PT employees with rate threshold
         key_list_pt_rate = make_key('list', ['employees'], ['pt_status', 'rate_gt'])
         patterns[key_list_pt_rate] = {
-            'sql_template': f'''SELECT p."{emp_num_col}", p."{ptft_col}", c."{rate_col}"
+            'sql_template': f'''SELECT p."{emp_num_col}", p."{ptft_col}", DECRYPT(c."{rate_col}") as pay_rate
 FROM "{company_table}" c
 JOIN "{personal_table}" p ON c."{emp_num_col}" = p."{emp_num_col}"
 WHERE p."{ptft_col}" = '{pt_value}'
-AND TRY_CAST(c."{rate_col}" AS FLOAT) > {{rate_threshold}}
+AND DECRYPT_FLOAT(c."{rate_col}") > {{rate_threshold}}
 LIMIT 100''',
             'signature': {'intent': 'list', 'entities': ['employees'], 'filters': ['pt_status', 'rate_gt'], 'key': key_list_pt_rate},
             'success_count': 10,
@@ -507,7 +507,7 @@ LIMIT 100''',
             'sql_template': f'''SELECT COUNT(*) as count
 FROM "{company_table}" c
 JOIN "{personal_table}" p ON c."{emp_num_col}" = p."{emp_num_col}"
-WHERE TRY_CAST(c."{rate_col}" AS FLOAT) > {{rate_threshold}}
+WHERE DECRYPT_FLOAT(c."{rate_col}") > {{rate_threshold}}
 AND p."{ptft_col}" = '{pt_value}' ''',
             'signature': {'intent': 'count', 'entities': ['employees'], 'filters': ['pt_status', 'rate_gt'], 'key': key1},
             'success_count': 10,
@@ -522,7 +522,7 @@ AND p."{ptft_col}" = '{pt_value}' ''',
             'sql_template': f'''SELECT COUNT(*) as count
 FROM "{company_table}" c
 JOIN "{personal_table}" p ON c."{emp_num_col}" = p."{emp_num_col}"
-WHERE TRY_CAST(c."{rate_col}" AS FLOAT) > {{rate_threshold}}
+WHERE DECRYPT_FLOAT(c."{rate_col}") > {{rate_threshold}}
 AND p."{ptft_col}" = '{ft_value}' ''',
             'signature': {'intent': 'count', 'entities': ['employees'], 'filters': ['ft_status', 'rate_gt'], 'key': key2},
             'success_count': 10,
@@ -572,11 +572,17 @@ def initialize_patterns(project: str, schema: Dict):
     needs_regenerate = len(cache.patterns) == 0
     
     if not needs_regenerate and cache.patterns:
-        # Check if any pattern still has old ILIKE placeholder
+        # Check if patterns use old format (without DECRYPT)
         for pattern in cache.patterns.values():
             sql = pattern.get('sql_template', '')
             if 'ILIKE' in sql or '{employment_type}' in sql:
-                logger.warning(f"[SQL-CACHE] Old pattern format detected (ILIKE), regenerating with LLM interpretation")
+                logger.warning(f"[SQL-CACHE] Old pattern format detected (ILIKE), regenerating")
+                cache.patterns = {}
+                needs_regenerate = True
+                break
+            # Check for TRY_CAST instead of DECRYPT_FLOAT (need to upgrade)
+            if 'TRY_CAST' in sql and 'rate' in sql.lower():
+                logger.warning(f"[SQL-CACHE] Old pattern format detected (TRY_CAST), upgrading to DECRYPT")
                 cache.patterns = {}
                 needs_regenerate = True
                 break
