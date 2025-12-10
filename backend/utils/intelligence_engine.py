@@ -446,12 +446,79 @@ RULES:
                 'sql': sql,
                 'table': table_name,
                 'query_type': query_type,
-                'model': model
+                'model': model,
+                'all_columns': all_columns  # For self-healing at execution
             }
         else:
             error = result.get('error', 'Unknown')
             logger.warning(f"[SQL-GEN] Failed: {error}")
             return None
+    
+    def _try_fix_sql_from_error(self, sql: str, error_msg: str, all_columns: set) -> Optional[str]:
+        """
+        Try to fix SQL based on DuckDB error message.
+        
+        Example error: 'Table "x" does not have a column named "rate"'
+        """
+        import re
+        from difflib import SequenceMatcher
+        
+        # Extract the bad column name from error
+        match = re.search(r'does not have a column named "([^"]+)"', error_msg)
+        if not match:
+            return None
+        
+        bad_col = match.group(1)
+        logger.info(f"[SQL-FIX] Attempting to fix column: {bad_col}")
+        
+        # Known fixes
+        known_fixes = {
+            'rate': 'hourly_pay_rate',
+            'hourly_rate': 'hourly_pay_rate',
+            'pay_rate': 'hourly_pay_rate',
+            'employee_id': 'employee_number',
+            'emp_id': 'employee_number',
+            'id': 'employee_number',
+            'status': 'employment_status_code',
+        }
+        
+        if bad_col.lower() in known_fixes:
+            fix = known_fixes[bad_col.lower()]
+            # Verify the fix exists in schema
+            if fix.lower() in {c.lower() for c in all_columns}:
+                logger.info(f"[SQL-FIX] Known fix: {bad_col} → {fix}")
+                return re.sub(
+                    r'\.\"?' + re.escape(bad_col) + r'\"?',
+                    f'."{fix}"',
+                    sql,
+                    flags=re.IGNORECASE
+                )
+        
+        # Fuzzy match
+        best_match = None
+        best_score = 0.5
+        
+        for col in all_columns:
+            if bad_col.lower() in col.lower():
+                score = 0.8
+            else:
+                score = SequenceMatcher(None, bad_col.lower(), col.lower()).ratio()
+            
+            if score > best_score:
+                best_score = score
+                best_match = col
+        
+        if best_match:
+            logger.info(f"[SQL-FIX] Fuzzy fix: {bad_col} → {best_match} (score: {best_score:.2f})")
+            return re.sub(
+                r'\.\"?' + re.escape(bad_col) + r'\"?',
+                f'."{best_match}"',
+                sql,
+                flags=re.IGNORECASE
+            )
+        
+        logger.warning(f"[SQL-FIX] Could not find fix for: {bad_col}")
+        return None
     
     def _needs_clarification(self, mode, entities, domains, q_lower) -> bool:
         """Determine if we need to ask clarifying questions."""
@@ -610,35 +677,50 @@ RULES:
             # FIRST: Try to generate and execute targeted SQL
             sql_info = self._generate_sql_for_question(question, analysis)
             if sql_info:
-                try:
-                    sql = sql_info['sql']
-                    logger.info(f"[INTELLIGENCE] Generated SQL: {sql}")
-                    rows, cols = self.structured_handler.execute_query(sql)
-                    
-                    # Store the SQL for session context
-                    self.last_executed_sql = sql
-                    
-                    if rows:
-                        truths.append(Truth(
-                            source_type='reality',
-                            source_name=f"SQL Query: {sql_info['table']}",
-                            content={
-                                'sql': sql,
-                                'columns': cols,
-                                'rows': rows,
-                                'total': len(rows),
-                                'query_type': sql_info['query_type'],
-                                'table': sql_info['table'],
-                                'is_targeted_query': True
-                            },
-                            confidence=0.98,
-                            location=f"Query: {sql}"
-                        ))
-                        logger.info(f"[INTELLIGENCE] SQL returned {len(rows)} rows")
-                        # If we got a targeted result, prioritize it
-                        return truths
-                except Exception as sql_e:
-                    logger.warning(f"[INTELLIGENCE] SQL query failed: {sql_e}")
+                sql = sql_info['sql']
+                logger.info(f"[INTELLIGENCE] Generated SQL: {sql}")
+                
+                # Try to execute with self-healing on column errors
+                max_retries = 2
+                for attempt in range(max_retries + 1):
+                    try:
+                        rows, cols = self.structured_handler.execute_query(sql)
+                        
+                        # Store the SQL for session context
+                        self.last_executed_sql = sql
+                        
+                        if rows:
+                            truths.append(Truth(
+                                source_type='reality',
+                                source_name=f"SQL Query: {sql_info['table']}",
+                                content={
+                                    'sql': sql,
+                                    'columns': cols,
+                                    'rows': rows,
+                                    'total': len(rows),
+                                    'query_type': sql_info['query_type'],
+                                    'table': sql_info['table'],
+                                    'is_targeted_query': True
+                                },
+                                confidence=0.98,
+                                location=f"Query: {sql}"
+                            ))
+                            logger.info(f"[INTELLIGENCE] SQL returned {len(rows)} rows")
+                            return truths
+                        break  # Success but no rows
+                        
+                    except Exception as sql_e:
+                        error_msg = str(sql_e)
+                        logger.warning(f"[INTELLIGENCE] SQL query failed (attempt {attempt + 1}): {error_msg}")
+                        
+                        # Try to extract and fix the column name from the error
+                        if attempt < max_retries and 'does not have a column named' in error_msg:
+                            fixed_sql = self._try_fix_sql_from_error(sql, error_msg, sql_info.get('all_columns', set()))
+                            if fixed_sql and fixed_sql != sql:
+                                logger.info(f"[INTELLIGENCE] Attempting auto-fix: {fixed_sql[:100]}...")
+                                sql = fixed_sql
+                                continue
+                        break  # Can't fix or out of retries
             
             # FALLBACK: Sample data from relevant tables
             tables = self.schema.get('tables', [])
