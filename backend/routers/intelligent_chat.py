@@ -157,7 +157,7 @@ async def intelligent_chat(request: IntelligentChatRequest):
                 if schema.get('tables'):
                     engine.load_context(structured_handler=handler, schema=schema)
                     structured_loaded = True
-                    logger.info(f"[INTELLIGENT] Loaded {len(schema['tables'])} tables for {project}")
+                    logger.warning(f"[INTELLIGENT] Loaded {len(schema['tables'])} tables for {project}")
                 else:
                     logger.warning(f"[INTELLIGENT] No tables found for project {project}")
         except Exception as e:
@@ -469,7 +469,7 @@ async def get_project_schema_direct(project: str, scope: str, handler) -> Dict:
     try:
         # Get all tables directly from DuckDB
         all_tables = handler.conn.execute("SHOW TABLES").fetchall()
-        logger.info(f"[SCHEMA] DuckDB has {len(all_tables)} total tables")
+        logger.warning(f"[SCHEMA] DuckDB has {len(all_tables)} total tables")
         
         # Build project prefix for filtering (try multiple formats)
         project_clean = (project or '').strip()
@@ -557,7 +557,7 @@ async def get_project_schema_direct(project: str, scope: str, handler) -> Dict:
             except Exception as col_e:
                 logger.warning(f"[SCHEMA] Error processing {table_name}: {col_e}")
         
-        logger.info(f"[SCHEMA] Returning {len(tables)} tables for project '{project}'")
+        logger.warning(f"[SCHEMA] Returning {len(tables)} tables for project '{project}'")
         
     except Exception as e:
         logger.error(f"[SCHEMA] Failed: {e}")
@@ -670,7 +670,7 @@ async def get_project_schema(project: str, scope: str) -> Dict:
     except Exception as e:
         logger.warning(f"Could not get project schema: {e}")
     
-    logger.info(f"[SCHEMA] Returning {len(tables)} tables for project {project}")
+    logger.warning(f"[SCHEMA] Returning {len(tables)} tables for project {project}")
     return {'tables': tables}
 
 
