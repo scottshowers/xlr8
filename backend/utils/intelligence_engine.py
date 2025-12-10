@@ -326,9 +326,9 @@ class IntelligenceEngine:
             logger.error(f"[SQL-GEN] Could not load LocalLLMClient: {e}")
             return None
         
-        # Build schema description - same as chat.py
+        # Build schema description - show ALL tables so LLM can reason
         tables_info = []
-        for table in tables[:10]:
+        for table in tables:
             table_name = table.get('table_name', '')
             columns = table.get('columns', [])
             if columns and isinstance(columns[0], dict):
@@ -355,11 +355,22 @@ class IntelligenceEngine:
             tables_info.append(f"Table: {table_name}\n  Columns: {', '.join(col_names[:30])}\n  Rows: {row_count}{sample_str}")
         
         schema_text = '\n\n'.join(tables_info)
-        logger.warning(f"[SQL-GEN] Built schema with {len(tables_info)} tables")
+        logger.warning(f"[SQL-GEN] Built schema with {len(tables_info)} tables (of {len(tables)} total)")
+        
+        # Log which tables have key columns for debugging
+        for t in tables:
+            cols_lower = [str(c).lower() for c in t.get('columns', [])]
+            col_str = ', '.join(cols_lower[:5])
+            if any('part' in c or 'full' in c or 'pt' in c or 'ft' in c for c in cols_lower):
+                logger.warning(f"[SQL-GEN] Table with PT/FT column: {t.get('table_name')}")
+            if any('rate' in c or 'hour' in c or 'pay' in c for c in cols_lower):
+                logger.warning(f"[SQL-GEN] Table with rate column: {t.get('table_name')}")
         
         # Log what we're sending so we can debug
         if tables_info:
             logger.warning(f"[SQL-GEN] First table: {tables[0].get('table_name', '') if tables else 'none'}")
+            # Log first table's full info to see if samples are there
+            logger.warning(f"[SQL-GEN] First table detail: {tables_info[0][:500]}")
         else:
             logger.warning(f"[SQL-GEN] NO TABLES IN SCHEMA - LLM has nothing to work with!")
         
@@ -367,7 +378,7 @@ class IntelligenceEngine:
         relationships_text = ""
         if self.relationships:
             rel_lines = []
-            for rel in self.relationships[:20]:  # Limit to avoid token overflow
+            for rel in self.relationships[:50]:  # Show more relationships
                 src = f"{rel.get('source_table')}.{rel.get('source_column')}"
                 tgt = f"{rel.get('target_table')}.{rel.get('target_column')}"
                 rel_lines.append(f"  {src} → {tgt}")
@@ -392,7 +403,7 @@ Previous result summary: {last_result[:500] if last_result else 'No result'}
 IMPORTANT: If this question references "the X" or "those" or "them", it refers to the previous query results.
 If asked to "list" or "show" items from a previous count, modify the previous SQL to SELECT * instead of COUNT(*).
 """
-                logger.info(f"[SQL-GEN] Including conversation context from previous question")
+                logger.warning(f"[SQL-GEN] Including conversation context from previous question")
         
         # Build prompt - let LLM reason from schema + samples + relationships
         prompt = f"""Generate a SQL query for DuckDB to answer this question.
@@ -415,6 +426,10 @@ RULES:
 10. If previous SQL is provided, use the same table/conditions for follow-up questions
 
 SQL:"""
+        
+        # Log key parts of the prompt so we can debug
+        logger.warning(f"[SQL-GEN] QUESTION being sent: {question}")
+        logger.warning(f"[SQL-GEN] CONTEXT being sent: {context_str[:200] if context_str else 'None'}")
         
         # Call LLM - same as chat.py
         try:
