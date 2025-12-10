@@ -456,6 +456,11 @@ RULES:
     def _needs_clarification(self, mode, entities, domains, q_lower) -> bool:
         """Determine if we need to ask clarifying questions."""
         
+        # CRITICAL: If we already have clarification answers, DON'T ask again
+        if self.confirmed_facts:
+            logger.info(f"[INTELLIGENCE] Skipping clarification - already have answers: {list(self.confirmed_facts.keys())}")
+            return False
+        
         # ALWAYS ask for configuration tasks
         if mode == IntelligenceMode.CONFIGURE:
             return True
