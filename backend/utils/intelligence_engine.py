@@ -458,64 +458,84 @@ RULES:
         """
         Try to fix SQL based on DuckDB error message.
         
-        Example error: 'Table "x" does not have a column named "rate"'
+        Handles errors like:
+        - 'Table "x" does not have a column named "rate"'
+        - 'Referenced column "hourly_rate" not found in FROM clause!'
         """
         import re
         from difflib import SequenceMatcher
         
-        # Extract the bad column name from error
-        match = re.search(r'does not have a column named "([^"]+)"', error_msg)
-        if not match:
+        # Try multiple error patterns
+        patterns = [
+            r'does not have a column named "([^"]+)"',
+            r'Referenced column "([^"]+)" not found',
+            r'column "([^"]+)" not found',
+            r'Unknown column[:\s]*"?([a-z_][a-z0-9_]*)"?',
+        ]
+        
+        bad_col = None
+        for pattern in patterns:
+            match = re.search(pattern, error_msg, re.IGNORECASE)
+            if match:
+                bad_col = match.group(1)
+                break
+        
+        if not bad_col:
+            logger.warning(f"[SQL-FIX] Could not extract column from error")
             return None
         
-        bad_col = match.group(1)
         logger.info(f"[SQL-FIX] Attempting to fix column: {bad_col}")
         
         # Known fixes
         known_fixes = {
             'rate': 'hourly_pay_rate',
             'hourly_rate': 'hourly_pay_rate',
+            'hourlyrate': 'hourly_pay_rate',
             'pay_rate': 'hourly_pay_rate',
             'employee_id': 'employee_number',
+            'employeeid': 'employee_number',
             'emp_id': 'employee_number',
             'id': 'employee_number',
             'status': 'employment_status_code',
+            'employment_status': 'fullpart_time_code',
         }
+        
+        fix = None
         
         if bad_col.lower() in known_fixes:
             fix = known_fixes[bad_col.lower()]
             # Verify the fix exists in schema
-            if fix.lower() in {c.lower() for c in all_columns}:
-                logger.info(f"[SQL-FIX] Known fix: {bad_col} → {fix}")
-                return re.sub(
-                    r'\.\"?' + re.escape(bad_col) + r'\"?',
-                    f'."{fix}"',
-                    sql,
-                    flags=re.IGNORECASE
-                )
+            if fix.lower() not in {c.lower() for c in all_columns}:
+                fix = None  # Fix not in schema
         
-        # Fuzzy match
-        best_match = None
-        best_score = 0.5
+        # Fuzzy match if no known fix
+        if not fix:
+            best_score = 0.5
+            for col in all_columns:
+                if bad_col.lower() in col.lower():
+                    score = 0.8
+                elif col.lower() in bad_col.lower():
+                    score = 0.7
+                else:
+                    score = SequenceMatcher(None, bad_col.lower(), col.lower()).ratio()
+                
+                if score > best_score:
+                    best_score = score
+                    fix = col
         
-        for col in all_columns:
-            if bad_col.lower() in col.lower():
-                score = 0.8
-            else:
-                score = SequenceMatcher(None, bad_col.lower(), col.lower()).ratio()
+        if fix:
+            logger.info(f"[SQL-FIX] Fixing: {bad_col} → {fix}")
             
-            if score > best_score:
-                best_score = score
-                best_match = col
-        
-        if best_match:
-            logger.info(f"[SQL-FIX] Fuzzy fix: {bad_col} → {best_match} (score: {best_score:.2f})")
-            return re.sub(
-                r'\.\"?' + re.escape(bad_col) + r'\"?',
-                f'."{best_match}"',
+            # Replace both bare and dot-prefixed versions
+            # Bare: WHERE hourly_rate > 35
+            fixed_sql = re.sub(
+                r'\b' + re.escape(bad_col) + r'\b',
+                f'"{fix}"',
                 sql,
                 flags=re.IGNORECASE
             )
+            
+            return fixed_sql
         
         logger.warning(f"[SQL-FIX] Could not find fix for: {bad_col}")
         return None
@@ -714,7 +734,16 @@ RULES:
                         logger.warning(f"[INTELLIGENCE] SQL query failed (attempt {attempt + 1}): {error_msg}")
                         
                         # Try to extract and fix the column name from the error
-                        if attempt < max_retries and 'does not have a column named' in error_msg:
+                        column_errors = [
+                            'does not have a column named',
+                            'not found in FROM clause',
+                            'column.*not found',
+                        ]
+                        
+                        is_column_error = any(pattern in error_msg.lower() or re.search(pattern, error_msg, re.IGNORECASE) 
+                                              for pattern in column_errors)
+                        
+                        if attempt < max_retries and is_column_error:
                             fixed_sql = self._try_fix_sql_from_error(sql, error_msg, sql_info.get('all_columns', set()))
                             if fixed_sql and fixed_sql != sql:
                                 logger.info(f"[INTELLIGENCE] Attempting auto-fix: {fixed_sql[:100]}...")
