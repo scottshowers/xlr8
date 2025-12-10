@@ -760,8 +760,8 @@ RULES:
                 if cached_pattern and cached_pattern.get('sql'):
                     sql = cached_pattern['sql']
                     sql_source = 'pattern_cache'
-                    logger.info(f"[INTELLIGENCE] Pattern cache HIT! Confidence: {cached_pattern.get('confidence', 0):.0%}")
-                    logger.info(f"[INTELLIGENCE] Using cached SQL: {sql[:100]}...")
+                    logger.warning(f"[INTELLIGENCE] Pattern cache HIT! Confidence: {cached_pattern.get('confidence', 0):.0%}")
+                    logger.warning(f"[INTELLIGENCE] Using cached SQL: {sql[:100]}...")
             
             # STEP 2: Only generate via LLM if no cache hit
             if not sql:
@@ -769,7 +769,7 @@ RULES:
                 if sql_info and sql_info.get('sql'):
                     sql = sql_info['sql']
                     sql_source = 'llm_generated'
-                    logger.info(f"[INTELLIGENCE] Generated SQL via LLM: {sql[:100]}...")
+                    logger.warning(f"[INTELLIGENCE] Generated SQL via LLM: {sql[:100]}...")
             
             # STEP 3: Execute SQL (from cache or LLM)
             if sql:
@@ -811,12 +811,12 @@ RULES:
                                 confidence=0.98,
                                 location=f"Query: {sql}"
                             ))
-                            logger.info(f"[INTELLIGENCE] SQL returned {len(rows)} rows (source: {sql_source})")
+                            logger.warning(f"[INTELLIGENCE] SQL returned {len(rows)} rows (source: {sql_source})")
                             
                             # STEP 4: LEARN from success (if from LLM)
                             if pattern_cache and sql_source == 'llm_generated':
                                 pattern_cache.learn_pattern(question, sql, success=True)
-                                logger.info(f"[INTELLIGENCE] Learned SQL pattern for future use")
+                                logger.warning(f"[INTELLIGENCE] Learned SQL pattern for future use")
                             
                             return truths
                         break  # Success but no rows
