@@ -470,6 +470,37 @@ LIMIT 100''',
     
     # If we determined PT/FT values, create those patterns
     if pt_value and ft_value:
+        # List PT employees with rates (the missing pattern!)
+        key_list_pt = make_key('list', ['employees'], ['pt_status'])
+        patterns[key_list_pt] = {
+            'sql_template': f'''SELECT p."{emp_num_col}", p."{ptft_col}", c."{rate_col}"
+FROM "{company_table}" c
+JOIN "{personal_table}" p ON c."{emp_num_col}" = p."{emp_num_col}"
+WHERE p."{ptft_col}" = '{pt_value}'
+LIMIT 100''',
+            'signature': {'intent': 'list', 'entities': ['employees'], 'filters': ['pt_status'], 'key': key_list_pt},
+            'success_count': 10,
+            'confidence': 0.95,
+            'created': datetime.now().isoformat(),
+            'example_question': 'Show me part-time employees with their rates'
+        }
+        
+        # List PT employees with rate threshold
+        key_list_pt_rate = make_key('list', ['employees'], ['pt_status', 'rate_gt'])
+        patterns[key_list_pt_rate] = {
+            'sql_template': f'''SELECT p."{emp_num_col}", p."{ptft_col}", c."{rate_col}"
+FROM "{company_table}" c
+JOIN "{personal_table}" p ON c."{emp_num_col}" = p."{emp_num_col}"
+WHERE p."{ptft_col}" = '{pt_value}'
+AND TRY_CAST(c."{rate_col}" AS FLOAT) > {{rate_threshold}}
+LIMIT 100''',
+            'signature': {'intent': 'list', 'entities': ['employees'], 'filters': ['pt_status', 'rate_gt'], 'key': key_list_pt_rate},
+            'success_count': 10,
+            'confidence': 0.95,
+            'created': datetime.now().isoformat(),
+            'example_question': 'Show me PT employees making over $40/hr'
+        }
+        
         # Count PT employees with rate threshold
         key1 = make_key('count', ['employees'], ['pt_status', 'rate_gt'])
         patterns[key1] = {
@@ -541,7 +572,7 @@ def initialize_patterns(project: str, schema: Dict):
     needs_regenerate = len(cache.patterns) == 0
     
     if not needs_regenerate and cache.patterns:
-        # Check if any pattern still has old ILIKE placeholder (needs LLM interpretation)
+        # Check if any pattern still has old ILIKE placeholder
         for pattern in cache.patterns.values():
             sql = pattern.get('sql_template', '')
             if 'ILIKE' in sql or '{employment_type}' in sql:
@@ -550,9 +581,9 @@ def initialize_patterns(project: str, schema: Dict):
                 needs_regenerate = True
                 break
         
-        # Also regenerate if we only have 2 patterns (basic ones without PT/FT)
-        if not needs_regenerate and len(cache.patterns) <= 2:
-            logger.warning(f"[SQL-CACHE] Only {len(cache.patterns)} patterns (missing PT/FT), regenerating")
+        # Regenerate if missing key patterns (should have 7+ now)
+        if not needs_regenerate and len(cache.patterns) < 7:
+            logger.warning(f"[SQL-CACHE] Only {len(cache.patterns)} patterns (expecting 7+), regenerating")
             cache.patterns = {}
             needs_regenerate = True
     
