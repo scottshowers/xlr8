@@ -712,6 +712,7 @@ SELECT"""
     def _auto_correct_columns(self, sql: str, invalid_cols: List[str], valid_columns: set) -> Optional[str]:
         """
         Try to fix invalid columns by fuzzy matching to valid ones.
+        CAREFUL: Don't break quoted column names with spaces.
         """
         from difflib import SequenceMatcher
         
@@ -721,55 +722,64 @@ SELECT"""
         # Common column name mappings (LLM hallucinations → actual columns)
         known_fixes = {
             'hourly_rate': 'hourly_pay_rate',
-            'hourly': 'hourly_pay_rate', 
             'hourlyrate': 'hourly_pay_rate',
             'pay_rate': 'hourly_pay_rate',
-            'rate': 'hourly_pay_rate',
             'employee_id': 'employee_number',
             'employeeid': 'employee_number',
             'emp_id': 'employee_number',
-            'employee': 'employee_number',
             'employment_status': 'fullpart_time_code',
-            'status': 'employment_status_code',
             'pt_ft': 'fullpart_time_code',
             'earnings_type': 'type_code',
             'earnings_type_id': 'type_code',
-            'personal': 'employee_number',
         }
+        
+        # Skip dangerous partial replacements
+        skip_words = {'employee', 'personal', 'status', 'rate', 'hourly', 'type', 'code', 'id', 'name'}
         
         for invalid in set(invalid_cols):  # dedupe
             invalid_lower = invalid.lower()
             
             # Skip very short or common SQL noise
-            if len(invalid_lower) < 3 or invalid_lower in ['db', 'com', 'id', 'code', 'the', 'and', 'for']:
+            if len(invalid_lower) < 4 or invalid_lower in ['db', 'com', 'the', 'and', 'for']:
                 continue
             
-            # Check known fixes first
+            # Skip single common words that might be parts of multi-word columns
+            if invalid_lower in skip_words:
+                logger.info(f"[SQL-AUTO] Skipping risky partial: '{invalid}'")
+                continue
+            
+            # Check known fixes first (only full column names)
             if invalid_lower in known_fixes:
                 target = known_fixes[invalid_lower]
                 if target.lower() in valid_lower:
                     best_match = valid_lower[target.lower()]
                     logger.info(f"[SQL-AUTO] Known fix: '{invalid}' → '{best_match}'")
+                    
+                    # Pattern: .column_name or ."column_name" (NOT partial match inside quotes)
+                    # Use negative lookbehind/ahead to avoid partial matches
                     corrected_sql = re.sub(
-                        r'\.\"?' + re.escape(invalid) + r'\"?',
+                        r'\.(' + re.escape(invalid) + r')(?![a-z_])',  # Not followed by more letters
+                        f'."{best_match}"',
+                        corrected_sql,
+                        flags=re.IGNORECASE
+                    )
+                    corrected_sql = re.sub(
+                        r'\."(' + re.escape(invalid) + r')"',  # Exact quoted match
                         f'."{best_match}"',
                         corrected_sql,
                         flags=re.IGNORECASE
                     )
                     continue
             
-            # Fuzzy match
+            # Fuzzy match - only for underscore-separated names (safe)
+            if '_' not in invalid:
+                continue  # Skip single words for fuzzy - too risky
+            
             best_match = None
-            best_score = 0.6  # Higher threshold
+            best_score = 0.7  # Higher threshold for fuzzy
             
             for valid_col in valid_lower.keys():
-                if invalid_lower in valid_col:
-                    score = 0.85
-                elif valid_col in invalid_lower:
-                    score = 0.75
-                else:
-                    score = SequenceMatcher(None, invalid_lower, valid_col).ratio()
-                
+                score = SequenceMatcher(None, invalid_lower, valid_col).ratio()
                 if score > best_score:
                     best_score = score
                     best_match = valid_lower[valid_col]
@@ -777,15 +787,14 @@ SELECT"""
             if best_match:
                 logger.info(f"[SQL-AUTO] Fuzzy fix: '{invalid}' → '{best_match}' (score: {best_score:.2f})")
                 corrected_sql = re.sub(
-                    r'\.\"?' + re.escape(invalid) + r'\"?',
+                    r'\.(' + re.escape(invalid) + r')(?![a-z_])',
                     f'."{best_match}"',
                     corrected_sql,
                     flags=re.IGNORECASE
                 )
         
-        # Clean up any remaining "column1 column2" patterns (two words that should be one)
-        # Pattern: word followed by space and another word after a dot
-        corrected_sql = re.sub(r'\"(\w+)\s+(\w+)\"', r'"\1_\2"', corrected_sql)
+        # Clean up double quotes that might have been introduced
+        corrected_sql = corrected_sql.replace('""', '"')
         
         return corrected_sql if corrected_sql != sql else None
     
@@ -803,21 +812,28 @@ SELECT"""
         valid_cols.update([
             'count', 'sum', 'avg', 'min', 'max', 'as', 'and', 'or', 'not', 
             'null', 'true', 'false', 'on', 'where', 'from', 'join', 'select',
-            'try_cast', 'double', 'integer', 'varchar', 'ilike', 'like'
+            'try_cast', 'double', 'integer', 'varchar', 'ilike', 'like',
+            'float', 'int', 'text', 'boolean', 'date', 'timestamp'
         ])
         
-        # Extract column references after dots: table.column or table."column"
-        dot_cols = re.findall(r'\.\"?([a-z][a-z0-9_]*)\"?', sql.lower())
-        
         invalid = []
-        for col in dot_cols:
-            # Skip if it looks like a table name part (has double underscore pattern)
-            if '__' in col:
+        
+        # Pattern 1: Quoted columns after dot: ."column_name"
+        quoted_cols = re.findall(r'\."([^"]+)"', sql)
+        for col in quoted_cols:
+            col_lower = col.lower()
+            # Skip multi-word columns (with spaces) - these are custom names
+            if ' ' in col:
                 continue
-            # Skip very short (likely parsing artifacts)
-            if len(col) < 3:
-                continue
-            if col not in valid_cols:
-                invalid.append(col)
+            if col_lower not in valid_cols and '__' not in col_lower:
+                if len(col_lower) >= 4:  # Skip very short
+                    invalid.append(col)
+        
+        # Pattern 2: Bare columns after dot: .column_name (no quotes)
+        bare_cols = re.findall(r'\.([a-z_][a-z0-9_]*)(?!["\w])', sql.lower())
+        for col in bare_cols:
+            if col not in valid_cols and '__' not in col:
+                if len(col) >= 4:  # Skip very short
+                    invalid.append(col)
         
         return list(set(invalid))  # dedupe
