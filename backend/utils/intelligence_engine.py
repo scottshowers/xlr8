@@ -343,7 +343,7 @@ class IntelligenceEngine:
                 rows, cols = self.structured_handler.execute_query(f'SELECT * FROM "{table_name}" LIMIT 5')
                 if rows and cols:
                     samples = []
-                    for col in cols[:15]:  # Show more columns
+                    for col in cols:  # Show ALL columns
                         # rows are dicts, so access by column name
                         vals = set(str(row.get(col, ''))[:30] for row in rows if row.get(col) is not None)
                         if vals:
@@ -352,7 +352,7 @@ class IntelligenceEngine:
             except Exception as sample_e:
                 logger.warning(f"[SQL-GEN] Sample error for {table_name}: {sample_e}")
             
-            tables_info.append(f"Table: {table_name}\n  Columns: {', '.join(col_names[:30])}\n  Rows: {row_count}{sample_str}")
+            tables_info.append(f"Table: {table_name}\n  Columns: {', '.join(col_names)}\n  Rows: {row_count}{sample_str}")
         
         schema_text = '\n\n'.join(tables_info)
         logger.warning(f"[SQL-GEN] Built schema with {len(tables_info)} tables (of {len(tables)} total)")
@@ -367,13 +367,14 @@ class IntelligenceEngine:
             ptft_cols = [c for c, cl in zip(cols, cols_lower) if any(x in cl for x in ['part', 'full', 'status', 'emp_type', 'employee_type', 'ft', 'pt'])]
             if ptft_cols and 'personal' in tname.lower():
                 logger.warning(f"[SQL-GEN] PERSONAL TABLE: {tname}")
-                logger.warning(f"[SQL-GEN] PERSONAL COLUMNS: {cols[:20]}")
+                logger.warning(f"[SQL-GEN] PERSONAL COLUMNS: {cols}")
             
             # Find rate columns  
             rate_cols = [c for c, cl in zip(cols, cols_lower) if any(x in cl for x in ['rate', 'hour', 'pay', 'wage', 'salary'])]
             if rate_cols and 'company' in tname.lower() and 'master' not in tname.lower():
                 logger.warning(f"[SQL-GEN] COMPANY TABLE: {tname}")
-                logger.warning(f"[SQL-GEN] COMPANY COLUMNS: {cols[:20]}")
+                logger.warning(f"[SQL-GEN] COMPANY COLUMNS: {cols}")
+                logger.warning(f"[SQL-GEN] RATE COLUMNS FOUND: {rate_cols}")
         
         # Log what we're sending so we can debug
         if tables_info:
