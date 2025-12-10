@@ -486,6 +486,9 @@ RULES:
         
         logger.info(f"[SQL-FIX] Attempting to fix column: {bad_col}")
         
+        # Skip risky single-word partial matches (for fuzzy only, known fixes are OK)
+        skip_for_fuzzy = {'employee', 'personal', 'status', 'type', 'code', 'name'}
+        
         # Known fixes
         known_fixes = {
             'rate': 'hourly_pay_rate',
@@ -510,6 +513,11 @@ RULES:
         
         # Fuzzy match if no known fix
         if not fix:
+            # Skip risky single words for fuzzy matching
+            if bad_col.lower() in skip_for_fuzzy:
+                logger.info(f"[SQL-FIX] Skipping fuzzy for risky word: {bad_col}")
+                return None
+            
             best_score = 0.5
             for col in all_columns:
                 if bad_col.lower() in col.lower():
