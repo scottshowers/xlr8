@@ -182,6 +182,9 @@ class SQLPatternCache:
         signature = self._extract_pattern_signature(question)
         pattern_key = signature['key']
         
+        logger.warning(f"[SQL-CACHE] Looking for pattern key: {pattern_key} (intent={signature['intent']}, filters={signature['filters']})")
+        logger.warning(f"[SQL-CACHE] Available keys: {list(self.patterns.keys())}")
+        
         if pattern_key in self.patterns:
             cached = self.patterns[pattern_key]
             
@@ -197,7 +200,7 @@ class SQLPatternCache:
                     else:
                         sql = sql.replace(placeholder, str(value))
             
-            logger.info(f"[SQL-CACHE] Pattern hit! Key={pattern_key}, successes={cached.get('success_count', 0)}")
+            logger.warning(f"[SQL-CACHE] Pattern hit! Key={pattern_key}, successes={cached.get('success_count', 0)}")
             
             return {
                 'sql': sql,
@@ -207,7 +210,7 @@ class SQLPatternCache:
                 'source': 'pattern_cache'
             }
         
-        logger.info(f"[SQL-CACHE] No pattern match for key={pattern_key}")
+        logger.warning(f"[SQL-CACHE] No pattern match for key={pattern_key}")
         return None
     
     def learn_pattern(self, question: str, sql: str, success: bool = True):
@@ -281,7 +284,7 @@ class SQLPatternCache:
             self.patterns[pattern_key]['confidence'] = 0.90
         
         self._save_cache()
-        logger.info(f"[SQL-CACHE] Learned pattern {pattern_key}, total successes: {self.patterns[pattern_key]['success_count']}")
+        logger.warning(f"[SQL-CACHE] Learned pattern {pattern_key}, total successes: {self.patterns[pattern_key]['success_count']}")
     
     def record_failure(self, question: str):
         """Record a pattern failure (reduce confidence or remove)"""
@@ -368,8 +371,14 @@ def get_bootstrap_patterns(project: str, schema: Dict) -> Dict[str, Dict]:
     ptft_col = next((c for c in personal_cols if 'fullpart' in c or 'part_time' in c), 'fullpart_time_code')
     emp_num_col = 'employee_number'
     
+    # Helper to generate consistent pattern keys (must match _extract_pattern_signature)
+    def make_key(intent, entities, filters):
+        sig_key = f"{intent}|{','.join(sorted(entities))}|{','.join(sorted(filters))}"
+        return hashlib.md5(sig_key.encode()).hexdigest()[:12]
+    
     # Pattern 1: Count PT employees with rate threshold
-    patterns['count_pt_rate'] = {
+    key1 = make_key('count', ['employees'], ['pt_status', 'rate_gt'])
+    patterns[key1] = {
         'sql_template': f'''SELECT COUNT(*) as count
 FROM "{company_table}" c
 JOIN "{personal_table}" p ON c."{emp_num_col}" = p."{emp_num_col}"
@@ -379,7 +388,7 @@ AND p."{ptft_col}" ILIKE '%{{employment_type}}%' ''',
             'intent': 'count',
             'entities': ['employees'],
             'filters': ['pt_status', 'rate_gt'],
-            'key': 'count_pt_rate'
+            'key': key1
         },
         'success_count': 10,  # Bootstrap with high confidence
         'confidence': 0.95,
@@ -388,7 +397,8 @@ AND p."{ptft_col}" ILIKE '%{{employment_type}}%' ''',
     }
     
     # Pattern 2: Count FT employees with rate threshold
-    patterns['count_ft_rate'] = {
+    key2 = make_key('count', ['employees'], ['ft_status', 'rate_gt'])
+    patterns[key2] = {
         'sql_template': f'''SELECT COUNT(*) as count
 FROM "{company_table}" c
 JOIN "{personal_table}" p ON c."{emp_num_col}" = p."{emp_num_col}"
@@ -398,7 +408,7 @@ AND p."{ptft_col}" ILIKE '%{{employment_type}}%' ''',
             'intent': 'count',
             'entities': ['employees'],
             'filters': ['ft_status', 'rate_gt'],
-            'key': 'count_ft_rate'
+            'key': key2
         },
         'success_count': 10,
         'confidence': 0.95,
@@ -407,14 +417,15 @@ AND p."{ptft_col}" ILIKE '%{{employment_type}}%' ''',
     }
     
     # Pattern 3: Count all employees
-    patterns['count_all_emp'] = {
+    key3 = make_key('count', ['employees'], [])
+    patterns[key3] = {
         'sql_template': f'''SELECT COUNT(*) as count
 FROM "{personal_table}"''',
         'signature': {
             'intent': 'count',
             'entities': ['employees'],
             'filters': [],
-            'key': 'count_all_emp'
+            'key': key3
         },
         'success_count': 10,
         'confidence': 0.98,
@@ -422,8 +433,9 @@ FROM "{personal_table}"''',
         'example_question': 'How many employees are there?'
     }
     
-    # Pattern 4: Count PT employees
-    patterns['count_pt_emp'] = {
+    # Pattern 4: Count PT employees (no rate filter)
+    key4 = make_key('count', ['employees'], ['pt_status'])
+    patterns[key4] = {
         'sql_template': f'''SELECT COUNT(*) as count
 FROM "{personal_table}"
 WHERE "{ptft_col}" ILIKE '%PT%' ''',
@@ -431,7 +443,7 @@ WHERE "{ptft_col}" ILIKE '%PT%' ''',
             'intent': 'count',
             'entities': ['employees'],
             'filters': ['pt_status'],
-            'key': 'count_pt_emp'
+            'key': key4
         },
         'success_count': 10,
         'confidence': 0.95,
@@ -440,7 +452,8 @@ WHERE "{ptft_col}" ILIKE '%PT%' ''',
     }
     
     # Pattern 5: List employees with high rate
-    patterns['list_high_rate'] = {
+    key5 = make_key('list', ['employees'], ['rate_gt'])
+    patterns[key5] = {
         'sql_template': f'''SELECT p."{emp_num_col}", c."{rate_col}"
 FROM "{company_table}" c
 JOIN "{personal_table}" p ON c."{emp_num_col}" = p."{emp_num_col}"
@@ -450,7 +463,7 @@ LIMIT 100''',
             'intent': 'list',
             'entities': ['employees'],
             'filters': ['rate_gt'],
-            'key': 'list_high_rate'
+            'key': key5
         },
         'success_count': 5,
         'confidence': 0.90,
@@ -482,11 +495,20 @@ def initialize_patterns(project: str, schema: Dict):
     """
     cache = get_sql_pattern_cache(project)
     
-    # Only bootstrap if cache is empty
-    if len(cache.patterns) == 0:
+    # Check if we need to regenerate (old keys vs new hash-based keys)
+    needs_regenerate = len(cache.patterns) == 0
+    if not needs_regenerate and cache.patterns:
+        # Check if any key is the old literal format vs new hash format
+        sample_key = list(cache.patterns.keys())[0]
+        if len(sample_key) != 12 or not all(c in '0123456789abcdef' for c in sample_key):
+            logger.warning(f"[SQL-CACHE] Old key format detected ({sample_key}), regenerating patterns")
+            cache.patterns = {}
+            needs_regenerate = True
+    
+    if needs_regenerate:
         bootstrap = get_bootstrap_patterns(project, schema)
         cache.patterns.update(bootstrap)
         cache._save_cache()
-        logger.info(f"[SQL-CACHE] Bootstrapped {len(bootstrap)} patterns for {project}")
+        logger.warning(f"[SQL-CACHE] Bootstrapped {len(bootstrap)} patterns for {project}")
     
     return cache
