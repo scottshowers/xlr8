@@ -399,7 +399,7 @@ async def delete_relationship(
 
 async def get_project_tables(project_name: str) -> List[Dict]:
     """
-    Get table schemas for a project - copies exact logic from status.py /status/structured
+    Get table schemas for a project - tries metadata first, falls back to direct DuckDB query.
     """
     import json
     
@@ -485,6 +485,62 @@ async def get_project_tables(project_name: str) -> List[Dict]:
                 
         except Exception as e:
             logger.debug(f"PDF tables query: {e}")
+        
+        # FALLBACK: If metadata returned nothing, query DuckDB directly
+        if not tables:
+            logger.warning(f"No tables from metadata - querying DuckDB directly for {project_name}")
+            try:
+                all_tables = handler.conn.execute("SHOW TABLES").fetchall()
+                
+                # Build project prefixes for matching
+                project_clean = project_name.strip()
+                project_prefixes = [
+                    project_clean.lower(),
+                    project_clean.lower().replace(' ', '_'),
+                    project_clean.lower().replace(' ', '_').replace('-', '_'),
+                ]
+                
+                for (table_name,) in all_tables:
+                    # Skip system tables
+                    if table_name.startswith('_'):
+                        continue
+                    
+                    # Check if matches project
+                    table_lower = table_name.lower()
+                    if not any(table_lower.startswith(prefix) for prefix in project_prefixes if prefix):
+                        continue
+                    
+                    # Get columns
+                    columns = []
+                    try:
+                        result = handler.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 0')
+                        columns = [desc[0] for desc in result.description]
+                    except:
+                        try:
+                            col_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
+                            columns = [row[1] for row in col_result]
+                        except:
+                            pass
+                    
+                    # Get row count
+                    try:
+                        count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
+                        row_count = count_result[0] if count_result else 0
+                    except:
+                        row_count = 0
+                    
+                    tables.append({
+                        'table_name': table_name,
+                        'columns': columns,
+                        'row_count': row_count,
+                        'sheet_name': 'Direct Query',
+                        'filename': 'DuckDB'
+                    })
+                
+                logger.info(f"Direct query found {len(tables)} tables for {project_name}")
+                
+            except Exception as direct_e:
+                logger.error(f"Direct table query failed: {direct_e}")
         
         logger.info(f"Total {len(tables)} tables for project {project_name}")
         return tables
