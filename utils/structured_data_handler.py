@@ -319,8 +319,58 @@ class StructuredDataHandler:
         self.db_path = db_path
         self.conn = duckdb.connect(db_path)
         self.encryptor = FieldEncryptor()
+        self._register_decrypt_udf()  # Register DECRYPT function for SQL queries
         self._init_metadata_table()
         logger.info(f"StructuredDataHandler initialized with {db_path}")
+    
+    def _register_decrypt_udf(self):
+        """Register DECRYPT function for use in SQL queries on encrypted data."""
+        try:
+            encryptor = self.encryptor
+            
+            def decrypt_value(val):
+                """Decrypt ENC256: prefixed values, return as-is otherwise."""
+                if val is None:
+                    return None
+                val_str = str(val)
+                if val_str.startswith('ENC256:'):
+                    try:
+                        return encryptor.decrypt(val_str)
+                    except:
+                        return None  # Return NULL if decrypt fails
+                return val_str
+            
+            def decrypt_float(val):
+                """Decrypt and cast to float for numeric comparisons."""
+                if val is None:
+                    return None
+                val_str = str(val)
+                if val_str.startswith('ENC256:'):
+                    try:
+                        decrypted = encryptor.decrypt(val_str)
+                        # Try to parse as float
+                        if decrypted:
+                            # Remove currency symbols, commas
+                            cleaned = str(decrypted).replace('$', '').replace(',', '').strip()
+                            return float(cleaned)
+                    except:
+                        return None
+                else:
+                    # Not encrypted, try direct conversion
+                    try:
+                        cleaned = val_str.replace('$', '').replace(',', '').strip()
+                        return float(cleaned)
+                    except:
+                        return None
+                return None
+            
+            # Register both functions
+            self.conn.create_function('DECRYPT', decrypt_value)
+            self.conn.create_function('DECRYPT_FLOAT', decrypt_float)
+            logger.info("[HANDLER] Registered DECRYPT and DECRYPT_FLOAT UDFs for encrypted data queries")
+            
+        except Exception as e:
+            logger.warning(f"[HANDLER] Could not register decrypt UDF: {e}")
     
     def _init_metadata_table(self):
         """Create metadata table to track schemas and versions"""
