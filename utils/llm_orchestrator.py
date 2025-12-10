@@ -561,6 +561,11 @@ SELECT"""
                 if success and response:
                     sql = response.strip()
                     
+                    # FIRST: Check if response is prose (before any modifications)
+                    if self._is_prose_not_sql(sql):
+                        logger.warning(f"[SQL-LOCAL] {model} ({prompt_type}) returned prose, skipping")
+                        continue
+                    
                     if prompt_type in ['simplified', 'fallback'] and not sql.upper().startswith('SELECT'):
                         sql = 'SELECT ' + sql
                     
@@ -585,9 +590,11 @@ SELECT"""
                             last_invalid_cols = invalid_cols
                             
                             # Keep track of best attempt (fewest invalid columns)
-                            if best_sql is None or len(invalid_cols) < len(best_invalid):
-                                best_sql = sql
-                                best_invalid = invalid_cols
+                            # But only if it's actually SQL (extra safety check)
+                            if not self._is_prose_not_sql(sql):
+                                if best_sql is None or len(invalid_cols) < len(best_invalid):
+                                    best_sql = sql
+                                    best_invalid = invalid_cols
                             continue
                     
                     logger.info(f"[SQL-LOCAL] {model} ({prompt_type}) generated valid SQL")
@@ -599,7 +606,8 @@ SELECT"""
         
         # ALL ATTEMPTS FAILED - Try auto-correction on best attempt
         if best_sql and best_invalid and schema_columns:
-            logger.warning(f"[SQL-LOCAL] Attempting auto-correction of {len(best_invalid)} invalid columns")
+            logger.warning(f"[SQL-LOCAL] Attempting auto-correction of {len(best_invalid)} invalid columns: {best_invalid}")
+            logger.info(f"[SQL-LOCAL] Best SQL preview: {best_sql[:100]}...")
             
             # Clean the SQL first before correcting
             best_sql = self._clean_sql_output(best_sql)
@@ -651,6 +659,55 @@ SELECT"""
         sql = '\n'.join(clean_lines)
         
         return sql.strip()
+    
+    def _is_prose_not_sql(self, text: str) -> bool:
+        """
+        Detect if LLM response is prose explanation instead of SQL.
+        """
+        text_lower = text.lower().strip()
+        
+        # Prose indicators - if text starts with these, it's not SQL
+        prose_starts = [
+            'to answer',
+            'to find',
+            'to get',
+            'to solve',
+            'to query',
+            'let me',
+            'i would',
+            'i will',
+            'i\'ll',
+            'we need',
+            'we can',
+            'we should',
+            'you can',
+            'you need',
+            'the query',
+            'this query',
+            'here is',
+            'here\'s',
+            'first,',
+            'based on',
+            'assuming',
+            'unfortunately',
+            'i cannot',
+            'i don\'t',
+        ]
+        
+        for starter in prose_starts:
+            if text_lower.startswith(starter):
+                return True
+        
+        # If first word is not a SQL keyword, likely prose
+        sql_starters = ['select', 'with', 'insert', 'update', 'delete', 'create', 'drop', 'alter', 'count', '*']
+        first_word = text_lower.split()[0] if text_lower.split() else ''
+        
+        if first_word and first_word not in sql_starters:
+            # Check if it looks like a column/table reference (has underscore or is short)
+            if '_' not in first_word and len(first_word) > 10:
+                return True
+        
+        return False
     
     def _auto_correct_columns(self, sql: str, invalid_cols: List[str], valid_columns: set) -> Optional[str]:
         """
