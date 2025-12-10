@@ -289,8 +289,8 @@ class IntelligenceEngine:
         return domains if domains else ['general']
     
     def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
-        """Generate SQL query based on the question - SMART schema scanning."""
-        logger.info(f"[SQL-GEN] Starting - handler: {self.structured_handler is not None}, schema: {self.schema is not None}")
+        """Generate SQL query using LOCAL LLM - same pattern as working chat.py."""
+        logger.info(f"[SQL-GEN] Starting LLM SQL generation")
         
         if not self.structured_handler:
             logger.warning("[SQL-GEN] No structured handler")
@@ -300,234 +300,129 @@ class IntelligenceEngine:
             logger.warning("[SQL-GEN] No schema")
             return None
         
-        q_lower = question.lower()
         tables = self.schema.get('tables', [])
-        
         if not tables:
-            logger.warning("[SQL-GEN] Schema has no tables")
+            logger.warning("[SQL-GEN] No tables in schema")
             return None
         
-        logger.info(f"[SQL-GEN] Scanning {len(tables)} tables: {[t.get('table_name') for t in tables[:5]]}...")
+        # Get LocalLLMClient - same as chat.py uses
+        try:
+            try:
+                from utils.hybrid_analyzer import LocalLLMClient
+            except ImportError:
+                from backend.utils.hybrid_analyzer import LocalLLMClient
+            
+            local_llm = LocalLLMClient()
+            if not local_llm.is_available():
+                logger.warning("[SQL-GEN] Local LLM not available")
+                return None
+            
+            logger.info("[SQL-GEN] Local LLM available")
+            
+        except Exception as e:
+            logger.error(f"[SQL-GEN] Could not load LocalLLMClient: {e}")
+            return None
         
-        # Detect query type
-        query_type = 'list'
-        if any(w in q_lower for w in ['how many', 'count', 'number of', 'total number']):
-            query_type = 'count'
-        elif any(w in q_lower for w in ['total', 'sum of']):
-            query_type = 'sum'
-        elif any(w in q_lower for w in ['average', 'avg', 'mean']):
-            query_type = 'average'
-        
-        # SMART: Scan ALL tables and columns to find relevant ones
-        best_table = None
-        best_score = 0
-        pt_col = None
-        rate_col = None
-        
-        # Keywords that indicate PT/FT columns (by NAME)
-        pt_name_keywords = ['fullpart', 'full_part', 'ft_pt', 'ptft', 'part_time', 'parttime', 
-                           'emp_type', 'employee_type', 'work_status', 'schedule_type', 'fte',
-                           'employment_type', 'emp_status', 'work_type', 'status_type']
-        
-        # Keywords that indicate rate/pay columns (by NAME)
-        rate_name_keywords = ['hourly', 'hour_rate', 'hrly', 'pay_rate', 'rate', 'wage', 
-                             'salary', 'compensation', 'annual', 'pay', 'amount', 'per_hour']
-        
-        for table in tables:
+        # Build schema description - same as chat.py
+        tables_info = []
+        for table in tables[:10]:
             table_name = table.get('table_name', '')
             columns = table.get('columns', [])
-            
-            # Get column names
-            col_names = []
-            for c in columns:
-                if isinstance(c, str):
-                    col_names.append(c)
-                elif isinstance(c, dict):
-                    col_names.append(c.get('name', ''))
-            
-            logger.debug(f"[SQL-GEN] Table {table_name} columns: {col_names[:10]}...")
-            
-            # Score this table
-            table_score = 0
-            found_pt = None
-            found_rate = None
-            
-            for col in col_names:
-                col_lower = col.lower()
-                
-                # Check for PT/FT column by name
-                for kw in pt_name_keywords:
-                    if kw in col_lower:
-                        found_pt = col
-                        table_score += 10
-                        logger.info(f"[SQL-GEN] Found PT column by name: {col}")
-                        break
-                
-                # Check for rate/pay column by name
-                for kw in rate_name_keywords:
-                    if kw in col_lower and 'date' not in col_lower and 'code' not in col_lower:
-                        found_rate = col
-                        table_score += 10
-                        logger.info(f"[SQL-GEN] Found rate column by name: {col}")
-                        break
-                
-                # Bonus for employee-related tables
-                if any(x in table_name.lower() for x in ['employee', 'personal', 'worker', 'staff', 'demographic']):
-                    table_score += 5
-            
-            if table_score > best_score:
-                best_score = table_score
-                best_table = table_name
-                pt_col = found_pt
-                rate_col = found_rate
-        
-        # SMART FALLBACK: If we didn't find PT/FT column by name, search by VALUES
-        if not pt_col and best_table:
-            logger.info(f"[SQL-GEN] No PT column by name - searching by values in {best_table}")
-            pt_col = self._find_column_by_values(best_table, ['P', 'F', 'PT', 'FT', 'Part', 'Full', 'Part-Time', 'Full-Time'])
-            if pt_col:
-                logger.info(f"[SQL-GEN] Found PT column by values: {pt_col}")
-        
-        # SMART FALLBACK: If we didn't find rate column by name, search for numeric columns
-        if not rate_col and best_table:
-            logger.info(f"[SQL-GEN] No rate column by name - searching for numeric columns in {best_table}")
-            rate_col = self._find_numeric_column(best_table, ['rate', 'hourly', 'pay', 'wage', 'salary', 'amount'])
-            if rate_col:
-                logger.info(f"[SQL-GEN] Found rate column: {rate_col}")
-        
-        if not best_table:
-            logger.warning("[SQL-GEN] Could not find suitable table")
-            return None
-        
-        logger.info(f"[SQL-GEN] Best table: {best_table} (score: {best_score})")
-        logger.info(f"[SQL-GEN] PT column: {pt_col}, Rate column: {rate_col}")
-        
-        # Build WHERE conditions
-        where_conditions = []
-        
-        # PT/FT filter
-        if 'pt' in q_lower or 'part-time' in q_lower or 'part time' in q_lower:
-            if pt_col:
-                where_conditions.append(f'LOWER(CAST("{pt_col}" AS VARCHAR)) IN (\'p\', \'pt\', \'part-time\', \'part time\', \'parttime\', \'part\')')
+            if columns and isinstance(columns[0], dict):
+                col_names = [c.get('name', str(c)) for c in columns]
             else:
-                logger.warning("[SQL-GEN] No PT/FT column found for filtering")
-        elif 'ft' in q_lower or 'full-time' in q_lower or 'full time' in q_lower:
-            if pt_col:
-                where_conditions.append(f'LOWER(CAST("{pt_col}" AS VARCHAR)) IN (\'f\', \'ft\', \'full-time\', \'full time\', \'fulltime\', \'full\')')
+                col_names = [str(c) for c in columns] if columns else []
+            row_count = table.get('row_count', 0)
+            
+            # Get sample values to help LLM understand the data
+            sample_str = ""
+            try:
+                rows, cols = self.structured_handler.execute_query(f'SELECT * FROM "{table_name}" LIMIT 3')
+                if rows and cols:
+                    samples = []
+                    for i, col in enumerate(cols[:10]):
+                        vals = set(str(row[i])[:30] for row in rows if row[i] is not None)
+                        if vals:
+                            samples.append(f"    {col}: {', '.join(list(vals)[:3])}")
+                    sample_str = "\n  Sample values:\n" + "\n".join(samples) if samples else ""
+            except:
+                pass
+            
+            tables_info.append(f"Table: {table_name}\n  Columns: {', '.join(col_names[:20])}\n  Rows: {row_count}{sample_str}")
         
-        # Numeric conditions (more than, less than)
-        money_match = re.search(r'(?:more than|over|greater than|above|>|make\s+|makes\s+)\s*\$?(\d+(?:\.\d+)?)', q_lower)
-        if money_match and rate_col:
-            amount = money_match.group(1)
-            where_conditions.append(f'TRY_CAST("{rate_col}" AS DOUBLE) > {amount}')
-            logger.info(f"[SQL-GEN] Adding rate filter: > {amount}")
+        schema_text = '\n\n'.join(tables_info)
+        logger.info(f"[SQL-GEN] Built schema with {len(tables_info)} tables")
         
-        money_match_less = re.search(r'(?:less than|under|below|<)\s*\$?(\d+(?:\.\d+)?)', q_lower)
-        if money_match_less and rate_col:
-            amount = money_match_less.group(1)
-            where_conditions.append(f'TRY_CAST("{rate_col}" AS DOUBLE) < {amount}')
+        # Build prompt - same pattern as chat.py
+        prompt = f"""Generate a SQL query for DuckDB to answer this question.
+
+SCHEMA:
+{schema_text}
+
+QUESTION: {question}
+
+RULES:
+1. Return ONLY the SQL query, nothing else
+2. Use exact table and column names from schema
+3. Use ILIKE for case-insensitive text matching
+4. LIMIT 1000 unless counting
+5. For "how many" use COUNT(*)
+6. Wrap table/column names in double quotes
+7. Look at the sample values to understand what data looks like
+8. For part-time employees, look for values like 'P', 'PT', 'Part-Time'
+9. For numeric comparisons, use TRY_CAST(column AS DOUBLE)
+
+SQL:"""
         
-        # Build SQL
-        where_clause = ' AND '.join(where_conditions) if where_conditions else '1=1'
-        
-        if query_type == 'count':
-            sql = f'SELECT COUNT(*) as count FROM "{best_table}" WHERE {where_clause}'
-        elif query_type == 'sum' and rate_col:
-            sql = f'SELECT SUM(TRY_CAST("{rate_col}" AS DOUBLE)) as total FROM "{best_table}" WHERE {where_clause}'
-        elif query_type == 'average' and rate_col:
-            sql = f'SELECT AVG(TRY_CAST("{rate_col}" AS DOUBLE)) as average FROM "{best_table}" WHERE {where_clause}'
-        else:
-            sql = f'SELECT * FROM "{best_table}" WHERE {where_clause} LIMIT 100'
-        
-        logger.info(f"[SQL-GEN] Generated SQL: {sql}")
-        
-        return {
-            'sql': sql,
-            'table': best_table,
-            'columns': [c for c in [pt_col, rate_col] if c],
-            'query_type': query_type,
-            'conditions': where_conditions
-        }
-    
-    def _find_column_by_values(self, table_name: str, search_values: List[str]) -> Optional[str]:
-        """Find a column that contains specific values (e.g., 'P', 'F' for PT/FT)."""
-        if not self.structured_handler:
-            return None
-        
+        # Call LLM - same as chat.py
         try:
-            # Get sample data
-            rows, cols = self.structured_handler.execute_query(f'SELECT * FROM "{table_name}" LIMIT 100')
-            if not rows or not cols:
-                return None
+            result, success = local_llm.extract("", prompt)
             
-            search_values_lower = [v.lower() for v in search_values]
-            
-            # Check each column for matching values
-            for i, col in enumerate(cols):
-                col_values = set()
-                for row in rows:
-                    if row[i] is not None:
-                        col_values.add(str(row[i]).strip().lower())
+            if success and result:
+                sql = result.strip()
                 
-                # Check if any search values are in this column
-                matches = col_values.intersection(search_values_lower)
-                if matches:
-                    logger.info(f"[SQL-GEN] Column '{col}' contains values: {matches}")
-                    return col
-            
+                # Clean up response
+                if sql.startswith('```'):
+                    sql = sql.split('```')[1]
+                    if sql.startswith('sql'):
+                        sql = sql[3:]
+                sql = sql.strip().rstrip(';')
+                
+                if sql.upper().startswith('SELECT'):
+                    logger.info(f"[SQL-GEN] Generated: {sql}")
+                    
+                    # Detect query type
+                    sql_upper = sql.upper()
+                    if 'COUNT(*)' in sql_upper or 'COUNT(' in sql_upper:
+                        query_type = 'count'
+                    elif 'SUM(' in sql_upper:
+                        query_type = 'sum'
+                    elif 'AVG(' in sql_upper:
+                        query_type = 'average'
+                    else:
+                        query_type = 'list'
+                    
+                    # Extract table name
+                    table_match = re.search(r'FROM\s+"?([^"\s]+)"?', sql, re.IGNORECASE)
+                    table_name = table_match.group(1) if table_match else 'unknown'
+                    
+                    return {
+                        'sql': sql,
+                        'table': table_name,
+                        'columns': [],
+                        'query_type': query_type,
+                        'conditions': [],
+                        'llm_generated': True
+                    }
+                else:
+                    logger.warning(f"[SQL-GEN] LLM returned non-SQL: {sql[:100]}")
+            else:
+                logger.warning(f"[SQL-GEN] LLM extraction failed")
+                
         except Exception as e:
-            logger.warning(f"[SQL-GEN] Error searching column values: {e}")
-        
-        return None
-    
-    def _find_numeric_column(self, table_name: str, name_hints: List[str]) -> Optional[str]:
-        """Find a numeric column that might be a rate/pay field."""
-        if not self.structured_handler:
-            return None
-        
-        try:
-            # Get sample data
-            rows, cols = self.structured_handler.execute_query(f'SELECT * FROM "{table_name}" LIMIT 100')
-            if not rows or not cols:
-                return None
-            
-            # Look for numeric columns with values in reasonable pay range (0-500)
-            for i, col in enumerate(cols):
-                col_lower = col.lower()
-                
-                # Skip obviously non-pay columns
-                if any(x in col_lower for x in ['date', 'id', 'code', 'number', 'num', 'phone', 'zip', 'ssn']):
-                    continue
-                
-                # Prefer columns with name hints
-                has_hint = any(hint in col_lower for hint in name_hints)
-                
-                # Check if values are numeric and in reasonable range
-                numeric_count = 0
-                in_range_count = 0
-                for row in rows:
-                    val = row[i]
-                    if val is not None:
-                        try:
-                            num_val = float(str(val).replace('$', '').replace(',', ''))
-                            numeric_count += 1
-                            if 0 < num_val < 500:  # Reasonable hourly rate range
-                                in_range_count += 1
-                        except:
-                            pass
-                
-                # If mostly numeric and in range, this might be our column
-                if numeric_count > len(rows) * 0.5 and in_range_count > len(rows) * 0.3:
-                    if has_hint:
-                        logger.info(f"[SQL-GEN] Found numeric column with hint: {col}")
-                        return col
-                    elif not has_hint and numeric_count > len(rows) * 0.8:
-                        # Only use non-hinted columns if very clearly numeric
-                        logger.info(f"[SQL-GEN] Found numeric column without hint: {col}")
-                        return col
-            
-        except Exception as e:
-            logger.warning(f"[SQL-GEN] Error finding numeric column: {e}")
+            logger.error(f"[SQL-GEN] LLM call failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
         
         return None
     
