@@ -735,13 +735,19 @@ RULES:
             from utils.sql_pattern_cache import get_sql_pattern_cache, initialize_patterns
             if hasattr(self, 'project') and self.project:
                 pattern_cache = initialize_patterns(self.project, self.schema)
+                logger.warning(f"[SQL-CACHE] Initialized for {self.project}, patterns: {len(pattern_cache.patterns) if pattern_cache else 0}")
         except ImportError:
             try:
                 from backend.utils.sql_pattern_cache import get_sql_pattern_cache, initialize_patterns
                 if hasattr(self, 'project') and self.project:
                     pattern_cache = initialize_patterns(self.project, self.schema)
+                    logger.warning(f"[SQL-CACHE] Initialized for {self.project}, patterns: {len(pattern_cache.patterns) if pattern_cache else 0}")
             except ImportError:
                 logger.debug("[REALITY] SQL pattern cache not available")
+            except Exception as e:
+                logger.warning(f"[SQL-CACHE] Failed to initialize (inner): {e}")
+        except Exception as e:
+            logger.warning(f"[SQL-CACHE] Failed to initialize: {e}")
         
         try:
             sql = None
