@@ -328,7 +328,7 @@ class StructuredDataHandler:
         try:
             encryptor = self.encryptor
             
-            def decrypt_value(val):
+            def decrypt_value(val: str) -> str:
                 """Decrypt ENC256: prefixed values, return as-is otherwise."""
                 if val is None:
                     return None
@@ -340,7 +340,7 @@ class StructuredDataHandler:
                         return None  # Return NULL if decrypt fails
                 return val_str
             
-            def decrypt_float(val):
+            def decrypt_float(val: str) -> float:
                 """Decrypt and cast to float for numeric comparisons."""
                 if val is None:
                     return None
@@ -364,9 +364,9 @@ class StructuredDataHandler:
                         return None
                 return None
             
-            # Register both functions
-            self.conn.create_function('DECRYPT', decrypt_value)
-            self.conn.create_function('DECRYPT_FLOAT', decrypt_float)
+            # Register using keyword arguments for compatibility
+            self.conn.create_function('DECRYPT', decrypt_value, parameters=['VARCHAR'], return_type='VARCHAR')
+            self.conn.create_function('DECRYPT_FLOAT', decrypt_float, parameters=['VARCHAR'], return_type='DOUBLE')
             logger.info("[HANDLER] Registered DECRYPT and DECRYPT_FLOAT UDFs for encrypted data queries")
             
         except Exception as e:
