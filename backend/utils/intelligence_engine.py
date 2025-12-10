@@ -356,6 +356,24 @@ class IntelligenceEngine:
         schema_text = '\n\n'.join(tables_info)
         logger.info(f"[SQL-GEN] Built schema with {len(tables_info)} tables")
         
+        # Log what we're sending so we can debug
+        if tables_info:
+            logger.info(f"[SQL-GEN] First table preview: {tables_info[0][:200]}...")
+        else:
+            logger.warning(f"[SQL-GEN] NO TABLES IN SCHEMA - LLM has nothing to work with!")
+        
+        # Build relationships text so LLM knows how to JOIN tables
+        relationships_text = ""
+        if self.relationships:
+            rel_lines = []
+            for rel in self.relationships[:20]:  # Limit to avoid token overflow
+                src = f"{rel.get('source_table')}.{rel.get('source_column')}"
+                tgt = f"{rel.get('target_table')}.{rel.get('target_column')}"
+                rel_lines.append(f"  {src} → {tgt}")
+            if rel_lines:
+                relationships_text = "\n\nRELATIONSHIPS (use these to JOIN tables):\n" + "\n".join(rel_lines)
+                logger.info(f"[SQL-GEN] Including {len(rel_lines)} relationships for JOINs")
+        
         # Build conversation context if available (for follow-up questions)
         context_str = ""
         if hasattr(self, 'conversation_context') and self.conversation_context:
@@ -375,11 +393,11 @@ If asked to "list" or "show" items from a previous count, modify the previous SQ
 """
                 logger.info(f"[SQL-GEN] Including conversation context from previous question")
         
-        # Build prompt - same pattern as chat.py
+        # Build prompt - let LLM reason from schema + samples + relationships
         prompt = f"""Generate a SQL query for DuckDB to answer this question.
 {context_str}
-SCHEMA:
-{schema_text}
+SCHEMA (with sample values to help you understand the data):
+{schema_text}{relationships_text}
 
 QUESTION: {question}
 
@@ -390,10 +408,10 @@ RULES:
 4. LIMIT 1000 unless counting
 5. For "how many" use COUNT(*)
 6. Wrap table/column names in double quotes
-7. Look at the sample values to understand what data looks like
-8. For part-time employees, look for values like 'P', 'PT', 'Part-Time'
+7. Look at the sample values to understand what values exist in each column
+8. If data needed is in multiple tables, use JOIN with the relationships provided
 9. For numeric comparisons, use TRY_CAST(column AS DOUBLE)
-10. If this is a follow-up to a previous question, use the same table and conditions
+10. If previous SQL is provided, use the same table/conditions for follow-up questions
 
 SQL:"""
         
