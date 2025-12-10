@@ -438,17 +438,18 @@ SCHEMA (with sample values to help you understand the data):
 
 QUESTION: {question}
 
-RULES:
+CRITICAL RULES:
 1. Return ONLY the SQL query, nothing else
-2. Use exact table and column names from schema
-3. Use ILIKE for case-insensitive text matching
-4. LIMIT 1000 unless counting
-5. For "how many" use COUNT(*)
-6. Wrap table/column names in double quotes
-7. Look at the sample values to understand what values exist in each column
-8. If data needed is in multiple tables, use JOIN with the relationships provided
-9. For numeric comparisons, use TRY_CAST(column AS DOUBLE)
-10. If previous SQL is provided, use the same table/conditions for follow-up questions
+2. You MUST ONLY use table names and column names that appear EXACTLY in the schema above
+3. NEVER guess or invent column names - if a column isn't listed above, it doesn't exist
+4. Read the column names carefully - use the EXACT spelling from the schema
+5. Use ILIKE for case-insensitive text matching
+6. LIMIT 1000 unless counting
+7. For "how many" use COUNT(*)
+8. Wrap table/column names in double quotes
+9. If data is in multiple tables, use JOIN with the relationships provided
+10. For numeric comparisons, use TRY_CAST(column AS DOUBLE)
+11. If previous SQL is provided, use the same tables/conditions for follow-up questions
 
 SQL:"""
         
