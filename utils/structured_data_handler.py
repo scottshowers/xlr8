@@ -321,56 +321,91 @@ class StructuredDataHandler:
         self.encryptor = FieldEncryptor()
         self._register_decrypt_udf()  # Register DECRYPT function for SQL queries
         self._init_metadata_table()
-        logger.info(f"StructuredDataHandler initialized with {db_path}")
+        logger.warning(f"[HANDLER] StructuredDataHandler initialized with {db_path}")
     
     def _register_decrypt_udf(self):
         """Register DECRYPT function for use in SQL queries on encrypted data."""
-        try:
-            encryptor = self.encryptor
-            
-            def decrypt_value(val: str) -> str:
-                """Decrypt ENC256: prefixed values, return as-is otherwise."""
-                if val is None:
-                    return None
-                val_str = str(val)
-                if val_str.startswith('ENC256:'):
-                    try:
-                        return encryptor.decrypt(val_str)
-                    except:
-                        return None  # Return NULL if decrypt fails
-                return val_str
-            
-            def decrypt_float(val: str) -> float:
-                """Decrypt and cast to float for numeric comparisons."""
-                if val is None:
-                    return None
-                val_str = str(val)
-                if val_str.startswith('ENC256:'):
-                    try:
-                        decrypted = encryptor.decrypt(val_str)
-                        # Try to parse as float
-                        if decrypted:
-                            # Remove currency symbols, commas
-                            cleaned = str(decrypted).replace('$', '').replace(',', '').strip()
-                            return float(cleaned)
-                    except:
-                        return None
-                else:
-                    # Not encrypted, try direct conversion
-                    try:
-                        cleaned = val_str.replace('$', '').replace(',', '').strip()
-                        return float(cleaned)
-                    except:
-                        return None
+        encryptor = self.encryptor
+        
+        def decrypt_value(val: str) -> str:
+            """Decrypt ENC256: prefixed values, return as-is otherwise."""
+            if val is None:
                 return None
-            
-            # Register using keyword arguments for compatibility
-            self.conn.create_function('DECRYPT', decrypt_value, parameters=['VARCHAR'], return_type='VARCHAR')
-            self.conn.create_function('DECRYPT_FLOAT', decrypt_float, parameters=['VARCHAR'], return_type='DOUBLE')
-            logger.info("[HANDLER] Registered DECRYPT and DECRYPT_FLOAT UDFs for encrypted data queries")
-            
-        except Exception as e:
-            logger.warning(f"[HANDLER] Could not register decrypt UDF: {e}")
+            val_str = str(val)
+            if val_str.startswith('ENC256:'):
+                try:
+                    return encryptor.decrypt(val_str)
+                except:
+                    return None
+            return val_str
+        
+        def decrypt_float(val: str) -> float:
+            """Decrypt and cast to float for numeric comparisons."""
+            if val is None:
+                return None
+            val_str = str(val)
+            if val_str.startswith('ENC256:'):
+                try:
+                    decrypted = encryptor.decrypt(val_str)
+                    if decrypted:
+                        cleaned = str(decrypted).replace('$', '').replace(',', '').strip()
+                        return float(cleaned)
+                except:
+                    return None
+            else:
+                try:
+                    cleaned = val_str.replace('$', '').replace(',', '').strip()
+                    return float(cleaned)
+                except:
+                    return None
+            return None
+        
+        # Try multiple syntaxes until one works
+        registered = False
+        
+        # Syntax 1: List types as strings
+        if not registered:
+            try:
+                self.conn.create_function('DECRYPT', decrypt_value, ['VARCHAR'], 'VARCHAR')
+                self.conn.create_function('DECRYPT_FLOAT', decrypt_float, ['VARCHAR'], 'DOUBLE')
+                logger.warning("[HANDLER] UDF registered with syntax 1: ['VARCHAR'], 'VARCHAR'")
+                registered = True
+            except Exception as e:
+                logger.warning(f"[HANDLER] Syntax 1 failed: {e}")
+        
+        # Syntax 2: Python types
+        if not registered:
+            try:
+                self.conn.create_function('DECRYPT', decrypt_value, [str], str)
+                self.conn.create_function('DECRYPT_FLOAT', decrypt_float, [str], float)
+                logger.warning("[HANDLER] UDF registered with syntax 2: [str], str")
+                registered = True
+            except Exception as e:
+                logger.warning(f"[HANDLER] Syntax 2 failed: {e}")
+        
+        # Syntax 3: duckdb.typing module
+        if not registered:
+            try:
+                import duckdb.typing as dt
+                self.conn.create_function('DECRYPT', decrypt_value, [dt.VARCHAR], dt.VARCHAR)
+                self.conn.create_function('DECRYPT_FLOAT', decrypt_float, [dt.VARCHAR], dt.DOUBLE)
+                logger.warning("[HANDLER] UDF registered with syntax 3: duckdb.typing")
+                registered = True
+            except Exception as e:
+                logger.warning(f"[HANDLER] Syntax 3 failed: {e}")
+        
+        # Syntax 4: No type hints, let it infer from annotations
+        if not registered:
+            try:
+                self.conn.create_function('DECRYPT', decrypt_value)
+                self.conn.create_function('DECRYPT_FLOAT', decrypt_float)
+                logger.warning("[HANDLER] UDF registered with syntax 4: type annotations only")
+                registered = True
+            except Exception as e:
+                logger.warning(f"[HANDLER] Syntax 4 failed: {e}")
+        
+        if not registered:
+            logger.error("[HANDLER] All UDF registration attempts failed")
     
     def _init_metadata_table(self):
         """Create metadata table to track schemas and versions"""
