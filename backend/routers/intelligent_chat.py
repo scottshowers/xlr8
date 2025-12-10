@@ -126,10 +126,25 @@ async def intelligent_chat(request: IntelligentChatRequest):
                 "insights": [],
             }
         
-        # ALWAYS create fresh engine - don't cache broken state
-        engine = IntelligenceEngine(project or 'default')
+        # Get or create session - KEEP conversation context
+        if session_id in intelligence_sessions:
+            session = intelligence_sessions[session_id]
+            engine = session.get('engine')
+            last_sql = session.get('last_sql')
+            last_result = session.get('last_result')
+            last_question = session.get('last_question')
+            logger.info(f"[INTELLIGENT] Resuming session, last_sql: {last_sql[:50] if last_sql else 'None'}...")
+        else:
+            engine = None
+            last_sql = None
+            last_result = None
+            last_question = None
         
-        # Load structured data handler - REQUIRED for SQL generation
+        # Create fresh engine if needed (but keep session data)
+        if not engine:
+            engine = IntelligenceEngine(project or 'default')
+        
+        # ALWAYS refresh schema/handler (don't use stale connections)
         structured_loaded = False
         try:
             from utils.structured_data_handler import get_structured_handler
@@ -149,6 +164,14 @@ async def intelligent_chat(request: IntelligentChatRequest):
             logger.error(f"[INTELLIGENT] Structured handler failed: {e}")
             import traceback
             logger.error(traceback.format_exc())
+        
+        # Pass conversation context to engine
+        if last_sql or last_result or last_question:
+            engine.conversation_context = {
+                'last_sql': last_sql,
+                'last_result': last_result,
+                'last_question': last_question
+            }
         
         # Load RAG handler
         try:
@@ -327,6 +350,22 @@ async def intelligent_chat(request: IntelligentChatRequest):
                     )
                 except Exception as e:
                     logger.warning(f"[LEARNING] Failed to record query: {e}")
+        
+        # SAVE SESSION - preserve context for follow-up questions
+        # Prefer executed_sql from engine, fall back to learned_sql
+        actual_sql = getattr(answer, 'executed_sql', None) or learned_sql
+        intelligence_sessions[session_id] = {
+            'engine': engine,
+            'last_sql': actual_sql,
+            'last_result': response["answer"][:1000] if response.get("answer") else None,
+            'last_question': message
+        }
+        logger.info(f"[INTELLIGENT] Saved session {session_id}, sql: {actual_sql[:50] if actual_sql else 'None'}...")
+        
+        # Cleanup old sessions (keep last 100)
+        if len(intelligence_sessions) > 100:
+            oldest = list(intelligence_sessions.keys())[0]
+            del intelligence_sessions[oldest]
         
         return response
         
