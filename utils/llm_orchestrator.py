@@ -614,32 +614,55 @@ SELECT"""
     def _auto_correct_columns(self, sql: str, invalid_cols: List[str], valid_columns: set) -> Optional[str]:
         """
         Try to fix invalid columns by fuzzy matching to valid ones.
-        
-        Common patterns:
-        - hourly_rate → hourly_pay_rate
-        - employee_id → employee_number
-        - id → employee_number (in employee context)
         """
         from difflib import SequenceMatcher
         
         corrected_sql = sql
         valid_lower = {c.lower(): c for c in valid_columns}
         
-        for invalid in invalid_cols:
+        # Common column name mappings (LLM hallucinations → actual columns)
+        known_fixes = {
+            'hourly_rate': 'hourly_pay_rate',
+            'hourly': 'hourly_pay_rate', 
+            'rate': 'hourly_pay_rate',
+            'employee_id': 'employee_number',
+            'emp_id': 'employee_number',
+            'id': 'employee_number',
+            'employment_status': 'fullpart_time_code',
+            'status': 'employment_status_code',
+            'pt_ft': 'fullpart_time_code',
+        }
+        
+        for invalid in set(invalid_cols):  # dedupe
             invalid_lower = invalid.lower()
             
-            # Skip common SQL keywords that slipped through
-            if invalid_lower in ['id', 'code', 'db', 'com']:
+            # Skip very short or common SQL noise
+            if len(invalid_lower) < 3 or invalid_lower in ['db', 'com', 'id', 'code', 'the', 'and', 'for']:
                 continue
             
-            # Find best fuzzy match
+            # Check known fixes first
+            if invalid_lower in known_fixes:
+                target = known_fixes[invalid_lower]
+                if target.lower() in valid_lower:
+                    best_match = valid_lower[target.lower()]
+                    logger.info(f"[SQL-AUTO] Known fix: '{invalid}' → '{best_match}'")
+                    corrected_sql = re.sub(
+                        r'\.\"?' + re.escape(invalid) + r'\"?',
+                        f'."{best_match}"',
+                        corrected_sql,
+                        flags=re.IGNORECASE
+                    )
+                    continue
+            
+            # Fuzzy match
             best_match = None
-            best_score = 0.5  # Minimum threshold
+            best_score = 0.6  # Higher threshold
             
             for valid_col in valid_lower.keys():
-                # Exact substring match (e.g., 'hourly' in 'hourly_pay_rate')
-                if invalid_lower in valid_col or valid_col in invalid_lower:
-                    score = 0.8
+                if invalid_lower in valid_col:
+                    score = 0.85
+                elif valid_col in invalid_lower:
+                    score = 0.75
                 else:
                     score = SequenceMatcher(None, invalid_lower, valid_col).ratio()
                 
@@ -648,15 +671,17 @@ SELECT"""
                     best_match = valid_lower[valid_col]
             
             if best_match:
-                logger.info(f"[SQL-AUTO] Correcting '{invalid}' → '{best_match}' (score: {best_score:.2f})")
-                # Replace in SQL (case-insensitive)
-                import re
+                logger.info(f"[SQL-AUTO] Fuzzy fix: '{invalid}' → '{best_match}' (score: {best_score:.2f})")
                 corrected_sql = re.sub(
-                    r'\b' + re.escape(invalid) + r'\b',
-                    best_match,
+                    r'\.\"?' + re.escape(invalid) + r'\"?',
+                    f'."{best_match}"',
                     corrected_sql,
                     flags=re.IGNORECASE
                 )
+        
+        # Clean up any remaining "column1 column2" patterns (two words that should be one)
+        # Pattern: word followed by space and another word after a dot
+        corrected_sql = re.sub(r'\"(\w+)\s+(\w+)\"', r'"\1_\2"', corrected_sql)
         
         return corrected_sql if corrected_sql != sql else None
     
@@ -670,16 +695,25 @@ SELECT"""
         # Normalize schema columns to lowercase
         valid_cols = {c.lower() for c in schema_columns}
         
-        # Add common SQL keywords that look like columns
-        valid_cols.update(['count', 'sum', 'avg', 'min', 'max', 'as', 'and', 'or', 'not', 'null', 'true', 'false'])
+        # Add common SQL keywords and functions
+        valid_cols.update([
+            'count', 'sum', 'avg', 'min', 'max', 'as', 'and', 'or', 'not', 
+            'null', 'true', 'false', 'on', 'where', 'from', 'join', 'select',
+            'try_cast', 'double', 'integer', 'varchar', 'ilike', 'like'
+        ])
         
-        # Extract column references (after dots or in column positions)
-        # Pattern: table.column or just column in select/where
-        dot_cols = re.findall(r'\.\"?([a-z_][a-z0-9_]*)\"?', sql.lower())
+        # Extract column references after dots: table.column or table."column"
+        dot_cols = re.findall(r'\.\"?([a-z][a-z0-9_]*)\"?', sql.lower())
         
         invalid = []
         for col in dot_cols:
+            # Skip if it looks like a table name part (has double underscore pattern)
+            if '__' in col:
+                continue
+            # Skip very short (likely parsing artifacts)
+            if len(col) < 3:
+                continue
             if col not in valid_cols:
                 invalid.append(col)
         
-        return invalid
+        return list(set(invalid))  # dedupe
