@@ -65,6 +65,7 @@ class SynthesizedAnswer:
     insights: List[Insight] = field(default_factory=list)
     structured_output: Optional[Dict] = None
     reasoning: List[str] = field(default_factory=list)
+    executed_sql: Optional[str] = None  # SQL that was generated and executed
 
 
 class IntelligenceMode(Enum):
@@ -133,6 +134,8 @@ class IntelligenceEngine:
         self.conversation_history = []
         self.confirmed_facts = {}
         self.pending_questions = []
+        self.conversation_context = {}  # For follow-up questions
+        self.last_executed_sql = None  # Track last SQL for session context
     
     def load_context(
         self, 
@@ -353,9 +356,28 @@ class IntelligenceEngine:
         schema_text = '\n\n'.join(tables_info)
         logger.info(f"[SQL-GEN] Built schema with {len(tables_info)} tables")
         
+        # Build conversation context if available (for follow-up questions)
+        context_str = ""
+        if hasattr(self, 'conversation_context') and self.conversation_context:
+            last_q = self.conversation_context.get('last_question', '')
+            last_sql = self.conversation_context.get('last_sql', '')
+            last_result = self.conversation_context.get('last_result', '')
+            
+            if last_q or last_sql:
+                context_str = f"""
+PREVIOUS CONVERSATION:
+Previous question: {last_q}
+Previous SQL used: {last_sql}
+Previous result summary: {last_result[:500] if last_result else 'No result'}
+
+IMPORTANT: If this question references "the X" or "those" or "them", it refers to the previous query results.
+If asked to "list" or "show" items from a previous count, modify the previous SQL to SELECT * instead of COUNT(*).
+"""
+                logger.info(f"[SQL-GEN] Including conversation context from previous question")
+        
         # Build prompt - same pattern as chat.py
         prompt = f"""Generate a SQL query for DuckDB to answer this question.
-
+{context_str}
 SCHEMA:
 {schema_text}
 
@@ -371,6 +393,7 @@ RULES:
 7. Look at the sample values to understand what data looks like
 8. For part-time employees, look for values like 'P', 'PT', 'Part-Time'
 9. For numeric comparisons, use TRY_CAST(column AS DOUBLE)
+10. If this is a follow-up to a previous question, use the same table and conditions
 
 SQL:"""
         
@@ -519,6 +542,9 @@ SQL:"""
                     sql = sql_info['sql']
                     logger.info(f"[INTELLIGENCE] Generated SQL: {sql}")
                     rows, cols = self.structured_handler.execute_query(sql)
+                    
+                    # Store the SQL for session context
+                    self.last_executed_sql = sql
                     
                     if rows:
                         truths.append(Truth(
@@ -824,5 +850,6 @@ SQL:"""
             conflicts=conflicts,
             insights=insights,
             structured_output=None,
-            reasoning=reasoning
+            reasoning=reasoning,
+            executed_sql=self.last_executed_sql
         )
