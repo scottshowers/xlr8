@@ -357,14 +357,23 @@ class IntelligenceEngine:
         schema_text = '\n\n'.join(tables_info)
         logger.warning(f"[SQL-GEN] Built schema with {len(tables_info)} tables (of {len(tables)} total)")
         
-        # Log which tables have key columns for debugging
+        # Log which tables have key columns and what those columns are called
         for t in tables:
-            cols_lower = [str(c).lower() for c in t.get('columns', [])]
-            col_str = ', '.join(cols_lower[:5])
-            if any('part' in c or 'full' in c or 'pt' in c or 'ft' in c for c in cols_lower):
-                logger.warning(f"[SQL-GEN] Table with PT/FT column: {t.get('table_name')}")
-            if any('rate' in c or 'hour' in c or 'pay' in c for c in cols_lower):
-                logger.warning(f"[SQL-GEN] Table with rate column: {t.get('table_name')}")
+            tname = t.get('table_name', '')
+            cols = t.get('columns', [])
+            cols_lower = [str(c).lower() for c in cols]
+            
+            # Find PT/FT columns
+            ptft_cols = [c for c, cl in zip(cols, cols_lower) if any(x in cl for x in ['part', 'full', 'status', 'emp_type', 'employee_type', 'ft', 'pt'])]
+            if ptft_cols and 'personal' in tname.lower():
+                logger.warning(f"[SQL-GEN] PERSONAL TABLE: {tname}")
+                logger.warning(f"[SQL-GEN] PERSONAL COLUMNS: {cols[:20]}")
+            
+            # Find rate columns  
+            rate_cols = [c for c, cl in zip(cols, cols_lower) if any(x in cl for x in ['rate', 'hour', 'pay', 'wage', 'salary'])]
+            if rate_cols and 'company' in tname.lower() and 'master' not in tname.lower():
+                logger.warning(f"[SQL-GEN] COMPANY TABLE: {tname}")
+                logger.warning(f"[SQL-GEN] COMPANY COLUMNS: {cols[:20]}")
         
         # Log what we're sending so we can debug
         if tables_info:
@@ -382,6 +391,11 @@ class IntelligenceEngine:
                 src = f"{rel.get('source_table')}.{rel.get('source_column')}"
                 tgt = f"{rel.get('target_table')}.{rel.get('target_column')}"
                 rel_lines.append(f"  {src} → {tgt}")
+                # Log key relationships
+                if 'personal' in rel.get('source_table', '').lower() and 'company' in rel.get('target_table', '').lower():
+                    logger.warning(f"[SQL-GEN] KEY RELATIONSHIP: {src} → {tgt}")
+                if 'company' in rel.get('source_table', '').lower() and 'personal' in rel.get('target_table', '').lower():
+                    logger.warning(f"[SQL-GEN] KEY RELATIONSHIP: {src} → {tgt}")
             if rel_lines:
                 relationships_text = "\n\nRELATIONSHIPS (use these to JOIN tables):\n" + "\n".join(rel_lines)
                 logger.warning(f"[SQL-GEN] Including {len(rel_lines)} relationships for JOINs")
