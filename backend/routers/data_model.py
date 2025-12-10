@@ -255,11 +255,24 @@ async def get_relationships(project_name: str):
         high_conf = sum(1 for r in relationships if r.get('confirmed') or not r.get('needs_review'))
         needs_review = sum(1 for r in relationships if r.get('needs_review') and not r.get('confirmed'))
         
+        # Get table/column stats from DuckDB directly
+        tables_count = 0
+        columns_count = 0
+        try:
+            tables = await get_project_tables(project_name)
+            tables_count = len(tables)
+            columns_count = sum(len(t.get('columns', [])) for t in tables)
+            logger.info(f"Stats for {project_name}: {tables_count} tables, {columns_count} columns")
+        except Exception as stats_e:
+            logger.warning(f"Could not get table stats: {stats_e}")
+        
         return {
             "project": project_name,
             "relationships": relationships,
             "semantic_types": semantic_types,
             "stats": {
+                "tables_analyzed": tables_count,
+                "columns_analyzed": columns_count,
                 "relationships_found": len(relationships),
                 "high_confidence": high_conf,
                 "needs_review": needs_review,
