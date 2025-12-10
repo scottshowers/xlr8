@@ -340,25 +340,25 @@ class IntelligenceEngine:
             # Get sample values to help LLM understand the data
             sample_str = ""
             try:
-                rows, cols = self.structured_handler.execute_query(f'SELECT * FROM "{table_name}" LIMIT 3')
+                rows, cols = self.structured_handler.execute_query(f'SELECT * FROM "{table_name}" LIMIT 5')
                 if rows and cols:
                     samples = []
-                    for i, col in enumerate(cols[:10]):
+                    for i, col in enumerate(cols[:15]):  # Show more columns
                         vals = set(str(row[i])[:30] for row in rows if row[i] is not None)
                         if vals:
-                            samples.append(f"    {col}: {', '.join(list(vals)[:3])}")
+                            samples.append(f"    {col}: {', '.join(list(vals)[:5])}")
                     sample_str = "\n  Sample values:\n" + "\n".join(samples) if samples else ""
-            except:
-                pass
+            except Exception as sample_e:
+                logger.warning(f"[SQL-GEN] Sample error for {table_name}: {sample_e}")
             
-            tables_info.append(f"Table: {table_name}\n  Columns: {', '.join(col_names[:20])}\n  Rows: {row_count}{sample_str}")
+            tables_info.append(f"Table: {table_name}\n  Columns: {', '.join(col_names[:30])}\n  Rows: {row_count}{sample_str}")
         
         schema_text = '\n\n'.join(tables_info)
         logger.warning(f"[SQL-GEN] Built schema with {len(tables_info)} tables")
         
         # Log what we're sending so we can debug
         if tables_info:
-            logger.warning(f"[SQL-GEN] First table preview: {tables_info[0][:200]}...")
+            logger.warning(f"[SQL-GEN] First table: {tables[0].get('table_name', '') if tables else 'none'}")
         else:
             logger.warning(f"[SQL-GEN] NO TABLES IN SCHEMA - LLM has nothing to work with!")
         
