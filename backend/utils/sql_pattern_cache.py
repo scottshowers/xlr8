@@ -191,14 +191,11 @@ class SQLPatternCache:
             # Build SQL from template with current params
             sql = cached['sql_template']
             
-            # Substitute parameters
+            # Substitute parameters - DON'T add quotes, template already has them
             for param, value in signature['params'].items():
                 placeholder = f'{{{param}}}'
                 if placeholder in sql:
-                    if isinstance(value, str):
-                        sql = sql.replace(placeholder, f"'{value}'")
-                    else:
-                        sql = sql.replace(placeholder, str(value))
+                    sql = sql.replace(placeholder, str(value))
             
             logger.warning(f"[SQL-CACHE] Pattern hit! Key={pattern_key}, successes={cached.get('success_count', 0)}")
             
