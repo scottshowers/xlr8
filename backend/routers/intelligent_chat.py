@@ -188,11 +188,15 @@ async def intelligent_chat(request: IntelligentChatRequest):
             except ImportError:
                 from utils.database.supabase_client import get_supabase
             supabase = get_supabase()
-            result = supabase.table('project_relationships').select('*').eq('project_name', project).eq('status', 'confirmed').execute()
+            # Load BOTH confirmed and auto_confirmed relationships
+            result = supabase.table('project_relationships').select('*').eq('project_name', project).in_('status', ['confirmed', 'auto_confirmed']).execute()
             if result.data:
                 engine.relationships = result.data
+                logger.warning(f"[INTELLIGENT] Loaded {len(result.data)} relationships for {project}")
+            else:
+                logger.warning(f"[INTELLIGENT] No relationships found for {project}")
         except Exception as e:
-            pass  # Non-critical
+            logger.warning(f"[INTELLIGENT] Failed to load relationships: {e}")
         
         # Apply any clarification answers
         if request.clarifications:
