@@ -279,7 +279,7 @@ class IntelligenceEngine:
         
         domain_patterns = {
             'employees': r'\b(employee|worker|staff|people|person|pt|ft|part.?time|full.?time)\b',
-            'earnings': r'\b(earning|pay|salary|wage|compensation|overtime|ot|hour|rate|hourly)\b',
+            'earnings': r'(\b(earning|pay|salary|wage|compensation|overtime|ot|hour|rate|hourly|make|makes|paid)\b|\$)',
             'deductions': r'\b(deduction|benefit|401k|insurance|health|dental)\b',
             'taxes': r'\b(tax|withhold|federal|state|local|w-?4|fit|sit)\b',
             'jobs': r'\b(job|position|title|department|location)\b',
@@ -469,23 +469,48 @@ SQL:"""
     
     def _needs_clarification(self, mode, entities, domains, q_lower) -> bool:
         """Determine if we need to ask clarifying questions."""
-        # Skip clarification for simple data queries with clear filters
-        if any(w in q_lower for w in ['how many', 'count', 'list', 'show me', 'what is', 'total']):
-            # If they specified PT/FT, don't ask about employee status
-            if any(w in q_lower for w in ['pt ', 'ft ', 'part-time', 'part time', 'full-time', 'full time']):
-                return False
-            # If they specified active/terminated, don't ask
-            if any(w in q_lower for w in ['active', 'terminated', 'termed', 'all employees']):
-                return False
         
+        # ALWAYS ask for configuration tasks
         if mode == IntelligenceMode.CONFIGURE:
             return True
         
-        if mode == IntelligenceMode.VALIDATE and domains == ['general']:
+        # ALWAYS ask for validation without clear context
+        if mode == IntelligenceMode.VALIDATE:
             return True
         
-        # Don't ask for employee status clarification on simple queries
-        # Only ask for complex configuration scenarios
+        # For data queries - check if question is specific enough
+        is_specific = False
+        
+        # Check if they specified employee filters
+        has_employee_filter = any(w in q_lower for w in [
+            'pt ', 'ft ', 'part-time', 'part time', 'full-time', 'full time',
+            'active', 'terminated', 'termed', 'all employees', 'hourly', 'salaried'
+        ])
+        
+        # Check if they specified a clear numeric condition
+        has_numeric_condition = any(w in q_lower for w in [
+            'more than', 'less than', 'over', 'under', 'above', 'below',
+            'at least', 'greater than', 'equal to', '$'
+        ])
+        
+        # Check if it's a simple count/list with clear criteria
+        is_simple_query = any(w in q_lower for w in ['how many', 'count', 'list', 'show me'])
+        
+        # Question is specific if it has filters AND is a simple query type
+        if is_simple_query and (has_employee_filter or has_numeric_condition):
+            is_specific = True
+        
+        # Question is specific if it mentions specific entities
+        if entities and len(entities) > 0:
+            is_specific = True
+        
+        # If not specific, ask clarification
+        if not is_specific and 'employees' in domains:
+            return True
+        
+        # For earnings/deductions, ask if no clear criteria
+        if 'earnings' in domains and not has_numeric_condition:
+            return True
         
         return False
     
@@ -505,6 +530,31 @@ SQL:"""
                 ]
             })
         
+        if 'earnings' in domains:
+            questions.append({
+                'id': 'earnings_scope',
+                'question': 'What earnings data are you interested in?',
+                'type': 'radio',
+                'options': [
+                    {'id': 'current_rates', 'label': 'Current pay rates', 'default': True},
+                    {'id': 'ytd', 'label': 'Year-to-date earnings'},
+                    {'id': 'history', 'label': 'Historical earnings'},
+                ]
+            })
+        
+        if 'deductions' in domains:
+            questions.append({
+                'id': 'deduction_type',
+                'question': 'What type of deductions?',
+                'type': 'radio',
+                'options': [
+                    {'id': 'all', 'label': 'All deductions', 'default': True},
+                    {'id': 'benefits', 'label': 'Benefits only (medical, dental, etc.)'},
+                    {'id': 'retirement', 'label': 'Retirement only (401k, pension)'},
+                    {'id': 'other', 'label': 'Other deductions'},
+                ]
+            })
+        
         if mode == IntelligenceMode.CONFIGURE:
             questions.append({
                 'id': 'config_type',
@@ -515,6 +565,19 @@ SQL:"""
                     {'id': 'deduction', 'label': 'Deduction setup'},
                     {'id': 'tax', 'label': 'Tax configuration'},
                     {'id': 'other', 'label': 'Something else'},
+                ]
+            })
+        
+        if mode == IntelligenceMode.VALIDATE:
+            questions.append({
+                'id': 'validation_type',
+                'question': 'What would you like me to validate?',
+                'type': 'radio',
+                'options': [
+                    {'id': 'data_quality', 'label': 'Data quality/completeness'},
+                    {'id': 'business_rules', 'label': 'Business rule compliance'},
+                    {'id': 'config', 'label': 'Configuration accuracy'},
+                    {'id': 'comparison', 'label': 'Compare against source'},
                 ]
             })
         
