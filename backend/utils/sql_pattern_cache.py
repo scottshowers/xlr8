@@ -385,29 +385,60 @@ def get_bootstrap_patterns(project: str, schema: Dict) -> Dict[str, Dict]:
             logger.warning(f"[SQL-CACHE] Found PT/FT values in data: {values}")
             
             if values:
-                # Use LLM to interpret
-                try:
-                    from utils.llm_orchestrator import get_orchestrator
-                    orchestrator = get_orchestrator()
-                    
-                    prompt = f"""Column "{ptft_col}" contains these distinct values: {values}
+                values_upper = [v.upper() for v in values]
+                
+                # FAST PATH: Common obvious patterns - no LLM needed
+                # Industry standard: P=Part-time, F=Full-time
+                if 'P' in values_upper and 'F' in values_upper:
+                    pt_value = next(v for v in values if v.upper() == 'P')
+                    ft_value = next(v for v in values if v.upper() == 'F')
+                    logger.warning(f"[SQL-CACHE] Fast match (P/F): PT='{pt_value}', FT='{ft_value}'")
+                elif 'PT' in values_upper and 'FT' in values_upper:
+                    pt_value = next(v for v in values if v.upper() == 'PT')
+                    ft_value = next(v for v in values if v.upper() == 'FT')
+                    logger.warning(f"[SQL-CACHE] Fast match (PT/FT): PT='{pt_value}', FT='{ft_value}'")
+                elif any('PART' in v.upper() for v in values) and any('FULL' in v.upper() for v in values):
+                    pt_value = next(v for v in values if 'PART' in v.upper())
+                    ft_value = next(v for v in values if 'FULL' in v.upper())
+                    logger.warning(f"[SQL-CACHE] Fast match (Part/Full): PT='{pt_value}', FT='{ft_value}'")
+                else:
+                    # SLOW PATH: Use LLM for ambiguous values
+                    try:
+                        import httpx
+                        import os
+                        
+                        prompt = f"""Column "{ptft_col}" contains these distinct values: {values}
 
 Which value represents PART-TIME employees and which represents FULL-TIME employees?
 
 Reply with ONLY two lines, nothing else:
 PT_VALUE: <exact value>
 FT_VALUE: <exact value>"""
-                    
-                    response = orchestrator.generate(prompt, max_tokens=50)
-                    if response:
-                        for line in response.strip().split('\n'):
-                            if line.upper().startswith('PT_VALUE:'):
-                                pt_value = line.split(':', 1)[1].strip()
-                            elif line.upper().startswith('FT_VALUE:'):
-                                ft_value = line.split(':', 1)[1].strip()
-                        logger.warning(f"[SQL-CACHE] LLM interpreted: PT='{pt_value}', FT='{ft_value}'")
-                except Exception as llm_e:
-                    logger.warning(f"[SQL-CACHE] LLM interpretation failed: {llm_e}")
+                        
+                        ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+                        
+                        response = httpx.post(
+                            f"{ollama_host}/api/generate",
+                            json={
+                                "model": "mistral",
+                                "prompt": prompt,
+                                "stream": False,
+                                "options": {"num_predict": 50}
+                            },
+                            timeout=30.0
+                        )
+                        
+                        if response.status_code == 200:
+                            result = response.json().get("response", "")
+                            for line in result.strip().split('\n'):
+                                line_upper = line.upper().strip()
+                                if line_upper.startswith('PT_VALUE:'):
+                                    pt_value = line.split(':', 1)[1].strip()
+                                elif line_upper.startswith('FT_VALUE:'):
+                                    ft_value = line.split(':', 1)[1].strip()
+                            logger.warning(f"[SQL-CACHE] LLM interpreted: PT='{pt_value}', FT='{ft_value}'")
+                    except Exception as llm_e:
+                        logger.warning(f"[SQL-CACHE] LLM interpretation failed: {llm_e}")
     except Exception as e:
         logger.warning(f"[SQL-CACHE] Could not query PT/FT values: {e}")
     
@@ -518,6 +549,12 @@ def initialize_patterns(project: str, schema: Dict):
                 cache.patterns = {}
                 needs_regenerate = True
                 break
+        
+        # Also regenerate if we only have 2 patterns (basic ones without PT/FT)
+        if not needs_regenerate and len(cache.patterns) <= 2:
+            logger.warning(f"[SQL-CACHE] Only {len(cache.patterns)} patterns (missing PT/FT), regenerating")
+            cache.patterns = {}
+            needs_regenerate = True
     
     if needs_regenerate:
         bootstrap = get_bootstrap_patterns(project, schema)
