@@ -293,7 +293,7 @@ class IntelligenceEngine:
     
     def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
         """Generate SQL query using LOCAL LLM - same pattern as working chat.py."""
-        logger.info(f"[SQL-GEN] Starting LLM SQL generation")
+        logger.warning(f"[SQL-GEN] Starting LLM SQL generation")
         
         if not self.structured_handler:
             logger.warning("[SQL-GEN] No structured handler")
@@ -320,7 +320,7 @@ class IntelligenceEngine:
                 logger.warning("[SQL-GEN] Local LLM not available")
                 return None
             
-            logger.info("[SQL-GEN] Local LLM available")
+            logger.warning("[SQL-GEN] Local LLM available")
             
         except Exception as e:
             logger.error(f"[SQL-GEN] Could not load LocalLLMClient: {e}")
@@ -354,11 +354,11 @@ class IntelligenceEngine:
             tables_info.append(f"Table: {table_name}\n  Columns: {', '.join(col_names[:20])}\n  Rows: {row_count}{sample_str}")
         
         schema_text = '\n\n'.join(tables_info)
-        logger.info(f"[SQL-GEN] Built schema with {len(tables_info)} tables")
+        logger.warning(f"[SQL-GEN] Built schema with {len(tables_info)} tables")
         
         # Log what we're sending so we can debug
         if tables_info:
-            logger.info(f"[SQL-GEN] First table preview: {tables_info[0][:200]}...")
+            logger.warning(f"[SQL-GEN] First table preview: {tables_info[0][:200]}...")
         else:
             logger.warning(f"[SQL-GEN] NO TABLES IN SCHEMA - LLM has nothing to work with!")
         
@@ -372,7 +372,7 @@ class IntelligenceEngine:
                 rel_lines.append(f"  {src} → {tgt}")
             if rel_lines:
                 relationships_text = "\n\nRELATIONSHIPS (use these to JOIN tables):\n" + "\n".join(rel_lines)
-                logger.info(f"[SQL-GEN] Including {len(rel_lines)} relationships for JOINs")
+                logger.warning(f"[SQL-GEN] Including {len(rel_lines)} relationships for JOINs")
         
         # Build conversation context if available (for follow-up questions)
         context_str = ""
@@ -430,7 +430,7 @@ SQL:"""
                 sql = sql.strip().rstrip(';')
                 
                 if sql.upper().startswith('SELECT'):
-                    logger.info(f"[SQL-GEN] Generated: {sql}")
+                    logger.warning(f"[SQL-GEN] Generated: {sql}")
                     
                     # Detect query type
                     sql_upper = sql.upper()
@@ -538,7 +538,7 @@ SQL:"""
     
     def _gather_reality(self, question: str, analysis: Dict) -> List[Truth]:
         """Gather REALITY - what the customer's DATA shows."""
-        logger.info(f"[REALITY] Starting - handler: {self.structured_handler is not None}, schema tables: {len(self.schema.get('tables', [])) if self.schema else 0}")
+        logger.warning(f"[REALITY] Starting - handler: {self.structured_handler is not None}, schema tables: {len(self.schema.get('tables', [])) if self.schema else 0}")
         
         if not self.structured_handler:
             logger.warning("[REALITY] No structured handler - returning empty")
