@@ -319,93 +319,8 @@ class StructuredDataHandler:
         self.db_path = db_path
         self.conn = duckdb.connect(db_path)
         self.encryptor = FieldEncryptor()
-        self._register_decrypt_udf()  # Register DECRYPT function for SQL queries
         self._init_metadata_table()
         logger.warning(f"[HANDLER] StructuredDataHandler initialized with {db_path}")
-    
-    def _register_decrypt_udf(self):
-        """Register DECRYPT function for use in SQL queries on encrypted data."""
-        encryptor = self.encryptor
-        
-        def decrypt_value(val: str) -> str:
-            """Decrypt ENC256: prefixed values, return as-is otherwise."""
-            if val is None:
-                return None
-            val_str = str(val)
-            if val_str.startswith('ENC256:'):
-                try:
-                    return encryptor.decrypt(val_str)
-                except:
-                    return None
-            return val_str
-        
-        def decrypt_float(val: str) -> float:
-            """Decrypt and cast to float for numeric comparisons."""
-            if val is None:
-                return None
-            val_str = str(val)
-            if val_str.startswith('ENC256:'):
-                try:
-                    decrypted = encryptor.decrypt(val_str)
-                    if decrypted:
-                        cleaned = str(decrypted).replace('$', '').replace(',', '').strip()
-                        return float(cleaned)
-                except:
-                    return None
-            else:
-                try:
-                    cleaned = val_str.replace('$', '').replace(',', '').strip()
-                    return float(cleaned)
-                except:
-                    return None
-            return None
-        
-        # Try multiple syntaxes until one works
-        registered = False
-        
-        # Syntax 1: List types as strings
-        if not registered:
-            try:
-                self.conn.create_function('DECRYPT', decrypt_value, ['VARCHAR'], 'VARCHAR')
-                self.conn.create_function('DECRYPT_FLOAT', decrypt_float, ['VARCHAR'], 'DOUBLE')
-                logger.warning("[HANDLER] UDF registered with syntax 1: ['VARCHAR'], 'VARCHAR'")
-                registered = True
-            except Exception as e:
-                logger.warning(f"[HANDLER] Syntax 1 failed: {e}")
-        
-        # Syntax 2: Python types
-        if not registered:
-            try:
-                self.conn.create_function('DECRYPT', decrypt_value, [str], str)
-                self.conn.create_function('DECRYPT_FLOAT', decrypt_float, [str], float)
-                logger.warning("[HANDLER] UDF registered with syntax 2: [str], str")
-                registered = True
-            except Exception as e:
-                logger.warning(f"[HANDLER] Syntax 2 failed: {e}")
-        
-        # Syntax 3: duckdb.typing module
-        if not registered:
-            try:
-                import duckdb.typing as dt
-                self.conn.create_function('DECRYPT', decrypt_value, [dt.VARCHAR], dt.VARCHAR)
-                self.conn.create_function('DECRYPT_FLOAT', decrypt_float, [dt.VARCHAR], dt.DOUBLE)
-                logger.warning("[HANDLER] UDF registered with syntax 3: duckdb.typing")
-                registered = True
-            except Exception as e:
-                logger.warning(f"[HANDLER] Syntax 3 failed: {e}")
-        
-        # Syntax 4: No type hints, let it infer from annotations
-        if not registered:
-            try:
-                self.conn.create_function('DECRYPT', decrypt_value)
-                self.conn.create_function('DECRYPT_FLOAT', decrypt_float)
-                logger.warning("[HANDLER] UDF registered with syntax 4: type annotations only")
-                registered = True
-            except Exception as e:
-                logger.warning(f"[HANDLER] Syntax 4 failed: {e}")
-        
-        if not registered:
-            logger.error("[HANDLER] All UDF registration attempts failed")
     
     def _init_metadata_table(self):
         """Create metadata table to track schemas and versions"""
@@ -1698,7 +1613,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
         file_path: str,
         project: str,
         file_name: str,
-        encrypt_pii: bool = True,
+        encrypt_pii: bool = False,  # Disabled - security at perimeter (Railway, API auth, HTTPS)
         keep_previous_version: bool = True
     ) -> Dict[str, Any]:
         """
