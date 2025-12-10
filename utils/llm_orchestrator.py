@@ -525,32 +525,52 @@ Analyze the data. Answer the question with real numbers and real values from the
         if not self.ollama_url:
             return {"sql": None, "error": "No LLM configured", "success": False}
         
-        models_to_try = ['deepseek-coder:6.7b', 'mistral:7b']
+        # Try DeepSeek twice (with different prompts) before falling back
+        attempts = [
+            ('deepseek-coder:6.7b', 'initial'),
+            ('deepseek-coder:6.7b', 'simplified'),
+            ('mistral:7b', 'fallback')
+        ]
         last_invalid_cols = []
         
-        for attempt, model in enumerate(models_to_try):
+        for attempt, (model, prompt_type) in enumerate(attempts):
             try:
-                # Build prompt - stronger for retries
-                if attempt == 0:
-                    local_prompt = f"""You are a SQL generator. Output ONLY a valid SQL SELECT statement. No explanations, no text, just SQL.
+                # Build prompt based on attempt type
+                if prompt_type == 'initial':
+                    local_prompt = f"""You are a SQL generator. Output ONLY a valid SQL SELECT statement. No explanations.
 
 {prompt}
 
-IMPORTANT: Output ONLY the SQL query starting with SELECT. Nothing else."""
-                else:
-                    # Retry prompt is more explicit about what went wrong
-                    local_prompt = f"""Output ONLY a SQL SELECT statement. No explanations.
+Output ONLY the SQL starting with SELECT:"""
 
-PREVIOUS ATTEMPT FAILED because these columns don't exist: {last_invalid_cols}
+                elif prompt_type == 'simplified':
+                    # Extract just column names from prompt for clarity
+                    col_list = ', '.join(sorted(schema_columns)[:50]) if schema_columns else ''
+                    local_prompt = f"""Generate SQL. Output ONLY the SELECT statement.
+
+VALID COLUMNS: {col_list}
+
+INVALID (do not use): {', '.join(last_invalid_cols)}
 
 {prompt}
 
-You MUST only use columns from the schema above. Start your response with SELECT."""
+SELECT"""
+
+                else:  # fallback
+                    local_prompt = f"""SQL query only. No explanation. Start with SELECT.
+
+{prompt}
+
+SELECT"""
                 
                 response, success = self._call_ollama(model, local_prompt)
                 
                 if success and response:
                     sql = response.strip()
+                    
+                    # For simplified/fallback prompts, we started with SELECT
+                    if prompt_type in ['simplified', 'fallback'] and not sql.upper().startswith('SELECT'):
+                        sql = 'SELECT ' + sql
                     
                     # Clean up markdown
                     if sql.startswith("```"):
@@ -562,37 +582,19 @@ You MUST only use columns from the schema above. Start your response with SELECT
                     # VALIDATE: Must start with SELECT (or WITH for CTEs)
                     sql_upper = sql.upper().strip()
                     if not (sql_upper.startswith('SELECT') or sql_upper.startswith('WITH')):
-                        logger.warning(f"[SQL-LOCAL] {model} returned non-SQL: {sql[:80]}...")
-                        if attempt < len(models_to_try) - 1:
-                            continue
-                        else:
-                            return {
-                                "sql": None,
-                                "error": "Model returned prose instead of SQL",
-                                "success": False,
-                                "model": model
-                            }
+                        logger.warning(f"[SQL-LOCAL] {model} ({prompt_type}) returned non-SQL: {sql[:80]}...")
+                        continue
                     
                     # Validate columns if schema provided
                     if schema_columns:
                         invalid_cols = self._validate_sql_columns(sql, schema_columns)
                         
                         if invalid_cols:
-                            logger.warning(f"[SQL-LOCAL] {model} produced invalid columns: {invalid_cols}")
+                            logger.warning(f"[SQL-LOCAL] {model} ({prompt_type}) produced invalid columns: {invalid_cols}")
                             last_invalid_cols = invalid_cols
-                            
-                            if attempt < len(models_to_try) - 1:
-                                logger.info(f"[SQL-LOCAL] Retrying with {models_to_try[attempt + 1]}")
-                                continue
-                            else:
-                                return {
-                                    "sql": None, 
-                                    "error": f"Invalid columns: {invalid_cols}", 
-                                    "success": False,
-                                    "model": model
-                                }
+                            continue
                     
-                    logger.info(f"[SQL-LOCAL] {model} generated valid SQL")
+                    logger.info(f"[SQL-LOCAL] {model} ({prompt_type}) generated valid SQL")
                     return {"sql": sql, "model": model, "success": True}
                     
             except Exception as e:
