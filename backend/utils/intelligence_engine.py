@@ -381,6 +381,16 @@ class IntelligenceEngine:
             logger.warning(f"[SQL-GEN] First table: {tables[0].get('table_name', '') if tables else 'none'}")
             # Log first table's full info to see if samples are there
             logger.warning(f"[SQL-GEN] First table detail: {tables_info[0][:500]}")
+            
+            # Also log the company and personal tables specifically
+            for i, info in enumerate(tables_info):
+                if '__company' in info.lower() and 'master' not in info.lower() and 'tax' not in info.lower():
+                    logger.warning(f"[SQL-GEN] COMPANY TABLE IN PROMPT: {info[:800]}")
+                    break
+            for i, info in enumerate(tables_info):
+                if '__personal' in info.lower():
+                    logger.warning(f"[SQL-GEN] PERSONAL TABLE IN PROMPT: {info[:800]}")
+                    break
         else:
             logger.warning(f"[SQL-GEN] NO TABLES IN SCHEMA - LLM has nothing to work with!")
         
