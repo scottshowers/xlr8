@@ -568,7 +568,9 @@ SELECT"""
                         sql = sql.split("```")[1]
                         if sql.startswith("sql"):
                             sql = sql[3:]
-                    sql = sql.strip().rstrip(';')
+                    
+                    # CRITICAL: Strip trailing explanations/prose
+                    sql = self._clean_sql_output(sql)
                     
                     sql_upper = sql.upper().strip()
                     if not (sql_upper.startswith('SELECT') or sql_upper.startswith('WITH')):
@@ -598,6 +600,10 @@ SELECT"""
         # ALL ATTEMPTS FAILED - Try auto-correction on best attempt
         if best_sql and best_invalid and schema_columns:
             logger.warning(f"[SQL-LOCAL] Attempting auto-correction of {len(best_invalid)} invalid columns")
+            
+            # Clean the SQL first before correcting
+            best_sql = self._clean_sql_output(best_sql)
+            
             corrected_sql = self._auto_correct_columns(best_sql, best_invalid, schema_columns)
             
             if corrected_sql:
@@ -610,6 +616,41 @@ SELECT"""
                     logger.warning(f"[SQL-LOCAL] Auto-correction still has invalid: {remaining_invalid}")
         
         return {"sql": None, "error": "All local models failed", "success": False}
+    
+    def _clean_sql_output(self, sql: str) -> str:
+        """
+        Clean up SQL output from LLM - remove trailing explanations, markdown, etc.
+        """
+        sql = sql.strip()
+        
+        # Remove trailing semicolons
+        sql = sql.rstrip(';')
+        
+        # Cut off at common explanation markers
+        cut_markers = [
+            '\n###',           # Markdown headers
+            '\n##',
+            '\n#',
+            '\n\nExplanation',
+            '\n\nThis query',
+            '\n\nNote:',
+            '\n\nThe query',
+            '\n\n---',
+            '\n```',           # Markdown code blocks
+            '\nPlease note',
+            '\nThis SQL',
+        ]
+        
+        for marker in cut_markers:
+            if marker in sql:
+                sql = sql.split(marker)[0]
+        
+        # Remove any lines that start with # (comments/headers)
+        lines = sql.split('\n')
+        clean_lines = [l for l in lines if not l.strip().startswith('#')]
+        sql = '\n'.join(clean_lines)
+        
+        return sql.strip()
     
     def _auto_correct_columns(self, sql: str, invalid_cols: List[str], valid_columns: set) -> Optional[str]:
         """
@@ -624,13 +665,19 @@ SELECT"""
         known_fixes = {
             'hourly_rate': 'hourly_pay_rate',
             'hourly': 'hourly_pay_rate', 
+            'hourlyrate': 'hourly_pay_rate',
+            'pay_rate': 'hourly_pay_rate',
             'rate': 'hourly_pay_rate',
             'employee_id': 'employee_number',
+            'employeeid': 'employee_number',
             'emp_id': 'employee_number',
-            'id': 'employee_number',
+            'employee': 'employee_number',
             'employment_status': 'fullpart_time_code',
             'status': 'employment_status_code',
             'pt_ft': 'fullpart_time_code',
+            'earnings_type': 'type_code',
+            'earnings_type_id': 'type_code',
+            'personal': 'employee_number',
         }
         
         for invalid in set(invalid_cols):  # dedupe
