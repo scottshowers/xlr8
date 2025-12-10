@@ -349,9 +349,20 @@ def get_bootstrap_patterns(project: str, schema: Dict) -> Dict[str, Dict]:
     if not company_table or not personal_table:
         return patterns
     
-    # Find key columns
-    company_cols = [str(c).lower() for c in tables[[t.get('table_name') for t in tables].index(company_table)].get('columns', [])]
-    personal_cols = [str(c).lower() for c in tables[[t.get('table_name') for t in tables].index(personal_table)].get('columns', [])]
+    # Find key columns - handle both string and dict column formats
+    def get_columns_for_table(table_name):
+        for t in tables:
+            if t.get('table_name') == table_name:
+                cols = t.get('columns', [])
+                # Handle dict columns
+                if cols and isinstance(cols[0], dict):
+                    return [str(c.get('name', c)).lower() for c in cols]
+                else:
+                    return [str(c).lower() for c in cols]
+        return []
+    
+    company_cols = get_columns_for_table(company_table)
+    personal_cols = get_columns_for_table(personal_table)
     
     rate_col = next((c for c in company_cols if 'hourly' in c and 'rate' in c), 'hourly_pay_rate')
     ptft_col = next((c for c in personal_cols if 'fullpart' in c or 'part_time' in c), 'fullpart_time_code')
