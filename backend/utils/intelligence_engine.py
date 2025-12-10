@@ -343,8 +343,9 @@ class IntelligenceEngine:
                 rows, cols = self.structured_handler.execute_query(f'SELECT * FROM "{table_name}" LIMIT 5')
                 if rows and cols:
                     samples = []
-                    for i, col in enumerate(cols[:15]):  # Show more columns
-                        vals = set(str(row[i])[:30] for row in rows if row[i] is not None)
+                    for col in cols[:15]:  # Show more columns
+                        # rows are dicts, so access by column name
+                        vals = set(str(row.get(col, ''))[:30] for row in rows if row.get(col) is not None)
                         if vals:
                             samples.append(f"    {col}: {', '.join(list(vals)[:5])}")
                     sample_str = "\n  Sample values:\n" + "\n".join(samples) if samples else ""
