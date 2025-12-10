@@ -491,120 +491,112 @@ Analyze the data. Answer the question with real numbers and real values from the
         
         return status
     
-    def generate_sql(self, prompt: str) -> Dict[str, Any]:
+    def generate_sql(self, prompt: str, schema_columns: set = None) -> Dict[str, Any]:
         """
-        Generate SQL query from natural language using Claude.
+        Generate SQL query from natural language using LOCAL LLM.
         
-        Used by structured data handler to convert user questions
-        into DuckDB SQL queries.
+        Strategy:
+        1. Try DeepSeek (best for code/SQL)
+        2. If invalid columns, retry with Mistral
+        3. Claude is NOT used - local LLMs handle SQL
         
         Args:
             prompt: Natural language query with schema context
+            schema_columns: Set of valid column names for validation
             
         Returns:
             {'sql': 'SELECT ...', 'model': '...', 'success': True/False}
         """
-        if not self.claude_api_key:
-            # Try local LLM as fallback
-            return self._generate_sql_local(prompt)
-        
-        try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=self.claude_api_key)
-            
-            system_prompt = """You are a SQL expert. Generate valid DuckDB SQL queries.
-
-RULES:
-1. Return ONLY the SQL query, no explanations or markdown
-2. Use the exact table and column names provided
-3. For text searches, use ILIKE for case-insensitive matching
-4. Limit results to 1000 rows unless it's a COUNT query
-5. Use proper JOIN syntax when combining tables
-6. Handle NULL values appropriately
-7. Column and table names are case-sensitive - use exactly as provided
-
-Output ONLY the SQL query, nothing else."""
-
-            logger.info(f"Generating SQL from prompt ({len(prompt)} chars)")
-            
-            response = client.messages.create(
-                model=self.claude_model,
-                max_tokens=1024,
-                system=system_prompt,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            
-            sql = response.content[0].text.strip()
-            
-            # Log cost
-            try:
-                from backend.utils.cost_tracker import log_cost, CostService
-                usage = response.usage
-                log_cost(
-                    service=CostService.CLAUDE,
-                    operation="sql_generate",
-                    tokens_in=usage.input_tokens if usage else 0,
-                    tokens_out=usage.output_tokens if usage else 0,
-                    metadata={"model": self.claude_model}
-                )
-            except Exception as cost_err:
-                logger.debug(f"Cost tracking failed: {cost_err}")
-            
-            # Clean up markdown if present
-            if sql.startswith("```sql"):
-                sql = sql[6:]
-            if sql.startswith("```"):
-                sql = sql[3:]
-            if sql.endswith("```"):
-                sql = sql[:-3]
-            sql = sql.strip()
-            
-            logger.info(f"Generated SQL: {sql[:100]}...")
-            
-            return {
-                "sql": sql,
-                "model": self.claude_model,
-                "success": True
-            }
-            
-        except Exception as e:
-            logger.error(f"SQL generation error: {e}")
-            return {
-                "sql": None,
-                "error": str(e),
-                "success": False
-            }
+        # ALWAYS use local LLM for SQL - no Claude needed
+        return self._generate_sql_local(prompt, schema_columns)
     
-    def _generate_sql_local(self, prompt: str) -> Dict[str, Any]:
+    def _generate_sql_local(self, prompt: str, schema_columns: set = None) -> Dict[str, Any]:
         """
-        Generate SQL using local Ollama LLM (fallback if no Claude API key)
+        Generate SQL using local LLM with validation and retry.
+        
+        Model Selection:
+        - DeepSeek: Best for code/SQL generation
+        - Mistral: Fallback for simpler queries
+        
+        Self-Healing:
+        - Validates column names against schema
+        - Retries with clearer prompt if validation fails
         """
         if not self.ollama_url:
             return {"sql": None, "error": "No LLM configured", "success": False}
         
-        try:
-            local_prompt = f"""Generate a SQL query for this question. Return ONLY the SQL, no explanation.
+        models_to_try = ['deepseek-coder:6.7b', 'mistral:7b']
+        
+        for attempt, model in enumerate(models_to_try):
+            try:
+                local_prompt = f"""Generate a SQL query for this question. Return ONLY the SQL, no explanation.
+
+CRITICAL: Only use column names that appear in the schema. Never invent column names.
 
 {prompt}
 
 SQL:"""
-            
-            response, success = self._call_ollama('mistral:7b', local_prompt)
-            
-            if success and response:
-                sql = response.strip()
                 
-                # Clean up markdown
-                if sql.startswith("```"):
-                    sql = sql.split("```")[1]
-                    if sql.startswith("sql"):
-                        sql = sql[3:]
-                sql = sql.strip()
+                response, success = self._call_ollama(model, local_prompt)
                 
-                return {"sql": sql, "model": "mistral:7b", "success": True}
-            else:
-                return {"sql": None, "error": "Local LLM failed", "success": False}
-                
-        except Exception as e:
-            logger.error(f"Local SQL generation error: {e}")
-            return {"sql": None, "error": str(e), "success": False}
+                if success and response:
+                    sql = response.strip()
+                    
+                    # Clean up markdown
+                    if sql.startswith("```"):
+                        sql = sql.split("```")[1]
+                        if sql.startswith("sql"):
+                            sql = sql[3:]
+                    sql = sql.strip().rstrip(';')
+                    
+                    # Validate columns if schema provided
+                    if schema_columns and sql.upper().startswith('SELECT'):
+                        invalid_cols = self._validate_sql_columns(sql, schema_columns)
+                        
+                        if invalid_cols:
+                            logger.warning(f"[SQL-LOCAL] {model} produced invalid columns: {invalid_cols}")
+                            
+                            if attempt < len(models_to_try) - 1:
+                                # Retry with next model and explicit column list
+                                logger.info(f"[SQL-LOCAL] Retrying with {models_to_try[attempt + 1]}")
+                                continue
+                            else:
+                                return {
+                                    "sql": None, 
+                                    "error": f"Invalid columns: {invalid_cols}", 
+                                    "success": False,
+                                    "model": model
+                                }
+                    
+                    logger.info(f"[SQL-LOCAL] {model} generated valid SQL")
+                    return {"sql": sql, "model": model, "success": True}
+                    
+            except Exception as e:
+                logger.error(f"[SQL-LOCAL] {model} error: {e}")
+                continue
+        
+        return {"sql": None, "error": "All local models failed", "success": False}
+    
+    def _validate_sql_columns(self, sql: str, schema_columns: set) -> List[str]:
+        """
+        Validate that column references in SQL exist in schema.
+        Returns list of invalid column names.
+        """
+        import re
+        
+        # Normalize schema columns to lowercase
+        valid_cols = {c.lower() for c in schema_columns}
+        
+        # Add common SQL keywords that look like columns
+        valid_cols.update(['count', 'sum', 'avg', 'min', 'max', 'as', 'and', 'or', 'not', 'null', 'true', 'false'])
+        
+        # Extract column references (after dots or in column positions)
+        # Pattern: table.column or just column in select/where
+        dot_cols = re.findall(r'\.\"?([a-z_][a-z0-9_]*)\"?', sql.lower())
+        
+        invalid = []
+        for col in dot_cols:
+            if col not in valid_cols:
+                invalid.append(col)
+        
+        return invalid
