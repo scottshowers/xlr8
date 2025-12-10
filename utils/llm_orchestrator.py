@@ -512,15 +512,7 @@ Analyze the data. Answer the question with real numbers and real values from the
     
     def _generate_sql_local(self, prompt: str, schema_columns: set = None) -> Dict[str, Any]:
         """
-        Generate SQL using local LLM with validation and retry.
-        
-        Model Selection:
-        - DeepSeek: Best for code/SQL generation
-        - Mistral: Fallback for simpler queries
-        
-        Self-Healing:
-        - Validates column names against schema
-        - Retries with clearer prompt if validation fails
+        Generate SQL using local LLM with validation, retry, and auto-correction.
         """
         if not self.ollama_url:
             return {"sql": None, "error": "No LLM configured", "success": False}
@@ -532,6 +524,8 @@ Analyze the data. Answer the question with real numbers and real values from the
             ('mistral:7b', 'fallback')
         ]
         last_invalid_cols = []
+        best_sql = None
+        best_invalid = None
         
         for attempt, (model, prompt_type) in enumerate(attempts):
             try:
@@ -544,7 +538,6 @@ Analyze the data. Answer the question with real numbers and real values from the
 Output ONLY the SQL starting with SELECT:"""
 
                 elif prompt_type == 'simplified':
-                    # Extract just column names from prompt for clarity
                     col_list = ', '.join(sorted(schema_columns)[:50]) if schema_columns else ''
                     local_prompt = f"""Generate SQL. Output ONLY the SELECT statement.
 
@@ -568,30 +561,31 @@ SELECT"""
                 if success and response:
                     sql = response.strip()
                     
-                    # For simplified/fallback prompts, we started with SELECT
                     if prompt_type in ['simplified', 'fallback'] and not sql.upper().startswith('SELECT'):
                         sql = 'SELECT ' + sql
                     
-                    # Clean up markdown
                     if sql.startswith("```"):
                         sql = sql.split("```")[1]
                         if sql.startswith("sql"):
                             sql = sql[3:]
                     sql = sql.strip().rstrip(';')
                     
-                    # VALIDATE: Must start with SELECT (or WITH for CTEs)
                     sql_upper = sql.upper().strip()
                     if not (sql_upper.startswith('SELECT') or sql_upper.startswith('WITH')):
                         logger.warning(f"[SQL-LOCAL] {model} ({prompt_type}) returned non-SQL: {sql[:80]}...")
                         continue
                     
-                    # Validate columns if schema provided
                     if schema_columns:
                         invalid_cols = self._validate_sql_columns(sql, schema_columns)
                         
                         if invalid_cols:
                             logger.warning(f"[SQL-LOCAL] {model} ({prompt_type}) produced invalid columns: {invalid_cols}")
                             last_invalid_cols = invalid_cols
+                            
+                            # Keep track of best attempt (fewest invalid columns)
+                            if best_sql is None or len(invalid_cols) < len(best_invalid):
+                                best_sql = sql
+                                best_invalid = invalid_cols
                             continue
                     
                     logger.info(f"[SQL-LOCAL] {model} ({prompt_type}) generated valid SQL")
@@ -601,7 +595,70 @@ SELECT"""
                 logger.error(f"[SQL-LOCAL] {model} error: {e}")
                 continue
         
+        # ALL ATTEMPTS FAILED - Try auto-correction on best attempt
+        if best_sql and best_invalid and schema_columns:
+            logger.warning(f"[SQL-LOCAL] Attempting auto-correction of {len(best_invalid)} invalid columns")
+            corrected_sql = self._auto_correct_columns(best_sql, best_invalid, schema_columns)
+            
+            if corrected_sql:
+                # Validate corrected SQL
+                remaining_invalid = self._validate_sql_columns(corrected_sql, schema_columns)
+                if not remaining_invalid:
+                    logger.info(f"[SQL-LOCAL] Auto-correction successful!")
+                    return {"sql": corrected_sql, "model": "auto-corrected", "success": True}
+                else:
+                    logger.warning(f"[SQL-LOCAL] Auto-correction still has invalid: {remaining_invalid}")
+        
         return {"sql": None, "error": "All local models failed", "success": False}
+    
+    def _auto_correct_columns(self, sql: str, invalid_cols: List[str], valid_columns: set) -> Optional[str]:
+        """
+        Try to fix invalid columns by fuzzy matching to valid ones.
+        
+        Common patterns:
+        - hourly_rate → hourly_pay_rate
+        - employee_id → employee_number
+        - id → employee_number (in employee context)
+        """
+        from difflib import SequenceMatcher
+        
+        corrected_sql = sql
+        valid_lower = {c.lower(): c for c in valid_columns}
+        
+        for invalid in invalid_cols:
+            invalid_lower = invalid.lower()
+            
+            # Skip common SQL keywords that slipped through
+            if invalid_lower in ['id', 'code', 'db', 'com']:
+                continue
+            
+            # Find best fuzzy match
+            best_match = None
+            best_score = 0.5  # Minimum threshold
+            
+            for valid_col in valid_lower.keys():
+                # Exact substring match (e.g., 'hourly' in 'hourly_pay_rate')
+                if invalid_lower in valid_col or valid_col in invalid_lower:
+                    score = 0.8
+                else:
+                    score = SequenceMatcher(None, invalid_lower, valid_col).ratio()
+                
+                if score > best_score:
+                    best_score = score
+                    best_match = valid_lower[valid_col]
+            
+            if best_match:
+                logger.info(f"[SQL-AUTO] Correcting '{invalid}' → '{best_match}' (score: {best_score:.2f})")
+                # Replace in SQL (case-insensitive)
+                import re
+                corrected_sql = re.sub(
+                    r'\b' + re.escape(invalid) + r'\b',
+                    best_match,
+                    corrected_sql,
+                    flags=re.IGNORECASE
+                )
+        
+        return corrected_sql if corrected_sql != sql else None
     
     def _validate_sql_columns(self, sql: str, schema_columns: set) -> List[str]:
         """
