@@ -324,18 +324,21 @@ class SQLPatternCache:
 
 def get_bootstrap_patterns(project: str, schema: Dict) -> Dict[str, Dict]:
     """
-    Generate bootstrap SQL patterns based on actual schema.
+    Generate bootstrap SQL patterns based on actual schema AND data values.
     
-    These are KNOWN GOOD patterns that we seed the cache with.
-    No LLM needed - these are crafted SQL templates.
+    Uses LLM to interpret what values mean - no hardcoding.
     """
     patterns = {}
+    
+    # Helper to generate consistent pattern keys
+    def make_key(intent, entities, filters):
+        sig_key = f"{intent}|{','.join(sorted(entities))}|{','.join(sorted(filters))}"
+        return hashlib.md5(sig_key.encode()).hexdigest()[:12]
     
     # Find key tables
     tables = schema.get('tables', [])
     company_table = None
     personal_table = None
-    earnings_table = None
     
     for t in tables:
         name = t.get('table_name', '').lower()
@@ -343,18 +346,15 @@ def get_bootstrap_patterns(project: str, schema: Dict) -> Dict[str, Dict]:
             company_table = t.get('table_name')
         if 'personal' in name:
             personal_table = t.get('table_name')
-        if 'earning' in name:
-            earnings_table = t.get('table_name')
     
     if not company_table or not personal_table:
         return patterns
     
-    # Find key columns - handle both string and dict column formats
+    # Find key columns
     def get_columns_for_table(table_name):
         for t in tables:
             if t.get('table_name') == table_name:
                 cols = t.get('columns', [])
-                # Handle dict columns
                 if cols and isinstance(cols[0], dict):
                     return [str(c.get('name', c)).lower() for c in cols]
                 else:
@@ -368,105 +368,119 @@ def get_bootstrap_patterns(project: str, schema: Dict) -> Dict[str, Dict]:
     ptft_col = next((c for c in personal_cols if 'fullpart' in c or 'part_time' in c), 'fullpart_time_code')
     emp_num_col = 'employee_number'
     
-    # Helper to generate consistent pattern keys (must match _extract_pattern_signature)
-    def make_key(intent, entities, filters):
-        sig_key = f"{intent}|{','.join(sorted(entities))}|{','.join(sorted(filters))}"
-        return hashlib.md5(sig_key.encode()).hexdigest()[:12]
+    # INTELLIGENT: Query actual values and use LLM to interpret them
+    pt_value = None
+    ft_value = None
     
-    # Pattern 1: Count PT employees with rate threshold
-    key1 = make_key('count', ['employees'], ['pt_status', 'rate_gt'])
-    patterns[key1] = {
-        'sql_template': f'''SELECT COUNT(*) as count
-FROM "{company_table}" c
-JOIN "{personal_table}" p ON c."{emp_num_col}" = p."{emp_num_col}"
-WHERE TRY_CAST(c."{rate_col}" AS FLOAT) > {{rate_threshold}}
-AND p."{ptft_col}" ILIKE '%{{employment_type}}%' ''',
-        'signature': {
-            'intent': 'count',
-            'entities': ['employees'],
-            'filters': ['pt_status', 'rate_gt'],
-            'key': key1
-        },
-        'success_count': 10,  # Bootstrap with high confidence
-        'confidence': 0.95,
-        'created': datetime.now().isoformat(),
-        'example_question': 'How many PT employees make over $35/hr?'
-    }
+    try:
+        from utils.structured_data_handler import get_structured_handler
+        handler = get_structured_handler()
+        
+        # Get distinct values
+        distinct_query = f'SELECT DISTINCT "{ptft_col}" FROM "{personal_table}" LIMIT 20'
+        rows, cols = handler.execute_query(distinct_query)
+        
+        if rows:
+            values = [str(r.get(ptft_col, '')).strip() for r in rows if r.get(ptft_col)]
+            logger.warning(f"[SQL-CACHE] Found PT/FT values in data: {values}")
+            
+            if values:
+                # Use LLM to interpret
+                try:
+                    from utils.llm_orchestrator import get_orchestrator
+                    orchestrator = get_orchestrator()
+                    
+                    prompt = f"""Column "{ptft_col}" contains these distinct values: {values}
+
+Which value represents PART-TIME employees and which represents FULL-TIME employees?
+
+Reply with ONLY two lines, nothing else:
+PT_VALUE: <exact value>
+FT_VALUE: <exact value>"""
+                    
+                    response = orchestrator.generate(prompt, max_tokens=50)
+                    if response:
+                        for line in response.strip().split('\n'):
+                            if line.upper().startswith('PT_VALUE:'):
+                                pt_value = line.split(':', 1)[1].strip()
+                            elif line.upper().startswith('FT_VALUE:'):
+                                ft_value = line.split(':', 1)[1].strip()
+                        logger.warning(f"[SQL-CACHE] LLM interpreted: PT='{pt_value}', FT='{ft_value}'")
+                except Exception as llm_e:
+                    logger.warning(f"[SQL-CACHE] LLM interpretation failed: {llm_e}")
+    except Exception as e:
+        logger.warning(f"[SQL-CACHE] Could not query PT/FT values: {e}")
     
-    # Pattern 2: Count FT employees with rate threshold
-    key2 = make_key('count', ['employees'], ['ft_status', 'rate_gt'])
-    patterns[key2] = {
-        'sql_template': f'''SELECT COUNT(*) as count
-FROM "{company_table}" c
-JOIN "{personal_table}" p ON c."{emp_num_col}" = p."{emp_num_col}"
-WHERE TRY_CAST(c."{rate_col}" AS FLOAT) > {{rate_threshold}}
-AND p."{ptft_col}" ILIKE '%{{employment_type}}%' ''',
-        'signature': {
-            'intent': 'count',
-            'entities': ['employees'],
-            'filters': ['ft_status', 'rate_gt'],
-            'key': key2
-        },
-        'success_count': 10,
-        'confidence': 0.95,
-        'created': datetime.now().isoformat(),
-        'example_question': 'How many FT employees make over $50/hr?'
-    }
-    
-    # Pattern 3: Count all employees
-    key3 = make_key('count', ['employees'], [])
-    patterns[key3] = {
-        'sql_template': f'''SELECT COUNT(*) as count
-FROM "{personal_table}"''',
-        'signature': {
-            'intent': 'count',
-            'entities': ['employees'],
-            'filters': [],
-            'key': key3
-        },
+    # Always create basic pattern
+    key_count_all = make_key('count', ['employees'], [])
+    patterns[key_count_all] = {
+        'sql_template': f'SELECT COUNT(*) as count FROM "{personal_table}"',
+        'signature': {'intent': 'count', 'entities': ['employees'], 'filters': [], 'key': key_count_all},
         'success_count': 10,
         'confidence': 0.98,
         'created': datetime.now().isoformat(),
         'example_question': 'How many employees are there?'
     }
     
-    # Pattern 4: Count PT employees (no rate filter)
-    key4 = make_key('count', ['employees'], ['pt_status'])
-    patterns[key4] = {
-        'sql_template': f'''SELECT COUNT(*) as count
-FROM "{personal_table}"
-WHERE "{ptft_col}" ILIKE '%PT%' ''',
-        'signature': {
-            'intent': 'count',
-            'entities': ['employees'],
-            'filters': ['pt_status'],
-            'key': key4
-        },
-        'success_count': 10,
-        'confidence': 0.95,
-        'created': datetime.now().isoformat(),
-        'example_question': 'How many part-time employees?'
-    }
-    
-    # Pattern 5: List employees with high rate
-    key5 = make_key('list', ['employees'], ['rate_gt'])
-    patterns[key5] = {
+    # List employees with high rate (doesn't need PT/FT)
+    key_list = make_key('list', ['employees'], ['rate_gt'])
+    patterns[key_list] = {
         'sql_template': f'''SELECT p."{emp_num_col}", c."{rate_col}"
 FROM "{company_table}" c
 JOIN "{personal_table}" p ON c."{emp_num_col}" = p."{emp_num_col}"
 WHERE TRY_CAST(c."{rate_col}" AS FLOAT) > {{rate_threshold}}
 LIMIT 100''',
-        'signature': {
-            'intent': 'list',
-            'entities': ['employees'],
-            'filters': ['rate_gt'],
-            'key': key5
-        },
+        'signature': {'intent': 'list', 'entities': ['employees'], 'filters': ['rate_gt'], 'key': key_list},
         'success_count': 5,
         'confidence': 0.90,
         'created': datetime.now().isoformat(),
         'example_question': 'List employees making over $40/hr'
     }
+    
+    # If we determined PT/FT values, create those patterns
+    if pt_value and ft_value:
+        # Count PT employees with rate threshold
+        key1 = make_key('count', ['employees'], ['pt_status', 'rate_gt'])
+        patterns[key1] = {
+            'sql_template': f'''SELECT COUNT(*) as count
+FROM "{company_table}" c
+JOIN "{personal_table}" p ON c."{emp_num_col}" = p."{emp_num_col}"
+WHERE TRY_CAST(c."{rate_col}" AS FLOAT) > {{rate_threshold}}
+AND p."{ptft_col}" = '{pt_value}' ''',
+            'signature': {'intent': 'count', 'entities': ['employees'], 'filters': ['pt_status', 'rate_gt'], 'key': key1},
+            'success_count': 10,
+            'confidence': 0.95,
+            'created': datetime.now().isoformat(),
+            'example_question': 'How many PT employees make over $35/hr?'
+        }
+        
+        # Count FT employees with rate threshold  
+        key2 = make_key('count', ['employees'], ['ft_status', 'rate_gt'])
+        patterns[key2] = {
+            'sql_template': f'''SELECT COUNT(*) as count
+FROM "{company_table}" c
+JOIN "{personal_table}" p ON c."{emp_num_col}" = p."{emp_num_col}"
+WHERE TRY_CAST(c."{rate_col}" AS FLOAT) > {{rate_threshold}}
+AND p."{ptft_col}" = '{ft_value}' ''',
+            'signature': {'intent': 'count', 'entities': ['employees'], 'filters': ['ft_status', 'rate_gt'], 'key': key2},
+            'success_count': 10,
+            'confidence': 0.95,
+            'created': datetime.now().isoformat(),
+            'example_question': 'How many FT employees make over $50/hr?'
+        }
+        
+        # Count PT employees (no rate filter)
+        key4 = make_key('count', ['employees'], ['pt_status'])
+        patterns[key4] = {
+            'sql_template': f'''SELECT COUNT(*) as count FROM "{personal_table}" WHERE "{ptft_col}" = '{pt_value}' ''',
+            'signature': {'intent': 'count', 'entities': ['employees'], 'filters': ['pt_status'], 'key': key4},
+            'success_count': 10,
+            'confidence': 0.95,
+            'created': datetime.now().isoformat(),
+            'example_question': 'How many part-time employees?'
+        }
+    else:
+        logger.warning(f"[SQL-CACHE] Could not determine PT/FT values, skipping employment type patterns")
     
     return patterns
 
@@ -492,15 +506,18 @@ def initialize_patterns(project: str, schema: Dict):
     """
     cache = get_sql_pattern_cache(project)
     
-    # Check if we need to regenerate (old keys vs new hash-based keys)
+    # Check if we need to regenerate
     needs_regenerate = len(cache.patterns) == 0
+    
     if not needs_regenerate and cache.patterns:
-        # Check if any key is the old literal format vs new hash format
-        sample_key = list(cache.patterns.keys())[0]
-        if len(sample_key) != 12 or not all(c in '0123456789abcdef' for c in sample_key):
-            logger.warning(f"[SQL-CACHE] Old key format detected ({sample_key}), regenerating patterns")
-            cache.patterns = {}
-            needs_regenerate = True
+        # Check if any pattern still has old ILIKE placeholder (needs LLM interpretation)
+        for pattern in cache.patterns.values():
+            sql = pattern.get('sql_template', '')
+            if 'ILIKE' in sql or '{employment_type}' in sql:
+                logger.warning(f"[SQL-CACHE] Old pattern format detected (ILIKE), regenerating with LLM interpretation")
+                cache.patterns = {}
+                needs_regenerate = True
+                break
     
     if needs_regenerate:
         bootstrap = get_bootstrap_patterns(project, schema)
