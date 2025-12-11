@@ -334,6 +334,7 @@ async def intelligent_chat(request: IntelligentChatRequest):
                         query_type = truth.content.get('query_type', '')
                         rows = truth.content.get('rows', [])
                         sql = truth.content.get('sql', '')
+                        cols = truth.content.get('columns', [])
                         
                         if query_type == 'count' and rows:
                             count_val = list(rows[0].values())[0] if rows[0] else 0
@@ -348,6 +349,24 @@ async def intelligent_chat(request: IntelligentChatRequest):
                             simple_answer = f"**{label}: {result_val:,.2f}**"
                             if sql:
                                 simple_answer += f"\n\n*Query executed:* `{sql[:300]}`"
+                            break
+                        elif query_type == 'list' and rows and cols:
+                            # Format as markdown table
+                            table_lines = []
+                            # Header
+                            display_cols = cols[:6]  # Limit columns for readability
+                            table_lines.append("| " + " | ".join(display_cols) + " |")
+                            table_lines.append("|" + "|".join(["---"] * len(display_cols)) + "|")
+                            # Rows (limit to 20)
+                            for row in rows[:20]:
+                                vals = [str(row.get(c, ''))[:30] for c in display_cols]
+                                table_lines.append("| " + " | ".join(vals) + " |")
+                            
+                            simple_answer = f"**Found {len(rows)} results:**\n\n" + "\n".join(table_lines)
+                            if len(rows) > 20:
+                                simple_answer += f"\n\n*Showing first 20 of {len(rows)} results*"
+                            if sql:
+                                simple_answer += f"\n\n*Query:* `{sql[:200]}`"
                             break
             
             if simple_answer:
