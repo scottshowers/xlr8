@@ -2292,7 +2292,10 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
         
         # Try date
         try:
-            date_series = pd.to_datetime(series, errors='coerce')
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                date_series = pd.to_datetime(series, errors='coerce')
             date_valid = date_series.dropna()
             
             if len(date_valid) >= len(series) * 0.8:  # 80% valid dates
