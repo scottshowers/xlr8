@@ -480,12 +480,25 @@ If this references previous results, use the same tables/conditions.
                     short_name = tname.split('__')[-1] if '__' in tname else tname
                     column_hints += f"\nNOTE: Pay/rate columns ({', '.join(rate_cols)}) are in the {short_name} table, NOT in earnings table."
             
-            # PT/FT status location
+            # PT/FT status location - DISCOVER ACTUAL VALUES
             if 'personal' in tname.lower():
                 ptft_cols = [str(c) for c in cols if 'fullpart' in str(c).lower() or 'part_time' in str(c).lower()]
                 if ptft_cols:
                     short_name = tname.split('__')[-1] if '__' in tname else tname
-                    column_hints += f"\nNOTE: PT/FT status ({', '.join(ptft_cols)}) is in the {short_name} table."
+                    # Query actual distinct values
+                    ptft_values = ""
+                    try:
+                        for ptft_col in ptft_cols[:1]:  # Just first one
+                            rows, _ = self.structured_handler.execute_query(
+                                f'SELECT DISTINCT "{ptft_col}" FROM "{tname}" WHERE "{ptft_col}" IS NOT NULL LIMIT 10'
+                            )
+                            if rows:
+                                vals = [str(r.get(ptft_col, '')) for r in rows]
+                                ptft_values = f" ACTUAL VALUES: {', '.join(vals)} (use these exact values, e.g. 'P' for part-time, 'F' for full-time)"
+                    except Exception as val_e:
+                        logger.debug(f"Could not get PT/FT values: {val_e}")
+                    
+                    column_hints += f"\nCRITICAL: PT/FT status is in {short_name}.{ptft_cols[0]}.{ptft_values}"
         
         prompt = f"""{context_str}
 SCHEMA (with sample values):
@@ -503,7 +516,8 @@ RULES:
 5. JOIN tables using shared columns from COLUMN LOCATIONS
 6. TRY_CAST for numeric comparisons
 7. LIMIT 1000 unless counting
-8. Use correct table alias for each column - CHECK COLUMN LOCATIONS above"""
+8. Use correct table alias for each column - CHECK COLUMN LOCATIONS above
+9. For PT/FT filtering, use the ACTUAL VALUES shown above (usually 'P'/'F', NOT 'PT'/'FT')"""
         
         logger.warning(f"[SQL-GEN] Calling orchestrator...")
         
