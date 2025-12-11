@@ -325,6 +325,10 @@ class IntelligenceEngine:
         tables_info = []
         all_columns = set()
         
+        # BUILD COLUMN INDEX - which table(s) has each column
+        column_index = {}  # col_name -> [table_short_names]
+        table_short_names = {}  # full_name -> short_name
+        
         for table in tables:
             table_name = table.get('table_name', '')
             columns = table.get('columns', [])
@@ -336,6 +340,18 @@ class IntelligenceEngine:
             
             # Track all columns for validation
             all_columns.update(col_names)
+            
+            # Build short name for table
+            short_name = table_name.split('__')[-1] if '__' in table_name else table_name
+            table_short_names[table_name] = short_name
+            
+            # Index each column to its table(s)
+            for col in col_names:
+                col_lower = col.lower()
+                if col_lower not in column_index:
+                    column_index[col_lower] = []
+                if short_name not in column_index[col_lower]:
+                    column_index[col_lower].append(short_name)
             
             # Get sample values
             sample_str = ""
@@ -356,6 +372,10 @@ class IntelligenceEngine:
         schema_text = '\n\n'.join(tables_info)
         logger.warning(f"[SQL-GEN] Built schema with {len(tables_info)} tables, {len(all_columns)} columns")
         
+        # Store column index for self-healing
+        self._column_index = column_index
+        self._table_short_names = table_short_names
+        
         # Log key tables for debugging
         for t in tables:
             tname = t.get('table_name', '')
@@ -372,17 +392,62 @@ class IntelligenceEngine:
                 if rate_cols:
                     logger.warning(f"[SQL-GEN] COMPANY rate columns: {rate_cols}")
         
-        # Build relationships text
+        # Build relationships text - VALIDATE columns exist in tables using column_index
         relationships_text = ""
         if self.relationships:
             rel_lines = []
-            for rel in self.relationships[:50]:
-                src = f"{rel.get('source_table')}.{rel.get('source_column')}"
-                tgt = f"{rel.get('target_table')}.{rel.get('target_column')}"
-                rel_lines.append(f"  {src} → {tgt}")
+            skipped = 0
+            for rel in self.relationships[:100]:  # Check more, filter down
+                src_table = rel.get('source_table', '').lower()
+                src_col = rel.get('source_column', '').lower()
+                tgt_table = rel.get('target_table', '').lower()
+                tgt_col = rel.get('target_column', '').lower()
+                
+                # Get short names for matching
+                src_short = src_table.split('__')[-1] if '__' in src_table else src_table
+                tgt_short = tgt_table.split('__')[-1] if '__' in tgt_table else tgt_table
+                
+                # VALIDATE: Both columns must exist in their respective tables
+                src_tables = column_index.get(src_col, [])
+                tgt_tables = column_index.get(tgt_col, [])
+                
+                src_valid = src_short in [t.lower() for t in src_tables]
+                tgt_valid = tgt_short in [t.lower() for t in tgt_tables]
+                
+                if src_valid and tgt_valid:
+                    src = f"{rel.get('source_table')}.{rel.get('source_column')}"
+                    tgt = f"{rel.get('target_table')}.{rel.get('target_column')}"
+                    rel_lines.append(f"  {src} → {tgt}")
+                else:
+                    skipped += 1
+                    if skipped <= 3:
+                        logger.debug(f"[SQL-GEN] Skipping invalid relationship: {src_table}.{src_col} → {tgt_table}.{tgt_col}")
+                
+                if len(rel_lines) >= 50:
+                    break
+            
             if rel_lines:
                 relationships_text = "\n\nRELATIONSHIPS (use these for JOINs):\n" + "\n".join(rel_lines)
-                logger.warning(f"[SQL-GEN] Including {len(rel_lines)} relationships")
+                logger.warning(f"[SQL-GEN] Including {len(rel_lines)} validated relationships (skipped {skipped} invalid)")
+        
+        # BUILD COLUMN LOCATION HINTS from column_index
+        # This tells LLM exactly which table has which column
+        column_location_text = "\n\nCOLUMN LOCATIONS (CRITICAL - use correct table for each column):\n"
+        
+        # Group columns: unique (1 table) vs shared (multiple tables)
+        unique_cols = []
+        shared_cols = []
+        for col, tables_list in sorted(column_index.items()):
+            if len(tables_list) == 1:
+                unique_cols.append(f"  {col}: {tables_list[0]} ONLY")
+            elif len(tables_list) > 1:
+                shared_cols.append(f"  {col}: {', '.join(tables_list)} (can JOIN on this)")
+        
+        # Show shared columns first (potential join keys), then unique
+        if shared_cols:
+            column_location_text += "SHARED COLUMNS (potential JOIN keys):\n" + "\n".join(shared_cols[:20]) + "\n\n"
+        if unique_cols:
+            column_location_text += "TABLE-SPECIFIC COLUMNS:\n" + "\n".join(unique_cols[:30]) + "\n"
         
         # Build conversation context
         context_str = ""
@@ -425,6 +490,7 @@ If this references previous results, use the same tables/conditions.
         prompt = f"""{context_str}
 SCHEMA (with sample values):
 {schema_text}{relationships_text}
+{column_location_text}
 {column_hints}
 
 QUESTION: {question}
@@ -434,10 +500,10 @@ RULES:
 2. Use ILIKE for text matching
 3. COUNT(*) for "how many" questions  
 4. Wrap column names in double quotes
-5. JOIN tables using the relationships
+5. JOIN tables using shared columns from COLUMN LOCATIONS
 6. TRY_CAST for numeric comparisons
 7. LIMIT 1000 unless counting
-8. Use correct table alias for each column - check which table has it"""
+8. Use correct table alias for each column - CHECK COLUMN LOCATIONS above"""
         
         logger.warning(f"[SQL-GEN] Calling orchestrator...")
         
@@ -508,9 +574,48 @@ RULES:
         
         logger.info(f"[SQL-FIX] Attempting to fix column: {bad_col}")
         
-        # CRITICAL: If the column IS VALID, it's a table alias problem, not a column name problem
+        # CRITICAL: If the column IS VALID, it's a table alias problem
         valid_cols_lower = {c.lower() for c in all_columns}
         if bad_col.lower() in valid_cols_lower:
+            # Use column_index to find correct table
+            if hasattr(self, '_column_index') and self._column_index:
+                correct_tables = self._column_index.get(bad_col.lower(), [])
+                if correct_tables:
+                    # Try to find wrong alias in SQL and replace
+                    # Pattern: wrong_alias."column" or wrong_alias.column
+                    alias_pattern = r'(\w+)\s*\.\s*"?' + re.escape(bad_col) + r'"?'
+                    match = re.search(alias_pattern, sql, re.IGNORECASE)
+                    if match:
+                        wrong_alias = match.group(1)
+                        # Find correct alias - use first table that has this column
+                        correct_table = correct_tables[0].lower()
+                        
+                        # Map short name to alias used in SQL
+                        # Check what aliases are defined in FROM/JOIN
+                        from_pattern = r'FROM\s+"?([^"\s]+)"?\s+(\w+)|JOIN\s+"?([^"\s]+)"?\s+(\w+)'
+                        alias_map = {}
+                        for m in re.finditer(from_pattern, sql, re.IGNORECASE):
+                            table_name = m.group(1) or m.group(3)
+                            alias = m.group(2) or m.group(4)
+                            if table_name:
+                                short = table_name.split('__')[-1].lower() if '__' in table_name else table_name.lower()
+                                alias_map[short] = alias
+                        
+                        if correct_table in alias_map:
+                            correct_alias = alias_map[correct_table]
+                            logger.info(f"[SQL-FIX] Fixing table alias: {wrong_alias}.{bad_col} → {correct_alias}.{bad_col}")
+                            
+                            # Replace wrong_alias.column with correct_alias.column
+                            fixed_sql = re.sub(
+                                r'\b' + re.escape(wrong_alias) + r'\s*\.\s*"?' + re.escape(bad_col) + r'"?',
+                                f'{correct_alias}."{bad_col}"',
+                                sql,
+                                flags=re.IGNORECASE
+                            )
+                            return fixed_sql
+                        else:
+                            logger.warning(f"[SQL-FIX] Column '{bad_col}' exists in {correct_tables} but no alias found in SQL")
+            
             logger.warning(f"[SQL-FIX] Column '{bad_col}' exists but wrong table alias - cannot auto-fix")
             return None
         
