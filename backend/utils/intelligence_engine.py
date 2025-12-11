@@ -467,7 +467,7 @@ class IntelligenceEngine:
                 
                 if is_follow_up:
                     # Extract WHERE clause from previous SQL to reuse
-                    import re
+                    # re imported at module level
                     where_match = re.search(r'WHERE\s+(.+?)(?:ORDER|LIMIT|GROUP|$)', last_sql, re.IGNORECASE | re.DOTALL)
                     where_clause = where_match.group(1).strip() if where_match else None
                     
@@ -640,7 +640,7 @@ Return ONLY the SQL, no explanation."""
         - 'Table "x" does not have a column named "rate"'
         - 'Referenced column "hourly_rate" not found in FROM clause!'
         """
-        import re
+        # re imported at module level
         from difflib import SequenceMatcher
         
         # Try multiple error patterns
