@@ -217,7 +217,19 @@ class IntelligenceEngine:
         return any(p in q_lower for p in specified_patterns)
     
     def _request_employee_status_clarification(self, question: str) -> SynthesizedAnswer:
-        """Ask the ONE clarification that matters."""
+        """Ask for employee status clarification using ACTUAL values from the data."""
+        
+        # Get actual status values from profile data
+        status_options = self._get_status_options_from_profiles()
+        
+        if not status_options:
+            # Fallback to generic options if no profile data
+            status_options = [
+                {'id': 'active', 'label': 'Active only', 'default': True},
+                {'id': 'termed', 'label': 'Terminated only'},
+                {'id': 'all', 'label': 'All employees'}
+            ]
+        
         return SynthesizedAnswer(
             question=question,
             answer="",
@@ -228,11 +240,7 @@ class IntelligenceEngine:
                     'id': 'employee_status',
                     'question': 'Which employees should I include?',
                     'type': 'radio',
-                    'options': [
-                        {'id': 'active', 'label': 'Active only', 'default': True},
-                        {'id': 'termed', 'label': 'Terminated only'},
-                        {'id': 'all', 'label': 'All employees'}
-                    ]
+                    'options': status_options
                 }],
                 'original_question': question,
                 'detected_mode': 'search',
@@ -240,6 +248,171 @@ class IntelligenceEngine:
             },
             reasoning=['Need to know which employees to include']
         )
+    
+    def _get_status_options_from_profiles(self) -> List[Dict]:
+        """
+        Get employee status options from actual profile data.
+        This is the key Phase 2 feature - data-driven clarification.
+        """
+        if not self.schema:
+            return []
+        
+        tables = self.schema.get('tables', [])
+        
+        # Look for status-related columns in the profiles
+        status_patterns = ['status', 'employment_status', 'emp_status', 'employee_status', 
+                          'employment_status_code', 'termination_date', 'term_date']
+        
+        for table in tables:
+            categorical_cols = table.get('categorical_columns', [])
+            column_profiles = table.get('column_profiles', {})
+            
+            # Check categorical columns for status-like values
+            for cat_col in categorical_cols:
+                col_name = cat_col.get('column', '').lower()
+                
+                # Is this a status column?
+                if any(pattern in col_name for pattern in status_patterns):
+                    values = cat_col.get('values', [])
+                    distribution = cat_col.get('distribution', {})
+                    
+                    if values:
+                        return self._build_status_options(values, distribution, col_name)
+            
+            # Also check column_profiles directly
+            for col_name, profile in column_profiles.items():
+                col_lower = col_name.lower()
+                if any(pattern in col_lower for pattern in status_patterns):
+                    if profile.get('is_categorical') and profile.get('distinct_values'):
+                        values = profile['distinct_values']
+                        distribution = profile.get('value_distribution', {})
+                        return self._build_status_options(values, distribution, col_name)
+        
+        return []
+    
+    def _build_status_options(self, values: List[str], distribution: Dict, col_name: str) -> List[Dict]:
+        """Build clarification options from actual data values."""
+        options = []
+        
+        # Common status code mappings
+        status_labels = {
+            'A': 'Active', 'T': 'Terminated', 'L': 'Leave', 'I': 'Inactive',
+            'ACTIVE': 'Active', 'TERMED': 'Terminated', 'TERM': 'Terminated',
+            'LOA': 'Leave of Absence', 'LEAVE': 'Leave', 'INACTIVE': 'Inactive',
+            'REG': 'Regular', 'TEMP': 'Temporary', 'PART': 'Part-time',
+            'FT': 'Full-time', 'PT': 'Part-time'
+        }
+        
+        # Build options with counts
+        active_values = []
+        termed_values = []
+        other_values = []
+        
+        for val in values:
+            val_upper = str(val).upper().strip()
+            count = distribution.get(val, distribution.get(str(val), 0))
+            
+            # Categorize
+            if val_upper in ['A', 'ACTIVE', 'ACT']:
+                active_values.append((val, count))
+            elif val_upper in ['T', 'TERMINATED', 'TERM', 'TERMED', 'I', 'INACTIVE']:
+                termed_values.append((val, count))
+            else:
+                other_values.append((val, count))
+        
+        # Build options with actual counts
+        if active_values:
+            active_count = sum(c for _, c in active_values)
+            active_codes = ', '.join(v for v, _ in active_values)
+            options.append({
+                'id': 'active',
+                'label': f'Active only ({active_count:,} employees)',
+                'codes': active_codes,
+                'default': True
+            })
+        
+        if termed_values:
+            termed_count = sum(c for _, c in termed_values)
+            termed_codes = ', '.join(v for v, _ in termed_values)
+            options.append({
+                'id': 'termed',
+                'label': f'Terminated only ({termed_count:,} employees)',
+                'codes': termed_codes
+            })
+        
+        # Add "All" option with total
+        total_count = sum(distribution.values()) if distribution else 0
+        options.append({
+            'id': 'all',
+            'label': f'All employees ({total_count:,} total)'
+        })
+        
+        # If we couldn't categorize well, show raw values
+        if not active_values and not termed_values and other_values:
+            options = []
+            for val, count in sorted(other_values, key=lambda x: -x[1])[:5]:
+                label = status_labels.get(str(val).upper(), str(val))
+                options.append({
+                    'id': str(val).lower(),
+                    'label': f'{label} ({count:,})',
+                    'code': val
+                })
+            options.append({'id': 'all', 'label': f'All ({total_count:,} total)'})
+        
+        logger.info(f"[CLARIFICATION] Built {len(options)} options from {col_name}: {[o['id'] for o in options]}")
+        return options
+    
+    def _get_status_column_and_codes(self, status_filter: str) -> Tuple[Optional[str], List[str]]:
+        """
+        Get the actual column name and codes to use for filtering.
+        Returns (column_name, [list of codes])
+        """
+        if not self.schema:
+            return None, []
+        
+        tables = self.schema.get('tables', [])
+        status_patterns = ['status', 'employment_status', 'emp_status', 'employee_status', 'employment_status_code']
+        
+        for table in tables:
+            categorical_cols = table.get('categorical_columns', [])
+            column_profiles = table.get('column_profiles', {})
+            
+            for cat_col in categorical_cols:
+                col_name = cat_col.get('column', '')
+                col_lower = col_name.lower()
+                
+                if any(pattern in col_lower for pattern in status_patterns):
+                    values = cat_col.get('values', [])
+                    
+                    # Find matching codes based on status_filter
+                    if status_filter == 'active':
+                        codes = [v for v in values if str(v).upper() in ['A', 'ACTIVE', 'ACT']]
+                    elif status_filter == 'termed':
+                        codes = [v for v in values if str(v).upper() in ['T', 'TERMINATED', 'TERM', 'TERMED', 'I', 'INACTIVE']]
+                    else:
+                        # Check if filter matches a specific code
+                        codes = [v for v in values if str(v).lower() == status_filter.lower()]
+                    
+                    if codes:
+                        return col_name, codes
+            
+            # Also check column_profiles
+            for col_name, profile in column_profiles.items():
+                col_lower = col_name.lower()
+                if any(pattern in col_lower for pattern in status_patterns):
+                    values = profile.get('distinct_values', [])
+                    
+                    if status_filter == 'active':
+                        codes = [v for v in values if str(v).upper() in ['A', 'ACTIVE', 'ACT']]
+                    elif status_filter == 'termed':
+                        codes = [v for v in values if str(v).upper() in ['T', 'TERMINATED', 'TERM', 'TERMED', 'I', 'INACTIVE']]
+                    else:
+                        codes = [v for v in values if str(v).lower() == status_filter.lower()]
+                    
+                    if codes:
+                        return col_name, codes
+        
+        return None, []
     
     def _detect_mode(self, q_lower: str) -> IntelligenceMode:
         """Detect the appropriate intelligence mode."""
@@ -349,13 +522,22 @@ class IntelligenceEngine:
             if rel_lines:
                 relationships_text = "\n\nRELATIONSHIPS:\n" + "\n".join(rel_lines)
         
-        # Employee status filter
+        # Employee status filter - now uses actual codes from profile data
         filter_instructions = ""
-        if self.confirmed_facts.get('employee_status') == 'active':
-            filter_instructions = "\n\nFILTER: Include only ACTIVE employees (exclude terminated)"
-        elif self.confirmed_facts.get('employee_status') == 'termed':
-            filter_instructions = "\n\nFILTER: Include only TERMINATED employees"
-        # 'all' means no filter
+        status_filter = self.confirmed_facts.get('employee_status')
+        
+        if status_filter and status_filter != 'all':
+            # Get actual status column and codes from profile data
+            status_col, status_codes = self._get_status_column_and_codes(status_filter)
+            
+            if status_col and status_codes:
+                codes_str = ', '.join(f"'{c}'" for c in status_codes)
+                filter_instructions = f"\n\nFILTER: Include only employees where {status_col} IN ({codes_str})"
+            elif status_filter == 'active':
+                # Fallback: try termination_date approach
+                filter_instructions = "\n\nFILTER: Include only ACTIVE employees (WHERE termination_date IS NULL OR termination_date = '')"
+            elif status_filter == 'termed':
+                filter_instructions = "\n\nFILTER: Include only TERMINATED employees (WHERE termination_date IS NOT NULL AND termination_date != '')"
         
         prompt = f"""SCHEMA:
 {schema_text}{relationships_text}
