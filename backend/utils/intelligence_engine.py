@@ -25,7 +25,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v3.1 LOADED ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v3.2 SHORT ALIASES ======")
 
 
 # =============================================================================
@@ -560,10 +560,11 @@ class IntelligenceEngine:
         q_lower = question.lower()
         relevant_tables = self._select_relevant_tables(tables, q_lower)
         
-        # Build COMPACT schema - only relevant tables, minimal samples
+        # Build COMPACT schema with SHORT ALIASES
         tables_info = []
         all_columns = set()
         primary_table = None
+        table_aliases = {}  # Map short alias to full name
         
         for i, table in enumerate(relevant_tables):
             table_name = table.get('table_name', '')
@@ -576,9 +577,13 @@ class IntelligenceEngine:
             
             all_columns.update(col_names)
             
+            # Create SHORT alias from table name
+            short_name = table_name.split('__')[-1] if '__' in table_name else table_name
+            table_aliases[short_name] = table_name
+            
             # First relevant table is "primary"
             if i == 0:
-                primary_table = table_name
+                primary_table = short_name
             
             # Only include sample for primary table
             sample_str = ""
@@ -600,7 +605,11 @@ class IntelligenceEngine:
             if len(col_names) > 15:
                 col_str += f" (+{len(col_names) - 15} more)"
             
-            tables_info.append(f"Table: {table_name}\n  Columns: {col_str}\n  Rows: {row_count}{sample_str}")
+            # Use SHORT name in schema
+            tables_info.append(f"Table: {short_name}\n  Columns: {col_str}\n  Rows: {row_count}{sample_str}")
+        
+        # Store aliases for SQL post-processing
+        self._table_aliases = table_aliases
         
         schema_text = '\n\n'.join(tables_info)
         
@@ -665,6 +674,38 @@ SQL:"""
                 sql = re.sub(r'```sql\s*', '', sql, flags=re.IGNORECASE)
                 sql = re.sub(r'```\s*$', '', sql)
                 sql = sql.replace('```', '').strip()
+            
+            # EXPAND short aliases to full table names
+            if hasattr(self, '_table_aliases') and self._table_aliases:
+                for short_name, full_name in self._table_aliases.items():
+                    # Replace FROM short_name and JOIN short_name patterns
+                    # Be careful to match word boundaries
+                    sql = re.sub(
+                        rf'\bFROM\s+{re.escape(short_name)}\b',
+                        f'FROM "{full_name}"',
+                        sql,
+                        flags=re.IGNORECASE
+                    )
+                    sql = re.sub(
+                        rf'\bJOIN\s+{re.escape(short_name)}\b',
+                        f'JOIN "{full_name}"',
+                        sql,
+                        flags=re.IGNORECASE
+                    )
+                    # Also handle quoted versions
+                    sql = re.sub(
+                        rf'\bFROM\s+"{re.escape(short_name)}"',
+                        f'FROM "{full_name}"',
+                        sql,
+                        flags=re.IGNORECASE
+                    )
+                    sql = re.sub(
+                        rf'\bJOIN\s+"{re.escape(short_name)}"',
+                        f'JOIN "{full_name}"',
+                        sql,
+                        flags=re.IGNORECASE
+                    )
+                logger.warning(f"[SQL-GEN] After alias expansion: {sql[:150]}")
             
             logger.warning(f"[SQL-GEN] Generated: {sql[:150]}")
             
