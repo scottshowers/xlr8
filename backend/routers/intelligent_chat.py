@@ -993,3 +993,101 @@ async def get_user_preferences(user_id: str, project: str = None):
     except Exception as e:
         logger.error(f"[LEARNING] Error getting preferences: {e}")
         return {"preferences": {}, "error": str(e)}
+
+
+# =============================================================================
+# DIAGNOSTIC ENDPOINTS
+# =============================================================================
+
+@router.get("/chat/intelligent/diagnostics/profiles")
+async def check_profiles(project: str = None):
+    """
+    Check if column profiles exist and optionally run backfill.
+    GET /api/chat/intelligent/diagnostics/profiles?project=TEA1000
+    """
+    try:
+        from utils.structured_data_handler import get_structured_handler
+    except ImportError:
+        from backend.utils.structured_data_handler import get_structured_handler
+    
+    handler = get_structured_handler()
+    
+    result = {
+        "profiles_table_exists": False,
+        "total_profiles": 0,
+        "profiles_by_project": {},
+        "sample_profiles": []
+    }
+    
+    try:
+        # Check if table exists
+        tables = handler.conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='_column_profiles'").fetchall()
+        if not tables:
+            # Try DuckDB syntax
+            tables = handler.conn.execute("SELECT table_name FROM information_schema.tables WHERE table_name = '_column_profiles'").fetchall()
+        
+        result["profiles_table_exists"] = len(tables) > 0
+        
+        if result["profiles_table_exists"]:
+            # Count total
+            count = handler.conn.execute("SELECT COUNT(*) FROM _column_profiles").fetchone()
+            result["total_profiles"] = count[0] if count else 0
+            
+            # Count by project
+            by_project = handler.conn.execute("""
+                SELECT project, COUNT(*) as cnt 
+                FROM _column_profiles 
+                GROUP BY project
+            """).fetchall()
+            result["profiles_by_project"] = {p[0]: p[1] for p in by_project}
+            
+            # Sample profiles
+            if project:
+                samples = handler.conn.execute("""
+                    SELECT table_name, column_name, inferred_type, distinct_count, is_categorical
+                    FROM _column_profiles 
+                    WHERE project = ?
+                    LIMIT 10
+                """, [project]).fetchall()
+            else:
+                samples = handler.conn.execute("""
+                    SELECT table_name, column_name, inferred_type, distinct_count, is_categorical
+                    FROM _column_profiles 
+                    LIMIT 10
+                """).fetchall()
+            
+            result["sample_profiles"] = [
+                {
+                    "table": s[0].split('__')[-1] if s[0] else '',
+                    "column": s[1],
+                    "type": s[2],
+                    "distinct_count": s[3],
+                    "is_categorical": s[4]
+                }
+                for s in samples
+            ]
+    except Exception as e:
+        result["error"] = str(e)
+    
+    return result
+
+
+@router.post("/chat/intelligent/diagnostics/backfill")
+async def run_backfill(project: str = None):
+    """
+    Run profile backfill for existing tables.
+    POST /api/chat/intelligent/diagnostics/backfill?project=TEA1000
+    """
+    try:
+        from utils.structured_data_handler import get_structured_handler
+    except ImportError:
+        from backend.utils.structured_data_handler import get_structured_handler
+    
+    handler = get_structured_handler()
+    
+    # Check if backfill method exists
+    if not hasattr(handler, 'backfill_profiles'):
+        return {"error": "backfill_profiles method not found - deploy latest structured_data_handler.py"}
+    
+    result = handler.backfill_profiles(project)
+    return result
