@@ -25,7 +25,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v3.2 SHORT ALIASES ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v3.3 ALIAS FIX ======")
 
 
 # =============================================================================
@@ -534,7 +534,7 @@ class IntelligenceEngine:
     
     def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
         """Generate SQL query using LLMOrchestrator with SMART table selection."""
-        logger.warning(f"[SQL-GEN] v3.1 - Starting SQL generation")
+        logger.warning(f"[SQL-GEN] v3.3 - Starting SQL generation")
         logger.warning(f"[SQL-GEN] confirmed_facts: {self.confirmed_facts}")
         
         if not self.structured_handler or not self.schema:
@@ -675,37 +675,36 @@ SQL:"""
                 sql = re.sub(r'```\s*$', '', sql)
                 sql = sql.replace('```', '').strip()
             
-            # EXPAND short aliases to full table names
+            # EXPAND short aliases to full table names WITH alias preservation
             if hasattr(self, '_table_aliases') and self._table_aliases:
                 for short_name, full_name in self._table_aliases.items():
-                    # Replace FROM short_name and JOIN short_name patterns
-                    # Be careful to match word boundaries
+                    # Replace FROM short_name → FROM "full_name" AS short_name
                     sql = re.sub(
-                        rf'\bFROM\s+{re.escape(short_name)}\b',
-                        f'FROM "{full_name}"',
+                        rf'\bFROM\s+{re.escape(short_name)}\b(?!\s+AS)',
+                        f'FROM "{full_name}" AS {short_name}',
                         sql,
                         flags=re.IGNORECASE
                     )
                     sql = re.sub(
-                        rf'\bJOIN\s+{re.escape(short_name)}\b',
-                        f'JOIN "{full_name}"',
+                        rf'\bFROM\s+"{re.escape(short_name)}"(?!\s+AS)',
+                        f'FROM "{full_name}" AS {short_name}',
                         sql,
                         flags=re.IGNORECASE
                     )
-                    # Also handle quoted versions
+                    # Replace JOIN short_name → JOIN "full_name" AS short_name
                     sql = re.sub(
-                        rf'\bFROM\s+"{re.escape(short_name)}"',
-                        f'FROM "{full_name}"',
+                        rf'\bJOIN\s+{re.escape(short_name)}\b(?!\s+AS)',
+                        f'JOIN "{full_name}" AS {short_name}',
                         sql,
                         flags=re.IGNORECASE
                     )
                     sql = re.sub(
-                        rf'\bJOIN\s+"{re.escape(short_name)}"',
-                        f'JOIN "{full_name}"',
+                        rf'\bJOIN\s+"{re.escape(short_name)}"(?!\s+AS)',
+                        f'JOIN "{full_name}" AS {short_name}',
                         sql,
                         flags=re.IGNORECASE
                     )
-                logger.warning(f"[SQL-GEN] After alias expansion: {sql[:150]}")
+                logger.warning(f"[SQL-GEN] After alias expansion: {sql[:200]}")
             
             logger.warning(f"[SQL-GEN] Generated: {sql[:150]}")
             
