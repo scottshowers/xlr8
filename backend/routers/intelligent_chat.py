@@ -416,6 +416,22 @@ async def intelligent_chat(request: IntelligentChatRequest):
         }
         logger.info(f"[INTELLIGENT] Saved session {session_id}, sql: {actual_sql[:50] if actual_sql else 'None'}...")
         
+        # Handle case where we have no answer at all
+        if response["answer"] is None and not response["needs_clarification"]:
+            # Check if we have any data at all
+            if answer.from_reality or answer.from_intent or answer.from_best_practice:
+                response["answer"] = "I found some related information but couldn't generate a complete answer. Please try rephrasing your question."
+            else:
+                response["answer"] = "I couldn't find any data matching your query. Please check that data has been uploaded for this project."
+            response["confidence"] = 0.3
+        
+        # Add helpful message for clarification responses
+        if response["needs_clarification"]:
+            questions = response.get("clarification_questions", [])
+            if questions:
+                q_text = questions[0].get('question', 'I need more information')
+                response["answer"] = f"Before I can answer, {q_text.lower()}"
+        
         # Cleanup old sessions (keep last 100)
         if len(intelligence_sessions) > 100:
             oldest = list(intelligence_sessions.keys())[0]
@@ -597,11 +613,67 @@ async def get_project_schema_direct(project: str, scope: str, handler) -> Dict:
                 except:
                     row_count = 0
                 
+                # Get column profiles (Phase 2: Data-driven clarification)
+                categorical_columns = []
+                column_profiles = {}
+                try:
+                    profile_result = handler.conn.execute("""
+                        SELECT column_name, inferred_type, distinct_count, 
+                               distinct_values, value_distribution, is_categorical,
+                               min_value, max_value
+                        FROM _column_profiles 
+                        WHERE table_name = ?
+                    """, [table_name]).fetchall()
+                    
+                    for prow in profile_result:
+                        col_name, inf_type, distinct_cnt, distinct_vals, val_dist, is_cat, min_val, max_val = prow
+                        
+                        profile = {
+                            'inferred_type': inf_type,
+                            'distinct_count': distinct_cnt,
+                            'is_categorical': is_cat
+                        }
+                        
+                        # Parse JSON fields
+                        if distinct_vals:
+                            try:
+                                profile['distinct_values'] = json.loads(distinct_vals)
+                            except:
+                                pass
+                        
+                        if val_dist:
+                            try:
+                                profile['value_distribution'] = json.loads(val_dist)
+                            except:
+                                pass
+                        
+                        if inf_type == 'numeric':
+                            profile['min_value'] = min_val
+                            profile['max_value'] = max_val
+                        
+                        column_profiles[col_name] = profile
+                        
+                        # Track categorical columns for clarification
+                        if is_cat and distinct_cnt and distinct_cnt <= 20:
+                            categorical_columns.append({
+                                'column': col_name,
+                                'values': profile.get('distinct_values', []),
+                                'distribution': profile.get('value_distribution', {})
+                            })
+                    
+                    if categorical_columns:
+                        logger.info(f"[SCHEMA] {table_name}: {len(categorical_columns)} categorical columns loaded")
+                        
+                except Exception as profile_e:
+                    logger.debug(f"[SCHEMA] No profiles for {table_name}: {profile_e}")
+                
                 tables.append({
                     'table_name': table_name,
                     'project': project or 'unknown',
                     'columns': columns,
-                    'row_count': row_count
+                    'row_count': row_count,
+                    'column_profiles': column_profiles,
+                    'categorical_columns': categorical_columns
                 })
                 
                 # Log first few columns
