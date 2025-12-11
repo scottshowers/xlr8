@@ -160,7 +160,14 @@ class IntelligenceEngine:
         # 2. User hasn't already answered
         # 3. User didn't specify in the question
         if is_employee_question and 'employee_status' not in self.confirmed_facts:
-            if not self._status_specified_in_question(q_lower):
+            # Check if user specified status in the question itself
+            detected_status = self._detect_status_in_question(q_lower)
+            if detected_status:
+                # User specified - set it and continue
+                self.confirmed_facts['employee_status'] = detected_status
+                logger.info(f"[INTELLIGENCE] Detected status in question: {detected_status}")
+            else:
+                # Need to ask
                 logger.info("[INTELLIGENCE] Asking for employee status clarification")
                 return self._request_employee_status_clarification(question)
         
@@ -207,14 +214,24 @@ class IntelligenceEngine:
         ]
         return any(w in q_lower for w in employee_words)
     
-    def _status_specified_in_question(self, q_lower: str) -> bool:
-        """Check if user already specified employee status in their question."""
-        specified_patterns = [
-            'active only', 'active employees', 'only active',
-            'terminated', 'termed', 'inactive',
-            'all employees', 'everyone', 'all staff', 'all workers'
-        ]
-        return any(p in q_lower for p in specified_patterns)
+    def _detect_status_in_question(self, q_lower: str) -> Optional[str]:
+        """
+        Check if user specified employee status in their question.
+        Returns the detected status ('active', 'termed', 'all') or None.
+        """
+        # Active patterns
+        if any(p in q_lower for p in ['active only', 'active employees', 'only active', 'current employees']):
+            return 'active'
+        
+        # Terminated patterns
+        if any(p in q_lower for p in ['terminated', 'termed', 'inactive', 'former employees']):
+            return 'termed'
+        
+        # All patterns
+        if any(p in q_lower for p in ['all employees', 'everyone', 'all staff', 'all workers', 'total employees']):
+            return 'all'
+        
+        return None
     
     def _request_employee_status_clarification(self, question: str) -> SynthesizedAnswer:
         """Ask for employee status clarification using ACTUAL values from the data."""
