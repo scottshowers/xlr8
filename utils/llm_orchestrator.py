@@ -631,6 +631,10 @@ SELECT"""
         """
         sql = sql.strip()
         
+        # Remove DeepSeek tokenizer artifacts
+        sql = re.sub(r'<｜[^｜]+｜>', '', sql)  # Remove <｜...｜> patterns
+        sql = re.sub(r'<\|[^|]+\|>', '', sql)   # Remove <|...|> patterns (ASCII variant)
+        
         # Remove trailing semicolons
         sql = sql.rstrip(';')
         
