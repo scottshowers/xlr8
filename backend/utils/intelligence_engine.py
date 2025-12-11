@@ -1245,18 +1245,32 @@ Return ONLY the SQL, no explanation."""
         context_parts = []
         
         if reality:
-            context_parts.append("=== CUSTOMER DATA ===")
+            context_parts.append("=== CUSTOMER DATA (QUERY RESULTS) ===")
             for truth in reality[:3]:
                 if isinstance(truth.content, dict) and 'rows' in truth.content:
                     rows = truth.content['rows']
                     cols = truth.content['columns']
-                    context_parts.append(f"\nSource: {truth.source_name}")
-                    context_parts.append(f"Columns: {', '.join(cols[:10])}")
-                    context_parts.append(f"Sample data ({len(rows)} rows):")
-                    for row in rows[:5]:
-                        row_str = " | ".join(f"{k}: {v}" for k, v in list(row.items())[:6])
-                        context_parts.append(f"  {row_str}")
-            reasoning.append(f"Found {len(reality)} relevant data sources")
+                    query_type = truth.content.get('query_type', 'unknown')
+                    
+                    # FORMAT COUNT RESULTS CLEARLY
+                    if query_type == 'count' and rows:
+                        count_val = list(rows[0].values())[0] if rows[0] else 0
+                        context_parts.append(f"\n**ANSWER: {count_val}**")
+                        context_parts.append(f"(This is the count result from the query)")
+                        context_parts.append(f"SQL: {truth.content.get('sql', 'N/A')[:200]}")
+                    elif query_type in ['sum', 'average'] and rows:
+                        result_val = list(rows[0].values())[0] if rows[0] else 0
+                        context_parts.append(f"\n**RESULT: {result_val}**")
+                        context_parts.append(f"SQL: {truth.content.get('sql', 'N/A')[:200]}")
+                    else:
+                        # List/detail results
+                        context_parts.append(f"\nSource: {truth.source_name}")
+                        context_parts.append(f"Columns: {', '.join(cols[:10])}")
+                        context_parts.append(f"Results ({len(rows)} rows):")
+                        for row in rows[:10]:
+                            row_str = " | ".join(f"{k}: {v}" for k, v in list(row.items())[:6])
+                            context_parts.append(f"  {row_str}")
+            reasoning.append(f"Found {len(reality)} data query results")
         
         if intent:
             context_parts.append("\n=== CUSTOMER DOCUMENTS ===")
