@@ -695,7 +695,9 @@ async def get_project_schema_direct(project: str, scope: str, handler) -> Dict:
                             })
                     
                     if categorical_columns:
-                        logger.info(f"[SCHEMA] {table_name}: {len(categorical_columns)} categorical columns loaded")
+                        logger.warning(f"[SCHEMA] {table_name.split('__')[-1]}: {len(categorical_columns)} categorical columns, {len(column_profiles)} total profiles")
+                    elif column_profiles:
+                        logger.warning(f"[SCHEMA] {table_name.split('__')[-1]}: {len(column_profiles)} profiles (no categorical)")
                         
                 except Exception as profile_e:
                     logger.warning(f"[SCHEMA] No profiles for {table_name}: {profile_e}")
@@ -718,12 +720,21 @@ async def get_project_schema_direct(project: str, scope: str, handler) -> Dict:
         
         logger.warning(f"[SCHEMA] Returning {len(tables)} tables for project '{project}'")
         
+        # Get filter candidates for intelligent clarification
+        filter_candidates = {}
+        try:
+            filter_candidates = handler.get_filter_candidates(project)
+            if filter_candidates:
+                logger.warning(f"[SCHEMA] Filter candidates: {list(filter_candidates.keys())}")
+        except Exception as fc_e:
+            logger.warning(f"[SCHEMA] Could not get filter candidates: {fc_e}")
+        
     except Exception as e:
         logger.error(f"[SCHEMA] Failed: {e}")
         import traceback
         logger.error(traceback.format_exc())
     
-    return {'tables': tables}
+    return {'tables': tables, 'filter_candidates': filter_candidates}
 
 
 async def get_project_schema(project: str, scope: str) -> Dict:
@@ -1002,7 +1013,7 @@ async def get_user_preferences(user_id: str, project: str = None):
 @router.get("/chat/intelligent/diagnostics/profiles")
 async def check_profiles(project: str = None):
     """
-    Check if column profiles exist and optionally run backfill.
+    Check if column profiles exist and show filter candidates.
     GET /api/chat/intelligent/diagnostics/profiles?project=TEA1000
     """
     try:
@@ -1016,6 +1027,7 @@ async def check_profiles(project: str = None):
         "profiles_table_exists": False,
         "total_profiles": 0,
         "profiles_by_project": {},
+        "filter_candidates": {},
         "sample_profiles": []
     }
     
@@ -1041,19 +1053,23 @@ async def check_profiles(project: str = None):
             """).fetchall()
             result["profiles_by_project"] = {p[0]: p[1] for p in by_project}
             
+            # Get filter candidates
+            if project:
+                result["filter_candidates"] = handler.get_filter_candidates(project)
+            
             # Sample profiles
             if project:
                 samples = handler.conn.execute("""
-                    SELECT table_name, column_name, inferred_type, distinct_count, is_categorical
+                    SELECT table_name, column_name, inferred_type, distinct_count, is_categorical, filter_category
                     FROM _column_profiles 
                     WHERE project = ?
-                    LIMIT 10
+                    LIMIT 15
                 """, [project]).fetchall()
             else:
                 samples = handler.conn.execute("""
-                    SELECT table_name, column_name, inferred_type, distinct_count, is_categorical
+                    SELECT table_name, column_name, inferred_type, distinct_count, is_categorical, filter_category
                     FROM _column_profiles 
-                    LIMIT 10
+                    LIMIT 15
                 """).fetchall()
             
             result["sample_profiles"] = [
@@ -1062,7 +1078,8 @@ async def check_profiles(project: str = None):
                     "column": s[1],
                     "type": s[2],
                     "distinct_count": s[3],
-                    "is_categorical": s[4]
+                    "is_categorical": s[4],
+                    "filter_category": s[5]
                 }
                 for s in samples
             ]
