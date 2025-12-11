@@ -1,18 +1,24 @@
 """
-XLR8 INTELLIGENCE ENGINE
-=========================
+XLR8 INTELLIGENCE ENGINE v2
+============================
 
 Deploy to: backend/utils/intelligence_engine.py
 
-FIXED: Clarification now tracks per-question-type, not globally.
-Previously: Once you answered "Active only" for one question, ALL subsequent 
-questions skipped clarification (even different domains like deductions).
-Now: Each question-type gets its own clarification check.
+PROPERLY INTELLIGENT:
+- Question analysis done by LOCAL LLM (Mistral), not regex
+- Clarification decisions made by LLM based on context
+- Domain detection is LLM-powered
+- Zero hardcoded patterns for classification
+
+LOCAL LLM = FREE, FAST, UNLIMITED
 """
 
+import os
 import re
 import json
 import logging
+import requests
+from requests.auth import HTTPBasicAuth
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
@@ -70,7 +76,7 @@ class SynthesizedAnswer:
     insights: List[Insight] = field(default_factory=list)
     structured_output: Optional[Dict] = None
     reasoning: List[str] = field(default_factory=list)
-    executed_sql: Optional[str] = None  # SQL that was generated and executed
+    executed_sql: Optional[str] = None
 
 
 class IntelligenceMode(Enum):
@@ -86,7 +92,7 @@ class IntelligenceMode(Enum):
 
 
 # =============================================================================
-# SEMANTIC PATTERNS
+# SEMANTIC PATTERNS (kept for column matching, NOT for question analysis)
 # =============================================================================
 
 SEMANTIC_TYPES = {
@@ -124,24 +130,218 @@ SEMANTIC_TYPES = {
 
 
 # =============================================================================
-# CLARIFICATION QUESTION IDS BY DOMAIN
-# Maps each domain to the clarification question IDs that domain requires.
-# This is the key to fixing the bug - we check if THIS domain's questions
-# have been answered, not if ANY questions have been answered.
+# LOCAL LLM CLIENT
 # =============================================================================
 
-DOMAIN_CLARIFICATION_MAP = {
-    'employees': ['employee_status'],
-    'earnings': ['earnings_scope'],
-    'deductions': ['deduction_type'],
-    'taxes': ['tax_scope'],
-    'jobs': ['job_scope'],
-}
+class LocalLLM:
+    """Client for calling local Ollama instance."""
+    
+    def __init__(self):
+        self.ollama_url = os.getenv("LLM_ENDPOINT", "").rstrip('/')
+        self.ollama_username = os.getenv("LLM_USERNAME", "")
+        self.ollama_password = os.getenv("LLM_PASSWORD", "")
+        
+        # Model selection
+        self.analysis_model = "mistral:7b"  # For question analysis
+        self.sql_model = "deepseek-coder:6.7b"  # For SQL generation
+        self.synthesis_model = "mistral:7b"  # For answer synthesis
+        
+    def call(self, prompt: str, model: str = None, temperature: float = 0.3, max_tokens: int = 2048) -> Tuple[Optional[str], bool]:
+        """
+        Call local Ollama instance.
+        
+        Returns:
+            Tuple of (response_text, success_bool)
+        """
+        if not self.ollama_url:
+            logger.error("LLM_ENDPOINT not configured!")
+            return None, False
+        
+        model = model or self.analysis_model
+        
+        try:
+            url = f"{self.ollama_url}/api/generate"
+            
+            payload = {
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": temperature,
+                    "num_predict": max_tokens
+                }
+            }
+            
+            logger.info(f"[LOCAL-LLM] Calling {model} ({len(prompt)} chars)")
+            
+            # Use auth if configured
+            if self.ollama_username and self.ollama_password:
+                response = requests.post(
+                    url, json=payload,
+                    auth=HTTPBasicAuth(self.ollama_username, self.ollama_password),
+                    timeout=60
+                )
+            else:
+                response = requests.post(url, json=payload, timeout=60)
+            
+            if response.status_code != 200:
+                logger.error(f"[LOCAL-LLM] Error {response.status_code}: {response.text[:200]}")
+                return None, False
+            
+            result = response.json().get("response", "")
+            logger.info(f"[LOCAL-LLM] Response: {len(result)} chars")
+            return result, True
+            
+        except requests.exceptions.Timeout:
+            logger.error("[LOCAL-LLM] Timeout")
+            return None, False
+        except Exception as e:
+            logger.error(f"[LOCAL-LLM] Error: {e}")
+            return None, False
+    
+    def analyze_question(self, question: str, schema_summary: str = "", confirmed_facts: Dict = None) -> Dict:
+        """
+        Use LLM to analyze the question and determine what's needed.
+        
+        Returns dict with:
+            - mode: search/analyze/compare/validate/configure/report
+            - domains: list of data domains involved
+            - needs_clarification: bool
+            - clarification_questions: list of questions to ask (if needed)
+            - entities: extracted specific entities
+            - reasoning: why these decisions were made
+        """
+        confirmed_facts = confirmed_facts or {}
+        
+        prompt = f"""Analyze this HR/payroll system question and return JSON only.
 
-MODE_CLARIFICATION_MAP = {
-    'configure': ['config_type'],
-    'validate': ['validation_type'],
-}
+QUESTION: {question}
+
+SCHEMA AVAILABLE: {schema_summary if schema_summary else "Employee data, earnings, deductions, jobs, taxes"}
+
+ALREADY ANSWERED BY USER: {json.dumps(confirmed_facts) if confirmed_facts else "Nothing yet"}
+
+Return ONLY valid JSON (no markdown, no explanation):
+{{
+    "mode": "search|analyze|compare|validate|configure|report",
+    "domains": ["employees", "earnings", "deductions", "taxes", "jobs", "benefits"],
+    "needs_clarification": true/false,
+    "clarification_questions": [
+        {{
+            "id": "unique_id",
+            "question": "What to ask the user",
+            "type": "radio",
+            "options": [
+                {{"id": "opt1", "label": "Option 1", "default": true}},
+                {{"id": "opt2", "label": "Option 2"}}
+            ],
+            "reason": "Why this matters"
+        }}
+    ],
+    "entities": {{
+        "employee_id": null,
+        "company_code": null,
+        "status_filter": null,
+        "numeric_threshold": null
+    }},
+    "reasoning": "Brief explanation of analysis"
+}}
+
+RULES FOR CLARIFICATION:
+1. If asking about EMPLOYEES and user hasn't specified status → ask active/terminated/all
+2. If asking about MONEY but unclear if rates vs YTD vs history → ask scope
+3. If asking about DEDUCTIONS but type unclear → ask type
+4. If user already answered a clarification for this domain → DON'T ask again
+5. If question is crystal clear with no ambiguity → needs_clarification: false
+6. Keep clarification questions SHORT and RELEVANT
+
+JSON only:"""
+
+        response, success = self.call(prompt, model=self.analysis_model, temperature=0.1)
+        
+        if not success or not response:
+            logger.warning("[LOCAL-LLM] Analysis failed, using fallback")
+            return self._fallback_analysis(question, confirmed_facts)
+        
+        # Parse JSON from response
+        try:
+            # Try to extract JSON from response (handle markdown wrapping)
+            json_str = response.strip()
+            if json_str.startswith('```'):
+                json_str = re.sub(r'^```json?\s*', '', json_str)
+                json_str = re.sub(r'\s*```$', '', json_str)
+            
+            result = json.loads(json_str)
+            logger.info(f"[LOCAL-LLM] Analysis: mode={result.get('mode')}, domains={result.get('domains')}, needs_clarification={result.get('needs_clarification')}")
+            return result
+            
+        except json.JSONDecodeError as e:
+            logger.warning(f"[LOCAL-LLM] JSON parse failed: {e}, using fallback")
+            return self._fallback_analysis(question, confirmed_facts)
+    
+    def _fallback_analysis(self, question: str, confirmed_facts: Dict) -> Dict:
+        """
+        Simple fallback if LLM analysis fails.
+        This is the ONLY place with hardcoded patterns - as emergency backup.
+        """
+        q_lower = question.lower()
+        
+        # Detect mode
+        mode = "search"
+        if any(w in q_lower for w in ['validate', 'check', 'verify']):
+            mode = "validate"
+        elif any(w in q_lower for w in ['configure', 'set up', 'setup']):
+            mode = "configure"
+        elif any(w in q_lower for w in ['compare', 'versus', 'vs']):
+            mode = "compare"
+        elif any(w in q_lower for w in ['report', 'summary']):
+            mode = "report"
+        elif any(w in q_lower for w in ['analyze', 'trend', 'pattern']):
+            mode = "analyze"
+        
+        # Detect domains
+        domains = []
+        if any(w in q_lower for w in ['employee', 'worker', 'staff', 'people', 'how many', 'count']):
+            domains.append('employees')
+        if any(w in q_lower for w in ['earn', 'pay', 'salary', 'wage', 'rate', 'hour', '$']):
+            domains.append('earnings')
+        if any(w in q_lower for w in ['deduction', 'benefit', '401k', 'insurance']):
+            domains.append('deductions')
+        if any(w in q_lower for w in ['tax', 'withhold']):
+            domains.append('taxes')
+        if any(w in q_lower for w in ['job', 'position', 'title', 'department']):
+            domains.append('jobs')
+        
+        if not domains:
+            domains = ['general']
+        
+        # Determine if clarification needed
+        needs_clarification = False
+        clarification_questions = []
+        
+        if 'employees' in domains and 'employee_status' not in confirmed_facts:
+            if not any(w in q_lower for w in ['active', 'terminated', 'all employees']):
+                needs_clarification = True
+                clarification_questions.append({
+                    'id': 'employee_status',
+                    'question': 'Which employees should I include?',
+                    'type': 'radio',
+                    'options': [
+                        {'id': 'active', 'label': 'Active only', 'default': True},
+                        {'id': 'termed', 'label': 'Terminated only'},
+                        {'id': 'all', 'label': 'All employees'}
+                    ],
+                    'reason': 'Need to know employment status scope'
+                })
+        
+        return {
+            'mode': mode,
+            'domains': domains,
+            'needs_clarification': needs_clarification,
+            'clarification_questions': clarification_questions,
+            'entities': {},
+            'reasoning': 'Fallback analysis (LLM unavailable)'
+        }
 
 
 # =============================================================================
@@ -149,7 +349,7 @@ MODE_CLARIFICATION_MAP = {
 # =============================================================================
 
 class IntelligenceEngine:
-    """The brain of XLR8."""
+    """The brain of XLR8 - now actually intelligent."""
     
     def __init__(self, project_name: str):
         self.project = project_name
@@ -160,8 +360,11 @@ class IntelligenceEngine:
         self.conversation_history = []
         self.confirmed_facts = {}
         self.pending_questions = []
-        self.conversation_context = {}  # For follow-up questions
-        self.last_executed_sql = None  # Track last SQL for session context
+        self.conversation_context = {}
+        self.last_executed_sql = None
+        
+        # Initialize local LLM client
+        self.llm = LocalLLM()
     
     def load_context(
         self, 
@@ -176,6 +379,30 @@ class IntelligenceEngine:
         self.schema = schema or {}
         self.relationships = relationships or []
     
+    def _get_schema_summary(self) -> str:
+        """Get a brief summary of available schema for LLM context."""
+        if not self.schema or not self.schema.get('tables'):
+            return "No schema loaded"
+        
+        tables = self.schema.get('tables', [])
+        summary_parts = []
+        
+        for table in tables[:10]:  # Limit to 10 tables
+            table_name = table.get('table_name', '')
+            # Get short name
+            short_name = table_name.split('__')[-1] if '__' in table_name else table_name
+            columns = table.get('columns', [])
+            
+            # Get column names
+            if columns and isinstance(columns[0], dict):
+                col_names = [c.get('name', str(c)) for c in columns[:10]]
+            else:
+                col_names = [str(c) for c in columns[:10]]
+            
+            summary_parts.append(f"{short_name}: {', '.join(col_names)}")
+        
+        return "; ".join(summary_parts)
+    
     def ask(
         self, 
         question: str,
@@ -185,12 +412,20 @@ class IntelligenceEngine:
         """Main entry point - ask the engine a question."""
         logger.info(f"[INTELLIGENCE] Question: {question[:100]}...")
         
-        # Analyze the question
-        analysis = self._analyze_question(question)
-        mode = mode or analysis['mode']
+        # Use LOCAL LLM to analyze the question
+        schema_summary = self._get_schema_summary()
+        analysis = self.llm.analyze_question(question, schema_summary, self.confirmed_facts)
+        
+        # Convert mode string to enum if needed
+        if mode is None and analysis.get('mode'):
+            try:
+                mode = IntelligenceMode(analysis['mode'])
+            except ValueError:
+                mode = IntelligenceMode.SEARCH
         
         # Check if clarification needed
-        if analysis['needs_clarification']:
+        if analysis.get('needs_clarification') and analysis.get('clarification_questions'):
+            logger.info(f"[INTELLIGENCE] Clarification needed: {len(analysis['clarification_questions'])} questions")
             return self._request_clarification(question, analysis)
         
         logger.info(f"[INTELLIGENCE] Gathering truths - no clarification needed")
@@ -230,92 +465,25 @@ class IntelligenceEngine:
         
         return answer
     
-    def _analyze_question(self, question: str) -> Dict:
-        """Analyze what the question is asking for."""
-        q_lower = question.lower()
+    def _request_clarification(self, question: str, analysis: Dict) -> SynthesizedAnswer:
+        """Return a response that asks for clarification."""
+        # Convert analysis format to expected output format
+        questions = analysis.get('clarification_questions', [])
         
-        mode = self._detect_mode(q_lower)
-        entities = self._extract_entities(question)
-        domains = self._detect_domains(q_lower)
-        needs_clarification = self._needs_clarification(mode, entities, domains, q_lower)
-        
-        confidence = 0.7
-        if entities:
-            confidence += 0.1
-        if len(domains) == 1:
-            confidence += 0.1
-        
-        return {
-            'mode': mode,
-            'entities': entities,
-            'domains': domains,
-            'needs_clarification': needs_clarification,
-            'clarification_questions': self._get_clarification_questions(mode, domains) if needs_clarification else [],
-            'confidence': min(confidence, 0.95)
-        }
-    
-    def _detect_mode(self, q_lower: str) -> IntelligenceMode:
-        """Detect the appropriate intelligence mode."""
-        if any(w in q_lower for w in ['configure', 'set up', 'setup', 'create', 'build']):
-            if any(w in q_lower for w in ['rule', 'business rule', 'earning', 'deduction']):
-                return IntelligenceMode.CONFIGURE
-        
-        if any(w in q_lower for w in ['validate', 'check', 'verify', 'issues', 'problems', 'errors']):
-            return IntelligenceMode.VALIDATE
-        
-        if any(w in q_lower for w in ['compare', 'difference', 'versus', 'vs', 'match']):
-            return IntelligenceMode.COMPARE
-        
-        if any(w in q_lower for w in ['fill in', 'populate', 'template', 'generate']):
-            return IntelligenceMode.POPULATE
-        
-        if any(w in q_lower for w in ['report', 'summary', 'overview', 'status']):
-            return IntelligenceMode.REPORT
-        
-        if any(w in q_lower for w in ['analyze', 'analysis', 'pattern', 'trend', 'insight']):
-            return IntelligenceMode.ANALYZE
-        
-        if any(w in q_lower for w in ['help me', 'walk me through', 'guide', 'step by step']):
-            return IntelligenceMode.WORKFLOW
-        
-        return IntelligenceMode.SEARCH
-    
-    def _extract_entities(self, question: str) -> Dict[str, Any]:
-        """Extract specific entities from the question."""
-        entities = {}
-        
-        emp_match = re.search(r'employee\s*(?:#|id|number|num)?\s*(\d+)', question, re.I)
-        if emp_match:
-            entities['employee_id'] = emp_match.group(1)
-        
-        company_match = re.search(r'company\s*(?:code)?\s*([A-Z0-9]{2,10})', question, re.I)
-        if company_match:
-            entities['company_code'] = company_match.group(1)
-        
-        if 'active' in question.lower():
-            entities['status'] = 'active'
-        elif 'terminated' in question.lower() or 'termed' in question.lower():
-            entities['status'] = 'terminated'
-        
-        return entities
-    
-    def _detect_domains(self, q_lower: str) -> List[str]:
-        """Detect which data domains are relevant."""
-        domains = []
-        
-        domain_patterns = {
-            'employees': r'\b(employee|worker|staff|people|person|pt|ft|part.?time|full.?time)\b',
-            'earnings': r'(\b(earning|pay|salary|wage|compensation|overtime|ot|hour|rate|hourly|make|makes|paid)\b|\$)',
-            'deductions': r'\b(deduction|benefit|401k|insurance|health|dental)\b',
-            'taxes': r'\b(tax|withhold|federal|state|local|w-?4|fit|sit)\b',
-            'jobs': r'\b(job|position|title|department|location)\b',
-        }
-        
-        for domain, pattern in domain_patterns.items():
-            if re.search(pattern, q_lower):
-                domains.append(domain)
-        
-        return domains if domains else ['general']
+        return SynthesizedAnswer(
+            question=question,
+            answer="",
+            confidence=0.0,
+            structured_output={
+                'type': 'clarification_needed',
+                'questions': questions,
+                'original_question': question,
+                'detected_mode': analysis.get('mode', 'search'),
+                'detected_domains': analysis.get('domains', ['general']),
+                'reasoning': analysis.get('reasoning', '')
+            },
+            reasoning=[analysis.get('reasoning', 'Need more information')]
+        )
     
     def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
         """Generate SQL query using LLMOrchestrator with smart model selection and validation."""
@@ -352,8 +520,8 @@ class IntelligenceEngine:
         all_columns = set()
         
         # BUILD COLUMN INDEX - which table(s) has each column
-        column_index = {}  # col_name -> [table_short_names]
-        table_short_names = {}  # full_name -> short_name
+        column_index = {}
+        table_short_names = {}
         
         for table in tables:
             table_name = table.get('table_name', '')
@@ -364,14 +532,11 @@ class IntelligenceEngine:
                 col_names = [str(c) for c in columns] if columns else []
             row_count = table.get('row_count', 0)
             
-            # Track all columns for validation
             all_columns.update(col_names)
             
-            # Build short name for table
             short_name = table_name.split('__')[-1] if '__' in table_name else table_name
             table_short_names[table_name] = short_name
             
-            # Index each column to its table(s)
             for col in col_names:
                 col_lower = col.lower()
                 if col_lower not in column_index:
@@ -379,62 +544,42 @@ class IntelligenceEngine:
                 if short_name not in column_index[col_lower]:
                     column_index[col_lower].append(short_name)
             
-            # Get sample values for KEY columns only (not all)
+            # Get sample values
             sample_str = ""
             try:
                 rows, cols = self.structured_handler.execute_query(f'SELECT * FROM "{table_name}" LIMIT 3')
                 if rows and cols:
                     samples = []
-                    # Only sample first 5 columns to keep prompt manageable
                     for col in cols[:5]:
                         vals = set(str(row.get(col, ''))[:20] for row in rows if row.get(col) is not None)
                         if vals:
                             samples.append(f"    {col}: {', '.join(list(vals)[:3])}")
                     sample_str = "\n  Samples:\n" + "\n".join(samples) if samples else ""
-            except Exception as sample_e:
-                pass  # Non-critical
+            except:
+                pass
             
             tables_info.append(f"Table: {table_name}\n  Columns: {', '.join(col_names)}\n  Rows: {row_count}{sample_str}")
         
         schema_text = '\n\n'.join(tables_info)
         logger.warning(f"[SQL-GEN] Built schema with {len(tables_info)} tables, {len(all_columns)} columns")
         
-        # Store column index for self-healing
         self._column_index = column_index
         self._table_short_names = table_short_names
         
-        # Log key tables for debugging
-        for t in tables:
-            tname = t.get('table_name', '')
-            cols = t.get('columns', [])
-            cols_lower = [str(c).lower() for c in cols]
-            
-            if 'personal' in tname.lower():
-                ptft_cols = [c for c in cols if any(x in str(c).lower() for x in ['part', 'full', 'time', 'ft', 'pt'])]
-                if ptft_cols:
-                    logger.warning(f"[SQL-GEN] PERSONAL PT/FT columns: {ptft_cols}")
-            
-            if 'company' in tname.lower() and 'master' not in tname.lower() and 'tax' not in tname.lower():
-                rate_cols = [c for c in cols if any(x in str(c).lower() for x in ['rate', 'hour', 'pay', 'salary'])]
-                if rate_cols:
-                    logger.warning(f"[SQL-GEN] COMPANY rate columns: {rate_cols}")
-        
-        # Build relationships text - VALIDATE columns exist in tables using column_index
+        # Build relationships text
         relationships_text = ""
         if self.relationships:
             rel_lines = []
             skipped = 0
-            for rel in self.relationships[:100]:  # Check more, filter down
+            for rel in self.relationships[:100]:
                 src_table = rel.get('source_table', '').lower()
                 src_col = rel.get('source_column', '').lower()
                 tgt_table = rel.get('target_table', '').lower()
                 tgt_col = rel.get('target_column', '').lower()
                 
-                # Get short names for matching
                 src_short = src_table.split('__')[-1] if '__' in src_table else src_table
                 tgt_short = tgt_table.split('__')[-1] if '__' in tgt_table else tgt_table
                 
-                # VALIDATE: Both columns must exist in their respective tables
                 src_tables = column_index.get(src_col, [])
                 tgt_tables = column_index.get(tgt_col, [])
                 
@@ -447,114 +592,27 @@ class IntelligenceEngine:
                     rel_lines.append(f"  {src} → {tgt}")
                 else:
                     skipped += 1
-                    if skipped <= 3:
-                        logger.debug(f"[SQL-GEN] Skipping invalid relationship: {src_table}.{src_col} → {tgt_table}.{tgt_col}")
                 
-                if len(rel_lines) >= 15:  # Reduced from 50
+                if len(rel_lines) >= 15:
                     break
             
             if rel_lines:
-                relationships_text = "\n\nRELATIONSHIPS (use these for JOINs):\n" + "\n".join(rel_lines)
-                logger.warning(f"[SQL-GEN] Including {len(rel_lines)} validated relationships (skipped {skipped} invalid)")
+                relationships_text = "\n\nRELATIONSHIPS:\n" + "\n".join(rel_lines)
         
-        # BUILD COLUMN LOCATION HINTS from column_index
-        # This tells LLM exactly which table has which column
-        column_location_text = "\n\nCOLUMN LOCATIONS (CRITICAL - use correct table for each column):\n"
-        
-        # Group columns: unique (1 table) vs shared (multiple tables)
-        unique_cols = []
+        # Build column location hints
+        column_location_text = "\n\nJOIN KEYS:\n"
         shared_cols = []
         for col, tables_list in sorted(column_index.items()):
-            if len(tables_list) == 1:
-                unique_cols.append(f"  {col}: {tables_list[0]} ONLY")
-            elif len(tables_list) > 1:
-                shared_cols.append(f"  {col}: {', '.join(tables_list)} (can JOIN on this)")
-        
-        # Show ONLY shared columns (join keys) - skip unique to reduce prompt size
+            if len(tables_list) > 1:
+                shared_cols.append(f"  {col}: {', '.join(tables_list)}")
         if shared_cols:
-            column_location_text += "JOIN KEYS (shared columns):\n" + "\n".join(shared_cols[:10]) + "\n"
+            column_location_text += "\n".join(shared_cols[:10]) + "\n"
         
-        # Build conversation context - with SMART FOLLOW-UP handling
-        context_str = ""
-        if hasattr(self, 'conversation_context') and self.conversation_context:
-            last_q = self.conversation_context.get('last_question', '')
-            last_sql = self.conversation_context.get('last_sql', '')
-            last_result = self.conversation_context.get('last_result', '')
-            
-            if last_sql:
-                q_lower = question.lower()
-                
-                # Detect follow-up references to previous results
-                is_follow_up = any(w in q_lower for w in [
-                    'these ', 'those ', 'they ', 'them ', 'their ',
-                    'the employees', 'which ones', 'show me', 'list them',
-                    'who are', 'where do', 'what are', 'details'
-                ])
-                
-                if is_follow_up:
-                    # Extract WHERE clause from previous SQL to reuse
-                    # re imported at module level
-                    where_match = re.search(r'WHERE\s+(.+?)(?:ORDER|LIMIT|GROUP|$)', last_sql, re.IGNORECASE | re.DOTALL)
-                    where_clause = where_match.group(1).strip() if where_match else None
-                    
-                    context_str = f"""
-FOLLOW-UP QUESTION - User is asking about results from previous query.
-
-PREVIOUS QUESTION: {last_q}
-PREVIOUS SQL: {last_sql}
-PREVIOUS RESULT: {last_result[:200] if last_result else 'count result'}
-
-CRITICAL: Reuse the WHERE clause from previous SQL: WHERE {where_clause}
-Change SELECT to answer the new question. Do NOT use COUNT(*) - user wants details.
-"""
-                    logger.warning(f"[SQL-GEN] Follow-up detected. WHERE clause: {where_clause[:100] if where_clause else 'none'}...")
-                else:
-                    context_str = f"""
-PREVIOUS CONVERSATION (for reference):
-Previous question: {last_q}
-Previous SQL: {last_sql}
-"""
-        
-        # Build prompt for orchestrator
-        # Add hints about commonly confused columns
-        column_hints = ""
-        for t in tables:
-            tname = t.get('table_name', '')
-            cols = t.get('columns', [])
-            
-            # If this is the company table with rate columns, note it
-            if 'company' in tname.lower() and 'master' not in tname.lower() and 'tax' not in tname.lower():
-                rate_cols = [str(c) for c in cols if any(x in str(c).lower() for x in ['hourly', 'salary', 'annual', 'period_pay', 'pay_rate'])]
-                if rate_cols:
-                    short_name = tname.split('__')[-1] if '__' in tname else tname
-                    column_hints += f"\nNOTE: Pay/rate columns ({', '.join(rate_cols)}) are in the {short_name} table, NOT in earnings table."
-            
-            # PT/FT status location - DISCOVER ACTUAL VALUES
-            if 'personal' in tname.lower():
-                ptft_cols = [str(c) for c in cols if 'fullpart' in str(c).lower() or 'part_time' in str(c).lower()]
-                if ptft_cols:
-                    short_name = tname.split('__')[-1] if '__' in tname else tname
-                    # Query actual distinct values
-                    ptft_values = ""
-                    try:
-                        for ptft_col in ptft_cols[:1]:  # Just first one
-                            rows, _ = self.structured_handler.execute_query(
-                                f'SELECT DISTINCT "{ptft_col}" FROM "{tname}" WHERE "{ptft_col}" IS NOT NULL LIMIT 10'
-                            )
-                            if rows:
-                                vals = [str(r.get(ptft_col, '')) for r in rows]
-                                ptft_values = f" ACTUAL VALUES: {', '.join(vals)} (use these exact values, e.g. 'P' for part-time, 'F' for full-time)"
-                    except Exception as val_e:
-                        logger.debug(f"Could not get PT/FT values: {val_e}")
-                    
-                    column_hints += f"\nCRITICAL: PT/FT status is in {short_name}.{ptft_cols[0]}.{ptft_values}"
-        
-        # Add user's confirmed answers as filters - but only if we can find the right columns
+        # Add user's confirmed answers as filters
         filter_instructions = ""
         if self.confirmed_facts:
             filters = []
             
-            # For employee_status filter, find actual status column
             if self.confirmed_facts.get('employee_status') in ['active', 'termed']:
                 status_col = None
                 status_table = None
@@ -572,19 +630,17 @@ Previous SQL: {last_sql}
                 
                 if status_col:
                     if self.confirmed_facts.get('employee_status') == 'active':
-                        filters.append(f"Filter to active employees using {status_table}.{status_col} (exclude terminated)")
+                        filters.append(f"Filter to active employees using {status_table}.{status_col}")
                     else:
                         filters.append(f"Filter to terminated employees using {status_table}.{status_col}")
-                # If no status column found, skip filter - don't confuse LLM
             
             if filters:
                 filter_instructions = "\n\nFILTERS:\n" + "\n".join(f"- {f}" for f in filters)
         
-        prompt = f"""{context_str}
-SCHEMA:
+        prompt = f"""SCHEMA:
 {schema_text}{relationships_text}
 {column_location_text}
-{column_hints}{filter_instructions}
+{filter_instructions}
 
 QUESTION: {question}
 
@@ -594,35 +650,20 @@ RULES:
 3. COUNT(*) for "how many"  
 4. JOIN on shared columns (employee_number is typical key)
 5. TRY_CAST for numeric comparisons
-6. For PT/FT: use 'P'/'F' not 'PT'/'FT'
 
 Return ONLY the SQL, no explanation."""
         
         logger.warning(f"[SQL-GEN] Prompt length: {len(prompt)} chars")
-        logger.warning(f"[SQL-GEN] Calling orchestrator...")
         
-        # Call orchestrator - handles model selection, validation, retry
         result = orchestrator.generate_sql(prompt, all_columns)
         
         if result.get('success') and result.get('sql'):
             sql = result['sql']
             model = result.get('model', 'local')
             
-            # CLEAN SQL - strip markdown artifacts from LLM responses
-            # Handle: "SELECT ```sql\nSELECT..." or "```sql\nSELECT...\n```"
+            # Clean SQL
             sql = sql.strip()
-            if sql.startswith('SELECT '):
-                # LLM returned "SELECT ```sql\nSELECT..." - take everything after first SELECT
-                if '```' in sql:
-                    parts = sql.split('```')
-                    for part in parts:
-                        part = part.strip()
-                        if part.startswith('sql'):
-                            part = part[3:].strip()
-                        if part.upper().startswith('SELECT'):
-                            sql = part
-                            break
-            elif '```sql' in sql.lower():
+            if '```sql' in sql.lower():
                 sql = re.sub(r'```sql\s*', '', sql, flags=re.IGNORECASE)
                 sql = re.sub(r'```\s*$', '', sql)
             elif '```' in sql:
@@ -642,7 +683,6 @@ Return ONLY the SQL, no explanation."""
             else:
                 query_type = 'list'
             
-            # Extract table name
             table_match = re.search(r'FROM\s+"?([^"\s]+)"?', sql, re.IGNORECASE)
             table_name = table_match.group(1) if table_match else 'unknown'
             
@@ -651,7 +691,7 @@ Return ONLY the SQL, no explanation."""
                 'table': table_name,
                 'query_type': query_type,
                 'model': model,
-                'all_columns': all_columns  # For self-healing at execution
+                'all_columns': all_columns
             }
         else:
             error = result.get('error', 'Unknown')
@@ -659,22 +699,13 @@ Return ONLY the SQL, no explanation."""
             return None
     
     def _try_fix_sql_from_error(self, sql: str, error_msg: str, all_columns: set) -> Optional[str]:
-        """
-        Try to fix SQL based on DuckDB error message.
-        
-        Handles errors like:
-        - 'Table "x" does not have a column named "rate"'
-        - 'Referenced column "hourly_rate" not found in FROM clause!'
-        """
-        # re imported at module level
+        """Try to fix SQL based on DuckDB error message."""
         from difflib import SequenceMatcher
         
-        # Try multiple error patterns
         patterns = [
             r'does not have a column named "([^"]+)"',
             r'Referenced column "([^"]+)" not found',
             r'column "([^"]+)" not found',
-            r'Unknown column[:\s]*"?([a-z_][a-z0-9_]*)"?',
         ]
         
         bad_col = None
@@ -685,369 +716,111 @@ Return ONLY the SQL, no explanation."""
                 break
         
         if not bad_col:
-            logger.warning(f"[SQL-FIX] Could not extract column from error")
             return None
         
         logger.info(f"[SQL-FIX] Attempting to fix column: {bad_col}")
         
-        # CRITICAL: If the column IS VALID, it's a table alias problem
         valid_cols_lower = {c.lower() for c in all_columns}
-        if bad_col.lower() in valid_cols_lower:
-            # Use column_index to find correct table
-            if hasattr(self, '_column_index') and self._column_index:
-                correct_tables = self._column_index.get(bad_col.lower(), [])
-                if correct_tables:
-                    # Try to find wrong alias in SQL and replace
-                    # Pattern: wrong_alias."column" or wrong_alias.column
-                    alias_pattern = r'(\w+)\s*\.\s*"?' + re.escape(bad_col) + r'"?'
-                    match = re.search(alias_pattern, sql, re.IGNORECASE)
-                    if match:
-                        wrong_alias = match.group(1)
-                        # Find correct alias - use first table that has this column
-                        correct_table = correct_tables[0].lower()
-                        
-                        # Map short name to alias used in SQL
-                        # Check what aliases are defined in FROM/JOIN
-                        from_pattern = r'FROM\s+"?([^"\s]+)"?\s+(\w+)|JOIN\s+"?([^"\s]+)"?\s+(\w+)'
-                        alias_map = {}
-                        for m in re.finditer(from_pattern, sql, re.IGNORECASE):
-                            table_name = m.group(1) or m.group(3)
-                            alias = m.group(2) or m.group(4)
-                            if table_name:
-                                short = table_name.split('__')[-1].lower() if '__' in table_name else table_name.lower()
-                                alias_map[short] = alias
-                        
-                        if correct_table in alias_map:
-                            correct_alias = alias_map[correct_table]
-                            logger.info(f"[SQL-FIX] Fixing table alias: {wrong_alias}.{bad_col} → {correct_alias}.{bad_col}")
-                            
-                            # Replace wrong_alias.column with correct_alias.column
-                            fixed_sql = re.sub(
-                                r'\b' + re.escape(wrong_alias) + r'\s*\.\s*"?' + re.escape(bad_col) + r'"?',
-                                f'{correct_alias}."{bad_col}"',
-                                sql,
-                                flags=re.IGNORECASE
-                            )
-                            return fixed_sql
-                        else:
-                            logger.warning(f"[SQL-FIX] Column '{bad_col}' exists in {correct_tables} but no alias found in SQL")
-            
-            logger.warning(f"[SQL-FIX] Column '{bad_col}' exists but wrong table alias - cannot auto-fix")
-            return None
-        
-        # Skip risky single-word partial matches (for fuzzy only, known fixes are OK)
-        skip_for_fuzzy = {'employee', 'personal', 'status', 'type', 'code', 'name'}
         
         # Known fixes
         known_fixes = {
             'rate': 'hourly_pay_rate',
             'hourly_rate': 'hourly_pay_rate',
-            'hourlyrate': 'hourly_pay_rate',
             'pay_rate': 'hourly_pay_rate',
             'employee_id': 'employee_number',
-            'employeeid': 'employee_number',
             'emp_id': 'employee_number',
-            'id': 'employee_number',
-            'status': 'employment_status_code',
-            'employment_status': 'fullpart_time_code',
         }
         
         fix = None
         
         if bad_col.lower() in known_fixes:
             fix = known_fixes[bad_col.lower()]
-            # Verify the fix exists in schema
             if fix.lower() not in valid_cols_lower:
-                fix = None  # Fix not in schema
+                fix = None
         
-        # Fuzzy match if no known fix
-        if not fix:
-            # Skip risky single words for fuzzy matching
-            if bad_col.lower() in skip_for_fuzzy:
-                logger.info(f"[SQL-FIX] Skipping fuzzy for risky word: {bad_col}")
-                return None
-            
-            best_score = 0.5
+        if not fix and '_' in bad_col:
+            best_score = 0.6
             for col in all_columns:
-                if bad_col.lower() in col.lower():
-                    score = 0.8
-                elif col.lower() in bad_col.lower():
-                    score = 0.7
-                else:
-                    score = SequenceMatcher(None, bad_col.lower(), col.lower()).ratio()
-                
+                score = SequenceMatcher(None, bad_col.lower(), col.lower()).ratio()
                 if score > best_score:
                     best_score = score
                     fix = col
         
         if fix:
             logger.info(f"[SQL-FIX] Fixing: {bad_col} → {fix}")
-            
-            # Replace both bare and dot-prefixed versions
-            # Bare: WHERE hourly_rate > 35
             fixed_sql = re.sub(
                 r'\b' + re.escape(bad_col) + r'\b',
                 f'"{fix}"',
                 sql,
                 flags=re.IGNORECASE
             )
-            
             return fixed_sql
         
-        logger.warning(f"[SQL-FIX] Could not find fix for: {bad_col}")
         return None
-    
-    def _needs_clarification(self, mode, entities, domains, q_lower) -> bool:
-        """
-        Determine if we need to ask clarifying questions.
-        
-        FIXED: Now checks if the SPECIFIC clarification questions for THIS question's
-        domains have been answered, instead of checking if ANY confirmed_facts exist.
-        
-        Old behavior (BUG): If confirmed_facts had anything, skip ALL clarification.
-        New behavior: Check if THIS question's required clarifications are answered.
-        """
-        logger.warning(f"[CLARIFY-CHECK] mode={mode}, domains={domains}, confirmed_facts={list(self.confirmed_facts.keys())}")
-        
-        # Get the clarification question IDs this question would need
-        required_question_ids = set()
-        
-        # Add domain-based questions
-        for domain in domains:
-            if domain in DOMAIN_CLARIFICATION_MAP:
-                required_question_ids.update(DOMAIN_CLARIFICATION_MAP[domain])
-        
-        # Add mode-based questions
-        mode_str = mode.value if hasattr(mode, 'value') else str(mode)
-        if mode_str in MODE_CLARIFICATION_MAP:
-            required_question_ids.update(MODE_CLARIFICATION_MAP[mode_str])
-        
-        # Check if ALL required questions have been answered
-        if required_question_ids:
-            answered_ids = set(self.confirmed_facts.keys())
-            unanswered = required_question_ids - answered_ids
-            
-            if unanswered:
-                logger.warning(f"[CLARIFY-CHECK] Missing answers for: {unanswered}")
-                # Fall through to domain-specific checks below
-            else:
-                logger.warning(f"[CLARIFY-CHECK] All required clarifications answered: {required_question_ids}")
-                return False
-        
-        # ALWAYS ask for configuration tasks (if not already answered)
-        if mode == IntelligenceMode.CONFIGURE:
-            if 'config_type' not in self.confirmed_facts:
-                logger.warning("[CLARIFY-CHECK] Returning True - CONFIGURE mode, no config_type answer")
-                return True
-        
-        # ALWAYS ask for validation without clear context (if not already answered)
-        if mode == IntelligenceMode.VALIDATE:
-            if 'validation_type' not in self.confirmed_facts:
-                logger.warning("[CLARIFY-CHECK] Returning True - VALIDATE mode, no validation_type answer")
-                return True
-        
-        # CONSULTANT LOGIC: For employee queries, ALWAYS ask about active status
-        # unless they explicitly said "active" or "all employees" or "terminated"
-        # OR they already answered this clarification
-        if 'employees' in domains:
-            # Check if already answered
-            if 'employee_status' in self.confirmed_facts:
-                logger.warning(f"[CLARIFY-CHECK] employee_status already answered: {self.confirmed_facts['employee_status']}")
-            else:
-                explicitly_specified_status = any(w in q_lower for w in [
-                    'active only', 'active employees', 'all employees', 
-                    'terminated', 'termed', 'inactive'
-                ])
-                logger.warning(f"[CLARIFY-CHECK] employees domain, explicitly_specified={explicitly_specified_status}")
-                if not explicitly_specified_status:
-                    logger.warning("[CLARIFY-CHECK] Returning True - employee status not specified")
-                    return True
-        
-        # For earnings/deductions, ask if no clear criteria (and not already answered)
-        if 'earnings' in domains:
-            if 'earnings_scope' in self.confirmed_facts:
-                logger.warning(f"[CLARIFY-CHECK] earnings_scope already answered: {self.confirmed_facts['earnings_scope']}")
-            else:
-                has_numeric_condition = any(w in q_lower for w in [
-                    'more than', 'less than', 'over', 'under', 'above', 'below',
-                    'at least', 'greater than', 'equal to', '$'
-                ])
-                if not has_numeric_condition:
-                    logger.warning("[CLARIFY-CHECK] Returning True - earnings without numeric condition")
-                    return True
-        
-        # For deductions, check if answered
-        if 'deductions' in domains:
-            if 'deduction_type' not in self.confirmed_facts:
-                logger.warning("[CLARIFY-CHECK] Returning True - deductions domain, no deduction_type answer")
-                return True
-        
-        logger.warning("[CLARIFY-CHECK] Returning False - no clarification needed")
-        return False
-    
-    def _get_clarification_questions(self, mode, domains) -> List[Dict]:
-        """Get clarification questions for the given mode/domains."""
-        questions = []
-        
-        if 'employees' in domains:
-            questions.append({
-                'id': 'employee_status',
-                'question': 'Which employees should I include?',
-                'type': 'radio',
-                'options': [
-                    {'id': 'active', 'label': 'Active only', 'default': True},
-                    {'id': 'termed', 'label': 'Terminated only'},
-                    {'id': 'all', 'label': 'All employees'},
-                ]
-            })
-        
-        if 'earnings' in domains:
-            questions.append({
-                'id': 'earnings_scope',
-                'question': 'What earnings data are you interested in?',
-                'type': 'radio',
-                'options': [
-                    {'id': 'current_rates', 'label': 'Current pay rates', 'default': True},
-                    {'id': 'ytd', 'label': 'Year-to-date earnings'},
-                    {'id': 'history', 'label': 'Historical earnings'},
-                ]
-            })
-        
-        if 'deductions' in domains:
-            questions.append({
-                'id': 'deduction_type',
-                'question': 'What type of deductions?',
-                'type': 'radio',
-                'options': [
-                    {'id': 'all', 'label': 'All deductions', 'default': True},
-                    {'id': 'benefits', 'label': 'Benefits only (medical, dental, etc.)'},
-                    {'id': 'retirement', 'label': 'Retirement only (401k, pension)'},
-                    {'id': 'other', 'label': 'Other deductions'},
-                ]
-            })
-        
-        if mode == IntelligenceMode.CONFIGURE:
-            questions.append({
-                'id': 'config_type',
-                'question': 'What are you trying to configure?',
-                'type': 'radio',
-                'options': [
-                    {'id': 'earning', 'label': 'Earning code/calculation'},
-                    {'id': 'deduction', 'label': 'Deduction setup'},
-                    {'id': 'tax', 'label': 'Tax configuration'},
-                    {'id': 'other', 'label': 'Something else'},
-                ]
-            })
-        
-        if mode == IntelligenceMode.VALIDATE:
-            questions.append({
-                'id': 'validation_type',
-                'question': 'What would you like me to validate?',
-                'type': 'radio',
-                'options': [
-                    {'id': 'data_quality', 'label': 'Data quality/completeness'},
-                    {'id': 'business_rules', 'label': 'Business rule compliance'},
-                    {'id': 'config', 'label': 'Configuration accuracy'},
-                    {'id': 'comparison', 'label': 'Compare against source'},
-                ]
-            })
-        
-        return questions
-    
-    def _request_clarification(self, question: str, analysis: Dict) -> SynthesizedAnswer:
-        """Return a response that asks for clarification."""
-        return SynthesizedAnswer(
-            question=question,
-            answer="",
-            confidence=0.0,
-            structured_output={
-                'type': 'clarification_needed',
-                'questions': analysis['clarification_questions'],
-                'original_question': question,
-                'detected_mode': analysis['mode'].value,
-                'detected_domains': analysis['domains']
-            },
-            reasoning=['Need more information to provide accurate answer']
-        )
     
     def _gather_reality(self, question: str, analysis: Dict) -> List[Truth]:
         """Gather REALITY - what the customer's DATA shows."""
-        logger.warning(f"[REALITY] Starting - handler: {self.structured_handler is not None}, schema tables: {len(self.schema.get('tables', [])) if self.schema else 0}")
+        logger.warning(f"[REALITY] Starting")
         
         if not self.structured_handler:
-            logger.warning("[REALITY] No structured handler - returning empty")
             return []
         
         if not self.schema or not self.schema.get('tables'):
-            logger.warning("[REALITY] No schema tables - returning empty")
             return []
         
         truths = []
-        domains = analysis['domains']
-        entities = analysis['entities']
+        domains = analysis.get('domains', ['general'])
         
-        # Get pattern cache for this project
+        # Get pattern cache
         pattern_cache = None
         try:
-            from utils.sql_pattern_cache import get_sql_pattern_cache, initialize_patterns
-            if hasattr(self, 'project') and self.project:
+            from utils.sql_pattern_cache import initialize_patterns
+            if self.project:
                 pattern_cache = initialize_patterns(self.project, self.schema)
-                logger.warning(f"[SQL-CACHE] Initialized for {self.project}, patterns: {len(pattern_cache.patterns) if pattern_cache else 0}")
         except ImportError:
             try:
-                from backend.utils.sql_pattern_cache import get_sql_pattern_cache, initialize_patterns
-                if hasattr(self, 'project') and self.project:
+                from backend.utils.sql_pattern_cache import initialize_patterns
+                if self.project:
                     pattern_cache = initialize_patterns(self.project, self.schema)
-                    logger.warning(f"[SQL-CACHE] Initialized for {self.project}, patterns: {len(pattern_cache.patterns) if pattern_cache else 0}")
-            except ImportError:
-                logger.debug("[REALITY] SQL pattern cache not available")
-            except Exception as e:
-                logger.warning(f"[SQL-CACHE] Failed to initialize (inner): {e}")
-        except Exception as e:
-            logger.warning(f"[SQL-CACHE] Failed to initialize: {e}")
+            except:
+                pass
+        except:
+            pass
         
         try:
             sql = None
             sql_source = None
             sql_info = None
             
-            # STEP 1: CHECK PATTERN CACHE FIRST (no LLM needed!)
+            # Check pattern cache first
             if pattern_cache:
                 cached_pattern = pattern_cache.find_matching_pattern(question)
                 if cached_pattern and cached_pattern.get('sql'):
                     sql = cached_pattern['sql']
                     sql_source = 'pattern_cache'
-                    logger.warning(f"[INTELLIGENCE] Pattern cache HIT! Confidence: {cached_pattern.get('confidence', 0):.0%}")
-                    logger.warning(f"[INTELLIGENCE] Using cached SQL: {sql[:100]}...")
+                    logger.warning(f"[INTELLIGENCE] Pattern cache HIT!")
             
-            # STEP 2: Only generate via LLM if no cache hit
+            # Generate via LLM if no cache
             if not sql:
                 sql_info = self._generate_sql_for_question(question, analysis)
                 if sql_info and sql_info.get('sql'):
                     sql = sql_info['sql']
                     sql_source = 'llm_generated'
-                    logger.warning(f"[INTELLIGENCE] Generated SQL via LLM: {sql[:100]}...")
             
-            # STEP 3: Execute SQL (from cache or LLM)
+            # Execute SQL
             if sql:
                 max_retries = 2
-                execution_success = False
                 
                 for attempt in range(max_retries + 1):
                     try:
                         rows, cols = self.structured_handler.execute_query(sql)
-                        
-                        # Store the SQL for session context
                         self.last_executed_sql = sql
-                        execution_success = True
                         
                         if rows:
-                            # Determine table name
                             table_name = 'query_result'
                             if sql_info:
                                 table_name = sql_info.get('table', 'query_result')
                             else:
-                                # Extract from SQL
                                 table_match = re.search(r'FROM\s+"?([^"\s]+)"?', sql, re.IGNORECASE)
                                 if table_match:
                                     table_name = table_match.group(1)
@@ -1068,61 +841,42 @@ Return ONLY the SQL, no explanation."""
                                 confidence=0.98,
                                 location=f"Query: {sql}"
                             ))
-                            logger.warning(f"[INTELLIGENCE] SQL returned {len(rows)} rows (source: {sql_source})")
                             
-                            # STEP 4: LEARN from success (if from LLM)
+                            # Learn pattern
                             if pattern_cache and sql_source == 'llm_generated':
                                 pattern_cache.learn_pattern(question, sql, success=True)
-                                logger.warning(f"[INTELLIGENCE] Learned SQL pattern for future use")
                             
                             return truths
-                        break  # Success but no rows
+                        break
                         
                     except Exception as sql_e:
                         error_msg = str(sql_e)
-                        logger.warning(f"[INTELLIGENCE] SQL query failed (attempt {attempt + 1}): {error_msg}")
+                        logger.warning(f"[INTELLIGENCE] SQL failed (attempt {attempt + 1}): {error_msg}")
                         
-                        # Record failure if from cache
                         if pattern_cache and sql_source == 'pattern_cache' and attempt == 0:
                             pattern_cache.record_failure(question)
-                            logger.warning(f"[INTELLIGENCE] Recorded pattern failure, falling back to LLM")
-                            # Try LLM generation as fallback
                             sql_info = self._generate_sql_for_question(question, analysis)
                             if sql_info and sql_info.get('sql'):
                                 sql = sql_info['sql']
                                 sql_source = 'llm_fallback'
                                 continue
                         
-                        # Try to fix column errors
-                        column_errors = [
-                            'does not have a column named',
-                            'not found in FROM clause',
-                            'column.*not found',
-                        ]
-                        
-                        is_column_error = any(pattern in error_msg.lower() or re.search(pattern, error_msg, re.IGNORECASE) 
-                                              for pattern in column_errors)
-                        
-                        if attempt < max_retries and is_column_error and sql_info:
+                        if attempt < max_retries and sql_info:
                             fixed_sql = self._try_fix_sql_from_error(sql, error_msg, sql_info.get('all_columns', set()))
                             if fixed_sql and fixed_sql != sql:
-                                logger.info(f"[INTELLIGENCE] Attempting auto-fix: {fixed_sql[:100]}...")
                                 sql = fixed_sql
                                 continue
-                        break  # Can't fix or out of retries
+                        break
             
-            # FALLBACK: Sample data from relevant tables
+            # Fallback: sample from relevant tables
             tables = self.schema.get('tables', [])
-            
             for table in tables:
                 table_name = table.get('table_name', '')
-                columns = table.get('columns', [])
                 
-                # Filter to relevant tables
                 relevant = False
-                if 'employees' in domains and any(c in table_name.lower() for c in ['personal', 'employee', 'demographic']):
+                if 'employees' in domains and any(c in table_name.lower() for c in ['personal', 'employee']):
                     relevant = True
-                if 'earnings' in domains and any(c in table_name.lower() for c in ['earning', 'pay', 'rate', 'salary', 'compensation']):
+                if 'earnings' in domains and any(c in table_name.lower() for c in ['earning', 'pay', 'rate']):
                     relevant = True
                 if 'deductions' in domains and 'deduction' in table_name.lower():
                     relevant = True
@@ -1148,8 +902,8 @@ Return ONLY the SQL, no explanation."""
                             confidence=0.95,
                             location=f"Table: {table_name}"
                         ))
-                except Exception as e:
-                    logger.debug(f"Query failed for {table_name}: {e}")
+                except:
+                    pass
         
         except Exception as e:
             logger.error(f"Error gathering reality: {e}")
@@ -1164,14 +918,10 @@ Return ONLY the SQL, no explanation."""
         truths = []
         
         try:
-            # Try to find the right collection name
             collection_name = self._get_document_collection_name()
             if not collection_name:
-                logger.warning("No document collection found")
                 return []
             
-            # Use rag_handler.search() which properly handles embeddings
-            # Filter by project to get customer-specific docs (excludes Global/Universal)
             results = self.rag_handler.search(
                 collection_name=collection_name,
                 query=question,
@@ -1184,7 +934,6 @@ Return ONLY the SQL, no explanation."""
                 distance = result.get('distance', 1.0)
                 doc = result.get('document', '')
                 
-                # Skip global docs - we want customer-specific intent
                 project_id = metadata.get('project_id', '').lower()
                 if project_id in ['global', '__global__', 'global/universal']:
                     continue
@@ -1203,37 +952,29 @@ Return ONLY the SQL, no explanation."""
         return truths
     
     def _get_document_collection_name(self) -> Optional[str]:
-        """Find the document collection name from available collections."""
+        """Find the document collection name."""
         if not self.rag_handler:
             return None
         
-        # Cache the result
         if hasattr(self, '_doc_collection_name'):
             return self._doc_collection_name
         
         try:
             collections = self.rag_handler.list_collections()
-            
-            # Priority order for document collections
             preferred = ['hcmpact_docs', 'documents', 'hcm_docs', 'xlr8_docs']
             
             for name in preferred:
                 if name in collections:
                     self._doc_collection_name = name
-                    logger.info(f"Using document collection: {name}")
                     return name
             
-            # Fall back to any collection that might have docs
             for name in collections:
                 if 'doc' in name.lower() or 'hcm' in name.lower():
                     self._doc_collection_name = name
-                    logger.info(f"Using document collection (fallback): {name}")
                     return name
             
-            # Last resort - use first collection if any
             if collections:
                 self._doc_collection_name = collections[0]
-                logger.warning(f"Using first available collection: {collections[0]}")
                 return collections[0]
                 
         except Exception as e:
@@ -1249,18 +990,15 @@ Return ONLY the SQL, no explanation."""
         truths = []
         
         try:
-            # Try to find the right collection name
             collection_name = self._get_document_collection_name()
             if not collection_name:
-                logger.warning("No document collection found for best practices")
                 return []
             
-            # Use rag_handler.search() with Global/Universal to get only UKG best practices
             results = self.rag_handler.search(
                 collection_name=collection_name,
                 query=question,
                 n_results=10,
-                project_id="Global/Universal"  # Only get global/UKG docs
+                project_id="Global/Universal"
             )
             
             for result in results:
@@ -1283,13 +1021,12 @@ Return ONLY the SQL, no explanation."""
     
     def _detect_conflicts(self, reality, intent, best_practice) -> List[Conflict]:
         """Detect conflicts between the three truths."""
-        # Placeholder - return empty for now
         return []
     
     def _run_proactive_checks(self, analysis: Dict) -> List[Insight]:
         """Run proactive checks while answering."""
         insights = []
-        domains = analysis['domains']
+        domains = analysis.get('domains', ['general'])
         
         if not self.structured_handler:
             return insights
@@ -1346,18 +1083,15 @@ Return ONLY the SQL, no explanation."""
                     cols = truth.content['columns']
                     query_type = truth.content.get('query_type', 'unknown')
                     
-                    # FORMAT COUNT RESULTS CLEARLY
                     if query_type == 'count' and rows:
                         count_val = list(rows[0].values())[0] if rows[0] else 0
                         context_parts.append(f"\n**ANSWER: {count_val}**")
-                        context_parts.append(f"(This is the count result from the query)")
                         context_parts.append(f"SQL: {truth.content.get('sql', 'N/A')[:200]}")
                     elif query_type in ['sum', 'average'] and rows:
                         result_val = list(rows[0].values())[0] if rows[0] else 0
                         context_parts.append(f"\n**RESULT: {result_val}**")
                         context_parts.append(f"SQL: {truth.content.get('sql', 'N/A')[:200]}")
                     else:
-                        # List/detail results
                         context_parts.append(f"\nSource: {truth.source_name}")
                         context_parts.append(f"Columns: {', '.join(cols[:10])}")
                         context_parts.append(f"Results ({len(rows)} rows):")
@@ -1411,21 +1145,7 @@ Return ONLY the SQL, no explanation."""
             executed_sql=self.last_executed_sql
         )
     
-    def clear_clarifications_for_new_question(self):
-        """
-        Optional: Call this to reset clarifications when starting a completely new topic.
-        Useful if you want to force re-asking clarification even for answered domains.
-        """
+    def clear_clarifications(self):
+        """Clear all confirmed facts to start fresh."""
         self.confirmed_facts = {}
-        logger.info("[INTELLIGENCE] Cleared all confirmed facts for new question context")
-    
-    def clear_domain_clarification(self, domain: str):
-        """
-        Clear clarification answers for a specific domain.
-        Useful when user says "actually, show me all employees" after answering "active only".
-        """
-        if domain in DOMAIN_CLARIFICATION_MAP:
-            for question_id in DOMAIN_CLARIFICATION_MAP[domain]:
-                if question_id in self.confirmed_facts:
-                    del self.confirmed_facts[question_id]
-                    logger.info(f"[INTELLIGENCE] Cleared clarification: {question_id}")
+        logger.info("[INTELLIGENCE] Cleared all confirmed facts")
