@@ -665,7 +665,7 @@ async def get_project_schema_direct(project: str, scope: str, handler) -> Dict:
                         logger.info(f"[SCHEMA] {table_name}: {len(categorical_columns)} categorical columns loaded")
                         
                 except Exception as profile_e:
-                    logger.debug(f"[SCHEMA] No profiles for {table_name}: {profile_e}")
+                    logger.warning(f"[SCHEMA] No profiles for {table_name}: {profile_e}")
                 
                 tables.append({
                     'table_name': table_name,
