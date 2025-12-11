@@ -24,6 +24,9 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+# LOAD VERIFICATION - this line proves the new file is loaded
+logger.warning("[INTELLIGENCE_ENGINE] ====== v3.1 LOADED ======")
+
 
 # =============================================================================
 # DATA CLASSES
@@ -146,13 +149,15 @@ class IntelligenceEngine:
         context: Dict = None
     ) -> SynthesizedAnswer:
         """Main entry point - ask the engine a question."""
-        logger.info(f"[INTELLIGENCE] Question: {question[:100]}...")
+        logger.warning(f"[INTELLIGENCE] Question: {question[:100]}...")
+        logger.warning(f"[INTELLIGENCE] Current confirmed_facts: {self.confirmed_facts}")
         
         q_lower = question.lower()
         
         # Simple analysis
         mode = mode or self._detect_mode(q_lower)
         is_employee_question = self._is_employee_question(q_lower)
+        logger.warning(f"[INTELLIGENCE] is_employee_question: {is_employee_question}")
         
         # ONLY clarification: employee status (active/termed/all)
         # Only ask if:
@@ -162,16 +167,17 @@ class IntelligenceEngine:
         if is_employee_question and 'employee_status' not in self.confirmed_facts:
             # Check if user specified status in the question itself
             detected_status = self._detect_status_in_question(q_lower)
+            logger.warning(f"[INTELLIGENCE] detected_status: {detected_status}")
             if detected_status:
                 # User specified - set it and continue
                 self.confirmed_facts['employee_status'] = detected_status
-                logger.info(f"[INTELLIGENCE] Detected status in question: {detected_status}")
+                logger.warning(f"[INTELLIGENCE] Detected status in question: {detected_status}")
             else:
                 # Need to ask
-                logger.info("[INTELLIGENCE] Asking for employee status clarification")
+                logger.warning("[INTELLIGENCE] Asking for employee status clarification")
                 return self._request_employee_status_clarification(question)
         
-        logger.info(f"[INTELLIGENCE] No clarification needed, gathering data")
+        logger.warning(f"[INTELLIGENCE] Proceeding with facts: {self.confirmed_facts}")
         
         # Gather the three truths
         analysis = {'domains': self._detect_domains(q_lower), 'mode': mode}
@@ -528,7 +534,8 @@ class IntelligenceEngine:
     
     def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
         """Generate SQL query using LLMOrchestrator with SMART table selection."""
-        logger.warning(f"[SQL-GEN] Starting SQL generation")
+        logger.warning(f"[SQL-GEN] v3.1 - Starting SQL generation")
+        logger.warning(f"[SQL-GEN] confirmed_facts: {self.confirmed_facts}")
         
         if not self.structured_handler or not self.schema:
             return None
