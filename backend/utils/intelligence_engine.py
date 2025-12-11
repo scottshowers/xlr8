@@ -527,6 +527,28 @@ RULES:
         if result.get('success') and result.get('sql'):
             sql = result['sql']
             model = result.get('model', 'local')
+            
+            # CLEAN SQL - strip markdown artifacts from LLM responses
+            # Handle: "SELECT ```sql\nSELECT..." or "```sql\nSELECT...\n```"
+            sql = sql.strip()
+            if sql.startswith('SELECT '):
+                # LLM returned "SELECT ```sql\nSELECT..." - take everything after first SELECT
+                if '```' in sql:
+                    parts = sql.split('```')
+                    for part in parts:
+                        part = part.strip()
+                        if part.startswith('sql'):
+                            part = part[3:].strip()
+                        if part.upper().startswith('SELECT'):
+                            sql = part
+                            break
+            elif '```sql' in sql.lower():
+                sql = re.sub(r'```sql\s*', '', sql, flags=re.IGNORECASE)
+                sql = re.sub(r'```\s*$', '', sql)
+            elif '```' in sql:
+                sql = sql.replace('```', '').strip()
+            
+            sql = sql.strip()
             logger.warning(f"[SQL-GEN] {model} generated: {sql[:150]}")
             
             # Detect query type
@@ -697,18 +719,21 @@ RULES:
     
     def _needs_clarification(self, mode, entities, domains, q_lower) -> bool:
         """Determine if we need to ask clarifying questions."""
+        logger.warning(f"[CLARIFY-CHECK] mode={mode}, domains={domains}, confirmed_facts={bool(self.confirmed_facts)}")
         
         # CRITICAL: If we already have clarification answers, DON'T ask again
         if self.confirmed_facts:
-            logger.info(f"[INTELLIGENCE] Skipping clarification - already have answers: {list(self.confirmed_facts.keys())}")
+            logger.warning(f"[CLARIFY-CHECK] Skipping - already have answers: {list(self.confirmed_facts.keys())}")
             return False
         
         # ALWAYS ask for configuration tasks
         if mode == IntelligenceMode.CONFIGURE:
+            logger.warning("[CLARIFY-CHECK] Returning True - CONFIGURE mode")
             return True
         
         # ALWAYS ask for validation without clear context
         if mode == IntelligenceMode.VALIDATE:
+            logger.warning("[CLARIFY-CHECK] Returning True - VALIDATE mode")
             return True
         
         # CONSULTANT LOGIC: For employee queries, ALWAYS ask about active status
@@ -718,8 +743,9 @@ RULES:
                 'active only', 'active employees', 'all employees', 
                 'terminated', 'termed', 'inactive'
             ])
+            logger.warning(f"[CLARIFY-CHECK] employees domain, explicitly_specified={explicitly_specified_status}")
             if not explicitly_specified_status:
-                logger.info(f"[INTELLIGENCE] Asking clarification - employee status not specified")
+                logger.warning("[CLARIFY-CHECK] Returning True - employee status not specified")
                 return True
         
         # For earnings/deductions, ask if no clear criteria
@@ -729,8 +755,10 @@ RULES:
                 'at least', 'greater than', 'equal to', '$'
             ])
             if not has_numeric_condition:
+                logger.warning("[CLARIFY-CHECK] Returning True - earnings without numeric condition")
                 return True
         
+        logger.warning("[CLARIFY-CHECK] Returning False - no clarification needed")
         return False
     
     def _get_clarification_questions(self, mode, domains) -> List[Dict]:
