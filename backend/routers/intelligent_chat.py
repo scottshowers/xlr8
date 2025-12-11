@@ -322,16 +322,47 @@ async def intelligent_chat(request: IntelligentChatRequest):
             "answer": None
         }
         
-        # If we don't need clarification, generate the full answer
+        # If we don't need clarification, generate the answer
         if not response["needs_clarification"] and answer.answer:
-            # Use Claude to generate final synthesized response
-            response["answer"] = await generate_intelligent_answer(
-                question=message,
-                context=answer.answer,
-                persona=request.persona,
-                insights=answer.insights,
-                conflicts=answer.conflicts
-            )
+            
+            # CHECK: Is this a simple count/sum query with a clear result?
+            # If so, just return it directly without Claude overhead
+            simple_answer = None
+            if answer.from_reality:
+                for truth in answer.from_reality:
+                    if isinstance(truth.content, dict):
+                        query_type = truth.content.get('query_type', '')
+                        rows = truth.content.get('rows', [])
+                        sql = truth.content.get('sql', '')
+                        
+                        if query_type == 'count' and rows:
+                            count_val = list(rows[0].values())[0] if rows[0] else 0
+                            # Build simple direct answer
+                            simple_answer = f"**{count_val:,}** employees match your criteria."
+                            if sql:
+                                simple_answer += f"\n\n*Query executed:* `{sql[:300]}`"
+                            break
+                        elif query_type in ['sum', 'average'] and rows:
+                            result_val = list(rows[0].values())[0] if rows[0] else 0
+                            label = "Total" if query_type == 'sum' else "Average"
+                            simple_answer = f"**{label}: {result_val:,.2f}**"
+                            if sql:
+                                simple_answer += f"\n\n*Query executed:* `{sql[:300]}`"
+                            break
+            
+            if simple_answer:
+                # Direct answer - no Claude needed
+                response["answer"] = simple_answer
+                logger.info(f"[INTELLIGENT] Direct answer (no Claude): {simple_answer[:100]}")
+            else:
+                # Complex query - use Claude to synthesize
+                response["answer"] = await generate_intelligent_answer(
+                    question=message,
+                    context=answer.answer,
+                    persona=request.persona,
+                    insights=answer.insights,
+                    conflicts=answer.conflicts
+                )
             
             # LEARNING: Record successful query pattern
             if LEARNING_AVAILABLE and response["answer"]:
