@@ -471,6 +471,11 @@ class StructuredDataHandler:
                     -- Metadata
                     is_likely_key BOOLEAN DEFAULT FALSE,
                     is_categorical BOOLEAN DEFAULT FALSE,
+                    
+                    -- FILTER INTELLIGENCE (Phase 2.5)
+                    filter_category VARCHAR,         -- 'status', 'company', 'organization', 'location', 'pay_type', 'employee_type', 'job', NULL
+                    filter_priority INTEGER DEFAULT 0,  -- Higher = more likely to need clarification
+                    
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     
                     -- Unique constraint
@@ -2245,7 +2250,9 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             'mean_value': None,
             'min_date': None,
             'max_date': None,
-            'sample_values': []
+            'sample_values': [],
+            'filter_category': None,
+            'filter_priority': 0
         }
         
         # Get non-null, non-empty values
@@ -2268,6 +2275,115 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
         
         # Try to infer type and get type-specific stats
         profile = self._infer_column_type(non_null, distinct_values, profile)
+        
+        # DETECT FILTER CATEGORY
+        profile = self._detect_filter_category(col, profile, distinct_values)
+        
+        return profile
+    
+    def _detect_filter_category(self, col_name: str, profile: Dict, distinct_values) -> Dict:
+        """
+        Detect if this column is a common filter dimension.
+        
+        Categories:
+        - status: Employment status (active/terminated)
+        - company: Company/entity code
+        - organization: Org hierarchy (dept, division, cost center)
+        - location: Work location/site
+        - pay_type: Hourly/Salary, FLSA status
+        - employee_type: Regular/Temp/Contractor
+        - job: Job code/family/grade
+        """
+        col_lower = col_name.lower()
+        distinct_count = profile.get('distinct_count', 0)
+        inferred_type = profile.get('inferred_type', 'text')
+        values_upper = set(str(v).upper() for v in distinct_values) if distinct_values is not None else set()
+        
+        # STATUS DETECTION
+        # Pattern 1: termination_date column
+        if 'termination' in col_lower and inferred_type == 'date':
+            profile['filter_category'] = 'status'
+            profile['filter_priority'] = 100  # Highest - almost always need to clarify
+            return profile
+        
+        # Pattern 2: Status code columns
+        if any(p in col_lower for p in ['employment_status', 'emp_status', 'employee_status', 'status_code', 'active_status']):
+            if distinct_count <= 10:
+                profile['filter_category'] = 'status'
+                profile['filter_priority'] = 100
+                return profile
+        
+        # Pattern 3: Values look like status codes
+        status_indicators = {'A', 'T', 'I', 'L', 'ACTIVE', 'TERMINATED', 'INACTIVE', 'LEAVE', 'TERM'}
+        if distinct_count <= 10 and len(values_upper & status_indicators) >= 2:
+            profile['filter_category'] = 'status'
+            profile['filter_priority'] = 90
+            return profile
+        
+        # COMPANY DETECTION
+        if any(p in col_lower for p in ['company_code', 'company_name', 'entity', 'legal_entity', 'home_company']):
+            if 2 <= distinct_count <= 50:
+                profile['filter_category'] = 'company'
+                profile['filter_priority'] = 80
+                return profile
+        
+        # ORGANIZATION DETECTION
+        if any(p in col_lower for p in ['org_level', 'department', 'division', 'cost_center', 'business_unit', 
+                                         'org_code', 'dept_code', 'segment']):
+            if 2 <= distinct_count <= 200:
+                profile['filter_category'] = 'organization'
+                profile['filter_priority'] = 70
+                return profile
+        
+        # LOCATION DETECTION
+        if any(p in col_lower for p in ['location', 'site', 'work_location', 'work_state', 'work_country',
+                                         'location_code', 'facility', 'branch', 'region']):
+            if 2 <= distinct_count <= 500:
+                profile['filter_category'] = 'location'
+                profile['filter_priority'] = 60
+                return profile
+        
+        # PAY TYPE DETECTION
+        if any(p in col_lower for p in ['hourly_salary', 'pay_type', 'flsa', 'exempt', 'fullpart_time', 
+                                         'full_part', 'ft_pt', 'salary_hourly']):
+            if distinct_count <= 5:
+                profile['filter_category'] = 'pay_type'
+                profile['filter_priority'] = 50
+                return profile
+        
+        # Check for H/S, F/P values
+        pay_indicators = {'H', 'S', 'HOURLY', 'SALARY', 'F', 'P', 'FULL', 'PART', 'FT', 'PT',
+                          'EXEMPT', 'NON-EXEMPT', 'NONEXEMPT', 'E', 'N'}
+        if distinct_count <= 5 and len(values_upper & pay_indicators) >= 1:
+            # Check column name hints too
+            if any(p in col_lower for p in ['time', 'type', 'class', 'flsa']):
+                profile['filter_category'] = 'pay_type'
+                profile['filter_priority'] = 45
+                return profile
+        
+        # EMPLOYEE TYPE DETECTION
+        if any(p in col_lower for p in ['employee_type', 'worker_type', 'emp_type', 'employment_type',
+                                         'worker_category', 'contingent']):
+            if distinct_count <= 20:
+                profile['filter_category'] = 'employee_type'
+                profile['filter_priority'] = 55
+                return profile
+        
+        # Check for REG/TMP/CON values
+        emp_type_indicators = {'REG', 'REGULAR', 'TMP', 'TEMP', 'TEMPORARY', 'CON', 'CONTRACTOR', 
+                               'CTR', 'INT', 'INTERN', 'CAS', 'CASUAL', 'FTE', 'PTE'}
+        if distinct_count <= 15 and len(values_upper & emp_type_indicators) >= 1:
+            profile['filter_category'] = 'employee_type'
+            profile['filter_priority'] = 50
+            return profile
+        
+        # JOB DETECTION
+        if any(p in col_lower for p in ['job_code', 'job_title', 'job_family', 'job_grade', 'position_code',
+                                         'occupation', 'job_class', 'pay_grade']):
+            if 2 <= distinct_count <= 500:
+                profile['filter_category'] = 'job'
+                profile['filter_priority'] = 40
+                return profile
         
         return profile
     
@@ -2357,8 +2473,9 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                     min_value, max_value, mean_value,
                     distinct_values, value_distribution,
                     min_date, max_date,
-                    sample_values, is_likely_key, is_categorical
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    sample_values, is_likely_key, is_categorical,
+                    filter_category, filter_priority
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, [
                 hash(f"{profile['project']}_{profile['table_name']}_{profile['column_name']}") % 2147483647,
                 profile['project'],
@@ -2378,7 +2495,9 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 profile.get('max_date'),
                 json.dumps(profile.get('sample_values')) if profile.get('sample_values') else None,
                 profile.get('is_likely_key', False),
-                profile.get('is_categorical', False)
+                profile.get('is_categorical', False),
+                profile.get('filter_category'),
+                profile.get('filter_priority', 0)
             ])
             self.conn.commit()
             
@@ -2471,6 +2590,62 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
         except Exception as e:
             logger.warning(f"[PROFILING] Failed to get categorical columns: {e}")
             return []
+    
+    def get_filter_candidates(self, project: str) -> Dict[str, List[Dict]]:
+        """
+        Get all columns identified as filter candidates, grouped by category.
+        
+        Categories: status, company, organization, location, pay_type, employee_type, job
+        
+        Returns:
+            Dict with category keys: {
+                'status': [{'column': 'termination_date', 'table': '...', 'values': [...], ...}],
+                'company': [...],
+                ...
+            }
+        """
+        try:
+            result = self.conn.execute("""
+                SELECT 
+                    filter_category,
+                    table_name,
+                    column_name,
+                    inferred_type,
+                    distinct_count,
+                    distinct_values,
+                    value_distribution,
+                    total_count,
+                    null_count,
+                    filter_priority
+                FROM _column_profiles
+                WHERE project = ? AND filter_category IS NOT NULL
+                ORDER BY filter_priority DESC, filter_category
+            """, [project]).fetchall()
+            
+            candidates = {}
+            for row in result:
+                category = row[0]
+                if category not in candidates:
+                    candidates[category] = []
+                
+                candidates[category].append({
+                    'table': row[1],
+                    'column': row[2],
+                    'type': row[3],
+                    'distinct_count': row[4],
+                    'values': json.loads(row[5]) if row[5] else [],
+                    'distribution': json.loads(row[6]) if row[6] else {},
+                    'total_count': row[7],
+                    'null_count': row[8],
+                    'priority': row[9]
+                })
+            
+            logger.warning(f"[PROFILING] Found filter candidates: {list(candidates.keys())}")
+            return candidates
+            
+        except Exception as e:
+            logger.warning(f"[PROFILING] Failed to get filter candidates: {e}")
+            return {}
     
     def get_profile_summary(self, project: str) -> Dict[str, Any]:
         """
