@@ -25,7 +25,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v3.4 STATUS FILTER ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v4.0 MULTI-FILTER ======")
 
 
 # =============================================================================
@@ -128,6 +128,7 @@ class IntelligenceEngine:
         self.pending_questions = []
         self.conversation_context = {}
         self.last_executed_sql = None
+        self.filter_candidates = {}  # Detected filter dimensions
     
     def load_context(
         self, 
@@ -141,6 +142,11 @@ class IntelligenceEngine:
         self.rag_handler = rag_handler
         self.schema = schema or {}
         self.relationships = relationships or []
+        
+        # Extract filter candidates for intelligent clarification
+        self.filter_candidates = self.schema.get('filter_candidates', {})
+        if self.filter_candidates:
+            logger.warning(f"[INTELLIGENCE] Filter candidates loaded: {list(self.filter_candidates.keys())}")
     
     def ask(
         self, 
@@ -151,6 +157,7 @@ class IntelligenceEngine:
         """Main entry point - ask the engine a question."""
         logger.warning(f"[INTELLIGENCE] Question: {question[:100]}...")
         logger.warning(f"[INTELLIGENCE] Current confirmed_facts: {self.confirmed_facts}")
+        logger.warning(f"[INTELLIGENCE] Available filter categories: {list(self.filter_candidates.keys())}")
         
         q_lower = question.lower()
         
@@ -159,23 +166,16 @@ class IntelligenceEngine:
         is_employee_question = self._is_employee_question(q_lower)
         logger.warning(f"[INTELLIGENCE] is_employee_question: {is_employee_question}")
         
-        # ONLY clarification: employee status (active/termed/all)
-        # Only ask if:
-        # 1. Question involves employees
-        # 2. User hasn't already answered
-        # 3. User didn't specify in the question
-        if is_employee_question and 'employee_status' not in self.confirmed_facts:
-            # Check if user specified status in the question itself
-            detected_status = self._detect_status_in_question(q_lower)
-            logger.warning(f"[INTELLIGENCE] detected_status: {detected_status}")
-            if detected_status:
-                # User specified - set it and continue
-                self.confirmed_facts['employee_status'] = detected_status
-                logger.warning(f"[INTELLIGENCE] Detected status in question: {detected_status}")
-            else:
-                # Need to ask
-                logger.warning("[INTELLIGENCE] Asking for employee status clarification")
-                return self._request_employee_status_clarification(question)
+        # INTELLIGENT CLARIFICATION
+        # For employee questions, determine which filters need clarification
+        if is_employee_question:
+            needed_clarifications = self._get_needed_clarifications(q_lower)
+            logger.warning(f"[INTELLIGENCE] Needed clarifications: {needed_clarifications}")
+            
+            if needed_clarifications:
+                # Build clarification question for first needed filter
+                first_filter = needed_clarifications[0]
+                return self._request_filter_clarification(question, first_filter)
         
         logger.warning(f"[INTELLIGENCE] Proceeding with facts: {self.confirmed_facts}")
         
@@ -238,6 +238,187 @@ class IntelligenceEngine:
             return 'all'
         
         return None
+    
+    def _get_needed_clarifications(self, q_lower: str) -> List[str]:
+        """
+        Determine which filter categories need clarification for this question.
+        
+        Returns list of filter category names that need clarification.
+        """
+        needed = []
+        
+        # Check each available filter category
+        for category in self.filter_candidates.keys():
+            # Skip if already confirmed
+            if category in self.confirmed_facts:
+                continue
+            
+            # Check if specified in question
+            detected = self._detect_filter_in_question(category, q_lower)
+            if detected:
+                # User specified - set it and skip
+                self.confirmed_facts[category] = detected
+                logger.warning(f"[INTELLIGENCE] Detected {category} in question: {detected}")
+                continue
+            
+            # Check if this filter is relevant to the question
+            if self._is_filter_relevant(category, q_lower):
+                needed.append(category)
+        
+        # Sort by priority (status first, then company, etc.)
+        priority_order = ['status', 'company', 'organization', 'location', 'employee_type', 'pay_type', 'job']
+        needed.sort(key=lambda x: priority_order.index(x) if x in priority_order else 99)
+        
+        return needed
+    
+    def _detect_filter_in_question(self, category: str, q_lower: str) -> Optional[str]:
+        """
+        Check if user specified a filter value in their question.
+        Returns the detected value or None.
+        """
+        if category == 'status':
+            return self._detect_status_in_question(q_lower)
+        
+        # Get filter candidates for this category
+        candidates = self.filter_candidates.get(category, [])
+        if not candidates:
+            return None
+        
+        # For other categories, check if any specific value is mentioned
+        for candidate in candidates:
+            values = candidate.get('values', [])
+            for value in values:
+                value_str = str(value).lower()
+                if len(value_str) > 2 and value_str in q_lower:
+                    return value
+        
+        # Category-specific patterns
+        if category == 'pay_type':
+            if any(p in q_lower for p in ['hourly', 'hourly employees', 'hourly workers']):
+                return 'hourly'
+            if any(p in q_lower for p in ['salary', 'salaried', 'salaried employees']):
+                return 'salary'
+            if any(p in q_lower for p in ['full time', 'full-time', 'ft ']):
+                return 'full_time'
+            if any(p in q_lower for p in ['part time', 'part-time', 'pt ']):
+                return 'part_time'
+        
+        if category == 'employee_type':
+            if any(p in q_lower for p in ['regular', 'regular employees']):
+                return 'regular'
+            if any(p in q_lower for p in ['temp', 'temporary', 'temps']):
+                return 'temp'
+            if any(p in q_lower for p in ['contractor', 'contractors', 'contract']):
+                return 'contractor'
+        
+        return None
+    
+    def _is_filter_relevant(self, category: str, q_lower: str) -> bool:
+        """
+        Determine if a filter category is relevant to this question.
+        
+        Not all questions need all filters. E.g., "What's the headcount?" needs status,
+        but "What earnings codes exist?" doesn't need any employee filter.
+        """
+        # Status is almost always relevant for employee questions
+        if category == 'status':
+            return True
+        
+        # Company is relevant when asking about totals/counts
+        if category == 'company':
+            # Multiple companies exist?
+            candidates = self.filter_candidates.get('company', [])
+            if candidates and candidates[0].get('distinct_count', 0) > 1:
+                # Relevant for count/total questions
+                if any(w in q_lower for w in ['how many', 'count', 'total', 'headcount']):
+                    return True
+        
+        # For now, keep it simple - only status is auto-asked
+        # Other categories require explicit mention or future enhancement
+        return False
+    
+    def _request_filter_clarification(self, question: str, category: str) -> SynthesizedAnswer:
+        """
+        Build a clarification question for a specific filter category.
+        Uses actual values from profile data.
+        """
+        # Get candidates for this category
+        candidates = self.filter_candidates.get(category, [])
+        
+        if category == 'status':
+            return self._request_employee_status_clarification(question)
+        
+        # Build options from profile data
+        options = self._build_filter_options(category, candidates)
+        
+        if not options:
+            # Skip this category if we can't build options
+            return self._continue_without_filter(question, category)
+        
+        # Category-specific question text
+        question_text = {
+            'company': "Which company should I include?",
+            'organization': "Which department/organization?",
+            'location': "Which location(s)?",
+            'pay_type': "Which pay type?",
+            'employee_type': "Which employee type?",
+            'job': "Which job family/code?"
+        }.get(category, f"Which {category}?")
+        
+        return SynthesizedAnswer(
+            question=question,
+            answer="",
+            confidence=0.0,
+            structured_output={
+                'type': 'clarification_needed',
+                'filter_category': category,
+                'questions': [{
+                    'id': category,
+                    'text': question_text,
+                    'type': 'single_select',
+                    'options': options
+                }],
+                'detected_domains': ['employees']
+            },
+            reasoning=f"Need to clarify {category} filter"
+        )
+    
+    def _build_filter_options(self, category: str, candidates: List[Dict]) -> List[Dict]:
+        """Build filter options from profile data."""
+        if not candidates:
+            return []
+        
+        # Use first candidate (highest priority)
+        candidate = candidates[0]
+        values = candidate.get('values', [])
+        distribution = candidate.get('distribution', {})
+        total_count = candidate.get('total_count', 0)
+        
+        if not values:
+            return []
+        
+        options = []
+        for value in values[:10]:  # Limit to 10 options
+            count = distribution.get(str(value), 0)
+            label = f"{value} ({count:,})" if count else str(value)
+            options.append({
+                'id': str(value).lower().replace(' ', '_'),
+                'label': label,
+                'value': value
+            })
+        
+        # Add "All" option
+        options.append({
+            'id': 'all',
+            'label': f'All ({total_count:,} total)'
+        })
+        
+        return options
+    
+    def _continue_without_filter(self, question: str, category: str) -> SynthesizedAnswer:
+        """Continue processing without this filter (skip clarification)."""
+        self.confirmed_facts[category] = 'all'
+        return self.ask(question)  # Recursive call to continue
     
     def _request_employee_status_clarification(self, question: str) -> SynthesizedAnswer:
         """Ask for employee status clarification using ACTUAL values from the data."""
@@ -437,6 +618,120 @@ class IntelligenceEngine:
         
         return None, []
     
+    def _build_filter_instructions(self, relevant_tables: List[Dict]) -> str:
+        """
+        Build SQL filter instructions from confirmed_facts and filter_candidates.
+        Uses profile data to generate accurate WHERE clauses.
+        """
+        filters = []
+        
+        # STATUS FILTER
+        status_filter = self.confirmed_facts.get('status') or self.confirmed_facts.get('employee_status')
+        logger.warning(f"[SQL-GEN] Building filters. status={status_filter}, all_facts={self.confirmed_facts}")
+        
+        if status_filter and status_filter != 'all':
+            # Check filter_candidates for status column info
+            status_candidates = self.filter_candidates.get('status', [])
+            
+            if status_candidates:
+                candidate = status_candidates[0]  # Highest priority
+                col_name = candidate.get('column')
+                col_type = candidate.get('type')
+                values = candidate.get('values', [])
+                distribution = candidate.get('distribution', {})
+                
+                logger.warning(f"[SQL-GEN] Status candidate: col={col_name}, type={col_type}")
+                
+                if col_type == 'date':  # termination_date
+                    if status_filter == 'active':
+                        filters.append(f"({col_name} IS NULL OR {col_name} = '' OR CAST({col_name} AS VARCHAR) = '')")
+                    elif status_filter == 'termed':
+                        filters.append(f"({col_name} IS NOT NULL AND {col_name} != '' AND CAST({col_name} AS VARCHAR) != '')")
+                else:  # categorical status code
+                    # Find matching codes
+                    if status_filter == 'active':
+                        codes = [v for v in values if str(v).upper() in ['A', 'ACTIVE', 'ACT']]
+                    elif status_filter == 'termed':
+                        codes = [v for v in values if str(v).upper() in ['T', 'TERMINATED', 'TERM', 'TERMED', 'I', 'INACTIVE']]
+                    else:
+                        codes = [v for v in values if str(v).lower() == status_filter.lower()]
+                    
+                    if codes:
+                        codes_str = ', '.join(f"'{c}'" for c in codes)
+                        filters.append(f"{col_name} IN ({codes_str})")
+            else:
+                # Fallback: look for termination_date in tables
+                for table in relevant_tables:
+                    columns = table.get('columns', [])
+                    for col in columns:
+                        col_name = col.get('name', str(col)) if isinstance(col, dict) else str(col)
+                        if 'termination_date' in col_name.lower():
+                            if status_filter == 'active':
+                                filters.append(f"({col_name} IS NULL OR {col_name} = '')")
+                            elif status_filter == 'termed':
+                                filters.append(f"({col_name} IS NOT NULL AND {col_name} != '')")
+                            break
+        
+        # COMPANY FILTER
+        company_filter = self.confirmed_facts.get('company')
+        if company_filter and company_filter != 'all':
+            company_candidates = self.filter_candidates.get('company', [])
+            if company_candidates:
+                col_name = company_candidates[0].get('column')
+                filters.append(f"{col_name} = '{company_filter}'")
+        
+        # LOCATION FILTER
+        location_filter = self.confirmed_facts.get('location')
+        if location_filter and location_filter != 'all':
+            location_candidates = self.filter_candidates.get('location', [])
+            if location_candidates:
+                col_name = location_candidates[0].get('column')
+                filters.append(f"{col_name} = '{location_filter}'")
+        
+        # PAY TYPE FILTER
+        pay_type_filter = self.confirmed_facts.get('pay_type')
+        if pay_type_filter and pay_type_filter != 'all':
+            pay_candidates = self.filter_candidates.get('pay_type', [])
+            if pay_candidates:
+                col_name = pay_candidates[0].get('column')
+                values = pay_candidates[0].get('values', [])
+                # Map common terms to actual codes
+                if pay_type_filter in ['hourly', 'h']:
+                    codes = [v for v in values if str(v).upper() in ['H', 'HOURLY']]
+                elif pay_type_filter in ['salary', 'salaried', 's']:
+                    codes = [v for v in values if str(v).upper() in ['S', 'SALARY', 'SALARIED']]
+                else:
+                    codes = [pay_type_filter]
+                if codes:
+                    codes_str = ', '.join(f"'{c}'" for c in codes)
+                    filters.append(f"{col_name} IN ({codes_str})")
+        
+        # EMPLOYEE TYPE FILTER
+        emp_type_filter = self.confirmed_facts.get('employee_type')
+        if emp_type_filter and emp_type_filter != 'all':
+            emp_candidates = self.filter_candidates.get('employee_type', [])
+            if emp_candidates:
+                col_name = emp_candidates[0].get('column')
+                values = emp_candidates[0].get('values', [])
+                # Map common terms
+                if emp_type_filter in ['regular', 'reg']:
+                    codes = [v for v in values if str(v).upper() in ['REG', 'REGULAR']]
+                elif emp_type_filter in ['temp', 'temporary']:
+                    codes = [v for v in values if str(v).upper() in ['TMP', 'TEMP', 'TEMPORARY']]
+                elif emp_type_filter in ['contractor', 'contract']:
+                    codes = [v for v in values if str(v).upper() in ['CON', 'CTR', 'CONTRACTOR']]
+                else:
+                    codes = [emp_type_filter]
+                if codes:
+                    codes_str = ', '.join(f"'{c}'" for c in codes)
+                    filters.append(f"{col_name} IN ({codes_str})")
+        
+        # Build final filter string
+        if filters:
+            return "\n\nFILTER: WHERE " + " AND ".join(filters)
+        
+        return ""
+    
     def _detect_mode(self, q_lower: str) -> IntelligenceMode:
         """Detect the appropriate intelligence mode."""
         if any(w in q_lower for w in ['validate', 'check', 'verify', 'issues', 'problems']):
@@ -534,7 +829,7 @@ class IntelligenceEngine:
     
     def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
         """Generate SQL query using LLMOrchestrator with SMART table selection."""
-        logger.warning(f"[SQL-GEN] v3.3 - Starting SQL generation")
+        logger.warning(f"[SQL-GEN] v4.0 - Starting SQL generation")
         logger.warning(f"[SQL-GEN] confirmed_facts: {self.confirmed_facts}")
         
         if not self.structured_handler or not self.schema:
@@ -628,44 +923,8 @@ class IntelligenceEngine:
             if rel_lines:
                 relationships_text = "\n\nJOIN ON:\n" + "\n".join(rel_lines[:5])
         
-        # Employee status filter
-        filter_instructions = ""
-        status_filter = self.confirmed_facts.get('employee_status')
-        logger.warning(f"[SQL-GEN] status_filter from confirmed_facts: {status_filter}")
-        
-        if status_filter and status_filter != 'all':
-            status_col, status_codes = self._get_status_column_and_codes(status_filter)
-            logger.warning(f"[SQL-GEN] _get_status_column_and_codes returned: col={status_col}, codes={status_codes}")
-            
-            if status_col and status_codes:
-                codes_str = ', '.join(f"'{c}'" for c in status_codes)
-                filter_instructions = f"\n\nFILTER: WHERE {status_col} IN ({codes_str})"
-            else:
-                # FALLBACK: Look for common status columns in the schema
-                status_columns_found = []
-                for table in relevant_tables:
-                    columns = table.get('columns', [])
-                    for col in columns:
-                        col_name = col.get('name', str(col)) if isinstance(col, dict) else str(col)
-                        col_lower = col_name.lower()
-                        if any(p in col_lower for p in ['employment_status', 'emp_status', 'status_code', 'active_status']):
-                            status_columns_found.append((table.get('table_name', ''), col_name))
-                
-                logger.warning(f"[SQL-GEN] Fallback status columns found: {status_columns_found}")
-                
-                if status_columns_found:
-                    # Use first found status column
-                    _, col_name = status_columns_found[0]
-                    if status_filter == 'active':
-                        filter_instructions = f"\n\nFILTER: WHERE {col_name} = 'A' OR {col_name} ILIKE '%active%'"
-                    elif status_filter == 'termed':
-                        filter_instructions = f"\n\nFILTER: WHERE {col_name} IN ('T', 'I') OR {col_name} ILIKE '%term%' OR {col_name} ILIKE '%inactive%'"
-                elif status_filter == 'active':
-                    # Last resort: termination_date approach
-                    filter_instructions = "\n\nFILTER: WHERE termination_date IS NULL OR termination_date = ''"
-                elif status_filter == 'termed':
-                    filter_instructions = "\n\nFILTER: WHERE termination_date IS NOT NULL AND termination_date != ''"
-        
+        # BUILD FILTER INSTRUCTIONS FROM CONFIRMED FACTS
+        filter_instructions = self._build_filter_instructions(relevant_tables)
         logger.warning(f"[SQL-GEN] filter_instructions: {filter_instructions[:100] if filter_instructions else 'NONE'}")
         
         # SIMPLE vs COMPLEX query hint
