@@ -1788,7 +1788,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                                     colored_cells = 0
                                     total_cells = 0
                                     
-                                    for col_idx in range(1, min(20, ws.max_column + 1)):
+                                    for col_idx in range(1, min(20, (ws.max_column or 0) + 1)):
                                         try:
                                             cell = ws.cell(row=row_idx, column=col_idx)
                                             if cell.value is not None:
