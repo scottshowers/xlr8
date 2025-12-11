@@ -445,8 +445,72 @@ class IntelligenceEngine:
         
         return domains if domains else ['general']
     
+    def _select_relevant_tables(self, tables: List[Dict], q_lower: str) -> List[Dict]:
+        """
+        Select only tables relevant to the question.
+        This keeps the SQL prompt small and focused.
+        """
+        if not tables:
+            return []
+        
+        # Priority keywords for table selection
+        table_keywords = {
+            'personal': ['employee', 'employees', 'person', 'people', 'who', 'name', 'ssn', 'birth', 'hire'],
+            'company': ['company', 'organization', 'org', 'entity'],
+            'job': ['job', 'position', 'title', 'department', 'dept'],
+            'earnings': ['earn', 'earning', 'pay', 'salary', 'wage', 'compensation', 'rate'],
+            'deductions': ['deduction', 'benefit', '401k', 'insurance', 'health'],
+            'taxes': ['tax', 'withhold', 'federal', 'state'],
+            'time': ['time', 'hours', 'attendance', 'schedule'],
+            'address': ['address', 'location', 'city', 'state', 'zip'],
+        }
+        
+        # Score each table
+        scored_tables = []
+        for table in tables:
+            table_name = table.get('table_name', '').lower()
+            short_name = table_name.split('__')[-1] if '__' in table_name else table_name
+            
+            score = 0
+            
+            # Check if table name matches any keyword patterns
+            for pattern, keywords in table_keywords.items():
+                if pattern in short_name:
+                    # Check if any keyword is in the question
+                    if any(kw in q_lower for kw in keywords):
+                        score += 10
+                    else:
+                        score += 1  # Table exists but question doesn't directly ask about it
+            
+            # Boost "personal" table for general employee questions
+            if 'personal' in short_name and any(kw in q_lower for kw in ['employee', 'how many', 'count', 'who']):
+                score += 20
+            
+            # Boost tables with high row counts (they're likely the main tables)
+            row_count = table.get('row_count', 0)
+            if row_count > 1000:
+                score += 5
+            elif row_count > 100:
+                score += 2
+            
+            scored_tables.append((score, table))
+        
+        # Sort by score descending
+        scored_tables.sort(key=lambda x: -x[0])
+        
+        # Take top 3 tables max (keeps prompt small)
+        relevant = [t for score, t in scored_tables[:3] if score > 0]
+        
+        # If no relevant tables found, just use first table
+        if not relevant:
+            relevant = [tables[0]]
+        
+        logger.info(f"[SQL-GEN] Selected {len(relevant)} relevant tables: {[t.get('table_name', '').split('__')[-1] for t in relevant]}")
+        
+        return relevant
+    
     def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
-        """Generate SQL query using LLMOrchestrator."""
+        """Generate SQL query using LLMOrchestrator with SMART table selection."""
         logger.warning(f"[SQL-GEN] Starting SQL generation")
         
         if not self.structured_handler or not self.schema:
@@ -468,12 +532,16 @@ class IntelligenceEngine:
             logger.error(f"[SQL-GEN] Could not load LLMOrchestrator: {e}")
             return None
         
-        # Build schema
+        # SMART TABLE SELECTION - only include relevant tables
+        q_lower = question.lower()
+        relevant_tables = self._select_relevant_tables(tables, q_lower)
+        
+        # Build COMPACT schema - only relevant tables, minimal samples
         tables_info = []
         all_columns = set()
-        column_index = {}
+        primary_table = None
         
-        for table in tables:
+        for i, table in enumerate(relevant_tables):
             table_name = table.get('table_name', '')
             columns = table.get('columns', [])
             if columns and isinstance(columns[0], dict):
@@ -483,79 +551,85 @@ class IntelligenceEngine:
             row_count = table.get('row_count', 0)
             
             all_columns.update(col_names)
-            short_name = table_name.split('__')[-1] if '__' in table_name else table_name
             
-            for col in col_names:
-                col_lower = col.lower()
-                if col_lower not in column_index:
-                    column_index[col_lower] = []
-                if short_name not in column_index[col_lower]:
-                    column_index[col_lower].append(short_name)
+            # First relevant table is "primary"
+            if i == 0:
+                primary_table = table_name
             
-            # Sample values
+            # Only include sample for primary table
             sample_str = ""
-            try:
-                rows, cols = self.structured_handler.execute_query(f'SELECT * FROM "{table_name}" LIMIT 3')
-                if rows and cols:
-                    samples = []
-                    for col in cols[:5]:
-                        vals = set(str(row.get(col, ''))[:20] for row in rows if row.get(col) is not None)
-                        if vals:
-                            samples.append(f"    {col}: {', '.join(list(vals)[:3])}")
-                    sample_str = "\n  Samples:\n" + "\n".join(samples) if samples else ""
-            except:
-                pass
+            if i == 0:
+                try:
+                    rows, cols = self.structured_handler.execute_query(f'SELECT * FROM "{table_name}" LIMIT 2')
+                    if rows and cols:
+                        samples = []
+                        for col in cols[:4]:  # Limit to 4 columns
+                            vals = set(str(row.get(col, ''))[:15] for row in rows if row.get(col))
+                            if vals:
+                                samples.append(f"    {col}: {', '.join(list(vals)[:2])}")
+                        sample_str = "\n  Sample:\n" + "\n".join(samples[:4]) if samples else ""
+                except:
+                    pass
             
-            tables_info.append(f"Table: {table_name}\n  Columns: {', '.join(col_names)}\n  Rows: {row_count}{sample_str}")
+            # Compact column list
+            col_str = ', '.join(col_names[:15])
+            if len(col_names) > 15:
+                col_str += f" (+{len(col_names) - 15} more)"
+            
+            tables_info.append(f"Table: {table_name}\n  Columns: {col_str}\n  Rows: {row_count}{sample_str}")
         
         schema_text = '\n\n'.join(tables_info)
-        self._column_index = column_index
         
-        # Relationships
+        # SIMPLIFIED relationships - only between relevant tables
         relationships_text = ""
-        if self.relationships:
+        if self.relationships and len(relevant_tables) > 1:
+            relevant_table_names = {t.get('table_name', '') for t in relevant_tables}
             rel_lines = []
-            for rel in self.relationships[:15]:
-                src = f"{rel.get('source_table')}.{rel.get('source_column')}"
-                tgt = f"{rel.get('target_table')}.{rel.get('target_column')}"
-                rel_lines.append(f"  {src} → {tgt}")
+            for rel in self.relationships[:10]:
+                src_table = rel.get('source_table', '')
+                tgt_table = rel.get('target_table', '')
+                if src_table in relevant_table_names and tgt_table in relevant_table_names:
+                    src = f"{src_table.split('__')[-1]}.{rel.get('source_column')}"
+                    tgt = f"{tgt_table.split('__')[-1]}.{rel.get('target_column')}"
+                    rel_lines.append(f"  {src} → {tgt}")
             if rel_lines:
-                relationships_text = "\n\nRELATIONSHIPS:\n" + "\n".join(rel_lines)
+                relationships_text = "\n\nJOIN ON:\n" + "\n".join(rel_lines[:5])
         
-        # Employee status filter - now uses actual codes from profile data
+        # Employee status filter
         filter_instructions = ""
         status_filter = self.confirmed_facts.get('employee_status')
         
         if status_filter and status_filter != 'all':
-            # Get actual status column and codes from profile data
             status_col, status_codes = self._get_status_column_and_codes(status_filter)
             
             if status_col and status_codes:
                 codes_str = ', '.join(f"'{c}'" for c in status_codes)
-                filter_instructions = f"\n\nFILTER: Include only employees where {status_col} IN ({codes_str})"
+                filter_instructions = f"\n\nFILTER: WHERE {status_col} IN ({codes_str})"
             elif status_filter == 'active':
-                # Fallback: try termination_date approach
-                filter_instructions = "\n\nFILTER: Include only ACTIVE employees (WHERE termination_date IS NULL OR termination_date = '')"
+                filter_instructions = "\n\nFILTER: WHERE termination_date IS NULL OR termination_date = ''"
             elif status_filter == 'termed':
-                filter_instructions = "\n\nFILTER: Include only TERMINATED employees (WHERE termination_date IS NOT NULL AND termination_date != '')"
+                filter_instructions = "\n\nFILTER: WHERE termination_date IS NOT NULL AND termination_date != ''"
+        
+        # SIMPLE vs COMPLEX query hint
+        query_hint = ""
+        if 'how many' in q_lower or 'count' in q_lower:
+            query_hint = f"\n\nHINT: For COUNT, use single table: SELECT COUNT(*) FROM \"{primary_table}\""
         
         prompt = f"""SCHEMA:
 {schema_text}{relationships_text}
-{filter_instructions}
+{filter_instructions}{query_hint}
 
 QUESTION: {question}
 
 RULES:
-1. Use ONLY columns that exist in the schema above
-2. Use ILIKE for text matching
-3. COUNT(*) for "how many" questions
-4. JOIN tables on employee_number
-5. TRY_CAST for numeric comparisons
-6. Quote column names with spaces or special chars
+1. Use ONLY columns from schema above
+2. For "how many" → SELECT COUNT(*) FROM single_table
+3. ILIKE for text matching
+4. Quote table names with special chars
 
-Return ONLY the SQL query, nothing else."""
+SQL:"""
         
-        logger.warning(f"[SQL-GEN] Calling orchestrator ({len(prompt)} chars)")
+        logger.warning(f"[SQL-GEN] Calling orchestrator ({len(prompt)} chars, {len(relevant_tables)} tables)")
         
         result = orchestrator.generate_sql(prompt, all_columns)
         
