@@ -247,6 +247,7 @@ async def intelligent_chat(request: IntelligentChatRequest):
         answer = engine.ask(message, mode=mode, context={'learned_sql': learned_sql} if learned_sql else None)
         
         # LEARNING: Check if we can skip clarification
+        auto_applied_facts = {}  # Track what was auto-applied
         if answer.structured_output and answer.structured_output.get('type') == 'clarification_needed':
             if LEARNING_AVAILABLE:
                 try:
@@ -264,10 +265,30 @@ async def intelligent_chat(request: IntelligentChatRequest):
                     if can_skip and learned_answers:
                         logger.info(f"[LEARNING] Skipping clarification - using learned answers: {learned_answers}")
                         engine.confirmed_facts.update(learned_answers)
+                        auto_applied_facts = learned_answers.copy()  # Remember what we auto-applied
                         # Re-ask with learned answers
                         answer = engine.ask(message, mode=mode)
                 except Exception as e:
                     logger.warning(f"[LEARNING] Error checking skip clarification: {e}")
+        
+        # Build human-readable description of auto-applied facts
+        auto_applied_note = ""
+        if auto_applied_facts:
+            notes = []
+            for key, value in auto_applied_facts.items():
+                if key == 'employee_status':
+                    if value == 'active':
+                        notes.append("Active employees only")
+                    elif value == 'termed':
+                        notes.append("Terminated employees only")
+                    elif value == 'all':
+                        notes.append("All employees (active + terminated)")
+                    else:
+                        notes.append(f"Employee status: {value}")
+                else:
+                    notes.append(f"{key}: {value}")
+            if notes:
+                auto_applied_note = "📌 *Remembered: " + ", ".join(notes) + "*"
         
         # Build response
         response = {
@@ -275,6 +296,10 @@ async def intelligent_chat(request: IntelligentChatRequest):
             "question": answer.question,
             "confidence": answer.confidence,
             "reasoning": answer.reasoning,
+            
+            # Auto-applied facts reminder
+            "auto_applied_note": auto_applied_note,
+            "auto_applied_facts": auto_applied_facts,
             
             # Clarification
             "needs_clarification": (
@@ -371,17 +396,25 @@ async def intelligent_chat(request: IntelligentChatRequest):
             
             if simple_answer:
                 # Direct answer - no Claude needed
+                # Prepend auto-applied note if any
+                if auto_applied_note:
+                    simple_answer = auto_applied_note + "\n\n" + simple_answer
                 response["answer"] = simple_answer
                 logger.info(f"[INTELLIGENT] Direct answer (no Claude): {simple_answer[:100]}")
             else:
                 # Complex query - use Claude to synthesize
-                response["answer"] = await generate_intelligent_answer(
+                claude_answer = await generate_intelligent_answer(
                     question=message,
                     context=answer.answer,
                     persona=request.persona,
                     insights=answer.insights,
                     conflicts=answer.conflicts
                 )
+                # Prepend auto-applied note if any
+                if auto_applied_note and claude_answer:
+                    response["answer"] = auto_applied_note + "\n\n" + claude_answer
+                else:
+                    response["answer"] = claude_answer
             
             # LEARNING: Record successful query pattern
             if LEARNING_AVAILABLE and response["answer"]:
