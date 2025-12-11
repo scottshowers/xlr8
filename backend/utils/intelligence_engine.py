@@ -353,17 +353,18 @@ class IntelligenceEngine:
                 if short_name not in column_index[col_lower]:
                     column_index[col_lower].append(short_name)
             
-            # Get sample values
+            # Get sample values for KEY columns only (not all)
             sample_str = ""
             try:
-                rows, cols = self.structured_handler.execute_query(f'SELECT * FROM "{table_name}" LIMIT 5')
+                rows, cols = self.structured_handler.execute_query(f'SELECT * FROM "{table_name}" LIMIT 3')
                 if rows and cols:
                     samples = []
-                    for col in cols:
-                        vals = set(str(row.get(col, ''))[:30] for row in rows if row.get(col) is not None)
+                    # Only sample first 5 columns to keep prompt manageable
+                    for col in cols[:5]:
+                        vals = set(str(row.get(col, ''))[:20] for row in rows if row.get(col) is not None)
                         if vals:
-                            samples.append(f"    {col}: {', '.join(list(vals)[:5])}")
-                    sample_str = "\n  Sample values:\n" + "\n".join(samples) if samples else ""
+                            samples.append(f"    {col}: {', '.join(list(vals)[:3])}")
+                    sample_str = "\n  Samples:\n" + "\n".join(samples) if samples else ""
             except Exception as sample_e:
                 pass  # Non-critical
             
@@ -423,7 +424,7 @@ class IntelligenceEngine:
                     if skipped <= 3:
                         logger.debug(f"[SQL-GEN] Skipping invalid relationship: {src_table}.{src_col} → {tgt_table}.{tgt_col}")
                 
-                if len(rel_lines) >= 50:
+                if len(rel_lines) >= 15:  # Reduced from 50
                     break
             
             if rel_lines:
@@ -443,11 +444,9 @@ class IntelligenceEngine:
             elif len(tables_list) > 1:
                 shared_cols.append(f"  {col}: {', '.join(tables_list)} (can JOIN on this)")
         
-        # Show shared columns first (potential join keys), then unique
+        # Show ONLY shared columns (join keys) - skip unique to reduce prompt size
         if shared_cols:
-            column_location_text += "SHARED COLUMNS (potential JOIN keys):\n" + "\n".join(shared_cols[:20]) + "\n\n"
-        if unique_cols:
-            column_location_text += "TABLE-SPECIFIC COLUMNS:\n" + "\n".join(unique_cols[:30]) + "\n"
+            column_location_text += "JOIN KEYS (shared columns):\n" + "\n".join(shared_cols[:10]) + "\n"
         
         # Build conversation context
         context_str = ""
@@ -500,25 +499,41 @@ If this references previous results, use the same tables/conditions.
                     
                     column_hints += f"\nCRITICAL: PT/FT status is in {short_name}.{ptft_cols[0]}.{ptft_values}"
         
+        # Add user's confirmed answers as filters
+        filter_instructions = ""
+        if self.confirmed_facts:
+            filters = []
+            if self.confirmed_facts.get('employee_status') == 'active':
+                filters.append("Include ONLY active employees (filter on employment_status or similar)")
+            elif self.confirmed_facts.get('employee_status') == 'termed':
+                filters.append("Include ONLY terminated employees")
+            # 'all' means no filter needed
+            
+            if self.confirmed_facts.get('earnings_scope') == 'current_rates':
+                filters.append("Use current pay rates only")
+            
+            if filters:
+                filter_instructions = "\n\nUSER REQUESTED FILTERS:\n" + "\n".join(f"- {f}" for f in filters)
+        
         prompt = f"""{context_str}
-SCHEMA (with sample values):
+SCHEMA:
 {schema_text}{relationships_text}
 {column_location_text}
-{column_hints}
+{column_hints}{filter_instructions}
 
 QUESTION: {question}
 
 RULES:
-1. ONLY use column names from the schema - never invent columns
+1. Use ONLY columns from schema
 2. Use ILIKE for text matching
-3. COUNT(*) for "how many" questions  
-4. Wrap column names in double quotes
-5. JOIN tables using shared columns from COLUMN LOCATIONS
-6. TRY_CAST for numeric comparisons
-7. LIMIT 1000 unless counting
-8. Use correct table alias for each column - CHECK COLUMN LOCATIONS above
-9. For PT/FT filtering, use the ACTUAL VALUES shown above (usually 'P'/'F', NOT 'PT'/'FT')"""
+3. COUNT(*) for "how many"  
+4. JOIN on shared columns (employee_number is typical key)
+5. TRY_CAST for numeric comparisons
+6. For PT/FT: use 'P'/'F' not 'PT'/'FT'
+
+Return ONLY the SQL, no explanation."""
         
+        logger.warning(f"[SQL-GEN] Prompt length: {len(prompt)} chars")
         logger.warning(f"[SQL-GEN] Calling orchestrator...")
         
         # Call orchestrator - handles model selection, validation, retry
