@@ -711,39 +711,25 @@ RULES:
         if mode == IntelligenceMode.VALIDATE:
             return True
         
-        # For data queries - check if question is specific enough
-        is_specific = False
-        
-        # Check if they specified employee filters
-        has_employee_filter = any(w in q_lower for w in [
-            'pt ', 'ft ', 'part-time', 'part time', 'full-time', 'full time',
-            'active', 'terminated', 'termed', 'all employees', 'hourly', 'salaried'
-        ])
-        
-        # Check if they specified a clear numeric condition
-        has_numeric_condition = any(w in q_lower for w in [
-            'more than', 'less than', 'over', 'under', 'above', 'below',
-            'at least', 'greater than', 'equal to', '$'
-        ])
-        
-        # Check if it's a simple count/list with clear criteria
-        is_simple_query = any(w in q_lower for w in ['how many', 'count', 'list', 'show me'])
-        
-        # Question is specific if it has filters AND is a simple query type
-        if is_simple_query and (has_employee_filter or has_numeric_condition):
-            is_specific = True
-        
-        # Question is specific if it mentions specific entities
-        if entities and len(entities) > 0:
-            is_specific = True
-        
-        # If not specific, ask clarification
-        if not is_specific and 'employees' in domains:
-            return True
+        # CONSULTANT LOGIC: For employee queries, ALWAYS ask about active status
+        # unless they explicitly said "active" or "all employees" or "terminated"
+        if 'employees' in domains:
+            explicitly_specified_status = any(w in q_lower for w in [
+                'active only', 'active employees', 'all employees', 
+                'terminated', 'termed', 'inactive'
+            ])
+            if not explicitly_specified_status:
+                logger.info(f"[INTELLIGENCE] Asking clarification - employee status not specified")
+                return True
         
         # For earnings/deductions, ask if no clear criteria
-        if 'earnings' in domains and not has_numeric_condition:
-            return True
+        if 'earnings' in domains:
+            has_numeric_condition = any(w in q_lower for w in [
+                'more than', 'less than', 'over', 'under', 'above', 'below',
+                'at least', 'greater than', 'equal to', '$'
+            ])
+            if not has_numeric_condition:
+                return True
         
         return False
     
