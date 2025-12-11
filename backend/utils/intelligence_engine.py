@@ -499,21 +499,36 @@ If this references previous results, use the same tables/conditions.
                     
                     column_hints += f"\nCRITICAL: PT/FT status is in {short_name}.{ptft_cols[0]}.{ptft_values}"
         
-        # Add user's confirmed answers as filters
+        # Add user's confirmed answers as filters - but only if we can find the right columns
         filter_instructions = ""
         if self.confirmed_facts:
             filters = []
-            if self.confirmed_facts.get('employee_status') == 'active':
-                filters.append("Include ONLY active employees (filter on employment_status or similar)")
-            elif self.confirmed_facts.get('employee_status') == 'termed':
-                filters.append("Include ONLY terminated employees")
-            # 'all' means no filter needed
             
-            if self.confirmed_facts.get('earnings_scope') == 'current_rates':
-                filters.append("Use current pay rates only")
+            # For employee_status filter, find actual status column
+            if self.confirmed_facts.get('employee_status') in ['active', 'termed']:
+                status_col = None
+                status_table = None
+                for t in tables:
+                    tname = t.get('table_name', '')
+                    cols = t.get('columns', [])
+                    for c in cols:
+                        c_str = str(c).lower()
+                        if any(x in c_str for x in ['employment_status', 'emp_status', 'status_code', 'termination']):
+                            status_col = str(c)
+                            status_table = tname.split('__')[-1] if '__' in tname else tname
+                            break
+                    if status_col:
+                        break
+                
+                if status_col:
+                    if self.confirmed_facts.get('employee_status') == 'active':
+                        filters.append(f"Filter to active employees using {status_table}.{status_col} (exclude terminated)")
+                    else:
+                        filters.append(f"Filter to terminated employees using {status_table}.{status_col}")
+                # If no status column found, skip filter - don't confuse LLM
             
             if filters:
-                filter_instructions = "\n\nUSER REQUESTED FILTERS:\n" + "\n".join(f"- {f}" for f in filters)
+                filter_instructions = "\n\nFILTERS:\n" + "\n".join(f"- {f}" for f in filters)
         
         prompt = f"""{context_str}
 SCHEMA:
