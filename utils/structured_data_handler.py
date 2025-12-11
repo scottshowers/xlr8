@@ -431,6 +431,53 @@ class StructuredDataHandler:
                 )
             """)
             
+            # =================================================================
+            # COLUMN PROFILES TABLE - Phase 1 Data Foundation
+            # Stores detailed statistics about each column for intelligent
+            # query generation and clarification decisions.
+            # =================================================================
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS _column_profiles (
+                    id INTEGER,
+                    project VARCHAR NOT NULL,
+                    table_name VARCHAR NOT NULL,
+                    column_name VARCHAR NOT NULL,
+                    
+                    -- Data type info
+                    inferred_type VARCHAR,           -- 'numeric', 'categorical', 'date', 'text', 'boolean'
+                    original_dtype VARCHAR,          -- pandas dtype
+                    
+                    -- Basic stats
+                    total_count INTEGER,             -- total rows
+                    null_count INTEGER,              -- nulls/blanks
+                    distinct_count INTEGER,          -- unique values
+                    
+                    -- For numeric columns
+                    min_value DOUBLE,
+                    max_value DOUBLE,
+                    mean_value DOUBLE,
+                    
+                    -- For categorical columns (distinct_count <= 100)
+                    distinct_values JSON,            -- ['A', 'T', 'L', ...]
+                    value_distribution JSON,         -- {'A': 1500, 'T': 200, 'L': 50}
+                    
+                    -- For date columns
+                    min_date VARCHAR,
+                    max_date VARCHAR,
+                    
+                    -- Sample values (first 5 non-null)
+                    sample_values JSON,
+                    
+                    -- Metadata
+                    is_likely_key BOOLEAN DEFAULT FALSE,
+                    is_categorical BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    
+                    -- Unique constraint
+                    UNIQUE(project, table_name, column_name)
+                )
+            """)
+            
             self.conn.commit()
             logger.info("Metadata tables initialized successfully")
             
@@ -1760,6 +1807,14 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                                 results['total_rows'] += len(sub_df)
                                 results['tables_created'].append(table_name)
                                 
+                                # Profile horizontal sub-table
+                                try:
+                                    profile_result = self.profile_columns(project, table_name)
+                                    results['sheets'][-1]['column_profiles'] = profile_result.get('profiles', {})
+                                    results['sheets'][-1]['categorical_columns'] = profile_result.get('categorical_columns', [])
+                                except Exception as profile_e:
+                                    logger.warning(f"[PROFILING] Failed for horizontal sub-table {table_name}: {profile_e}")
+                                
                                 logger.info(f"Created horizontal sub-table: {table_name} ({len(sub_df)} rows)")
                                 
                             except Exception as sub_e:
@@ -1947,6 +2002,20 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                         'sample_data': df.head(3).to_dict('records')
                     }
                     
+                    # =================================================
+                    # COLUMN PROFILING - Phase 1 Data Foundation
+                    # Profile columns to enable intelligent clarification
+                    # =================================================
+                    try:
+                        profile_result = self.profile_columns(project, table_name)
+                        sheet_info['column_profiles'] = profile_result.get('profiles', {})
+                        sheet_info['categorical_columns'] = profile_result.get('categorical_columns', [])
+                        logger.info(f"[PROFILING] {table_name}: {profile_result.get('columns_profiled', 0)} columns profiled")
+                    except Exception as profile_e:
+                        logger.warning(f"[PROFILING] Failed for {table_name}: {profile_e}")
+                        sheet_info['column_profiles'] = {}
+                        sheet_info['categorical_columns'] = []
+                    
                     results['sheets'].append(sheet_info)
                     results['total_rows'] += len(df)
                     results['tables_created'].append(table_name)
@@ -2042,19 +2111,411 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             
             self.conn.commit()
             
+            # Profile columns for CSV
+            profile_result = {}
+            try:
+                profile_result = self.profile_columns(project, table_name)
+                logger.info(f"[PROFILING] CSV {table_name}: {profile_result.get('columns_profiled', 0)} columns profiled")
+            except Exception as profile_e:
+                logger.warning(f"[PROFILING] Failed for CSV {table_name}: {profile_e}")
+            
             return {
                 'project': project,
                 'file_name': file_name,
                 'table_name': table_name,
                 'columns': list(df.columns),
                 'row_count': len(df),
-                'likely_keys': likely_keys
+                'likely_keys': likely_keys,
+                'column_profiles': profile_result.get('profiles', {}),
+                'categorical_columns': profile_result.get('categorical_columns', [])
             }
             
         except Exception as e:
             logger.error(f"Error storing CSV: {e}")
             raise
     
+    # =========================================================================
+    # COLUMN PROFILING - Phase 1 Data Foundation
+    # These methods analyze column data to enable intelligent query generation
+    # and data-driven clarification decisions.
+    # =========================================================================
+    
+    def profile_columns(self, project: str, table_name: str) -> Dict[str, Any]:
+        """
+        Analyze all columns in a table and store detailed profiles.
+        
+        This is the foundation for intelligent clarification:
+        - Know what distinct values exist (e.g., status codes A, T, L)
+        - Know value distributions (1500 Active, 200 Terminated)
+        - Know numeric ranges (salary $30k - $500k)
+        - Know which columns are categorical vs free-text
+        
+        Args:
+            project: Project name
+            table_name: DuckDB table name to profile
+            
+        Returns:
+            Dict with profiling results and summary
+        """
+        logger.info(f"[PROFILING] Starting column profiling for {table_name}")
+        
+        result = {
+            'table_name': table_name,
+            'columns_profiled': 0,
+            'categorical_columns': [],
+            'numeric_columns': [],
+            'date_columns': [],
+            'profiles': {}
+        }
+        
+        try:
+            # Get all data for profiling (we need the full dataset for accurate stats)
+            df = self.query_to_dataframe(f"SELECT * FROM {table_name}")
+            
+            if df.empty:
+                logger.warning(f"[PROFILING] Table {table_name} is empty")
+                return result
+            
+            # Decrypt PII columns for profiling (we'll store aggregates, not raw values)
+            df = self.encryptor.decrypt_dataframe(df)
+            
+            for col in df.columns:
+                profile = self._profile_single_column(df, col)
+                profile['project'] = project
+                profile['table_name'] = table_name
+                profile['column_name'] = col
+                
+                # Store in database
+                self._store_column_profile(profile)
+                
+                # Track by type
+                result['profiles'][col] = profile
+                result['columns_profiled'] += 1
+                
+                if profile['inferred_type'] == 'categorical':
+                    result['categorical_columns'].append({
+                        'name': col,
+                        'distinct_count': profile['distinct_count'],
+                        'values': profile.get('distinct_values', [])
+                    })
+                elif profile['inferred_type'] == 'numeric':
+                    result['numeric_columns'].append({
+                        'name': col,
+                        'min': profile.get('min_value'),
+                        'max': profile.get('max_value'),
+                        'mean': profile.get('mean_value')
+                    })
+                elif profile['inferred_type'] == 'date':
+                    result['date_columns'].append({
+                        'name': col,
+                        'min_date': profile.get('min_date'),
+                        'max_date': profile.get('max_date')
+                    })
+            
+            logger.info(f"[PROFILING] Completed {table_name}: {result['columns_profiled']} columns, "
+                       f"{len(result['categorical_columns'])} categorical, "
+                       f"{len(result['numeric_columns'])} numeric")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"[PROFILING] Failed for {table_name}: {e}")
+            result['error'] = str(e)
+            return result
+    
+    def _profile_single_column(self, df: pd.DataFrame, col: str) -> Dict[str, Any]:
+        """
+        Profile a single column and return statistics.
+        """
+        series = df[col]
+        
+        profile = {
+            'column_name': col,
+            'original_dtype': str(series.dtype),
+            'total_count': len(series),
+            'null_count': int(series.isna().sum() + (series == '').sum()),
+            'distinct_count': 0,
+            'inferred_type': 'text',
+            'is_likely_key': False,
+            'is_categorical': False,
+            'distinct_values': None,
+            'value_distribution': None,
+            'min_value': None,
+            'max_value': None,
+            'mean_value': None,
+            'min_date': None,
+            'max_date': None,
+            'sample_values': []
+        }
+        
+        # Get non-null, non-empty values
+        non_null = series[series.notna() & (series != '') & (series.astype(str) != 'nan')]
+        
+        if len(non_null) == 0:
+            profile['inferred_type'] = 'empty'
+            return profile
+        
+        # Get distinct values
+        distinct_values = non_null.unique()
+        profile['distinct_count'] = len(distinct_values)
+        
+        # Sample values (first 5 unique)
+        profile['sample_values'] = [str(v) for v in distinct_values[:5]]
+        
+        # Check if this is a likely key column (high uniqueness)
+        uniqueness_ratio = profile['distinct_count'] / len(non_null) if len(non_null) > 0 else 0
+        profile['is_likely_key'] = uniqueness_ratio > 0.95 and profile['distinct_count'] > 10
+        
+        # Try to infer type and get type-specific stats
+        profile = self._infer_column_type(non_null, distinct_values, profile)
+        
+        return profile
+    
+    def _infer_column_type(self, series: pd.Series, distinct_values, profile: Dict) -> Dict:
+        """
+        Infer the semantic type of a column and compute type-specific statistics.
+        """
+        # Try numeric first
+        try:
+            # Filter out obvious non-numeric
+            numeric_series = pd.to_numeric(series.astype(str).str.replace(',', '').str.replace('$', '').str.strip(), errors='coerce')
+            numeric_valid = numeric_series.dropna()
+            
+            if len(numeric_valid) >= len(series) * 0.8:  # 80% numeric
+                profile['inferred_type'] = 'numeric'
+                profile['min_value'] = float(numeric_valid.min())
+                profile['max_value'] = float(numeric_valid.max())
+                profile['mean_value'] = float(numeric_valid.mean())
+                return profile
+        except:
+            pass
+        
+        # Try date
+        try:
+            date_series = pd.to_datetime(series, errors='coerce')
+            date_valid = date_series.dropna()
+            
+            if len(date_valid) >= len(series) * 0.8:  # 80% valid dates
+                profile['inferred_type'] = 'date'
+                profile['min_date'] = str(date_valid.min())
+                profile['max_date'] = str(date_valid.max())
+                return profile
+        except:
+            pass
+        
+        # Check for boolean-like
+        str_values = set(str(v).upper().strip() for v in distinct_values)
+        bool_patterns = [
+            {'Y', 'N'}, {'YES', 'NO'}, {'TRUE', 'FALSE'}, {'1', '0'},
+            {'T', 'F'}, {'ACTIVE', 'INACTIVE'}, {'Y', 'N', ''}
+        ]
+        
+        str_values_cleaned = str_values - {''}
+        for pattern in bool_patterns:
+            if str_values == pattern or str_values_cleaned == pattern or str_values_cleaned == pattern - {''}:
+                profile['inferred_type'] = 'boolean'
+                profile['is_categorical'] = True
+                profile['distinct_values'] = sorted([str(v) for v in distinct_values])
+                profile['value_distribution'] = series.value_counts().to_dict()
+                # Convert keys to strings
+                profile['value_distribution'] = {str(k): int(v) for k, v in profile['value_distribution'].items()}
+                return profile
+        
+        # Categorical: distinct count <= 100 and not high cardinality
+        if profile['distinct_count'] <= 100:
+            profile['inferred_type'] = 'categorical'
+            profile['is_categorical'] = True
+            profile['distinct_values'] = sorted([str(v) for v in distinct_values if str(v).strip()])
+            
+            # Get value distribution
+            value_counts = series.value_counts()
+            profile['value_distribution'] = {str(k): int(v) for k, v in value_counts.items()}
+            return profile
+        
+        # Default to text
+        profile['inferred_type'] = 'text'
+        return profile
+    
+    def _store_column_profile(self, profile: Dict):
+        """Store or update a column profile in the database."""
+        try:
+            # Delete existing profile for this column
+            self.conn.execute("""
+                DELETE FROM _column_profiles 
+                WHERE project = ? AND table_name = ? AND column_name = ?
+            """, [profile['project'], profile['table_name'], profile['column_name']])
+            
+            # Insert new profile
+            self.conn.execute("""
+                INSERT INTO _column_profiles (
+                    id, project, table_name, column_name,
+                    inferred_type, original_dtype,
+                    total_count, null_count, distinct_count,
+                    min_value, max_value, mean_value,
+                    distinct_values, value_distribution,
+                    min_date, max_date,
+                    sample_values, is_likely_key, is_categorical
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                hash(f"{profile['project']}_{profile['table_name']}_{profile['column_name']}") % 2147483647,
+                profile['project'],
+                profile['table_name'],
+                profile['column_name'],
+                profile.get('inferred_type'),
+                profile.get('original_dtype'),
+                profile.get('total_count'),
+                profile.get('null_count'),
+                profile.get('distinct_count'),
+                profile.get('min_value'),
+                profile.get('max_value'),
+                profile.get('mean_value'),
+                json.dumps(profile.get('distinct_values')) if profile.get('distinct_values') else None,
+                json.dumps(profile.get('value_distribution')) if profile.get('value_distribution') else None,
+                profile.get('min_date'),
+                profile.get('max_date'),
+                json.dumps(profile.get('sample_values')) if profile.get('sample_values') else None,
+                profile.get('is_likely_key', False),
+                profile.get('is_categorical', False)
+            ])
+            self.conn.commit()
+            
+        except Exception as e:
+            logger.warning(f"[PROFILING] Failed to store profile for {profile.get('column_name')}: {e}")
+    
+    def get_column_profile(self, project: str, table_name: str = None, 
+                           column_name: str = None) -> List[Dict]:
+        """
+        Retrieve column profiles from the database.
+        
+        Args:
+            project: Project name
+            table_name: Optional - filter by table
+            column_name: Optional - filter by column
+            
+        Returns:
+            List of profile dicts
+        """
+        try:
+            query = "SELECT * FROM _column_profiles WHERE project = ?"
+            params = [project]
+            
+            if table_name:
+                query += " AND table_name = ?"
+                params.append(table_name)
+            
+            if column_name:
+                query += " AND column_name = ?"
+                params.append(column_name)
+            
+            result = self.conn.execute(query, params).fetchall()
+            columns = [desc[0] for desc in self.conn.execute(query, params).description]
+            
+            profiles = []
+            for row in result:
+                profile = dict(zip(columns, row))
+                # Parse JSON fields
+                for json_field in ['distinct_values', 'value_distribution', 'sample_values']:
+                    if profile.get(json_field):
+                        try:
+                            profile[json_field] = json.loads(profile[json_field])
+                        except:
+                            pass
+                profiles.append(profile)
+            
+            return profiles
+            
+        except Exception as e:
+            logger.warning(f"[PROFILING] Failed to get profiles: {e}")
+            return []
+    
+    def get_categorical_columns(self, project: str, table_name: str = None) -> List[Dict]:
+        """
+        Get all categorical columns with their distinct values.
+        This is the key method for intelligent clarification.
+        
+        Returns columns where is_categorical = TRUE with their value distributions.
+        """
+        try:
+            query = """
+                SELECT table_name, column_name, distinct_count, 
+                       distinct_values, value_distribution
+                FROM _column_profiles 
+                WHERE project = ? AND is_categorical = TRUE
+            """
+            params = [project]
+            
+            if table_name:
+                query += " AND table_name = ?"
+                params.append(table_name)
+            
+            query += " ORDER BY table_name, column_name"
+            
+            result = self.conn.execute(query, params).fetchall()
+            
+            categorical = []
+            for row in result:
+                table, col, distinct_count, distinct_values, distribution = row
+                categorical.append({
+                    'table_name': table,
+                    'column_name': col,
+                    'distinct_count': distinct_count,
+                    'distinct_values': json.loads(distinct_values) if distinct_values else [],
+                    'value_distribution': json.loads(distribution) if distribution else {}
+                })
+            
+            return categorical
+            
+        except Exception as e:
+            logger.warning(f"[PROFILING] Failed to get categorical columns: {e}")
+            return []
+    
+    def get_profile_summary(self, project: str) -> Dict[str, Any]:
+        """
+        Get a summary of all column profiles for a project.
+        Useful for intelligence engine to understand the data landscape.
+        """
+        try:
+            # Count by type
+            type_counts = self.conn.execute("""
+                SELECT inferred_type, COUNT(*) as cnt
+                FROM _column_profiles
+                WHERE project = ?
+                GROUP BY inferred_type
+            """, [project]).fetchall()
+            
+            # Get categorical columns summary
+            categorical = self.get_categorical_columns(project)
+            
+            # Get tables profiled
+            tables = self.conn.execute("""
+                SELECT DISTINCT table_name, COUNT(*) as col_count
+                FROM _column_profiles
+                WHERE project = ?
+                GROUP BY table_name
+            """, [project]).fetchall()
+            
+            return {
+                'project': project,
+                'tables_profiled': len(tables),
+                'total_columns': sum(t[1] for t in tables),
+                'type_distribution': {t[0]: t[1] for t in type_counts},
+                'categorical_columns': len(categorical),
+                'categorical_summary': [
+                    {
+                        'table': c['table_name'],
+                        'column': c['column_name'],
+                        'values': c['distinct_values'][:10],  # First 10 values
+                        'count': c['distinct_count']
+                    }
+                    for c in categorical[:20]  # First 20 categorical columns
+                ],
+                'tables': [{'name': t[0], 'columns': t[1]} for t in tables]
+            }
+            
+        except Exception as e:
+            logger.warning(f"[PROFILING] Failed to get summary: {e}")
+            return {'project': project, 'error': str(e)}
+
     def get_schema_for_project(self, project: str) -> Dict[str, Any]:
         """Get all table schemas for a project (for Claude to use)"""
         try:
@@ -2079,16 +2540,90 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             'tables': []
         }
         
+        # Get all column profiles for this project (for efficiency)
+        all_profiles = {}
+        try:
+            profiles_list = self.get_column_profile(project)
+            for p in profiles_list:
+                key = (p['table_name'], p['column_name'])
+                all_profiles[key] = p
+        except:
+            pass
+        
+        # Get categorical columns summary
+        categorical_summary = {}
+        try:
+            categorical = self.get_categorical_columns(project)
+            for c in categorical:
+                if c['table_name'] not in categorical_summary:
+                    categorical_summary[c['table_name']] = []
+                categorical_summary[c['table_name']].append({
+                    'column': c['column_name'],
+                    'values': c['distinct_values'],
+                    'distribution': c['value_distribution']
+                })
+        except:
+            pass
+        
         for row in result:
             file_name, sheet_name, table_name, columns, row_count, likely_keys = row
-            schema['tables'].append({
+            columns_list = json.loads(columns) if columns else []
+            
+            # Enhance column info with profile data
+            enhanced_columns = []
+            for col_info in columns_list:
+                col_name = col_info.get('name', col_info) if isinstance(col_info, dict) else col_info
+                profile_key = (table_name, col_name)
+                
+                if profile_key in all_profiles:
+                    p = all_profiles[profile_key]
+                    enhanced_col = {
+                        'name': col_name,
+                        'type': col_info.get('type', 'VARCHAR') if isinstance(col_info, dict) else 'VARCHAR',
+                        'inferred_type': p.get('inferred_type'),
+                        'distinct_count': p.get('distinct_count'),
+                        'null_count': p.get('null_count'),
+                        'is_categorical': p.get('is_categorical', False),
+                        'is_likely_key': p.get('is_likely_key', False)
+                    }
+                    
+                    # Add type-specific info
+                    if p.get('inferred_type') == 'categorical':
+                        enhanced_col['distinct_values'] = p.get('distinct_values', [])
+                        enhanced_col['value_distribution'] = p.get('value_distribution', {})
+                    elif p.get('inferred_type') == 'numeric':
+                        enhanced_col['min_value'] = p.get('min_value')
+                        enhanced_col['max_value'] = p.get('max_value')
+                        enhanced_col['mean_value'] = p.get('mean_value')
+                    elif p.get('inferred_type') == 'date':
+                        enhanced_col['min_date'] = p.get('min_date')
+                        enhanced_col['max_date'] = p.get('max_date')
+                    
+                    enhanced_columns.append(enhanced_col)
+                else:
+                    # No profile, use basic info
+                    enhanced_columns.append(col_info if isinstance(col_info, dict) else {'name': col_info})
+            
+            table_info = {
                 'file': file_name,
                 'sheet': sheet_name,
                 'table_name': table_name,
-                'columns': json.loads(columns) if columns else [],
+                'columns': enhanced_columns,
                 'row_count': row_count,
                 'likely_keys': json.loads(likely_keys) if likely_keys else []
-            })
+            }
+            
+            # Add categorical columns summary for this table
+            if table_name in categorical_summary:
+                table_info['categorical_columns'] = categorical_summary[table_name]
+            
+            schema['tables'].append(table_info)
+        
+        # Add overall profile summary
+        try:
+            schema['profile_summary'] = self.get_profile_summary(project)
+        except:
+            pass
         
         return schema
     
