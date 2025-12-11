@@ -2518,6 +2518,61 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
         except Exception as e:
             logger.warning(f"[PROFILING] Failed to get summary: {e}")
             return {'project': project, 'error': str(e)}
+    
+    def backfill_profiles(self, project: str = None) -> Dict[str, Any]:
+        """
+        Backfill column profiles for existing tables.
+        Run this after upgrading to add profiles to previously-uploaded data.
+        
+        Args:
+            project: Optional project to limit backfill to
+            
+        Returns:
+            Summary of tables profiled
+        """
+        logger.info(f"[PROFILING] Starting backfill{' for project ' + project if project else ''}")
+        
+        result = {
+            'tables_profiled': 0,
+            'columns_profiled': 0,
+            'errors': []
+        }
+        
+        try:
+            # Get all tables from metadata
+            if project:
+                tables = self.conn.execute("""
+                    SELECT DISTINCT project, table_name 
+                    FROM _schema_metadata 
+                    WHERE project = ? AND is_current = TRUE
+                """, [project]).fetchall()
+            else:
+                tables = self.conn.execute("""
+                    SELECT DISTINCT project, table_name 
+                    FROM _schema_metadata 
+                    WHERE is_current = TRUE
+                """).fetchall()
+            
+            logger.info(f"[PROFILING] Found {len(tables)} tables to profile")
+            
+            for proj, table_name in tables:
+                try:
+                    profile_result = self.profile_columns(proj, table_name)
+                    result['tables_profiled'] += 1
+                    result['columns_profiled'] += profile_result.get('columns_profiled', 0)
+                    logger.info(f"[PROFILING] Backfilled {table_name}: {profile_result.get('columns_profiled', 0)} columns")
+                except Exception as e:
+                    error_msg = f"{table_name}: {str(e)}"
+                    result['errors'].append(error_msg)
+                    logger.warning(f"[PROFILING] Failed to profile {table_name}: {e}")
+            
+            logger.info(f"[PROFILING] Backfill complete: {result['tables_profiled']} tables, {result['columns_profiled']} columns")
+            
+        except Exception as e:
+            logger.error(f"[PROFILING] Backfill failed: {e}")
+            result['error'] = str(e)
+        
+        return result
 
     def get_schema_for_project(self, project: str) -> Dict[str, Any]:
         """Get all table schemas for a project (for Claude to use)"""
