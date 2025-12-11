@@ -25,7 +25,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v3.3 ALIAS FIX ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v3.4 STATUS FILTER ======")
 
 
 # =============================================================================
@@ -631,17 +631,42 @@ class IntelligenceEngine:
         # Employee status filter
         filter_instructions = ""
         status_filter = self.confirmed_facts.get('employee_status')
+        logger.warning(f"[SQL-GEN] status_filter from confirmed_facts: {status_filter}")
         
         if status_filter and status_filter != 'all':
             status_col, status_codes = self._get_status_column_and_codes(status_filter)
+            logger.warning(f"[SQL-GEN] _get_status_column_and_codes returned: col={status_col}, codes={status_codes}")
             
             if status_col and status_codes:
                 codes_str = ', '.join(f"'{c}'" for c in status_codes)
                 filter_instructions = f"\n\nFILTER: WHERE {status_col} IN ({codes_str})"
-            elif status_filter == 'active':
-                filter_instructions = "\n\nFILTER: WHERE termination_date IS NULL OR termination_date = ''"
-            elif status_filter == 'termed':
-                filter_instructions = "\n\nFILTER: WHERE termination_date IS NOT NULL AND termination_date != ''"
+            else:
+                # FALLBACK: Look for common status columns in the schema
+                status_columns_found = []
+                for table in relevant_tables:
+                    columns = table.get('columns', [])
+                    for col in columns:
+                        col_name = col.get('name', str(col)) if isinstance(col, dict) else str(col)
+                        col_lower = col_name.lower()
+                        if any(p in col_lower for p in ['employment_status', 'emp_status', 'status_code', 'active_status']):
+                            status_columns_found.append((table.get('table_name', ''), col_name))
+                
+                logger.warning(f"[SQL-GEN] Fallback status columns found: {status_columns_found}")
+                
+                if status_columns_found:
+                    # Use first found status column
+                    _, col_name = status_columns_found[0]
+                    if status_filter == 'active':
+                        filter_instructions = f"\n\nFILTER: WHERE {col_name} = 'A' OR {col_name} ILIKE '%active%'"
+                    elif status_filter == 'termed':
+                        filter_instructions = f"\n\nFILTER: WHERE {col_name} IN ('T', 'I') OR {col_name} ILIKE '%term%' OR {col_name} ILIKE '%inactive%'"
+                elif status_filter == 'active':
+                    # Last resort: termination_date approach
+                    filter_instructions = "\n\nFILTER: WHERE termination_date IS NULL OR termination_date = ''"
+                elif status_filter == 'termed':
+                    filter_instructions = "\n\nFILTER: WHERE termination_date IS NOT NULL AND termination_date != ''"
+        
+        logger.warning(f"[SQL-GEN] filter_instructions: {filter_instructions[:100] if filter_instructions else 'NONE'}")
         
         # SIMPLE vs COMPLEX query hint
         query_hint = ""
