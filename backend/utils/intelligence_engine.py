@@ -448,21 +448,45 @@ class IntelligenceEngine:
         if shared_cols:
             column_location_text += "JOIN KEYS (shared columns):\n" + "\n".join(shared_cols[:10]) + "\n"
         
-        # Build conversation context
+        # Build conversation context - with SMART FOLLOW-UP handling
         context_str = ""
         if hasattr(self, 'conversation_context') and self.conversation_context:
             last_q = self.conversation_context.get('last_question', '')
             last_sql = self.conversation_context.get('last_sql', '')
             last_result = self.conversation_context.get('last_result', '')
             
-            if last_q or last_sql:
-                context_str = f"""
-PREVIOUS CONVERSATION:
+            if last_sql:
+                q_lower = question.lower()
+                
+                # Detect follow-up references to previous results
+                is_follow_up = any(w in q_lower for w in [
+                    'these ', 'those ', 'they ', 'them ', 'their ',
+                    'the employees', 'which ones', 'show me', 'list them',
+                    'who are', 'where do', 'what are', 'details'
+                ])
+                
+                if is_follow_up:
+                    # Extract WHERE clause from previous SQL to reuse
+                    import re
+                    where_match = re.search(r'WHERE\s+(.+?)(?:ORDER|LIMIT|GROUP|$)', last_sql, re.IGNORECASE | re.DOTALL)
+                    where_clause = where_match.group(1).strip() if where_match else None
+                    
+                    context_str = f"""
+FOLLOW-UP QUESTION - User is asking about results from previous query.
+
+PREVIOUS QUESTION: {last_q}
+PREVIOUS SQL: {last_sql}
+PREVIOUS RESULT: {last_result[:200] if last_result else 'count result'}
+
+CRITICAL: Reuse the WHERE clause from previous SQL: WHERE {where_clause}
+Change SELECT to answer the new question. Do NOT use COUNT(*) - user wants details.
+"""
+                    logger.warning(f"[SQL-GEN] Follow-up detected. WHERE clause: {where_clause[:100] if where_clause else 'none'}...")
+                else:
+                    context_str = f"""
+PREVIOUS CONVERSATION (for reference):
 Previous question: {last_q}
 Previous SQL: {last_sql}
-Previous result: {last_result[:300] if last_result else 'None'}
-
-If this references previous results, use the same tables/conditions.
 """
         
         # Build prompt for orchestrator
