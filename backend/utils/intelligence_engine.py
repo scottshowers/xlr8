@@ -3,6 +3,11 @@ XLR8 INTELLIGENCE ENGINE
 =========================
 
 Deploy to: backend/utils/intelligence_engine.py
+
+FIXED: Clarification now tracks per-question-type, not globally.
+Previously: Once you answered "Active only" for one question, ALL subsequent 
+questions skipped clarification (even different domains like deductions).
+Now: Each question-type gets its own clarification check.
 """
 
 import re
@@ -115,6 +120,27 @@ SEMANTIC_TYPES = {
         r'^ded.*code', r'^deduction.*type', r'^deduct.*code',
         r'^deduction$', r'^ded_cd', r'^benefit.*code',
     ],
+}
+
+
+# =============================================================================
+# CLARIFICATION QUESTION IDS BY DOMAIN
+# Maps each domain to the clarification question IDs that domain requires.
+# This is the key to fixing the bug - we check if THIS domain's questions
+# have been answered, not if ANY questions have been answered.
+# =============================================================================
+
+DOMAIN_CLARIFICATION_MAP = {
+    'employees': ['employee_status'],
+    'earnings': ['earnings_scope'],
+    'deductions': ['deduction_type'],
+    'taxes': ['tax_scope'],
+    'jobs': ['job_scope'],
+}
+
+MODE_CLARIFICATION_MAP = {
+    'configure': ['config_type'],
+    'validate': ['validation_type'],
 }
 
 
@@ -772,44 +798,88 @@ Return ONLY the SQL, no explanation."""
         return None
     
     def _needs_clarification(self, mode, entities, domains, q_lower) -> bool:
-        """Determine if we need to ask clarifying questions."""
-        logger.warning(f"[CLARIFY-CHECK] mode={mode}, domains={domains}, confirmed_facts={bool(self.confirmed_facts)}")
+        """
+        Determine if we need to ask clarifying questions.
         
-        # CRITICAL: If we already have clarification answers, DON'T ask again
-        if self.confirmed_facts:
-            logger.warning(f"[CLARIFY-CHECK] Skipping - already have answers: {list(self.confirmed_facts.keys())}")
-            return False
+        FIXED: Now checks if the SPECIFIC clarification questions for THIS question's
+        domains have been answered, instead of checking if ANY confirmed_facts exist.
         
-        # ALWAYS ask for configuration tasks
+        Old behavior (BUG): If confirmed_facts had anything, skip ALL clarification.
+        New behavior: Check if THIS question's required clarifications are answered.
+        """
+        logger.warning(f"[CLARIFY-CHECK] mode={mode}, domains={domains}, confirmed_facts={list(self.confirmed_facts.keys())}")
+        
+        # Get the clarification question IDs this question would need
+        required_question_ids = set()
+        
+        # Add domain-based questions
+        for domain in domains:
+            if domain in DOMAIN_CLARIFICATION_MAP:
+                required_question_ids.update(DOMAIN_CLARIFICATION_MAP[domain])
+        
+        # Add mode-based questions
+        mode_str = mode.value if hasattr(mode, 'value') else str(mode)
+        if mode_str in MODE_CLARIFICATION_MAP:
+            required_question_ids.update(MODE_CLARIFICATION_MAP[mode_str])
+        
+        # Check if ALL required questions have been answered
+        if required_question_ids:
+            answered_ids = set(self.confirmed_facts.keys())
+            unanswered = required_question_ids - answered_ids
+            
+            if unanswered:
+                logger.warning(f"[CLARIFY-CHECK] Missing answers for: {unanswered}")
+                # Fall through to domain-specific checks below
+            else:
+                logger.warning(f"[CLARIFY-CHECK] All required clarifications answered: {required_question_ids}")
+                return False
+        
+        # ALWAYS ask for configuration tasks (if not already answered)
         if mode == IntelligenceMode.CONFIGURE:
-            logger.warning("[CLARIFY-CHECK] Returning True - CONFIGURE mode")
-            return True
+            if 'config_type' not in self.confirmed_facts:
+                logger.warning("[CLARIFY-CHECK] Returning True - CONFIGURE mode, no config_type answer")
+                return True
         
-        # ALWAYS ask for validation without clear context
+        # ALWAYS ask for validation without clear context (if not already answered)
         if mode == IntelligenceMode.VALIDATE:
-            logger.warning("[CLARIFY-CHECK] Returning True - VALIDATE mode")
-            return True
+            if 'validation_type' not in self.confirmed_facts:
+                logger.warning("[CLARIFY-CHECK] Returning True - VALIDATE mode, no validation_type answer")
+                return True
         
         # CONSULTANT LOGIC: For employee queries, ALWAYS ask about active status
         # unless they explicitly said "active" or "all employees" or "terminated"
+        # OR they already answered this clarification
         if 'employees' in domains:
-            explicitly_specified_status = any(w in q_lower for w in [
-                'active only', 'active employees', 'all employees', 
-                'terminated', 'termed', 'inactive'
-            ])
-            logger.warning(f"[CLARIFY-CHECK] employees domain, explicitly_specified={explicitly_specified_status}")
-            if not explicitly_specified_status:
-                logger.warning("[CLARIFY-CHECK] Returning True - employee status not specified")
-                return True
+            # Check if already answered
+            if 'employee_status' in self.confirmed_facts:
+                logger.warning(f"[CLARIFY-CHECK] employee_status already answered: {self.confirmed_facts['employee_status']}")
+            else:
+                explicitly_specified_status = any(w in q_lower for w in [
+                    'active only', 'active employees', 'all employees', 
+                    'terminated', 'termed', 'inactive'
+                ])
+                logger.warning(f"[CLARIFY-CHECK] employees domain, explicitly_specified={explicitly_specified_status}")
+                if not explicitly_specified_status:
+                    logger.warning("[CLARIFY-CHECK] Returning True - employee status not specified")
+                    return True
         
-        # For earnings/deductions, ask if no clear criteria
+        # For earnings/deductions, ask if no clear criteria (and not already answered)
         if 'earnings' in domains:
-            has_numeric_condition = any(w in q_lower for w in [
-                'more than', 'less than', 'over', 'under', 'above', 'below',
-                'at least', 'greater than', 'equal to', '$'
-            ])
-            if not has_numeric_condition:
-                logger.warning("[CLARIFY-CHECK] Returning True - earnings without numeric condition")
+            if 'earnings_scope' in self.confirmed_facts:
+                logger.warning(f"[CLARIFY-CHECK] earnings_scope already answered: {self.confirmed_facts['earnings_scope']}")
+            else:
+                has_numeric_condition = any(w in q_lower for w in [
+                    'more than', 'less than', 'over', 'under', 'above', 'below',
+                    'at least', 'greater than', 'equal to', '$'
+                ])
+                if not has_numeric_condition:
+                    logger.warning("[CLARIFY-CHECK] Returning True - earnings without numeric condition")
+                    return True
+        
+        # For deductions, check if answered
+        if 'deductions' in domains:
+            if 'deduction_type' not in self.confirmed_facts:
+                logger.warning("[CLARIFY-CHECK] Returning True - deductions domain, no deduction_type answer")
                 return True
         
         logger.warning("[CLARIFY-CHECK] Returning False - no clarification needed")
@@ -1340,3 +1410,22 @@ Return ONLY the SQL, no explanation."""
             reasoning=reasoning,
             executed_sql=self.last_executed_sql
         )
+    
+    def clear_clarifications_for_new_question(self):
+        """
+        Optional: Call this to reset clarifications when starting a completely new topic.
+        Useful if you want to force re-asking clarification even for answered domains.
+        """
+        self.confirmed_facts = {}
+        logger.info("[INTELLIGENCE] Cleared all confirmed facts for new question context")
+    
+    def clear_domain_clarification(self, domain: str):
+        """
+        Clear clarification answers for a specific domain.
+        Useful when user says "actually, show me all employees" after answering "active only".
+        """
+        if domain in DOMAIN_CLARIFICATION_MAP:
+            for question_id in DOMAIN_CLARIFICATION_MAP[domain]:
+                if question_id in self.confirmed_facts:
+                    del self.confirmed_facts[question_id]
+                    logger.info(f"[INTELLIGENCE] Cleared clarification: {question_id}")
