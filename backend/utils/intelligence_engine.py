@@ -25,7 +25,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v4.6 FILTER INJECTION ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v4.7 INJECT DEBUG ======")
 
 
 # =============================================================================
@@ -849,13 +849,6 @@ class IntelligenceEngine:
         Inject a WHERE clause into SQL that may or may not already have one.
         
         This is the data-driven approach: LLM generates structure, we inject filters.
-        
-        Args:
-            sql: The generated SQL (may have WHERE or not)
-            filter_clause: "WHERE col IN ('A')" or just "col IN ('A')"
-        
-        Returns:
-            SQL with filter injected
         """
         # Clean up filter_clause - remove leading WHERE if present
         conditions = filter_clause.strip()
@@ -863,7 +856,11 @@ class IntelligenceEngine:
             conditions = conditions[6:].strip()
         
         if not conditions:
+            logger.warning(f"[FILTER-INJECT] No conditions to inject")
             return sql
+        
+        logger.warning(f"[FILTER-INJECT] Injecting: {conditions}")
+        logger.warning(f"[FILTER-INJECT] SQL length before: {len(sql)}")
         
         sql_upper = sql.upper()
         
@@ -872,7 +869,7 @@ class IntelligenceEngine:
         
         if where_match:
             # Has WHERE - add with AND after existing conditions
-            # Find position after WHERE clause but before GROUP BY/ORDER BY/LIMIT
+            logger.warning(f"[FILTER-INJECT] Found existing WHERE at position {where_match.start()}")
             where_pos = where_match.end()
             
             # Find the end of existing WHERE conditions
@@ -891,6 +888,8 @@ class IntelligenceEngine:
         
         else:
             # No WHERE - find where to insert
+            logger.warning(f"[FILTER-INJECT] No existing WHERE found")
+            
             # Insert before GROUP BY, ORDER BY, LIMIT, or at end
             insert_keywords = ['GROUP BY', 'ORDER BY', 'LIMIT', 'HAVING']
             insert_pos = len(sql.rstrip().rstrip(';'))
@@ -899,16 +898,23 @@ class IntelligenceEngine:
                 kw_match = re.search(rf'\b{keyword}\b', sql, re.IGNORECASE)
                 if kw_match and kw_match.start() < insert_pos:
                     insert_pos = kw_match.start()
+                    logger.warning(f"[FILTER-INJECT] Found {keyword} at {insert_pos}")
+            
+            logger.warning(f"[FILTER-INJECT] Insert position: {insert_pos}")
             
             # Insert WHERE clause
             before = sql[:insert_pos].rstrip()
             after = sql[insert_pos:].lstrip()
+            
+            logger.warning(f"[FILTER-INJECT] Before part ends with: ...{before[-50:] if len(before) > 50 else before}")
+            logger.warning(f"[FILTER-INJECT] After part: {after[:50] if after else 'EMPTY'}")
             
             if after:
                 sql = f"{before} WHERE {conditions} {after}"
             else:
                 sql = f"{before} WHERE {conditions}"
         
+        logger.warning(f"[FILTER-INJECT] SQL length after: {len(sql)}")
         return sql.strip()
     
     def _detect_mode(self, q_lower: str) -> IntelligenceMode:
@@ -1008,7 +1014,7 @@ class IntelligenceEngine:
     
     def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
         """Generate SQL query using LLMOrchestrator with SMART table selection."""
-        logger.warning(f"[SQL-GEN] v4.6 - Starting SQL generation")
+        logger.warning(f"[SQL-GEN] v4.7 - Starting SQL generation")
         logger.warning(f"[SQL-GEN] confirmed_facts: {self.confirmed_facts}")
         
         if not self.structured_handler or not self.schema:
@@ -1169,6 +1175,7 @@ SQL:"""
                 logger.warning(f"[SQL-GEN] After alias expansion: {sql[:200]}")
             
             # INJECT FILTER CLAUSE (data-driven, not LLM-generated)
+            logger.warning(f"[SQL-GEN] About to inject, filter_instructions={filter_instructions}")
             if filter_instructions:
                 sql = self._inject_where_clause(sql, filter_instructions)
                 logger.warning(f"[SQL-GEN] After filter injection: {sql[:200]}")
