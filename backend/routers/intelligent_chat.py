@@ -307,6 +307,7 @@ async def intelligent_chat(request: IntelligentChatRequest):
             # Auto-applied facts reminder
             "auto_applied_note": auto_applied_note,
             "auto_applied_facts": auto_applied_facts,
+            "can_reset_preferences": bool(auto_applied_facts),  # Show reset button when facts were auto-applied
             
             # Clarification
             "needs_clarification": (
@@ -1114,4 +1115,161 @@ async def run_backfill(project: str = None):
         return {"error": "backfill_profiles method not found - deploy latest structured_data_handler.py"}
     
     result = handler.backfill_profiles(project)
+    return result
+
+
+# =============================================================================
+# RESET PREFERENCES ENDPOINTS
+# =============================================================================
+
+class ResetPreferencesRequest(BaseModel):
+    """Request to reset preferences."""
+    session_id: Optional[str] = None
+    project: Optional[str] = None
+    reset_type: str = "session"  # "session" or "learned"
+
+
+@router.post("/chat/intelligent/reset-preferences")
+async def reset_preferences(request: ResetPreferencesRequest):
+    """
+    Reset user preferences/filters.
+    
+    reset_type options:
+    - "session": Clear current session's confirmed_facts (ask clarification again)
+    - "learned": Clear learned preferences from learning module (stop auto-applying)
+    
+    POST /api/chat/intelligent/reset-preferences
+    {
+        "session_id": "session_123",
+        "project": "TEA1000",
+        "reset_type": "session"  // or "learned"
+    }
+    """
+    result = {
+        "success": False,
+        "reset_type": request.reset_type,
+        "message": ""
+    }
+    
+    try:
+        if request.reset_type == "session":
+            # Clear session's confirmed_facts
+            if request.session_id and request.session_id in intelligence_sessions:
+                session = intelligence_sessions[request.session_id]
+                engine = session.get('engine')
+                if engine:
+                    old_facts = dict(engine.confirmed_facts)
+                    engine.confirmed_facts.clear()
+                    result["success"] = True
+                    result["message"] = f"Cleared session facts: {old_facts}"
+                    result["cleared_facts"] = old_facts
+                    logger.warning(f"[RESET] Cleared session facts for {request.session_id}: {old_facts}")
+                else:
+                    result["message"] = "Session found but no engine"
+            else:
+                result["message"] = "Session not found"
+        
+        elif request.reset_type == "learned":
+            # Clear learned preferences from learning module
+            if LEARNING_AVAILABLE:
+                try:
+                    learning = get_learning_module()
+                    # Clear clarification choices for this project
+                    if hasattr(learning, 'clear_clarification_preferences'):
+                        cleared = learning.clear_clarification_preferences(
+                            project=request.project,
+                            user_id=None  # TODO: Get from auth
+                        )
+                        result["success"] = True
+                        result["message"] = f"Cleared learned preferences"
+                        result["cleared_count"] = cleared
+                    else:
+                        # Fallback: Try to clear via Supabase directly
+                        try:
+                            try:
+                                from utils.database.supabase_client import get_supabase
+                            except ImportError:
+                                from backend.utils.database.supabase_client import get_supabase
+                            supabase = get_supabase()
+                            
+                            # Delete clarification choices for this project
+                            delete_result = supabase.table('clarification_choices').delete().eq(
+                                'project', request.project
+                            ).execute()
+                            
+                            result["success"] = True
+                            result["message"] = "Cleared learned preferences via Supabase"
+                        except Exception as db_e:
+                            result["message"] = f"Could not clear preferences: {db_e}"
+                    
+                    logger.warning(f"[RESET] Cleared learned preferences for project {request.project}")
+                except Exception as e:
+                    result["message"] = f"Learning module error: {e}"
+            else:
+                result["message"] = "Learning module not available"
+        
+        else:
+            result["message"] = f"Unknown reset_type: {request.reset_type}"
+    
+    except Exception as e:
+        result["message"] = f"Error: {e}"
+        logger.error(f"[RESET] Error resetting preferences: {e}")
+    
+    return result
+
+
+@router.get("/chat/intelligent/preferences")
+async def get_preferences(session_id: str = None, project: str = None):
+    """
+    Get current preferences/filters for debugging.
+    
+    GET /api/chat/intelligent/preferences?session_id=xxx&project=TEA1000
+    """
+    result = {
+        "session_facts": {},
+        "learned_preferences": {},
+        "session_exists": False
+    }
+    
+    # Get session facts
+    if session_id and session_id in intelligence_sessions:
+        session = intelligence_sessions[session_id]
+        engine = session.get('engine')
+        if engine:
+            result["session_facts"] = dict(engine.confirmed_facts)
+            result["session_exists"] = True
+    
+    # Get learned preferences
+    if LEARNING_AVAILABLE and project:
+        try:
+            learning = get_learning_module()
+            if hasattr(learning, 'get_clarification_preferences'):
+                prefs = learning.get_clarification_preferences(
+                    project=project,
+                    user_id=None
+                )
+                result["learned_preferences"] = prefs
+            else:
+                # Fallback: Query Supabase directly
+                try:
+                    try:
+                        from utils.database.supabase_client import get_supabase
+                    except ImportError:
+                        from backend.utils.database.supabase_client import get_supabase
+                    supabase = get_supabase()
+                    
+                    choices = supabase.table('clarification_choices').select('*').eq(
+                        'project', project
+                    ).order('created_at', desc=True).limit(20).execute()
+                    
+                    if choices.data:
+                        result["learned_preferences"] = {
+                            c['question_id']: c['chosen_option'] 
+                            for c in choices.data
+                        }
+                except Exception as db_e:
+                    result["learning_error"] = f"Supabase query failed: {db_e}"
+        except Exception as e:
+            result["learning_error"] = str(e)
+    
     return result
