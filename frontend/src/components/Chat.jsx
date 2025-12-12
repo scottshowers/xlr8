@@ -89,6 +89,34 @@ export default function Chat({ functionalAreas = [] }) {
     }
   }
 
+  // Reset preferences (clear learned filters)
+  const resetPreferences = async (resetType = 'session') => {
+    try {
+      const response = await api.post('/chat/intelligent/reset-preferences', {
+        session_id: sessionId,
+        project: projectName || null,
+        reset_type: resetType
+      })
+      
+      if (response.data.success) {
+        // Add a system message indicating reset
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          type: 'system',
+          content: resetType === 'learned' 
+            ? '🔄 Preferences cleared. I\'ll ask clarifying questions again.'
+            : '🔄 Session filters reset. Ask your question again.',
+          timestamp: new Date().toISOString()
+        }])
+      }
+      
+      return response.data
+    } catch (err) {
+      console.error('Failed to reset preferences:', err)
+      return { success: false, message: err.message }
+    }
+  }
+
   const loadModelInfo = async () => {
     try {
       const response = await api.get('/chat/models')
@@ -179,6 +207,9 @@ export default function Chat({ functionalAreas = [] }) {
           insights: data.insights || [],
           reasoning: data.reasoning || [],
           structured_output: data.structured_output,
+          auto_applied_note: data.auto_applied_note || null,
+          auto_applied_facts: data.auto_applied_facts || null,
+          can_reset_preferences: data.can_reset_preferences || false,
           timestamp: new Date().toISOString()
         }])
       }
@@ -468,6 +499,7 @@ export default function Chat({ functionalAreas = [] }) {
               toggleSources={toggleSources}
               onFeedback={handleFeedback}
               onClarificationSubmit={(answers) => sendIntelligentMessage(answers)}
+              onResetPreferences={resetPreferences}
             />
           ))
         )}
@@ -536,8 +568,19 @@ export default function Chat({ functionalAreas = [] }) {
 // MESSAGE BUBBLE COMPONENT
 // ============================================================
 
-function MessageBubble({ message, index, persona, expandedSources, toggleSources, onFeedback, onClarificationSubmit }) {
+function MessageBubble({ message, index, persona, expandedSources, toggleSources, onFeedback, onClarificationSubmit, onResetPreferences }) {
   const isUser = message.role === 'user'
+  
+  // System message (like reset confirmation)
+  if (message.type === 'system') {
+    return (
+      <div className="flex justify-center my-2">
+        <div className="px-4 py-2 bg-gray-100 text-gray-600 text-sm rounded-full">
+          {message.content}
+        </div>
+      </div>
+    )
+  }
   
   // Clarification message
   if (message.type === 'clarification') {
@@ -557,6 +600,7 @@ function MessageBubble({ message, index, persona, expandedSources, toggleSources
         message={message}
         index={index}
         onFeedback={onFeedback}
+        onResetPreferences={onResetPreferences}
       />
     )
   }
@@ -744,9 +788,10 @@ function ClarificationCard({ questions, originalQuestion, onSubmit }) {
 // INTELLIGENT RESPONSE COMPONENT
 // ============================================================
 
-function IntelligentResponse({ message, index, onFeedback }) {
+function IntelligentResponse({ message, index, onFeedback, onResetPreferences }) {
   const [showSources, setShowSources] = useState(false)
   const [expandedSection, setExpandedSection] = useState(null)
+  const [resetting, setResetting] = useState(false)
   
   const hasReality = message.from_reality?.length > 0
   const hasIntent = message.from_intent?.length > 0
@@ -754,8 +799,42 @@ function IntelligentResponse({ message, index, onFeedback }) {
   const hasConflicts = message.conflicts?.length > 0
   const hasInsights = message.insights?.length > 0
   
+  const handleReset = async (resetType) => {
+    setResetting(true)
+    try {
+      await onResetPreferences(resetType)
+    } finally {
+      setResetting(false)
+    }
+  }
+  
   return (
     <div className="bg-white rounded-xl border shadow-sm overflow-hidden max-w-2xl">
+      {/* Auto-Applied Preferences Banner */}
+      {message.auto_applied_note && message.can_reset_preferences && (
+        <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 flex items-center justify-between">
+          <span className="text-sm text-amber-800">{message.auto_applied_note}</span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => handleReset('session')}
+              disabled={resetting}
+              className="text-xs text-amber-600 hover:text-amber-800 hover:underline disabled:opacity-50"
+              title="Ask clarification again for this session"
+            >
+              {resetting ? '...' : 'Reset'}
+            </button>
+            <button
+              onClick={() => handleReset('learned')}
+              disabled={resetting}
+              className="text-xs text-red-600 hover:text-red-800 hover:underline disabled:opacity-50"
+              title="Forget this preference permanently"
+            >
+              {resetting ? '...' : 'Forget'}
+            </button>
+          </div>
+        </div>
+      )}
+      
       {/* Confidence Header */}
       <div className="px-4 py-2 bg-gradient-to-r from-purple-50 to-blue-50 border-b flex items-center justify-between">
         <div className="flex items-center gap-2">
