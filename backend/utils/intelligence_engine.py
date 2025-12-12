@@ -25,7 +25,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v4.4 SMART FILTER ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v4.6 FILTER INJECTION ======")
 
 
 # =============================================================================
@@ -844,6 +844,73 @@ class IntelligenceEngine:
         
         return ""
     
+    def _inject_where_clause(self, sql: str, filter_clause: str) -> str:
+        """
+        Inject a WHERE clause into SQL that may or may not already have one.
+        
+        This is the data-driven approach: LLM generates structure, we inject filters.
+        
+        Args:
+            sql: The generated SQL (may have WHERE or not)
+            filter_clause: "WHERE col IN ('A')" or just "col IN ('A')"
+        
+        Returns:
+            SQL with filter injected
+        """
+        # Clean up filter_clause - remove leading WHERE if present
+        conditions = filter_clause.strip()
+        if conditions.upper().startswith('WHERE '):
+            conditions = conditions[6:].strip()
+        
+        if not conditions:
+            return sql
+        
+        sql_upper = sql.upper()
+        
+        # Check if SQL already has WHERE
+        where_match = re.search(r'\bWHERE\b', sql, re.IGNORECASE)
+        
+        if where_match:
+            # Has WHERE - add with AND after existing conditions
+            # Find position after WHERE clause but before GROUP BY/ORDER BY/LIMIT
+            where_pos = where_match.end()
+            
+            # Find the end of existing WHERE conditions
+            end_keywords = ['GROUP BY', 'ORDER BY', 'LIMIT', 'HAVING', ';']
+            end_pos = len(sql)
+            
+            for keyword in end_keywords:
+                kw_match = re.search(rf'\b{keyword}\b', sql[where_pos:], re.IGNORECASE)
+                if kw_match:
+                    candidate_pos = where_pos + kw_match.start()
+                    if candidate_pos < end_pos:
+                        end_pos = candidate_pos
+            
+            # Insert AND + conditions before end_pos
+            sql = sql[:end_pos].rstrip() + f" AND {conditions} " + sql[end_pos:]
+        
+        else:
+            # No WHERE - find where to insert
+            # Insert before GROUP BY, ORDER BY, LIMIT, or at end
+            insert_keywords = ['GROUP BY', 'ORDER BY', 'LIMIT', 'HAVING']
+            insert_pos = len(sql.rstrip().rstrip(';'))
+            
+            for keyword in insert_keywords:
+                kw_match = re.search(rf'\b{keyword}\b', sql, re.IGNORECASE)
+                if kw_match and kw_match.start() < insert_pos:
+                    insert_pos = kw_match.start()
+            
+            # Insert WHERE clause
+            before = sql[:insert_pos].rstrip()
+            after = sql[insert_pos:].lstrip()
+            
+            if after:
+                sql = f"{before} WHERE {conditions} {after}"
+            else:
+                sql = f"{before} WHERE {conditions}"
+        
+        return sql.strip()
+    
     def _detect_mode(self, q_lower: str) -> IntelligenceMode:
         """Detect the appropriate intelligence mode."""
         if any(w in q_lower for w in ['validate', 'check', 'verify', 'issues', 'problems']):
@@ -941,7 +1008,7 @@ class IntelligenceEngine:
     
     def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
         """Generate SQL query using LLMOrchestrator with SMART table selection."""
-        logger.warning(f"[SQL-GEN] v4.4 - Starting SQL generation")
+        logger.warning(f"[SQL-GEN] v4.6 - Starting SQL generation")
         logger.warning(f"[SQL-GEN] confirmed_facts: {self.confirmed_facts}")
         
         if not self.structured_handler or not self.schema:
@@ -1035,19 +1102,14 @@ class IntelligenceEngine:
             if rel_lines:
                 relationships_text = "\n\nJOIN ON:\n" + "\n".join(rel_lines[:5])
         
-        # BUILD FILTER INSTRUCTIONS FROM CONFIRMED FACTS
+        # BUILD FILTER INSTRUCTIONS FROM CONFIRMED FACTS (for post-injection)
         filter_instructions = self._build_filter_instructions(relevant_tables)
-        logger.warning(f"[SQL-GEN] filter_instructions: {filter_instructions[:100] if filter_instructions else 'NONE'}")
+        logger.warning(f"[SQL-GEN] filter_instructions: {filter_instructions if filter_instructions else 'NONE'}")
         
-        # SIMPLE vs COMPLEX query hint
+        # Simple hint for COUNT queries (no filter - we inject it after)
         query_hint = ""
         if 'how many' in q_lower or 'count' in q_lower:
-            query_hint = f"\n\nHINT: For COUNT, use single table: SELECT COUNT(*) FROM \"{primary_table}\""
-        
-        # Make filter instructions more explicit
-        filter_rule = ""
-        if filter_instructions:
-            filter_rule = f"\n5. REQUIRED: Apply this filter: {filter_instructions.replace('FILTER: ', '')}"
+            query_hint = f"\n\nHINT: For COUNT, use: SELECT COUNT(*) FROM \"{primary_table}\""
         
         prompt = f"""SCHEMA:
 {schema_text}{relationships_text}
@@ -1057,9 +1119,8 @@ QUESTION: {question}
 
 RULES:
 1. Use ONLY columns from schema above
-2. For "how many" → SELECT COUNT(*) FROM single_table
-3. ILIKE for text matching
-4. Quote table names with special chars{filter_rule}
+2. ILIKE for text matching
+3. Quote table names with special chars
 
 SQL:"""
         
@@ -1106,6 +1167,11 @@ SQL:"""
                         flags=re.IGNORECASE
                     )
                 logger.warning(f"[SQL-GEN] After alias expansion: {sql[:200]}")
+            
+            # INJECT FILTER CLAUSE (data-driven, not LLM-generated)
+            if filter_instructions:
+                sql = self._inject_where_clause(sql, filter_instructions)
+                logger.warning(f"[SQL-GEN] After filter injection: {sql[:200]}")
             
             logger.warning(f"[SQL-GEN] Generated: {sql[:150]}")
             
