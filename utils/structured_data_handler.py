@@ -1,6 +1,13 @@
 """
-Structured Data Handler - DuckDB Storage for Excel/CSV
-=======================================================
+Structured Data Handler - DuckDB Storage for Excel/CSV v4.9
+===========================================================
+
+Deploy to: backend/utils/structured_data_handler.py
+
+v4.9 CHANGES:
+- Improved horizontal table detection (skips header rows, uses 90% threshold)
+- Better logging for multi-table sheet parsing
+- Fixes Change Reasons and similar multi-table sheets
 
 Stores tabular data in DuckDB for fast SQL queries.
 Each project gets isolated tables. Cross-sheet joins supported.
@@ -535,6 +542,11 @@ class StructuredDataHandler:
         Detect and split horizontally arranged tables within a single sheet.
         Tables are separated by blank columns.
         
+        v4.9 IMPROVED blank detection:
+        - Skips header rows (first 3 rows) when checking for blank columns
+        - Uses 90% blank threshold instead of 100% (handles sparse data)
+        - Logs detection details for debugging
+        
         Smart header detection:
         - Detects title rows (sparse, mostly empty with just a title)
         - Finds actual header row (row with most populated cells)
@@ -549,17 +561,41 @@ class StructuredDataHandler:
             if raw_df.empty:
                 return []
             
-            # Find blank columns (all cells are NaN or empty)
+            logger.info(f"[HORIZONTAL-DETECT] Sheet '{sheet_name}': {raw_df.shape[0]} rows x {raw_df.shape[1]} cols")
+            
+            # Find blank columns - IMPROVED DETECTION
+            # Skip header rows (first 3 rows) when checking for blank columns
+            # Use 90% blank threshold instead of 100%
             blank_cols = []
+            HEADER_ROWS_TO_SKIP = 3
+            BLANK_THRESHOLD = 0.90  # 90% blank = separator column
+            
+            data_rows = raw_df.iloc[HEADER_ROWS_TO_SKIP:] if len(raw_df) > HEADER_ROWS_TO_SKIP else raw_df
+            
             for col_idx in range(len(raw_df.columns)):
-                col_data = raw_df.iloc[:, col_idx]
-                # Check if column is entirely blank
-                is_blank = col_data.isna().all() or (col_data.astype(str).str.strip() == '').all()
+                col_data = data_rows.iloc[:, col_idx] if len(data_rows) > 0 else raw_df.iloc[:, col_idx]
+                total_cells = len(col_data)
+                
+                if total_cells == 0:
+                    blank_cols.append(col_idx)
+                    continue
+                
+                # Count blank cells (NaN or empty string)
+                blank_count = sum(1 for v in col_data if pd.isna(v) or str(v).strip() == '' or str(v).lower() == 'nan')
+                blank_ratio = blank_count / total_cells
+                
+                # Column is a separator if mostly blank (90%+)
+                is_blank = blank_ratio >= BLANK_THRESHOLD
+                
                 if is_blank:
                     blank_cols.append(col_idx)
+                    logger.debug(f"[HORIZONTAL-DETECT] Col {col_idx}: BLANK (ratio={blank_ratio:.2f})")
+            
+            logger.info(f"[HORIZONTAL-DETECT] Sheet '{sheet_name}': Found {len(blank_cols)} blank separator columns: {blank_cols[:10]}{'...' if len(blank_cols) > 10 else ''}")
             
             # If no blank columns or less than 2 column groups, no split needed
             if not blank_cols:
+                logger.info(f"[HORIZONTAL-DETECT] Sheet '{sheet_name}': No blank columns found, no horizontal split")
                 return []
             
             # Find column groups (consecutive non-blank columns)
