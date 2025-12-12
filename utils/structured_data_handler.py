@@ -483,6 +483,24 @@ class StructuredDataHandler:
                 )
             """)
             
+            # MIGRATION: Add new columns if they don't exist (for existing databases)
+            try:
+                # Check if filter_category column exists
+                cols = self.conn.execute("PRAGMA table_info(_column_profiles)").fetchall()
+                col_names = [c[1] for c in cols]
+                
+                if 'filter_category' not in col_names:
+                    logger.warning("[MIGRATION] Adding filter_category column to _column_profiles")
+                    self.conn.execute("ALTER TABLE _column_profiles ADD COLUMN filter_category VARCHAR")
+                
+                if 'filter_priority' not in col_names:
+                    logger.warning("[MIGRATION] Adding filter_priority column to _column_profiles")
+                    self.conn.execute("ALTER TABLE _column_profiles ADD COLUMN filter_priority INTEGER DEFAULT 0")
+                
+                self.conn.commit()
+            except Exception as mig_e:
+                logger.warning(f"[MIGRATION] Column check/add: {mig_e}")
+            
             self.conn.commit()
             logger.info("Metadata tables initialized successfully")
             
