@@ -535,6 +535,11 @@ class StructuredDataHandler:
         Detect and split horizontally arranged tables within a single sheet.
         Tables are separated by blank columns.
         
+        Smart header detection:
+        - Detects title rows (sparse, mostly empty with just a title)
+        - Finds actual header row (row with most populated cells)
+        - Handles multi-row headers (title + column names)
+        
         Returns: List of (sub_table_name, dataframe) tuples
         """
         try:
@@ -592,26 +597,62 @@ class StructuredDataHandler:
                     # Extract columns for this group
                     sub_df = raw_df.iloc[:, group_cols].copy()
                     
-                    # Use first row as header
-                    sub_df.columns = sub_df.iloc[0].fillna('').astype(str).tolist()
-                    sub_df = sub_df.iloc[1:]  # Remove header row from data
+                    # SMART HEADER DETECTION
+                    # Find the header row - the row with the most non-empty cells
+                    # (usually row 0 is title, row 1 is headers)
+                    header_row_idx = 0
+                    title_row_idx = None
+                    max_populated = 0
+                    
+                    for row_idx in range(min(5, len(sub_df))):  # Check first 5 rows
+                        row = sub_df.iloc[row_idx]
+                        populated = sum(1 for v in row if pd.notna(v) and str(v).strip() != '')
+                        
+                        # If this row has significantly more populated cells, it's likely the header
+                        if populated > max_populated:
+                            # If previous best was sparse (title row), remember it
+                            if max_populated > 0 and max_populated <= 2 and title_row_idx is None:
+                                title_row_idx = header_row_idx
+                            max_populated = populated
+                            header_row_idx = row_idx
+                    
+                    # Get table name from title row or first header cell
+                    sub_table_name = None
+                    if title_row_idx is not None:
+                        # Use the title row's first non-empty cell
+                        title_row = sub_df.iloc[title_row_idx]
+                        for v in title_row:
+                            if pd.notna(v) and str(v).strip():
+                                sub_table_name = str(v).strip().split('\n')[0][:50]
+                                break
+                    
+                    if not sub_table_name:
+                        # Fall back to first header cell
+                        first_header = str(sub_df.iloc[header_row_idx, 0]).strip()
+                        if first_header and first_header.lower() not in ['unnamed', '', 'nan']:
+                            sub_table_name = first_header.split('\n')[0][:50]
+                        else:
+                            sub_table_name = f"section_{len(result) + 1}"
+                    
+                    # Set column names from header row
+                    header_row = sub_df.iloc[header_row_idx]
+                    sub_df.columns = [str(v).strip() if pd.notna(v) and str(v).strip() else f'col_{i}' 
+                                      for i, v in enumerate(header_row)]
+                    
+                    # Remove rows up to and including header row
+                    sub_df = sub_df.iloc[header_row_idx + 1:]
                     
                     # Drop empty rows
                     sub_df = sub_df.dropna(how='all')
                     
+                    # Reset index
+                    sub_df = sub_df.reset_index(drop=True)
+                    
                     if sub_df.empty or len(sub_df.columns) < 2:
                         continue
                     
-                    # Get table name from first column header (e.g., "Benefit Change Reasons")
-                    first_header = str(sub_df.columns[0]).strip()
-                    if first_header and first_header.lower() not in ['unnamed', '', 'nan']:
-                        # Try to extract a meaningful name
-                        sub_table_name = first_header.split('\n')[0][:50]  # First 50 chars, first line
-                    else:
-                        sub_table_name = f"section_{len(result) + 1}"
-                    
                     result.append((sub_table_name, sub_df))
-                    logger.info(f"  - Extracted: '{sub_table_name}' ({len(sub_df)} rows, {len(sub_df.columns)} cols)")
+                    logger.info(f"  - Extracted: '{sub_table_name}' ({len(sub_df)} rows, {len(sub_df.columns)} cols, header_row={header_row_idx})")
                     
                 except Exception as e:
                     logger.warning(f"Failed to extract column group: {e}")
