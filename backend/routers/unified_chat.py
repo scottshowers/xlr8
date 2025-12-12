@@ -476,7 +476,7 @@ class DataModelService:
                         table_name = lookup.table_name
                         code_col = lookup.code_column
                         desc_col = lookup.description_column
-                        mappings = lookup.mappings
+                        mappings = lookup.lookup_data  # Note: attribute is lookup_data, not mappings
                         
                         if mappings:
                             self.lookups[table_name] = mappings
