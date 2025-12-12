@@ -206,6 +206,10 @@ async def intelligent_chat(request: IntelligentChatRequest):
             engine.confirmed_facts.update(request.clarifications)
             logger.warning(f"[INTELLIGENT] confirmed_facts after update: {engine.confirmed_facts}")
             
+            # Clear skip_learning flag since user is providing fresh answers
+            if session_id and session_id in intelligence_sessions:
+                intelligence_sessions[session_id]['skip_learning'] = False
+            
             # LEARNING: Record clarification choices
             if LEARNING_AVAILABLE:
                 try:
@@ -251,8 +255,16 @@ async def intelligent_chat(request: IntelligentChatRequest):
         
         # LEARNING: Check if we can skip clarification
         auto_applied_facts = {}  # Track what was auto-applied
+        
+        # Check if session has skip_learning flag (set by Reset button)
+        skip_learning = False
+        if session_id and session_id in intelligence_sessions:
+            skip_learning = intelligence_sessions[session_id].get('skip_learning', False)
+            if skip_learning:
+                logger.warning(f"[LEARNING] skip_learning=True, will ask clarification instead of auto-applying")
+        
         if answer.structured_output and answer.structured_output.get('type') == 'clarification_needed':
-            if LEARNING_AVAILABLE:
+            if LEARNING_AVAILABLE and not skip_learning:
                 try:
                     learning = get_learning_module()
                     questions = answer.structured_output.get('questions', [])
@@ -449,11 +461,18 @@ async def intelligent_chat(request: IntelligentChatRequest):
         # SAVE SESSION - preserve context for follow-up questions
         # Prefer executed_sql from engine, fall back to learned_sql
         actual_sql = getattr(answer, 'executed_sql', None) or learned_sql
+        
+        # Preserve skip_learning flag if it was set
+        existing_skip_learning = False
+        if session_id in intelligence_sessions:
+            existing_skip_learning = intelligence_sessions[session_id].get('skip_learning', False)
+        
         intelligence_sessions[session_id] = {
             'engine': engine,
             'last_sql': actual_sql,
             'last_result': response["answer"][:1000] if response.get("answer") else None,
-            'last_question': message
+            'last_question': message,
+            'skip_learning': existing_skip_learning
         }
         logger.info(f"[INTELLIGENT] Saved session {session_id}, sql: {actual_sql[:50] if actual_sql else 'None'}...")
         
@@ -1160,6 +1179,8 @@ async def reset_preferences(request: ResetPreferencesRequest):
                 if engine:
                     old_facts = dict(engine.confirmed_facts)
                     engine.confirmed_facts.clear()
+                    # Set skip_learning flag so learning doesn't re-apply on next request
+                    session['skip_learning'] = True
                     result["success"] = True
                     result["message"] = f"Cleared session facts: {old_facts}"
                     result["cleared_facts"] = old_facts
