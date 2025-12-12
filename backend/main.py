@@ -64,14 +64,6 @@ except ImportError as e:
     DATA_MODEL_AVAILABLE = False
     logging.warning(f"Data model router import failed: {e}")
 
-# Import intelligent_chat router (revolutionary AI chat)
-try:
-    from backend.routers import intelligent_chat
-    INTELLIGENT_CHAT_AVAILABLE = True
-except ImportError as e:
-    INTELLIGENT_CHAT_AVAILABLE = False
-    logging.warning(f"Intelligent chat router import failed: {e}")
-
 # Import admin router (learning system management)
 try:
     from backend.routers import admin
@@ -222,13 +214,6 @@ if DATA_MODEL_AVAILABLE:
 else:
     logger.warning("Data model router not available")
 
-# Register intelligent_chat router if available (revolutionary AI chat)
-if INTELLIGENT_CHAT_AVAILABLE:
-    app.include_router(intelligent_chat.router, prefix="/api", tags=["intelligent-chat"])
-    logger.info("✓ Intelligent chat router registered at /api/chat/intelligent")
-else:
-    logger.warning("Intelligent chat router not available")
-
 # Register admin router if available (learning system management)
 if ADMIN_AVAILABLE:
     app.include_router(admin.router, prefix="/api", tags=["admin"])
@@ -277,7 +262,6 @@ async def health():
             "security": SECURITY_AVAILABLE,
             "auth": AUTH_AVAILABLE,
             "data_model": DATA_MODEL_AVAILABLE,
-            "intelligent_chat": INTELLIGENT_CHAT_AVAILABLE,
             "admin": ADMIN_AVAILABLE,
             "api_connections": API_CONNECTIONS_AVAILABLE,
             "intelligence": INTELLIGENCE_AVAILABLE,
@@ -300,7 +284,6 @@ async def health():
                 "playbooks": PLAYBOOKS_AVAILABLE,
                 "progress": PROGRESS_AVAILABLE,
                 "security": SECURITY_AVAILABLE,
-                "intelligent_chat": INTELLIGENT_CHAT_AVAILABLE,
                 "admin": ADMIN_AVAILABLE,
                 "api_connections": API_CONNECTIONS_AVAILABLE,
                 "intelligence": INTELLIGENCE_AVAILABLE,
