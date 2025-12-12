@@ -956,7 +956,12 @@ class FindingsExtractor:
         
         try:
             import anthropic
-            client = anthropic.Anthropic()
+            import os
+            api_key = os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+            if not api_key:
+                logger.error("[EXTRACT] No Claude API key found")
+                return None
+            client = anthropic.Anthropic(api_key=api_key)
         except Exception as e:
             logger.error(f"[EXTRACT] Claude client init failed: {e}")
             return None
