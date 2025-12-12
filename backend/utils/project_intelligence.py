@@ -793,97 +793,169 @@ class ProjectIntelligenceService:
         self._check_date_logic(tables)
     
     def _detect_reference_tables(self, tables: List[Dict]) -> None:
-        """Detect reference/lookup tables and build code→description mappings."""
+        """
+        Detect reference/lookup tables and build code→description mappings.
         
-        # Code → description column patterns
-        code_desc_patterns = [
-            ('code', 'description'), ('code', 'name'), ('code', 'desc'),
-            ('id', 'description'), ('id', 'name'),
-            ('key', 'value'), ('key', 'description'),
-            ('type_code', 'type_name'), ('status_code', 'status_name'),
-        ]
+        Uses smart pattern detection:
+        1. "{Entity} Code" → "{Entity}" (e.g., "Job Code" → "Job")
+        2. "{Entity} Code" → "{Entity} Name" (e.g., "Company Code" → "Company Name")
+        3. "* Code" → "Description" or "Name" column
+        4. Traditional code/description patterns as fallback
+        """
         
         for table_info in tables:
             table_name = table_info['table_name']
-            columns = [c.lower() for c in table_info.get('columns', [])]
+            columns = table_info.get('columns', [])
+            columns_lower = [c.lower() for c in columns]
             row_count = table_info.get('row_count', 0)
             
-            # Skip large tables - probably not reference
-            if row_count > 500:
-                logger.debug(f"[INTELLIGENCE] Skipping {table_name} for lookup detection (row_count={row_count} > 500)")
+            # Find best code→description pair
+            code_col, desc_col = self._find_code_desc_pair(columns, columns_lower)
+            
+            if not code_col or not desc_col:
+                logger.debug(f"[INTELLIGENCE] Skipping {table_name} - no code/desc pair found")
                 continue
             
-            logger.debug(f"[INTELLIGENCE] Checking {table_name} for lookup potential (row_count={row_count}, cols={len(columns)})")
+            logger.debug(f"[INTELLIGENCE] Checking {table_name} for lookup (rows={row_count}, code={code_col}, desc={desc_col})")
             
-            # Look for code/description pairs
-            code_col = None
-            desc_col = None
-            
-            for code_pattern, desc_pattern in code_desc_patterns:
-                for col in columns:
-                    if code_pattern in col and not code_col:
-                        code_col = col
-                    if desc_pattern in col and not desc_col:
-                        desc_col = col
-                if code_col and desc_col:
-                    break
-            
-            # Fallback: first two columns if small table
-            if not code_col and not desc_col and len(columns) >= 2 and row_count <= 100:
-                code_col = columns[0]
-                desc_col = columns[1]
-                logger.debug(f"[INTELLIGENCE] Using fallback columns for {table_name}: {code_col} -> {desc_col}")
-            
-            if code_col and desc_col:
-                try:
-                    # Get original case column names
-                    orig_columns = table_info.get('columns', [])
-                    orig_code = next((c for c in orig_columns if c.lower() == code_col), code_col)
-                    orig_desc = next((c for c in orig_columns if c.lower() == desc_col), desc_col)
+            try:
+                # Load the lookup data - use DISTINCT to handle large tables efficiently
+                rows = self.handler.conn.execute(f'''
+                    SELECT DISTINCT "{code_col}", "{desc_col}"
+                    FROM "{table_name}"
+                    WHERE "{code_col}" IS NOT NULL 
+                    AND TRIM(CAST("{code_col}" AS VARCHAR)) != ''
+                    LIMIT 50000
+                ''').fetchall()
+                
+                if rows:
+                    lookup_data = {str(r[0]): str(r[1]) for r in rows if r[0] and r[1]}
                     
-                    # Load the lookup data
-                    rows = self.handler.conn.execute(f'''
-                        SELECT "{orig_code}", "{orig_desc}"
-                        FROM "{table_name}"
-                        WHERE "{orig_code}" IS NOT NULL
-                        LIMIT 500
-                    ''').fetchall()
-                    
-                    if rows:
-                        lookup_data = {str(r[0]): str(r[1]) for r in rows if r[0] and r[1]}
+                    if lookup_data:
+                        # Determine lookup type from table/column name
+                        lookup_type = self._infer_lookup_type(table_name, code_col)
                         
-                        if lookup_data:
-                            # Determine lookup type from table/column name
-                            lookup_type = "general"
-                            type_hints = {
-                                'location': 'location', 'loc': 'location',
-                                'department': 'department', 'dept': 'department',
-                                'company': 'company', 'comp': 'company',
-                                'status': 'status', 'stat': 'status',
-                                'pay_group': 'pay_group', 'paygroup': 'pay_group',
-                                'job': 'job_code', 'position': 'job_code'
-                            }
-                            for hint, ltype in type_hints.items():
-                                if hint in table_name.lower() or hint in code_col:
-                                    lookup_type = ltype
-                                    break
-                            
-                            self.lookups.append(ReferenceLookup(
-                                table_name=table_name,
-                                code_column=orig_code,
-                                description_column=orig_desc,
-                                lookup_type=lookup_type,
-                                confidence=0.8,
-                                lookup_data=lookup_data,
-                                entry_count=len(lookup_data)
-                            ))
-                            logger.warning(f"[INTELLIGENCE] Found lookup: {table_name} ({len(lookup_data)} entries, type={lookup_type})")
-                            
-                except Exception as e:
-                    logger.debug(f"[INTELLIGENCE] Lookup detection failed for {table_name}: {e}")
+                        self.lookups.append(ReferenceLookup(
+                            table_name=table_name,
+                            code_column=code_col,
+                            description_column=desc_col,
+                            lookup_type=lookup_type,
+                            confidence=0.8,
+                            lookup_data=lookup_data,
+                            entry_count=len(lookup_data)
+                        ))
+                        logger.warning(f"[INTELLIGENCE] Found lookup: {table_name} ({len(lookup_data)} entries, type={lookup_type}, code={code_col}→{desc_col})")
+                        
+            except Exception as e:
+                logger.debug(f"[INTELLIGENCE] Lookup detection failed for {table_name}: {e}")
         
         # Summary log
         logger.warning(f"[INTELLIGENCE] Lookup detection complete: scanned {len(tables)} tables, found {len(self.lookups)} lookups")
+    
+    def _find_code_desc_pair(self, columns: List[str], columns_lower: List[str]) -> tuple:
+        """
+        Find the best code→description column pair using smart pattern matching.
+        
+        Patterns detected:
+        1. "{Entity} Code" → "{Entity}" (Job Code → Job)
+        2. "{Entity} Code" → "{Entity} Name" (Company Code → Company Name)  
+        3. "{Entity} Code" → "Description" (Any Code → Description)
+        4. Traditional patterns (code/description, id/name)
+        
+        Returns:
+            (code_column, description_column) in original case, or (None, None)
+        """
+        if not columns:
+            return None, None
+        
+        # Pattern 1 & 2: Look for "{Entity} Code" → "{Entity}" or "{Entity} Name"
+        for i, col in enumerate(columns):
+            col_lower = columns_lower[i]
+            
+            # Check if column ends with " code" or "_code"
+            if col_lower.endswith(' code') or col_lower.endswith('_code'):
+                # Extract the entity name (e.g., "Job" from "Job Code")
+                if col_lower.endswith(' code'):
+                    entity = col_lower[:-5].strip()  # Remove " code"
+                else:
+                    entity = col_lower[:-5].strip()  # Remove "_code"
+                
+                if entity:
+                    # Look for matching description column
+                    for j, other_col in enumerate(columns):
+                        if i == j:
+                            continue
+                        other_lower = columns_lower[j]
+                        
+                        # Check for exact match: "{Entity}" 
+                        if other_lower == entity:
+                            return col, other_col
+                        
+                        # Check for "{Entity} Name" or "{Entity} Description"
+                        if other_lower == f"{entity} name" or other_lower == f"{entity}_name":
+                            return col, other_col
+                        if other_lower == f"{entity} description" or other_lower == f"{entity}_description":
+                            return col, other_col
+        
+        # Pattern 3: Any "* Code" column → "Description" or "Name" column
+        code_cols = [(i, col) for i, col in enumerate(columns) 
+                     if columns_lower[i].endswith(' code') or columns_lower[i].endswith('_code') or columns_lower[i] == 'code']
+        desc_cols = [(i, col) for i, col in enumerate(columns) 
+                     if columns_lower[i] in ('description', 'name', 'desc', 'label', 'title')]
+        
+        if code_cols and desc_cols:
+            # Return first code col and first description col
+            return code_cols[0][1], desc_cols[0][1]
+        
+        # Pattern 4: Traditional patterns (less strict)
+        traditional_patterns = [
+            ('code', 'description'), ('code', 'name'), ('code', 'desc'),
+            ('id', 'description'), ('id', 'name'), ('id', 'label'),
+            ('key', 'value'), ('key', 'description'),
+            ('type', 'description'), ('type', 'name'),
+        ]
+        
+        for code_pattern, desc_pattern in traditional_patterns:
+            code_match = None
+            desc_match = None
+            
+            for i, col_lower in enumerate(columns_lower):
+                if code_pattern in col_lower and not code_match:
+                    code_match = columns[i]
+                if desc_pattern in col_lower and not desc_match:
+                    desc_match = columns[i]
+            
+            if code_match and desc_match and code_match != desc_match:
+                return code_match, desc_match
+        
+        return None, None
+    
+    def _infer_lookup_type(self, table_name: str, code_column: str) -> str:
+        """Infer the lookup type from table and column names."""
+        combined = f"{table_name} {code_column}".lower()
+        
+        type_hints = {
+            'location': 'location', 'loc_': 'location', 'site': 'location',
+            'department': 'department', 'dept': 'department', 'division': 'department',
+            'company': 'company', 'comp_': 'company', 'organization': 'company',
+            'status': 'status', 'employment_status': 'status',
+            'pay_group': 'pay_group', 'paygroup': 'pay_group', 'pay group': 'pay_group',
+            'job': 'job', 'position': 'job', 'job_code': 'job', 'job code': 'job',
+            'earning': 'earning', 'earnings': 'earning',
+            'deduction': 'deduction', 'benefit': 'benefit',
+            'tax': 'tax', 'tax_group': 'tax',
+            'bank': 'bank',
+            'project': 'project',
+            'union': 'union',
+            'worker': 'workers_comp', 'compensation': 'workers_comp',
+            'salary': 'salary', 'grade': 'salary',
+        }
+        
+        for hint, ltype in type_hints.items():
+            if hint in combined:
+                return ltype
+        
+        return "general"
     
     def _detect_profile_based_lookups(self, tables: List[Dict]) -> None:
         """
