@@ -25,7 +25,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v4.7 INJECT DEBUG ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v4.8 SMART FILTER DETECTION ======")
 
 
 # =============================================================================
@@ -279,6 +279,8 @@ class IntelligenceEngine:
         """
         Check if user specified a filter value in their question.
         Returns the detected value or None.
+        
+        This is the SMART DETECTION that auto-applies filters without asking.
         """
         if category == 'status':
             return self._detect_status_in_question(q_lower)
@@ -288,47 +290,188 @@ class IntelligenceEngine:
         if not candidates:
             return None
         
-        # For other categories, check if any specific value is mentioned
+        # LOCATION DETECTION - States, cities, common patterns
+        if category == 'location':
+            # US States (common ones)
+            states = {
+                'texas': 'TX', 'tx': 'TX',
+                'california': 'CA', 'ca': 'CA', 
+                'new york': 'NY', 'ny': 'NY',
+                'florida': 'FL', 'fl': 'FL',
+                'illinois': 'IL', 'il': 'IL',
+                'pennsylvania': 'PA', 'pa': 'PA',
+                'ohio': 'OH', 'oh': 'OH',
+                'georgia': 'GA', 'ga': 'GA',
+                'michigan': 'MI', 'mi': 'MI',
+                'north carolina': 'NC', 'nc': 'NC',
+                'new jersey': 'NJ', 'nj': 'NJ',
+                'virginia': 'VA', 'va': 'VA',
+                'washington': 'WA', 'wa': 'WA',
+                'arizona': 'AZ', 'az': 'AZ',
+                'massachusetts': 'MA', 'ma': 'MA',
+                'tennessee': 'TN', 'tn': 'TN',
+                'indiana': 'IN', 'missouri': 'MO',
+                'maryland': 'MD', 'wisconsin': 'WI',
+                'colorado': 'CO', 'minnesota': 'MN',
+                'south carolina': 'SC', 'alabama': 'AL',
+                'louisiana': 'LA', 'kentucky': 'KY',
+                'oregon': 'OR', 'oklahoma': 'OK',
+                'connecticut': 'CT', 'utah': 'UT',
+                'iowa': 'IA', 'nevada': 'NV',
+                'arkansas': 'AR', 'mississippi': 'MS',
+                'kansas': 'KS', 'new mexico': 'NM',
+                'nebraska': 'NE', 'hawaii': 'HI',
+                'idaho': 'ID', 'maine': 'ME',
+                'new hampshire': 'NH', 'rhode island': 'RI',
+                'montana': 'MT', 'delaware': 'DE',
+                'south dakota': 'SD', 'north dakota': 'ND',
+                'alaska': 'AK', 'vermont': 'VT',
+                'wyoming': 'WY', 'west virginia': 'WV'
+            }
+            
+            # Check for state mentions
+            for state_name, state_code in states.items():
+                # Pattern: "in texas", "texas employees", "from tx"
+                patterns = [
+                    f' in {state_name}', f'{state_name} employees', f'{state_name} workers',
+                    f'from {state_name}', f' {state_name} ', f'({state_name})'
+                ]
+                for pattern in patterns:
+                    if pattern in q_lower or q_lower.startswith(state_name):
+                        # Verify this code exists in our data
+                        for candidate in candidates:
+                            values = [str(v).upper() for v in candidate.get('values', [])]
+                            if state_code in values:
+                                logger.warning(f"[FILTER-DETECT] Found location {state_code} in question")
+                                return state_code
+            
+            # Check actual location values in data
+            for candidate in candidates:
+                values = candidate.get('values', [])
+                for value in values:
+                    value_str = str(value).lower()
+                    if len(value_str) > 2 and value_str in q_lower:
+                        logger.warning(f"[FILTER-DETECT] Found location value {value} in question")
+                        return value
+        
+        # COMPANY DETECTION - Check company codes directly
+        if category == 'company':
+            for candidate in candidates:
+                values = candidate.get('values', [])
+                for value in values:
+                    value_str = str(value).lower()
+                    value_upper = str(value).upper()
+                    # Company codes are usually 3-6 chars, check exact match
+                    if len(value_str) >= 3:
+                        # Pattern: "TISI employees", "for ACME", "company TISI"
+                        patterns = [
+                            f' {value_str} ', f' {value_str}', f'{value_str} ',
+                            f' {value_upper} ', f' {value_upper}', f'{value_upper} '
+                        ]
+                        for pattern in patterns:
+                            if pattern in q_lower or pattern in q_lower.upper():
+                                logger.warning(f"[FILTER-DETECT] Found company {value} in question")
+                                return value
+        
+        # PAY TYPE DETECTION
+        if category == 'pay_type':
+            pay_patterns = {
+                'hourly': ['hourly', 'hourly employees', 'hourly workers', 'hourly staff'],
+                'salary': ['salary', 'salaried', 'salaried employees'],
+                'full_time': ['full time', 'full-time', 'fulltime', ' ft '],
+                'part_time': ['part time', 'part-time', 'parttime', ' pt ']
+            }
+            for detected_value, patterns in pay_patterns.items():
+                if any(p in q_lower for p in patterns):
+                    # Map to actual code in data
+                    for candidate in candidates:
+                        values = candidate.get('values', [])
+                        for value in values:
+                            v = str(value).upper()
+                            if detected_value == 'hourly' and v in ['H', 'HOURLY', 'HR']:
+                                return value
+                            if detected_value == 'salary' and v in ['S', 'SALARY', 'SAL', 'SALARIED']:
+                                return value
+                            if detected_value == 'full_time' and v in ['F', 'FT', 'FULL', 'FULL-TIME']:
+                                return value
+                            if detected_value == 'part_time' and v in ['P', 'PT', 'PART', 'PART-TIME']:
+                                return value
+                    # Return the detected value if no mapping found
+                    logger.warning(f"[FILTER-DETECT] Found pay_type {detected_value} in question")
+                    return detected_value
+        
+        # EMPLOYEE TYPE DETECTION
+        if category == 'employee_type':
+            emp_patterns = {
+                'regular': ['regular employee', 'regular workers', 'regular staff', 'permanent'],
+                'temp': ['temp ', 'temporary', 'temps ', 'temp employees'],
+                'contractor': ['contractor', 'contractors', 'contract workers', '1099']
+            }
+            for detected_value, patterns in emp_patterns.items():
+                if any(p in q_lower for p in patterns):
+                    # Map to actual code in data
+                    for candidate in candidates:
+                        values = candidate.get('values', [])
+                        for value in values:
+                            v = str(value).upper()
+                            if detected_value == 'regular' and v in ['REG', 'REGULAR', 'R', 'PERM']:
+                                return value
+                            if detected_value == 'temp' and v in ['TMP', 'TEMP', 'T', 'TEMPORARY']:
+                                return value
+                            if detected_value == 'contractor' and v in ['CON', 'CTR', 'CONTRACTOR', 'C']:
+                                return value
+                    logger.warning(f"[FILTER-DETECT] Found employee_type {detected_value} in question")
+                    return detected_value
+        
+        # GENERIC: Check if any specific value from data is mentioned
         for candidate in candidates:
             values = candidate.get('values', [])
             for value in values:
                 value_str = str(value).lower()
-                if len(value_str) > 2 and value_str in q_lower:
+                if len(value_str) > 2 and f' {value_str}' in q_lower:
+                    logger.warning(f"[FILTER-DETECT] Found {category} value {value} in question")
                     return value
-        
-        # Category-specific patterns
-        if category == 'pay_type':
-            if any(p in q_lower for p in ['hourly', 'hourly employees', 'hourly workers']):
-                return 'hourly'
-            if any(p in q_lower for p in ['salary', 'salaried', 'salaried employees']):
-                return 'salary'
-            if any(p in q_lower for p in ['full time', 'full-time', 'ft ']):
-                return 'full_time'
-            if any(p in q_lower for p in ['part time', 'part-time', 'pt ']):
-                return 'part_time'
-        
-        if category == 'employee_type':
-            if any(p in q_lower for p in ['regular', 'regular employees']):
-                return 'regular'
-            if any(p in q_lower for p in ['temp', 'temporary', 'temps']):
-                return 'temp'
-            if any(p in q_lower for p in ['contractor', 'contractors', 'contract']):
-                return 'contractor'
         
         return None
     
     def _is_filter_relevant(self, category: str, q_lower: str) -> bool:
         """
         Determine if a filter category is relevant to this question.
+        Returns True if we should ASK about this filter (not auto-detected).
         
-        For now, only status is auto-asked. Other categories require explicit mention.
+        Smart logic:
+        - Status: Always relevant for employee questions (unless "all")
+        - Company: Ask if "by company" or multiple companies exist and asking totals
+        - Location: Ask if "by location/state" mentioned
+        - Others: Only if explicitly requested with "by X"
         """
         # Status is almost always relevant for employee questions
         if category == 'status':
+            # Skip if user said "all employees" or similar
+            if any(p in q_lower for p in ['all employees', 'all staff', 'everyone', 'all workers']):
+                self.confirmed_facts['status'] = 'all'
+                return False
             return True
         
-        # TODO Phase 2.5: Expand to ask about company/location when relevant
-        # For now, skip other categories to avoid empty questions
+        # Check for "by X" patterns that trigger clarification
+        by_patterns = {
+            'company': ['by company', 'per company', 'each company', 'by entity', 'by legal entity'],
+            'location': ['by location', 'by state', 'per state', 'by site', 'each location', 'by region'],
+            'organization': ['by department', 'by org', 'by cost center', 'per department', 'by division'],
+            'pay_type': ['by pay type', 'hourly vs salary', 'hourly and salary'],
+            'employee_type': ['by employee type', 'by worker type', 'regular vs temp']
+        }
+        
+        patterns = by_patterns.get(category, [])
+        if any(p in q_lower for p in patterns):
+            # Check if we have multiple values to ask about
+            candidates = self.filter_candidates.get(category, [])
+            if candidates:
+                distinct_count = candidates[0].get('distinct_count', 0)
+                if distinct_count > 1:
+                    logger.warning(f"[FILTER-RELEVANT] {category} relevant due to 'by X' pattern, {distinct_count} values")
+                    return True
+        
         return False
     
     def _request_filter_clarification(self, question: str, category: str) -> SynthesizedAnswer:
@@ -1014,7 +1157,7 @@ class IntelligenceEngine:
     
     def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
         """Generate SQL query using LLMOrchestrator with SMART table selection."""
-        logger.warning(f"[SQL-GEN] v4.7 - Starting SQL generation")
+        logger.warning(f"[SQL-GEN] v4.8 - Starting SQL generation")
         logger.warning(f"[SQL-GEN] confirmed_facts: {self.confirmed_facts}")
         
         if not self.structured_handler or not self.schema:
