@@ -263,6 +263,10 @@ async def intelligent_chat(request: IntelligentChatRequest):
                     )
                     
                     if can_skip and learned_answers:
+                        # Normalize keys: convert legacy 'employee_status' to 'status'
+                        if 'employee_status' in learned_answers and 'status' not in learned_answers:
+                            learned_answers['status'] = learned_answers.pop('employee_status')
+                        
                         logger.info(f"[LEARNING] Skipping clarification - using learned answers: {learned_answers}")
                         engine.confirmed_facts.update(learned_answers)
                         auto_applied_facts = learned_answers.copy()  # Remember what we auto-applied
@@ -276,7 +280,7 @@ async def intelligent_chat(request: IntelligentChatRequest):
         if auto_applied_facts:
             notes = []
             for key, value in auto_applied_facts.items():
-                if key == 'employee_status':
+                if key in ['employee_status', 'status']:
                     if value == 'active':
                         notes.append("Active employees only")
                     elif value == 'termed':
