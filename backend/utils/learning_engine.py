@@ -15,7 +15,13 @@ COMPONENTS:
 4. KnowledgeCache - Semantic retrieval of past analyses
 5. ModelTrainer - Fine-tunes local models
 
+INTEGRATION:
+- PlaybookFramework uses LearningHook which calls get_learning_system()
+- record_feedback() supports both old and new signatures
+- get_patterns() returns suppressions for playbook scans
+
 Author: XLR8 Team
+Version: 2.0.0 - Playbook Integration
 """
 
 import os
@@ -227,6 +233,7 @@ class FeedbackLoop:
     def __init__(self):
         self.feedback_file = FEEDBACK_DIR / "corrections.jsonl"
         self.patterns_file = FEEDBACK_DIR / "learned_patterns.json"
+        self.playbook_feedback_file = FEEDBACK_DIR / "playbook_feedback.jsonl"
         self._load_patterns()
     
     def _load_patterns(self):
@@ -239,7 +246,9 @@ class FeedbackLoop:
                 'false_positives': [],  # Issues AI flagged that weren't real
                 'missed_issues': [],     # Issues AI should have caught
                 'status_corrections': {},  # AI said X, user changed to Y
-                'learned_rules': []      # Auto-generated rules
+                'learned_rules': [],      # Auto-generated rules
+                'discarded_findings': [],  # Findings user discarded (for suppression)
+                'kept_findings': []        # Findings user explicitly kept (positive signal)
             }
     
     def _save_patterns(self):
@@ -293,6 +302,82 @@ class FeedbackLoop:
         
         logger.info(f"[LEARNING] Recorded correction for {action_id}: {correction_type}")
     
+    def record_playbook_feedback(
+        self,
+        project_id: str,
+        context: str,  # format: "playbook_id:action_id"
+        finding: str,
+        feedback: str,  # 'keep', 'discard', 'modify'
+        reason: Optional[str] = None
+    ):
+        """
+        Record feedback from playbook UI (keep/discard decisions).
+        
+        This is the method called by LearningHook.record_feedback().
+        """
+        playbook_id = context.split(':')[0] if ':' in context else 'unknown'
+        action_id = context.split(':')[1] if ':' in context else context
+        
+        feedback_record = {
+            'id': hashlib.md5(f"{finding}{datetime.now().isoformat()}".encode()).hexdigest()[:12],
+            'timestamp': datetime.now().isoformat(),
+            'project_id': project_id,
+            'playbook_id': playbook_id,
+            'action_id': action_id,
+            'finding': finding,
+            'feedback': feedback,
+            'reason': reason
+        }
+        
+        # Append to playbook feedback file
+        with open(self.playbook_feedback_file, 'a') as f:
+            f.write(json.dumps(feedback_record) + '\n')
+        
+        # Update patterns based on feedback type
+        if feedback == 'discard':
+            # User discarded this finding - add to suppression list
+            # Normalize for pattern matching
+            normalized = self._normalize_finding(finding)
+            self.patterns['discarded_findings'].append({
+                'finding': finding,
+                'normalized': normalized,
+                'playbook_id': playbook_id,
+                'action_id': action_id,
+                'reason': reason,
+                'timestamp': feedback_record['timestamp']
+            })
+            # Also record as false positive for rule generation
+            self.patterns['false_positives'].append({
+                'issue': finding,
+                'action_id': action_id,
+                'timestamp': feedback_record['timestamp']
+            })
+            logger.info(f"[LEARNING] Recorded DISCARD for: {finding[:50]}...")
+            
+        elif feedback == 'keep':
+            # User kept this finding - positive signal
+            normalized = self._normalize_finding(finding)
+            self.patterns['kept_findings'].append({
+                'finding': finding,
+                'normalized': normalized,
+                'playbook_id': playbook_id,
+                'action_id': action_id,
+                'timestamp': feedback_record['timestamp']
+            })
+            logger.info(f"[LEARNING] Recorded KEEP for: {finding[:50]}...")
+        
+        self._save_patterns()
+        self._maybe_generate_rules()
+    
+    def _normalize_finding(self, finding: str) -> str:
+        """Normalize a finding for pattern matching."""
+        # Replace numbers with placeholder
+        normalized = re.sub(r'\d+', 'N', finding.lower())
+        # Remove extra whitespace
+        normalized = ' '.join(normalized.split())
+        # Truncate for matching
+        return normalized[:100]
+    
     def _maybe_generate_rules(self):
         """
         Auto-generate rules from patterns.
@@ -321,6 +406,25 @@ class FeedbackLoop:
                     self.patterns['learned_rules'].append(rule)
                     logger.info(f"[LEARNING] Auto-generated rule: suppress '{issue_pattern}'")
         
+        # Also generate suppressions from discarded findings
+        discard_counts = {}
+        for df in self.patterns.get('discarded_findings', []):
+            normalized = df.get('normalized', '')
+            if normalized:
+                discard_counts[normalized] = discard_counts.get(normalized, 0) + 1
+        
+        for pattern, count in discard_counts.items():
+            if count >= 2:  # Lower threshold for explicit discards
+                rule = {
+                    'type': 'suppress_issue',
+                    'pattern': pattern,
+                    'reason': f'Explicitly discarded {count} times',
+                    'created': datetime.now().isoformat()
+                }
+                if rule not in self.patterns['learned_rules']:
+                    self.patterns['learned_rules'].append(rule)
+                    logger.info(f"[LEARNING] Auto-generated rule from discard: suppress '{pattern}'")
+        
         self._save_patterns()
     
     def get_suppression_patterns(self) -> List[str]:
@@ -331,6 +435,31 @@ class FeedbackLoop:
         """Check if an issue should be suppressed based on learned patterns"""
         normalized = re.sub(r'\d+', 'N', issue.lower())[:100]
         return normalized in self.get_suppression_patterns()
+    
+    def get_patterns_for_playbook(self, project_id: str, playbook_id: str) -> Dict[str, Any]:
+        """
+        Get learned patterns formatted for playbook suppression.
+        
+        Returns format expected by LearningHook.apply_learned_suppressions()
+        """
+        suppressions = self.get_suppression_patterns()
+        
+        # Also include recently discarded findings for this playbook
+        recent_discards = [
+            df['normalized'] for df in self.patterns.get('discarded_findings', [])
+            if df.get('playbook_id') == playbook_id
+        ]
+        
+        # Combine unique suppressions
+        all_suppressions = list(set(suppressions + recent_discards))
+        
+        return {
+            'suppressions': all_suppressions,
+            'preferences': {
+                'total_kept': len(self.patterns.get('kept_findings', [])),
+                'total_discarded': len(self.patterns.get('discarded_findings', []))
+            }
+        }
 
 
 # =============================================================================
@@ -569,8 +698,17 @@ class LearningSystem:
         # After Claude analysis
         learning.learn_from_claude(text, prompt, output, action_id)
         
-        # When user corrects
+        # When user corrects (old signature)
         learning.record_feedback(action_id, 'status', 'complete', 'in_progress')
+        
+        # When user keeps/discards in playbook (new signature via LearningHook)
+        learning.record_feedback(
+            project_id='xxx', 
+            context='year-end:2A',
+            finding='Some finding text',
+            feedback='discard',
+            reason='Not applicable'
+        )
         
         # Get stats
         stats = learning.get_stats()
@@ -599,10 +737,51 @@ class LearningSystem:
         # Cache for future
         self.cache.set(input_text, action_id, output)
     
-    def record_feedback(self, action_id: str, correction_type: str, 
-                       original: Any, corrected: Any, context: str = None):
-        """Record user correction"""
-        self.feedback.record_correction(action_id, correction_type, original, corrected, context)
+    def record_feedback(self, *args, **kwargs):
+        """
+        Record user feedback - supports BOTH signatures:
+        
+        OLD (direct call):
+            record_feedback(action_id, correction_type, original, corrected, context=None)
+        
+        NEW (from LearningHook):
+            record_feedback(project_id=, context=, finding=, feedback=, reason=)
+        """
+        # Detect which signature is being used
+        if kwargs.get('project_id') is not None or kwargs.get('finding') is not None:
+            # NEW signature from LearningHook
+            self.feedback.record_playbook_feedback(
+                project_id=kwargs.get('project_id', ''),
+                context=kwargs.get('context', ''),
+                finding=kwargs.get('finding', ''),
+                feedback=kwargs.get('feedback', 'keep'),
+                reason=kwargs.get('reason')
+            )
+        elif len(args) >= 4:
+            # OLD signature: action_id, correction_type, original, corrected, context
+            self.feedback.record_correction(
+                action_id=args[0],
+                correction_type=args[1],
+                original_value=args[2],
+                corrected_value=args[3],
+                context=args[4] if len(args) > 4 else kwargs.get('context')
+            )
+        else:
+            logger.warning(f"[LEARNING] Invalid record_feedback call: args={args}, kwargs={kwargs}")
+    
+    def get_patterns(self, project_id: str, playbook_id: str) -> Dict[str, Any]:
+        """
+        Get learned patterns for playbook suppression.
+        
+        This is called by LearningHook.get_learned_patterns().
+        
+        Returns:
+            {
+                'suppressions': ['pattern1', 'pattern2', ...],
+                'preferences': {...}
+            }
+        """
+        return self.feedback.get_patterns_for_playbook(project_id, playbook_id)
     
     def validate_extraction(self, extracted_data: Dict) -> List[Dict]:
         """Run rule-based validation (no LLM)"""
@@ -628,7 +807,9 @@ class LearningSystem:
             'feedback_patterns': {
                 'false_positives': len(self.feedback.patterns.get('false_positives', [])),
                 'missed_issues': len(self.feedback.patterns.get('missed_issues', [])),
-                'learned_rules': len(self.feedback.patterns.get('learned_rules', []))
+                'learned_rules': len(self.feedback.patterns.get('learned_rules', [])),
+                'discarded_findings': len(self.feedback.patterns.get('discarded_findings', [])),
+                'kept_findings': len(self.feedback.patterns.get('kept_findings', []))
             }
         }
     
