@@ -185,10 +185,12 @@ except ImportError:
 try:
     from backend.utils.project_intelligence import ProjectIntelligenceService, get_project_intelligence
     PROJECT_INTELLIGENCE_AVAILABLE = True
+    logger.warning("[UNIFIED] Project intelligence imported successfully")
 except ImportError:
     try:
         from utils.project_intelligence import ProjectIntelligenceService, get_project_intelligence
         PROJECT_INTELLIGENCE_AVAILABLE = True
+        logger.warning("[UNIFIED] Project intelligence imported successfully (alt path)")
     except ImportError:
         PROJECT_INTELLIGENCE_AVAILABLE = False
         logger.warning("[UNIFIED] Project intelligence not available - using fallback services")
@@ -457,14 +459,18 @@ class DataModelService:
         Args:
             handler: DuckDB structured data handler
         """
+        logger.warning(f"[DATA_MODEL] load_lookups called for {self.project}, _loaded={self._loaded}")
+        
         if self._loaded:
             return
         
         # PHASE 3.5: Try intelligence service first (pre-computed on upload)
         if PROJECT_INTELLIGENCE_AVAILABLE and handler:
             try:
+                logger.warning(f"[DATA_MODEL] Attempting to load from intelligence service for {self.project}")
                 intelligence = get_project_intelligence(self.project, handler)
                 if intelligence and intelligence.lookups:
+                    logger.warning(f"[DATA_MODEL] Found {len(intelligence.lookups)} lookups in intelligence")
                     # Pull from pre-computed lookups
                     for lookup in intelligence.lookups:
                         table_name = lookup.table_name
@@ -477,8 +483,10 @@ class DataModelService:
                             self.code_columns[code_col] = table_name
                     
                     self._loaded = True
-                    logger.info(f"[DATA_MODEL] Loaded {len(self.lookups)} lookup tables from intelligence service")
+                    logger.warning(f"[DATA_MODEL] Loaded {len(self.lookups)} lookup tables from intelligence service")
                     return
+                else:
+                    logger.warning(f"[DATA_MODEL] No lookups found in intelligence, falling back to scan")
             except Exception as e:
                 logger.warning(f"[DATA_MODEL] Intelligence service unavailable, falling back: {e}")
         
@@ -781,8 +789,10 @@ class DataQualityService:
         # PHASE 3.5: Try intelligence service first (pre-computed on upload)
         if PROJECT_INTELLIGENCE_AVAILABLE and handler:
             try:
+                logger.warning(f"[DATA_QUALITY] Attempting to load from intelligence service for {self.project}")
                 intelligence = get_project_intelligence(self.project, handler)
                 if intelligence and intelligence.findings:
+                    logger.warning(f"[DATA_QUALITY] Found {len(intelligence.findings)} findings in intelligence")
                     # Convert intelligence findings to alert format
                     for finding in intelligence.findings:
                         alert = {
@@ -803,8 +813,10 @@ class DataQualityService:
                     severity_order = {'critical': 0, 'warning': 1, 'info': 2}
                     self.alerts.sort(key=lambda x: severity_order.get(x.get('severity', 'info'), 3))
                     
-                    logger.info(f"[DATA_QUALITY] Loaded {len(self.alerts)} alerts from intelligence service")
+                    logger.warning(f"[DATA_QUALITY] Loaded {len(self.alerts)} alerts from intelligence service")
                     return self.alerts
+                else:
+                    logger.warning(f"[DATA_QUALITY] No findings in intelligence, falling back to SQL checks")
             except Exception as e:
                 logger.warning(f"[DATA_QUALITY] Intelligence service unavailable, falling back: {e}")
         
