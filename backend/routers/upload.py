@@ -445,7 +445,7 @@ class JobQueue:
                 finally:
                     self._current_job = None
                     if job.job_id in self._job_positions:
-                        del self._job_positions[job_id]
+                        del self._job_positions[job.job_id]
                     self._queue.task_done()
                     self._update_positions()
                     
