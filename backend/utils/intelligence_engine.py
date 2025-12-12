@@ -25,7 +25,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v4.3 STATUS ONLY ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v4.4 SMART FILTER ======")
 
 
 # =============================================================================
@@ -712,15 +712,41 @@ class IntelligenceEngine:
         logger.warning(f"[SQL-GEN] Building filters. status={status_filter}, all_facts={self.confirmed_facts}")
         
         if status_filter and status_filter != 'all':
-            # Check filter_candidates for status column info
+            # Use SAME logic as _get_status_options_from_filter_candidates to pick column
             status_candidates = self.filter_candidates.get('status', [])
+            best_candidate = None
             
-            if status_candidates:
-                candidate = status_candidates[0]  # Highest priority
-                col_name = candidate.get('column')
-                col_type = candidate.get('type')
-                values = candidate.get('values', [])
-                distribution = candidate.get('distribution', {})
+            for candidate in status_candidates:
+                col_name = candidate.get('column', '').lower()
+                total_count = candidate.get('total_count', 0)
+                col_type = candidate.get('type', '')
+                
+                # Skip transaction tables (too many rows per employee)
+                if total_count > 20000:
+                    continue
+                
+                # Prefer employment_status columns (categorical with A/T codes)
+                if 'employment_status' in col_name:
+                    best_candidate = candidate
+                    break
+                
+                # termination_date is fallback
+                if col_type == 'date' and 'termination' in col_name:
+                    if not best_candidate:
+                        best_candidate = candidate
+                    continue
+                
+                # Any categorical status column from employee-level table
+                if not best_candidate and col_type == 'categorical':
+                    best_candidate = candidate
+            
+            if not best_candidate and status_candidates:
+                best_candidate = status_candidates[0]
+            
+            if best_candidate:
+                col_name = best_candidate.get('column')
+                col_type = best_candidate.get('type')
+                values = best_candidate.get('values', [])
                 
                 logger.warning(f"[SQL-GEN] Status candidate: col={col_name}, type={col_type}")
                 
@@ -735,14 +761,18 @@ class IntelligenceEngine:
                         codes = [v for v in values if str(v).upper() in ['A', 'ACTIVE', 'ACT']]
                     elif status_filter == 'termed':
                         codes = [v for v in values if str(v).upper() in ['T', 'TERMINATED', 'TERM', 'TERMED', 'I', 'INACTIVE']]
+                    elif status_filter == 'leave':
+                        codes = [v for v in values if str(v).upper() in ['L', 'LEAVE', 'LOA']]
                     else:
                         codes = [v for v in values if str(v).lower() == status_filter.lower()]
                     
                     if codes:
                         codes_str = ', '.join(f"'{c}'" for c in codes)
                         filters.append(f"{col_name} IN ({codes_str})")
+                    else:
+                        logger.warning(f"[SQL-GEN] No matching codes for status={status_filter} in values={values}")
             else:
-                # Fallback: look for termination_date in tables
+                # Last resort fallback: look for termination_date in tables
                 for table in relevant_tables:
                     columns = table.get('columns', [])
                     for col in columns:
@@ -810,7 +840,7 @@ class IntelligenceEngine:
         
         # Build final filter string
         if filters:
-            return "\n\nFILTER: WHERE " + " AND ".join(filters)
+            return "WHERE " + " AND ".join(filters)
         
         return ""
     
@@ -911,7 +941,7 @@ class IntelligenceEngine:
     
     def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
         """Generate SQL query using LLMOrchestrator with SMART table selection."""
-        logger.warning(f"[SQL-GEN] v4.2 - Starting SQL generation")
+        logger.warning(f"[SQL-GEN] v4.4 - Starting SQL generation")
         logger.warning(f"[SQL-GEN] confirmed_facts: {self.confirmed_facts}")
         
         if not self.structured_handler or not self.schema:
@@ -1014,9 +1044,14 @@ class IntelligenceEngine:
         if 'how many' in q_lower or 'count' in q_lower:
             query_hint = f"\n\nHINT: For COUNT, use single table: SELECT COUNT(*) FROM \"{primary_table}\""
         
+        # Make filter instructions more explicit
+        filter_rule = ""
+        if filter_instructions:
+            filter_rule = f"\n5. REQUIRED: Apply this filter: {filter_instructions.replace('FILTER: ', '')}"
+        
         prompt = f"""SCHEMA:
 {schema_text}{relationships_text}
-{filter_instructions}{query_hint}
+{query_hint}
 
 QUESTION: {question}
 
@@ -1024,7 +1059,7 @@ RULES:
 1. Use ONLY columns from schema above
 2. For "how many" → SELECT COUNT(*) FROM single_table
 3. ILIKE for text matching
-4. Quote table names with special chars
+4. Quote table names with special chars{filter_rule}
 
 SQL:"""
         
