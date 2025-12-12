@@ -97,8 +97,10 @@ async def intelligent_chat(request: IntelligentChatRequest):
     message = request.message
     session_id = request.session_id or f"session_{uuid.uuid4().hex[:8]}"
     
-    logger.info(f"[INTELLIGENT] Question: {message[:100]}...")
-    logger.info(f"[INTELLIGENT] Project: {project}, Session: {session_id}")
+    logger.warning(f"[INTELLIGENT] ===== NEW REQUEST =====")
+    logger.warning(f"[INTELLIGENT] Message: {message[:100]}...")
+    logger.warning(f"[INTELLIGENT] Project: {project}, Session: {session_id}")
+    logger.warning(f"[INTELLIGENT] Clarifications in request: {request.clarifications}")
     
     try:
         # Import intelligence engine
@@ -200,8 +202,9 @@ async def intelligent_chat(request: IntelligentChatRequest):
         
         # Apply any clarification answers
         if request.clarifications:
+            logger.warning(f"[INTELLIGENT] Received clarifications: {request.clarifications}")
             engine.confirmed_facts.update(request.clarifications)
-            logger.info(f"[INTELLIGENT] Applied clarifications: {list(request.clarifications.keys())}")
+            logger.warning(f"[INTELLIGENT] confirmed_facts after update: {engine.confirmed_facts}")
             
             # LEARNING: Record clarification choices
             if LEARNING_AVAILABLE:
