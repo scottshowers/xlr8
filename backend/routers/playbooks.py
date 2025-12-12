@@ -251,6 +251,123 @@ async def update_progress(project_id: str, action_id: str, update: ProgressUpdat
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/year-end/summary/{project_id}")
+async def get_ai_summary(project_id: str):
+    """Get consolidated AI summary across all scanned actions."""
+    if FRAMEWORK_AVAILABLE:
+        progress = PROGRESS_MANAGER.get_raw_progress("year-end", project_id)
+    else:
+        progress = PLAYBOOK_PROGRESS.get(project_id, {})
+    
+    # Aggregate data
+    all_issues = []
+    all_recommendations = []
+    all_key_values = {}
+    all_conflicts = []
+    actions_with_flags = []
+    high_risk_actions = []
+    
+    # Keywords to filter out noise
+    noise_keywords = [
+        'fein', 'ein', 'federal employer', 'multiple feins', 'fein format',
+        'formatting issue', 'column alignment', 'garbled', 'misaligned data',
+        'conduct complete audit', 'conduct a complete audit', 'ensure consistency',
+        'verify consistency', 'verify and update', 'review data', 'reconcile all'
+    ]
+    
+    for action_id, action_progress in progress.items():
+        findings = action_progress.get("findings", {})
+        if not findings:
+            continue
+        
+        # Collect issues with filtering
+        for issue in findings.get("issues", []):
+            if not any(kw in issue.lower() for kw in noise_keywords):
+                all_issues.append({
+                    "action_id": action_id,
+                    "issue": issue,
+                    "risk_level": findings.get("risk_level", "medium")
+                })
+        
+        # Collect recommendations with filtering
+        for rec in findings.get("recommendations", []):
+            if not any(kw in rec.lower() for kw in noise_keywords):
+                all_recommendations.append({
+                    "action_id": action_id,
+                    "recommendation": rec
+                })
+        
+        # Collect key values
+        for key, value in findings.get("key_values", {}).items():
+            if key not in all_key_values:
+                all_key_values[key] = {"value": value, "source": action_id}
+        
+        # Collect conflicts (excluding FEIN)
+        for conflict in findings.get("conflicts", []):
+            field = conflict.get("field", "").lower()
+            if field != "fein" and "fein" not in conflict.get("message", "").lower():
+                all_conflicts.append(conflict)
+        
+        # Track review flags
+        if action_progress.get("review_flag"):
+            actions_with_flags.append({
+                "action_id": action_id,
+                "flag": action_progress["review_flag"]
+            })
+        
+        # Track high risk
+        if findings.get("risk_level") == "high":
+            high_risk_actions.append({
+                "action_id": action_id,
+                "summary": findings.get("summary", "")
+            })
+    
+    # Sort by risk
+    risk_order = {"high": 0, "medium": 1, "low": 2}
+    all_issues.sort(key=lambda x: risk_order.get(x["risk_level"], 3))
+    
+    # Calculate overall risk
+    if all_conflicts:
+        overall_risk = "high"
+    elif len(high_risk_actions) >= 5:
+        overall_risk = "medium"
+    else:
+        overall_risk = "low"
+    
+    # Generate summary text
+    summary_parts = []
+    if high_risk_actions:
+        summary_parts.append(f"📋 {len(high_risk_actions)} action(s) pending analysis")
+    if all_conflicts:
+        summary_parts.append(f"❗ {len(all_conflicts)} data conflict(s) detected")
+    if actions_with_flags:
+        summary_parts.append(f"🔄 {len(actions_with_flags)} action(s) flagged for review")
+    
+    total_complete = sum(1 for p in progress.values() if p.get("status") == "complete")
+    total_in_progress = sum(1 for p in progress.values() if p.get("status") == "in_progress")
+    
+    return {
+        "project_id": project_id,
+        "overall_risk": overall_risk,
+        "summary_text": " | ".join(summary_parts) if summary_parts else "No critical issues detected",
+        "stats": {
+            "actions_scanned": len(progress),
+            "actions_complete": total_complete,
+            "actions_in_progress": total_in_progress,
+            "total_issues": len(all_issues),
+            "total_recommendations": len(all_recommendations),
+            "total_conflicts": len(all_conflicts),
+            "actions_flagged": len(actions_with_flags)
+        },
+        "issues": all_issues[:20],
+        "recommendations": all_recommendations[:15],
+        "key_values": all_key_values,
+        "conflicts": all_conflicts,
+        "review_flags": actions_with_flags,
+        "high_risk_actions": high_risk_actions
+    }
+
+
 @router.post("/year-end/scan/{project_id}/{action_id}")
 async def scan_for_action(project_id: str, action_id: str):
     """
@@ -612,12 +729,13 @@ async def set_entity_config(project_id: str, request: EntityConfigRequest):
     """Set entity configuration for a project."""
     try:
         from utils.database.models import EntityConfigModel
-        result = EntityConfigModel.set(
+        result = EntityConfigModel.save(
             project_id=project_id,
             playbook_type="year-end",
             primary_entity=request.primary_entity,
-            fein=request.fein,
-            company_name=request.company_name
+            analysis_scope="selected" if request.primary_entity else "all",
+            selected_entities=[request.primary_entity] if request.primary_entity else [],
+            country_mode="us_only"
         )
         return {"success": True, "config": result}
     except ImportError:
