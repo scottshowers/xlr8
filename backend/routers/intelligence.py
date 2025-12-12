@@ -68,7 +68,7 @@ class TaskCompleteRequest(BaseModel):
 def _get_intelligence_service(project: str):
     """Get or create intelligence service for a project."""
     try:
-        from project_intelligence import ProjectIntelligenceService, get_project_intelligence
+        from backend.utils.project_intelligence import ProjectIntelligenceService, get_project_intelligence
         from utils.structured_data_handler import get_structured_handler
         
         handler = get_structured_handler()
