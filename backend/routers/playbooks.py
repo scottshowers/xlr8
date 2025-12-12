@@ -978,6 +978,71 @@ async def playbooks_health():
 
 
 # =============================================================================
+# LEARNING STATS ENDPOINT
+# =============================================================================
+
+@router.get("/learning/stats")
+async def get_learning_stats():
+    """Get learning system statistics."""
+    try:
+        try:
+            from backend.utils.learning_engine import get_learning_system
+        except ImportError:
+            from utils.learning_engine import get_learning_system
+        
+        learning = get_learning_system()
+        stats = learning.get_stats()
+        
+        return {
+            "available": True,
+            "stats": stats,
+            "message": "Learning system active"
+        }
+        
+    except ImportError:
+        return {
+            "available": False,
+            "stats": None,
+            "message": "Learning engine not available"
+        }
+    except Exception as e:
+        logger.error(f"[LEARNING] Stats error: {e}")
+        return {
+            "available": False,
+            "stats": None,
+            "message": str(e)
+        }
+
+
+@router.get("/learning/patterns/{playbook_id}")
+async def get_learning_patterns(playbook_id: str, project_id: str = "global"):
+    """Get learned suppression patterns for a playbook."""
+    try:
+        try:
+            from backend.utils.learning_engine import get_learning_system
+        except ImportError:
+            from utils.learning_engine import get_learning_system
+        
+        learning = get_learning_system()
+        patterns = learning.get_patterns(project_id, playbook_id)
+        
+        return {
+            "playbook_id": playbook_id,
+            "project_id": project_id,
+            "patterns": patterns
+        }
+        
+    except Exception as e:
+        logger.error(f"[LEARNING] Patterns error: {e}")
+        return {
+            "playbook_id": playbook_id,
+            "project_id": project_id,
+            "patterns": {"suppressions": [], "preferences": {}},
+            "error": str(e)
+        }
+
+
+# =============================================================================
 # ENTITY DETECTION ENDPOINT
 # =============================================================================
 
