@@ -96,6 +96,14 @@ except ImportError as e:
     INTELLIGENCE_AVAILABLE = False
     logging.warning(f"Intelligence router import failed: {e}")
 
+# Import unified_chat router (Phase 3.5 Intelligence Consumer)
+try:
+    from backend.routers import unified_chat
+    UNIFIED_CHAT_AVAILABLE = True
+except ImportError as e:
+    UNIFIED_CHAT_AVAILABLE = False
+    logging.warning(f"Unified chat router import failed: {e}")
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -242,6 +250,13 @@ if INTELLIGENCE_AVAILABLE:
 else:
     logger.warning("Intelligence router not available")
 
+# Register unified_chat router if available (Phase 3.5 Intelligence Consumer)
+if UNIFIED_CHAT_AVAILABLE:
+    app.include_router(unified_chat.router, prefix="/api", tags=["unified-chat"])
+    logger.info("✓ Unified chat router registered at /api/chat/unified")
+else:
+    logger.warning("Unified chat router not available")
+
 
 @app.get("/api/health")
 async def health():
@@ -266,6 +281,7 @@ async def health():
             "admin": ADMIN_AVAILABLE,
             "api_connections": API_CONNECTIONS_AVAILABLE,
             "intelligence": INTELLIGENCE_AVAILABLE,
+            "unified_chat": UNIFIED_CHAT_AVAILABLE,
         }
         
         return {
@@ -288,6 +304,7 @@ async def health():
                 "admin": ADMIN_AVAILABLE,
                 "api_connections": API_CONNECTIONS_AVAILABLE,
                 "intelligence": INTELLIGENCE_AVAILABLE,
+                "unified_chat": UNIFIED_CHAT_AVAILABLE,
             }
         }
 
