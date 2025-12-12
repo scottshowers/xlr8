@@ -80,7 +80,7 @@ except ImportError:
 
 # Import intelligence service for Phase 3 analysis
 try:
-    from utils.project_intelligence import ProjectIntelligenceService, AnalysisTier
+    from backend.utils.project_intelligence import ProjectIntelligenceService, AnalysisTier
     INTELLIGENCE_AVAILABLE = True
 except ImportError:
     INTELLIGENCE_AVAILABLE = False
