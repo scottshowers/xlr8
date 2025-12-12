@@ -9,6 +9,11 @@
  * - Export current state anytime
  * 
  * UPDATED: Non-blocking scan-all with live progress (no more 20-min freezes!)
+ * 
+ * Phase 3.6: Document Requirements Integration
+ * - Scan results now include document requirements from master playbook
+ * - Shows required vs found vs missing per action's step
+ * - Clear indication of what documents are still needed
  */
 
 import React, { useState, useEffect, useRef, useCallback, Component } from 'react';
@@ -1633,12 +1638,14 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
         }
         const newDocs = res.data.documents?.map(d => d.filename) || [];
         console.log('[SCAN] Found docs:', newDocs);
+        console.log('[SCAN] Document requirements:', res.data.document_requirements);
         setLocalDocsFound(newDocs);
         setLocalStatus(res.data.suggested_status);
         onUpdate(action.action_id, {
           status: res.data.suggested_status,
           findings: res.data.findings,
-          documents_found: newDocs
+          documents_found: newDocs,
+          document_requirements: res.data.document_requirements  // Phase 3.6
         });
       }
     } catch (err) {
@@ -2148,6 +2155,75 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {/* Phase 3.6: Show Document Requirements from Master Playbook */}
+          {progress?.document_requirements?.requirements?.length > 0 && (
+            <div style={styles.section}>
+              <div style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center',
+                marginBottom: '0.5rem'
+              }}>
+                <div style={styles.sectionTitle}>📋 Step {progress.document_requirements.step_number} Document Requirements</div>
+                <span style={{
+                  fontSize: '0.7rem',
+                  padding: '0.2rem 0.5rem',
+                  borderRadius: '10px',
+                  background: progress.document_requirements.stats?.missing > 0 ? '#fef2f2' : '#f0fdf4',
+                  color: progress.document_requirements.stats?.missing > 0 ? '#dc2626' : '#059669',
+                  fontWeight: '600'
+                }}>
+                  {progress.document_requirements.stats?.found || 0}/{progress.document_requirements.stats?.total || 0} found
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                {progress.document_requirements.requirements.map((req, i) => (
+                  <div key={i} style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.4rem 0.6rem',
+                    background: req.status === 'found' ? '#f0fdf4' : '#fef2f2',
+                    border: `1px solid ${req.status === 'found' ? '#bbf7d0' : '#fecaca'}`,
+                    borderRadius: '4px',
+                    fontSize: '0.8rem'
+                  }}>
+                    <span>{req.status === 'found' ? '✅' : '❌'}</span>
+                    <span style={{ fontWeight: '500', flex: 1 }}>{req.keyword}</span>
+                    {req.required && (
+                      <span style={{ 
+                        fontSize: '0.65rem', 
+                        background: '#fee2e2', 
+                        color: '#dc2626',
+                        padding: '0.1rem 0.3rem',
+                        borderRadius: '3px',
+                        fontWeight: '600'
+                      }}>Required</span>
+                    )}
+                    {req.matched_file && (
+                      <span style={{ color: '#6b7280', fontSize: '0.7rem' }}>
+                        → {req.matched_file.length > 25 ? req.matched_file.slice(0, 25) + '...' : req.matched_file}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {progress.document_requirements.stats?.required_missing > 0 && (
+                <div style={{
+                  marginTop: '0.5rem',
+                  padding: '0.4rem 0.6rem',
+                  background: '#fef3c7',
+                  border: '1px solid #fcd34d',
+                  borderRadius: '4px',
+                  fontSize: '0.75rem',
+                  color: '#92400e'
+                }}>
+                  ⚠️ {progress.document_requirements.stats.required_missing} required document(s) missing
+                </div>
+              )}
             </div>
           )}
 
