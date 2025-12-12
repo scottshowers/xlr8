@@ -346,7 +346,7 @@ async def debug_imports():
     
     # Check project intelligence
     try:
-        from utils.project_intelligence import ProjectIntelligenceService
+        from backend.utils.project_intelligence import ProjectIntelligenceService
         results['project_intelligence'] = 'OK'
     except Exception as e:
         results['project_intelligence'] = f'ERROR: {e}'
