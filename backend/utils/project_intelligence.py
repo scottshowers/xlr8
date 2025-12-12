@@ -777,6 +777,9 @@ class ProjectIntelligenceService:
         # Detect reference tables and build lookups
         self._detect_reference_tables(tables)
         
+        # Also extract lookups from categorical columns in column profiles
+        self._detect_profile_based_lookups(tables)
+        
         # Detect relationships between tables
         self._detect_relationships(tables)
         
@@ -807,7 +810,10 @@ class ProjectIntelligenceService:
             
             # Skip large tables - probably not reference
             if row_count > 500:
+                logger.debug(f"[INTELLIGENCE] Skipping {table_name} for lookup detection (row_count={row_count} > 500)")
                 continue
+            
+            logger.debug(f"[INTELLIGENCE] Checking {table_name} for lookup potential (row_count={row_count}, cols={len(columns)})")
             
             # Look for code/description pairs
             code_col = None
@@ -826,6 +832,7 @@ class ProjectIntelligenceService:
             if not code_col and not desc_col and len(columns) >= 2 and row_count <= 100:
                 code_col = columns[0]
                 desc_col = columns[1]
+                logger.debug(f"[INTELLIGENCE] Using fallback columns for {table_name}: {code_col} -> {desc_col}")
             
             if code_col and desc_col:
                 try:
@@ -870,10 +877,83 @@ class ProjectIntelligenceService:
                                 lookup_data=lookup_data,
                                 entry_count=len(lookup_data)
                             ))
-                            logger.debug(f"[INTELLIGENCE] Found lookup: {table_name} ({len(lookup_data)} entries)")
+                            logger.warning(f"[INTELLIGENCE] Found lookup: {table_name} ({len(lookup_data)} entries, type={lookup_type})")
                             
                 except Exception as e:
                     logger.debug(f"[INTELLIGENCE] Lookup detection failed for {table_name}: {e}")
+        
+        # Summary log
+        logger.warning(f"[INTELLIGENCE] Lookup detection complete: scanned {len(tables)} tables, found {len(self.lookups)} lookups")
+    
+    def _detect_profile_based_lookups(self, tables: List[Dict]) -> None:
+        """
+        Extract lookup-like data from categorical columns in column profiles.
+        
+        This catches cases where code→description mappings are embedded in
+        large transactional tables rather than separate reference tables.
+        """
+        if not self.handler or not self.handler.conn:
+            return
+        
+        try:
+            # Check if column profiles exist
+            profile_exists = self.handler.conn.execute("""
+                SELECT COUNT(*) FROM _column_profiles WHERE project_name = ?
+            """, [self.project]).fetchone()
+            
+            if not profile_exists or profile_exists[0] == 0:
+                logger.debug("[INTELLIGENCE] No column profiles found for profile-based lookup detection")
+                return
+            
+            # Get categorical columns with few unique values (potential lookups)
+            profiles = self.handler.conn.execute("""
+                SELECT table_name, column_name, distinct_count, top_values_json
+                FROM _column_profiles 
+                WHERE project_name = ?
+                AND inferred_type = 'categorical'
+                AND distinct_count <= 50
+                AND distinct_count > 1
+                AND top_values_json IS NOT NULL
+            """, [self.project]).fetchall()
+            
+            for row in profiles:
+                table_name, col_name, distinct_count, top_values_json = row
+                
+                # Check if we already have a lookup for this column type
+                col_lower = col_name.lower()
+                already_have = any(
+                    l.code_column.lower() == col_lower or l.lookup_type in col_lower
+                    for l in self.lookups
+                )
+                if already_have:
+                    continue
+                
+                # Parse top values
+                try:
+                    top_values = json.loads(top_values_json) if top_values_json else []
+                    if not top_values:
+                        continue
+                    
+                    # Build simple code->code lookup (values map to themselves)
+                    # This is useful for enrichment/filtering even without descriptions
+                    lookup_data = {str(v['value']): str(v['value']) for v in top_values if v.get('value')}
+                    
+                    if lookup_data:
+                        # Determine lookup type
+                        lookup_type = "categorical"
+                        for hint in ['status', 'type', 'code', 'category', 'group']:
+                            if hint in col_lower:
+                                lookup_type = hint
+                                break
+                        
+                        # Don't add as formal lookup, but log for awareness
+                        logger.debug(f"[INTELLIGENCE] Profile lookup candidate: {table_name}.{col_name} ({distinct_count} values, type={lookup_type})")
+                        
+                except Exception as e:
+                    logger.debug(f"[INTELLIGENCE] Failed to parse profile for {table_name}.{col_name}: {e}")
+                    
+        except Exception as e:
+            logger.debug(f"[INTELLIGENCE] Profile-based lookup detection failed: {e}")
     
     def _detect_relationships(self, tables: List[Dict]) -> None:
         """Detect foreign key relationships between tables."""
