@@ -25,7 +25,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v4.1 SMART STATUS SELECT ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v4.2 DEBUG LOOP ======")
 
 
 # =============================================================================
@@ -247,10 +247,13 @@ class IntelligenceEngine:
         """
         needed = []
         
+        logger.warning(f"[CLARIFICATION] Checking needed. confirmed_facts={self.confirmed_facts}, filter_candidates={list(self.filter_candidates.keys())}")
+        
         # Check each available filter category
         for category in self.filter_candidates.keys():
             # Skip if already confirmed
             if category in self.confirmed_facts:
+                logger.warning(f"[CLARIFICATION] Skipping {category} - already confirmed as {self.confirmed_facts[category]}")
                 continue
             
             # Check if specified in question
@@ -269,6 +272,7 @@ class IntelligenceEngine:
         priority_order = ['status', 'company', 'organization', 'location', 'employee_type', 'pay_type', 'job']
         needed.sort(key=lambda x: priority_order.index(x) if x in priority_order else 99)
         
+        logger.warning(f"[CLARIFICATION] Needed clarifications: {needed}")
         return needed
     
     def _detect_filter_in_question(self, category: str, q_lower: str) -> Optional[str]:
@@ -917,7 +921,7 @@ class IntelligenceEngine:
     
     def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
         """Generate SQL query using LLMOrchestrator with SMART table selection."""
-        logger.warning(f"[SQL-GEN] v4.1 - Starting SQL generation")
+        logger.warning(f"[SQL-GEN] v4.2 - Starting SQL generation")
         logger.warning(f"[SQL-GEN] confirmed_facts: {self.confirmed_facts}")
         
         if not self.structured_handler or not self.schema:
