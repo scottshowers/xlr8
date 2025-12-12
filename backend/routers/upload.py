@@ -10,6 +10,7 @@ FEATURES:
 - Smart Excel parsing (detects blue/colored headers)
 - SMART PDF ROUTING - tabular PDFs go to DuckDB!
 - CONTENT-BASED ROUTING - routes by content, not file extension
+- INTELLIGENCE ANALYSIS - runs on upload for instant insights (Phase 3)
 
 ROUTING LOGIC:
 - XLSX/XLS/CSV → DuckDB ONLY (never ChromaDB - structured data doesn't chunk)
@@ -77,6 +78,15 @@ except ImportError:
     logger_temp = logging.getLogger(__name__)
     logger_temp.warning("Document analyzer not available - DOCX/TXT will use extension-based routing")
 
+# Import intelligence service for Phase 3 analysis
+try:
+    from utils.project_intelligence import ProjectIntelligenceService, AnalysisTier
+    INTELLIGENCE_AVAILABLE = True
+except ImportError:
+    INTELLIGENCE_AVAILABLE = False
+    logger_temp = logging.getLogger(__name__)
+    logger_temp.warning("Project intelligence not available - upload analysis disabled")
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -91,10 +101,11 @@ async def debug_features():
     import os
     
     results = {
-        "version": "2025-12-03-v9-llm-based-analyzer",  # Update this when deploying
+        "version": "2025-12-12-v10-with-intelligence",  # Update this when deploying
         "smart_pdf_available": SMART_PDF_AVAILABLE,
         "structured_handler_available": STRUCTURED_HANDLER_AVAILABLE,
         "openpyxl_available": OPENPYXL_AVAILABLE,
+        "intelligence_available": INTELLIGENCE_AVAILABLE,
         "files_in_utils": [],
         "import_errors": []
     }
@@ -129,6 +140,16 @@ async def debug_features():
     except Exception as e:
         results["structured_handler_import"] = f"ERROR: {e}"
         results["import_errors"].append(f"structured_data_handler: {e}")
+    
+    try:
+        from utils.project_intelligence import ProjectIntelligenceService
+        results["intelligence_import"] = "SUCCESS"
+    except ImportError as e:
+        results["intelligence_import"] = f"FAILED: {e}"
+        results["import_errors"].append(f"project_intelligence: {e}")
+    except Exception as e:
+        results["intelligence_import"] = f"ERROR: {e}"
+        results["import_errors"].append(f"project_intelligence: {e}")
     
     # Check pdfplumber
     try:
@@ -424,7 +445,7 @@ class JobQueue:
                 finally:
                     self._current_job = None
                     if job.job_id in self._job_positions:
-                        del self._job_positions[job.job_id]
+                        del self._job_positions[job_id]
                     self._queue.task_done()
                     self._update_positions()
                     
@@ -441,6 +462,72 @@ class JobQueue:
 
 # Global queue instance
 job_queue = JobQueue()
+
+
+# =============================================================================
+# INTELLIGENCE ANALYSIS HELPER
+# =============================================================================
+
+def run_intelligence_analysis(project: str, handler, job_id: str) -> dict:
+    """
+    Run intelligence analysis on uploaded data.
+    
+    This is the Phase 3 Universal Analysis Engine integration.
+    Runs Tier 1 (instant) and Tier 2 (fast) analysis.
+    
+    Returns summary of findings, tasks, and alerts.
+    """
+    if not INTELLIGENCE_AVAILABLE:
+        logger.warning("[INTELLIGENCE] Intelligence module not available, skipping analysis")
+        return None
+    
+    try:
+        ProcessingJobModel.update_progress(job_id, 72, "Running intelligence analysis...")
+        
+        intelligence = ProjectIntelligenceService(project, handler)
+        analysis = intelligence.analyze(tiers=[AnalysisTier.TIER_1, AnalysisTier.TIER_2])
+        
+        if 'error' in analysis:
+            logger.warning(f"[INTELLIGENCE] Analysis returned error: {analysis.get('error')}")
+            return None
+        
+        # Extract summary
+        findings_count = len(analysis.get('findings', []))
+        tasks_count = analysis.get('tasks', {}).get('total', 0)
+        critical_count = analysis.get('findings_summary', {}).get('critical', 0)
+        warning_count = analysis.get('findings_summary', {}).get('warning', 0)
+        lookups_count = len(analysis.get('lookups', []))
+        relationships_count = len(analysis.get('structure', {}).get('relationships', []))
+        
+        intelligence_summary = {
+            'findings': findings_count,
+            'tasks': tasks_count,
+            'critical': critical_count,
+            'warning': warning_count,
+            'lookups_detected': lookups_count,
+            'relationships_detected': relationships_count,
+            'analyzed_at': analysis.get('analyzed_at'),
+            'analysis_time_seconds': analysis.get('analysis_time_seconds')
+        }
+        
+        # Build status message
+        if critical_count > 0:
+            status_msg = f"⚠️ Intelligence: {critical_count} critical, {warning_count} warnings, {tasks_count} tasks"
+        elif findings_count > 0:
+            status_msg = f"✅ Intelligence: {findings_count} findings, {tasks_count} tasks"
+        else:
+            status_msg = f"✅ Intelligence: Data looks clean"
+        
+        ProcessingJobModel.update_progress(job_id, 78, status_msg)
+        logger.info(f"[INTELLIGENCE] Analysis complete: {findings_count} findings, {tasks_count} tasks, {critical_count} critical")
+        
+        return intelligence_summary
+        
+    except Exception as e:
+        logger.warning(f"[INTELLIGENCE] Analysis failed: {e}")
+        import traceback
+        logger.warning(traceback.format_exc())
+        return None
 
 
 # =============================================================================
@@ -461,9 +548,10 @@ def process_file_background(
     
     This is where all the heavy lifting happens:
     1. For Excel/CSV: Store in DuckDB (structured queries)
-    2. For TABULAR PDFs: Smart detection → DuckDB + ChromaDB
-    3. For TEXT PDFs/Docs: Extract text, chunk, embed in ChromaDB
-    4. Update job status throughout
+    2. Run intelligence analysis (Phase 3)
+    3. For TABULAR PDFs: Smart detection → DuckDB + ChromaDB
+    4. For TEXT PDFs/Docs: Extract text, chunk, embed in ChromaDB
+    5. Update job status throughout
     """
     try:
         logger.warning(f"[BACKGROUND] === STARTING JOB {job_id} ===")
@@ -495,6 +583,14 @@ def process_file_background(
                     f"Created {tables_created} table(s) with {total_rows:,} rows"
                 )
                 
+                # =====================================================
+                # INTELLIGENCE ANALYSIS - Phase 3
+                # Run Tier 1 + 2 analysis on uploaded data
+                # =====================================================
+                intelligence_summary = run_intelligence_analysis(project, handler, job_id)
+                if intelligence_summary:
+                    result['intelligence'] = intelligence_summary
+                
                 # Store schema summary in documents table for reference
                 if project_id:
                     try:
@@ -512,7 +608,8 @@ def process_file_background(
                                 'tables': result.get('tables_created', []),
                                 'total_rows': total_rows,
                                 'project': project,
-                                'functional_area': functional_area
+                                'functional_area': functional_area,
+                                'intelligence': intelligence_summary
                             }
                         )
                         logger.info(f"[BACKGROUND] Saved structured data metadata to database")
@@ -550,7 +647,8 @@ def process_file_background(
                         metadata={
                             'project_name': project,
                             'functional_area': functional_area,
-                            'file_size': file_size
+                            'file_size': file_size,
+                            'intelligence': intelligence_summary
                         }
                     )
                     logger.info(f"[BACKGROUND] Registered document in registry: {filename} ({usage_type})")
@@ -565,15 +663,22 @@ def process_file_background(
                     except:
                         pass
                 
-                # Complete!
-                ProcessingJobModel.complete(job_id, {
+                # Build completion result
+                completion_result = {
                     'filename': filename,
                     'type': 'structured',
                     'tables_created': tables_created,
                     'total_rows': total_rows,
                     'project': project,
                     'functional_area': functional_area
-                })
+                }
+                
+                # Add intelligence summary to completion
+                if intelligence_summary:
+                    completion_result['intelligence'] = intelligence_summary
+                
+                # Complete!
+                ProcessingJobModel.complete(job_id, completion_result)
                 
                 logger.info(f"[BACKGROUND] Structured data job {job_id} completed!")
                 return
@@ -629,6 +734,15 @@ def process_file_background(
                 duckdb_success = 'duckdb' in pdf_result.get('storage_used', [])
                 
                 if duckdb_success:
+                    # Run intelligence analysis on PDF tables
+                    try:
+                        handler = get_structured_handler()
+                        intelligence_summary = run_intelligence_analysis(project, handler, job_id)
+                        if intelligence_summary:
+                            pdf_result['intelligence'] = intelligence_summary
+                    except Exception as int_e:
+                        logger.warning(f"[BACKGROUND] PDF intelligence analysis failed: {int_e}")
+                    
                     # Register in document registry
                     try:
                         from utils.database.models import DocumentRegistryModel
@@ -653,7 +767,8 @@ def process_file_background(
                                     'is_tabular': analysis.get('is_tabular', False),
                                     'confidence': analysis.get('confidence', 0),
                                     'table_pages': len(analysis.get('table_pages', []))
-                                }
+                                },
+                                'intelligence': pdf_result.get('intelligence')
                             }
                         )
                         logger.info(f"[BACKGROUND] Registered PDF in registry with DuckDB tables")
@@ -682,7 +797,8 @@ def process_file_background(
                         'type': 'smart_pdf',
                         'storage': pdf_result.get('storage_used', []),
                         'duckdb_rows': pdf_result.get('duckdb_result', {}).get('total_rows', 0),
-                        'project': project
+                        'project': project,
+                        'intelligence': pdf_result.get('intelligence')
                     })
                     logger.info(f"[BACKGROUND] Smart PDF job {job_id} completed (DuckDB only)")
                     return
@@ -705,7 +821,8 @@ def process_file_background(
                         'storage': pdf_result.get('storage_used', []),
                         'duckdb_rows': pdf_result.get('duckdb_result', {}).get('total_rows', 0),
                         'project': project,
-                        'note': 'ChromaDB skipped - large tabular PDF'
+                        'note': 'ChromaDB skipped - large tabular PDF',
+                        'intelligence': pdf_result.get('intelligence')
                     })
                     logger.info(f"[BACKGROUND] Smart PDF job {job_id} completed (DuckDB only - large tabular)")
                     return
@@ -804,6 +921,9 @@ def process_file_background(
                                             ProcessingJobModel.update_progress(job_id, 70, 
                                                 f"Created table with {result.get('row_count', 0):,} rows")
                                             
+                                            # Run intelligence analysis
+                                            intelligence_summary = run_intelligence_analysis(project, handler, job_id)
+                                            
                                             # Register in document registry
                                             try:
                                                 from utils.database.models import DocumentRegistryModel
@@ -821,7 +941,8 @@ def process_file_background(
                                                         'functional_area': functional_area,
                                                         'original_type': file_ext,
                                                         'detected_structure': 'tabular',
-                                                        'delimiter': delimiter
+                                                        'delimiter': delimiter,
+                                                        'intelligence': intelligence_summary
                                                     }
                                                 )
                                             except Exception as reg_e:
@@ -839,7 +960,8 @@ def process_file_background(
                                                 'type': 'structured_from_text',
                                                 'original_format': file_ext,
                                                 'rows': result.get('row_count', 0),
-                                                'project': project
+                                                'project': project,
+                                                'intelligence': intelligence_summary
                                             })
                                             
                                             logger.info(f"[BACKGROUND] Converted {file_ext} to structured data!")
@@ -879,6 +1001,9 @@ def process_file_background(
                                                 except:
                                                     pass
                                                 
+                                                # Run intelligence analysis
+                                                intelligence_summary = run_intelligence_analysis(project, handler, job_id)
+                                                
                                                 # Complete as structured
                                                 if file_path and os.path.exists(file_path):
                                                     try:
@@ -891,7 +1016,8 @@ def process_file_background(
                                                     'type': 'structured_from_docx_table',
                                                     'tables_found': len(tables_data),
                                                     'rows': result.get('row_count', 0),
-                                                    'project': project
+                                                    'project': project,
+                                                    'intelligence': intelligence_summary
                                                 })
                                                 
                                                 logger.info(f"[BACKGROUND] Extracted {len(tables_data)} tables from DOCX!")
