@@ -25,7 +25,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v4.0 MULTI-FILTER ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v4.1 SMART STATUS SELECT ======")
 
 
 # =============================================================================
@@ -421,10 +421,10 @@ class IntelligenceEngine:
         return self.ask(question)  # Recursive call to continue
     
     def _request_employee_status_clarification(self, question: str) -> SynthesizedAnswer:
-        """Ask for employee status clarification using ACTUAL values from the data."""
+        """Ask for employee status clarification using ACTUAL values from filter_candidates."""
         
-        # Get actual status values from profile data
-        status_options = self._get_status_options_from_profiles()
+        # Get status options from filter_candidates (smarter selection)
+        status_options = self._get_status_options_from_filter_candidates()
         
         if not status_options:
             # Fallback to generic options if no profile data
@@ -441,7 +441,7 @@ class IntelligenceEngine:
             structured_output={
                 'type': 'clarification_needed',
                 'questions': [{
-                    'id': 'employee_status',
+                    'id': 'status',  # Use 'status' consistently (was 'employee_status')
                     'question': 'Which employees should I include?',
                     'type': 'radio',
                     'options': status_options
@@ -452,6 +452,94 @@ class IntelligenceEngine:
             },
             reasoning=['Need to know which employees to include']
         )
+    
+    def _get_status_options_from_filter_candidates(self) -> List[Dict]:
+        """
+        Get employee status options from filter_candidates.
+        Prioritizes columns from employee-level tables (lower row counts).
+        """
+        status_candidates = self.filter_candidates.get('status', [])
+        
+        if not status_candidates:
+            return []
+        
+        # Find the BEST status column:
+        # 1. Prefer employment_status_code/employment_status over others
+        # 2. Prefer tables with ~14k rows (employee-level) over 60k+ (transaction-level)
+        best_candidate = None
+        
+        for candidate in status_candidates:
+            col_name = candidate.get('column', '').lower()
+            total_count = candidate.get('total_count', 0)
+            col_type = candidate.get('type', '')
+            
+            # Skip transaction tables (too many rows per employee)
+            if total_count > 20000:
+                continue
+            
+            # Prefer employment_status columns
+            if 'employment_status' in col_name:
+                best_candidate = candidate
+                break
+            
+            # termination_date is good but harder to show counts
+            if col_type == 'date' and 'termination' in col_name:
+                if not best_candidate:
+                    best_candidate = candidate
+                continue
+            
+            # Any categorical status column from employee-level table
+            if not best_candidate and col_type == 'categorical':
+                best_candidate = candidate
+        
+        if not best_candidate:
+            # Fallback to first candidate
+            best_candidate = status_candidates[0] if status_candidates else None
+        
+        if not best_candidate:
+            return []
+        
+        logger.warning(f"[CLARIFICATION] Using status column: {best_candidate.get('column')} from {best_candidate.get('table', '').split('__')[-1]}")
+        
+        col_type = best_candidate.get('type', '')
+        
+        # Handle termination_date (date type)
+        if col_type == 'date':
+            total = best_candidate.get('total_count', 0)
+            null_count = best_candidate.get('null_count', 0)
+            active_count = null_count  # null termination_date = active
+            termed_count = total - null_count
+            
+            return [
+                {'id': 'active', 'label': f'Active only ({active_count:,} employees)', 'default': True},
+                {'id': 'termed', 'label': f'Terminated only ({termed_count:,} employees)'},
+                {'id': 'all', 'label': f'All employees ({total:,} total)'}
+            ]
+        
+        # Handle categorical status column (A/T codes)
+        values = best_candidate.get('values', [])
+        distribution = best_candidate.get('distribution', {})
+        total = best_candidate.get('total_count', 0)
+        
+        # Map codes to active/termed
+        active_codes = ['A', 'ACTIVE', 'ACT']
+        termed_codes = ['T', 'TERMINATED', 'TERM', 'I', 'INACTIVE']
+        leave_codes = ['L', 'LEAVE', 'LOA']
+        
+        active_count = sum(distribution.get(v, 0) for v in values if str(v).upper() in active_codes)
+        termed_count = sum(distribution.get(v, 0) for v in values if str(v).upper() in termed_codes)
+        leave_count = sum(distribution.get(v, 0) for v in values if str(v).upper() in leave_codes)
+        
+        options = []
+        if active_count > 0:
+            options.append({'id': 'active', 'label': f'Active only ({active_count:,} employees)', 'default': True})
+        if termed_count > 0:
+            options.append({'id': 'termed', 'label': f'Terminated only ({termed_count:,} employees)'})
+        if leave_count > 0:
+            options.append({'id': 'leave', 'label': f'On Leave ({leave_count:,} employees)'})
+        options.append({'id': 'all', 'label': f'All employees ({total:,} total)'})
+        
+        return options
     
     def _get_status_options_from_profiles(self) -> List[Dict]:
         """
@@ -626,7 +714,7 @@ class IntelligenceEngine:
         filters = []
         
         # STATUS FILTER
-        status_filter = self.confirmed_facts.get('status') or self.confirmed_facts.get('employee_status')
+        status_filter = self.confirmed_facts.get('status')
         logger.warning(f"[SQL-GEN] Building filters. status={status_filter}, all_facts={self.confirmed_facts}")
         
         if status_filter and status_filter != 'all':
@@ -829,7 +917,7 @@ class IntelligenceEngine:
     
     def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
         """Generate SQL query using LLMOrchestrator with SMART table selection."""
-        logger.warning(f"[SQL-GEN] v4.0 - Starting SQL generation")
+        logger.warning(f"[SQL-GEN] v4.1 - Starting SQL generation")
         logger.warning(f"[SQL-GEN] confirmed_facts: {self.confirmed_facts}")
         
         if not self.structured_handler or not self.schema:
