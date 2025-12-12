@@ -1,10 +1,7 @@
 """
-Playbooks Router v3 - Interactive Year-End Checklist + Intelligence Integration
+Playbooks Router v3 - Interactive Year-End Checklist
 
-Phase 3.6: Playbooks now consume Project Intelligence Service.
-- Scan results include document requirements from Step_Documents
-- Validates required vs found vs missing per action
-- Data quality alerts from intelligence (when relevant)
+Phase 3.6: Intelligence service imported for P2 integration.
 
 Endpoints:
 - GET /playbooks/year-end/structure - Get parsed playbook structure
@@ -633,130 +630,6 @@ def get_inherited_data(project_id: str, action_id: str) -> Dict[str, Any]:
         "documents": list(set(inherited_docs)),  # Dedupe
         "findings": inherited_findings,
         "content": inherited_content
-    }
-
-
-def get_document_requirements_for_action(action_id: str, project_id: str) -> Dict[str, Any]:
-    """
-    Get document requirements for a specific action's step.
-    
-    Phase 3.6: Each action belongs to a step, and each step has required documents
-    defined in the Step_Documents sheet of the master playbook.
-    
-    Returns:
-        {
-            'step_number': '2',
-            'step_name': 'Review and Update Company Information',
-            'requirements': [
-                {'keyword': 'Company Tax Verification', 'description': '...', 'required': True, 'matched_file': 'file.xlsx'},
-                {'keyword': 'Company Master', 'description': '...', 'required': True, 'matched_file': None},
-            ],
-            'stats': {'total': 13, 'found': 8, 'missing': 5, 'required_missing': 3}
-        }
-    """
-    try:
-        from backend.utils.playbook_parser import load_step_documents, match_documents_to_step, get_duckdb_connection
-    except ImportError:
-        from utils.playbook_parser import load_step_documents, match_documents_to_step, get_duckdb_connection
-    
-    # Extract step number from action_id (e.g., "2A" -> "2", "10B" -> "10")
-    step_number = ''.join(c for c in action_id if c.isdigit())
-    if not step_number:
-        return {'step_number': None, 'requirements': [], 'stats': {}}
-    
-    # Load step documents mapping
-    step_docs = load_step_documents()
-    if not step_docs or step_number not in step_docs:
-        logger.info(f"[DOC-REQ] No document requirements for step {step_number}")
-        return {'step_number': step_number, 'requirements': [], 'stats': {}}
-    
-    # Get uploaded files for this project
-    uploaded_files = []
-    seen = set()
-    
-    conn = get_duckdb_connection()
-    if conn:
-        try:
-            # From _schema_metadata (Excel files)
-            result = conn.execute("""
-                SELECT DISTINCT file_name, project
-                FROM _schema_metadata
-                WHERE file_name IS NOT NULL
-                AND is_current = TRUE
-            """).fetchall()
-            
-            for row in result:
-                file_name, proj = row
-                is_global = proj and proj.lower() in ('global', '__global__')
-                is_project = proj and project_id[:8].lower() in proj.lower()
-                
-                if (is_global or is_project) and file_name and file_name.lower() not in seen:
-                    uploaded_files.append(file_name)
-                    seen.add(file_name.lower())
-            
-            conn.close()
-        except Exception as e:
-            logger.warning(f"[DOC-REQ] Error getting uploaded files: {e}")
-    
-    # Also check ChromaDB for PDFs
-    try:
-        from utils.rag_handler import RAGHandler
-        rag = RAGHandler()
-        collection = rag.client.get_or_create_collection(name="documents")
-        results = collection.get(include=["metadatas"], limit=500)
-        
-        for metadata in results.get("metadatas", []):
-            doc_project = metadata.get("project_id") or metadata.get("project", "")
-            is_global = doc_project.lower() in ('global', '__global__')
-            is_project = project_id[:8].lower() in doc_project.lower()
-            
-            if is_global or is_project:
-                filename = metadata.get("source", metadata.get("filename", ""))
-                if filename and filename.lower() not in seen:
-                    uploaded_files.append(filename)
-                    seen.add(filename.lower())
-    except Exception as e:
-        logger.debug(f"[DOC-REQ] ChromaDB check failed: {e}")
-    
-    logger.info(f"[DOC-REQ] Action {action_id} (Step {step_number}): {len(uploaded_files)} files available")
-    
-    # Match documents
-    step_requirements = step_docs[step_number]
-    match_result = match_documents_to_step(step_requirements, uploaded_files)
-    
-    # Build combined requirements list with match status
-    requirements = []
-    for doc in match_result.get('matched', []):
-        requirements.append({
-            'keyword': doc['keyword'],
-            'description': doc.get('description', ''),
-            'required': doc.get('required', False),
-            'matched_file': doc.get('matched_file'),
-            'status': 'found'
-        })
-    
-    for doc in match_result.get('missing', []):
-        requirements.append({
-            'keyword': doc['keyword'],
-            'description': doc.get('description', ''),
-            'required': doc.get('required', False),
-            'matched_file': None,
-            'status': 'missing'
-        })
-    
-    stats = match_result.get('stats', {})
-    
-    logger.info(f"[DOC-REQ] Step {step_number}: {stats.get('matched', 0)} found, {stats.get('missing', 0)} missing")
-    
-    return {
-        'step_number': step_number,
-        'requirements': requirements,
-        'stats': {
-            'total': stats.get('total', len(requirements)),
-            'found': stats.get('matched', 0),
-            'missing': stats.get('missing', 0),
-            'required_missing': stats.get('required_missing', 0)
-        }
     }
 
 
@@ -1743,19 +1616,13 @@ async def scan_for_action(project_id: str, action_id: str):
         # Persist to file
         save_progress(PLAYBOOK_PROGRESS)
         
-        # =====================================================================
-        # PHASE 3.6: GET DOCUMENT REQUIREMENTS FOR THIS ACTION
-        # =====================================================================
-        document_requirements = get_document_requirements_for_action(action_id, project_id)
-        
         return {
             "found": len(found_docs) > 0,
             "documents": found_docs,
             "findings": findings,
             "suggested_status": final_status,
             "inherited_from": parent_actions if parent_actions else None,
-            "conflicts": conflicts,
-            "document_requirements": document_requirements  # Phase 3.6
+            "conflicts": conflicts
         }
         
     except HTTPException:
@@ -1845,17 +1712,13 @@ async def handle_dependent_action(
     
     save_progress(PLAYBOOK_PROGRESS)
     
-    # Phase 3.6: Get document requirements for dependent action too
-    document_requirements = get_document_requirements_for_action(action_id, project_id)
-    
     return {
         "found": len(parent_docs) > 0,
         "documents": [{"filename": d, "match_type": "inherited", "snippet": f"From {primary_parent}"} for d in set(parent_docs)],
         "findings": findings,
         "suggested_status": suggested_status,
         "inherited_from": parent_actions,
-        "is_dependent": True,
-        "document_requirements": document_requirements  # Phase 3.6
+        "is_dependent": True
     }
 
 
