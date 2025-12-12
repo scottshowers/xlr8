@@ -83,6 +83,9 @@ try:
         YEAR_END_DEPENDENT_GUIDANCE,
     )
     YEAR_END_CONFIG = get_year_end_config()
+    # Register the playbook on import
+    if FRAMEWORK_AVAILABLE:
+        register_year_end_playbook()
 except ImportError:
     try:
         from playbooks.year_end_playbook import (
@@ -92,6 +95,9 @@ except ImportError:
             YEAR_END_DEPENDENT_GUIDANCE,
         )
         YEAR_END_CONFIG = get_year_end_config()
+        # Register the playbook on import
+        if FRAMEWORK_AVAILABLE:
+            register_year_end_playbook()
     except ImportError:
         YEAR_END_CONFIG = {}
         logger.warning("[PLAYBOOKS] Year-End config not available")
@@ -630,13 +636,14 @@ async def get_suppressions(project_id: str):
     """Get suppression rules for a project."""
     try:
         from utils.database.models import FindingSuppressionModel
-        rules = FindingSuppressionModel.get_active(project_id, "year-end")
-        return {"rules": rules}
+        rules = FindingSuppressionModel.get_by_project(project_id, "year-end")
+        stats = FindingSuppressionModel.get_stats(project_id, "year-end")
+        return {"rules": rules, "stats": stats}
     except ImportError:
-        return {"rules": [], "message": "Suppression not available"}
+        return {"rules": [], "stats": {}, "message": "Suppression not available"}
     except Exception as e:
         logger.error(f"[SUPPRESS] Get rules error: {e}")
-        return {"rules": [], "error": str(e)}
+        return {"rules": [], "stats": {}, "error": str(e)}
 
 
 @router.post("/year-end/suppress/quick/{project_id}/{action_id}")
@@ -745,3 +752,208 @@ async def playbooks_health():
         "year_end_config_loaded": bool(YEAR_END_CONFIG),
         "learning_available": FRAMEWORK_AVAILABLE and LearningHook.is_available()
     }
+
+
+# =============================================================================
+# ENTITY DETECTION ENDPOINT
+# =============================================================================
+
+async def get_project_documents_text(project_id: str) -> List[str]:
+    """Get all document text for a project (for entity detection)."""
+    texts = []
+    project_name = None
+    
+    # Get project NAME from Supabase
+    try:
+        supabase = get_supabase()
+        if supabase:
+            result = supabase.table('projects').select('name').eq('id', project_id).execute()
+            if result.data and len(result.data) > 0:
+                project_name = result.data[0].get('name')
+    except Exception as e:
+        logger.debug(f"[ENTITIES] Could not get project name: {e}")
+    
+    # 1. Try DuckDB (structured data)
+    if project_name:
+        try:
+            from backend.utils.playbook_parser import get_duckdb_connection
+            conn = get_duckdb_connection()
+            if conn:
+                try:
+                    tables = conn.execute("""
+                        SELECT table_name, file_name 
+                        FROM _schema_metadata 
+                        WHERE LOWER(project) = LOWER(?) AND is_current = TRUE
+                    """, [project_name]).fetchall()
+                    
+                    for table_name, file_name in tables:
+                        try:
+                            df = conn.execute(f'SELECT * FROM "{table_name}" LIMIT 500').fetchdf()
+                            if df is not None and not df.empty:
+                                texts.append(f"[Source: {file_name}]\n{df.to_string()}")
+                        except Exception:
+                            pass
+                    
+                    # Also check _pdf_tables
+                    try:
+                        pdf_tables = conn.execute("""
+                            SELECT table_name, source_file 
+                            FROM _pdf_tables 
+                            WHERE project = ? OR project_id = ?
+                        """, [project_name, project_id]).fetchall()
+                        
+                        for table_name, source_file in pdf_tables:
+                            try:
+                                df = conn.execute(f'SELECT * FROM "{table_name}" LIMIT 500').fetchdf()
+                                if df is not None and not df.empty:
+                                    texts.append(f"[Source: {source_file}]\n{df.to_string()}")
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                    
+                    conn.close()
+                except Exception as e:
+                    logger.debug(f"[ENTITIES] DuckDB query error: {e}")
+                    try:
+                        conn.close()
+                    except:
+                        pass
+        except Exception:
+            pass
+    
+    # 2. Try ChromaDB (unstructured data)
+    try:
+        from utils.rag_handler import RAGHandler
+        rag = RAGHandler()
+        results = rag.search(
+            collection_name="documents",
+            query="company FEIN EIN employer tax federal identification",
+            n_results=50,
+            project_id=project_id
+        )
+        if results:
+            for result in results:
+                doc_text = result.get('document', '')
+                if doc_text:
+                    texts.append(doc_text)
+    except Exception:
+        pass
+    
+    logger.info(f"[ENTITIES] Retrieved {len(texts)} text chunks for project {project_id[:8]}")
+    return texts
+
+
+@router.post("/{playbook_type}/detect-entities/{project_id}")
+async def detect_entities(playbook_type: str, project_id: str):
+    """Scan project documents for US FEINs and Canada BNs using LLM."""
+    logger.info(f"[ENTITIES] Starting entity detection for project {project_id}")
+    
+    try:
+        docs = await get_project_documents_text(project_id)
+        
+        if not docs:
+            return {
+                "success": True,
+                "entities": {"us": [], "canada": []},
+                "summary": {"us_count": 0, "canada_count": 0, "total": 0},
+                "warnings": ["No documents found for this project"]
+            }
+        
+        combined_text = "\n\n---\n\n".join(docs)
+        if len(combined_text) > 50000:
+            combined_text = combined_text[:50000]
+        
+        logger.info(f"[ENTITIES] Analyzing {len(combined_text)} chars")
+        
+        from anthropic import Anthropic
+        client = Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
+        
+        prompt = f"""Analyze these documents and extract ALL Federal Employer Identification Numbers (FEINs/EINs).
+
+FEINs are 9-digit numbers, usually formatted as XX-XXXXXXX (like 74-1776312).
+They may appear:
+- In headers/footers
+- In company profile sections
+- Embedded in codes (like 036741776312F01 contains 74-1776312)
+- Near text like "EIN", "FEIN", "Employer Identification Number", "Tax ID"
+
+Also look for Canada Business Numbers (9 digits + RT/RC/RP/RZ/RR + 4 digits).
+
+Return ONLY a JSON object in this exact format:
+{{
+  "us": [
+    {{"fein": "74-1776312", "company_name": "Company Name if found", "confidence": "high"}}
+  ],
+  "canada": [
+    {{"bn": "123456789 RT 0001", "company_name": "Company Name if found", "confidence": "high"}}
+  ]
+}}
+
+If no FEINs/BNs found, return: {{"us": [], "canada": []}}
+
+DOCUMENTS:
+{combined_text}"""
+
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        response_text = response.content[0].text.strip()
+        
+        try:
+            if "```json" in response_text:
+                response_text = response_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in response_text:
+                response_text = response_text.split("```")[1].split("```")[0].strip()
+            
+            entities = json.loads(response_text)
+        except json.JSONDecodeError:
+            entities = {"us": [], "canada": []}
+        
+        us_entities = entities.get("us", [])
+        ca_entities = entities.get("canada", [])
+        
+        for i, entity in enumerate(us_entities):
+            entity['id'] = entity.get('fein', f'US-{i}')
+            entity['type'] = 'fein'
+            entity['count'] = 1
+        
+        for i, entity in enumerate(ca_entities):
+            entity['id'] = entity.get('bn', f'CA-{i}')
+            entity['type'] = 'bn'
+            entity['count'] = 1
+        
+        warnings = []
+        if ca_entities and playbook_type == 'year-end':
+            warnings.append("Canada entities detected - requires Canada Year-End Playbook")
+        
+        primary = None
+        for e in us_entities:
+            if e.get('confidence') == 'high':
+                primary = e['id']
+                break
+        if not primary and us_entities:
+            primary = us_entities[0]['id']
+        
+        logger.info(f"[ENTITIES] Found {len(us_entities)} US, {len(ca_entities)} Canada entities")
+        
+        return {
+            "success": True,
+            "project_id": project_id,
+            "playbook_type": playbook_type,
+            "entities": {"us": us_entities, "canada": ca_entities},
+            "summary": {
+                "us_count": len(us_entities),
+                "canada_count": len(ca_entities),
+                "total": len(us_entities) + len(ca_entities),
+                "suggested_primary": primary
+            },
+            "warnings": warnings
+        }
+        
+    except Exception as e:
+        logger.error(f"[ENTITIES] Detection error: {e}")
+        return {"success": False, "message": str(e)}
