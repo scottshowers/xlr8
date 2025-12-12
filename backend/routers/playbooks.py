@@ -511,98 +511,203 @@ async def record_feedback(
 
 @router.get("/year-end/document-checklist/{project_id}")
 async def get_document_checklist(project_id: str):
-    """Get document checklist with upload status."""
+    """
+    Get the document checklist with real-time upload status.
+    Shows which reports are needed per step, matched vs missing.
+    """
     try:
         from utils.rag_handler import RAGHandler
-        from backend.utils.playbook_parser import (
-            load_step_documents, 
-            match_documents_to_step, 
-            get_duckdb_connection
-        )
+        from utils.database.models import ProcessingJobModel
+        from backend.utils.playbook_parser import load_step_documents, match_documents_to_step, get_duckdb_connection
     except ImportError:
-        from utils.rag_handler import RAGHandler
-        from utils.playbook_parser import (
-            load_step_documents, 
-            match_documents_to_step, 
-            get_duckdb_connection
-        )
+        try:
+            from utils.rag_handler import RAGHandler
+            from utils.database.models import ProcessingJobModel
+            from utils.playbook_parser import load_step_documents, match_documents_to_step, get_duckdb_connection
+        except ImportError:
+            raise HTTPException(status_code=500, detail="Required modules not available")
     
-    uploaded_files = set()
+    uploaded_files_list = []
+    seen_files = set()
+    project_name = None
     
-    # Get files from ChromaDB
+    # SOURCE 1: ChromaDB (vector chunks)
     try:
         rag = RAGHandler()
         collection = rag.client.get_or_create_collection(name="documents")
-        results = collection.get(include=["metadatas"], limit=1000)
+        all_results = collection.get(include=["metadatas"], limit=1000)
         
-        for metadata in results.get("metadatas", []):
-            doc_project = metadata.get("project_id", "")
-            doc_project_name = metadata.get("project", "")
+        for metadata in all_results.get("metadatas", []):
+            doc_project_id = metadata.get("project_id", "")
+            doc_project_name = metadata.get("project") or metadata.get("project_name", "")
             
-            is_global = doc_project_name.lower() in ('global', '__global__')
-            is_this_project = doc_project == project_id or doc_project.startswith(project_id[:8])
+            # Find project name for this project_id
+            if not project_name and doc_project_id:
+                if doc_project_id == project_id or doc_project_id.startswith(project_id[:8]) or project_id.startswith(doc_project_id):
+                    project_name = doc_project_name
+            
+            # Include GLOBAL files OR project-specific files
+            is_global = doc_project_name and doc_project_name.lower() in ('global', '__global__', 'global/universal')
+            is_this_project = (
+                (doc_project_id and (doc_project_id == project_id or doc_project_id.startswith(project_id[:8]) or project_id.startswith(doc_project_id))) or
+                (project_name and doc_project_name and doc_project_name.lower() == project_name.lower())
+            )
             
             if is_global or is_this_project:
                 filename = metadata.get("source", metadata.get("filename", ""))
-                if filename:
-                    uploaded_files.add(filename)
+                if filename and filename.lower() not in seen_files:
+                    uploaded_files_list.append(filename)
+                    seen_files.add(filename.lower())
+        
+        logger.info(f"[DOC-CHECKLIST] ChromaDB: {len(uploaded_files_list)} files for project {project_id[:8]}")
     except Exception as e:
-        logger.debug(f"ChromaDB query failed: {e}")
+        logger.warning(f"[DOC-CHECKLIST] ChromaDB query failed: {e}")
     
-    # Get files from DuckDB
+    # SOURCE 2: DuckDB _schema_metadata (Excel files)
     try:
         conn = get_duckdb_connection()
         if conn:
-            # Excel files
             result = conn.execute("""
-                SELECT DISTINCT file_name, project FROM _schema_metadata
+                SELECT DISTINCT file_name, project
+                FROM _schema_metadata
                 WHERE file_name IS NOT NULL
             """).fetchall()
-            for row in result:
-                filename, proj = row
-                if proj and (proj.lower() == 'global' or project_id[:8].lower() in proj.lower()):
-                    uploaded_files.add(filename)
             
-            # PDF tables
-            try:
-                result = conn.execute("""
-                    SELECT DISTINCT source_file, project FROM _pdf_tables
-                    WHERE source_file IS NOT NULL
-                """).fetchall()
-                for row in result:
-                    filename, proj = row
-                    if proj and (proj.lower() == 'global' or project_id[:8].lower() in proj.lower()):
-                        uploaded_files.add(filename)
-            except Exception:
-                pass
+            logger.info(f"[DOC-CHECKLIST] DuckDB _schema_metadata returned {len(result)} rows")
+            
+            for row in result:
+                source_file, proj = row
+                is_global = proj and proj.lower() in ('global', '__global__', 'global/universal')
+                is_this_project = proj and (
+                    proj.lower() in project_id.lower() or
+                    project_id[:8].lower() in proj.lower() or
+                    (project_name and proj.lower() == project_name.lower())
+                )
+                
+                if is_global or is_this_project:
+                    if source_file and source_file.lower() not in seen_files:
+                        uploaded_files_list.append(source_file)
+                        seen_files.add(source_file.lower())
+                        logger.info(f"[DOC-CHECKLIST] DuckDB Excel: {source_file}")
             
             conn.close()
     except Exception as e:
-        logger.debug(f"DuckDB query failed: {e}")
+        logger.warning(f"[DOC-CHECKLIST] DuckDB _schema_metadata query failed: {e}")
     
-    # Build step checklists
+    # SOURCE 3: DuckDB _pdf_tables (PDF files)
+    try:
+        conn = get_duckdb_connection()
+        if conn:
+            table_check = conn.execute("""
+                SELECT COUNT(*) FROM information_schema.tables 
+                WHERE table_name = '_pdf_tables'
+            """).fetchone()
+            
+            if table_check and table_check[0] > 0:
+                result = conn.execute("""
+                    SELECT DISTINCT source_file, project, project_id
+                    FROM _pdf_tables
+                    WHERE source_file IS NOT NULL
+                """).fetchall()
+                
+                logger.info(f"[DOC-CHECKLIST] DuckDB _pdf_tables returned {len(result)} rows")
+                
+                for row in result:
+                    source_file, proj, pid = row
+                    is_global = proj and proj.lower() in ('global', '__global__', 'global/universal')
+                    is_this_project = (
+                        (pid and (pid == project_id or pid.startswith(project_id[:8]))) or
+                        (proj and project_id[:8].lower() in proj.lower()) or
+                        (proj and project_name and proj.lower() == project_name.lower())
+                    )
+                    
+                    if is_global or is_this_project:
+                        if source_file and source_file.lower() not in seen_files:
+                            uploaded_files_list.append(source_file)
+                            seen_files.add(source_file.lower())
+                            logger.info(f"[DOC-CHECKLIST] DuckDB PDF: {source_file}")
+            
+            conn.close()
+    except Exception as e:
+        logger.warning(f"[DOC-CHECKLIST] DuckDB _pdf_tables query failed: {e}")
+    
+    uploaded_files_list.sort()
+    logger.info(f"[DOC-CHECKLIST] TOTAL: {len(uploaded_files_list)} files")
+    
+    # Check for active processing jobs
+    processing_jobs = []
+    try:
+        all_jobs = ProcessingJobModel.get_all(limit=20)
+        for job in all_jobs:
+            job_status = job.get("status", "")
+            job_project = job.get("input_data", {}).get("project_id", "")
+            if job_status in ["pending", "processing"] and job_project == project_id:
+                processing_jobs.append({
+                    "filename": job.get("input_data", {}).get("filename", "Unknown"),
+                    "progress": job.get("progress", 0),
+                    "message": job.get("status_message", "Processing..."),
+                    "job_id": job.get("id")
+                })
+    except Exception as e:
+        logger.warning(f"Could not fetch processing jobs: {e}")
+    
+    # STEP-BASED DOCUMENT CHECKLIST (from Step_Documents sheet)
     step_checklists = []
+    has_step_documents = False
+    total_matched = 0
+    total_missing = 0
+    required_missing = 0
+    
     try:
         step_documents = load_step_documents()
+        
+        # Get step names from structure
+        step_names_map = {}
+        try:
+            structure = await get_year_end_structure()
+            for step in structure.get('steps', []):
+                step_names_map[step['step_number']] = step.get('step_name', f"Step {step['step_number']}")
+        except Exception as e:
+            logger.warning(f"[DOC-CHECKLIST] Could not load step names: {e}")
+        
         if step_documents:
-            for step_num, docs in sorted(step_documents.items()):
-                result = match_documents_to_step(docs, list(uploaded_files))
+            has_step_documents = True
+            logger.info(f"[DOC-CHECKLIST] Found Step_Documents for {len(step_documents)} steps")
+            
+            for step_num, docs in sorted(step_documents.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 999):
+                result = match_documents_to_step(docs, uploaded_files_list)
+                
+                actual_step_name = step_names_map.get(step_num, "")
+                
                 step_checklists.append({
                     'step_number': step_num,
+                    'step_name': actual_step_name,
                     'matched': result['matched'],
                     'missing': result['missing'],
                     'stats': result['stats']
                 })
+                
+                total_matched += result['stats']['matched']
+                total_missing += result['stats']['missing']
+                required_missing += result['stats']['required_missing']
+        else:
+            logger.info("[DOC-CHECKLIST] No Step_Documents found - showing uploaded files only")
+            
     except Exception as e:
-        logger.debug(f"Could not load step documents: {e}")
+        logger.warning(f"[DOC-CHECKLIST] Could not load Step_Documents: {e}")
     
     return {
         "project_id": project_id,
-        "uploaded_files": sorted(list(uploaded_files)),
+        "has_step_documents": has_step_documents,
+        "uploaded_files": uploaded_files_list,
         "step_checklists": step_checklists,
         "stats": {
-            "files_in_project": len(uploaded_files)
-        }
+            "files_in_project": len(uploaded_files_list),
+            "total_matched": total_matched,
+            "total_missing": total_missing,
+            "required_missing": required_missing
+        },
+        "processing_jobs": processing_jobs
     }
 
 
