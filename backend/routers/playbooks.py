@@ -1,7 +1,10 @@
 """
-Playbooks Router v3 - Interactive Year-End Checklist
+Playbooks Router v3.1 - Interactive Year-End Checklist
 
-Phase 3.6: Intelligence service imported for P2 integration.
+Phase 3.6 P2: Intelligence Engine Integration
+- Scan results enhanced with Intelligence Service findings
+- Intelligence tasks linked to playbook actions  
+- Smarter document matching using Intelligence lookups
 
 Endpoints:
 - GET /playbooks/year-end/structure - Get parsed playbook structure
@@ -46,6 +49,154 @@ except ImportError:
         logger.warning("[PLAYBOOKS] Project intelligence not available")
 
 router = APIRouter(prefix="/playbooks", tags=["playbooks"])
+
+
+# =============================================================================
+# P2: INTELLIGENCE CONTEXT HELPERS
+# =============================================================================
+
+def get_intelligence_for_action(project_id: str, action_id: str) -> Dict[str, Any]:
+    """
+    Get Intelligence Engine context relevant to a playbook action.
+    
+    Returns:
+        {
+            'available': bool,
+            'findings': List[Dict],      # Relevant findings from intelligence
+            'tasks': List[Dict],         # Related tasks
+            'lookups': List[Dict],       # Lookup tables that might help
+            'summary': Dict              # High-level project stats
+        }
+    """
+    result = {
+        'available': False,
+        'findings': [],
+        'tasks': [],
+        'lookups': [],
+        'summary': {}
+    }
+    
+    if not INTELLIGENCE_AVAILABLE:
+        return result
+    
+    try:
+        from utils.structured_data_handler import get_structured_handler
+        handler = get_structured_handler()
+        service = get_project_intelligence(project_id, handler)
+        
+        if not service or not service.analyzed_at:
+            logger.debug(f"[INTELLIGENCE] Project {project_id[:8]} not analyzed yet")
+            return result
+        
+        result['available'] = True
+        
+        # Get summary stats
+        result['summary'] = {
+            'total_tables': service.total_tables,
+            'total_rows': service.total_rows,
+            'total_findings': len(service.findings),
+            'analyzed_at': service.analyzed_at.isoformat() if service.analyzed_at else None
+        }
+        
+        # Map action IDs to relevant categories/keywords
+        action_keywords = _get_action_keywords(action_id)
+        
+        # Filter findings relevant to this action
+        for finding in service.findings:
+            finding_dict = finding.to_dict() if hasattr(finding, 'to_dict') else finding
+            
+            # Check if finding is relevant to this action
+            if _is_finding_relevant(finding_dict, action_keywords):
+                result['findings'].append({
+                    'id': finding_dict.get('id'),
+                    'title': finding_dict.get('title'),
+                    'description': finding_dict.get('description'),
+                    'severity': finding_dict.get('severity', {}).get('value') if isinstance(finding_dict.get('severity'), dict) else str(finding_dict.get('severity', '')),
+                    'category': finding_dict.get('category'),
+                    'table': finding_dict.get('table'),
+                    'column': finding_dict.get('column'),
+                    'source': 'intelligence_engine'
+                })
+        
+        # Filter tasks relevant to this action
+        for task in service.tasks:
+            task_dict = task.to_dict() if hasattr(task, 'to_dict') else task
+            
+            if _is_task_relevant(task_dict, action_keywords):
+                result['tasks'].append({
+                    'id': task_dict.get('id'),
+                    'title': task_dict.get('title'),
+                    'shortcut': task_dict.get('shortcut'),
+                    'status': task_dict.get('status', {}).get('value') if isinstance(task_dict.get('status'), dict) else str(task_dict.get('status', '')),
+                    'source': 'intelligence_engine'
+                })
+        
+        # Include relevant lookups (always useful for context)
+        for lookup in service.lookups[:10]:  # Limit to first 10
+            lookup_dict = lookup.to_dict() if hasattr(lookup, 'to_dict') else lookup
+            result['lookups'].append({
+                'table': lookup_dict.get('table'),
+                'lookup_type': lookup_dict.get('lookup_type'),
+                'entry_count': lookup_dict.get('entry_count', 0)
+            })
+        
+        logger.info(f"[INTELLIGENCE] Action {action_id}: {len(result['findings'])} findings, {len(result['tasks'])} tasks")
+        return result
+        
+    except Exception as e:
+        logger.warning(f"[INTELLIGENCE] Failed to get context for {action_id}: {e}")
+        return result
+
+
+def _get_action_keywords(action_id: str) -> Dict[str, List[str]]:
+    """Map action IDs to relevant keywords for finding matching."""
+    mappings = {
+        '2A': {'keywords': ['tax', 'sui', 'suta', 'futa', 'ein', 'fein', 'rate', 'verification'], 'categories': ['QUALITY', 'PATTERN']},
+        '2B': {'keywords': ['company', 'address', 'name', 'legal'], 'categories': ['QUALITY']},
+        '2C': {'keywords': ['tax', 'code', 'rate', 'state'], 'categories': ['QUALITY', 'PATTERN']},
+        '2D': {'keywords': ['tax', 'jurisdiction', 'local', 'city', 'county'], 'categories': ['QUALITY']},
+        '2E': {'keywords': ['worksite', 'mwr', 'location', 'bls'], 'categories': ['STRUCTURE']},
+        '3A': {'keywords': ['employee', 'ssn', 'social', 'address', 'w2'], 'categories': ['QUALITY', 'PATTERN']},
+        '3B': {'keywords': ['employee', 'name', 'address', 'data'], 'categories': ['QUALITY']},
+        '4A': {'keywords': ['deduction', 'benefit', 'pretax', 'posttax', 'cafeteria', '125'], 'categories': ['QUALITY', 'STRUCTURE']},
+        '4B': {'keywords': ['401k', 'retirement', 'pension', 'match'], 'categories': ['QUALITY']},
+        '5A': {'keywords': ['earnings', 'pay', 'wage', 'salary', 'bonus'], 'categories': ['QUALITY', 'PATTERN']},
+        '5B': {'keywords': ['check', 'void', 'adjustment', 'reversal'], 'categories': ['QUALITY']},
+        '6A': {'keywords': ['w2', 'w-2', 'box', 'reporting', 'wage'], 'categories': ['QUALITY', 'PATTERN']},
+        '6B': {'keywords': ['third party', 'sick', 'disability'], 'categories': ['QUALITY']},
+        '6C': {'keywords': ['fringe', 'benefit', 'vehicle', 'life'], 'categories': ['QUALITY', 'PATTERN']},
+    }
+    return mappings.get(action_id, {'keywords': ['data', 'quality', 'missing', 'duplicate', 'error'], 'categories': ['QUALITY', 'PATTERN']})
+
+
+def _is_finding_relevant(finding: Dict, action_keywords: Dict) -> bool:
+    """Check if a finding is relevant to an action based on keywords."""
+    keywords = action_keywords.get('keywords', [])
+    categories = action_keywords.get('categories', [])
+    
+    finding_category = finding.get('category', '')
+    if isinstance(finding_category, dict):
+        finding_category = finding_category.get('value', '')
+    
+    category_match = any(cat.lower() in str(finding_category).lower() for cat in categories)
+    
+    text_to_check = ' '.join([
+        str(finding.get('title', '')),
+        str(finding.get('description', '')),
+        str(finding.get('table', '')),
+        str(finding.get('column', ''))
+    ]).lower()
+    
+    keyword_match = any(kw.lower() in text_to_check for kw in keywords)
+    
+    return category_match or keyword_match
+
+
+def _is_task_relevant(task: Dict, action_keywords: Dict) -> bool:
+    """Check if a task is relevant to an action."""
+    keywords = action_keywords.get('keywords', [])
+    text_to_check = ' '.join([str(task.get('title', '')), str(task.get('shortcut', ''))]).lower()
+    return any(kw.lower() in text_to_check for kw in keywords)
 
 # Persistent progress storage location
 PROGRESS_FILE = "/data/playbook_progress.json"
@@ -1312,6 +1463,16 @@ async def scan_for_action(project_id: str, action_id: str):
         parent_actions = get_parent_actions(action_id)
         
         # =====================================================================
+        # P2: GET INTELLIGENCE CONTEXT
+        # =====================================================================
+        intelligence_context = get_intelligence_for_action(project_id, action_id)
+        intelligence_findings = intelligence_context.get('findings', [])
+        intelligence_tasks = intelligence_context.get('tasks', [])
+        
+        if intelligence_context['available']:
+            logger.info(f"[SCAN] Intelligence: {len(intelligence_findings)} findings, {len(intelligence_tasks)} tasks for {action_id}")
+        
+        # =====================================================================
         # STANDARD SCAN FOR ACTIONS WITH REPORTS_NEEDED
         # =====================================================================
         inherited = get_inherited_data(project_id, action_id)
@@ -1573,8 +1734,33 @@ async def scan_for_action(project_id: str, action_id: str):
                     content=final_content,
                     inherited_findings=inherited_findings,
                     action_id=action_id,
-                    project_id=project_id
+                    project_id=project_id,
+                    intelligence_findings=intelligence_findings  # P2: Pass intelligence findings
                 )
+                
+                # P2: Merge intelligence findings into response if not already captured
+                if findings and intelligence_findings:
+                    existing_issues = set((findings.get('issues') or []))
+                    for intel_finding in intelligence_findings:
+                        issue_text = f"[Intelligence] {intel_finding.get('title', 'Unknown issue')}"
+                        if intel_finding.get('severity') in ['critical', 'warning']:
+                            if issue_text not in existing_issues:
+                                if 'issues' not in findings:
+                                    findings['issues'] = []
+                                findings['issues'].append(issue_text)
+                    
+                    # Add intelligence tasks as recommendations
+                    existing_recs = set((findings.get('recommendations') or []))
+                    for intel_task in intelligence_tasks:
+                        if intel_task.get('status') != 'complete':
+                            rec_text = f"[Task] {intel_task.get('title', 'Unknown task')}"
+                            shortcut = intel_task.get('shortcut')
+                            if shortcut:
+                                rec_text += f" - {shortcut}"
+                            if rec_text not in existing_recs:
+                                if 'recommendations' not in findings:
+                                    findings['recommendations'] = []
+                                findings['recommendations'].append(rec_text)
         
         # =====================================================================
         # CONFLICT DETECTION - Check for inconsistencies
@@ -1610,7 +1796,12 @@ async def scan_for_action(project_id: str, action_id: str):
             "inherited_from": parent_actions if parent_actions else None,
             "last_scan": datetime.now().isoformat(),
             "notes": PLAYBOOK_PROGRESS.get(project_id, {}).get(action_id, {}).get("notes"),
-            "review_flag": None  # Clear review flag after scan
+            "review_flag": None,  # Clear review flag after scan
+            "intelligence_context": {
+                "available": intelligence_context['available'],
+                "findings_count": len(intelligence_findings),
+                "tasks_count": len(intelligence_tasks)
+            } if intelligence_context['available'] else None
         }
         
         # Persist to file
@@ -1622,7 +1813,14 @@ async def scan_for_action(project_id: str, action_id: str):
             "findings": findings,
             "suggested_status": final_status,
             "inherited_from": parent_actions if parent_actions else None,
-            "conflicts": conflicts
+            "conflicts": conflicts,
+            # P2: Include intelligence context in response
+            "intelligence": {
+                "available": intelligence_context['available'],
+                "findings": intelligence_findings,
+                "tasks": intelligence_tasks,
+                "summary": intelligence_context.get('summary', {})
+            } if intelligence_context['available'] else None
         }
         
     except HTTPException:
@@ -1839,10 +2037,13 @@ async def extract_findings_consultative(
     content: List[str], 
     inherited_findings: List[Dict],
     action_id: str,
-    project_id: str = None
+    project_id: str = None,
+    intelligence_findings: List[Dict] = None  # P2: Intelligence findings
 ) -> Optional[Dict]:
     """
     HYBRID ANALYZER: Uses local LLM for extraction, Claude for complex analysis.
+    
+    P2 Enhancement: Now includes Intelligence Engine findings for richer context.
     
     Cost Reduction: 50-70% fewer Claude API calls
     
@@ -1861,6 +2062,20 @@ async def extract_findings_consultative(
                 selected_fein = config["primary_entity"]
         except Exception:
             pass
+    
+    # P2: Build intelligence context string
+    intelligence_context_str = ""
+    if intelligence_findings:
+        intel_items = []
+        for finding in intelligence_findings[:5]:  # Limit to top 5
+            intel_items.append(f"- [{finding.get('severity', 'info')}] {finding.get('title', 'Unknown')}: {finding.get('description', '')[:200]}")
+        if intel_items:
+            intelligence_context_str = f"""
+INTELLIGENCE ENGINE FINDINGS (pre-analyzed issues):
+{chr(10).join(intel_items)}
+
+Consider these when analyzing - they were detected during data profiling.
+"""
     
     try:
         # Try hybrid approach first
@@ -1950,6 +2165,7 @@ Focus your analysis on this specific entity. Other FEINs in documents are for re
 ACTION: {action['action_id']} - {action.get('description', '')}
 REPORTS NEEDED: {', '.join(action.get('reports_needed', []))}
 {entity_context}
+{intelligence_context_str}
 {f'''
 INHERITED DATA FROM PREVIOUS ACTIONS:
 {inherited_context}
