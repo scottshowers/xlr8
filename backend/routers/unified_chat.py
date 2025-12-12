@@ -72,7 +72,7 @@ DEPLOYMENT:
 3. Update frontend to call /api/chat/unified
 
 Author: XLR8 Team
-Version: 1.0.0 - Phase 3 Unified
+Version: 1.1.0 - Phase 3.5 Intelligence Consumer
 Date: December 2025
 """
 
@@ -180,6 +180,18 @@ except ImportError:
     except ImportError:
         SUPABASE_AVAILABLE = False
         logger.warning("[UNIFIED] Supabase not available")
+
+# Project Intelligence Service (Phase 3)
+try:
+    from backend.utils.project_intelligence import ProjectIntelligenceService, get_project_intelligence
+    PROJECT_INTELLIGENCE_AVAILABLE = True
+except ImportError:
+    try:
+        from utils.project_intelligence import ProjectIntelligenceService, get_project_intelligence
+        PROJECT_INTELLIGENCE_AVAILABLE = True
+    except ImportError:
+        PROJECT_INTELLIGENCE_AVAILABLE = False
+        logger.warning("[UNIFIED] Project intelligence not available - using fallback services")
 
 
 # =============================================================================
@@ -437,12 +449,41 @@ class DataModelService:
     
     def load_lookups(self, handler) -> None:
         """
-        Scan tables and build lookup dictionaries.
+        Load lookup dictionaries - tries intelligence service first, falls back to scanning.
+        
+        Phase 3.5: Consumes pre-computed lookups from ProjectIntelligenceService
+        when available, avoiding redundant table scanning.
         
         Args:
             handler: DuckDB structured data handler
         """
-        if self._loaded or not handler or not handler.conn:
+        if self._loaded:
+            return
+        
+        # PHASE 3.5: Try intelligence service first (pre-computed on upload)
+        if PROJECT_INTELLIGENCE_AVAILABLE and handler:
+            try:
+                intelligence = get_project_intelligence(self.project, handler)
+                if intelligence and intelligence.lookups:
+                    # Pull from pre-computed lookups
+                    for lookup in intelligence.lookups:
+                        table_name = lookup.table_name
+                        code_col = lookup.code_column
+                        desc_col = lookup.description_column
+                        mappings = lookup.mappings
+                        
+                        if mappings:
+                            self.lookups[table_name] = mappings
+                            self.code_columns[code_col] = table_name
+                    
+                    self._loaded = True
+                    logger.info(f"[DATA_MODEL] Loaded {len(self.lookups)} lookup tables from intelligence service")
+                    return
+            except Exception as e:
+                logger.warning(f"[DATA_MODEL] Intelligence service unavailable, falling back: {e}")
+        
+        # FALLBACK: Scan tables directly (original behavior)
+        if not handler or not handler.conn:
             return
         
         try:
@@ -723,7 +764,10 @@ class DataQualityService:
     
     def run_checks(self, handler, tables: List[Dict]) -> List[Dict]:
         """
-        Run all applicable quality checks on provided tables.
+        Get quality alerts - tries intelligence service first, falls back to SQL checks.
+        
+        Phase 3.5: Consumes pre-computed findings from ProjectIntelligenceService
+        when available, avoiding redundant SQL execution.
         
         Args:
             handler: DuckDB handler
@@ -734,6 +778,37 @@ class DataQualityService:
         """
         self.alerts = []
         
+        # PHASE 3.5: Try intelligence service first (pre-computed on upload)
+        if PROJECT_INTELLIGENCE_AVAILABLE and handler:
+            try:
+                intelligence = get_project_intelligence(self.project, handler)
+                if intelligence and intelligence.findings:
+                    # Convert intelligence findings to alert format
+                    for finding in intelligence.findings:
+                        alert = {
+                            'id': finding.finding_type,
+                            'name': finding.title,
+                            'category': finding.category,
+                            'severity': finding.severity,
+                            'table': finding.table_name.split('__')[-1] if finding.table_name else '',
+                            'count': finding.affected_count,
+                            'percentage': finding.affected_percentage,
+                            'description': finding.description,
+                            'details': f"{finding.affected_count:,} records affected" if finding.affected_count else finding.description,
+                            'evidence_sql': finding.evidence_sql
+                        }
+                        self.alerts.append(alert)
+                    
+                    # Sort by severity
+                    severity_order = {'critical': 0, 'warning': 1, 'info': 2}
+                    self.alerts.sort(key=lambda x: severity_order.get(x.get('severity', 'info'), 3))
+                    
+                    logger.info(f"[DATA_QUALITY] Loaded {len(self.alerts)} alerts from intelligence service")
+                    return self.alerts
+            except Exception as e:
+                logger.warning(f"[DATA_QUALITY] Intelligence service unavailable, falling back: {e}")
+        
+        # FALLBACK: Run SQL checks directly (original behavior)
         if not handler or not handler.conn:
             return self.alerts
         
@@ -2422,8 +2497,9 @@ async def health_check():
     """Health check endpoint."""
     return {
         "status": "healthy",
-        "version": "1.0.0",
+        "version": "1.1.0",  # Phase 3.5
         "intelligence": INTELLIGENCE_AVAILABLE,
+        "project_intelligence": PROJECT_INTELLIGENCE_AVAILABLE,
         "learning": LEARNING_AVAILABLE,
         "structured": STRUCTURED_AVAILABLE,
         "rag": RAG_AVAILABLE,
@@ -2437,6 +2513,7 @@ async def get_stats():
     stats = {
         "active_sessions": len(unified_sessions),
         "intelligence_available": INTELLIGENCE_AVAILABLE,
+        "project_intelligence_available": PROJECT_INTELLIGENCE_AVAILABLE,
         "learning_available": LEARNING_AVAILABLE,
         "structured_available": STRUCTURED_AVAILABLE,
         "rag_available": RAG_AVAILABLE
