@@ -25,7 +25,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v4.2 DEBUG LOOP ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v4.3 STATUS ONLY ======")
 
 
 # =============================================================================
@@ -321,24 +321,14 @@ class IntelligenceEngine:
         """
         Determine if a filter category is relevant to this question.
         
-        Not all questions need all filters. E.g., "What's the headcount?" needs status,
-        but "What earnings codes exist?" doesn't need any employee filter.
+        For now, only status is auto-asked. Other categories require explicit mention.
         """
         # Status is almost always relevant for employee questions
         if category == 'status':
             return True
         
-        # Company is relevant when asking about totals/counts
-        if category == 'company':
-            # Multiple companies exist?
-            candidates = self.filter_candidates.get('company', [])
-            if candidates and candidates[0].get('distinct_count', 0) > 1:
-                # Relevant for count/total questions
-                if any(w in q_lower for w in ['how many', 'count', 'total', 'headcount']):
-                    return True
-        
-        # For now, keep it simple - only status is auto-asked
-        # Other categories require explicit mention or future enhancement
+        # TODO Phase 2.5: Expand to ask about company/location when relevant
+        # For now, skip other categories to avoid empty questions
         return False
     
     def _request_filter_clarification(self, question: str, category: str) -> SynthesizedAnswer:
