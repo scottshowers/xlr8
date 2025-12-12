@@ -2,7 +2,7 @@
 XLR8 FastAPI Backend
 Main application entry point
 
-Updated: December 8, 2025 - Added security router for real-time threat monitoring
+Updated: December 12, 2025 - Added intelligence router (Phase 3 Universal Analysis Engine)
 """
 
 from fastapi import FastAPI
@@ -87,6 +87,14 @@ try:
 except ImportError as e:
     API_CONNECTIONS_AVAILABLE = False
     logging.warning(f"API connections router import failed: {e}")
+
+# Import intelligence router (Phase 3 Universal Analysis Engine)
+try:
+    from backend.routers import intelligence
+    INTELLIGENCE_AVAILABLE = True
+except ImportError as e:
+    INTELLIGENCE_AVAILABLE = False
+    logging.warning(f"Intelligence router import failed: {e}")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -227,6 +235,13 @@ if API_CONNECTIONS_AVAILABLE:
 else:
     logger.warning("API connections router not available")
 
+# Register intelligence router if available (Phase 3 Universal Analysis Engine)
+if INTELLIGENCE_AVAILABLE:
+    app.include_router(intelligence.router, prefix="/api", tags=["intelligence"])
+    logger.info("✓ Intelligence router registered at /api/intelligence")
+else:
+    logger.warning("Intelligence router not available")
+
 
 @app.get("/api/health")
 async def health():
@@ -250,6 +265,7 @@ async def health():
             "intelligent_chat": INTELLIGENT_CHAT_AVAILABLE,
             "admin": ADMIN_AVAILABLE,
             "api_connections": API_CONNECTIONS_AVAILABLE,
+            "intelligence": INTELLIGENCE_AVAILABLE,
         }
         
         return {
@@ -271,6 +287,7 @@ async def health():
                 "intelligent_chat": INTELLIGENT_CHAT_AVAILABLE,
                 "admin": ADMIN_AVAILABLE,
                 "api_connections": API_CONNECTIONS_AVAILABLE,
+                "intelligence": INTELLIGENCE_AVAILABLE,
             }
         }
 
@@ -326,6 +343,13 @@ async def debug_imports():
             results['threat_assessor'] = 'OK (alt path)'
         except Exception as e2:
             results['threat_assessor'] = f'ERROR: {e2}'
+    
+    # Check project intelligence
+    try:
+        from utils.project_intelligence import ProjectIntelligenceService
+        results['project_intelligence'] = 'OK'
+    except Exception as e:
+        results['project_intelligence'] = f'ERROR: {e}'
     
     return results
 
