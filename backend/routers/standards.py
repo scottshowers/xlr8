@@ -36,7 +36,7 @@ router = APIRouter(prefix="/standards", tags=["standards"])
 def _get_standards_processor():
     """Get standards processor module."""
     try:
-        from utils.standards_processor import (
+        from backend.utils.standards_processor import (
             process_pdf, 
             process_text,
             get_rule_registry,
@@ -48,15 +48,29 @@ def _get_standards_processor():
             "get_rule_registry": get_rule_registry,
             "search_standards": search_standards
         }
-    except ImportError as e:
-        logger.error(f"[STANDARDS] Processor not available: {e}")
-        return None
+    except ImportError:
+        try:
+            from utils.standards_processor import (
+                process_pdf, 
+                process_text,
+                get_rule_registry,
+                search_standards
+            )
+            return {
+                "process_pdf": process_pdf,
+                "process_text": process_text,
+                "get_rule_registry": get_rule_registry,
+                "search_standards": search_standards
+            }
+        except ImportError as e:
+            logger.error(f"[STANDARDS] Processor not available: {e}")
+            return None
 
 
 def _get_compliance_engine():
     """Get compliance engine."""
     try:
-        from utils.compliance_engine import (
+        from backend.utils.compliance_engine import (
             get_compliance_engine,
             run_compliance_check,
             check_single_rule
@@ -66,24 +80,42 @@ def _get_compliance_engine():
             "run_check": run_compliance_check,
             "check_rule": check_single_rule
         }
-    except ImportError as e:
-        logger.error(f"[STANDARDS] Compliance engine not available: {e}")
-        return None
+    except ImportError:
+        try:
+            from utils.compliance_engine import (
+                get_compliance_engine,
+                run_compliance_check,
+                check_single_rule
+            )
+            return {
+                "get_engine": get_compliance_engine,
+                "run_check": run_compliance_check,
+                "check_rule": check_single_rule
+            }
+        except ImportError as e:
+            logger.error(f"[STANDARDS] Compliance engine not available: {e}")
+            return None
 
 
 def _get_db_handler(project_id: str):
     """Get database handler for a project."""
     try:
-        from utils.structured_data_handler import StructuredDataHandler
+        from backend.utils.structured_data_handler import StructuredDataHandler
         handler = StructuredDataHandler()
         handler.set_project(project_id)
         return handler
     except ImportError:
         try:
-            from utils.duckdb_handler import DuckDBHandler
-            return DuckDBHandler()
-        except:
-            return None
+            from utils.structured_data_handler import StructuredDataHandler
+            handler = StructuredDataHandler()
+            handler.set_project(project_id)
+            return handler
+        except ImportError:
+            try:
+                from utils.duckdb_handler import DuckDBHandler
+                return DuckDBHandler()
+            except:
+                return None
 
 
 # =============================================================================
