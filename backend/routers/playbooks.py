@@ -869,6 +869,69 @@ async def get_suppressions(project_id: str):
         return {"rules": [], "stats": {}, "error": str(e)}
 
 
+class SuppressRequest(BaseModel):
+    """Request body for suppress endpoint."""
+    finding_text: str
+    reason: str
+    action_id: Optional[str] = None
+    suppress_type: str = 'acknowledge'
+    fein: Optional[str] = None
+
+
+@router.post("/year-end/suppress/{project_id}")
+async def suppress_finding(project_id: str, request: SuppressRequest):
+    """
+    Suppress a finding - feeds BOTH suppression model AND learning system.
+    
+    This is the endpoint the frontend UI calls.
+    """
+    success = False
+    rule_id = None
+    action_id = request.action_id or "general"
+    
+    # 1. Store in FindingSuppressionModel (existing behavior)
+    try:
+        from utils.database.models import FindingSuppressionModel
+        result = FindingSuppressionModel.create(
+            project_id=project_id,
+            playbook_type="year-end",
+            action_id=action_id,
+            suppression_type=request.suppress_type,
+            finding_text=request.finding_text,
+            reason=request.reason,
+            fein_filter=[request.fein] if request.fein else None
+        )
+        if result:
+            success = True
+            rule_id = result['id']
+            logger.info(f"[SUPPRESS] Created suppression rule {rule_id}")
+    except ImportError:
+        logger.warning("[SUPPRESS] FindingSuppressionModel not available")
+    except Exception as e:
+        logger.error(f"[SUPPRESS] Suppress error: {e}")
+    
+    # 2. ALSO feed into Learning System
+    try:
+        if FRAMEWORK_AVAILABLE and LearningHook.is_available():
+            engine = get_playbook_engine("year-end")
+            if engine:
+                engine.record_feedback(
+                    project_id=project_id,
+                    action_id=action_id,
+                    finding_text=request.finding_text,
+                    feedback='discard',
+                    reason=request.reason
+                )
+                logger.info(f"[LEARNING] Recorded discard from suppress UI: {request.finding_text[:50]}...")
+                success = True
+    except Exception as e:
+        logger.warning(f"[LEARNING] Failed to record in learning system: {e}")
+    
+    if success:
+        return {"success": True, "rule_id": rule_id, "learning_recorded": True}
+    return {"success": False, "message": "Both systems unavailable"}
+
+
 @router.post("/year-end/suppress/quick/{project_id}/{action_id}")
 async def quick_suppress(
     project_id: str, 
