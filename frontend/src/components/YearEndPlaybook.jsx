@@ -1552,7 +1552,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
   const matchedFromUploads = React.useMemo(() => {
     if (!uploadedFiles?.length || !reportsNeeded.length) return [];
     
-    const normalize = (s) => s.toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').replace(/\./g, ' ').replace(/'/g, '');
+    const normalize = (s) => (s || '').toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').replace(/\./g, ' ').replace(/'/g, '');
     
     const matched = [];
     for (const report of reportsNeeded) {
@@ -2088,7 +2088,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
                 ).map((report, i) => {
                   const reportTrimmed = String(report).trim();
                   // Normalize: lowercase, replace separators
-                  const normalize = (s) => s.toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').replace(/\./g, ' ');
+                  const normalize = (s) => (s || '').toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').replace(/\./g, ' ');
                   const reportNorm = normalize(reportTrimmed);
                   const reportWords = reportNorm.split(' ').filter(w => w.length > 2); // Skip tiny words
                   
@@ -2968,9 +2968,10 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
 
   // Check if an issue is suppressed
   const isIssueSuppressed = (actionId, issue) => {
+    if (!issue) return false;
     return suppressions.some(s => {
       if (!s.is_active) return false;
-      if (s.suppression_type === 'pattern') {
+      if (s.suppression_type === 'pattern' && s.pattern) {
         return issue.toLowerCase().includes(s.pattern.toLowerCase());
       }
       return s.action_id === actionId && s.pattern === issue && s.suppression_type === 'suppress';
@@ -2979,6 +2980,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
 
   // Check if an issue is acknowledged
   const isIssueAcknowledged = (actionId, issue) => {
+    if (!issue) return false;
     return suppressions.some(s => 
       s.is_active && 
       s.action_id === actionId && 
@@ -3035,7 +3037,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
     if (!structure?.steps || !docChecklist?.uploaded_files) return [];
     
     const uploadedFiles = docChecklist.uploaded_files || [];
-    const normalize = (s) => s.toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').replace(/\./g, ' ').replace(/'/g, '');
+    const normalize = (s) => (s || '').toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').replace(/\./g, ' ').replace(/'/g, '');
     
     const ready = [];
     
@@ -4015,7 +4017,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                             {ftItem.reports_needed.map((report, i) => {
                               const isFound = linkedDocsFound.some(d => 
-                                d.toLowerCase().includes(report.toLowerCase().split(' ')[0])
+                                d && report && d.toLowerCase().includes((report.toLowerCase().split(' ')[0] || ''))
                               );
                               return (
                                 <span 
@@ -4278,4 +4280,4 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
     </div>
     </ErrorBoundary>
   );
-}
+        }
