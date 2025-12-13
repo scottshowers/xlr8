@@ -1179,13 +1179,79 @@ def process_file_background(
 async def upload_file(
     file: UploadFile = File(...),
     project: str = Form(...),
-    functional_area: Optional[str] = Form(None)
+    functional_area: Optional[str] = Form(None),
+    standards_mode: Optional[str] = Form(None),
+    domain: Optional[str] = Form(None)
 ):
     """
     Upload a file for async processing
     
-    Returns immediately with job_id for status polling
+    If standards_mode=true, extracts compliance rules instead of normal processing.
+    Returns immediately with job_id for status polling (or rules for standards mode)
     """
+    
+    # STANDARDS MODE - Extract rules from compliance documents
+    if standards_mode == "true" or project.lower() == "__standards__":
+        try:
+            if not file.filename:
+                raise HTTPException(status_code=400, detail="No filename provided")
+            
+            filename = file.filename
+            ext = filename.split('.')[-1].lower()
+            
+            if ext not in ['pdf', 'docx', 'doc', 'txt', 'md']:
+                raise HTTPException(status_code=400, detail=f"File type '{ext}' not supported for standards")
+            
+            logger.info(f"[STANDARDS] Upload: {filename}, domain={domain or 'general'}")
+            
+            content = await file.read()
+            logger.info(f"[STANDARDS] Size: {len(content)} bytes")
+            
+            if not STANDARDS_AVAILABLE:
+                raise HTTPException(status_code=503, detail="Standards processor not available")
+            
+            file_path = f"/tmp/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filename}"
+            with open(file_path, 'wb') as f:
+                f.write(content)
+            
+            try:
+                if ext == 'pdf':
+                    doc = standards_process_pdf(file_path, domain or 'general')
+                else:
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        text = f.read()
+                    doc = standards_process_text(text, filename, domain or 'general')
+                
+                registry = get_rule_registry()
+                registry.add_document(doc)
+                
+                logger.info(f"[STANDARDS] Extracted {len(doc.rules)} rules")
+                
+                return {
+                    "success": True,
+                    "document_id": doc.document_id,
+                    "filename": doc.filename,
+                    "title": doc.title,
+                    "domain": doc.domain,
+                    "rules_extracted": len(doc.rules),
+                    "page_count": doc.page_count,
+                    "rules": [r.to_dict() for r in doc.rules[:10]]
+                }
+            finally:
+                if os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                    except:
+                        pass
+                        
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"[STANDARDS] Upload failed: {e}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    # NORMAL MODE - Regular file processing
     try:
         # Validate file
         if not file.filename:
@@ -1355,7 +1421,6 @@ async def standards_health():
 
 
 @router.post("/standards/upload")
-@router.post("/upload-standards")
 async def upload_standards(
     file: UploadFile = File(...),
     domain: str = Form(default="general"),
