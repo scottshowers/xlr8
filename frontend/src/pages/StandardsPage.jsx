@@ -1,12 +1,11 @@
 /**
- * StandardsPage - Uses existing /api/upload with standards_mode flag
+ * StandardsPage - Uses same api service as working Upload component
  * 
  * Deploy to: frontend/src/pages/StandardsPage.jsx
  */
 
 import React, { useState, useEffect } from 'react';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'https://xlr8-backend-production.up.railway.app';
+import api from '../services/api';
 
 function UploadTab({ onUploadSuccess }) {
   const [file, setFile] = useState(null);
@@ -23,7 +22,6 @@ function UploadTab({ onUploadSuccess }) {
     setError(null);
     setResult(null);
 
-    // Use the SAME /api/upload endpoint that works, with standards_mode flag
     const formData = new FormData();
     formData.append('file', file);
     formData.append('project', '__STANDARDS__');
@@ -31,22 +29,17 @@ function UploadTab({ onUploadSuccess }) {
     formData.append('domain', domain);
 
     try {
-      const response = await fetch(`${API_BASE}/api/upload`, {
-        method: 'POST',
-        body: formData,
+      const response = await api.post('/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 120000
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Upload failed: ${response.status} - ${errorText}`);
-      }
-
-      const data = await response.json();
-      setResult(data);
+      setResult(response.data);
       setFile(null);
       if (onUploadSuccess) onUploadSuccess();
     } catch (err) {
-      setError(err.message);
+      console.error('Standards upload error:', err);
+      setError(err.response?.data?.detail || err.message || 'Upload failed');
     } finally {
       setUploading(false);
     }
@@ -135,9 +128,8 @@ function RulesTab() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/standards/rules`)
-      .then(res => res.json())
-      .then(data => setRules(data.rules || []))
+    api.get('/standards/rules')
+      .then(res => setRules(res.data.rules || []))
       .catch(() => setRules([]))
       .finally(() => setLoading(false));
   }, []);
@@ -168,9 +160,8 @@ function DocumentsTab() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/standards/documents`)
-      .then(res => res.json())
-      .then(data => setDocuments(data.documents || []))
+    api.get('/standards/documents')
+      .then(res => setDocuments(res.data.documents || []))
       .catch(() => setDocuments([]))
       .finally(() => setLoading(false));
   }, []);
@@ -205,9 +196,8 @@ function ComplianceTab() {
   const [results, setResults] = useState(null);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/projects`)
-      .then(res => res.json())
-      .then(data => setProjects(data.projects || data || []))
+    api.get('/projects')
+      .then(res => setProjects(res.data.projects || res.data || []))
       .catch(() => {});
   }, []);
 
@@ -216,8 +206,8 @@ function ComplianceTab() {
     setRunning(true);
     setResults(null);
     try {
-      const res = await fetch(`${API_BASE}/api/standards/compliance/check/${selectedProject}`, { method: 'POST' });
-      setResults(await res.json());
+      const res = await api.post(`/standards/compliance/check/${selectedProject}`);
+      setResults(res.data);
     } catch (e) {
       setResults({ error: e.message });
     } finally {
