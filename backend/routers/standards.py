@@ -27,14 +27,14 @@ import tempfile
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/standards", tags=["standards"])
+router = APIRouter()
 
 
 # =============================================================================
 # TEST ENDPOINT
 # =============================================================================
 
-@router.post("/test")
+@router.post("/standards/test")
 async def test_post():
     """Simple test - no processing, just returns success."""
     return {"status": "ok", "message": "POST works"}
@@ -133,7 +133,7 @@ def _get_db_handler(project_id: str):
 # UPLOAD & PROCESS STANDARDS
 # =============================================================================
 
-@router.post("/upload")
+@router.post("/standards/upload")
 async def upload_standards_document(
     file: UploadFile = File(...),
     domain: str = Form(default="general"),
@@ -215,7 +215,7 @@ class TextUploadRequest(BaseModel):
     domain: str = "general"
 
 
-@router.post("/upload/text")
+@router.post("/standards/upload/text")
 async def upload_standards_text(request: TextUploadRequest):
     """
     Process standards from raw text.
@@ -248,7 +248,7 @@ async def upload_standards_text(request: TextUploadRequest):
 # RULE MANAGEMENT
 # =============================================================================
 
-@router.get("/rules")
+@router.get("/standards/rules")
 async def list_rules(
     domain: str = None,
     category: str = None,
@@ -287,7 +287,7 @@ async def list_rules(
         raise HTTPException(500, f"Failed to list rules: {e}")
 
 
-@router.get("/rules/search")
+@router.get("/standards/rules/search")
 async def search_rules(
     query: str,
     domain: str = None,
@@ -316,7 +316,7 @@ async def search_rules(
         raise HTTPException(500, f"Search failed: {e}")
 
 
-@router.get("/rules/{rule_id}")
+@router.get("/standards/rules/{rule_id}")
 async def get_rule(rule_id: str):
     """Get a specific rule by ID."""
     processor = _get_standards_processor()
@@ -341,7 +341,7 @@ async def get_rule(rule_id: str):
 # COMPLIANCE CHECKING
 # =============================================================================
 
-@router.post("/compliance/check/{project_id}")
+@router.post("/standards/compliance/check/{project_id}")
 async def run_compliance_scan(
     project_id: str,
     domain: str = None,
@@ -414,7 +414,7 @@ async def run_compliance_scan(
         raise HTTPException(500, f"Compliance scan failed: {e}")
 
 
-@router.post("/compliance/check-rule/{project_id}")
+@router.post("/standards/compliance/check-rule/{project_id}")
 async def check_single_rule_endpoint(
     project_id: str,
     rule: dict
@@ -457,7 +457,7 @@ async def check_single_rule_endpoint(
 # DOCUMENTS
 # =============================================================================
 
-@router.get("/documents")
+@router.get("/standards/documents")
 async def list_documents():
     """List all processed standards documents."""
     processor = _get_standards_processor()
@@ -476,7 +476,7 @@ async def list_documents():
         raise HTTPException(500, f"Failed to list documents: {e}")
 
 
-@router.get("/documents/{document_id}")
+@router.get("/standards/documents/{document_id}")
 async def get_document(document_id: str):
     """Get a specific standards document."""
     processor = _get_standards_processor()
@@ -501,7 +501,7 @@ async def get_document(document_id: str):
 # EXPORT
 # =============================================================================
 
-@router.get("/export")
+@router.get("/standards/export")
 async def export_all():
     """Export all standards and rules as JSON."""
     processor = _get_standards_processor()
@@ -520,7 +520,7 @@ async def export_all():
 # HEALTH
 # =============================================================================
 
-@router.get("/health")
+@router.get("/standards/health")
 async def health_check():
     """Check standards layer health."""
     processor = _get_standards_processor()
