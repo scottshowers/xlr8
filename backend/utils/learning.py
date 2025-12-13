@@ -254,9 +254,7 @@ class LearningModule:
                     'chosen_option': normalized_pattern,
                     'project': project_id,
                     'semantic_domain': playbook_id,
-                    'choice_count': 1,
-                    'confidence': 0.8,
-                    'created_at': datetime.now().isoformat()
+                    'choice_count': 1
                 }).execute()
                 
             logger.debug(f"[LEARNING] Stored suppression pattern: {normalized_pattern[:50]}...")
@@ -289,16 +287,15 @@ class LearningModule:
             pattern_prefix = f"suppress:{playbook_id}:"
             
             patterns = self.supabase.table('clarification_patterns') \
-                .select('chosen_option, choice_count, confidence') \
+                .select('chosen_option, choice_count') \
                 .like('question_id', f'{pattern_prefix}%') \
                 .gte('choice_count', 1) \
                 .execute()
             
             if patterns.data:
-                # Only use patterns that have been confirmed (choice_count >= 2) 
-                # or high confidence
+                # Only use patterns that have been confirmed (choice_count >= 2)
                 for p in patterns.data:
-                    if p.get('choice_count', 0) >= 2 or p.get('confidence', 0) >= 0.9:
+                    if p.get('choice_count', 0) >= 2:
                         result['suppressions'].append(p['chosen_option'])
                 
                 result['stats']['discarded'] = len(patterns.data)
