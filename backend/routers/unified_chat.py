@@ -2542,6 +2542,34 @@ async def get_stats():
     return stats
 
 
+@router.get("/chat/intelligent/learning/stats")
+async def get_learning_stats():
+    """
+    Get learning system statistics.
+    
+    This endpoint is called by the Admin UI Learning page.
+    Provides counts for learned queries, feedback, preferences, and patterns.
+    """
+    if not LEARNING_AVAILABLE:
+        return {
+            'available': False,
+            'learned_queries': 0,
+            'feedback_records': 0,
+            'user_preferences': 0,
+            'clarification_patterns': 0
+        }
+    
+    try:
+        learning = get_learning_module()
+        return learning.get_learning_stats()
+    except Exception as e:
+        logger.error(f"[LEARNING] Stats error: {e}")
+        return {
+            'available': False,
+            'error': str(e)
+        }
+
+
 # =============================================================================
 # BACKWARD COMPATIBILITY REDIRECTS
 # =============================================================================
