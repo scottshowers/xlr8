@@ -1307,3 +1307,137 @@ async def get_job_status(job_id: str):
     except Exception as e:
         logger.error(f"[STATUS] Error getting job status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# STANDARDS UPLOAD - P4 Standards Layer
+# =============================================================================
+
+# Import standards processor
+try:
+    from backend.utils.standards_processor import (
+        process_pdf as standards_process_pdf,
+        process_text as standards_process_text,
+        get_rule_registry,
+        search_standards
+    )
+    STANDARDS_AVAILABLE = True
+except ImportError:
+    try:
+        from utils.standards_processor import (
+            process_pdf as standards_process_pdf,
+            process_text as standards_process_text,
+            get_rule_registry,
+            search_standards
+        )
+        STANDARDS_AVAILABLE = True
+    except ImportError:
+        STANDARDS_AVAILABLE = False
+        logger.warning("[UPLOAD] Standards processor not available")
+
+
+@router.get("/standards/health")
+async def standards_health():
+    """Standards health check."""
+    status = {
+        "standards_processor": STANDARDS_AVAILABLE,
+        "rules_loaded": 0,
+        "documents_loaded": 0
+    }
+    if STANDARDS_AVAILABLE:
+        try:
+            registry = get_rule_registry()
+            status["rules_loaded"] = len(registry.rules)
+            status["documents_loaded"] = len(registry.documents)
+        except:
+            pass
+    return status
+
+
+@router.post("/standards/upload")
+async def upload_standards(
+    file: UploadFile = File(...),
+    domain: str = Form(default="general"),
+    title: Optional[str] = Form(default=None)
+):
+    """Upload standards document for rule extraction."""
+    try:
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="No filename provided")
+        
+        filename = file.filename
+        ext = filename.split('.')[-1].lower()
+        
+        if ext not in ['pdf', 'docx', 'doc', 'txt', 'md']:
+            raise HTTPException(status_code=400, detail=f"File type '{ext}' not supported")
+        
+        logger.info(f"[STANDARDS] Upload: {filename}, domain={domain}")
+        
+        content = await file.read()
+        logger.info(f"[STANDARDS] Size: {len(content)} bytes")
+        
+        if not STANDARDS_AVAILABLE:
+            raise HTTPException(status_code=503, detail="Standards processor not available")
+        
+        file_path = f"/tmp/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filename}"
+        with open(file_path, 'wb') as f:
+            f.write(content)
+        
+        try:
+            if ext == 'pdf':
+                doc = standards_process_pdf(file_path, domain)
+            else:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    text = f.read()
+                doc = standards_process_text(text, filename, domain)
+            
+            if title:
+                doc.title = title
+            
+            registry = get_rule_registry()
+            registry.add_document(doc)
+            
+            logger.info(f"[STANDARDS] Extracted {len(doc.rules)} rules")
+            
+            return {
+                "success": True,
+                "document_id": doc.document_id,
+                "filename": doc.filename,
+                "title": doc.title,
+                "domain": doc.domain,
+                "rules_extracted": len(doc.rules),
+                "page_count": doc.page_count,
+                "rules": [r.to_dict() for r in doc.rules[:10]]
+            }
+        finally:
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except:
+                    pass
+                    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[STANDARDS] Upload failed: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/standards/rules")
+async def list_standards_rules(limit: int = 100):
+    """List extracted rules."""
+    if not STANDARDS_AVAILABLE:
+        raise HTTPException(503, "Standards processor not available")
+    registry = get_rule_registry()
+    rules = registry.get_all_rules()
+    return {"total": len(rules), "rules": [r.to_dict() for r in rules[:limit]]}
+
+
+@router.get("/standards/documents")
+async def list_standards_documents():
+    """List processed documents."""
+    if not STANDARDS_AVAILABLE:
+        raise HTTPException(503, "Standards processor not available")
+    registry = get_rule_registry()
+    return {"total": len(registry.documents), "documents": [d.to_dict() for d in registry.documents.values()]}
