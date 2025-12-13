@@ -4280,4 +4280,4 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
     </div>
     </ErrorBoundary>
   );
-        }
+      }
