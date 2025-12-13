@@ -104,6 +104,14 @@ const Navigation: React.FC<NavigationProps> = () => {
                 SECURE 2.0
               </Link>
             </li>
+            <li>
+              <Link 
+                to="/standards" 
+                className={isActive('/standards') ? 'active' : ''}
+              >
+                Standards
+              </Link>
+            </li>
           </ul>
         </div>
       </div>
