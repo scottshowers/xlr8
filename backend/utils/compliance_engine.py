@@ -651,7 +651,15 @@ class ComplianceEngine:
         # Get rules from registry if not provided
         if rules is None:
             try:
-                from utils.standards_processor import get_rule_registry
+                from backend.utils.standards_processor import get_rule_registry
+            except ImportError:
+                try:
+                    from utils.standards_processor import get_rule_registry
+                except ImportError:
+                    logger.error("[COMPLIANCE] Standards processor not available")
+                    return []
+            
+            try:
                 registry = get_rule_registry()
                 
                 if domain:
@@ -659,8 +667,8 @@ class ComplianceEngine:
                 else:
                     rules = [r.to_dict() for r in registry.get_all_rules()]
                     
-            except ImportError:
-                logger.error("[COMPLIANCE] Standards processor not available")
+            except Exception as e:
+                logger.error(f"[COMPLIANCE] Failed to get rules: {e}")
                 return []
         
         if not rules:
