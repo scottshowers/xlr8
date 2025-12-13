@@ -105,70 +105,54 @@ class StandardsDocument:
 
 
 # =============================================================================
-# LLM INTEGRATION
+# LLM INTEGRATION - Uses LLMOrchestrator like intelligence_engine
 # =============================================================================
 
-def _get_llm_client():
-    """Get LLM client for rule extraction."""
-    # Try local first, fall back to Claude
-    try:
-        # Check for Ollama
-        import requests
-        response = requests.get("http://localhost:11434/api/tags", timeout=2)
-        if response.status_code == 200:
-            return {"type": "ollama", "model": "mistral"}
-    except:
-        pass
-    
-    # Fall back to Claude
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if api_key:
-        return {"type": "claude", "api_key": api_key}
-    
-    return None
+_orchestrator = None
+
+def _get_orchestrator():
+    """Get or create LLMOrchestrator instance."""
+    global _orchestrator
+    if _orchestrator is None:
+        try:
+            try:
+                from utils.llm_orchestrator import LLMOrchestrator
+            except ImportError:
+                from backend.utils.llm_orchestrator import LLMOrchestrator
+            _orchestrator = LLMOrchestrator()
+            logger.info("[STANDARDS] LLMOrchestrator initialized")
+        except Exception as e:
+            logger.error(f"[STANDARDS] Could not load LLMOrchestrator: {e}")
+            return None
+    return _orchestrator
 
 
 def _call_llm(prompt: str, system_prompt: str = None) -> str:
-    """Call LLM for rule extraction."""
-    client = _get_llm_client()
+    """Call LLM for rule extraction using LLMOrchestrator."""
+    orchestrator = _get_orchestrator()
     
-    if not client:
+    if not orchestrator:
         logger.error("[STANDARDS] No LLM available for rule extraction")
         return ""
     
     try:
-        if client["type"] == "ollama":
-            import requests
-            response = requests.post(
-                "http://localhost:11434/api/generate",
-                json={
-                    "model": client["model"],
-                    "prompt": f"{system_prompt}\n\n{prompt}" if system_prompt else prompt,
-                    "stream": False
-                },
-                timeout=120
-            )
-            return response.json().get("response", "")
+        # Use process_query which handles local vs Claude routing
+        # We'll format as a simple query
+        full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
         
-        elif client["type"] == "claude":
-            import requests
-            response = requests.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": client["api_key"],
-                    "content-type": "application/json",
-                    "anthropic-version": "2023-06-01"
-                },
-                json={
-                    "model": "claude-sonnet-4-20250514",
-                    "max_tokens": 4096,
-                    "system": system_prompt or "You are a compliance analyst extracting rules from documents.",
-                    "messages": [{"role": "user", "content": prompt}]
-                },
-                timeout=120
-            )
-            data = response.json()
-            return data.get("content", [{}])[0].get("text", "")
+        # Try Claude directly since this is text extraction (not SQL)
+        result, success = orchestrator._call_claude(
+            prompt=prompt,
+            system_prompt=system_prompt or "You are a compliance analyst extracting rules from documents.",
+            operation="standards_extraction"
+        )
+        
+        if success:
+            logger.info(f"[STANDARDS] LLM response: {len(result)} chars")
+            return result
+        else:
+            logger.error(f"[STANDARDS] LLM call failed: {result}")
+            return ""
     
     except Exception as e:
         logger.error(f"[STANDARDS] LLM call failed: {e}")
