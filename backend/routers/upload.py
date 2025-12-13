@@ -1355,6 +1355,7 @@ async def standards_health():
 
 
 @router.post("/standards/upload")
+@router.post("/upload-standards")
 async def upload_standards(
     file: UploadFile = File(...),
     domain: str = Form(default="general"),
@@ -1441,45 +1442,3 @@ async def list_standards_documents():
         raise HTTPException(503, "Standards processor not available")
     registry = get_rule_registry()
     return {"total": len(registry.documents), "documents": [d.to_dict() for d in registry.documents.values()]}
-
-
-from pydantic import BaseModel
-
-class StandardsTextRequest(BaseModel):
-    text: str
-    document_name: str
-    domain: str = "general"
-
-
-@router.post("/standards/upload/text")
-async def upload_standards_text(request: StandardsTextRequest):
-    """Upload standards as raw text."""
-    try:
-        logger.info(f"[STANDARDS] Text upload: {request.document_name}, domain={request.domain}")
-        
-        if not STANDARDS_AVAILABLE:
-            raise HTTPException(status_code=503, detail="Standards processor not available")
-        
-        doc = standards_process_text(request.text, request.document_name, request.domain)
-        
-        registry = get_rule_registry()
-        registry.add_document(doc)
-        
-        logger.info(f"[STANDARDS] Extracted {len(doc.rules)} rules from text")
-        
-        return {
-            "success": True,
-            "document_id": doc.document_id,
-            "filename": doc.filename,
-            "title": doc.title,
-            "domain": doc.domain,
-            "rules_extracted": len(doc.rules),
-            "rules": [r.to_dict() for r in doc.rules[:10]]
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[STANDARDS] Text upload failed: {e}")
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
