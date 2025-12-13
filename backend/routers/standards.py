@@ -18,6 +18,7 @@ Version: 1.0.0 - P4 Standards Layer
 """
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from pydantic import BaseModel
 from typing import List, Optional
 import logging
 import json
@@ -27,6 +28,16 @@ import tempfile
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/standards", tags=["standards"])
+
+
+# =============================================================================
+# TEST ENDPOINT
+# =============================================================================
+
+@router.post("/test")
+async def test_post():
+    """Simple test - no processing, just returns success."""
+    return {"status": "ok", "message": "POST works"}
 
 
 # =============================================================================
@@ -198,12 +209,14 @@ async def upload_standards_document(
             pass
 
 
-@router.post("/upload/text")
-async def upload_standards_text(
-    text: str,
-    document_name: str,
+class TextUploadRequest(BaseModel):
+    text: str
+    document_name: str
     domain: str = "general"
-):
+
+
+@router.post("/upload/text")
+async def upload_standards_text(request: TextUploadRequest):
     """
     Process standards from raw text.
     
@@ -214,7 +227,7 @@ async def upload_standards_text(
         raise HTTPException(503, "Standards processor not available")
     
     try:
-        doc = processor["process_text"](text, document_name, domain)
+        doc = processor["process_text"](request.text, request.document_name, request.domain)
         
         registry = processor["get_rule_registry"]()
         registry.add_document(doc)
