@@ -875,7 +875,11 @@ async def quick_suppress(
     action_id: str, 
     request: QuickSuppressRequest
 ):
-    """Quick suppress from UI."""
+    """Quick suppress from UI - feeds BOTH suppression model AND learning system."""
+    success = False
+    rule_id = None
+    
+    # 1. Store in FindingSuppressionModel (existing behavior)
     try:
         from utils.database.models import FindingSuppressionModel
         result = FindingSuppressionModel.create(
@@ -888,13 +892,34 @@ async def quick_suppress(
             fein_filter=[request.fein] if request.fein else None
         )
         if result:
-            return {"success": True, "rule_id": result['id']}
-        return {"success": False}
+            success = True
+            rule_id = result['id']
+            logger.info(f"[SUPPRESS] Created suppression rule {rule_id}")
     except ImportError:
-        return {"success": False, "message": "Suppression not available"}
+        logger.warning("[SUPPRESS] FindingSuppressionModel not available")
     except Exception as e:
         logger.error(f"[SUPPRESS] Quick suppress error: {e}")
-        return {"success": False, "error": str(e)}
+    
+    # 2. ALSO feed into Learning System (new behavior)
+    try:
+        if FRAMEWORK_AVAILABLE and LearningHook.is_available():
+            engine = get_playbook_engine("year-end")
+            if engine:
+                engine.record_feedback(
+                    project_id=project_id,
+                    action_id=action_id,
+                    finding_text=request.finding_text,
+                    feedback='discard',
+                    reason=request.reason
+                )
+                logger.info(f"[LEARNING] Recorded discard from suppress UI: {request.finding_text[:50]}...")
+                success = True  # Mark success even if suppression model failed
+    except Exception as e:
+        logger.warning(f"[LEARNING] Failed to record in learning system: {e}")
+    
+    if success:
+        return {"success": True, "rule_id": rule_id, "learning_recorded": True}
+    return {"success": False, "message": "Both systems unavailable"}
 
 
 # =============================================================================
