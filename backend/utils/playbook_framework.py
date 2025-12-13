@@ -32,7 +32,7 @@ USAGE:
 3. Framework handles: scanning, progress, export, learning
 
 Author: XLR8 Team
-Version: 1.0.0 - P3.6 P3 Initial Release
+Version: 1.1.0 - P3.6 P4 Learning Integration (Supabase)
 Date: December 2025
 """
 
@@ -560,22 +560,27 @@ class IntelligenceHook:
 
 class LearningHook:
     """
-    Hook into the Learning Engine.
+    Hook into the Learning Module (Supabase-backed).
     
     Provides feedback recording and pattern retrieval.
-    This is a HOOK - actual implementation is in learning_engine.py.
+    This is a HOOK - actual implementation is in learning.py (Supabase).
+    
+    P3.6 P4: Rewired to use learning.py instead of learning_engine.py
+    so that feedback shows in the Admin UI.
     """
     
     @staticmethod
     def is_available() -> bool:
-        """Check if learning engine is available."""
+        """Check if learning module is available."""
         try:
-            from backend.utils.learning_engine import get_learning_system
-            return True
+            from backend.utils.learning import get_learning_module
+            module = get_learning_module()
+            return module.supabase is not None
         except ImportError:
             try:
-                from utils.learning_engine import get_learning_system
-                return True
+                from utils.learning import get_learning_module
+                module = get_learning_module()
+                return module.supabase is not None
             except ImportError:
                 return False
     
@@ -592,26 +597,31 @@ class LearningHook:
         Record user feedback on a finding.
         
         This trains the system to make better recommendations.
+        Stores in Supabase so it shows in Admin UI.
         """
         if not LearningHook.is_available():
+            logger.warning("[LEARNING] Learning module not available")
             return False
         
         try:
             try:
-                from backend.utils.learning_engine import get_learning_system
+                from backend.utils.learning import get_learning_module
             except ImportError:
-                from utils.learning_engine import get_learning_system
+                from utils.learning import get_learning_module
             
-            learning = get_learning_system()
-            learning.record_feedback(
+            learning = get_learning_module()
+            success = learning.record_playbook_feedback(
                 project_id=project_id,
-                context=f"{playbook_id}:{action_id}",
-                finding=finding_text,
+                playbook_id=playbook_id,
+                action_id=action_id,
+                finding_text=finding_text,
                 feedback=feedback,
                 reason=reason
             )
-            logger.info(f"[LEARNING] Recorded feedback: {feedback} for {action_id}")
-            return True
+            
+            if success:
+                logger.info(f"[LEARNING] Recorded feedback: {feedback} for {action_id}")
+            return success
             
         except Exception as e:
             logger.warning(f"[LEARNING] Failed to record feedback: {e}")
@@ -623,18 +633,19 @@ class LearningHook:
         Get learned patterns for a project/playbook.
         
         Returns patterns that should influence findings.
+        Reads from Supabase.
         """
         if not LearningHook.is_available():
             return {'suppressions': [], 'preferences': {}}
         
         try:
             try:
-                from backend.utils.learning_engine import get_learning_system
+                from backend.utils.learning import get_learning_module
             except ImportError:
-                from utils.learning_engine import get_learning_system
+                from utils.learning import get_learning_module
             
-            learning = get_learning_system()
-            return learning.get_patterns(project_id, playbook_id)
+            learning = get_learning_module()
+            return learning.get_playbook_patterns(project_id, playbook_id)
             
         except Exception as e:
             logger.warning(f"[LEARNING] Failed to get patterns: {e}")
@@ -642,7 +653,7 @@ class LearningHook:
     
     @staticmethod
     def _normalize_for_matching(text: str) -> str:
-        """Normalize text for suppression matching (same as learning_engine)."""
+        """Normalize text for suppression matching (same as learning.py)."""
         import re
         # Replace numbers with N, lowercase, truncate
         normalized = re.sub(r'\d+', 'N', text.lower())
