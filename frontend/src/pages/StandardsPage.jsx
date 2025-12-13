@@ -1,14 +1,13 @@
 /**
- * StandardsPage - P4 Standards Layer
+ * StandardsPage - Uses existing /api/upload with standards_mode flag
  * 
  * Deploy to: frontend/src/pages/StandardsPage.jsx
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'https://xlr8-backend-production.up.railway.app';
 
-// ==================== UPLOAD TAB ====================
 function UploadTab({ onUploadSuccess }) {
   const [file, setFile] = useState(null);
   const [domain, setDomain] = useState('general');
@@ -24,12 +23,15 @@ function UploadTab({ onUploadSuccess }) {
     setError(null);
     setResult(null);
 
+    // Use the SAME /api/upload endpoint that works, with standards_mode flag
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('project', '__STANDARDS__');
+    formData.append('standards_mode', 'true');
     formData.append('domain', domain);
 
     try {
-      const response = await fetch(`${API_BASE}/api/upload-standards`, {
+      const response = await fetch(`${API_BASE}/api/upload`, {
         method: 'POST',
         body: formData,
       });
@@ -42,7 +44,6 @@ function UploadTab({ onUploadSuccess }) {
       const data = await response.json();
       setResult(data);
       setFile(null);
-      document.querySelector('input[type="file"]').value = '';
       if (onUploadSuccess) onUploadSuccess();
     } catch (err) {
       setError(err.message);
@@ -77,7 +78,6 @@ function UploadTab({ onUploadSuccess }) {
             onChange={(e) => setFile(e.target.files[0])}
             style={{ display: 'block', width: '100%', padding: '0.5rem', border: '1px solid #e1e8ed', borderRadius: '8px' }}
           />
-          {file && <span style={{ display: 'block', marginTop: '0.5rem', color: '#5f6c7b', fontSize: '0.85rem' }}>{file.name}</span>}
         </div>
 
         <div style={{ marginBottom: '1rem' }}>
@@ -130,22 +130,19 @@ function UploadTab({ onUploadSuccess }) {
   );
 }
 
-// ==================== RULES TAB ====================
 function RulesTab() {
   const [rules, setRules] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
 
   useEffect(() => {
     fetch(`${API_BASE}/api/standards/rules`)
       .then(res => res.json())
       .then(data => setRules(data.rules || []))
-      .catch(err => setError(err.message))
+      .catch(() => setRules([]))
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <div style={{ padding: '2rem', textAlign: 'center', color: '#5f6c7b' }}>Loading rules...</div>;
-  if (error) return <div style={{ padding: '1rem', background: '#f8d7da', color: '#721c24', borderRadius: '8px' }}>❌ {error}</div>;
+  if (loading) return <div style={{ padding: '2rem', textAlign: 'center', color: '#5f6c7b' }}>Loading...</div>;
 
   return (
     <div>
@@ -166,7 +163,6 @@ function RulesTab() {
   );
 }
 
-// ==================== DOCUMENTS TAB ====================
 function DocumentsTab() {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -175,7 +171,7 @@ function DocumentsTab() {
     fetch(`${API_BASE}/api/standards/documents`)
       .then(res => res.json())
       .then(data => setDocuments(data.documents || []))
-      .catch(err => console.error(err))
+      .catch(() => setDocuments([]))
       .finally(() => setLoading(false));
   }, []);
 
@@ -183,9 +179,9 @@ function DocumentsTab() {
 
   return (
     <div>
-      <h3 style={{ margin: '0 0 1rem 0' }}>📚 Standards Documents ({documents.length})</h3>
+      <h3 style={{ margin: '0 0 1rem 0' }}>📚 Documents ({documents.length})</h3>
       {documents.length === 0 ? (
-        <p style={{ color: '#5f6c7b' }}>No documents uploaded yet.</p>
+        <p style={{ color: '#5f6c7b' }}>No documents yet.</p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           {documents.map((doc, i) => (
@@ -202,34 +198,28 @@ function DocumentsTab() {
   );
 }
 
-// ==================== COMPLIANCE TAB ====================
 function ComplianceTab() {
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState('');
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState(null);
-  const [error, setError] = useState(null);
 
   useEffect(() => {
     fetch(`${API_BASE}/api/projects`)
       .then(res => res.json())
       .then(data => setProjects(data.projects || data || []))
-      .catch(err => console.error(err));
+      .catch(() => {});
   }, []);
 
   const runCheck = async () => {
     if (!selectedProject) return;
     setRunning(true);
-    setError(null);
     setResults(null);
-
     try {
-      const response = await fetch(`${API_BASE}/api/standards/compliance/check/${selectedProject}`, { method: 'POST' });
-      if (!response.ok) throw new Error('Check failed');
-      const data = await response.json();
-      setResults(data);
-    } catch (err) {
-      setError(err.message);
+      const res = await fetch(`${API_BASE}/api/standards/compliance/check/${selectedProject}`, { method: 'POST' });
+      setResults(await res.json());
+    } catch (e) {
+      setResults({ error: e.message });
     } finally {
       setRunning(false);
     }
@@ -238,59 +228,39 @@ function ComplianceTab() {
   return (
     <div>
       <h3 style={{ margin: '0 0 1rem 0' }}>🔍 Run Compliance Check</h3>
-      
-      <div style={{ maxWidth: '500px' }}>
-        <div style={{ marginBottom: '1rem' }}>
-          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600' }}>Select Project</label>
-          <select
-            value={selectedProject}
-            onChange={(e) => setSelectedProject(e.target.value)}
-            style={{ width: '100%', padding: '0.75rem', border: '1px solid #e1e8ed', borderRadius: '8px' }}
-          >
-            <option value="">-- Select --</option>
-            {projects.map(p => (
-              <option key={p.id || p.project_id} value={p.id || p.project_id}>
-                {p.name || p.project_name || p.id}
-              </option>
-            ))}
-          </select>
-        </div>
-
+      <div style={{ maxWidth: '400px', marginBottom: '1rem' }}>
+        <select
+          value={selectedProject}
+          onChange={(e) => setSelectedProject(e.target.value)}
+          style={{ width: '100%', padding: '0.75rem', border: '1px solid #e1e8ed', borderRadius: '8px', marginBottom: '1rem' }}
+        >
+          <option value="">Select Project</option>
+          {projects.map(p => (
+            <option key={p.id || p.project_id} value={p.id || p.project_id}>{p.name || p.id}</option>
+          ))}
+        </select>
         <button
           onClick={runCheck}
           disabled={!selectedProject || running}
-          style={{
-            padding: '0.75rem 1.5rem',
-            background: '#83b16d',
-            color: 'white',
-            border: 'none',
-            borderRadius: '8px',
-            fontWeight: '600',
-            cursor: 'pointer',
-            opacity: (!selectedProject || running) ? 0.5 : 1,
-          }}
+          style={{ padding: '0.75rem 1.5rem', background: '#83b16d', color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', opacity: (!selectedProject || running) ? 0.5 : 1 }}
         >
           {running ? '⏳ Running...' : '▶️ Run Check'}
         </button>
       </div>
-
-      {error && <div style={{ padding: '1rem', background: '#f8d7da', color: '#721c24', borderRadius: '8px', marginTop: '1rem' }}>❌ {error}</div>}
-
       {results && (
-        <div style={{ padding: '1rem', background: '#f8f9fa', borderRadius: '8px', marginTop: '1rem' }}>
+        <div style={{ padding: '1rem', background: '#f8f9fa', borderRadius: '8px' }}>
           <p><strong>Rules Checked:</strong> {results.rules_checked}</p>
           <p><strong>Findings:</strong> {results.findings_count}</p>
-          {results.message && <p style={{ color: '#5f6c7b' }}>{results.message}</p>}
+          {results.message && <p>{results.message}</p>}
         </div>
       )}
     </div>
   );
 }
 
-// ==================== MAIN ====================
 export default function StandardsPage() {
   const [activeTab, setActiveTab] = useState('upload');
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [key, setKey] = useState(0);
 
   const tabs = [
     { id: 'upload', label: 'Upload', icon: '📤' },
@@ -299,25 +269,13 @@ export default function StandardsPage() {
     { id: 'compliance', label: 'Compliance', icon: '🔍' },
   ];
 
-  const renderTab = () => {
-    switch (activeTab) {
-      case 'upload': return <UploadTab onUploadSuccess={() => setRefreshKey(k => k + 1)} />;
-      case 'documents': return <DocumentsTab key={refreshKey} />;
-      case 'rules': return <RulesTab key={refreshKey} />;
-      case 'compliance': return <ComplianceTab />;
-      default: return null;
-    }
-  };
-
   return (
     <div>
       <div style={{ marginBottom: '1.5rem' }}>
         <h1 style={{ fontFamily: "'Sora', sans-serif", fontSize: '1.75rem', fontWeight: '700', color: '#2a3441', margin: 0 }}>
           📜 Standards & Compliance
         </h1>
-        <p style={{ color: '#5f6c7b', marginTop: '0.25rem' }}>
-          Upload compliance documents, extract rules, run checks.
-        </p>
+        <p style={{ color: '#5f6c7b', marginTop: '0.25rem' }}>Upload compliance documents, extract rules, run checks.</p>
       </div>
 
       <div style={{ background: 'white', borderRadius: '16px', boxShadow: '0 1px 3px rgba(42, 52, 65, 0.08)', overflow: 'hidden' }}>
@@ -327,27 +285,21 @@ export default function StandardsPage() {
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '1rem 1.5rem',
-                border: 'none',
-                background: activeTab === tab.id ? 'white' : 'transparent',
-                color: activeTab === tab.id ? '#83b16d' : '#5f6c7b',
-                fontWeight: '600',
-                fontSize: '0.9rem',
-                cursor: 'pointer',
-                borderBottom: activeTab === tab.id ? '2px solid #83b16d' : '2px solid transparent',
-                marginBottom: '-1px',
+                display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '1rem 1.5rem',
+                border: 'none', background: activeTab === tab.id ? 'white' : 'transparent',
+                color: activeTab === tab.id ? '#83b16d' : '#5f6c7b', fontWeight: '600', cursor: 'pointer',
+                borderBottom: activeTab === tab.id ? '2px solid #83b16d' : '2px solid transparent', marginBottom: '-1px',
               }}
             >
-              <span>{tab.icon}</span>
-              {tab.label}
+              <span>{tab.icon}</span>{tab.label}
             </button>
           ))}
         </div>
         <div style={{ padding: '1.5rem' }}>
-          {renderTab()}
+          {activeTab === 'upload' && <UploadTab onUploadSuccess={() => setKey(k => k + 1)} />}
+          {activeTab === 'documents' && <DocumentsTab key={key} />}
+          {activeTab === 'rules' && <RulesTab key={key} />}
+          {activeTab === 'compliance' && <ComplianceTab />}
         </div>
       </div>
     </div>
