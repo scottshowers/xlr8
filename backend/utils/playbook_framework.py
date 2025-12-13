@@ -641,6 +641,15 @@ class LearningHook:
             return {'suppressions': [], 'preferences': {}}
     
     @staticmethod
+    def _normalize_for_matching(text: str) -> str:
+        """Normalize text for suppression matching (same as learning_engine)."""
+        import re
+        # Replace numbers with N, lowercase, truncate
+        normalized = re.sub(r'\d+', 'N', text.lower())
+        normalized = ' '.join(normalized.split())  # Clean whitespace
+        return normalized[:100]
+    
+    @staticmethod
     def apply_learned_suppressions(
         findings: Dict[str, Any],
         patterns: Dict[str, Any]
@@ -649,18 +658,32 @@ class LearningHook:
         Apply learned suppressions to findings.
         
         Removes or marks findings that user has previously discarded.
+        
+        IMPORTANT: Both the finding and the suppression pattern are normalized
+        (numbers replaced with 'N', lowercased) before comparison.
         """
         if not findings or not patterns.get('suppressions'):
             return findings
         
         suppressions = patterns['suppressions']
         
+        def should_suppress(text: str) -> bool:
+            """Check if text matches any suppression pattern."""
+            normalized_text = LearningHook._normalize_for_matching(text)
+            for supp in suppressions:
+                # Normalize suppression too (in case it wasn't already)
+                normalized_supp = LearningHook._normalize_for_matching(supp)
+                if normalized_supp in normalized_text or normalized_text in normalized_supp:
+                    logger.debug(f"[LEARNING] Match: '{normalized_supp}' <-> '{normalized_text}'")
+                    return True
+            return False
+        
         # Filter issues
         if findings.get('issues'):
             original_count = len(findings['issues'])
             findings['issues'] = [
                 issue for issue in findings['issues']
-                if not any(supp.lower() in issue.lower() for supp in suppressions)
+                if not should_suppress(issue)
             ]
             suppressed = original_count - len(findings['issues'])
             if suppressed > 0:
@@ -671,7 +694,7 @@ class LearningHook:
             original_count = len(findings['recommendations'])
             findings['recommendations'] = [
                 rec for rec in findings['recommendations']
-                if not any(supp.lower() in rec.lower() for supp in suppressions)
+                if not should_suppress(rec)
             ]
             suppressed = original_count - len(findings['recommendations'])
             if suppressed > 0:
