@@ -870,12 +870,23 @@ async def get_suppressions(project_id: str):
 
 
 class SuppressRequest(BaseModel):
-    """Request body for suppress endpoint."""
-    finding_text: str
-    reason: str
+    """Request body for suppress endpoint - flexible field names."""
+    finding_text: Optional[str] = None
+    pattern_text: Optional[str] = None  # Alternative name frontend might use
+    text: Optional[str] = None  # Another alternative
+    pattern: Optional[str] = None  # Yet another alternative
+    reason: Optional[str] = "User suppressed"
     action_id: Optional[str] = None
     suppress_type: str = 'acknowledge'
+    suppression_type: Optional[str] = None  # Alternative name
     fein: Optional[str] = None
+    
+    class Config:
+        extra = 'allow'  # Accept any extra fields
+    
+    def get_finding_text(self) -> str:
+        """Get finding text from whichever field was provided."""
+        return self.finding_text or self.pattern_text or self.text or self.pattern or ""
 
 
 @router.post("/year-end/suppress/{project_id}")
@@ -885,9 +896,21 @@ async def suppress_finding(project_id: str, request: SuppressRequest):
     
     This is the endpoint the frontend UI calls.
     """
+    # Log what we received for debugging
+    logger.info(f"[SUPPRESS] Raw request fields: {request.dict()}")
+    
     success = False
     rule_id = None
     action_id = request.action_id or "general"
+    finding_text = request.get_finding_text()
+    reason = request.reason or "User suppressed"
+    suppress_type = request.suppression_type or request.suppress_type or 'acknowledge'
+    
+    if not finding_text:
+        logger.warning(f"[SUPPRESS] No finding text found in request: {request.dict()}")
+        return {"success": False, "message": "No finding text provided"}
+    
+    logger.info(f"[SUPPRESS] Received: finding='{finding_text[:50]}...', reason='{reason}'")
     
     # 1. Store in FindingSuppressionModel (existing behavior)
     try:
@@ -896,9 +919,9 @@ async def suppress_finding(project_id: str, request: SuppressRequest):
             project_id=project_id,
             playbook_type="year-end",
             action_id=action_id,
-            suppression_type=request.suppress_type,
-            finding_text=request.finding_text,
-            reason=request.reason,
+            suppression_type=suppress_type,
+            finding_text=finding_text,
+            reason=reason,
             fein_filter=[request.fein] if request.fein else None
         )
         if result:
@@ -918,11 +941,11 @@ async def suppress_finding(project_id: str, request: SuppressRequest):
                 engine.record_feedback(
                     project_id=project_id,
                     action_id=action_id,
-                    finding_text=request.finding_text,
+                    finding_text=finding_text,
                     feedback='discard',
-                    reason=request.reason
+                    reason=reason
                 )
-                logger.info(f"[LEARNING] Recorded discard from suppress UI: {request.finding_text[:50]}...")
+                logger.info(f"[LEARNING] Recorded discard from suppress UI: {finding_text[:50]}...")
                 success = True
     except Exception as e:
         logger.warning(f"[LEARNING] Failed to record in learning system: {e}")
