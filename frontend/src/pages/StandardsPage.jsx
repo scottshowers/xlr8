@@ -29,7 +29,7 @@ function UploadTab({ onUploadSuccess }) {
     formData.append('domain', domain);
 
     try {
-      const response = await fetch(`${API_BASE}/api/standards/upload`, {
+      const response = await fetch(`${API_BASE}/api/upload-standards`, {
         method: 'POST',
         body: formData,
       });
