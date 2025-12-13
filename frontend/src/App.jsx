@@ -46,6 +46,7 @@ import AdminPage from './pages/AdminPage';
 import AdminDashboard from './pages/AdminDashboard';
 import DataModelPage from './pages/DataModelPage';
 import SystemMonitorPage from './pages/SystemMonitorPage';
+import StandardsPage from './pages/StandardsPage';
 
 // CSS
 import './index.css';
@@ -106,6 +107,12 @@ function App() {
             <Route path="/playbooks" element={
               <ProtectedRoute permission="playbooks">
                 <Layout><PlaybooksPage /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/standards" element={
+              <ProtectedRoute permission="playbooks">
+                <Layout><StandardsPage /></Layout>
               </ProtectedRoute>
             } />
             
