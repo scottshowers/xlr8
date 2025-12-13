@@ -7,8 +7,11 @@ Makes the AI smarter with every interaction:
 - Remembers user preferences from clarifications
 - Uses feedback to improve responses
 - Skips unnecessary clarifications
+- Records playbook finding feedback (P3.6 P4)
 
 Deploy to: backend/utils/learning.py
+
+Version: 2.0.0 - Added playbook feedback integration
 """
 
 import logging
@@ -28,6 +31,7 @@ class LearningModule:
     - Learn from user feedback
     - Remember clarification preferences
     - Skip questions when we know the answer
+    - Track playbook finding feedback (keep/discard)
     """
     
     def __init__(self):
@@ -42,7 +46,7 @@ class LearningModule:
             logger.info("[LEARNING] Connected to Supabase")
         except Exception as e:
             try:
-                from utils.database.supabase_client import get_supabase
+                from backend.utils.database.supabase_client import get_supabase
                 self.supabase = get_supabase()
                 logger.info("[LEARNING] Connected to Supabase (alt path)")
             except Exception as e2:
@@ -127,7 +131,7 @@ class LearningModule:
             logger.warning(f"[LEARNING] Error recording query: {e}")
     
     # =========================================================================
-    # FEEDBACK LEARNING
+    # FEEDBACK LEARNING (Chat)
     # =========================================================================
     
     def record_feedback(
@@ -162,6 +166,175 @@ class LearningModule:
             
         except Exception as e:
             logger.warning(f"[LEARNING] Error recording feedback: {e}")
+    
+    # =========================================================================
+    # PLAYBOOK FEEDBACK (P3.6 P4)
+    # =========================================================================
+    
+    def record_playbook_feedback(
+        self,
+        project_id: str,
+        playbook_id: str,
+        action_id: str,
+        finding_text: str,
+        feedback: str,  # 'keep', 'discard', 'modify'
+        reason: str = None
+    ) -> bool:
+        """
+        Record feedback on a playbook finding.
+        
+        This is called by PlaybookFramework's LearningHook.
+        Stores in query_feedback table so it shows in Admin UI.
+        """
+        if not self.supabase:
+            logger.warning("[LEARNING] Supabase not available for playbook feedback")
+            return False
+        
+        try:
+            # Map playbook feedback to standard feedback format
+            feedback_type = 'negative' if feedback == 'discard' else 'positive'
+            
+            # Create a context string that includes playbook info
+            context = f"playbook:{playbook_id}:{action_id}"
+            
+            # Normalize the finding for pattern matching
+            normalized = self._normalize_for_matching(finding_text)
+            
+            # Store in query_feedback table
+            self.supabase.table('query_feedback').insert({
+                'question': finding_text[:500],  # Use finding as "question"
+                'feedback': feedback_type,
+                'project': project_id,
+                'intent': context,  # Store playbook context in intent field
+                'keywords': [playbook_id, action_id, feedback, normalized[:50]],
+                'was_intelligent': True,  # Mark as from playbook
+                'created_at': datetime.now().isoformat()
+            }).execute()
+            
+            logger.info(f"[LEARNING] Recorded playbook feedback: {feedback} for {action_id}")
+            
+            # Also store in clarification_patterns for suppression lookup
+            if feedback == 'discard':
+                self._store_suppression_pattern(project_id, playbook_id, action_id, normalized, reason)
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"[LEARNING] Error recording playbook feedback: {e}")
+            return False
+    
+    def _store_suppression_pattern(
+        self,
+        project_id: str,
+        playbook_id: str,
+        action_id: str,
+        normalized_pattern: str,
+        reason: str = None
+    ):
+        """Store a suppression pattern for future scans."""
+        try:
+            # Use clarification_patterns table to store suppressions
+            # This is a bit of a hack but keeps everything in existing tables
+            pattern_id = f"suppress:{playbook_id}:{action_id}"
+            
+            # Check if pattern exists
+            existing = self.supabase.table('clarification_patterns') \
+                .select('*') \
+                .eq('question_id', pattern_id) \
+                .eq('chosen_option', normalized_pattern) \
+                .execute()
+            
+            if existing.data:
+                # Increment count
+                self.supabase.table('clarification_patterns') \
+                    .update({'choice_count': existing.data[0].get('choice_count', 0) + 1}) \
+                    .eq('id', existing.data[0]['id']) \
+                    .execute()
+            else:
+                # Create new pattern
+                self.supabase.table('clarification_patterns').insert({
+                    'question_id': pattern_id,
+                    'chosen_option': normalized_pattern,
+                    'project': project_id,
+                    'semantic_domain': playbook_id,
+                    'choice_count': 1,
+                    'confidence': 0.8,
+                    'created_at': datetime.now().isoformat()
+                }).execute()
+                
+            logger.debug(f"[LEARNING] Stored suppression pattern: {normalized_pattern[:50]}...")
+            
+        except Exception as e:
+            logger.warning(f"[LEARNING] Error storing suppression pattern: {e}")
+    
+    def get_playbook_patterns(
+        self,
+        project_id: str,
+        playbook_id: str
+    ) -> Dict[str, Any]:
+        """
+        Get learned patterns for a playbook.
+        
+        Returns suppressions and preferences for the given project/playbook.
+        Called by PlaybookFramework's LearningHook.
+        """
+        result = {
+            'suppressions': [],
+            'preferences': {},
+            'stats': {'total_feedback': 0, 'discarded': 0, 'kept': 0}
+        }
+        
+        if not self.supabase:
+            return result
+        
+        try:
+            # Get suppression patterns from clarification_patterns
+            pattern_prefix = f"suppress:{playbook_id}:"
+            
+            patterns = self.supabase.table('clarification_patterns') \
+                .select('chosen_option, choice_count, confidence') \
+                .like('question_id', f'{pattern_prefix}%') \
+                .gte('choice_count', 1) \
+                .execute()
+            
+            if patterns.data:
+                # Only use patterns that have been confirmed (choice_count >= 2) 
+                # or high confidence
+                for p in patterns.data:
+                    if p.get('choice_count', 0) >= 2 or p.get('confidence', 0) >= 0.9:
+                        result['suppressions'].append(p['chosen_option'])
+                
+                result['stats']['discarded'] = len(patterns.data)
+            
+            # Get feedback stats
+            context_pattern = f"playbook:{playbook_id}:%"
+            
+            feedback_stats = self.supabase.table('query_feedback') \
+                .select('feedback') \
+                .eq('project', project_id) \
+                .like('intent', context_pattern) \
+                .execute()
+            
+            if feedback_stats.data:
+                result['stats']['total_feedback'] = len(feedback_stats.data)
+                result['stats']['kept'] = sum(1 for f in feedback_stats.data if f['feedback'] == 'positive')
+                result['stats']['discarded'] = sum(1 for f in feedback_stats.data if f['feedback'] == 'negative')
+            
+            logger.debug(f"[LEARNING] Got {len(result['suppressions'])} suppression patterns for {playbook_id}")
+            return result
+            
+        except Exception as e:
+            logger.warning(f"[LEARNING] Error getting playbook patterns: {e}")
+            return result
+    
+    def _normalize_for_matching(self, text: str) -> str:
+        """Normalize text for pattern matching."""
+        if not text:
+            return ""
+        # Replace numbers with N, lowercase, clean whitespace
+        normalized = re.sub(r'\d+', 'N', text.lower())
+        normalized = ' '.join(normalized.split())
+        return normalized[:200]  # Limit length
     
     # =========================================================================
     # CLARIFICATION LEARNING
