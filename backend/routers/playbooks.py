@@ -920,7 +920,7 @@ async def suppress_finding(project_id: str, request: SuppressRequest):
             playbook_type="year-end",
             action_id=action_id,
             suppression_type=suppress_type,
-            finding_text=finding_text,
+            pattern=finding_text,  # The model uses 'pattern' column
             reason=reason,
             fein_filter=[request.fein] if request.fein else None
         )
@@ -973,7 +973,7 @@ async def quick_suppress(
             playbook_type="year-end",
             action_id=action_id,
             suppression_type=request.suppress_type,
-            finding_text=request.finding_text,
+            pattern=request.finding_text,  # The model uses 'pattern' column
             reason=request.reason,
             fein_filter=[request.fein] if request.fein else None
         )
