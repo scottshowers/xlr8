@@ -205,8 +205,7 @@ class LearningModule:
                 'question': finding_text[:500],  # Use finding as "question"
                 'feedback': feedback_type,
                 'project': project_id,
-                'intent': context,  # Store playbook context in intent field
-                'keywords': [playbook_id, action_id, feedback, normalized[:50]],
+                'intent': context,  # Store playbook context in intent field (playbook:id:action)
                 'was_intelligent': True,  # Mark as from playbook
                 'created_at': datetime.now().isoformat()
             }).execute()
