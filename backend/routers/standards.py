@@ -1,29 +1,24 @@
 """
-XLR8 STANDARDS ROUTER
-=====================
+Standards Upload Router for XLR8
+================================
 
-API endpoints for the P4 Standards Layer:
-- Upload and process standards documents
-- Run compliance checks
-- Retrieve findings
+Copied directly from working upload.py pattern.
+No guessing, just match what works.
 
 Deploy to: backend/routers/standards.py
-
-Add to main.py:
-    from routers import standards
-    app.include_router(standards.router, prefix="/api", tags=["standards"])
-
-Author: XLR8 Team
-Version: 1.0.0 - P4 Standards Layer
 """
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
-from pydantic import BaseModel
-from typing import List, Optional
-import logging
-import json
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from typing import Optional
+from datetime import datetime
+import sys
 import os
-import tempfile
+import json
+import traceback
+import logging
+
+sys.path.insert(0, '/app')
+sys.path.insert(0, '/data')
 
 logger = logging.getLogger(__name__)
 
@@ -31,243 +26,205 @@ router = APIRouter()
 
 
 # =============================================================================
-# TEST ENDPOINT
+# IMPORTS - Same pattern as upload.py
 # =============================================================================
 
-@router.post("/standards/test")
-async def test_post():
-    """Simple test - no processing, just returns success."""
-    return {"status": "ok", "message": "POST works"}
-
-
-# =============================================================================
-# IMPORTS
-# =============================================================================
-
-def _get_standards_processor():
-    """Get standards processor module."""
+try:
+    from backend.utils.standards_processor import (
+        process_pdf,
+        process_text,
+        get_rule_registry,
+        search_standards
+    )
+    STANDARDS_PROCESSOR_AVAILABLE = True
+except ImportError:
     try:
-        from backend.utils.standards_processor import (
-            process_pdf, 
+        from utils.standards_processor import (
+            process_pdf,
             process_text,
             get_rule_registry,
             search_standards
         )
-        return {
-            "process_pdf": process_pdf,
-            "process_text": process_text,
-            "get_rule_registry": get_rule_registry,
-            "search_standards": search_standards
-        }
-    except ImportError:
-        try:
-            from utils.standards_processor import (
-                process_pdf, 
-                process_text,
-                get_rule_registry,
-                search_standards
-            )
-            return {
-                "process_pdf": process_pdf,
-                "process_text": process_text,
-                "get_rule_registry": get_rule_registry,
-                "search_standards": search_standards
-            }
-        except ImportError as e:
-            logger.error(f"[STANDARDS] Processor not available: {e}")
-            return None
+        STANDARDS_PROCESSOR_AVAILABLE = True
+    except ImportError as e:
+        STANDARDS_PROCESSOR_AVAILABLE = False
+        logger.warning(f"Standards processor not available: {e}")
 
-
-def _get_compliance_engine():
-    """Get compliance engine."""
+try:
+    from backend.utils.compliance_engine import get_compliance_engine
+    COMPLIANCE_ENGINE_AVAILABLE = True
+except ImportError:
     try:
-        from backend.utils.compliance_engine import (
-            get_compliance_engine,
-            run_compliance_check,
-            check_single_rule
-        )
-        return {
-            "get_engine": get_compliance_engine,
-            "run_check": run_compliance_check,
-            "check_rule": check_single_rule
-        }
-    except ImportError:
-        try:
-            from utils.compliance_engine import (
-                get_compliance_engine,
-                run_compliance_check,
-                check_single_rule
-            )
-            return {
-                "get_engine": get_compliance_engine,
-                "run_check": run_compliance_check,
-                "check_rule": check_single_rule
-            }
-        except ImportError as e:
-            logger.error(f"[STANDARDS] Compliance engine not available: {e}")
-            return None
+        from utils.compliance_engine import get_compliance_engine
+        COMPLIANCE_ENGINE_AVAILABLE = True
+    except ImportError as e:
+        COMPLIANCE_ENGINE_AVAILABLE = False
+        logger.warning(f"Compliance engine not available: {e}")
 
-
-def _get_db_handler(project_id: str):
-    """Get database handler for a project."""
+try:
+    from backend.utils.structured_data_handler import StructuredDataHandler
+    STRUCTURED_HANDLER_AVAILABLE = True
+except ImportError:
     try:
-        from backend.utils.structured_data_handler import StructuredDataHandler
-        handler = StructuredDataHandler()
-        handler.set_project(project_id)
-        return handler
+        from utils.structured_data_handler import StructuredDataHandler
+        STRUCTURED_HANDLER_AVAILABLE = True
     except ImportError:
-        try:
-            from utils.structured_data_handler import StructuredDataHandler
-            handler = StructuredDataHandler()
-            handler.set_project(project_id)
-            return handler
-        except ImportError:
-            try:
-                from utils.duckdb_handler import DuckDBHandler
-                return DuckDBHandler()
-            except:
-                return None
+        STRUCTURED_HANDLER_AVAILABLE = False
 
 
 # =============================================================================
-# UPLOAD & PROCESS STANDARDS
+# DEBUG ENDPOINT - Same pattern as upload.py
+# =============================================================================
+
+@router.get("/standards/debug")
+async def debug_features():
+    """Debug endpoint to check what features are available"""
+    return {
+        "version": "2025-12-13-standards-v1",
+        "standards_processor_available": STANDARDS_PROCESSOR_AVAILABLE,
+        "compliance_engine_available": COMPLIANCE_ENGINE_AVAILABLE,
+        "structured_handler_available": STRUCTURED_HANDLER_AVAILABLE,
+    }
+
+
+# =============================================================================
+# HEALTH CHECK
+# =============================================================================
+
+@router.get("/standards/health")
+async def health_check():
+    """Check standards layer health."""
+    status = {
+        "standards_processor": STANDARDS_PROCESSOR_AVAILABLE,
+        "compliance_engine": COMPLIANCE_ENGINE_AVAILABLE,
+        "rules_loaded": 0,
+        "documents_loaded": 0
+    }
+    
+    if STANDARDS_PROCESSOR_AVAILABLE:
+        try:
+            registry = get_rule_registry()
+            status["rules_loaded"] = len(registry.rules)
+            status["documents_loaded"] = len(registry.documents)
+        except:
+            pass
+    
+    return status
+
+
+# =============================================================================
+# UPLOAD ENDPOINT - Matches upload.py exactly
 # =============================================================================
 
 @router.post("/standards/upload")
 async def upload_standards_document(
     file: UploadFile = File(...),
     domain: str = Form(default="general"),
-    title: str = Form(default=None)
+    title: Optional[str] = Form(default=None)
 ):
     """
-    Upload and process a standards document.
+    Upload a standards document for rule extraction.
     
-    Extracts compliance rules from the document and stores them
-    in the rule registry for use in compliance checks.
-    
-    Args:
-        file: PDF or text file containing standards
-        domain: Category (e.g., "retirement", "tax", "benefits")
-        title: Optional title override
-    
-    Returns:
-        Document info with extracted rules count
+    Matches the upload.py pattern exactly.
     """
-    processor = _get_standards_processor()
-    if not processor:
-        raise HTTPException(503, "Standards processor not available")
-    
-    filename = file.filename or "standards.pdf"
-    
-    # Save to temp file
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1]) as tmp:
-            content = await file.read()
-            tmp.write(content)
-            tmp_path = tmp.name
-    except Exception as e:
-        raise HTTPException(500, f"Failed to save file: {e}")
-    
-    try:
-        # Process based on file type
-        if filename.lower().endswith('.pdf'):
-            doc = processor["process_pdf"](tmp_path, domain)
-        else:
-            # Read as text
-            with open(tmp_path, 'r', encoding='utf-8', errors='ignore') as f:
-                text = f.read()
-            doc = processor["process_text"](text, filename, domain)
+        # Validate file
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="No filename provided")
         
-        # Override title if provided
-        if title:
-            doc.title = title
+        filename = file.filename
+        ext = filename.split('.')[-1].lower()
         
-        # Add to registry
-        registry = processor["get_rule_registry"]()
-        registry.add_document(doc)
+        # Check file extension
+        allowed_extensions = ['pdf', 'docx', 'doc', 'txt', 'md']
+        if ext not in allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File type '{ext}' not supported. Allowed: {', '.join(allowed_extensions)}"
+            )
         
-        return {
-            "success": True,
-            "document_id": doc.document_id,
-            "filename": doc.filename,
-            "title": doc.title,
-            "domain": doc.domain,
-            "rules_extracted": len(doc.rules),
-            "page_count": doc.page_count,
-            "rules": [r.to_dict() for r in doc.rules[:10]]  # Preview first 10
-        }
+        logger.info(f"[STANDARDS] Upload received: {filename}, domain={domain}")
         
-    except Exception as e:
-        logger.error(f"[STANDARDS] Processing failed: {e}")
-        raise HTTPException(500, f"Failed to process document: {e}")
+        # Read file content
+        content = await file.read()
+        file_size = len(content)
         
-    finally:
-        # Clean up temp file
+        logger.info(f"[STANDARDS] File size: {file_size} bytes")
+        
+        # Check processor availability
+        if not STANDARDS_PROCESSOR_AVAILABLE:
+            raise HTTPException(status_code=503, detail="Standards processor not available")
+        
+        # Save to temp file
+        file_path = f"/tmp/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filename}"
+        with open(file_path, 'wb') as f:
+            f.write(content)
+        
+        logger.info(f"[STANDARDS] Saved to {file_path}")
+        
         try:
-            os.unlink(tmp_path)
-        except:
-            pass
-
-
-class TextUploadRequest(BaseModel):
-    text: str
-    document_name: str
-    domain: str = "general"
-
-
-@router.post("/standards/upload/text")
-async def upload_standards_text(request: TextUploadRequest):
-    """
-    Process standards from raw text.
-    
-    Useful for pasting in requirements or rules directly.
-    """
-    processor = _get_standards_processor()
-    if not processor:
-        raise HTTPException(503, "Standards processor not available")
-    
-    try:
-        doc = processor["process_text"](request.text, request.document_name, request.domain)
+            # Process based on file type
+            if ext == 'pdf':
+                doc = process_pdf(file_path, domain)
+            else:
+                # Read as text
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    text = f.read()
+                doc = process_text(text, filename, domain)
+            
+            # Override title if provided
+            if title:
+                doc.title = title
+            
+            # Add to registry
+            registry = get_rule_registry()
+            registry.add_document(doc)
+            
+            logger.info(f"[STANDARDS] Extracted {len(doc.rules)} rules from {filename}")
+            
+            return {
+                "success": True,
+                "document_id": doc.document_id,
+                "filename": doc.filename,
+                "title": doc.title,
+                "domain": doc.domain,
+                "rules_extracted": len(doc.rules),
+                "page_count": doc.page_count,
+                "rules": [r.to_dict() for r in doc.rules[:10]]  # Preview first 10
+            }
+            
+        finally:
+            # Cleanup temp file
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except:
+                    pass
         
-        registry = processor["get_rule_registry"]()
-        registry.add_document(doc)
-        
-        return {
-            "success": True,
-            "document_id": doc.document_id,
-            "title": doc.title,
-            "rules_extracted": len(doc.rules),
-            "rules": [r.to_dict() for r in doc.rules]
-        }
-        
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(500, f"Failed to process text: {e}")
+        logger.error(f"[STANDARDS] Upload failed: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # =============================================================================
-# RULE MANAGEMENT
+# RULES ENDPOINTS
 # =============================================================================
 
 @router.get("/standards/rules")
 async def list_rules(
-    domain: str = None,
-    category: str = None,
+    domain: Optional[str] = None,
+    category: Optional[str] = None,
     limit: int = 100
 ):
-    """
-    List all extracted rules.
-    
-    Args:
-        domain: Filter by domain
-        category: Filter by category
-        limit: Max rules to return
-    """
-    processor = _get_standards_processor()
-    if not processor:
+    """List all extracted rules."""
+    if not STANDARDS_PROCESSOR_AVAILABLE:
         raise HTTPException(503, "Standards processor not available")
     
     try:
-        registry = processor["get_rule_registry"]()
+        registry = get_rule_registry()
         
         if domain:
             rules = registry.get_rules_by_domain(domain)
@@ -288,104 +245,73 @@ async def list_rules(
 
 
 @router.get("/standards/rules/search")
-async def search_rules(
+async def search_rules_endpoint(
     query: str,
-    domain: str = None,
+    domain: Optional[str] = None,
     limit: int = 10
 ):
-    """
-    Search for relevant rules using semantic search.
-    
-    Args:
-        query: Search query (e.g., "catch-up contributions age 50")
-        domain: Filter by domain
-        limit: Max results
-    """
-    processor = _get_standards_processor()
-    if not processor:
+    """Search for relevant rules."""
+    if not STANDARDS_PROCESSOR_AVAILABLE:
         raise HTTPException(503, "Standards processor not available")
     
     try:
-        results = processor["search_standards"](query, domain)
+        results = search_standards(query, domain)
         return {
             "query": query,
             "results": results[:limit]
         }
-        
     except Exception as e:
         raise HTTPException(500, f"Search failed: {e}")
 
 
-@router.get("/standards/rules/{rule_id}")
-async def get_rule(rule_id: str):
-    """Get a specific rule by ID."""
-    processor = _get_standards_processor()
-    if not processor:
+# =============================================================================
+# DOCUMENTS ENDPOINTS
+# =============================================================================
+
+@router.get("/standards/documents")
+async def list_documents():
+    """List all processed standards documents."""
+    if not STANDARDS_PROCESSOR_AVAILABLE:
         raise HTTPException(503, "Standards processor not available")
     
     try:
-        registry = processor["get_rule_registry"]()
-        
-        if rule_id in registry.rules:
-            return registry.rules[rule_id].to_dict()
-        
-        raise HTTPException(404, f"Rule not found: {rule_id}")
-        
-    except HTTPException:
-        raise
+        registry = get_rule_registry()
+        return {
+            "total": len(registry.documents),
+            "documents": [doc.to_dict() for doc in registry.documents.values()]
+        }
     except Exception as e:
-        raise HTTPException(500, f"Failed to get rule: {e}")
+        raise HTTPException(500, f"Failed to list documents: {e}")
 
 
 # =============================================================================
-# COMPLIANCE CHECKING
+# COMPLIANCE ENDPOINTS
 # =============================================================================
 
 @router.post("/standards/compliance/check/{project_id}")
 async def run_compliance_scan(
     project_id: str,
-    domain: str = None,
-    rule_ids: List[str] = None
+    domain: Optional[str] = None
 ):
-    """
-    Run compliance scan on a project.
-    
-    Checks all applicable rules against the project's data
-    and returns findings for any non-compliant items.
-    
-    Args:
-        project_id: Project to scan
-        domain: Filter rules by domain
-        rule_ids: Specific rule IDs to check (optional)
-    
-    Returns:
-        List of compliance findings
-    """
-    compliance = _get_compliance_engine()
-    if not compliance:
+    """Run compliance scan on a project."""
+    if not COMPLIANCE_ENGINE_AVAILABLE:
         raise HTTPException(503, "Compliance engine not available")
     
-    processor = _get_standards_processor()
-    if not processor:
+    if not STANDARDS_PROCESSOR_AVAILABLE:
         raise HTTPException(503, "Standards processor not available")
     
-    # Get database handler
-    db_handler = _get_db_handler(project_id)
-    if not db_handler:
-        raise HTTPException(503, "Database handler not available")
-    
     try:
-        engine = compliance["get_engine"]()
-        engine.set_db_handler(db_handler)
+        # Get database handler
+        if not STRUCTURED_HANDLER_AVAILABLE:
+            raise HTTPException(503, "Database handler not available")
+        
+        handler = StructuredDataHandler()
+        handler.set_project(project_id)
         
         # Get rules
-        registry = processor["get_rule_registry"]()
+        registry = get_rule_registry()
         
-        if rule_ids:
-            rules = [registry.rules[rid].to_dict() 
-                    for rid in rule_ids 
-                    if rid in registry.rules]
-        elif domain:
+        if domain:
             rules = [r.to_dict() for r in registry.get_rules_by_domain(domain)]
         else:
             rules = [r.to_dict() for r in registry.get_all_rules()]
@@ -399,6 +325,8 @@ async def run_compliance_scan(
             }
         
         # Run scan
+        engine = get_compliance_engine()
+        engine.set_db_handler(handler)
         findings = engine.run_compliance_scan(project_id, rules=rules)
         
         return {
@@ -412,133 +340,3 @@ async def run_compliance_scan(
     except Exception as e:
         logger.error(f"[STANDARDS] Compliance scan failed: {e}")
         raise HTTPException(500, f"Compliance scan failed: {e}")
-
-
-@router.post("/standards/compliance/check-rule/{project_id}")
-async def check_single_rule_endpoint(
-    project_id: str,
-    rule: dict
-):
-    """
-    Check a single rule against project data.
-    
-    Useful for testing rules or ad-hoc checks.
-    
-    Args:
-        project_id: Project to check
-        rule: Rule definition to check
-    
-    Returns:
-        Finding if non-compliant, null if compliant
-    """
-    compliance = _get_compliance_engine()
-    if not compliance:
-        raise HTTPException(503, "Compliance engine not available")
-    
-    db_handler = _get_db_handler(project_id)
-    if not db_handler:
-        raise HTTPException(503, "Database handler not available")
-    
-    try:
-        finding = compliance["check_rule"](rule, project_id, db_handler)
-        
-        return {
-            "project_id": project_id,
-            "rule_id": rule.get("rule_id", "ad-hoc"),
-            "compliant": finding is None,
-            "finding": finding
-        }
-        
-    except Exception as e:
-        raise HTTPException(500, f"Check failed: {e}")
-
-
-# =============================================================================
-# DOCUMENTS
-# =============================================================================
-
-@router.get("/standards/documents")
-async def list_documents():
-    """List all processed standards documents."""
-    processor = _get_standards_processor()
-    if not processor:
-        raise HTTPException(503, "Standards processor not available")
-    
-    try:
-        registry = processor["get_rule_registry"]()
-        
-        return {
-            "total": len(registry.documents),
-            "documents": [doc.to_dict() for doc in registry.documents.values()]
-        }
-        
-    except Exception as e:
-        raise HTTPException(500, f"Failed to list documents: {e}")
-
-
-@router.get("/standards/documents/{document_id}")
-async def get_document(document_id: str):
-    """Get a specific standards document."""
-    processor = _get_standards_processor()
-    if not processor:
-        raise HTTPException(503, "Standards processor not available")
-    
-    try:
-        registry = processor["get_rule_registry"]()
-        
-        if document_id in registry.documents:
-            return registry.documents[document_id].to_dict()
-        
-        raise HTTPException(404, f"Document not found: {document_id}")
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(500, f"Failed to get document: {e}")
-
-
-# =============================================================================
-# EXPORT
-# =============================================================================
-
-@router.get("/standards/export")
-async def export_all():
-    """Export all standards and rules as JSON."""
-    processor = _get_standards_processor()
-    if not processor:
-        raise HTTPException(503, "Standards processor not available")
-    
-    try:
-        registry = processor["get_rule_registry"]()
-        return registry.export_rules()
-        
-    except Exception as e:
-        raise HTTPException(500, f"Export failed: {e}")
-
-
-# =============================================================================
-# HEALTH
-# =============================================================================
-
-@router.get("/standards/health")
-async def health_check():
-    """Check standards layer health."""
-    processor = _get_standards_processor()
-    compliance = _get_compliance_engine()
-    
-    status = {
-        "standards_processor": processor is not None,
-        "compliance_engine": compliance is not None,
-        "rules_loaded": 0,
-        "documents_loaded": 0
-    }
-    
-    if processor:
-        try:
-            registry = processor["get_rule_registry"]()
-            status["rules_loaded"] = len(registry.rules)
-            status["documents_loaded"] = len(registry.documents)
-        except:
-            pass
-    
-    return status
