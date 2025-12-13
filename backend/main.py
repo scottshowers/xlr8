@@ -96,13 +96,7 @@ except ImportError as e:
     UNIFIED_CHAT_AVAILABLE = False
     logging.warning(f"Unified chat router import failed: {e}")
 
-# Import standards router (Phase 4 Standards Layer)
-try:
-    from backend.routers import standards
-    STANDARDS_AVAILABLE = True
-except ImportError as e:
-    STANDARDS_AVAILABLE = False
-    logging.warning(f"Standards router import failed: {e}")
+# Standards endpoints are now in upload.py (no separate router needed)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -250,12 +244,7 @@ if UNIFIED_CHAT_AVAILABLE:
 else:
     logger.warning("Unified chat router not available")
 
-# Register standards router if available (Phase 4 Standards Layer)
-if STANDARDS_AVAILABLE:
-    app.include_router(standards.router, prefix="/api", tags=["standards"])
-    logger.info("✓ Standards router registered at /api/standards")
-else:
-    logger.warning("Standards router not available")
+
 
 
 @app.get("/api/health")
@@ -281,7 +270,7 @@ async def health():
             "api_connections": API_CONNECTIONS_AVAILABLE,
             "intelligence": INTELLIGENCE_AVAILABLE,
             "unified_chat": UNIFIED_CHAT_AVAILABLE,
-            "standards": STANDARDS_AVAILABLE,
+            "standards": True,  # Via upload.py
         }
         
         return {
@@ -304,7 +293,7 @@ async def health():
                 "api_connections": API_CONNECTIONS_AVAILABLE,
                 "intelligence": INTELLIGENCE_AVAILABLE,
                 "unified_chat": UNIFIED_CHAT_AVAILABLE,
-                "standards": STANDARDS_AVAILABLE,
+                "standards": True,  # Via upload.py
             }
         }
 
