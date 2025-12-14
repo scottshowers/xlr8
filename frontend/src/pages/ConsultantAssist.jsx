@@ -1,3 +1,9 @@
+/**
+ * ConsultantAssist.jsx - Help Claude understand new register formats
+ * 
+ * POLISHED: All purple → grassGreen for consistency
+ */
+
 import React, { useState, useEffect } from 'react';
 import { 
   HelpCircle, 
@@ -13,19 +19,13 @@ import {
   AlertTriangle,
   CheckCircle
 } from 'lucide-react';
+import { COLORS } from '../components/ui';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
+const BRAND = COLORS?.grassGreen || '#83b16d';
+const BRAND_DARK = '#6b9a57';
+const BRAND_LIGHT = '#f0fdf4';
 
-/**
- * ConsultantAssist - Help Claude understand new register formats
- * 
- * Features:
- * - View raw extracted text
- * - Define section markers (where employees start/end)
- * - Map fields to patterns
- * - Add custom fields
- * - Save templates for reuse
- */
 export default function ConsultantAssist({ 
   extractionId, 
   sourceFile,
@@ -36,12 +36,11 @@ export default function ConsultantAssist({
   onClose,
   onRetry 
 }) {
-  const [activeTab, setActiveTab] = useState('overview'); // overview, raw_text, sections, fields
+  const [activeTab, setActiveTab] = useState('overview');
   const [rawText, setRawText] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   
-  // Section definitions
   const [sections, setSections] = useState([
     { name: 'employee_header', label: 'Employee Header', startPattern: '', endPattern: '', description: 'Where employee info begins' },
     { name: 'earnings', label: 'Earnings', startPattern: '', endPattern: '', description: 'Earnings section' },
@@ -49,19 +48,16 @@ export default function ConsultantAssist({
     { name: 'deductions', label: 'Deductions', startPattern: '', endPattern: '', description: 'Deductions section' },
   ]);
   
-  // Field definitions
   const [fields, setFields] = useState([]);
   const [newField, setNewField] = useState({ table_name: 'employees', field_name: '', field_label: '', field_type: 'text', pattern: '' });
   
-  // Hints for prompt
   const [hints, setHints] = useState({
-    layout: 'vertical', // vertical or horizontal
+    layout: 'vertical',
     employeeMarker: '',
     pageBreakHandling: '',
     specialInstructions: ''
   });
 
-  // Load raw text when opened
   useEffect(() => {
     loadRawText();
     loadFieldDefinitions();
@@ -74,7 +70,6 @@ export default function ConsultantAssist({
       if (extractionId) {
         res = await fetch(`${API_BASE}/api/vacuum/extract/${extractionId}/raw`);
       } else if (sourceFile) {
-        // Fallback: lookup by source file name
         res = await fetch(`${API_BASE}/api/vacuum/extract-by-file/${encodeURIComponent(sourceFile)}/raw`);
       } else {
         setRawText('No extraction ID or source file available.');
@@ -164,12 +159,15 @@ export default function ConsultantAssist({
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl shadow-2xl w-[90vw] max-w-5xl h-[85vh] flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-t-xl">
+        <div 
+          className="flex items-center justify-between p-4 border-b text-white rounded-t-xl"
+          style={{ background: `linear-gradient(135deg, ${BRAND}, ${BRAND_DARK})` }}
+        >
           <div className="flex items-center gap-3">
             <Wand2 className="w-6 h-6" />
             <div>
               <h2 className="text-lg font-semibold">Consultant Assist</h2>
-              <p className="text-sm text-purple-200">Help Claude understand this register format</p>
+              <p className="text-sm" style={{ color: '#c6e7b8' }}>Help Claude understand this register format</p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-white/20 rounded-lg transition">
@@ -203,11 +201,14 @@ export default function ConsultantAssist({
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition ${
-                activeTab === tab.id 
-                  ? 'border-purple-600 text-purple-600' 
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
+              className="flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors"
+              style={activeTab === tab.id ? {
+                borderColor: BRAND,
+                color: BRAND
+              } : {
+                borderColor: 'transparent',
+                color: '#6b7280'
+              }}
             >
               <tab.icon className="w-4 h-4" />
               {tab.label}
@@ -216,65 +217,50 @@ export default function ConsultantAssist({
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-auto p-4">
+        <div className="flex-1 overflow-y-auto p-4">
           {/* Overview Tab */}
           {activeTab === 'overview' && (
-            <div className="space-y-6">
-              <div className="bg-gray-50 rounded-lg p-4">
-                <h3 className="font-medium text-gray-900 mb-2">How Consultant Assist Works</h3>
-                <ol className="list-decimal list-inside space-y-2 text-sm text-gray-600">
-                  <li><strong>Review Raw Text</strong> - See exactly what was extracted from the PDF</li>
-                  <li><strong>Define Sections</strong> - Tell Claude where to find employee data, earnings, taxes, etc.</li>
-                  <li><strong>Add Custom Fields</strong> - Define any extra fields unique to this vendor</li>
-                  <li><strong>Save Template</strong> - Reuse your definitions for future extractions</li>
-                </ol>
+            <div className="space-y-6 max-w-2xl">
+              <div className="p-4 rounded-lg" style={{ background: BRAND_LIGHT, border: `1px solid ${BRAND}40` }}>
+                <h3 className="font-medium mb-2" style={{ color: BRAND }}>What is Consultant Assist?</h3>
+                <p className="text-sm text-gray-600">
+                  When Claude struggles to parse a new register format, you can use this tool to provide hints 
+                  about the document structure. Your hints help Claude learn and improve extraction accuracy.
+                </p>
               </div>
 
-              {/* Layout Hint */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Register Layout</label>
-                <div className="flex gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="layout"
-                      value="vertical"
-                      checked={hints.layout === 'vertical'}
+                <h4 className="font-medium text-gray-900 mb-3">Quick Settings</h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Register Layout
+                    </label>
+                    <select
+                      value={hints.layout}
                       onChange={(e) => setHints({ ...hints, layout: e.target.value })}
-                      className="text-purple-600"
-                    />
-                    <span className="text-sm">Vertical (sections stacked)</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
+                      className="w-full border rounded-lg px-3 py-2 text-sm"
+                    >
+                      <option value="vertical">Vertical (one employee per section)</option>
+                      <option value="horizontal">Horizontal (table format)</option>
+                      <option value="mixed">Mixed layout</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Employee Marker Pattern
+                    </label>
                     <input
-                      type="radio"
-                      name="layout"
-                      value="horizontal"
-                      checked={hints.layout === 'horizontal'}
-                      onChange={(e) => setHints({ ...hints, layout: e.target.value })}
-                      className="text-purple-600"
+                      type="text"
+                      value={hints.employeeMarker}
+                      onChange={(e) => setHints({ ...hints, employeeMarker: e.target.value })}
+                      placeholder="e.g., 'Employee:' or SSN pattern"
+                      className="w-full border rounded-lg px-3 py-2 text-sm"
                     />
-                    <span className="text-sm">Horizontal (columns side-by-side)</span>
-                  </label>
+                  </div>
                 </div>
               </div>
 
-              {/* Employee Marker */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Employee Marker Pattern
-                </label>
-                <input
-                  type="text"
-                  value={hints.employeeMarker}
-                  onChange={(e) => setHints({ ...hints, employeeMarker: e.target.value })}
-                  placeholder="e.g., 'Emp #:' or employee name pattern"
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                />
-                <p className="text-xs text-gray-500 mt-1">What text marks the start of each employee?</p>
-              </div>
-
-              {/* Special Instructions */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Special Instructions for Claude
@@ -367,7 +353,12 @@ export default function ConsultantAssist({
                         <span className="text-xs bg-gray-100 px-2 py-1 rounded">{field.table_name}</span>
                         <span className="font-medium text-sm">{field.field_label}</span>
                         <span className="text-xs text-gray-500">({field.field_name})</span>
-                        <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded">{field.field_type}</span>
+                        <span 
+                          className="text-xs px-2 py-1 rounded"
+                          style={{ background: BRAND_LIGHT, color: BRAND }}
+                        >
+                          {field.field_type}
+                        </span>
                       </div>
                       <button
                         onClick={() => handleRemoveField(index)}
@@ -435,7 +426,8 @@ export default function ConsultantAssist({
                     <button
                       onClick={handleAddField}
                       disabled={!newField.field_name || !newField.field_label}
-                      className="w-full px-3 py-1.5 bg-purple-600 text-white rounded text-sm hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1"
+                      className="w-full px-3 py-1.5 text-white rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1"
+                      style={{ background: BRAND }}
                     >
                       <Plus className="w-4 h-4" /> Add
                     </button>
@@ -458,14 +450,16 @@ export default function ConsultantAssist({
             <button
               onClick={handleSaveTemplate}
               disabled={saving}
-              className="px-4 py-2 border border-purple-600 text-purple-600 rounded-lg hover:bg-purple-50 flex items-center gap-2"
+              className="px-4 py-2 border rounded-lg flex items-center gap-2"
+              style={{ borderColor: BRAND, color: BRAND }}
             >
               <Save className="w-4 h-4" />
               {saving ? 'Saving...' : 'Save Template'}
             </button>
             <button
               onClick={handleRetryWithHints}
-              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center gap-2"
+              className="px-4 py-2 text-white rounded-lg flex items-center gap-2"
+              style={{ background: BRAND }}
             >
               <Wand2 className="w-4 h-4" />
               Retry with Hints
