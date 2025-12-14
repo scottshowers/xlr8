@@ -12,6 +12,7 @@
  * /vacuum/explore → VacuumExplore (intelligent detection UI)
  * /vacuum/map → VacuumColumnMapping (column mapping interface)
  * /playbooks  → PlaybooksPage (Analysis Playbooks)
+ * /playbook-builder → PlaybookBuilderPage (Create/Edit Playbooks) - Admin only
  * /admin      → AdminPage (System Monitor + Settings only) - Admin only
  * /learning-admin → AdminDashboard (Learning System Management) - Admin only
  * /data-model → DataModelPage (Visual ERD for relationships)
@@ -42,6 +43,7 @@ import VacuumUploadPage from './pages/VacuumUploadPage';
 import VacuumExplore from './pages/VacuumExplore';
 import VacuumColumnMapping from './pages/VacuumColumnMapping';
 import PlaybooksPage from './pages/PlaybooksPage';
+import PlaybookBuilderPage from './pages/PlaybookBuilderPage';
 import AdminPage from './pages/AdminPage';
 import AdminDashboard from './pages/AdminDashboard';
 import DataModelPage from './pages/DataModelPage';
@@ -107,6 +109,12 @@ function App() {
             <Route path="/playbooks" element={
               <ProtectedRoute permission="playbooks">
                 <Layout><PlaybooksPage /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/playbook-builder" element={
+              <ProtectedRoute permission="ops_center">
+                <Layout><PlaybookBuilderPage /></Layout>
               </ProtectedRoute>
             } />
             
