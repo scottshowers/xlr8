@@ -1,34 +1,27 @@
 /**
  * App.jsx - Main Application Entry
  * 
- * RESTRUCTURED NAV:
+ * NAV STRUCTURE:
  * Main: Dashboard | Projects | Data | Reference Library | Playbooks | Workspace
- * Admin: Admin | Learning | System
+ * Admin: Admin | Learning (System moved to Admin tab)
  * 
- * Routes:
- * /                  → Landing (public)
- * /login             → LoginPage (public)
- * /dashboard         → DashboardPage (Command Center)
- * /projects          → ProjectsPage
- * /data              → DataPage (Upload)
- * /reference-library → ReferenceLibraryPage (was Standards)
- * /playbooks         → PlaybooksPage
- * /workspace         → WorkspacePage (Chat)
- * 
- * Admin:
- * /admin             → AdminPage (Operations Center)
- * /learning-admin    → AdminDashboard (Learning Center)
- * /system            → DataObservatoryPage (Data Observatory)
- * 
- * Legacy routes redirect appropriately
+ * PROVIDERS:
+ * - AuthProvider
+ * - ProjectProvider  
+ * - ThemeProvider (consistent dark/light)
+ * - UploadProvider (background uploads)
+ * - OnboardingProvider (Joyride tours)
  */
 
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 
-// Context
+// Context Providers
 import { ProjectProvider } from './context/ProjectContext';
 import { AuthProvider } from './context/AuthContext';
+import { ThemeProvider } from './context/ThemeContext';
+import { UploadProvider } from './context/UploadContext';
+import { OnboardingProvider } from './context/OnboardingContext';
 
 // Auth Components
 import ProtectedRoute from './components/ProtectedRoute';
@@ -52,127 +45,115 @@ import AdminPage from './pages/AdminPage';
 import AdminDashboard from './pages/AdminDashboard';
 import DataModelPage from './pages/DataModelPage';
 import ReferenceLibraryPage from './pages/ReferenceLibraryPage';
-import SystemMonitorPage from './pages/SystemMonitorPage';
 
 // CSS
 import './index.css';
+
+// Inner app with router hooks available
+function AppRoutes() {
+  return (
+    <OnboardingProvider>
+      <Routes>
+        {/* Public routes */}
+        <Route path="/" element={<Landing />} />
+        <Route path="/login" element={<LoginPage />} />
+        
+        {/* ====== MAIN NAV ====== */}
+        
+        {/* Dashboard */}
+        <Route path="/dashboard" element={
+          <ProtectedRoute><Layout><DashboardPage /></Layout></ProtectedRoute>
+        } />
+        
+        {/* Projects */}
+        <Route path="/projects" element={
+          <ProtectedRoute><Layout><ProjectsPage /></Layout></ProtectedRoute>
+        } />
+        <Route path="/projects/:id" element={
+          <ProtectedRoute><Layout><ProjectsPage /></Layout></ProtectedRoute>
+        } />
+        
+        {/* Data */}
+        <Route path="/data" element={
+          <ProtectedRoute><Layout><DataPage /></Layout></ProtectedRoute>
+        } />
+        
+        {/* Vacuum (sub-pages of Data) */}
+        <Route path="/vacuum" element={
+          <ProtectedRoute><Layout><VacuumUploadPage /></Layout></ProtectedRoute>
+        } />
+        <Route path="/vacuum/explore/:jobId" element={
+          <ProtectedRoute><Layout><VacuumExplore /></Layout></ProtectedRoute>
+        } />
+        <Route path="/vacuum/mapping/:jobId" element={
+          <ProtectedRoute><Layout><VacuumColumnMapping /></Layout></ProtectedRoute>
+        } />
+        
+        {/* Reference Library (was Standards) */}
+        <Route path="/reference-library" element={
+          <ProtectedRoute><Layout><ReferenceLibraryPage /></Layout></ProtectedRoute>
+        } />
+        
+        {/* Playbooks */}
+        <Route path="/playbooks" element={
+          <ProtectedRoute><Layout><PlaybooksPage /></Layout></ProtectedRoute>
+        } />
+        <Route path="/playbooks/builder" element={
+          <ProtectedRoute><Layout><PlaybookBuilderPage /></Layout></ProtectedRoute>
+        } />
+        
+        {/* Workspace (Chat) */}
+        <Route path="/workspace" element={
+          <ProtectedRoute><Layout><WorkspacePage /></Layout></ProtectedRoute>
+        } />
+        
+        {/* ====== ADMIN NAV ====== */}
+        
+        {/* Admin (includes System tab now) */}
+        <Route path="/admin" element={
+          <ProtectedRoute><Layout><AdminPage /></Layout></ProtectedRoute>
+        } />
+        
+        {/* Learning Admin */}
+        <Route path="/learning-admin" element={
+          <ProtectedRoute><Layout><AdminDashboard /></Layout></ProtectedRoute>
+        } />
+        
+        {/* ====== UTILITY ROUTES ====== */}
+        
+        {/* Data Model */}
+        <Route path="/data-model" element={
+          <ProtectedRoute><Layout><DataModelPage /></Layout></ProtectedRoute>
+        } />
+        
+        {/* ====== LEGACY REDIRECTS ====== */}
+        
+        <Route path="/standards" element={<Navigate to="/reference-library" replace />} />
+        <Route path="/chat" element={<Navigate to="/workspace" replace />} />
+        <Route path="/upload" element={<Navigate to="/data" replace />} />
+        <Route path="/status" element={<Navigate to="/admin" replace />} />
+        <Route path="/system" element={<Navigate to="/admin" replace />} />
+        <Route path="/secure20" element={<Navigate to="/playbooks" replace />} />
+        <Route path="/packs" element={<Navigate to="/playbooks" replace />} />
+        
+        {/* 404 fallback */}
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Routes>
+    </OnboardingProvider>
+  );
+}
 
 function App() {
   return (
     <AuthProvider>
       <ProjectProvider>
-        <Router>
-          <Routes>
-            {/* Public routes */}
-            <Route path="/" element={<Landing />} />
-            <Route path="/login" element={<LoginPage />} />
-            
-            {/* ====== MAIN NAV - Consultant workspace ====== */}
-            
-            <Route path="/dashboard" element={
-              <ProtectedRoute>
-                <Layout><DashboardPage /></Layout>
-              </ProtectedRoute>
-            } />
-            
-            <Route path="/projects" element={
-              <ProtectedRoute>
-                <Layout><ProjectsPage /></Layout>
-              </ProtectedRoute>
-            } />
-            
-            <Route path="/data" element={
-              <ProtectedRoute permission="upload">
-                <Layout><DataPage /></Layout>
-              </ProtectedRoute>
-            } />
-            
-            <Route path="/reference-library" element={
-              <ProtectedRoute permission="playbooks">
-                <Layout><ReferenceLibraryPage /></Layout>
-              </ProtectedRoute>
-            } />
-            
-            <Route path="/playbooks" element={
-              <ProtectedRoute permission="playbooks">
-                <Layout><PlaybooksPage /></Layout>
-              </ProtectedRoute>
-            } />
-            
-            <Route path="/workspace" element={
-              <ProtectedRoute>
-                <Layout><WorkspacePage /></Layout>
-              </ProtectedRoute>
-            } />
-            
-            {/* ====== ADMIN NAV - Admin/Ops ====== */}
-            
-            <Route path="/admin" element={
-              <ProtectedRoute permission="ops_center">
-                <Layout><AdminPage /></Layout>
-              </ProtectedRoute>
-            } />
-            
-            <Route path="/learning-admin" element={
-              <ProtectedRoute permission="ops_center">
-                <Layout><AdminDashboard /></Layout>
-              </ProtectedRoute>
-            } />
-            
-            <Route path="/system" element={
-              <ProtectedRoute permission="ops_center">
-                <Layout><SystemMonitorPage /></Layout>
-              </ProtectedRoute>
-            } />
-            
-            {/* ====== OTHER PROTECTED ROUTES ====== */}
-            
-            <Route path="/vacuum" element={
-              <ProtectedRoute permission="vacuum">
-                <Layout><VacuumUploadPage /></Layout>
-              </ProtectedRoute>
-            } />
-            
-            <Route path="/vacuum/explore" element={
-              <ProtectedRoute permission="vacuum">
-                <Layout><VacuumExplore /></Layout>
-              </ProtectedRoute>
-            } />
-            
-            <Route path="/vacuum/map" element={
-              <ProtectedRoute permission="vacuum">
-                <Layout><VacuumColumnMapping /></Layout>
-              </ProtectedRoute>
-            } />
-            
-            <Route path="/playbook-builder" element={
-              <ProtectedRoute permission="ops_center">
-                <Layout><PlaybookBuilderPage /></Layout>
-              </ProtectedRoute>
-            } />
-            
-            <Route path="/data-model" element={
-              <ProtectedRoute permission="data_model">
-                <Layout><DataModelPage /></Layout>
-              </ProtectedRoute>
-            } />
-            
-            {/* ====== LEGACY REDIRECTS ====== */}
-            
-            {/* Standards → Reference Library */}
-            <Route path="/standards" element={<Navigate to="/reference-library" replace />} />
-            
-            {/* Other legacy routes */}
-            <Route path="/chat" element={<Navigate to="/workspace" replace />} />
-            <Route path="/upload" element={<Navigate to="/data" replace />} />
-            <Route path="/status" element={<Navigate to="/system" replace />} />
-            <Route path="/secure20" element={<Navigate to="/playbooks" replace />} />
-            <Route path="/packs" element={<Navigate to="/playbooks" replace />} />
-            
-            {/* 404 fallback - go to dashboard if logged in */}
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
-          </Routes>
-        </Router>
+        <ThemeProvider>
+          <UploadProvider>
+            <Router>
+              <AppRoutes />
+            </Router>
+          </UploadProvider>
+        </ThemeProvider>
       </ProjectProvider>
     </AuthProvider>
   );
