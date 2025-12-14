@@ -66,4 +66,50 @@ export function getCustomerPrimaryColor(projectName) {
   return getCustomerColor(projectName).primary;
 }
 
+/**
+ * Get initials from customer/project name
+ * @param {string} name - Customer or project name
+ * @returns {string} 2-character initials
+ */
+export function getCustomerInitials(name) {
+  if (!name) return '??';
+  
+  // If it's a project code like MEY1000, take first 2 chars
+  if (/^[A-Z]{3}\d+$/.test(name)) {
+    return name.slice(0, 2);
+  }
+  
+  // Otherwise split by space and take first letter of each word
+  const words = name.trim().split(/\s+/);
+  if (words.length >= 2) {
+    return (words[0][0] + words[1][0]).toUpperCase();
+  }
+  
+  // Single word - take first 2 chars
+  return name.slice(0, 2).toUpperCase();
+}
+
+/**
+ * Get contrasting text color (black or white) for a background
+ * @param {string} hexColor - Hex color string
+ * @returns {string} '#ffffff' or '#000000'
+ */
+export function getContrastText(hexColor) {
+  if (!hexColor) return '#000000';
+  
+  // Remove # if present
+  const hex = hexColor.replace('#', '');
+  
+  // Parse RGB values
+  const r = parseInt(hex.substr(0, 2), 16);
+  const g = parseInt(hex.substr(2, 2), 16);
+  const b = parseInt(hex.substr(4, 2), 16);
+  
+  // Calculate relative luminance
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  
+  // Return black or white based on luminance
+  return luminance > 0.5 ? '#000000' : '#ffffff';
+}
+
 export default CUSTOMER_COLORS;
