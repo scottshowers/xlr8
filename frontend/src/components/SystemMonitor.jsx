@@ -281,6 +281,7 @@ function NavTabs({ active, onChange, T }) {
     { id: 'security', label: 'SECURITY', icon: '🛡️' },
     { id: 'performance', label: 'PERFORMANCE', icon: '⚡' },
     { id: 'costs', label: 'COSTS', icon: '💰' },
+    { id: 'data', label: 'DATA STORES', icon: '🗄️' },
   ];
 
   return (
@@ -1172,6 +1173,179 @@ function OverviewPage({ T, data, flow, selectedNode, onNodeClick, activity, thre
 }
 
 // =============================================================================
+// DATA STORES PAGE - Unified view of DuckDB, Supabase, ChromaDB
+// =============================================================================
+
+function DataStoresPage({ T }) {
+  const [loading, setLoading] = useState(true);
+  const [activeStore, setActiveStore] = useState('overview');
+  const [duckdbData, setDuckdbData] = useState(null);
+  const [supabaseData, setSupabaseData] = useState(null);
+  const [chromadbData, setChromadbData] = useState(null);
+
+  useEffect(() => {
+    loadAllData();
+  }, []);
+
+  const loadAllData = async () => {
+    setLoading(true);
+    try {
+      const [duckRes, docsRes, chromaRes] = await Promise.all([
+        api.get('/status/structured').catch(() => ({ data: { available: false, files: [], total_rows: 0 } })),
+        api.get('/status/documents').catch(() => ({ data: { documents: [] } })),
+        api.get('/status/chromadb').catch(() => ({ data: { total_chunks: 0 } })),
+      ]);
+      setDuckdbData(duckRes.data);
+      setSupabaseData(docsRes.data);
+      setChromadbData(chromaRes.data);
+    } catch (err) {
+      console.error('Failed to load data:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const totals = {
+    duckdb: { files: duckdbData?.total_files || 0, tables: duckdbData?.total_tables || 0, rows: duckdbData?.total_rows || 0 },
+    supabase: { documents: supabaseData?.documents?.length || 0 },
+    chromadb: { chunks: chromadbData?.total_chunks || 0 },
+  };
+
+  const stores = [
+    { id: 'duckdb', label: 'DuckDB', icon: '🦆', color: T.yellow, value: totals.duckdb.rows, sub: `${totals.duckdb.files} files` },
+    { id: 'supabase', label: 'Documents', icon: '📄', color: T.green, value: totals.supabase.documents, sub: 'tracked' },
+    { id: 'chromadb', label: 'Vectors', icon: '🔮', color: '#8b5cf6', value: totals.chromadb.chunks, sub: 'chunks' },
+  ];
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '4rem' }}>
+        <div style={{ textAlign: 'center', color: T.textDim }}>
+          <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>🔄</div>
+          <div>Loading data stores...</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+      {/* Left Column - Store Cards */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        {stores.map(store => (
+          <Panel key={store.id} T={T} style={{ cursor: 'pointer' }} onClick={() => setActiveStore(store.id)}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <span style={{ fontSize: '1.5rem' }}>{store.icon}</span>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{store.label}</div>
+                  <div style={{ fontSize: '0.7rem', color: T.textDim }}>{store.sub}</div>
+                </div>
+              </div>
+              <AccentText size="1.5rem" color={store.color} mono glow={T.name === 'dark'} T={T}>
+                {store.value.toLocaleString()}
+              </AccentText>
+            </div>
+          </Panel>
+        ))}
+
+        {/* Refresh Button */}
+        <Button onClick={loadAllData} T={T}>🔄 Refresh All</Button>
+      </div>
+
+      {/* Right Column - Detail View */}
+      <Panel T={T}>
+        {activeStore === 'overview' && (
+          <div>
+            <div style={{ fontSize: '0.7rem', color: T.textDim, fontFamily: 'monospace', marginBottom: '1rem' }}>SYSTEM OVERVIEW</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {[
+                { label: 'DuckDB', status: duckdbData?.available !== false, detail: `${totals.duckdb.rows.toLocaleString()} rows in ${totals.duckdb.tables} tables` },
+                { label: 'Supabase', status: true, detail: `${totals.supabase.documents} documents tracked` },
+                { label: 'ChromaDB', status: !chromadbData?.error, detail: `${totals.chromadb.chunks.toLocaleString()} vector chunks` },
+              ].map((item, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem', background: T.panelLight, borderRadius: 6 }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{item.label}</div>
+                    <div style={{ fontSize: '0.7rem', color: T.textDim }}>{item.detail}</div>
+                  </div>
+                  <StatusDot status={item.status ? 0 : 2} size={10} T={T} />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {activeStore === 'duckdb' && (
+          <div>
+            <div style={{ fontSize: '0.7rem', color: T.textDim, fontFamily: 'monospace', marginBottom: '1rem' }}>DUCKDB - STRUCTURED DATA</div>
+            {(duckdbData?.files || []).length === 0 ? (
+              <div style={{ color: T.textDim, textAlign: 'center', padding: '2rem' }}>No structured data files</div>
+            ) : (
+              <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                {(duckdbData?.files || []).map((file, i) => (
+                  <div key={i} style={{ padding: '0.5rem', borderBottom: `1px solid ${T.panelBorder}`, fontSize: '0.8rem' }}>
+                    <div style={{ fontWeight: 600 }}>{file.filename}</div>
+                    <div style={{ color: T.textDim, fontSize: '0.7rem' }}>
+                      {file.project} • {file.total_rows?.toLocaleString() || 0} rows • {file.sheets?.length || 0} sheets
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeStore === 'supabase' && (
+          <div>
+            <div style={{ fontSize: '0.7rem', color: T.textDim, fontFamily: 'monospace', marginBottom: '1rem' }}>SUPABASE - DOCUMENTS</div>
+            {(supabaseData?.documents || []).length === 0 ? (
+              <div style={{ color: T.textDim, textAlign: 'center', padding: '2rem' }}>No documents</div>
+            ) : (
+              <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                {(supabaseData?.documents || []).slice(0, 20).map((doc, i) => (
+                  <div key={i} style={{ padding: '0.5rem', borderBottom: `1px solid ${T.panelBorder}`, fontSize: '0.8rem' }}>
+                    <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.filename}</div>
+                    <div style={{ color: T.textDim, fontSize: '0.7rem' }}>
+                      {doc.project || 'No project'} • {doc.chunk_count || 0} chunks
+                    </div>
+                  </div>
+                ))}
+                {(supabaseData?.documents || []).length > 20 && (
+                  <div style={{ padding: '0.5rem', color: T.textDim, fontSize: '0.7rem', textAlign: 'center' }}>
+                    +{(supabaseData?.documents || []).length - 20} more
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeStore === 'chromadb' && (
+          <div>
+            <div style={{ fontSize: '0.7rem', color: T.textDim, fontFamily: 'monospace', marginBottom: '1rem' }}>CHROMADB - VECTOR STORE</div>
+            <div style={{ textAlign: 'center', padding: '1.5rem' }}>
+              <AccentText size="3rem" color="#8b5cf6" mono glow={T.name === 'dark'} T={T}>
+                {totals.chromadb.chunks.toLocaleString()}
+              </AccentText>
+              <div style={{ color: T.textDim, marginTop: '0.5rem', fontSize: '0.8rem' }}>Vector Chunks</div>
+              <div style={{ marginTop: '1rem', padding: '0.75rem', background: T.panelLight, borderRadius: 6, fontSize: '0.75rem', color: T.textDim }}>
+                384-dimensional embeddings for semantic search and AI analysis
+              </div>
+            </div>
+            {chromadbData?.error && (
+              <div style={{ marginTop: '1rem', padding: '0.5rem', background: T.redBg, borderRadius: 6, fontSize: '0.75rem', color: T.red }}>
+                ⚠️ {chromadbData.error}
+              </div>
+            )}
+          </div>
+        )}
+      </Panel>
+    </div>
+  );
+}
+
+// =============================================================================
 // MAIN COMPONENT
 // =============================================================================
 
@@ -1333,6 +1507,7 @@ export default function SystemMonitor() {
         {activePage === 'security' && <SecurityPage T={T} onNodeClick={setSelectedNode} threatData={threatData} />}
         {activePage === 'performance' && <PerformancePage T={T} data={data} />}
         {activePage === 'costs' && <CostsPage T={T} data={data} onSettingsClick={() => setShowSettings(true)} />}
+        {activePage === 'data' && <DataStoresPage T={T} />}
       </div>
 
       {/* Threat panel - PASS THREAT DATA */}
