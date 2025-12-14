@@ -52,7 +52,7 @@ import AdminPage from './pages/AdminPage';
 import AdminDashboard from './pages/AdminDashboard';
 import DataModelPage from './pages/DataModelPage';
 import ReferenceLibraryPage from './pages/ReferenceLibraryPage';
-import DataObservatoryPage from './pages/DataObservatoryPage';
+import SystemMonitorPage from './pages/SystemMonitorPage';
 
 // CSS
 import './index.css';
@@ -121,7 +121,7 @@ function App() {
             
             <Route path="/system" element={
               <ProtectedRoute permission="ops_center">
-                <Layout><DataObservatoryPage /></Layout>
+                <Layout><SystemMonitorPage /></Layout>
               </ProtectedRoute>
             } />
             
