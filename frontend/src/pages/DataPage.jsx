@@ -1,24 +1,19 @@
 /**
  * DataPage.jsx - Streamlined Data Hub
  * 
- * SIMPLIFIED: 3 tabs focused on getting data IN
- * - Upload: Standard document upload
- * - Vacuum: Deep extraction tool
- * - Jobs: Processing status + file listing (combined)
- * 
- * Removed: Global Data, UKG Connections (moved to Admin)
- * Data browsing/management moved to Operations Center → Data Stores
+ * 3 tabs: Upload | Vacuum | Jobs
+ * Jobs tab has 3 columns: Processing, Structured, Documents
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useProject } from '../context/ProjectContext';
-import Upload from '../components/Upload';
+import { useUpload } from '../context/UploadContext';
 import api from '../services/api';
 import {
   Upload as UploadIcon, Sparkles, ClipboardList, RefreshCw,
   CheckCircle, XCircle, Clock, Loader2, Trash2, StopCircle,
-  FileText, Table2, ChevronDown, ChevronRight
+  FileText, Table2, Calendar
 } from 'lucide-react';
 
 const COLORS = {
@@ -39,54 +34,31 @@ export default function DataPage() {
 
   return (
     <div>
-      {/* Header */}
-      <div style={{ marginBottom: '1.5rem' }}>
-        <h1 style={{
-          fontFamily: "'Sora', sans-serif",
-          fontSize: '1.75rem',
-          fontWeight: 700,
-          color: COLORS.text,
-          margin: 0,
-        }}>
+      <div data-tour="data-header" style={{ marginBottom: '1.5rem' }}>
+        <h1 style={{ fontFamily: "'Sora', sans-serif", fontSize: '1.75rem', fontWeight: 700, color: COLORS.text, margin: 0 }}>
           Data
         </h1>
-        <p style={{ color: COLORS.textLight, marginTop: '0.25rem' }}>
+        <p data-tour="data-project-context" style={{ color: COLORS.textLight, marginTop: '0.25rem' }}>
           Upload and process project data
           {projectName && <span> • <strong>{projectName}</strong></span>}
         </p>
       </div>
 
-      {/* Card */}
-      <div style={{
-        background: 'white',
-        borderRadius: '16px',
-        boxShadow: '0 1px 3px rgba(42, 52, 65, 0.08)',
-        overflow: 'hidden',
-      }}>
-        {/* Tabs */}
-        <div style={{
-          display: 'flex',
-          borderBottom: '1px solid #e1e8ed',
-          background: '#fafbfc',
-        }}>
+      <div style={{ background: 'white', borderRadius: '16px', boxShadow: '0 1px 3px rgba(42, 52, 65, 0.08)', overflow: 'hidden' }}>
+        <div style={{ display: 'flex', borderBottom: '1px solid #e1e8ed', background: '#fafbfc' }}>
           {TABS.map(tab => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
             return (
               <button
                 key={tab.id}
+                data-tour={`data-tab-${tab.id}`}
                 onClick={() => setActiveTab(tab.id)}
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  padding: '1rem 1.5rem',
-                  border: 'none',
-                  background: isActive ? 'white' : 'transparent',
-                  color: isActive ? COLORS.grassGreen : COLORS.textLight,
-                  fontWeight: 600,
-                  fontSize: '0.9rem',
-                  cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '1rem 1.5rem',
+                  border: 'none', background: isActive ? 'white' : 'transparent',
+                  color: isActive ? COLORS.grassGreen : COLORS.textLight, fontWeight: 600,
+                  fontSize: '0.9rem', cursor: 'pointer',
                   borderBottom: isActive ? `2px solid ${COLORS.grassGreen}` : '2px solid transparent',
                   marginBottom: '-1px',
                 }}
@@ -98,9 +70,8 @@ export default function DataPage() {
           })}
         </div>
 
-        {/* Content */}
         <div style={{ padding: '1.5rem' }}>
-          {activeTab === 'upload' && <UploadTab project={activeProject} />}
+          {activeTab === 'upload' && <UploadTab project={activeProject} projectName={projectName} />}
           {activeTab === 'vacuum' && <VacuumTab />}
           {activeTab === 'jobs' && <JobsTab />}
         </div>
@@ -110,7 +81,19 @@ export default function DataPage() {
 }
 
 // ==================== UPLOAD TAB ====================
-function UploadTab({ project }) {
+function UploadTab({ project, projectName }) {
+  const { addUpload } = useUpload();
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const handleFiles = (files) => {
+    if (!project) { alert('Please select a project first'); return; }
+    Array.from(files).forEach(file => addUpload(file, project, projectName));
+  };
+
+  const handleDrop = (e) => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); };
+  const handleFileSelect = (e) => { handleFiles(e.target.files); e.target.value = ''; };
+
   if (!project) {
     return (
       <div style={{ textAlign: 'center', padding: '3rem', color: COLORS.textLight }}>
@@ -120,7 +103,30 @@ function UploadTab({ project }) {
       </div>
     );
   }
-  return <Upload selectedProject={project} />;
+
+  return (
+    <div>
+      <input type="file" ref={fileInputRef} style={{ display: 'none' }} multiple accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.txt,.md" onChange={handleFileSelect} />
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={handleDrop}
+        onClick={() => fileInputRef.current?.click()}
+        style={{
+          border: `2px dashed ${dragOver ? COLORS.grassGreen : '#e1e8ed'}`, borderRadius: '12px',
+          padding: '3rem', textAlign: 'center', cursor: 'pointer',
+          background: dragOver ? '#f0fdf4' : '#fafbfc', transition: 'all 0.2s ease',
+        }}
+      >
+        <UploadIcon size={48} style={{ color: COLORS.grassGreen, marginBottom: '1rem' }} />
+        <h3 style={{ margin: '0 0 0.5rem', color: COLORS.text }}>{dragOver ? 'Drop files here' : 'Click or drag files to upload'}</h3>
+        <p style={{ color: COLORS.textLight, margin: 0, fontSize: '0.9rem' }}>PDF, Word, Excel, CSV, or Text files</p>
+      </div>
+      <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', background: '#f8fafc', borderRadius: '8px', fontSize: '0.85rem', color: COLORS.textLight }}>
+        💡 <strong>Tip:</strong> Files upload in the background. You can navigate away and check progress in the top-right indicator.
+      </div>
+    </div>
+  );
 }
 
 // ==================== VACUUM TAB ====================
@@ -130,55 +136,25 @@ function VacuumTab() {
       <Sparkles size={48} style={{ color: COLORS.grassGreen, marginBottom: '1rem' }} />
       <h2 style={{ margin: '0 0 0.5rem', color: COLORS.text }}>Vacuum Extract</h2>
       <p style={{ color: COLORS.textLight, maxWidth: '500px', margin: '0 auto 1.5rem', lineHeight: 1.6 }}>
-        Deep extraction tool for complex documents. Intelligent table detection, 
-        multi-sheet processing, and semantic column mapping.
+        Deep extraction for complex documents. Intelligent table detection, multi-sheet processing, and semantic column mapping.
       </p>
-      
-      <Link
-        to="/vacuum"
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '0.5rem',
-          padding: '0.875rem 1.75rem',
-          background: COLORS.grassGreen,
-          border: 'none',
-          borderRadius: '10px',
-          color: 'white',
-          fontSize: '1rem',
-          fontWeight: 600,
-          textDecoration: 'none',
-          boxShadow: '0 2px 8px rgba(131, 177, 109, 0.3)',
-        }}
-      >
-        <Sparkles size={18} />
-        Open Vacuum
-      </Link>
-
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(2, 1fr)',
-        gap: '1rem',
-        maxWidth: '600px',
-        margin: '2rem auto 0',
-        textAlign: 'left',
+      <Link to="/vacuum" style={{
+        display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.875rem 1.75rem',
+        background: COLORS.grassGreen, border: 'none', borderRadius: '10px', color: 'white',
+        fontSize: '1rem', fontWeight: 600, textDecoration: 'none', boxShadow: '0 2px 8px rgba(131, 177, 109, 0.3)',
       }}>
+        <Sparkles size={18} />Open Vacuum
+      </Link>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', maxWidth: '600px', margin: '2rem auto 0', textAlign: 'left' }}>
         {[
           { icon: '📊', text: 'Smart table detection from PDFs' },
           { icon: '🔍', text: 'Multi-sheet Excel processing' },
           { icon: '🏷️', text: 'Automatic column classification' },
           { icon: '✨', text: 'Data quality profiling' },
-        ].map((feature, i) => (
-          <div key={i} style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.75rem',
-            padding: '1rem',
-            background: '#f8fafc',
-            borderRadius: '8px',
-          }}>
-            <span style={{ fontSize: '1.25rem' }}>{feature.icon}</span>
-            <span style={{ fontSize: '0.9rem', color: COLORS.text }}>{feature.text}</span>
+        ].map((f, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '1rem', background: '#f8fafc', borderRadius: '8px' }}>
+            <span style={{ fontSize: '1.25rem' }}>{f.icon}</span>
+            <span style={{ fontSize: '0.9rem', color: COLORS.text }}>{f.text}</span>
           </div>
         ))}
       </div>
@@ -186,7 +162,7 @@ function VacuumTab() {
   );
 }
 
-// ==================== JOBS TAB (Combined Processing + Files) ====================
+// ==================== JOBS TAB (3 Sections) ====================
 function JobsTab() {
   const { projects } = useProject();
   const [jobs, setJobs] = useState([]);
@@ -195,7 +171,9 @@ function JobsTab() {
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(null);
   const [killing, setKilling] = useState(null);
-  const [expandedSection, setExpandedSection] = useState('jobs');
+  const [deleteStartDate, setDeleteStartDate] = useState('');
+  const [deleteEndDate, setDeleteEndDate] = useState('');
+  const [deletingRange, setDeletingRange] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -213,73 +191,61 @@ function JobsTab() {
       setJobs(jobsRes.data.jobs || []);
       setStructuredData(structRes.data);
       setDocuments(docsRes.data);
-    } catch (err) {
-      console.error('Failed to load data:', err);
-    } finally {
-      setLoading(false);
-    }
+    } catch (err) { console.error('Failed to load:', err); }
+    finally { setLoading(false); }
   };
 
   const killJob = async (jobId) => {
     if (!confirm('Kill this stuck job?')) return;
     setKilling(jobId);
-    try {
-      await api.post(`/jobs/${jobId}/fail`, null, { params: { error_message: 'Manually terminated' } });
-      loadData();
-    } catch (err) {
-      alert('Error: ' + (err.response?.data?.detail || err.message));
-    } finally {
-      setKilling(null);
-    }
+    try { await api.post(`/jobs/${jobId}/fail`, null, { params: { error_message: 'Manually terminated' } }); loadData(); }
+    catch (err) { alert('Error: ' + (err.response?.data?.detail || err.message)); }
+    finally { setKilling(null); }
   };
 
   const deleteJob = async (jobId) => {
-    if (!confirm('Delete this job from history?')) return;
+    if (!confirm('Delete this job?')) return;
     setDeleting(jobId);
+    try { await api.delete(`/jobs/${jobId}`); loadData(); }
+    catch (err) { alert('Error: ' + (err.response?.data?.detail || err.message)); }
+    finally { setDeleting(null); }
+  };
+
+  const deleteJobsInRange = async () => {
+    if (!deleteStartDate || !deleteEndDate) { alert('Select both dates'); return; }
+    if (!confirm(`Delete all jobs between ${deleteStartDate} and ${deleteEndDate}?`)) return;
+    setDeletingRange(true);
     try {
-      await api.delete(`/jobs/${jobId}`);
-      loadData();
-    } catch (err) {
-      alert('Error: ' + (err.response?.data?.detail || err.message));
-    } finally {
-      setDeleting(null);
-    }
+      await api.delete('/jobs/range', { params: { start_date: deleteStartDate, end_date: deleteEndDate } });
+      setDeleteStartDate(''); setDeleteEndDate(''); loadData();
+    } catch (err) { alert('Error: ' + (err.response?.data?.detail || err.message)); }
+    finally { setDeletingRange(false); }
   };
 
   const deleteStructuredFile = async (project, filename) => {
     if (!confirm(`Delete ${filename}?`)) return;
     setDeleting(`struct:${project}:${filename}`);
-    try {
-      await api.delete(`/status/structured/${encodeURIComponent(project)}/${encodeURIComponent(filename)}`);
-      loadData();
-    } catch (err) {
-      alert('Error: ' + (err.response?.data?.detail || err.message));
-    } finally {
-      setDeleting(null);
-    }
+    try { await api.delete(`/status/structured/${encodeURIComponent(project)}/${encodeURIComponent(filename)}`); loadData(); }
+    catch (err) { alert('Error: ' + (err.response?.data?.detail || err.message)); }
+    finally { setDeleting(null); }
   };
 
   const deleteDocument = async (filename) => {
-    if (!confirm(`Delete ${filename} and all its chunks?`)) return;
+    if (!confirm(`Delete ${filename}?`)) return;
     setDeleting(`doc:${filename}`);
-    try {
-      await api.delete(`/status/documents/${encodeURIComponent(filename)}`);
-      loadData();
-    } catch (err) {
-      alert('Error: ' + (err.response?.data?.detail || err.message));
-    } finally {
-      setDeleting(null);
-    }
+    try { await api.delete(`/status/documents/${encodeURIComponent(filename)}`); loadData(); }
+    catch (err) { alert('Error: ' + (err.response?.data?.detail || err.message)); }
+    finally { setDeleting(null); }
   };
 
-  const getProjectName = (projectValue) => {
-    if (!projectValue) return 'Unknown';
-    if (projectValue === 'GLOBAL') return 'GLOBAL';
-    if (projectValue.length === 36 && projectValue.includes('-')) {
-      const found = projects.find(p => p.id === projectValue);
-      return found ? found.name : projectValue.slice(0, 8) + '...';
+  const getProjectName = (pv) => {
+    if (!pv) return 'Unknown';
+    if (pv === 'GLOBAL') return 'GLOBAL';
+    if (pv.length === 36 && pv.includes('-')) {
+      const found = projects.find(p => p.id === pv);
+      return found ? found.name : pv.slice(0, 8) + '...';
     }
-    return projectValue;
+    return pv;
   };
 
   const getStatusIcon = (status) => {
@@ -299,269 +265,145 @@ function JobsTab() {
     );
   }
 
-  const recentJobs = jobs.slice(0, 20);
+  const recentJobs = jobs.slice(0, 30);
   const activeJobs = jobs.filter(j => j.status === 'processing' || j.status === 'pending');
   const structuredFiles = structuredData?.files || [];
   const docs = documents?.documents || [];
 
+  const sectionStyle = { background: '#f8fafc', border: '1px solid #e1e8ed', borderRadius: '12px', overflow: 'hidden' };
+  const headerStyle = { padding: '0.75rem 1rem', borderBottom: '1px solid #e1e8ed', display: 'flex', alignItems: 'center', gap: '0.5rem' };
+  const countBadge = { background: '#e1e8ed', padding: '0.1rem 0.5rem', borderRadius: '10px', fontSize: '0.75rem', color: COLORS.textLight };
+
   return (
     <div>
       {/* Summary Stats */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(4, 1fr)',
-        gap: '1rem',
-        marginBottom: '1.5rem',
-      }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
         {[
           { label: 'Active Jobs', value: activeJobs.length, color: '#3b82f6' },
           { label: 'Structured Files', value: structuredFiles.length, color: '#f59e0b' },
           { label: 'Documents', value: docs.length, color: '#10b981' },
           { label: 'Total Rows', value: (structuredData?.total_rows || 0).toLocaleString(), color: COLORS.grassGreen },
-        ].map((stat, i) => (
-          <div key={i} style={{
-            background: '#f8fafc',
-            borderRadius: '8px',
-            padding: '1rem',
-            textAlign: 'center',
-          }}>
-            <div style={{ fontSize: '1.5rem', fontWeight: 700, color: stat.color, fontFamily: 'monospace' }}>
-              {stat.value}
-            </div>
-            <div style={{ fontSize: '0.75rem', color: COLORS.textLight, marginTop: '0.25rem' }}>
-              {stat.label}
-            </div>
+        ].map((s, i) => (
+          <div key={i} style={{ background: '#f8fafc', borderRadius: '8px', padding: '1rem', textAlign: 'center' }}>
+            <div style={{ fontSize: '1.5rem', fontWeight: 700, color: s.color, fontFamily: 'monospace' }}>{s.value}</div>
+            <div style={{ fontSize: '0.75rem', color: COLORS.textLight, marginTop: '0.25rem' }}>{s.label}</div>
           </div>
         ))}
       </div>
 
-      {/* Collapsible Sections */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        {/* Processing Jobs Section */}
-        <Section
-          title="Processing Jobs"
-          icon={<ClipboardList size={18} />}
-          count={recentJobs.length}
-          expanded={expandedSection === 'jobs'}
-          onToggle={() => setExpandedSection(expandedSection === 'jobs' ? null : 'jobs')}
-        >
-          {recentJobs.length === 0 ? (
-            <div style={{ padding: '2rem', textAlign: 'center', color: COLORS.textLight }}>
-              No recent jobs
+      {/* 3-Column Layout */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
+        {/* JOBS SECTION */}
+        <div style={sectionStyle}>
+          <div style={headerStyle}>
+            <ClipboardList size={18} style={{ color: '#3b82f6' }} />
+            <span style={{ fontWeight: 600, color: COLORS.text }}>Jobs</span>
+            <span style={countBadge}>{recentJobs.length}</span>
+            <button onClick={loadData} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: COLORS.textLight }}>
+              <RefreshCw size={14} />
+            </button>
+          </div>
+          
+          {/* Delete Range */}
+          <div style={{ padding: '0.5rem 1rem', borderBottom: '1px solid #e1e8ed', background: 'white' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <Calendar size={14} style={{ color: COLORS.textLight }} />
+              <input type="date" value={deleteStartDate} onChange={(e) => setDeleteStartDate(e.target.value)}
+                style={{ padding: '0.25rem 0.5rem', border: '1px solid #e1e8ed', borderRadius: '4px', fontSize: '0.7rem', flex: 1, minWidth: '90px' }} />
+              <span style={{ color: COLORS.textLight, fontSize: '0.7rem' }}>to</span>
+              <input type="date" value={deleteEndDate} onChange={(e) => setDeleteEndDate(e.target.value)}
+                style={{ padding: '0.25rem 0.5rem', border: '1px solid #e1e8ed', borderRadius: '4px', fontSize: '0.7rem', flex: 1, minWidth: '90px' }} />
+              <button onClick={deleteJobsInRange} disabled={deletingRange || !deleteStartDate || !deleteEndDate}
+                style={{ padding: '0.25rem 0.5rem', background: deleteStartDate && deleteEndDate ? '#ef4444' : '#e1e8ed', color: deleteStartDate && deleteEndDate ? 'white' : COLORS.textLight, border: 'none', borderRadius: '4px', fontSize: '0.65rem', cursor: deleteStartDate && deleteEndDate ? 'pointer' : 'not-allowed' }}>
+                {deletingRange ? '...' : 'Delete'}
+              </button>
             </div>
-          ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid #e1e8ed' }}>
-                  <th style={{ textAlign: 'left', padding: '0.75rem', color: COLORS.textLight, fontWeight: 600 }}>Status</th>
-                  <th style={{ textAlign: 'left', padding: '0.75rem', color: COLORS.textLight, fontWeight: 600 }}>File</th>
-                  <th style={{ textAlign: 'left', padding: '0.75rem', color: COLORS.textLight, fontWeight: 600 }}>Project</th>
-                  <th style={{ textAlign: 'left', padding: '0.75rem', color: COLORS.textLight, fontWeight: 600 }}>Started</th>
-                  <th style={{ textAlign: 'center', padding: '0.75rem', color: COLORS.textLight, fontWeight: 600 }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentJobs.map((job) => (
-                  <tr key={job.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                    <td style={{ padding: '0.75rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        {getStatusIcon(job.status)}
-                        <span style={{ textTransform: 'capitalize' }}>{job.status}</span>
-                      </div>
-                    </td>
-                    <td style={{ padding: '0.75rem', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {job.filename}
-                    </td>
-                    <td style={{ padding: '0.75rem' }}>{getProjectName(job.project_id)}</td>
-                    <td style={{ padding: '0.75rem', color: COLORS.textLight, fontSize: '0.8rem' }}>
-                      {job.created_at ? new Date(job.created_at).toLocaleString() : '-'}
-                    </td>
-                    <td style={{ padding: '0.75rem', textAlign: 'center' }}>
-                      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
-                        {job.status === 'processing' && (
-                          <button
-                            onClick={() => killJob(job.id)}
-                            disabled={killing === job.id}
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#f59e0b' }}
-                            title="Kill Job"
-                          >
-                            <StopCircle size={16} />
-                          </button>
-                        )}
-                        <button
-                          onClick={() => deleteJob(job.id)}
-                          disabled={deleting === job.id}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444' }}
-                          title="Delete"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Section>
+          </div>
 
-        {/* Structured Files Section */}
-        <Section
-          title="Structured Data"
-          icon={<Table2 size={18} />}
-          count={structuredFiles.length}
-          expanded={expandedSection === 'structured'}
-          onToggle={() => setExpandedSection(expandedSection === 'structured' ? null : 'structured')}
-        >
-          {structuredFiles.length === 0 ? (
-            <div style={{ padding: '2rem', textAlign: 'center', color: COLORS.textLight }}>
-              No structured data files
-            </div>
-          ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid #e1e8ed' }}>
-                  <th style={{ textAlign: 'left', padding: '0.75rem', color: COLORS.textLight, fontWeight: 600 }}>File</th>
-                  <th style={{ textAlign: 'left', padding: '0.75rem', color: COLORS.textLight, fontWeight: 600 }}>Project</th>
-                  <th style={{ textAlign: 'right', padding: '0.75rem', color: COLORS.textLight, fontWeight: 600 }}>Rows</th>
-                  <th style={{ textAlign: 'right', padding: '0.75rem', color: COLORS.textLight, fontWeight: 600 }}>Sheets</th>
-                  <th style={{ textAlign: 'center', padding: '0.75rem', color: COLORS.textLight, fontWeight: 600 }}>Delete</th>
-                </tr>
-              </thead>
-              <tbody>
-                {structuredFiles.map((file, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                    <td style={{ padding: '0.75rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <Table2 size={16} style={{ color: '#f59e0b' }} />
-                        {file.filename}
-                      </div>
-                    </td>
-                    <td style={{ padding: '0.75rem' }}>{getProjectName(file.project)}</td>
-                    <td style={{ padding: '0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>
-                      {(file.total_rows || 0).toLocaleString()}
-                    </td>
-                    <td style={{ padding: '0.75rem', textAlign: 'right' }}>{file.sheets?.length || 0}</td>
-                    <td style={{ padding: '0.75rem', textAlign: 'center' }}>
-                      <button
-                        onClick={() => deleteStructuredFile(file.project, file.filename)}
-                        disabled={deleting === `struct:${file.project}:${file.filename}`}
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444' }}
-                      >
-                        <Trash2 size={16} />
+          <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+            {recentJobs.length === 0 ? (
+              <div style={{ padding: '2rem', textAlign: 'center', color: COLORS.textLight, fontSize: '0.85rem' }}>No recent jobs</div>
+            ) : (
+              recentJobs.map((job) => (
+                <div key={job.id} style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #f0f0f0', background: 'white', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  {getStatusIcon(job.status)}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{job.filename}</div>
+                    <div style={{ fontSize: '0.65rem', color: COLORS.textLight }}>{getProjectName(job.project_id)}</div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.2rem' }}>
+                    {job.status === 'processing' && (
+                      <button onClick={() => killJob(job.id)} disabled={killing === job.id} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#f59e0b', padding: '0.2rem' }} title="Kill">
+                        <StopCircle size={12} />
                       </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Section>
+                    )}
+                    <button onClick={() => deleteJob(job.id)} disabled={deleting === job.id} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', padding: '0.2rem' }} title="Delete">
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
 
-        {/* Documents Section */}
-        <Section
-          title="Documents"
-          icon={<FileText size={18} />}
-          count={docs.length}
-          expanded={expandedSection === 'docs'}
-          onToggle={() => setExpandedSection(expandedSection === 'docs' ? null : 'docs')}
-        >
-          {docs.length === 0 ? (
-            <div style={{ padding: '2rem', textAlign: 'center', color: COLORS.textLight }}>
-              No documents uploaded
-            </div>
-          ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid #e1e8ed' }}>
-                  <th style={{ textAlign: 'left', padding: '0.75rem', color: COLORS.textLight, fontWeight: 600 }}>Document</th>
-                  <th style={{ textAlign: 'left', padding: '0.75rem', color: COLORS.textLight, fontWeight: 600 }}>Project</th>
-                  <th style={{ textAlign: 'right', padding: '0.75rem', color: COLORS.textLight, fontWeight: 600 }}>Chunks</th>
-                  <th style={{ textAlign: 'center', padding: '0.75rem', color: COLORS.textLight, fontWeight: 600 }}>Delete</th>
-                </tr>
-              </thead>
-              <tbody>
-                {docs.slice(0, 50).map((doc, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                    <td style={{ padding: '0.75rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <FileText size={16} style={{ color: '#10b981' }} />
-                        {doc.filename}
-                      </div>
-                    </td>
-                    <td style={{ padding: '0.75rem' }}>{getProjectName(doc.project)}</td>
-                    <td style={{ padding: '0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>
-                      {doc.chunk_count || doc.chunks || 0}
-                    </td>
-                    <td style={{ padding: '0.75rem', textAlign: 'center' }}>
-                      <button
-                        onClick={() => deleteDocument(doc.filename)}
-                        disabled={deleting === `doc:${doc.filename}`}
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444' }}
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          {docs.length > 50 && (
-            <div style={{ padding: '0.75rem', textAlign: 'center', color: COLORS.textLight, fontSize: '0.8rem' }}>
-              Showing 50 of {docs.length} documents
-            </div>
-          )}
-        </Section>
+        {/* STRUCTURED DATA SECTION */}
+        <div style={sectionStyle}>
+          <div style={headerStyle}>
+            <Table2 size={18} style={{ color: '#f59e0b' }} />
+            <span style={{ fontWeight: 600, color: COLORS.text }}>Structured Data</span>
+            <span style={countBadge}>{structuredFiles.length}</span>
+          </div>
+          <div style={{ maxHeight: '450px', overflowY: 'auto' }}>
+            {structuredFiles.length === 0 ? (
+              <div style={{ padding: '2rem', textAlign: 'center', color: COLORS.textLight, fontSize: '0.85rem' }}>No structured files</div>
+            ) : (
+              structuredFiles.map((file, i) => (
+                <div key={i} style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #f0f0f0', background: 'white', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Table2 size={14} style={{ color: '#f59e0b', flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.filename}</div>
+                    <div style={{ fontSize: '0.65rem', color: COLORS.textLight }}>{getProjectName(file.project)} • {(file.total_rows || 0).toLocaleString()} rows</div>
+                  </div>
+                  <button onClick={() => deleteStructuredFile(file.project, file.filename)} disabled={deleting === `struct:${file.project}:${file.filename}`} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', padding: '0.2rem' }}>
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* DOCUMENTS SECTION */}
+        <div style={sectionStyle}>
+          <div style={headerStyle}>
+            <FileText size={18} style={{ color: '#10b981' }} />
+            <span style={{ fontWeight: 600, color: COLORS.text }}>Documents</span>
+            <span style={countBadge}>{docs.length}</span>
+          </div>
+          <div style={{ maxHeight: '450px', overflowY: 'auto' }}>
+            {docs.length === 0 ? (
+              <div style={{ padding: '2rem', textAlign: 'center', color: COLORS.textLight, fontSize: '0.85rem' }}>No documents</div>
+            ) : (
+              docs.slice(0, 50).map((doc, i) => (
+                <div key={i} style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #f0f0f0', background: 'white', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <FileText size={14} style={{ color: '#10b981', flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.filename}</div>
+                    <div style={{ fontSize: '0.65rem', color: COLORS.textLight }}>{getProjectName(doc.project)} • {doc.chunk_count || doc.chunks || 0} chunks</div>
+                  </div>
+                  <button onClick={() => deleteDocument(doc.filename)} disabled={deleting === `doc:${doc.filename}`} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', padding: '0.2rem' }}>
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              ))
+            )}
+            {docs.length > 50 && <div style={{ padding: '0.5rem', textAlign: 'center', color: COLORS.textLight, fontSize: '0.7rem' }}>+{docs.length - 50} more</div>}
+          </div>
+        </div>
       </div>
 
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
-    </div>
-  );
-}
-
-// Collapsible Section Component
-function Section({ title, icon, count, expanded, onToggle, children }) {
-  return (
-    <div style={{
-      border: '1px solid #e1e8ed',
-      borderRadius: '8px',
-      overflow: 'hidden',
-    }}>
-      <button
-        onClick={onToggle}
-        style={{
-          width: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '1rem',
-          background: expanded ? '#f8fafc' : 'white',
-          border: 'none',
-          cursor: 'pointer',
-          textAlign: 'left',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          {icon}
-          <span style={{ fontWeight: 600, color: COLORS.text }}>{title}</span>
-          <span style={{
-            background: '#e1e8ed',
-            padding: '0.2rem 0.6rem',
-            borderRadius: '12px',
-            fontSize: '0.75rem',
-            color: COLORS.textLight,
-          }}>
-            {count}
-          </span>
-        </div>
-        {expanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
-      </button>
-      {expanded && (
-        <div style={{ borderTop: '1px solid #e1e8ed' }}>
-          {children}
-        </div>
-      )}
     </div>
   );
 }
