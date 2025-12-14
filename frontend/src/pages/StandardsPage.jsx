@@ -1,11 +1,64 @@
 /**
- * StandardsPage - Uses same api service as working Upload component
+ * StandardsPage - Standards & Compliance
+ * 
+ * Upload compliance documents, extract rules, run compliance checks.
+ * Project inherited from ContextBar (same pattern as PlaybooksPage).
  * 
  * Deploy to: frontend/src/pages/StandardsPage.jsx
  */
 
 import React, { useState, useEffect } from 'react';
+import { useProject } from '../context/ProjectContext';
 import api from '../services/api';
+
+// Brand Colors
+const COLORS = {
+  grassGreen: '#83b16d',
+  skyBlue: '#93abd9',
+  iceFlow: '#c9d3d4',
+  white: '#f6f5fa',
+  text: '#2a3441',
+  textLight: '#5f6c7b',
+};
+
+// =============================================================================
+// SELECT PROJECT PROMPT (copied from PlaybooksPage)
+// =============================================================================
+
+function SelectProjectPrompt() {
+  return (
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: '50vh',
+      textAlign: 'center',
+      padding: '2rem',
+    }}>
+      <div style={{ fontSize: '4rem', marginBottom: '1.5rem', opacity: 0.6 }}>📜</div>
+      <h2 style={{
+        fontFamily: "'Sora', sans-serif",
+        fontSize: '1.5rem',
+        fontWeight: '700',
+        color: COLORS.text,
+        marginBottom: '0.75rem',
+      }}>Select a Project First</h2>
+      <p style={{
+        color: COLORS.textLight,
+        fontSize: '1rem',
+        maxWidth: '400px',
+        lineHeight: '1.6',
+      }}>
+        Choose a project from the selector above to run compliance checks.
+      </p>
+    </div>
+  );
+}
+
+// =============================================================================
+// UPLOAD TAB
+// =============================================================================
 
 function UploadTab({ onUploadSuccess }) {
   const [file, setFile] = useState(null);
@@ -91,7 +144,7 @@ function UploadTab({ onUploadSuccess }) {
           disabled={!file || uploading}
           style={{
             padding: '0.75rem 1.5rem',
-            background: '#83b16d',
+            background: COLORS.grassGreen,
             color: 'white',
             border: 'none',
             borderRadius: '8px',
@@ -123,6 +176,10 @@ function UploadTab({ onUploadSuccess }) {
   );
 }
 
+// =============================================================================
+// RULES TAB
+// =============================================================================
+
 function RulesTab() {
   const [rules, setRules] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -145,8 +202,29 @@ function RulesTab() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           {rules.map((rule, i) => (
             <div key={rule.rule_id || i} style={{ padding: '1rem', background: '#f8f9fa', borderRadius: '8px', border: '1px solid #e1e8ed' }}>
-              <h4 style={{ margin: '0 0 0.5rem 0' }}>{rule.title}</h4>
-              <p style={{ margin: '0', color: '#5f6c7b', fontSize: '0.9rem' }}>{rule.description}</p>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+                <h4 style={{ margin: 0 }}>{rule.title}</h4>
+                <span style={{
+                  fontSize: '0.75rem',
+                  padding: '0.2rem 0.5rem',
+                  background: rule.severity === 'critical' ? '#f8d7da' :
+                             rule.severity === 'high' ? '#fff3cd' :
+                             rule.severity === 'medium' ? '#cce5ff' : '#d4edda',
+                  color: rule.severity === 'critical' ? '#721c24' :
+                         rule.severity === 'high' ? '#856404' :
+                         rule.severity === 'medium' ? '#004085' : '#155724',
+                  borderRadius: '4px',
+                  fontWeight: '600',
+                  textTransform: 'uppercase',
+                }}>
+                  {rule.severity || 'medium'}
+                </span>
+              </div>
+              <p style={{ margin: '0 0 0.5rem 0', color: '#5f6c7b', fontSize: '0.9rem' }}>{rule.description}</p>
+              <div style={{ fontSize: '0.8rem', color: '#5f6c7b' }}>
+                <span style={{ marginRight: '1rem' }}>📁 {rule.category || 'general'}</span>
+                <span>📄 {rule.source_document}</span>
+              </div>
             </div>
           ))}
         </div>
@@ -154,6 +232,10 @@ function RulesTab() {
     </div>
   );
 }
+
+// =============================================================================
+// DOCUMENTS TAB
+// =============================================================================
 
 function DocumentsTab() {
   const [documents, setDocuments] = useState([]);
@@ -189,27 +271,28 @@ function DocumentsTab() {
   );
 }
 
-function ComplianceTab() {
-  const [projects, setProjects] = useState([]);
-  const [selectedProject, setSelectedProject] = useState('');
+// =============================================================================
+// COMPLIANCE TAB - Uses activeProject from context
+// =============================================================================
+
+function ComplianceTab({ activeProject, projectName, customerName }) {
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState(null);
-
-  useEffect(() => {
-    api.get('/projects')
-      .then(res => setProjects(res.data.projects || res.data || []))
-      .catch(() => {});
-  }, []);
+  const [error, setError] = useState(null);
 
   const runCheck = async () => {
-    if (!selectedProject) return;
+    if (!activeProject?.id) return;
+    
     setRunning(true);
     setResults(null);
+    setError(null);
+    
     try {
-      const res = await api.post(`/standards/compliance/check/${selectedProject}`);
+      const res = await api.post(`/standards/compliance/check/${activeProject.id}`);
       setResults(res.data);
     } catch (e) {
-      setResults({ error: e.message });
+      console.error('Compliance check error:', e);
+      setError(e.response?.data?.detail || e.message || 'Compliance check failed');
     } finally {
       setRunning(false);
     }
@@ -218,37 +301,124 @@ function ComplianceTab() {
   return (
     <div>
       <h3 style={{ margin: '0 0 1rem 0' }}>🔍 Run Compliance Check</h3>
-      <div style={{ maxWidth: '400px', marginBottom: '1rem' }}>
-        <select
-          value={selectedProject}
-          onChange={(e) => setSelectedProject(e.target.value)}
-          style={{ width: '100%', padding: '0.75rem', border: '1px solid #e1e8ed', borderRadius: '8px', marginBottom: '1rem' }}
-        >
-          <option value="">Select Project</option>
-          {projects.map(p => (
-            <option key={p.id || p.project_id} value={p.id || p.project_id}>{p.name || p.id}</option>
-          ))}
-        </select>
-        <button
-          onClick={runCheck}
-          disabled={!selectedProject || running}
-          style={{ padding: '0.75rem 1.5rem', background: '#83b16d', color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', opacity: (!selectedProject || running) ? 0.5 : 1 }}
-        >
-          {running ? '⏳ Running...' : '▶️ Run Check'}
-        </button>
+      
+      {/* Show current project context */}
+      <div style={{ 
+        padding: '1rem', 
+        background: COLORS.iceFlow, 
+        borderRadius: '8px', 
+        marginBottom: '1.5rem',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '1rem'
+      }}>
+        <div style={{ fontSize: '1.5rem' }}>📋</div>
+        <div>
+          <div style={{ fontWeight: '600', color: COLORS.text }}>{projectName}</div>
+          <div style={{ fontSize: '0.85rem', color: COLORS.textLight }}>{customerName}</div>
+        </div>
       </div>
+
+      <button
+        onClick={runCheck}
+        disabled={running}
+        style={{ 
+          padding: '0.75rem 1.5rem', 
+          background: COLORS.grassGreen, 
+          color: 'white', 
+          border: 'none', 
+          borderRadius: '8px', 
+          fontWeight: '600', 
+          cursor: 'pointer', 
+          opacity: running ? 0.5 : 1,
+          fontSize: '1rem',
+        }}
+      >
+        {running ? '⏳ Running...' : '▶️ Run Compliance Check'}
+      </button>
+
+      {error && (
+        <div style={{ padding: '1rem', background: '#f8d7da', color: '#721c24', borderRadius: '8px', marginTop: '1rem' }}>
+          ❌ {error}
+        </div>
+      )}
+
       {results && (
-        <div style={{ padding: '1rem', background: '#f8f9fa', borderRadius: '8px' }}>
-          <p><strong>Rules Checked:</strong> {results.rules_checked}</p>
-          <p><strong>Findings:</strong> {results.findings_count}</p>
-          {results.message && <p>{results.message}</p>}
+        <div style={{ marginTop: '1.5rem' }}>
+          {/* Summary */}
+          <div style={{ 
+            display: 'grid', 
+            gridTemplateColumns: 'repeat(3, 1fr)', 
+            gap: '1rem',
+            marginBottom: '1.5rem' 
+          }}>
+            <div style={{ padding: '1rem', background: '#f8f9fa', borderRadius: '8px', textAlign: 'center' }}>
+              <div style={{ fontSize: '2rem', fontWeight: '700', color: COLORS.text }}>{results.rules_checked || 0}</div>
+              <div style={{ fontSize: '0.85rem', color: COLORS.textLight }}>Rules Checked</div>
+            </div>
+            <div style={{ padding: '1rem', background: results.findings_count > 0 ? '#fff3cd' : '#d4edda', borderRadius: '8px', textAlign: 'center' }}>
+              <div style={{ fontSize: '2rem', fontWeight: '700', color: results.findings_count > 0 ? '#856404' : '#155724' }}>
+                {results.findings_count || 0}
+              </div>
+              <div style={{ fontSize: '0.85rem', color: COLORS.textLight }}>Findings</div>
+            </div>
+            <div style={{ padding: '1rem', background: '#d4edda', borderRadius: '8px', textAlign: 'center' }}>
+              <div style={{ fontSize: '2rem', fontWeight: '700', color: '#155724' }}>{results.compliant_count || 0}</div>
+              <div style={{ fontSize: '0.85rem', color: COLORS.textLight }}>Compliant</div>
+            </div>
+          </div>
+
+          {/* Message */}
+          {results.message && (
+            <div style={{ padding: '1rem', background: '#cce5ff', color: '#004085', borderRadius: '8px', marginBottom: '1rem' }}>
+              ℹ️ {results.message}
+            </div>
+          )}
+
+          {/* Findings */}
+          {results.findings && results.findings.length > 0 && (
+            <div>
+              <h4 style={{ margin: '0 0 1rem 0' }}>Findings</h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {results.findings.map((finding, i) => (
+                  <div key={i} style={{ 
+                    padding: '1rem', 
+                    background: '#f8f9fa', 
+                    borderRadius: '8px', 
+                    border: '1px solid #e1e8ed',
+                    borderLeft: `4px solid ${
+                      finding.severity === 'critical' ? '#dc3545' :
+                      finding.severity === 'high' ? '#ffc107' :
+                      finding.severity === 'medium' ? '#17a2b8' : '#28a745'
+                    }`
+                  }}>
+                    <h5 style={{ margin: '0 0 0.5rem 0', color: COLORS.text }}>{finding.condition || finding.title}</h5>
+                    {finding.criteria && <p style={{ margin: '0.25rem 0', fontSize: '0.9rem' }}><strong>Criteria:</strong> {finding.criteria}</p>}
+                    {finding.cause && <p style={{ margin: '0.25rem 0', fontSize: '0.9rem' }}><strong>Cause:</strong> {finding.cause}</p>}
+                    {finding.consequence && <p style={{ margin: '0.25rem 0', fontSize: '0.9rem' }}><strong>Consequence:</strong> {finding.consequence}</p>}
+                    {finding.corrective_action && <p style={{ margin: '0.25rem 0', fontSize: '0.9rem' }}><strong>Action:</strong> {finding.corrective_action}</p>}
+                    {finding.affected_count && (
+                      <div style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: COLORS.textLight }}>
+                        Affected: {finding.affected_count} records
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
+// =============================================================================
+// MAIN PAGE
+// =============================================================================
+
 export default function StandardsPage() {
+  const { activeProject, projectName, customerName, hasActiveProject, loading } = useProject();
   const [activeTab, setActiveTab] = useState('upload');
   const [key, setKey] = useState(0);
 
@@ -259,9 +429,36 @@ export default function StandardsPage() {
     { id: 'compliance', label: 'Compliance', icon: '🔍' },
   ];
 
+  // Show loading state
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', padding: '4rem' }}>
+        <div className="spinner" />
+      </div>
+    );
+  }
+
+  // Compliance tab requires a project - other tabs don't
+  const requiresProject = activeTab === 'compliance';
+
   return (
     <div>
+      {/* Header */}
       <div style={{ marginBottom: '1.5rem' }}>
+        {hasActiveProject && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            fontSize: '0.85rem',
+            color: COLORS.textLight,
+            marginBottom: '0.5rem',
+          }}>
+            <span>{customerName}</span>
+            <span>→</span>
+            <span style={{ color: COLORS.grassGreen, fontWeight: '600' }}>{projectName}</span>
+          </div>
+        )}
         <h1 style={{ fontFamily: "'Sora', sans-serif", fontSize: '1.75rem', fontWeight: '700', color: '#2a3441', margin: 0 }}>
           📜 Standards & Compliance
         </h1>
@@ -269,6 +466,7 @@ export default function StandardsPage() {
       </div>
 
       <div style={{ background: 'white', borderRadius: '16px', boxShadow: '0 1px 3px rgba(42, 52, 65, 0.08)', overflow: 'hidden' }}>
+        {/* Tab navigation */}
         <div style={{ display: 'flex', borderBottom: '1px solid #e1e8ed', background: '#fafbfc' }}>
           {tabs.map(tab => (
             <button
@@ -285,13 +483,25 @@ export default function StandardsPage() {
             </button>
           ))}
         </div>
+
+        {/* Tab content */}
         <div style={{ padding: '1.5rem' }}>
           {activeTab === 'upload' && <UploadTab onUploadSuccess={() => setKey(k => k + 1)} />}
           {activeTab === 'documents' && <DocumentsTab key={key} />}
           {activeTab === 'rules' && <RulesTab key={key} />}
-          {activeTab === 'compliance' && <ComplianceTab />}
+          {activeTab === 'compliance' && (
+            hasActiveProject ? (
+              <ComplianceTab 
+                activeProject={activeProject} 
+                projectName={projectName} 
+                customerName={customerName} 
+              />
+            ) : (
+              <SelectProjectPrompt />
+            )
+          )}
         </div>
       </div>
     </div>
   );
-}
+                    }
