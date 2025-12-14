@@ -1,14 +1,14 @@
 /**
  * Chat.jsx - REVOLUTIONARY INTELLIGENT CHAT
  * 
+ * POLISHED: All purple/blue → grassGreen for consistency
+ * 
  * Features:
  * - INTELLIGENT MODE: Three Truths synthesis, smart clarification, proactive insights
  * - Standard Mode: Original chat functionality
  * - Scope selector: project, global, all
  * - Thumbs up/down feedback
  * - Personas, Excel export, PII indicators
- * 
- * Deploy to: frontend/src/pages/Chat.jsx
  */
 
 import { useState, useEffect, useRef } from 'react'
@@ -16,11 +16,17 @@ import api from '../services/api'
 import { useProject } from '../context/ProjectContext'
 import PersonaSwitcher from '../components/PersonaSwitcher'
 import PersonaCreator from '../components/PersonaCreator'
+import { COLORS } from '../components/ui'
 import { 
   Zap, Brain, Database, FileText, BookOpen, AlertTriangle, 
   CheckCircle, ChevronDown, ChevronRight, Lightbulb, Download,
   ThumbsUp, ThumbsDown, Copy, RefreshCw, Send, Trash2, Eye, EyeOff
 } from 'lucide-react'
+
+// Brand color for consistent styling
+const BRAND = COLORS?.grassGreen || '#83b16d';
+const BRAND_LIGHT = '#f0fdf4';
+const BRAND_BORDER = '#bbf7d0';
 
 export default function Chat({ functionalAreas = [] }) {
   const { activeProject, projectName } = useProject()
@@ -400,11 +406,15 @@ export default function Chat({ functionalAreas = [] }) {
           {/* Intelligent Mode Toggle */}
           <button
             onClick={() => setIntelligentMode(!intelligentMode)}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-              intelligentMode 
-                ? 'bg-purple-600 text-white shadow-md' 
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
+            style={intelligentMode ? {
+              background: BRAND,
+              color: 'white',
+              boxShadow: '0 1px 3px rgba(131, 177, 109, 0.3)'
+            } : {
+              background: '#f3f4f6',
+              color: '#6b7280'
+            }}
           >
             <Brain size={16} />
             {intelligentMode ? '🧠 Intelligent' : 'Standard'}
@@ -435,15 +445,15 @@ export default function Chat({ functionalAreas = [] }) {
 
       {/* Intelligent Mode Banner */}
       {intelligentMode && (
-        <div className="px-4 py-2 bg-purple-50 border-b border-purple-100 flex items-center justify-between text-sm">
+        <div className="px-4 py-2 border-b flex items-center justify-between text-sm" style={{ background: BRAND_LIGHT, borderColor: BRAND_BORDER }}>
           <div className="flex items-center gap-2">
-            <Zap className="text-purple-600" size={16} />
-            <span className="text-purple-700">
+            <Zap size={16} style={{ color: BRAND }} />
+            <span style={{ color: '#166534' }}>
               <strong>Intelligent Mode:</strong> Synthesizes data + documents + best practices
             </span>
           </div>
           {learningStats?.available && (
-            <div className="flex items-center gap-3 text-xs text-purple-600">
+            <div className="flex items-center gap-3 text-xs" style={{ color: BRAND }}>
               <span title="Learned query patterns">
                 🧠 {learningStats.learned_queries || 0} patterns
               </span>
@@ -479,10 +489,10 @@ export default function Chat({ functionalAreas = [] }) {
                 <div className="flex items-center gap-1 text-blue-600">
                   <Database size={14} /> Data
                 </div>
-                <div className="flex items-center gap-1 text-purple-600">
+                <div className="flex items-center gap-1" style={{ color: BRAND }}>
                   <FileText size={14} /> Docs
                 </div>
-                <div className="flex items-center gap-1 text-green-600">
+                <div className="flex items-center gap-1 text-amber-600">
                   <BookOpen size={14} /> Best Practice
                 </div>
               </div>
@@ -528,20 +538,24 @@ export default function Chat({ functionalAreas = [] }) {
                   ? "Ask anything - I'll synthesize from all sources..."
                   : "Type your question..."
             }
-            className="flex-1 px-4 py-3 border rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+            className="flex-1 px-4 py-3 border rounded-xl resize-none focus:outline-none focus:ring-2 focus:border-transparent"
+            style={{ '--tw-ring-color': BRAND }}
             rows={2}
             disabled={scope === 'project' && !activeProject}
           />
           <button
             onClick={sendMessage}
             disabled={isDisabled}
-            className={`px-6 py-3 rounded-xl font-medium transition-all flex items-center gap-2 ${
-              isDisabled
-                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                : intelligentMode
-                  ? 'bg-purple-600 text-white hover:bg-purple-700 shadow-md'
-                  : 'bg-blue-600 text-white hover:bg-blue-700'
-            }`}
+            className="px-6 py-3 rounded-xl font-medium transition-all flex items-center gap-2"
+            style={isDisabled ? {
+              background: '#f3f4f6',
+              color: '#9ca3af',
+              cursor: 'not-allowed'
+            } : {
+              background: BRAND,
+              color: 'white',
+              boxShadow: '0 2px 8px rgba(131, 177, 109, 0.3)'
+            }}
           >
             <Send size={18} />
             {intelligentMode ? 'Analyze' : 'Send'}
@@ -609,22 +623,27 @@ function MessageBubble({ message, index, persona, expandedSources, toggleSources
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
       {/* Avatar */}
-      <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
-        isUser 
-          ? 'bg-gradient-to-br from-green-500 to-green-600 text-white' 
-          : 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-600'
-      }`}>
+      <div 
+        className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
+        style={isUser ? {
+          background: `linear-gradient(135deg, ${BRAND}, #6b9a57)`,
+          color: 'white'
+        } : {
+          background: BRAND_LIGHT,
+          color: BRAND
+        }}
+      >
         {isUser ? '👤' : persona?.icon || '🐮'}
       </div>
       
       {/* Bubble */}
       <div className={`max-w-[75%] rounded-xl px-4 py-3 ${
         isUser 
-          ? 'bg-gradient-to-br from-green-500 to-green-600 text-white rounded-br-sm'
+          ? 'rounded-br-sm text-white'
           : message.error
             ? 'bg-red-50 border border-red-200 text-red-700 rounded-bl-sm'
             : 'bg-white shadow-sm border rounded-bl-sm'
-      }`}>
+      }`} style={isUser ? { background: `linear-gradient(135deg, ${BRAND}, #6b9a57)` } : {}}>
         <div className="whitespace-pre-wrap text-sm leading-relaxed">
           {message.content}
         </div>
@@ -634,7 +653,8 @@ function MessageBubble({ message, index, persona, expandedSources, toggleSources
           <div className="mt-3 pt-3 border-t border-gray-100">
             <button 
               onClick={() => toggleSources(index)}
-              className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1"
+              className="text-xs flex items-center gap-1"
+              style={{ color: BRAND }}
             >
               {expandedSources[index] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
               {message.sources.length} sources
@@ -711,20 +731,20 @@ function ClarificationCard({ questions, originalQuestion, onSubmit }) {
   }, [questions])
   
   return (
-    <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 max-w-lg">
+    <div className="rounded-xl p-5 max-w-lg" style={{ background: BRAND_LIGHT, border: `1px solid ${BRAND_BORDER}` }}>
       <div className="flex items-center gap-3 mb-4">
-        <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
-          <Brain className="text-blue-600" size={20} />
+        <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: 'white' }}>
+          <Brain size={20} style={{ color: BRAND }} />
         </div>
         <div>
-          <h3 className="font-semibold text-blue-900">Let me clarify</h3>
-          <p className="text-sm text-blue-700">Quick questions for a better answer</p>
+          <h3 className="font-semibold" style={{ color: '#166534' }}>Let me clarify</h3>
+          <p className="text-sm" style={{ color: BRAND }}>Quick questions for a better answer</p>
         </div>
       </div>
       
       <div className="space-y-4">
         {questions?.map((q) => (
-          <div key={q.id} className="bg-white rounded-lg p-4 border border-blue-100">
+          <div key={q.id} className="bg-white rounded-lg p-4" style={{ border: `1px solid ${BRAND_BORDER}` }}>
             <div className="font-medium text-gray-800 mb-3">{q.question}</div>
             
             {q.type === 'radio' && (
@@ -736,7 +756,7 @@ function ClarificationCard({ questions, originalQuestion, onSubmit }) {
                       name={q.id}
                       checked={answers[q.id] === opt.id}
                       onChange={() => handleChange(q.id, opt.id, 'radio')}
-                      className="text-blue-600"
+                      style={{ accentColor: BRAND }}
                     />
                     <span className="text-sm text-gray-700 group-hover:text-gray-900">
                       {opt.label}
@@ -754,7 +774,8 @@ function ClarificationCard({ questions, originalQuestion, onSubmit }) {
                       type="checkbox"
                       checked={answers[q.id]?.includes(opt.id)}
                       onChange={() => handleChange(q.id, opt.id, 'checkbox')}
-                      className="text-blue-600 rounded"
+                      className="rounded"
+                      style={{ accentColor: BRAND }}
                     />
                     <span className="text-sm text-gray-700">{opt.label}</span>
                   </label>
@@ -768,7 +789,8 @@ function ClarificationCard({ questions, originalQuestion, onSubmit }) {
       <div className="mt-5 flex gap-3">
         <button
           onClick={() => onSubmit(answers)}
-          className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2"
+          className="px-5 py-2 text-white rounded-lg font-medium flex items-center gap-2"
+          style={{ background: BRAND }}
         >
           <Zap size={16} /> Get Answer
         </button>
@@ -836,10 +858,10 @@ function IntelligentResponse({ message, index, onFeedback, onResetPreferences })
       )}
       
       {/* Confidence Header */}
-      <div className="px-4 py-2 bg-gradient-to-r from-purple-50 to-blue-50 border-b flex items-center justify-between">
+      <div className="px-4 py-2 border-b flex items-center justify-between" style={{ background: BRAND_LIGHT }}>
         <div className="flex items-center gap-2">
-          <Brain className="text-purple-600" size={16} />
-          <span className="text-sm font-medium text-purple-800">Intelligent Analysis</span>
+          <Brain size={16} style={{ color: BRAND }} />
+          <span className="text-sm font-medium" style={{ color: '#166534' }}>Intelligent Analysis</span>
           {message.used_learning && (
             <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full flex items-center gap-1">
               🧠 Learned
@@ -914,8 +936,8 @@ function IntelligentResponse({ message, index, onFeedback, onResetPreferences })
             <span className="text-gray-600">Sources of Truth</span>
             <div className="flex items-center gap-3">
               {hasReality && <span className="text-blue-600 text-xs">📊 Data</span>}
-              {hasIntent && <span className="text-purple-600 text-xs">📄 Docs</span>}
-              {hasBestPractice && <span className="text-green-600 text-xs">📘 UKG</span>}
+              {hasIntent && <span className="text-xs" style={{ color: BRAND }}>📄 Docs</span>}
+              {hasBestPractice && <span className="text-amber-600 text-xs">📘 UKG</span>}
               {showSources ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
             </div>
           </button>
@@ -938,8 +960,8 @@ function IntelligentResponse({ message, index, onFeedback, onResetPreferences })
               {hasIntent && (
                 <SourceSection
                   title="Customer Documents"
-                  icon={<FileText className="text-purple-500" size={14} />}
-                  color="purple"
+                  icon={<FileText size={14} style={{ color: BRAND }} />}
+                  color="green"
                   items={message.from_intent}
                   expanded={expandedSection === 'intent'}
                   onToggle={() => setExpandedSection(expandedSection === 'intent' ? null : 'intent')}
@@ -950,8 +972,8 @@ function IntelligentResponse({ message, index, onFeedback, onResetPreferences })
               {hasBestPractice && (
                 <SourceSection
                   title="UKG Best Practice"
-                  icon={<BookOpen className="text-green-500" size={14} />}
-                  color="green"
+                  icon={<BookOpen className="text-amber-500" size={14} />}
+                  color="amber"
                   items={message.from_best_practice}
                   expanded={expandedSection === 'best_practice'}
                   onToggle={() => setExpandedSection(expandedSection === 'best_practice' ? null : 'best_practice')}
@@ -998,16 +1020,18 @@ function IntelligentResponse({ message, index, onFeedback, onResetPreferences })
 // Source Section Component
 function SourceSection({ title, icon, color, items, expanded, onToggle }) {
   const colors = {
-    blue: 'bg-blue-50 border-blue-100 hover:bg-blue-100',
-    purple: 'bg-purple-50 border-purple-100 hover:bg-purple-100',
-    green: 'bg-green-50 border-green-100 hover:bg-green-100',
+    blue: { bg: 'bg-blue-50', border: 'border-blue-100', hover: 'hover:bg-blue-100' },
+    green: { bg: BRAND_LIGHT, border: `border-[${BRAND_BORDER}]`, hover: 'hover:bg-green-100' },
+    amber: { bg: 'bg-amber-50', border: 'border-amber-100', hover: 'hover:bg-amber-100' },
   }
   
+  const colorStyle = colors[color] || colors.green
+  
   return (
-    <div className={`rounded-lg border ${colors[color]}`}>
+    <div className={`rounded-lg border ${colorStyle.bg} ${colorStyle.border}`}>
       <button
         onClick={onToggle}
-        className="w-full px-3 py-2 flex items-center justify-between"
+        className={`w-full px-3 py-2 flex items-center justify-between ${colorStyle.hover}`}
       >
         <div className="flex items-center gap-2">
           {icon}
