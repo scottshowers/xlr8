@@ -1,70 +1,105 @@
 /**
  * customerColors.js - Consistent Customer Color System
  * 
- * Use these colors for project/customer displays across the app
- * to maintain visual consistency.
+ * IMPORTANT: getCustomerColor returns a COLOR STRING for backward compatibility.
+ * Use getCustomerColorPalette if you need the full object.
  */
 
-// Customer color system - maps project codes to color palettes
-export const CUSTOMER_COLORS = {
-  'MEY1000': { 
-    primary: '#83b16d',   // grassGreen
-    secondary: '#a8ca99', 
-    bg: 'linear-gradient(135deg, #83b16d15, #a8ca9910)',
-    bgSolid: '#83b16d15',
-  },
-  'ACM2500': { 
-    primary: '#93abd9',   // skyBlue
-    secondary: '#b4c7e7', 
-    bg: 'linear-gradient(135deg, #93abd915, #b4c7e710)',
-    bgSolid: '#93abd915',
-  },
-  'GLB3000': { 
-    primary: '#f59e0b',   // amber
-    secondary: '#fbbf24', 
-    bg: 'linear-gradient(135deg, #f59e0b15, #fbbf2410)',
-    bgSolid: '#f59e0b15',
-  },
-  'TEC4000': { 
-    primary: '#8b5cf6',   // purple
-    secondary: '#a78bfa', 
-    bg: 'linear-gradient(135deg, #8b5cf615, #a78bfa10)',
-    bgSolid: '#8b5cf615',
-  },
-  'GLOBAL':  { 
-    primary: '#14b8a6',   // teal
-    secondary: '#5eead4', 
-    bg: 'linear-gradient(135deg, #14b8a615, #5eead410)',
-    bgSolid: '#14b8a615',
-  },
+// Color palette
+const PALETTE = {
+  grassGreen: '#83b16d',
+  skyBlue: '#93abd9',
+  amber: '#f59e0b',
+  purple: '#8b5cf6',
+  teal: '#14b8a6',
+  rose: '#f43f5e',
+  indigo: '#6366f1',
+  emerald: '#10b981',
+  orange: '#f97316',
+  cyan: '#06b6d4',
+  gray: '#6b7280',
 };
 
-// Default color for unknown projects
-const DEFAULT_COLOR = { 
-  primary: '#6b7280',   // gray
-  secondary: '#9ca3af', 
-  bg: 'linear-gradient(135deg, #6b728015, #9ca3af10)',
-  bgSolid: '#6b728015',
+// Map customer names to colors (add your customers here)
+const CUSTOMER_COLOR_MAP = {
+  // By customer name
+  'meyer corp': PALETTE.grassGreen,
+  'acme industries': PALETTE.skyBlue,
+  'global tech': PALETTE.amber,
+  'techflow inc': PALETTE.purple,
+  'techflow': PALETTE.purple,
+  
+  // By project code
+  'mey1000': PALETTE.grassGreen,
+  'acm2500': PALETTE.skyBlue,
+  'glb3000': PALETTE.amber,
+  'tec4000': PALETTE.purple,
+  
+  // Special
+  'global': PALETTE.teal,
+  '__standards__': PALETTE.teal,
 };
+
+// Color rotation for unknown customers (deterministic based on name)
+const COLOR_ROTATION = [
+  PALETTE.grassGreen,
+  PALETTE.skyBlue,
+  PALETTE.amber,
+  PALETTE.purple,
+  PALETTE.teal,
+  PALETTE.rose,
+  PALETTE.indigo,
+  PALETTE.emerald,
+  PALETTE.orange,
+  PALETTE.cyan,
+];
 
 /**
- * Get consistent color palette for a project
- * @param {string} projectName - The project code (e.g., 'MEY1000')
- * @returns {object} Color palette { primary, secondary, bg, bgSolid }
+ * Simple hash function for consistent color assignment
  */
-export function getCustomerColor(projectName) {
-  if (!projectName) return DEFAULT_COLOR;
-  const key = String(projectName);
-  return CUSTOMER_COLORS[key] || DEFAULT_COLOR;
+function hashString(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return Math.abs(hash);
 }
 
 /**
- * Get just the primary color for a project
- * @param {string} projectName - The project code
- * @returns {string} Primary color hex value
+ * Get color for a customer/project (returns STRING)
+ * @param {string} name - Customer name or project code
+ * @returns {string} Hex color string
  */
-export function getCustomerPrimaryColor(projectName) {
-  return getCustomerColor(projectName).primary;
+export function getCustomerColor(name) {
+  if (!name) return PALETTE.gray;
+  
+  const key = String(name).toLowerCase().trim();
+  
+  // Check explicit mapping first
+  if (CUSTOMER_COLOR_MAP[key]) {
+    return CUSTOMER_COLOR_MAP[key];
+  }
+  
+  // Fall back to deterministic color based on name hash
+  const index = hashString(key) % COLOR_ROTATION.length;
+  return COLOR_ROTATION[index];
+}
+
+/**
+ * Get full color palette for a customer/project
+ * @param {string} name - Customer name or project code  
+ * @returns {object} { primary, secondary, bg, bgSolid }
+ */
+export function getCustomerColorPalette(name) {
+  const primary = getCustomerColor(name);
+  return {
+    primary,
+    secondary: primary + 'cc', // Slightly transparent
+    bg: `linear-gradient(135deg, ${primary}15, ${primary}08)`,
+    bgSolid: primary + '15',
+  };
 }
 
 /**
@@ -75,15 +110,15 @@ export function getCustomerPrimaryColor(projectName) {
 export function getCustomerInitials(name) {
   if (!name) return '??';
   
-  const str = String(name);
+  const str = String(name).trim();
   
   // If it's a project code like MEY1000, take first 2 chars
-  if (/^[A-Z]{3}\d+$/.test(str)) {
-    return str.slice(0, 2);
+  if (/^[A-Z]{3}\d+$/i.test(str)) {
+    return str.slice(0, 2).toUpperCase();
   }
   
   // Otherwise split by space and take first letter of each word
-  const words = str.trim().split(/\s+/);
+  const words = str.split(/\s+/).filter(w => w.length > 0);
   if (words.length >= 2) {
     return (words[0][0] + words[1][0]).toUpperCase();
   }
@@ -128,4 +163,10 @@ export function getContrastText(hexColor) {
   return luminance > 0.5 ? '#000000' : '#ffffff';
 }
 
-export default CUSTOMER_COLORS;
+export default {
+  getCustomerColor,
+  getCustomerColorPalette,
+  getCustomerInitials,
+  getContrastText,
+  PALETTE,
+};
