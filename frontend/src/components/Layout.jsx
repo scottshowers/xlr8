@@ -1,6 +1,11 @@
 /**
  * Layout - Main App Wrapper
- * With role-based navigation hiding
+ * 
+ * POLISHED: Consistent navigation with role-based visibility
+ * 
+ * - Sticky context bar for project selection
+ * - Horizontal nav with active state indicators
+ * - Role-based menu filtering
  */
 
 import React, { useLayoutEffect } from 'react';
@@ -20,7 +25,7 @@ const COLORS = {
 
 // Nav items with required permissions
 const NAV_ITEMS = [
-  { path: '/dashboard', label: 'Dashboard', icon: '🏠', permission: null }, // Always visible
+  { path: '/dashboard', label: 'Dashboard', icon: '🏠', permission: null },
   { path: '/projects', label: 'Projects', icon: '🏢', permission: null },
   { path: '/data', label: 'Data', icon: '📁', permission: Permissions.UPLOAD },
   { path: '/data-model', label: 'Data Model', icon: '🔗', permission: Permissions.DATA_MODEL },
@@ -80,65 +85,121 @@ function Navigation() {
 
   // Filter nav items based on permissions
   const visibleItems = NAV_ITEMS.filter(item => {
-    if (!item.permission) return true; // No permission required
-    if (isAdmin) return true; // Admin sees everything
+    if (!item.permission) return true;
+    if (isAdmin) return true;
     return hasPermission(item.permission);
   });
 
-  return (
-    <nav style={{
+  const styles = {
+    nav: {
       background: 'white',
       borderBottom: '1px solid #e1e8ed',
       padding: '0 1.5rem',
-    }}>
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        maxWidth: '1400px',
-        margin: '0 auto',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-          {/* Vertical Logo */}
-          <Link to="/" style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            padding: '0.5rem 0',
-            textDecoration: 'none',
-          }}>
-            <div style={{ width: '32px', height: '32px' }}>
+    },
+    container: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      maxWidth: '1400px',
+      margin: '0 auto',
+    },
+    left: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '1.5rem',
+    },
+    logo: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.5rem',
+      padding: '0.5rem 0',
+      textDecoration: 'none',
+    },
+    logoIcon: {
+      width: '32px',
+      height: '32px',
+    },
+    logoText: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.25rem',
+    },
+    logoName: {
+      fontFamily: "'Ubuntu Mono', monospace",
+      fontWeight: '700',
+      fontSize: '1.1rem',
+      color: COLORS.text,
+    },
+    navItems: {
+      display: 'flex',
+      gap: '0.25rem',
+    },
+    navLink: (active) => ({
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.4rem',
+      padding: '0.875rem 1rem',
+      textDecoration: 'none',
+      fontSize: '0.875rem',
+      fontWeight: '600',
+      color: active ? COLORS.grassGreen : COLORS.textLight,
+      borderBottom: active ? `2px solid ${COLORS.grassGreen}` : '2px solid transparent',
+      marginBottom: '-1px',
+      transition: 'color 0.2s ease, border-color 0.2s ease',
+    }),
+    userMenu: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '1rem',
+    },
+    userInfo: {
+      textAlign: 'right',
+    },
+    userName: {
+      fontSize: '0.85rem',
+      fontWeight: '600',
+      color: COLORS.text,
+    },
+    userRole: {
+      fontSize: '0.7rem',
+      color: COLORS.textLight,
+      textTransform: 'uppercase',
+      letterSpacing: '0.5px',
+    },
+    logoutBtn: {
+      padding: '0.5rem 1rem',
+      background: 'transparent',
+      border: '1px solid #e1e8ed',
+      borderRadius: '6px',
+      color: COLORS.textLight,
+      fontSize: '0.8rem',
+      cursor: 'pointer',
+      transition: 'all 0.2s ease',
+    },
+  };
+
+  return (
+    <nav style={styles.nav}>
+      <div style={styles.container}>
+        <div style={styles.left}>
+          {/* Logo */}
+          <Link to="/" style={styles.logo}>
+            <div style={styles.logoIcon}>
               <HLogoGreen />
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-              <span style={{
-                fontFamily: "'Ubuntu Mono', monospace",
-                fontWeight: '700',
-                fontSize: '1.1rem',
-                color: COLORS.text,
-              }}>XLR8</span>
+            <div style={styles.logoText}>
+              <span style={styles.logoName}>XLR8</span>
               <Rocket style={{ width: 14, height: 14, color: COLORS.grassGreen }} />
             </div>
           </Link>
 
           {/* Nav Items */}
-          <div style={{ display: 'flex', gap: '0.25rem' }}>
+          <div style={styles.navItems}>
             {visibleItems.map((item) => (
               <Link
                 key={item.path}
                 to={item.path}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.4rem',
-                  padding: '0.875rem 1rem',
-                  textDecoration: 'none',
-                  fontSize: '0.875rem',
-                  fontWeight: '600',
-                  color: isActive(item.path) ? COLORS.grassGreen : COLORS.textLight,
-                  borderBottom: isActive(item.path) ? `2px solid ${COLORS.grassGreen}` : '2px solid transparent',
-                  marginBottom: '-1px',
-                }}
+                style={styles.navLink(isActive(item.path))}
               >
                 <span>{item.icon}</span>
                 {item.label}
@@ -149,30 +210,25 @@ function Navigation() {
 
         {/* User menu */}
         {user && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: '0.85rem', fontWeight: '600', color: COLORS.text }}>
+          <div style={styles.userMenu}>
+            <div style={styles.userInfo}>
+              <div style={styles.userName}>
                 {user.full_name || user.email}
               </div>
-              <div style={{ 
-                fontSize: '0.7rem', 
-                color: COLORS.textLight,
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px',
-              }}>
+              <div style={styles.userRole}>
                 {user.role}
               </div>
             </div>
             <button
               onClick={logout}
-              style={{
-                padding: '0.5rem 1rem',
-                background: 'transparent',
-                border: '1px solid #e1e8ed',
-                borderRadius: '6px',
-                color: COLORS.textLight,
-                fontSize: '0.8rem',
-                cursor: 'pointer',
+              style={styles.logoutBtn}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = COLORS.grassGreen;
+                e.currentTarget.style.color = COLORS.grassGreen;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = '#e1e8ed';
+                e.currentTarget.style.color = COLORS.textLight;
               }}
             >
               Logout
