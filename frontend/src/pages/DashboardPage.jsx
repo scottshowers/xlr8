@@ -41,7 +41,6 @@ function RadialGauge({ value, size = 80, strokeWidth = 8, color, label }) {
   return (
     <div style={{ position: 'relative', width: size, height: size }}>
       <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
-        {/* Background circle */}
         <circle
           cx={size / 2}
           cy={size / 2}
@@ -51,7 +50,6 @@ function RadialGauge({ value, size = 80, strokeWidth = 8, color, label }) {
           strokeWidth={strokeWidth}
           opacity={0.1}
         />
-        {/* Progress circle */}
         <circle
           cx={size / 2}
           cy={size / 2}
@@ -131,7 +129,6 @@ function StatCard({ label, value, icon: Icon, color, trend, sparkData, T, darkMo
       overflow: 'hidden',
       transition: 'all 0.3s ease',
     }}>
-      {/* Glow line */}
       <div style={{ 
         position: 'absolute', 
         top: 0, 
@@ -215,7 +212,6 @@ function ProjectCard({ project, T, darkMode, onClick, isSelected }) {
         e.currentTarget.style.boxShadow = isSelected ? `0 0 20px ${colors.primary}30` : 'none';
       }}
     >
-      {/* Customer color indicator bar */}
       <div style={{ 
         position: 'absolute', 
         top: 0, 
@@ -225,7 +221,6 @@ function ProjectCard({ project, T, darkMode, onClick, isSelected }) {
         background: `linear-gradient(90deg, ${colors.primary}, ${colors.secondary})`,
       }} />
       
-      {/* Background gradient */}
       <div style={{
         position: 'absolute',
         top: 0,
@@ -287,7 +282,6 @@ function ProjectCard({ project, T, darkMode, onClick, isSelected }) {
         />
       </div>
       
-      {/* Click indicator */}
       <div style={{
         position: 'absolute',
         bottom: '0.75rem',
@@ -340,7 +334,6 @@ function FeedItem({ item, T, darkMode, onClick }) {
         e.currentTarget.style.borderLeftWidth = '4px';
       }}
     >
-      {/* Subtle background gradient */}
       <div style={{
         position: 'absolute',
         top: 0,
@@ -355,7 +348,6 @@ function FeedItem({ item, T, darkMode, onClick }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>{item.msg}</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            {/* Mini progress bar */}
             <div style={{ 
               width: 60, 
               height: 6, 
@@ -465,7 +457,7 @@ function QuickAction({ icon: Icon, label, shortcut, onClick, T }) {
 export default function DashboardPage() {
   const navigate = useNavigate();
   const { darkMode, T } = useTheme();
-  const { setActiveProject, activeProject } = useProject();
+  const { selectProject, activeProject, projects: realProjects } = useProject();
   const [time, setTime] = useState(new Date());
 
   useEffect(() => {
@@ -473,26 +465,34 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Mock data
+  // Mock stats (will be real data later)
   const stats = [
-    { label: 'Active Projects', value: 4, icon: FolderOpen, color: BRAND.grassGreen, trend: 12, sparkData: [2, 3, 3, 4, 3, 4, 4] },
+    { label: 'Active Projects', value: realProjects?.length || 0, icon: FolderOpen, color: BRAND.grassGreen, trend: 12, sparkData: [2, 3, 3, 4, 3, 4, 4] },
     { label: 'Playbooks Running', value: 6, icon: PlayCircle, color: STATUS.blue, trend: 8, sparkData: [4, 5, 6, 5, 7, 6, 6] },
     { label: 'Pending Findings', value: 44, icon: AlertTriangle, color: STATUS.amber, trend: -15, sparkData: [60, 55, 52, 48, 45, 44, 44] },
     { label: 'Compliance Score', value: '73%', icon: Shield, color: STATUS.green, trend: 5, sparkData: [65, 68, 70, 69, 72, 73, 73] },
   ];
 
-  const projects = [
-    { id: '1', name: 'MEY1000', customer: 'Meyer Corp', health: 92, activePlaybooks: 2, pendingFindings: 3 },
-    { id: '2', name: 'ACM2500', customer: 'Acme Industries', health: 67, activePlaybooks: 1, pendingFindings: 12 },
-    { id: '3', name: 'GLB3000', customer: 'Global Tech', health: 45, activePlaybooks: 0, pendingFindings: 28 },
-    { id: '4', name: 'TEC4000', customer: 'TechFlow Inc', health: 88, activePlaybooks: 3, pendingFindings: 1 },
-  ];
+  // Use real projects if available, otherwise mock data
+  const displayProjects = realProjects?.length > 0 
+    ? realProjects.slice(0, 4).map(p => ({
+        ...p,
+        health: Math.floor(Math.random() * 40) + 60, // Mock health for now
+        activePlaybooks: Math.floor(Math.random() * 4),
+        pendingFindings: Math.floor(Math.random() * 20),
+      }))
+    : [
+        { id: '1', name: 'MEY1000', customer: 'Meyer Corp', health: 92, activePlaybooks: 2, pendingFindings: 3 },
+        { id: '2', name: 'ACM2500', customer: 'Acme Industries', health: 67, activePlaybooks: 1, pendingFindings: 12 },
+        { id: '3', name: 'GLB3000', customer: 'Global Tech', health: 45, activePlaybooks: 0, pendingFindings: 28 },
+        { id: '4', name: 'TEC4000', customer: 'TechFlow Inc', health: 88, activePlaybooks: 3, pendingFindings: 1 },
+      ];
 
   const liveFeed = [
-    { level: 'info', msg: 'Payroll register processed', project: 'MEY1000', time: '2m', path: '/data' },
-    { level: 'warning', msg: 'SECURE 2.0 gap detected', project: 'ACM2500', time: '15m', path: '/playbooks' },
-    { level: 'success', msg: 'Year-End Checklist passed', project: 'MEY1000', time: '1h', path: '/playbooks' },
-    { level: 'warning', msg: 'Missing deduction codes', project: 'GLB3000', time: '2h', path: '/playbooks' },
+    { level: 'info', msg: 'Payroll register processed', project: displayProjects[0]?.name || 'MEY1000', time: '2m', path: '/data' },
+    { level: 'warning', msg: 'SECURE 2.0 gap detected', project: displayProjects[1]?.name || 'ACM2500', time: '15m', path: '/playbooks' },
+    { level: 'success', msg: 'Year-End Checklist passed', project: displayProjects[0]?.name || 'MEY1000', time: '1h', path: '/playbooks' },
+    { level: 'warning', msg: 'Missing deduction codes', project: displayProjects[2]?.name || 'GLB3000', time: '2h', path: '/playbooks' },
     { level: 'info', msg: 'New standards doc uploaded', project: 'GLOBAL', time: '3h', path: '/reference-library' },
   ];
 
@@ -504,15 +504,16 @@ export default function DashboardPage() {
   ];
 
   const handleProjectClick = (project) => {
-    setActiveProject(project.id, project.name, project.customer);
+    // Use selectProject with full project object
+    selectProject(project);
     navigate('/data');
   };
 
   const handleFeedClick = (item) => {
     // Find project by name and select it
-    const project = projects.find(p => p.name === item.project);
+    const project = displayProjects.find(p => p.name === item.project);
     if (project && item.project !== 'GLOBAL') {
-      setActiveProject(project.id, project.name, project.customer);
+      selectProject(project);
     }
     navigate(item.path);
   };
@@ -545,7 +546,6 @@ export default function DashboardPage() {
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-          {/* System Status */}
           <div style={{ 
             background: `${STATUS.green}15`, 
             border: `1px solid ${STATUS.green}30`,
@@ -583,7 +583,6 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Live Clock */}
           <div style={{ 
             fontFamily: 'monospace', 
             fontSize: '1.75rem', 
@@ -642,14 +641,14 @@ export default function DashboardPage() {
             </button>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-            {projects.map(project => (
+            {displayProjects.map(project => (
               <ProjectCard 
                 key={project.id} 
                 project={project} 
                 T={T} 
                 darkMode={darkMode}
                 onClick={() => handleProjectClick(project)}
-                isSelected={activeProject === project.id}
+                isSelected={activeProject?.id === project.id}
               />
             ))}
           </div>
