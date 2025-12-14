@@ -3,7 +3,7 @@
  * 
  * This is where:
  * - Run pre-built analysis playbooks against project data
- * - Create new playbooks from successful ad-hoc analysis
+ * - Create new playbooks via Playbook Builder
  * 
  * Playbooks are "recipes" that combine:
  * - Questions to answer
@@ -11,6 +11,7 @@
  * - Output structure (workbook format)
  * 
  * Updated: Filters playbooks based on project assignment
+ * Updated: Create button navigates to Playbook Builder
  */
 
 import React, { useState, useEffect } from 'react';
@@ -241,65 +242,6 @@ function PlaybookCard({ playbook, onRun, isActive, hasProgress, isAssigned }) {
   );
 }
 
-// Create Playbook Modal (simplified for now)
-function CreatePlaybookPrompt({ onClose }) {
-  const styles = {
-    overlay: {
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: 'rgba(42, 52, 65, 0.5)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1000,
-    },
-    modal: {
-      background: 'white',
-      borderRadius: '16px',
-      padding: '2rem',
-      maxWidth: '500px',
-      width: '90%',
-    },
-    title: {
-      fontFamily: "'Sora', sans-serif",
-      fontSize: '1.25rem',
-      fontWeight: '700',
-      marginBottom: '1rem',
-    },
-    text: {
-      color: COLORS.textLight,
-      lineHeight: '1.6',
-      marginBottom: '1.5rem',
-    },
-    button: {
-      padding: '0.75rem 1.5rem',
-      background: COLORS.textLight,
-      border: 'none',
-      borderRadius: '8px',
-      color: 'white',
-      fontWeight: '600',
-      cursor: 'pointer',
-    },
-  };
-
-  return (
-    <div style={styles.overlay} onClick={onClose}>
-      <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-        <h2 style={styles.title}>🚧 Coming Soon</h2>
-        <p style={styles.text}>
-          The ability to create custom playbooks from successful ad-hoc analyses is coming soon.
-          <br /><br />
-          For now, use the <strong>Workspace</strong> for ad-hoc analysis, and these Playbooks for structured deliverables.
-        </p>
-        <button style={styles.button} onClick={onClose}>Got it</button>
-      </div>
-    </div>
-  );
-}
-
 // No-project placeholder
 function SelectProjectPrompt() {
   return (
@@ -371,7 +313,6 @@ export default function PlaybooksPage() {
   const { activeProject, projectName, customerName, hasActiveProject, loading } = useProject();
   const { isAdmin } = useAuth();
   const navigate = useNavigate();
-  const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [activePlaybook, setActivePlaybook] = useState(null);
   const [playbookProgress, setPlaybookProgress] = useState({});
@@ -478,6 +419,7 @@ export default function PlaybooksPage() {
       display: 'flex',
       alignItems: 'center',
       gap: '0.5rem',
+      transition: 'all 0.2s ease',
     },
     filters: {
       display: 'flex',
@@ -519,7 +461,18 @@ export default function PlaybooksPage() {
             </p>
           </div>
           {isAdmin && (
-            <button style={styles.createButton} onClick={() => setShowCreateModal(true)}>
+            <button 
+              style={styles.createButton} 
+              onClick={() => navigate('/playbook-builder')}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = COLORS.grassGreen;
+                e.currentTarget.style.color = 'white';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'white';
+                e.currentTarget.style.color = COLORS.grassGreen;
+              }}
+            >
               ➕ Create Playbook
             </button>
           )}
@@ -552,9 +505,6 @@ export default function PlaybooksPage() {
           />
         ))}
       </div>
-
-      {/* Create Modal */}
-      {showCreateModal && <CreatePlaybookPrompt onClose={() => setShowCreateModal(false)} />}
     </div>
   );
 }
