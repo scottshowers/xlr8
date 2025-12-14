@@ -1507,3 +1507,81 @@ async def list_standards_documents():
         raise HTTPException(503, "Standards processor not available")
     registry = get_rule_registry()
     return {"total": len(registry.documents), "documents": [d.to_dict() for d in registry.documents.values()]}
+
+
+# =============================================================================
+# COMPLIANCE CHECK - P4 Standards Layer
+# =============================================================================
+
+# Import compliance engine
+try:
+    from backend.utils.compliance_engine import get_compliance_engine, run_compliance_scan
+    COMPLIANCE_ENGINE_AVAILABLE = True
+except ImportError:
+    try:
+        from utils.compliance_engine import get_compliance_engine, run_compliance_scan
+        COMPLIANCE_ENGINE_AVAILABLE = True
+    except ImportError:
+        COMPLIANCE_ENGINE_AVAILABLE = False
+        logger.warning("[UPLOAD] Compliance engine not available")
+
+
+@router.post("/standards/compliance/check/{project_id}")
+async def run_compliance_check(
+    project_id: str,
+    domain: Optional[str] = None
+):
+    """
+    Run compliance check against a project's data.
+    
+    Uses extracted rules to check for violations in the project's data.
+    Returns findings in Five C's format (Condition, Criteria, Cause, Consequence, Corrective Action).
+    """
+    try:
+        logger.info(f"[COMPLIANCE] Starting check for project {project_id}, domain={domain}")
+        
+        if not STANDARDS_AVAILABLE:
+            raise HTTPException(503, "Standards processor not available")
+        
+        if not COMPLIANCE_ENGINE_AVAILABLE:
+            raise HTTPException(503, "Compliance engine not available")
+        
+        # Get rules
+        registry = get_rule_registry()
+        
+        if domain:
+            rules = [r.to_dict() for r in registry.get_rules_by_domain(domain)]
+        else:
+            rules = [r.to_dict() for r in registry.get_all_rules()]
+        
+        if not rules:
+            return {
+                "project_id": project_id,
+                "rules_checked": 0,
+                "findings": [],
+                "findings_count": 0,
+                "compliant_count": 0,
+                "message": "No rules found. Upload standards documents first."
+            }
+        
+        logger.info(f"[COMPLIANCE] Running {len(rules)} rules against project {project_id}")
+        
+        # Run compliance scan
+        findings = run_compliance_scan(project_id, rules=rules, domain=domain)
+        
+        logger.info(f"[COMPLIANCE] Scan complete: {len(findings)} findings")
+        
+        return {
+            "project_id": project_id,
+            "rules_checked": len(rules),
+            "findings_count": len(findings),
+            "findings": findings,
+            "compliant_count": len(rules) - len(findings)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[COMPLIANCE] Check failed: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(500, f"Compliance check failed: {e}")
