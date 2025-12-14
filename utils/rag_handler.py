@@ -8,6 +8,16 @@ import requests
 from requests.auth import HTTPBasicAuth
 import logging
 
+# Import universal document intelligence system
+try:
+    from utils.universal_chunker import chunk_intelligently
+    from utils.document_analyzer import DocumentAnalyzer
+    UNIVERSAL_CHUNKING_AVAILABLE = True
+    logging.info("✅ Universal Document Intelligence System loaded")
+except ImportError as e:
+    UNIVERSAL_CHUNKING_AVAILABLE = False
+    logging.warning(f"Universal chunker not available ({e}), falling back to basic chunking")
+
 logger = logging.getLogger(__name__)
 
 
@@ -15,10 +25,15 @@ class RAGHandler:
     """
     Handles all RAG operations including document processing, embedding, and retrieval.
     
-    CHANGES FOR PROJECT ISOLATION:
-    - Line 208: Preserves project_id in chunk metadata
-    - Line 232-238: Filters search by project_id (optional)
-    - All existing functionality preserved
+    NOW USES UNIVERSAL DOCUMENT INTELLIGENCE SYSTEM:
+    - Automatic document structure detection (tabular, code, hierarchical, linear, mixed)
+    - Adaptive chunking strategy per document type
+    - Rich metadata preservation (structure, strategy, parent_section, etc.)
+    - Optimized for Excel, PDF, Word, Code, CSV, Markdown, and more
+    
+    PROJECT ISOLATION:
+    - Preserves project_id in chunk metadata
+    - Filters search by project_id (optional)
     """
     
     def __init__(
@@ -81,18 +96,34 @@ class RAGHandler:
                 self.client = chromadb.Client()
             
             # Ollama configuration - use provided values or fall back to env vars
+            # NOTE: LLM_ENDPOINT env var MUST be set in Railway
             self.ollama_base_url = (
                 embed_endpoint or 
                 llm_endpoint or 
-                os.getenv("LLM_ENDPOINT", "http://178.156.190.64:11435")
+                os.getenv("LLM_ENDPOINT")
             )
-            self.ollama_username = username or os.getenv("LLM_USERNAME", "xlr8")
-            self.ollama_password = password or os.getenv("LLM_PASSWORD", "Argyle76226#")
+            
+            if not self.ollama_base_url:
+                logger.error("LLM_ENDPOINT environment variable not set! Embeddings will fail.")
+                self.ollama_base_url = "http://localhost:11434"  # Will fail but won't crash
+            
+            self.ollama_username = username or os.getenv("LLM_USERNAME", "")
+            self.ollama_password = password or os.getenv("LLM_PASSWORD", "")
             
             # Embedding settings
             self.embedding_model = "nomic-embed-text"
             self.chunk_size = 800
             self.chunk_overlap = 100
+            
+            # Initialize universal chunker system
+            if UNIVERSAL_CHUNKING_AVAILABLE:
+                self.analyzer = DocumentAnalyzer()
+                logger.info("✅ Universal Document Intelligence System initialized")
+                self.use_universal_chunking = True
+            else:
+                self.analyzer = None
+                self.use_universal_chunking = False
+                logger.warning("Using fallback basic chunking")
             
             logger.info("RAGHandler initialized successfully")
             logger.info(f"Ollama endpoint: {self.ollama_base_url}")
@@ -174,129 +205,194 @@ class RAGHandler:
 
     def get_embeddings_batch(self, texts: List[str], batch_size: int = 10) -> List[Optional[List[float]]]:
         """
-        Get embeddings for multiple texts in batches (PERFORMANCE OPTIMIZATION)
+        Get embeddings for multiple texts using PARALLEL PROCESSING
         
-        This reduces API calls by 10x: instead of 42 individual requests per sheet,
-        we make 4-5 batch requests. Massive speedup for large documents.
+        Uses ThreadPoolExecutor to make multiple embedding requests simultaneously.
+        This is 5-10x faster than sequential processing!
         
         Args:
             texts: List of text chunks to embed
-            batch_size: Number of texts to process per request (default 10)
+            batch_size: Number of concurrent requests (default 10, max 20)
             
         Returns:
             List of normalized embedding vectors (None for failed embeddings)
         """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import time
+        
         if not texts:
             return []
         
-        logger.info(f"[BATCH] Getting embeddings for {len(texts)} chunks in batches of {batch_size}")
+        # Limit concurrent requests to avoid overwhelming Ollama
+        max_workers = min(batch_size, 10)  # Cap at 10 concurrent
         
-        embeddings = []
+        logger.info(f"[PARALLEL] Getting embeddings for {len(texts)} chunks with {max_workers} workers")
+        start_time = time.time()
+        
+        # Pre-allocate results list (maintain order)
+        embeddings = [None] * len(texts)
         failed_count = 0
+        completed = 0
         
-        # Process in batches
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i:i+batch_size]
-            batch_num = (i // batch_size) + 1
-            total_batches = (len(texts) + batch_size - 1) // batch_size
+        def get_embedding_with_index(args):
+            """Wrapper to track index"""
+            index, text = args
+            embedding = self.get_embedding(text)
+            return index, embedding
+        
+        # Process all texts in parallel
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all tasks
+            future_to_index = {
+                executor.submit(get_embedding_with_index, (i, text)): i 
+                for i, text in enumerate(texts)
+            }
             
-            logger.info(f"[BATCH {batch_num}/{total_batches}] Processing {len(batch)} chunks...")
-            
-            # Get embeddings for this batch (still one-by-one but faster due to reduced overhead)
-            # Note: Ollama doesn't support true batch API, but reducing the number of 
-            # HTTP requests by grouping logic helps
-            for text in batch:
-                embedding = self.get_embedding(text)
-                embeddings.append(embedding)
-                
-                if embedding is None:
+            # Collect results as they complete
+            for future in as_completed(future_to_index):
+                try:
+                    index, embedding = future.result()
+                    embeddings[index] = embedding
+                    completed += 1
+                    
+                    if embedding is None:
+                        failed_count += 1
+                    
+                    # Log progress every 50 completions
+                    if completed % 50 == 0 or completed == len(texts):
+                        elapsed = time.time() - start_time
+                        rate = completed / elapsed if elapsed > 0 else 0
+                        eta = (len(texts) - completed) / rate if rate > 0 else 0
+                        logger.info(f"[PARALLEL] Progress: {completed}/{len(texts)} ({rate:.1f}/sec, ETA: {eta:.0f}s)")
+                        
+                except Exception as e:
+                    logger.error(f"[PARALLEL] Error in embedding task: {e}")
                     failed_count += 1
         
-        success_count = len(embeddings) - failed_count
-        logger.info(f"[BATCH] Completed: {success_count}/{len(texts)} successful, {failed_count} failed")
+        elapsed = time.time() - start_time
+        success_count = len(texts) - failed_count
+        rate = len(texts) / elapsed if elapsed > 0 else 0
+        
+        logger.info(f"[PARALLEL] Completed: {success_count}/{len(texts)} successful, {failed_count} failed")
+        logger.info(f"[PARALLEL] Total time: {elapsed:.1f}s ({rate:.1f} embeddings/sec)")
         
         return embeddings
 
-    def chunk_text(self, text: str, file_type: str = 'txt') -> List[str]:
+    def chunk_text(self, text: str, file_type: str = 'txt', filename: str = 'unknown') -> List[str]:
         """
-        Hybrid chunking - adapts chunk size based on file type.
+        Chunk text using UNIVERSAL DOCUMENT INTELLIGENCE
         
-        CHUNK SIZES:
-        - Excel/CSV: 2000 chars (preserves ~20-30 table rows)
-        - PDF/DOCX/TXT: 800 chars (standard)
+        This method now uses the Universal Chunker for:
+        1. Automatic document structure detection (tabular, code, hierarchical, linear, mixed)
+        2. Adaptive chunking strategy based on document type and density
+        3. Type-specific optimization (Excel, PDF, Code, Word, etc.)
+        4. Rich metadata preservation for better retrieval
         
         Args:
             text: Text to chunk
-            file_type: File type (xlsx, xls, csv, pdf, docx, txt, md)
+            file_type: File type (xlsx, xls, csv, pdf, docx, txt, md, py, js, etc.)
+            filename: Original filename for context
             
         Returns:
-            List of text chunks
+            List of text chunks (strings)
         """
         logger.info(f"[CHUNK] Starting, text length: {len(text)}, file_type: {file_type}")
         
+        if self.use_universal_chunking:
+            # Use universal document intelligence system
+            try:
+                logger.info(f"[CHUNK] Using Universal Document Intelligence...")
+                
+                # Call universal chunker with full metadata support
+                chunk_dicts = chunk_intelligently(
+                    text=text,
+                    filename=filename,
+                    file_type=file_type,
+                    metadata=None  # Will be enriched in add_document
+                )
+                
+                # Validate result
+                if not isinstance(chunk_dicts, list):
+                    raise TypeError(f"Universal chunker returned {type(chunk_dicts)}, expected list")
+                
+                if not chunk_dicts:
+                    raise ValueError("Universal chunker returned empty list")
+                
+                # Extract text strings from dicts
+                chunks = []
+                for i, c in enumerate(chunk_dicts):
+                    if not isinstance(c, dict):
+                        logger.error(f"[CHUNK] Chunk {i} is {type(c)}, expected dict")
+                        raise TypeError(f"Chunk {i} is {type(c)}, expected dict")
+                    
+                    if 'text' not in c:
+                        logger.error(f"[CHUNK] Chunk {i} missing 'text' key: {c.keys()}")
+                        raise KeyError(f"Chunk {i} missing 'text' key")
+                    
+                    chunks.append(c['text'])
+                
+                # Store enhanced metadata for later retrieval
+                self._last_chunk_metadata = chunk_dicts
+                
+                logger.info(f"[CHUNK] Universal chunking complete: {len(chunks)} chunks created")
+                
+                # Log analysis results if available
+                if chunk_dicts and 'metadata' in chunk_dicts[0]:
+                    first_meta = chunk_dicts[0]['metadata']
+                    logger.info(f"[CHUNK] Document structure: {first_meta.get('structure', 'unknown')}")
+                    logger.info(f"[CHUNK] Strategy used: {first_meta.get('strategy', 'unknown')}")
+                    logger.info(f"[CHUNK] Avg chunk size: {sum(len(c['text']) for c in chunk_dicts) / len(chunk_dicts):.0f} chars")
+                
+                # ✅ SANITY CHECK: Detect when Universal Chunker fails to properly chunk
+                # If document is large (>5000 chars) but only produced 1-2 chunks,
+                # the Universal Chunker likely treated it as a single unit (e.g., giant table)
+                avg_chunk_size = len(text) / len(chunks) if chunks else 0
+                if len(text) > 5000 and len(chunks) <= 2 and avg_chunk_size > 4000:
+                    logger.warning(f"[CHUNK] SANITY CHECK FAILED: {len(text)} chars produced only {len(chunks)} chunks")
+                    logger.warning(f"[CHUNK] Avg chunk size {avg_chunk_size:.0f} chars is too large - forcing basic chunking")
+                    raise ValueError("Chunks too large - forcing basic chunking fallback")
+                
+                return chunks
+                
+            except Exception as e:
+                logger.error(f"[CHUNK] Universal chunking failed: {e}", exc_info=True)
+                logger.warning("[CHUNK] Falling back to basic chunking")
+                # Fall through to basic chunking
+        else:
+            logger.info("[CHUNK] Universal chunker not available")
+        
+        # Fallback: Basic chunking (original logic)
+        logger.warning("[CHUNK] Using basic chunking (enhanced chunker not available or failed)")
+        
         # Determine chunk size based on file type
         if file_type in ['xlsx', 'xls', 'csv']:
-            chunk_size = 2000  # Larger for tabular data
-            chunk_overlap = 200  # More overlap for context
+            chunk_size = 2000
+            chunk_overlap = 200
             logger.info(f"[CHUNK] Using EXCEL mode: {chunk_size} chars, {chunk_overlap} overlap")
         else:
-            chunk_size = self.chunk_size  # Default 800
-            chunk_overlap = self.chunk_overlap  # Default 100
+            chunk_size = self.chunk_size
+            chunk_overlap = self.chunk_overlap
             logger.info(f"[CHUNK] Using STANDARD mode: {chunk_size} chars, {chunk_overlap} overlap")
         
         # Clean the text
         text = re.sub(r'\s+', ' ', text).strip()
-        logger.info(f"[CHUNK] After cleaning: {len(text)} chars")
-        
-        # Extract headers for Excel (if present)
-        header = None
-        if file_type in ['xlsx', 'xls', 'csv'] and 'WORKSHEET:' in text:
-            # Try to extract header (first line after WORKSHEET marker)
-            lines = text.split('\n')
-            for i, line in enumerate(lines):
-                if 'WORKSHEET:' in line and i + 2 < len(lines):
-                    # Skip the separator line, grab the header
-                    potential_header = lines[i + 2].strip()
-                    if potential_header and len(potential_header) < 500:
-                        header = potential_header
-                        logger.info(f"[CHUNK] Extracted header for repetition: {header[:50]}...")
-                    break
         
         chunks = []
         position = 0
-        chunk_count = 0
-        
-        logger.info(f"[CHUNK] Will create ~{len(text) // chunk_size} chunks")
         
         while position < len(text):
-            chunk_count += 1
-            
-            # Get chunk
             end = min(position + chunk_size, len(text))
             chunk = text[position:end].strip()
             
-            # For Excel: Prepend header to each chunk (except first)
-            if header and chunk_count > 1 and file_type in ['xlsx', 'xls', 'csv']:
-                chunk = f"[HEADER] {header}\n{chunk}"
-                logger.debug(f"[CHUNK] Added header to chunk #{chunk_count}")
-            
-            # Only add non-empty chunks
             if chunk:
                 chunks.append(chunk)
-                logger.debug(f"[CHUNK] Added chunk #{chunk_count}, length: {len(chunk)}")
             
-            # Move to next position with overlap
             if end < len(text):
                 position = end - chunk_overlap
             else:
-                position = len(text)  # Done
-            
-            # Safety check
-            if position < 0:
-                logger.error(f"[CHUNK] ERROR: position went negative! Breaking.")
-                break
+                position = len(text)
         
-        logger.info(f"[CHUNK] COMPLETED: {len(chunks)} chunks created")
+        logger.info(f"[CHUNK] COMPLETED: {len(chunks)} basic chunks created")
         return chunks
 
     def add_document(
@@ -331,14 +427,18 @@ class RAGHandler:
             if project_id:
                 logger.info(f"[PROJECT] Document tagged with project_id: {project_id}")
             
-            # Extract file type for adaptive chunking
+            # Extract file info for intelligent chunking
             file_type = metadata.get('file_type', 'txt')
+            filename = metadata.get('filename', metadata.get('source', 'unknown'))
             
-            # Chunk the text with file-type-specific strategy
+            # Chunk the text with UNIVERSAL DOCUMENT INTELLIGENCE
             if progress_callback:
-                progress_callback(0, 100, "Chunking document...")
+                progress_callback(0, 100, "Analyzing document structure...")
             
-            chunks = self.chunk_text(text, file_type=file_type)
+            chunks = self.chunk_text(text, file_type=file_type, filename=filename)
+            
+            # Get enhanced metadata if available
+            chunk_metadata_enhanced = getattr(self, '_last_chunk_metadata', None)
             
             if progress_callback:
                 progress_callback(10, 100, f"Chunked into {len(chunks)} pieces, getting embeddings...")
@@ -350,8 +450,16 @@ class RAGHandler:
             if progress_callback:
                 progress_callback(60, 100, f"Embeddings complete, adding to database...")
             
-            # Process chunks with their embeddings
+            # Process chunks with their embeddings - BATCH INSERTIONS
             chunks_added = 0
+            batch_size = 50  # Insert 50 chunks at once
+            
+            # Prepare all valid chunks/embeddings/metadata
+            valid_chunks = []
+            valid_embeddings = []
+            valid_metadatas = []
+            valid_ids = []
+            
             for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
                 if embedding is None:
                     logger.warning(f"Failed to get embedding for chunk {i}, skipping")
@@ -360,25 +468,89 @@ class RAGHandler:
                 # Create unique ID
                 doc_id = f"{metadata.get('source', 'unknown')}_{i}"
                 
+                # CRITICAL: Filter None values from base metadata BEFORE spreading
+                # ChromaDB rejects None values in metadata
+                base_metadata = {k: v for k, v in metadata.items() if v is not None}
+                
                 # CHANGE: Preserve project_id in chunk metadata
-                chunk_metadata = {**metadata, "chunk_index": i}
+                chunk_metadata = {**base_metadata, "chunk_index": i}
                 if project_id:
                     chunk_metadata['project_id'] = project_id
-                    logger.debug(f"[PROJECT] Chunk {i} tagged with project_id: {project_id}")
                 
-                # Add to collection
+                # UNIVERSAL CHUNKER: Extract rich metadata
+                if chunk_metadata_enhanced and i < len(chunk_metadata_enhanced):
+                    chunk_dict = chunk_metadata_enhanced[i]
+                    
+                    # Universal chunker provides metadata in nested structure
+                    if 'metadata' in chunk_dict:
+                        enhanced = chunk_dict['metadata']
+                        
+                        # Build metadata dict with potential None values
+                        enhanced_metadata = {
+                            # Core universal chunker metadata
+                            'structure': enhanced.get('structure', 'unknown'),
+                            'strategy': enhanced.get('strategy', 'unknown'),
+                            'chunk_type': enhanced.get('chunk_type', 'unknown'),
+                            'parent_section': enhanced.get('parent_section', 'unknown'),
+                            'has_header': enhanced.get('has_header', False),
+                            
+                            # Additional metadata (may be None)
+                            'row_start': enhanced.get('row_start'),
+                            'row_end': enhanced.get('row_end'),
+                            'line_start': enhanced.get('line_start'),
+                            'line_end': enhanced.get('line_end'),
+                            'hierarchy_level': enhanced.get('hierarchy_level'),
+                            
+                            # Computed metadata
+                            'tokens_estimate': len(chunk) // 4,
+                            'position': f"{i+1}/{len(chunks)}"
+                        }
+                        
+                        # CRITICAL: ChromaDB doesn't accept None values - filter them out
+                        enhanced_metadata = {k: v for k, v in enhanced_metadata.items() if v is not None}
+                        chunk_metadata.update(enhanced_metadata)
+                    else:
+                        # Fallback for older metadata structure
+                        fallback_metadata = {
+                            'chunk_type': chunk_dict.get('chunk_type', 'unknown'),
+                            'parent_section': chunk_dict.get('parent_section', 'unknown'),
+                            'has_header': chunk_dict.get('has_header', False),
+                            'tokens_estimate': len(chunk) // 4,
+                            'position': f"{i+1}/{len(chunks)}"
+                        }
+                        # Filter None values
+                        fallback_metadata = {k: v for k, v in fallback_metadata.items() if v is not None}
+                        chunk_metadata.update(fallback_metadata)
+                
+                # FINAL SAFETY CHECK: Remove ALL None values from chunk_metadata
+                # ChromaDB will reject the entire batch if ANY metadata has None
+                chunk_metadata = {k: v for k, v in chunk_metadata.items() if v is not None}
+                
+                valid_chunks.append(chunk)
+                valid_embeddings.append(embedding)
+                valid_metadatas.append(chunk_metadata)
+                valid_ids.append(doc_id)
+            
+            # Add in batches for speed
+            total_valid = len(valid_chunks)
+            for batch_start in range(0, total_valid, batch_size):
+                batch_end = min(batch_start + batch_size, total_valid)
+                
                 collection.add(
-                    embeddings=[embedding],
-                    documents=[chunk],
-                    metadatas=[chunk_metadata],  # ← CHANGED: Includes project_id
-                    ids=[doc_id]
+                    embeddings=valid_embeddings[batch_start:batch_end],
+                    documents=valid_chunks[batch_start:batch_end],
+                    metadatas=valid_metadatas[batch_start:batch_end],
+                    ids=valid_ids[batch_start:batch_end]
                 )
-                chunks_added += 1
                 
-                # Report progress every 10 chunks
-                if progress_callback and i % 10 == 0:
-                    pct = 60 + int((i / len(chunks)) * 35)  # 60-95% range
-                    progress_callback(pct, 100, f"Adding chunk {i+1}/{len(chunks)} to database...")
+                chunks_added += (batch_end - batch_start)
+                
+                # Report progress after each batch
+                if progress_callback:
+                    pct = 70 + int((batch_end / total_valid) * 25)  # 70-95% range
+                    progress_callback(pct, 100, f"Adding to database... ({batch_end}/{total_valid} chunks)")
+                
+                logger.info(f"Added batch {batch_start}-{batch_end} ({batch_end - batch_start} chunks)")
             
             if progress_callback:
                 progress_callback(100, 100, f"Complete! Added {chunks_added} chunks")
@@ -426,22 +598,45 @@ class RAGHandler:
                 return []
             
             # Build where clause for filtering
+            # ALWAYS include Global/Universal docs when filtering by project
             where_clause = None
             
             if project_id and functional_areas:
-                # Both filters: project_id AND functional_area in list
-                where_clause = {
-                    "$and": [
-                        {"project_id": project_id},
-                        {"functional_area": {"$in": functional_areas}}
-                    ]
-                }
-                logger.info(f"[PROJECT] Filtering by project_id: {project_id}")
+                # Both filters: (project_id OR Global/Universal) AND functional_area in list
+                if project_id == "Global/Universal":
+                    # Only Global/Universal
+                    where_clause = {
+                        "$and": [
+                            {"project_id": "Global/Universal"},
+                            {"functional_area": {"$in": functional_areas}}
+                        ]
+                    }
+                else:
+                    # Project + Global/Universal
+                    where_clause = {
+                        "$and": [
+                            {"$or": [
+                                {"project_id": project_id},
+                                {"project_id": "Global/Universal"}
+                            ]},
+                            {"functional_area": {"$in": functional_areas}}
+                        ]
+                    }
+                logger.info(f"[PROJECT] Filtering by project_id: {project_id} + Global/Universal")
                 logger.info(f"[FUNCTIONAL AREA] Filtering by areas: {', '.join(functional_areas)}")
             elif project_id:
-                # Only project filter
-                where_clause = {"project_id": project_id}
-                logger.info(f"[PROJECT] Filtering search by project_id: {project_id}")
+                # Only project filter - include Global/Universal
+                if project_id == "Global/Universal":
+                    where_clause = {"project_id": "Global/Universal"}
+                    logger.info(f"[PROJECT] Filtering search by Global/Universal only")
+                else:
+                    where_clause = {
+                        "$or": [
+                            {"project_id": project_id},
+                            {"project_id": "Global/Universal"}
+                        ]
+                    }
+                    logger.info(f"[PROJECT] Filtering search by project_id: {project_id} + Global/Universal")
             elif functional_areas:
                 # Only functional area filter
                 where_clause = {"functional_area": {"$in": functional_areas}}
@@ -486,7 +681,10 @@ class RAGHandler:
             
             logger.info(f"Search returned {len(formatted_results)} results from '{collection_name}'")
             if project_id:
-                logger.info(f"[PROJECT] Results filtered by project_id: {project_id}")
+                if project_id == "Global/Universal":
+                    logger.info(f"[PROJECT] Results filtered by: Global/Universal only")
+                else:
+                    logger.info(f"[PROJECT] Results filtered by: {project_id} + Global/Universal")
             if formatted_results and formatted_results[0].get('distance') is not None:
                 logger.info(f"Best match distance: {formatted_results[0]['distance']:.4f}")
             

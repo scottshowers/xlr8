@@ -1,5 +1,12 @@
-"""XLR8 FastAPI Backend"""
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+"""
+XLR8 FastAPI Backend
+Main application entry point
+
+Updated: December 12, 2025 - Added intelligence router (Phase 3 Universal Analysis Engine)
+Updated: December 14, 2025 - Added playbook_builder router (P3.6 P3)
+"""
+
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -10,64 +17,415 @@ import logging
 sys.path.insert(0, '/app')
 sys.path.insert(0, '/data')
 
-from backend.routers import chat, upload, status, projects
-from backend.websocket_manager import ws_manager
+from backend.routers import chat, upload, status, projects, jobs
+
+# Import playbooks router
+try:
+    from backend.routers import playbooks
+    PLAYBOOKS_AVAILABLE = True
+except ImportError as e:
+    PLAYBOOKS_AVAILABLE = False
+    logging.error(f"Playbooks router import failed: {e}")
+
+# Import playbook_builder router
+try:
+    from backend.routers import playbook_builder
+    PLAYBOOK_BUILDER_AVAILABLE = True
+except ImportError as e:
+    PLAYBOOK_BUILDER_AVAILABLE = False
+    logging.warning(f"Playbook builder router import failed: {e}")
+
+# Import vacuum router
+try:
+    from backend.routers import vacuum
+    VACUUM_AVAILABLE = True
+except ImportError:
+    VACUUM_AVAILABLE = False
+
+# Import progress router (SSE streaming)
+try:
+    from backend.routers import progress
+    PROGRESS_AVAILABLE = True
+except ImportError:
+    PROGRESS_AVAILABLE = False
+
+# Import security router (threat monitoring)
+try:
+    from backend.routers import security
+    SECURITY_AVAILABLE = True
+except ImportError as e:
+    SECURITY_AVAILABLE = False
+    logging.warning(f"Security router import failed: {e}")
+
+# Import auth router (user management, RBAC)
+try:
+    from backend.routers import auth
+    AUTH_AVAILABLE = True
+except ImportError as e:
+    AUTH_AVAILABLE = False
+    logging.warning(f"Auth router import failed: {e}")
+
+# Import data_model router (relationship detection)
+try:
+    from backend.routers import data_model
+    DATA_MODEL_AVAILABLE = True
+except ImportError as e:
+    DATA_MODEL_AVAILABLE = False
+    logging.warning(f"Data model router import failed: {e}")
+
+# Import admin router (learning system management)
+try:
+    from backend.routers import admin
+    ADMIN_AVAILABLE = True
+except ImportError as e:
+    ADMIN_AVAILABLE = False
+    logging.warning(f"Admin router import failed: {e}")
+
+# Import api_connections router (UKG Pro/WFM/Ready integration)
+try:
+    from backend.routers import api_connections
+    API_CONNECTIONS_AVAILABLE = True
+except ImportError as e:
+    API_CONNECTIONS_AVAILABLE = False
+    logging.warning(f"API connections router import failed: {e}")
+
+# Import intelligence router (Phase 3 Universal Analysis Engine)
+try:
+    from backend.routers import intelligence
+    INTELLIGENCE_AVAILABLE = True
+except ImportError as e:
+    INTELLIGENCE_AVAILABLE = False
+    logging.warning(f"Intelligence router import failed: {e}")
+
+# Import unified_chat router (Phase 3.5 Intelligence Consumer)
+try:
+    from backend.routers import unified_chat
+    UNIFIED_CHAT_AVAILABLE = True
+except ImportError as e:
+    UNIFIED_CHAT_AVAILABLE = False
+    logging.warning(f"Unified chat router import failed: {e}")
+
+# Standards endpoints are now in upload.py (no separate router needed)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="XLR8", version="2.0")
 
+# CORS Configuration - Allow all origins for now
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,  # Must be False when using wildcard
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
+# =============================================================================
+# STARTUP: Load playbooks from Supabase
+# =============================================================================
+
+@app.on_event("startup")
+async def startup_event():
+    """Load playbooks from Supabase on startup."""
+    try:
+        from utils.playbook_loader import load_playbooks_from_supabase
+        results = load_playbooks_from_supabase()
+        logger.info(f"✓ Loaded {sum(results.values())}/{len(results)} playbooks from Supabase")
+    except ImportError:
+        try:
+            from backend.utils.playbook_loader import load_playbooks_from_supabase
+            results = load_playbooks_from_supabase()
+            logger.info(f"✓ Loaded {sum(results.values())}/{len(results)} playbooks from Supabase")
+        except ImportError:
+            logger.warning("Playbook loader not available - using code-defined playbooks only")
+
+
+# Register core routers
 app.include_router(chat.router, prefix="/api")
 app.include_router(upload.router, prefix="/api")
 app.include_router(status.router, prefix="/api")
-app.include_router(projects.router, prefix="/api")
+app.include_router(projects.router, prefix="/api/projects")
+app.include_router(jobs.router, prefix="/api")
 
-@app.websocket("/ws/jobs")
-async def websocket_endpoint(websocket: WebSocket):
-    await ws_manager.connect(websocket)
-    try:
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        ws_manager.disconnect(websocket)
+# Register vacuum router if available
+if VACUUM_AVAILABLE:
+    app.include_router(vacuum.router, prefix="/api", tags=["vacuum"])
+    logger.info("✓ Vacuum router registered")
+else:
+    logger.warning("Vacuum router not available")
+
+# Register playbooks router if available
+if PLAYBOOKS_AVAILABLE:
+    app.include_router(playbooks.router, prefix="/api")
+    logger.info("✓ Playbooks router registered at /api/playbooks")
+else:
+    logger.warning("Playbooks router not available")
+
+# Register playbook_builder router if available
+if PLAYBOOK_BUILDER_AVAILABLE:
+    app.include_router(playbook_builder.router, prefix="/api", tags=["playbook-builder"])
+    logger.info("✓ Playbook builder router registered at /api/playbook-builder")
+else:
+    logger.warning("Playbook builder router not available")
+
+# Register progress router if available (SSE streaming)
+if PROGRESS_AVAILABLE:
+    app.include_router(progress.router, prefix="/api", tags=["progress"])
+    logger.info("✓ Progress router registered (SSE streaming enabled)")
+else:
+    logger.warning("Progress router not available")
+
+# Register security router if available (threat monitoring)
+if SECURITY_AVAILABLE:
+    app.include_router(security.router, tags=["security"])
+    logger.info("✓ Security router registered at /api/security")
+else:
+    # Create inline fallback security endpoints
+    from fastapi import APIRouter
+    security_fallback = APIRouter(prefix="/api/security", tags=["security"])
+    
+    @security_fallback.get("/threats")
+    async def get_threats_fallback():
+        """Fallback threat endpoint when full security module not available."""
+        try:
+            from backend.utils.threat_assessor import get_threat_assessor, refresh_assessor
+            assessor = refresh_assessor()
+            return assessor.assess_all()
+        except ImportError:
+            try:
+                from utils.threat_assessor import get_threat_assessor, refresh_assessor
+                assessor = refresh_assessor()
+                return assessor.assess_all()
+            except ImportError:
+                # Return minimal fallback
+                from datetime import datetime
+                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                return {
+                    "api": {"level": 0, "label": "API GATEWAY", "component": "api", "category": "infrastructure", "issues": [], "action": "", "lastScan": now},
+                    "duckdb": {"level": 0, "label": "STRUCTURED DB", "component": "duckdb", "category": "data", "issues": [], "action": "", "lastScan": now},
+                    "chromadb": {"level": 0, "label": "VECTOR STORE", "component": "chromadb", "category": "data", "issues": [], "action": "", "lastScan": now},
+                    "claude": {"level": 0, "label": "CLOUD AI (CLAUDE)", "component": "claude", "category": "ai", "issues": [], "action": "", "lastScan": now},
+                    "supabase": {"level": 0, "label": "AUTHENTICATION", "component": "supabase", "category": "infrastructure", "issues": [], "action": "", "lastScan": now},
+                    "runpod": {"level": 0, "label": "LOCAL AI (RUNPOD)", "component": "runpod", "category": "ai", "issues": [], "action": "", "lastScan": now},
+                    "rag": {"level": 0, "label": "RAG ENGINE", "component": "rag", "category": "ai", "issues": [], "action": "", "lastScan": now},
+                }
+    
+    @security_fallback.get("/threats/summary")
+    async def get_threats_summary_fallback():
+        """Fallback summary endpoint."""
+        try:
+            from backend.utils.threat_assessor import refresh_assessor
+            assessor = refresh_assessor()
+            return assessor.get_summary()
+        except ImportError:
+            try:
+                from utils.threat_assessor import refresh_assessor
+                assessor = refresh_assessor()
+                return assessor.get_summary()
+            except ImportError:
+                return {
+                    "status": "ALL SYSTEMS NOMINAL",
+                    "total_issues": 0,
+                    "open_issues": 0,
+                    "high_severity": 0,
+                    "components_at_risk": 0,
+                    "total_components": 7,
+                    "last_scan": None,
+                }
+    
+    app.include_router(security_fallback)
+    logger.info("✓ Security fallback endpoints registered (using threat_assessor directly)")
+
+# Register auth router if available (user management, RBAC)
+if AUTH_AVAILABLE:
+    app.include_router(auth.router, tags=["auth"])
+    logger.info("✓ Auth router registered at /api/auth")
+else:
+    logger.warning("Auth router not available")
+
+# Register data_model router if available (relationship detection)
+if DATA_MODEL_AVAILABLE:
+    app.include_router(data_model.router, prefix="/api", tags=["data-model"])
+    logger.info("✓ Data model router registered at /api/data-model")
+else:
+    logger.warning("Data model router not available")
+
+# Register admin router if available (learning system management)
+if ADMIN_AVAILABLE:
+    app.include_router(admin.router, prefix="/api", tags=["admin"])
+    logger.info("✓ Admin router registered at /api/admin")
+else:
+    logger.warning("Admin router not available")
+
+# Register api_connections router if available (UKG Pro/WFM/Ready integration)
+if API_CONNECTIONS_AVAILABLE:
+    app.include_router(api_connections.router, prefix="/api", tags=["connections"])
+    logger.info("✓ API connections router registered at /api/connections")
+else:
+    logger.warning("API connections router not available")
+
+# Register intelligence router if available (Phase 3 Universal Analysis Engine)
+if INTELLIGENCE_AVAILABLE:
+    app.include_router(intelligence.router, prefix="/api", tags=["intelligence"])
+    logger.info("✓ Intelligence router registered at /api/intelligence")
+else:
+    logger.warning("Intelligence router not available")
+
+# Register unified_chat router if available (Phase 3.5 Intelligence Consumer)
+if UNIFIED_CHAT_AVAILABLE:
+    app.include_router(unified_chat.router, prefix="/api", tags=["unified-chat"])
+    logger.info("✓ Unified chat router registered at /api/chat/unified")
+else:
+    logger.warning("Unified chat router not available")
+
+
+
 
 @app.get("/api/health")
 async def health():
-    from utils.rag_handler import RAGHandler
-    from utils.database.supabase_client import get_supabase_client
-    
+    """Health check endpoint."""
     try:
+        from utils.rag_handler import RAGHandler
         rag = RAGHandler()
-        stats = rag.get_stats()
-        supabase = get_supabase_client()
+        
+        # Check various subsystems
+        features = {
+            "rag": True,
+            "chat": True,
+            "upload": True,
+            "status": True,
+            "vacuum": VACUUM_AVAILABLE,
+            "playbooks": PLAYBOOKS_AVAILABLE,
+            "playbook_builder": PLAYBOOK_BUILDER_AVAILABLE,
+            "progress": PROGRESS_AVAILABLE,
+            "security": SECURITY_AVAILABLE,
+            "auth": AUTH_AVAILABLE,
+            "data_model": DATA_MODEL_AVAILABLE,
+            "admin": ADMIN_AVAILABLE,
+            "api_connections": API_CONNECTIONS_AVAILABLE,
+            "intelligence": INTELLIGENCE_AVAILABLE,
+            "unified_chat": UNIFIED_CHAT_AVAILABLE,
+            "standards": True,  # Via upload.py
+        }
         
         return {
             "status": "healthy",
-            "chromadb": stats,
-            "supabase": "connected"
+            "features": features,
+            "collections": {
+                "hcmpact_docs": rag.collection.count() if hasattr(rag, 'collection') else 0,
+            }
         }
     except Exception as e:
-        return {"status": "unhealthy", "error": str(e)}
+        return {
+            "status": "degraded",
+            "error": str(e),
+            "features": {
+                "vacuum": VACUUM_AVAILABLE,
+                "playbooks": PLAYBOOKS_AVAILABLE,
+                "playbook_builder": PLAYBOOK_BUILDER_AVAILABLE,
+                "progress": PROGRESS_AVAILABLE,
+                "security": SECURITY_AVAILABLE,
+                "admin": ADMIN_AVAILABLE,
+                "api_connections": API_CONNECTIONS_AVAILABLE,
+                "intelligence": INTELLIGENCE_AVAILABLE,
+                "unified_chat": UNIFIED_CHAT_AVAILABLE,
+                "standards": True,  # Via upload.py
+            }
+        }
 
-# Serve React static files
-frontend_path = Path("/app/frontend/dist")
-if frontend_path.exists():
-    app.mount("/assets", StaticFiles(directory=str(frontend_path / "assets")), name="assets")
+
+@app.get("/api/debug/imports")
+async def debug_imports():
+    """Debug endpoint to check import status."""
+    results = {}
+    
+    # Check structured data handler
+    try:
+        from utils.structured_data_handler import StructuredDataHandler
+        results['structured_data_handler'] = 'OK'
+    except Exception as e:
+        results['structured_data_handler'] = f'ERROR: {e}'
+    
+    # Check RAG handler
+    try:
+        from utils.rag_handler import RAGHandler
+        results['rag_handler'] = 'OK'
+    except Exception as e:
+        results['rag_handler'] = f'ERROR: {e}'
+    
+    # Check hybrid analyzer
+    try:
+        from backend.utils.hybrid_analyzer import HybridAnalyzer
+        results['hybrid_analyzer'] = 'OK'
+    except Exception as e:
+        results['hybrid_analyzer'] = f'ERROR: {e}'
+    
+    # Check security config
+    try:
+        from backend.utils.security_config import get_security_config
+        config = get_security_config()
+        results['security_config'] = 'OK'
+    except Exception as e:
+        try:
+            from utils.security_config import get_security_config
+            config = get_security_config()
+            results['security_config'] = 'OK (alt path)'
+        except Exception as e2:
+            results['security_config'] = f'ERROR: {e2}'
+    
+    # Check threat assessor
+    try:
+        from backend.utils.threat_assessor import get_threat_assessor
+        assessor = get_threat_assessor()
+        results['threat_assessor'] = 'OK'
+    except Exception as e:
+        try:
+            from utils.threat_assessor import get_threat_assessor
+            assessor = get_threat_assessor()
+            results['threat_assessor'] = 'OK (alt path)'
+        except Exception as e2:
+            results['threat_assessor'] = f'ERROR: {e2}'
+    
+    # Check project intelligence
+    try:
+        from backend.utils.project_intelligence import ProjectIntelligenceService
+        results['project_intelligence'] = 'OK'
+    except Exception as e:
+        results['project_intelligence'] = f'ERROR: {e}'
+    
+    # Check playbook loader
+    try:
+        from utils.playbook_loader import load_playbooks_from_supabase
+        results['playbook_loader'] = 'OK'
+    except Exception as e:
+        try:
+            from backend.utils.playbook_loader import load_playbooks_from_supabase
+            results['playbook_loader'] = 'OK (alt path)'
+        except Exception as e2:
+            results['playbook_loader'] = f'ERROR: {e2}'
+    
+    return results
+
+
+# Serve static files in production
+static_path = Path("/app/static")
+if static_path.exists():
+    app.mount("/assets", StaticFiles(directory=static_path / "assets"), name="assets")
     
     @app.get("/{full_path:path}")
-    async def serve_frontend(full_path: str):
-        if full_path.startswith("api/") or full_path.startswith("ws/"):
+    async def serve_spa(full_path: str):
+        # API routes should not reach here
+        if full_path.startswith("api/"):
             return {"error": "Not found"}
-        file_path = frontend_path / full_path
-        if file_path.is_file():
-            return FileResponse(file_path)
-        return FileResponse(frontend_path / "index.html")
+        
+        # Serve index.html for SPA routing
+        index_path = static_path / "index.html"
+        if index_path.exists():
+            return FileResponse(index_path)
+        return {"error": "Frontend not built"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

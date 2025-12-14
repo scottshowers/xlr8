@@ -1,29 +1,8 @@
-# Railway Nixpacks Configuration - Complete Version
-# Combines apt packages for document processing with direct Python installation
-# UPDATED: Clears Python cache before start
-
 [phases.setup]
-# System packages for PDF/document processing
-aptPkgs = [
-    "ghostscript",
-    "python3-tk",
-    "poppler-utils",
-    "tesseract-ocr",
-    "default-jre"
-]
-
-# Use Python 3.11 directly from nixpkgs (bypasses MISE)
-nixPkgs = ['python311', 'python311Packages.pip']
+nixPkgs = ["python311"]
 
 [phases.install]
-# Install Python dependencies + clear cache
-cmds = [
-  'pip install --upgrade pip',
-  'pip install -r requirements.txt',
-  'find . -type d -name __pycache__ -exec rm -rf {} + || true',
-  'find . -type f -name "*.pyc" -delete || true'
-]
+cmds = ["pip install -r requirements.txt"]
 
 [start]
-# Clear cache and start Streamlit app
-cmd = 'find . -type d -name __pycache__ -exec rm -rf {} + || true && find . -type f -name "*.pyc" -delete || true && streamlit run app.py --server.port $PORT --server.address 0.0.0.0'
+cmd = "uvicorn backend.main:app --host 0.0.0.0 --port $PORT"

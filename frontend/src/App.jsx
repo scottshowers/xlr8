@@ -1,64 +1,168 @@
-import { BrowserRouter, Routes, Route, Link } from 'react-router-dom'
-import { useState, useEffect } from 'react'
-import Chat from './components/Chat'
-import Upload from './components/Upload'
-import Status from './components/Status'
-import api from './services/api'
+/**
+ * App.jsx - Main Application Entry
+ * 
+ * Routes:
+ * /           → Landing (public)
+ * /login      → LoginPage (public)
+ * /dashboard  → DashboardPage (protected)
+ * /workspace  → WorkspacePage (Chat + Personas)
+ * /projects   → ProjectsPage (Project management)
+ * /data       → DataPage (Upload, Vacuum, Status, Data Mgmt, Global, Connections)
+ * /vacuum     → VacuumUploadPage (full extraction tool)
+ * /vacuum/explore → VacuumExplore (intelligent detection UI)
+ * /vacuum/map → VacuumColumnMapping (column mapping interface)
+ * /playbooks  → PlaybooksPage (Analysis Playbooks)
+ * /playbook-builder → PlaybookBuilderPage (Create/Edit Playbooks) - Admin only
+ * /admin      → AdminPage (System Monitor + Settings only) - Admin only
+ * /learning-admin → AdminDashboard (Learning System Management) - Admin only
+ * /data-model → DataModelPage (Visual ERD for relationships)
+ * /system     → SystemMonitorPage - Admin only
+ */
+
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+
+// Context
+import { ProjectProvider } from './context/ProjectContext';
+import { AuthProvider } from './context/AuthContext';
+
+// Auth Components
+import ProtectedRoute from './components/ProtectedRoute';
+
+// Layout
+import Layout from './components/Layout';
+
+// Pages
+import Landing from './pages/Landing';
+import LoginPage from './pages/LoginPage';
+import DashboardPage from './pages/DashboardPage';
+import WorkspacePage from './pages/WorkspacePage';
+import ProjectsPage from './pages/ProjectsPage';
+import DataPage from './pages/DataPage';
+import VacuumUploadPage from './pages/VacuumUploadPage';
+import VacuumExplore from './pages/VacuumExplore';
+import VacuumColumnMapping from './pages/VacuumColumnMapping';
+import PlaybooksPage from './pages/PlaybooksPage';
+import PlaybookBuilderPage from './pages/PlaybookBuilderPage';
+import AdminPage from './pages/AdminPage';
+import AdminDashboard from './pages/AdminDashboard';
+import DataModelPage from './pages/DataModelPage';
+import SystemMonitorPage from './pages/SystemMonitorPage';
+import StandardsPage from './pages/StandardsPage';
+
+// CSS
+import './index.css';
 
 function App() {
-  const [projects, setProjects] = useState([])
-  const [functionalAreas, setFunctionalAreas] = useState([])
-  const [health, setHealth] = useState(null)
-
-  useEffect(() => {
-    loadData()
-  }, [])
-
-  const loadData = async () => {
-    try {
-      const [projectsRes, areasRes, healthRes] = await Promise.all([
-        api.get('/projects'),
-        api.get('/functional-areas'),
-        api.get('/health')
-      ])
-      setProjects(projectsRes.data.projects || [])
-      setFunctionalAreas(areasRes.data.functional_areas || [])
-      setHealth(healthRes.data)
-    } catch (err) {
-      console.error('Error loading data:', err)
-    }
-  }
-
   return (
-    <BrowserRouter>
-      <div className="min-h-screen bg-gray-100">
-        <nav className="bg-blue-600 text-white p-4">
-          <div className="container mx-auto flex items-center justify-between">
-            <h1 className="text-2xl font-bold">XLR8</h1>
-            <div className="flex gap-4">
-              <Link to="/" className="hover:underline">Chat</Link>
-              <Link to="/upload" className="hover:underline">Upload</Link>
-              <Link to="/status" className="hover:underline">Status</Link>
-            </div>
-            {health && (
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${health.status === 'healthy' ? 'bg-green-400' : 'bg-red-400'}`}></div>
-                <span className="text-sm">{health.status}</span>
-              </div>
-            )}
-          </div>
-        </nav>
-        
-        <div className="container mx-auto p-4">
+    <AuthProvider>
+      <ProjectProvider>
+        <Router>
           <Routes>
-            <Route path="/" element={<Chat projects={projects} functionalAreas={functionalAreas} />} />
-            <Route path="/upload" element={<Upload projects={projects} functionalAreas={functionalAreas} />} />
-            <Route path="/status" element={<Status />} />
+            {/* Public routes */}
+            <Route path="/" element={<Landing />} />
+            <Route path="/login" element={<LoginPage />} />
+            
+            {/* Protected routes - require authentication */}
+            <Route path="/dashboard" element={
+              <ProtectedRoute>
+                <Layout><DashboardPage /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/workspace" element={
+              <ProtectedRoute>
+                <Layout><WorkspacePage /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/projects" element={
+              <ProtectedRoute>
+                <Layout><ProjectsPage /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/data" element={
+              <ProtectedRoute permission="upload">
+                <Layout><DataPage /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/vacuum" element={
+              <ProtectedRoute permission="vacuum">
+                <Layout><VacuumUploadPage /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/vacuum/explore" element={
+              <ProtectedRoute permission="vacuum">
+                <Layout><VacuumExplore /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/vacuum/map" element={
+              <ProtectedRoute permission="vacuum">
+                <Layout><VacuumColumnMapping /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/playbooks" element={
+              <ProtectedRoute permission="playbooks">
+                <Layout><PlaybooksPage /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/playbook-builder" element={
+              <ProtectedRoute permission="ops_center">
+                <Layout><PlaybookBuilderPage /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/standards" element={
+              <ProtectedRoute permission="playbooks">
+                <Layout><StandardsPage /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/data-model" element={
+              <ProtectedRoute permission="data_model">
+                <Layout><DataModelPage /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            {/* Admin only routes */}
+            <Route path="/admin" element={
+              <ProtectedRoute permission="ops_center">
+                <Layout><AdminPage /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/learning-admin" element={
+              <ProtectedRoute permission="ops_center">
+                <Layout><AdminDashboard /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/system" element={
+              <ProtectedRoute permission="ops_center">
+                <Layout><SystemMonitorPage /></Layout>
+              </ProtectedRoute>
+            } />
+            
+            {/* Legacy redirects */}
+            <Route path="/chat" element={<Navigate to="/workspace" replace />} />
+            <Route path="/upload" element={<Navigate to="/data" replace />} />
+            <Route path="/status" element={<Navigate to="/data" replace />} />
+            <Route path="/secure20" element={<Navigate to="/playbooks" replace />} />
+            <Route path="/packs" element={<Navigate to="/playbooks" replace />} />
+            
+            {/* 404 fallback */}
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
-        </div>
-      </div>
-    </BrowserRouter>
-  )
+        </Router>
+      </ProjectProvider>
+    </AuthProvider>
+  );
 }
 
-export default App
+export default App;
