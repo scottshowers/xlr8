@@ -1,6 +1,8 @@
 /**
  * ContextBar - Sticky Project Selector
  * 
+ * POLISHED: Consistent loading states and styling
+ * 
  * Single source of truth for project selection.
  * Customer colors derived from customer name (consistent across app).
  * 
@@ -12,6 +14,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useProject } from '../context/ProjectContext';
 import { useAuth } from '../context/AuthContext';
 import { getCustomerColor, getCustomerInitials, getContrastText } from '../utils/customerColors';
+import { LoadingSpinner } from './ui';
 
 // Brand Colors
 const COLORS = {
@@ -57,16 +60,6 @@ export default function ContextBar() {
     selectProject(project);
     setDropdownOpen(false);
     setSearchTerm('');
-  };
-
-  const handleClearProject = (e) => {
-    e.stopPropagation();
-    if (clearProject) {
-      clearProject();
-    } else {
-      selectProject(null);
-    }
-    setDropdownOpen(false);
   };
 
   const styles = {
@@ -148,16 +141,6 @@ export default function ContextBar() {
       opacity: 0.8,
       transition: 'transform 0.2s ease',
     },
-    clearBtn: {
-      background: 'rgba(255,255,255,0.2)',
-      border: 'none',
-      borderRadius: '4px',
-      color: 'white',
-      padding: '0.25rem 0.5rem',
-      fontSize: '0.7rem',
-      cursor: 'pointer',
-      marginLeft: '0.5rem',
-    },
     dropdown: {
       position: 'absolute',
       top: '100%',
@@ -209,6 +192,12 @@ export default function ContextBar() {
       color: COLORS.textLight,
       fontSize: '0.9rem',
     },
+    loadingState: {
+      padding: '1.5rem',
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
     allProjectsOption: {
       display: 'flex',
       alignItems: 'center',
@@ -244,10 +233,6 @@ export default function ContextBar() {
       borderRadius: '50%',
       border: '1px solid rgba(255,255,255,0.3)',
     }),
-    placeholder: {
-      color: 'rgba(255,255,255,0.7)',
-      fontStyle: 'italic',
-    },
     globalMode: {
       display: 'flex',
       alignItems: 'center',
@@ -346,7 +331,9 @@ export default function ContextBar() {
                 )}
 
                 {loading ? (
-                  <div style={styles.noProjects}>Loading...</div>
+                  <div style={styles.loadingState}>
+                    <LoadingSpinner size="sm" message="Loading projects..." />
+                  </div>
                 ) : filteredProjects.length === 0 ? (
                   <div style={styles.noProjects}>
                     {searchTerm ? 'No matching projects' : 'No projects yet'}
@@ -376,7 +363,7 @@ export default function ContextBar() {
                           <div style={styles.projectItemCustomer}>{project.customer}</div>
                         </div>
                         {activeProject?.id === project.id && (
-                          <span style={{ color: COLORS.grassGreen, fontSize: '0.8rem' }}>✓</span>
+                          <span style={{ color: COLORS.grassGreen, fontSize: '0.8rem' }}>✔</span>
                         )}
                       </div>
                     );
