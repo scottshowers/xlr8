@@ -1,6 +1,8 @@
 /**
  * AdminDashboard.jsx - Learning System Administration
  * 
+ * POLISHED: All purple → grassGreen for consistency
+ * 
  * View and manage:
  * - Learned query patterns
  * - User preferences
@@ -8,12 +10,11 @@
  * - Feedback history
  * - Global column mappings
  * - System statistics
- * 
- * Deploy to: frontend/src/pages/AdminDashboard.jsx
  */
 
 import { useState, useEffect } from 'react'
 import api from '../services/api'
+import { LoadingSpinner, ErrorState, EmptyState, PageHeader, COLORS } from '../components/ui'
 import {
   Brain, Database, Users, MessageSquare, ThumbsUp, ThumbsDown,
   Trash2, RefreshCw, Download, Search, ChevronDown, ChevronRight,
@@ -21,9 +22,15 @@ import {
   CheckCircle, XCircle, AlertTriangle, Filter, Calendar
 } from 'lucide-react'
 
+// Brand color for consistent styling
+const BRAND = COLORS.grassGreen;
+const BRAND_LIGHT = '#f0fdf4';
+const BRAND_BORDER = '#bbf7d0';
+
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState('overview')
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [stats, setStats] = useState(null)
   
   // Data for each section
@@ -36,13 +43,14 @@ export default function AdminDashboard() {
   // Filters
   const [searchTerm, setSearchTerm] = useState('')
   const [dateFilter, setDateFilter] = useState('all')
-  
+
   useEffect(() => {
     loadDashboardData()
   }, [])
 
   const loadDashboardData = async () => {
     setLoading(true)
+    setError(null)
     try {
       // Load learning stats
       const statsRes = await api.get('/chat/intelligent/learning/stats')
@@ -65,6 +73,7 @@ export default function AdminDashboard() {
       
     } catch (err) {
       console.error('Failed to load dashboard data:', err)
+      setError('Failed to load learning data. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -112,8 +121,8 @@ export default function AdminDashboard() {
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-purple-100 rounded-lg">
-                <Shield className="text-purple-600" size={24} />
+              <div className="p-2 rounded-lg" style={{ background: BRAND_LIGHT }}>
+                <Shield style={{ color: BRAND }} size={24} />
               </div>
               <div>
                 <h1 className="text-xl font-bold text-gray-900">Learning Admin</h1>
@@ -131,7 +140,8 @@ export default function AdminDashboard() {
               </button>
               <button
                 onClick={() => exportData('all')}
-                className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+                className="flex items-center gap-2 px-4 py-2 text-white rounded-lg hover:opacity-90"
+                style={{ background: BRAND }}
               >
                 <Download size={18} />
                 Export All
@@ -148,11 +158,13 @@ export default function AdminDashboard() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-all ${
-                activeTab === tab.id
-                  ? 'bg-purple-600 text-white'
-                  : 'text-gray-600 hover:bg-gray-100'
-              }`}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-all"
+              style={activeTab === tab.id ? {
+                background: BRAND,
+                color: 'white'
+              } : {
+                color: '#6b7280'
+              }}
             >
               <tab.icon size={16} />
               {tab.label}
@@ -162,9 +174,14 @@ export default function AdminDashboard() {
 
         {/* Content */}
         {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <RefreshCw className="animate-spin text-purple-600" size={32} />
-          </div>
+          <LoadingSpinner fullPage message="Loading learning data..." />
+        ) : error ? (
+          <ErrorState
+            fullPage
+            title="Failed to Load Data"
+            message={error}
+            onRetry={loadDashboardData}
+          />
         ) : (
           <>
             {activeTab === 'overview' && (
@@ -231,38 +248,35 @@ function OverviewTab({ stats, learnedQueries, feedback, preferences }) {
       label: 'Learned Patterns', 
       value: stats?.learned_queries || 0, 
       icon: Brain, 
-      color: 'purple',
+      color: BRAND,
+      bgColor: BRAND_LIGHT,
       description: 'Query patterns that can be reused'
     },
     { 
       label: 'Feedback Records', 
       value: stats?.feedback_records || 0, 
       icon: MessageSquare, 
-      color: 'blue',
+      color: '#3b82f6',
+      bgColor: '#eff6ff',
       description: 'User ratings collected'
     },
     { 
       label: 'User Preferences', 
       value: stats?.user_preferences || 0, 
       icon: Users, 
-      color: 'green',
+      color: '#10b981',
+      bgColor: '#ecfdf5',
       description: 'Learned user choices'
     },
     { 
       label: 'Clarification Patterns', 
       value: stats?.clarification_patterns || 0, 
       icon: Zap, 
-      color: 'amber',
+      color: '#f59e0b',
+      bgColor: '#fffbeb',
       description: 'Auto-answer patterns'
     },
   ]
-
-  const colors = {
-    purple: 'bg-purple-100 text-purple-600',
-    blue: 'bg-blue-100 text-blue-600',
-    green: 'bg-green-100 text-green-600',
-    amber: 'bg-amber-100 text-amber-600',
-  }
 
   return (
     <div className="space-y-6">
@@ -276,8 +290,8 @@ function OverviewTab({ stats, learnedQueries, feedback, preferences }) {
                 <p className="text-3xl font-bold text-gray-900 mt-1">{stat.value}</p>
                 <p className="text-xs text-gray-400 mt-1">{stat.description}</p>
               </div>
-              <div className={`p-3 rounded-lg ${colors[stat.color]}`}>
-                <stat.icon size={24} />
+              <div className="p-3 rounded-lg" style={{ background: stat.bgColor }}>
+                <stat.icon size={24} style={{ color: stat.color }} />
               </div>
             </div>
           </div>
@@ -305,8 +319,8 @@ function OverviewTab({ stats, learnedQueries, feedback, preferences }) {
             
             <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
               <div 
-                className="h-full bg-gradient-to-r from-green-500 to-green-400 rounded-full"
-                style={{ width: `${feedbackRate}%` }}
+                className="h-full rounded-full"
+                style={{ width: `${feedbackRate}%`, background: BRAND }}
               />
             </div>
             
@@ -323,14 +337,14 @@ function OverviewTab({ stats, learnedQueries, feedback, preferences }) {
 
         <div className="bg-white rounded-xl p-6 border shadow-sm">
           <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
-            <Brain className="text-purple-500" size={20} />
+            <Brain size={20} style={{ color: BRAND }} />
             Learning Progress
           </h3>
           
           <div className="space-y-3">
             <div className="flex items-center justify-between text-sm">
               <span className="text-gray-600">Queries that skip clarification</span>
-              <span className="font-medium text-purple-600">
+              <span className="font-medium" style={{ color: BRAND }}>
                 {preferences.filter(p => p.confidence >= 0.7).length} ready
               </span>
             </div>
@@ -360,8 +374,8 @@ function OverviewTab({ stats, learnedQueries, feedback, preferences }) {
           {learnedQueries.slice(0, 5).map((query, i) => (
             <div key={i} className="flex items-center justify-between py-2 border-b last:border-0">
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-purple-50 rounded-lg">
-                  <Brain className="text-purple-500" size={16} />
+                <div className="p-2 rounded-lg" style={{ background: BRAND_LIGHT }}>
+                  <Brain size={16} style={{ color: BRAND }} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-900 truncate max-w-md">
@@ -386,9 +400,11 @@ function OverviewTab({ stats, learnedQueries, feedback, preferences }) {
           ))}
           
           {learnedQueries.length === 0 && (
-            <p className="text-center text-gray-500 py-8">
-              No learned patterns yet. Start using Intelligent Chat!
-            </p>
+            <EmptyState
+              icon="🧠"
+              title="No learned patterns yet"
+              description="Start using Intelligent Chat to begin learning!"
+            />
           )}
         </div>
       </div>
@@ -403,12 +419,19 @@ function OverviewTab({ stats, learnedQueries, feedback, preferences }) {
 
 function QueriesTab({ queries, onDelete, onExport }) {
   const [search, setSearch] = useState('')
-  const [expandedId, setExpandedId] = useState(null)
+  const [expanded, setExpanded] = useState({})
   
-  const filtered = queries.filter(q => 
+  const filtered = queries.filter(q =>
     q.question_pattern?.toLowerCase().includes(search.toLowerCase()) ||
     q.semantic_domain?.toLowerCase().includes(search.toLowerCase())
   )
+
+  const grouped = filtered.reduce((acc, q) => {
+    const domain = q.semantic_domain || 'other'
+    if (!acc[domain]) acc[domain] = []
+    acc[domain].push(q)
+    return acc
+  }, {})
 
   return (
     <div className="space-y-4">
@@ -420,84 +443,75 @@ function QueriesTab({ queries, onDelete, onExport }) {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search patterns..."
-            className="w-full pl-10 pr-4 py-2 border rounded-lg"
+            className="w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2"
+            style={{ '--tw-ring-color': BRAND }}
           />
         </div>
         <button
           onClick={onExport}
-          className="flex items-center gap-2 px-4 py-2 text-purple-600 hover:bg-purple-50 rounded-lg"
+          className="flex items-center gap-2 px-4 py-2 text-white rounded-lg"
+          style={{ background: BRAND }}
         >
           <Download size={18} />
           Export
         </button>
       </div>
 
-      <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-        <table className="w-full">
-          <thead className="bg-gray-50 border-b">
-            <tr>
-              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Pattern</th>
-              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Domain</th>
-              <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase">Uses</th>
-              <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase">Feedback</th>
-              <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {filtered.map((query) => (
-              <tr key={query.id} className="hover:bg-gray-50">
-                <td className="px-4 py-3">
-                  <button
-                    onClick={() => setExpandedId(expandedId === query.id ? null : query.id)}
-                    className="flex items-center gap-2 text-left"
-                  >
-                    {expandedId === query.id ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                    <span className="text-sm font-medium text-gray-900 truncate max-w-xs">
-                      {query.question_pattern}
-                    </span>
-                  </button>
-                  {expandedId === query.id && query.successful_sql && (
-                    <pre className="mt-2 p-2 bg-gray-100 rounded text-xs overflow-x-auto">
-                      {query.successful_sql}
-                    </pre>
-                  )}
-                </td>
-                <td className="px-4 py-3">
-                  <span className="px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full">
-                    {query.semantic_domain || 'general'}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-center">
-                  <span className="text-sm font-medium">{query.use_count}</span>
-                </td>
-                <td className="px-4 py-3 text-center">
-                  <span className={`text-sm font-medium ${
-                    query.avg_feedback >= 0.5 ? 'text-green-600' :
-                    query.avg_feedback >= 0 ? 'text-gray-600' : 'text-red-600'
-                  }`}>
-                    {query.avg_feedback >= 0 ? '+' : ''}{query.avg_feedback?.toFixed(1) || '0'}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <button
-                    onClick={() => onDelete(query.id)}
-                    className="p-1 text-red-500 hover:bg-red-50 rounded"
-                    title="Delete"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        
-        {filtered.length === 0 && (
-          <div className="text-center py-12 text-gray-500">
-            {search ? 'No patterns match your search' : 'No learned patterns yet'}
-          </div>
-        )}
-      </div>
+      {Object.entries(grouped).map(([domain, domainQueries]) => (
+        <div key={domain} className="bg-white rounded-xl border shadow-sm overflow-hidden">
+          <button
+            onClick={() => setExpanded(e => ({ ...e, [domain]: !e[domain] }))}
+            className="w-full px-4 py-3 flex items-center justify-between bg-gray-50 hover:bg-gray-100"
+          >
+            <div className="flex items-center gap-2">
+              <Brain size={18} style={{ color: BRAND }} />
+              <span className="font-medium text-gray-900">{domain}</span>
+              <span className="text-xs text-gray-500 bg-gray-200 px-2 py-0.5 rounded-full">
+                {domainQueries.length}
+              </span>
+            </div>
+            {expanded[domain] ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+          </button>
+          
+          {expanded[domain] && (
+            <div className="divide-y">
+              {domainQueries.map((query) => (
+                <div key={query.id} className="p-4">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <p className="font-medium text-gray-900">{query.question_pattern}</p>
+                      <div className="mt-2 flex items-center gap-4 text-xs text-gray-500">
+                        <span>Used {query.use_count}x</span>
+                        <span>Avg feedback: {(query.avg_feedback || 0).toFixed(2)}</span>
+                        <span>{new Date(query.created_at).toLocaleDateString()}</span>
+                      </div>
+                      {query.sql_pattern && (
+                        <pre className="mt-2 p-2 bg-gray-50 rounded text-xs overflow-x-auto">
+                          {query.sql_pattern}
+                        </pre>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => onDelete(query.id)}
+                      className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+      
+      {Object.keys(grouped).length === 0 && (
+        <EmptyState
+          icon="🧠"
+          title="No learned queries"
+          description="Query patterns will appear here as the system learns."
+        />
+      )}
     </div>
   )
 }
@@ -510,77 +524,91 @@ function QueriesTab({ queries, onDelete, onExport }) {
 function FeedbackTab({ feedback, onDelete }) {
   const [filter, setFilter] = useState('all')
   
-  const filtered = feedback.filter(f => 
-    filter === 'all' || f.feedback === filter
-  )
+  const filtered = feedback.filter(f => {
+    if (filter === 'positive') return f.feedback === 'positive'
+    if (filter === 'negative') return f.feedback === 'negative'
+    return true
+  })
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
+      <div className="flex gap-2">
         {['all', 'positive', 'negative'].map(f => (
           <button
             key={f}
             onClick={() => setFilter(f)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium ${
-              filter === f
-                ? f === 'positive' ? 'bg-green-100 text-green-700' :
-                  f === 'negative' ? 'bg-red-100 text-red-700' :
-                  'bg-purple-100 text-purple-700'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
+            className="px-4 py-2 rounded-lg text-sm font-medium transition-all"
+            style={filter === f ? {
+              background: BRAND,
+              color: 'white'
+            } : {
+              background: '#f3f4f6',
+              color: '#6b7280'
+            }}
           >
             {f === 'all' ? 'All' : f === 'positive' ? '👍 Positive' : '👎 Negative'}
-            <span className="ml-2 text-xs">
-              ({f === 'all' ? feedback.length : feedback.filter(x => x.feedback === f).length})
-            </span>
           </button>
         ))}
+        <span className="ml-auto text-sm text-gray-500 self-center">
+          {filtered.length} records
+        </span>
       </div>
 
       <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-        <div className="divide-y">
-          {filtered.map((item) => (
-            <div key={item.id} className="p-4 hover:bg-gray-50">
-              <div className="flex items-start justify-between">
-                <div className="flex items-start gap-3">
-                  <div className={`p-2 rounded-lg ${
-                    item.feedback === 'positive' ? 'bg-green-100' : 'bg-red-100'
-                  }`}>
-                    {item.feedback === 'positive' 
-                      ? <ThumbsUp className="text-green-600" size={16} />
-                      : <ThumbsDown className="text-red-600" size={16} />
-                    }
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-900">{item.question}</p>
-                    <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
-                      <span>{item.project || 'No project'}</span>
-                      <span>•</span>
-                      <span>{new Date(item.created_at).toLocaleString()}</span>
-                      {item.was_intelligent_mode && (
-                        <>
-                          <span>•</span>
-                          <span className="text-purple-600">🧠 Intelligent</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                <button
-                  onClick={() => onDelete(item.id)}
-                  className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded"
-                >
-                  <Trash2 size={16} />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+        <table className="w-full">
+          <thead className="bg-gray-50 border-b">
+            <tr>
+              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Query</th>
+              <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase">Rating</th>
+              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Comment</th>
+              <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase">Date</th>
+              <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {filtered.map((fb) => (
+              <tr key={fb.id} className="hover:bg-gray-50">
+                <td className="px-4 py-3 max-w-md">
+                  <p className="text-sm text-gray-900 truncate">{fb.question}</p>
+                </td>
+                <td className="px-4 py-3 text-center">
+                  {fb.feedback === 'positive' ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium" style={{ background: BRAND_LIGHT, color: BRAND }}>
+                      <ThumbsUp size={12} /> Good
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs font-medium">
+                      <ThumbsDown size={12} /> Bad
+                    </span>
+                  )}
+                </td>
+                <td className="px-4 py-3">
+                  <p className="text-sm text-gray-600 truncate max-w-xs">
+                    {fb.feedback_text || '-'}
+                  </p>
+                </td>
+                <td className="px-4 py-3 text-center text-xs text-gray-500">
+                  {new Date(fb.created_at).toLocaleDateString()}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <button
+                    onClick={() => onDelete(fb.id)}
+                    className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
         
         {filtered.length === 0 && (
-          <div className="text-center py-12 text-gray-500">
-            No feedback records yet
-          </div>
+          <EmptyState
+            icon="💬"
+            title="No feedback records"
+            description={filter !== 'all' ? 'Try changing the filter' : 'Feedback will appear as users rate responses'}
+          />
         )}
       </div>
     </div>
@@ -614,7 +642,7 @@ function PreferencesTab({ preferences, onDelete }) {
               <div key={pref.id} className="p-4 flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="px-2 py-1 bg-blue-100 text-blue-700 text-sm rounded">
+                    <span className="px-2 py-1 text-sm rounded" style={{ background: BRAND_LIGHT, color: BRAND }}>
                       {pref.preference_value}
                     </span>
                     <span className={`text-xs ${
@@ -642,9 +670,11 @@ function PreferencesTab({ preferences, onDelete }) {
       ))}
       
       {Object.keys(grouped).length === 0 && (
-        <div className="bg-white rounded-xl border shadow-sm p-12 text-center text-gray-500">
-          No user preferences learned yet
-        </div>
+        <EmptyState
+          icon="👤"
+          title="No user preferences learned yet"
+          description="Preferences are learned as users make choices in conversations."
+        />
       )}
     </div>
   )
@@ -687,8 +717,8 @@ function ClarificationsTab({ patterns, onDelete }) {
                     </div>
                     <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                       <div 
-                        className="h-full bg-purple-500 rounded-full"
-                        style={{ width: `${opt.choice_rate * 100}%` }}
+                        className="h-full rounded-full"
+                        style={{ width: `${opt.choice_rate * 100}%`, background: BRAND }}
                       />
                     </div>
                   </div>
@@ -706,9 +736,11 @@ function ClarificationsTab({ patterns, onDelete }) {
       })}
       
       {Object.keys(grouped).length === 0 && (
-        <div className="bg-white rounded-xl border shadow-sm p-12 text-center text-gray-500">
-          No clarification patterns yet. Answer some clarification questions!
-        </div>
+        <EmptyState
+          icon="❓"
+          title="No clarification patterns yet"
+          description="Answer some clarification questions to start learning!"
+        />
       )}
     </div>
   )
@@ -773,7 +805,7 @@ function MappingsTab({ mappings, onDelete, onRefresh }) {
                   </code>
                 </td>
                 <td className="px-4 py-3">
-                  <span className="px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full">
+                  <span className="px-2 py-1 text-xs rounded-full" style={{ background: BRAND_LIGHT, color: BRAND }}>
                     {mapping.semantic_type || 'unknown'}
                   </span>
                 </td>
@@ -797,9 +829,11 @@ function MappingsTab({ mappings, onDelete, onRefresh }) {
         </table>
         
         {filtered.length === 0 && (
-          <div className="text-center py-12 text-gray-500">
-            {search ? 'No mappings match your search' : 'No global mappings yet'}
-          </div>
+          <EmptyState
+            icon="🔗"
+            title={search ? 'No mappings match your search' : 'No global mappings yet'}
+            description="Column mappings are learned from the Data Model page."
+          />
         )}
       </div>
     </div>
