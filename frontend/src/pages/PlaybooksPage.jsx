@@ -1,24 +1,18 @@
 /**
  * PlaybooksPage - Analysis Playbooks
  * 
- * This is where:
+ * POLISHED: Consistent loading, error states, and navigation patterns
+ * 
  * - Run pre-built analysis playbooks against project data
  * - Create new playbooks via Playbook Builder
- * 
- * Playbooks are "recipes" that combine:
- * - Questions to answer
- * - Data sources to use
- * - Output structure (workbook format)
- * 
- * Updated: Filters playbooks based on project assignment
- * Updated: Create button navigates to Playbook Builder
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useProject } from '../context/ProjectContext';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import YearEndPlaybook from '../components/YearEndPlaybook';
+import { LoadingSpinner, ErrorState, EmptyState, PageHeader, Card } from '../components/ui';
 import api from '../services/api';
 
 // Brand Colors
@@ -96,24 +90,24 @@ const PLAYBOOKS = [
 ];
 
 // Playbook Card Component
-function PlaybookCard({ playbook, onRun, isActive, hasProgress, isAssigned }) {
+function PlaybookCard({ playbook, onRun, hasProgress, isAssigned }) {
   const styles = {
     card: {
       background: 'white',
       borderRadius: '12px',
       padding: '1.5rem',
       boxShadow: '0 1px 3px rgba(42, 52, 65, 0.08)',
-      border: isActive ? `2px solid ${COLORS.grassGreen}` : '1px solid #e1e8ed',
+      border: playbook.hasRunner ? `2px solid ${COLORS.grassGreen}` : '1px solid #e1e8ed',
       transition: 'all 0.2s ease',
       cursor: 'pointer',
       position: 'relative',
     },
-    activeBadge: {
+    badge: {
       position: 'absolute',
       top: '0.75rem',
       right: '0.75rem',
-      background: COLORS.grassGreen,
-      color: 'white',
+      background: hasProgress ? '#FFEB9C' : '#C6EFCE',
+      color: hasProgress ? '#9C6500' : '#006600',
       fontSize: '0.7rem',
       fontWeight: '700',
       padding: '0.2rem 0.5rem',
@@ -187,7 +181,8 @@ function PlaybookCard({ playbook, onRun, isActive, hasProgress, isAssigned }) {
       color: 'white',
       fontWeight: '600',
       fontSize: '0.85rem',
-      cursor: 'pointer',
+      cursor: playbook.hasRunner ? 'pointer' : 'default',
+      opacity: playbook.hasRunner ? 1 : 0.7,
     },
   };
 
@@ -204,11 +199,7 @@ function PlaybookCard({ playbook, onRun, isActive, hasProgress, isAssigned }) {
       }}
     >
       {playbook.hasRunner && isAssigned && (
-        <span style={{
-          ...styles.activeBadge,
-          background: hasProgress ? '#FFEB9C' : '#C6EFCE',
-          color: hasProgress ? '#9C6500' : '#006600',
-        }}>
+        <span style={styles.badge}>
           {hasProgress ? 'IN PROGRESS' : 'LIVE'}
         </span>
       )}
@@ -234,6 +225,7 @@ function PlaybookCard({ playbook, onRun, isActive, hasProgress, isAssigned }) {
         <button 
           style={styles.button} 
           onClick={() => onRun(playbook)}
+          disabled={!playbook.hasRunner}
         >
           {playbook.hasRunner ? (hasProgress ? 'Continue →' : 'Kickoff →') : 'Coming Soon'}
         </button>
@@ -242,106 +234,58 @@ function PlaybookCard({ playbook, onRun, isActive, hasProgress, isAssigned }) {
   );
 }
 
-// No-project placeholder
-function SelectProjectPrompt() {
-  return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      minHeight: '50vh',
-      textAlign: 'center',
-      padding: '2rem',
-    }}>
-      <div style={{ fontSize: '4rem', marginBottom: '1.5rem', opacity: 0.6 }}>📋</div>
-      <h2 style={{
-        fontFamily: "'Sora', sans-serif",
-        fontSize: '1.5rem',
-        fontWeight: '700',
-        color: COLORS.text,
-        marginBottom: '0.75rem',
-      }}>Select a Project First</h2>
-      <p style={{
-        color: COLORS.textLight,
-        fontSize: '1rem',
-        maxWidth: '400px',
-        lineHeight: '1.6',
-      }}>
-        Choose a project from the selector above to run playbooks.
-      </p>
-    </div>
-  );
-}
-
-// No playbooks assigned placeholder
-function NoPlaybooksPrompt({ isAdmin }) {
-  return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      minHeight: '50vh',
-      textAlign: 'center',
-      padding: '2rem',
-    }}>
-      <div style={{ fontSize: '4rem', marginBottom: '1.5rem', opacity: 0.6 }}>📭</div>
-      <h2 style={{
-        fontFamily: "'Sora', sans-serif",
-        fontSize: '1.5rem',
-        fontWeight: '700',
-        color: COLORS.text,
-        marginBottom: '0.75rem',
-      }}>No Playbooks Assigned</h2>
-      <p style={{
-        color: COLORS.textLight,
-        fontSize: '1rem',
-        maxWidth: '400px',
-        lineHeight: '1.6',
-      }}>
-        {isAdmin 
-          ? "This project doesn't have any playbooks assigned yet. Go to Projects to assign playbooks."
-          : "No playbooks have been assigned to this project. Contact your administrator to enable playbooks."
-        }
-      </p>
-    </div>
-  );
-}
-
 export default function PlaybooksPage() {
-  const { activeProject, projectName, customerName, hasActiveProject, loading } = useProject();
+  const { activeProject, projectName, customerName, hasActiveProject, loading: projectLoading } = useProject();
   const { isAdmin } = useAuth();
   const navigate = useNavigate();
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [activePlaybook, setActivePlaybook] = useState(null);
   const [playbookProgress, setPlaybookProgress] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
-  // Check if user has started any playbooks
-  useEffect(() => {
-    if (activeProject?.id) {
-      api.get(`/playbooks/year-end/progress/${activeProject.id}`)
-        .then(res => {
-          const progress = res.data?.progress || {};
-          const hasStarted = Object.keys(progress).length > 0;
-          setPlaybookProgress(prev => ({ ...prev, 'year-end-checklist': hasStarted }));
-        })
-        .catch(() => {
-          setPlaybookProgress(prev => ({ ...prev, 'year-end-checklist': false }));
-        });
+  const fetchPlaybookProgress = useCallback(async () => {
+    if (!activeProject?.id) return;
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const res = await api.get(`/playbooks/year-end/progress/${activeProject.id}`);
+      const progress = res.data?.progress || {};
+      const hasStarted = Object.keys(progress).length > 0;
+      setPlaybookProgress(prev => ({ ...prev, 'year-end-checklist': hasStarted }));
+    } catch (err) {
+      // Don't show error for 404 (no progress yet)
+      if (err.response?.status !== 404) {
+        console.error('Failed to fetch playbook progress:', err);
+      }
+      setPlaybookProgress(prev => ({ ...prev, 'year-end-checklist': false }));
+    } finally {
+      setLoading(false);
     }
   }, [activeProject?.id]);
 
-  if (loading) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', padding: '4rem' }}>
-        <div className="spinner" />
-      </div>
-    );
+  useEffect(() => {
+    fetchPlaybookProgress();
+  }, [fetchPlaybookProgress]);
+
+  // Loading state
+  if (projectLoading || loading) {
+    return <LoadingSpinner fullPage message="Loading playbooks..." />;
   }
 
+  // No project selected
   if (!hasActiveProject) {
-    return <SelectProjectPrompt />;
+    return (
+      <EmptyState
+        fullPage
+        icon="📋"
+        title="Select a Project First"
+        description="Choose a project from the selector above to run playbooks."
+        action={{ label: 'Go to Projects', to: '/projects' }}
+      />
+    );
   }
 
   // If a playbook runner is active, show it
@@ -358,13 +302,35 @@ export default function PlaybooksPage() {
     }
   }
 
-  // Get assigned playbooks for this project - ONLY show assigned ones
+  // Get assigned playbooks for this project
   const assignedPlaybookIds = activeProject?.playbooks || [];
   const availablePlaybooks = PLAYBOOKS.filter(p => assignedPlaybookIds.includes(p.id));
 
-  // Show "no playbooks" message if none assigned
+  // No playbooks assigned
   if (availablePlaybooks.length === 0) {
-    return <NoPlaybooksPrompt isAdmin={isAdmin} />;
+    return (
+      <>
+        <PageHeader
+          title="Playbooks"
+          subtitle="Run pre-built analysis templates to generate deliverables."
+          breadcrumbs={[
+            { label: customerName },
+            { label: projectName },
+          ]}
+        />
+        <EmptyState
+          fullPage
+          icon="📭"
+          title="No Playbooks Assigned"
+          description={
+            isAdmin 
+              ? "This project doesn't have any playbooks assigned yet. Go to Projects to assign playbooks."
+              : "No playbooks have been assigned to this project. Contact your administrator to enable playbooks."
+          }
+          action={isAdmin ? { label: 'Manage Projects', to: '/projects' } : null}
+        />
+      </>
+    );
   }
 
   const categories = ['all', ...new Set(availablePlaybooks.map(p => p.category))];
@@ -381,46 +347,6 @@ export default function PlaybooksPage() {
   };
 
   const styles = {
-    header: {
-      marginBottom: '1.5rem',
-    },
-    breadcrumb: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.5rem',
-      fontSize: '0.85rem',
-      color: COLORS.textLight,
-      marginBottom: '0.5rem',
-    },
-    titleRow: {
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'flex-start',
-    },
-    title: {
-      fontFamily: "'Sora', sans-serif",
-      fontSize: '1.75rem',
-      fontWeight: '700',
-      color: COLORS.text,
-      margin: 0,
-    },
-    subtitle: {
-      color: COLORS.textLight,
-      marginTop: '0.25rem',
-    },
-    createButton: {
-      padding: '0.75rem 1.25rem',
-      background: 'white',
-      border: `2px solid ${COLORS.grassGreen}`,
-      borderRadius: '8px',
-      color: COLORS.grassGreen,
-      fontWeight: '600',
-      cursor: 'pointer',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.5rem',
-      transition: 'all 0.2s ease',
-    },
     filters: {
       display: 'flex',
       gap: '0.5rem',
@@ -436,6 +362,7 @@ export default function PlaybooksPage() {
       fontWeight: '600',
       fontSize: '0.85rem',
       cursor: 'pointer',
+      transition: 'all 0.2s ease',
     }),
     grid: {
       display: 'grid',
@@ -447,37 +374,29 @@ export default function PlaybooksPage() {
   return (
     <div>
       {/* Header */}
-      <div style={styles.header}>
-        <div style={styles.breadcrumb}>
-          <span>{customerName}</span>
-          <span>→</span>
-          <span style={{ color: COLORS.grassGreen, fontWeight: '600' }}>{projectName}</span>
-        </div>
-        <div style={styles.titleRow}>
-          <div>
-            <h1 style={styles.title}>Playbooks</h1>
-            <p style={styles.subtitle}>
-              Run pre-built analysis templates to generate deliverables.
-            </p>
-          </div>
-          {isAdmin && (
-            <button 
-              style={styles.createButton} 
-              onClick={() => navigate('/playbook-builder')}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = COLORS.grassGreen;
-                e.currentTarget.style.color = 'white';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'white';
-                e.currentTarget.style.color = COLORS.grassGreen;
-              }}
-            >
-              ➕ Create Playbook
-            </button>
-          )}
-        </div>
-      </div>
+      <PageHeader
+        title="Playbooks"
+        subtitle="Run pre-built analysis templates to generate deliverables."
+        breadcrumbs={[
+          { label: customerName },
+          { label: projectName },
+        ]}
+        action={isAdmin ? {
+          label: 'Create Playbook',
+          icon: '➕',
+          to: '/playbook-builder',
+        } : null}
+      />
+
+      {/* Error state (inline) */}
+      {error && (
+        <ErrorState
+          compact
+          title="Failed to load progress"
+          message={error}
+          onRetry={fetchPlaybookProgress}
+        />
+      )}
 
       {/* Category Filters */}
       <div style={styles.filters}>
@@ -499,7 +418,6 @@ export default function PlaybooksPage() {
             key={playbook.id}
             playbook={playbook} 
             onRun={handleRunPlaybook}
-            isActive={playbook.hasRunner}
             hasProgress={playbookProgress[playbook.id] || false}
             isAssigned={true}
           />
