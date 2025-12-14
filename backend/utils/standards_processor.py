@@ -11,10 +11,12 @@ NO HARDCODING. The LLM reads the document and extracts:
 - Conditions (who/what this applies to)
 - Actions (what to do about it)
 
+PERSISTENCE: Rules stored in Supabase (survive Railway redeploys)
+
 Deploy to: backend/utils/standards_processor.py
 
 Author: XLR8 Team
-Version: 1.0.0 - P4 Standards Layer
+Version: 1.1.0 - P4 Standards Layer + Supabase Persistence
 """
 
 import os
@@ -75,6 +77,26 @@ class ExtractedRule:
             "check_type": self.check_type,
             "suggested_sql_pattern": self.suggested_sql_pattern
         }
+    
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'ExtractedRule':
+        """Create ExtractedRule from dictionary."""
+        return cls(
+            rule_id=data.get("rule_id", ""),
+            title=data.get("title", ""),
+            description=data.get("description", ""),
+            applies_to=data.get("applies_to", {}),
+            requirement=data.get("requirement", {}),
+            source_document=data.get("source_document", ""),
+            source_page=data.get("source_page"),
+            source_section=data.get("source_section"),
+            source_text=data.get("source_text", ""),
+            category=data.get("category", "general"),
+            severity=data.get("severity", "medium"),
+            effective_date=data.get("effective_date"),
+            check_type=data.get("check_type", "data"),
+            suggested_sql_pattern=data.get("suggested_sql_pattern")
+        )
 
 
 @dataclass
@@ -102,6 +124,50 @@ class StandardsDocument:
             "page_count": self.page_count,
             "rule_count": len(self.rules)
         }
+    
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'StandardsDocument':
+        """Create StandardsDocument from dictionary."""
+        doc = cls(
+            document_id=data.get("document_id", ""),
+            filename=data.get("filename", ""),
+            title=data.get("title", ""),
+            domain=data.get("domain", "general"),
+            processed_at=data.get("processed_at", datetime.now().isoformat()),
+            page_count=data.get("page_count", 0),
+            raw_text=data.get("raw_text", "")
+        )
+        # Convert rules if present
+        rules_data = data.get("rules", [])
+        doc.rules = [ExtractedRule.from_dict(r) if isinstance(r, dict) else r for r in rules_data]
+        return doc
+
+
+# =============================================================================
+# SUPABASE CLIENT
+# =============================================================================
+
+_supabase_client = None
+
+def _get_supabase():
+    """Get Supabase client (singleton)."""
+    global _supabase_client
+    if _supabase_client is None:
+        try:
+            from supabase import create_client
+            url = os.getenv("SUPABASE_URL")
+            key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
+            
+            if url and key:
+                _supabase_client = create_client(url, key)
+                logger.info("[STANDARDS] Supabase client initialized")
+            else:
+                logger.warning("[STANDARDS] Supabase credentials not found")
+        except ImportError:
+            logger.warning("[STANDARDS] Supabase library not available")
+        except Exception as e:
+            logger.error(f"[STANDARDS] Supabase init failed: {e}")
+    return _supabase_client
 
 
 # =============================================================================
@@ -136,10 +202,6 @@ def _call_llm(prompt: str, system_prompt: str = None) -> str:
         return ""
     
     try:
-        # Use process_query which handles local vs Claude routing
-        # We'll format as a simple query
-        full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
-        
         # Try Claude directly since this is text extraction (not SQL)
         result, success = orchestrator._call_claude(
             prompt=prompt,
@@ -377,23 +439,43 @@ def process_text(text: str, document_name: str, domain: str = "general") -> Stan
 
 
 # =============================================================================
-# RULE STORAGE & RETRIEVAL
+# RULE STORAGE & RETRIEVAL - WITH SUPABASE PERSISTENCE
 # =============================================================================
 
 class RuleRegistry:
     """
     Store and retrieve extracted rules.
-    Uses ChromaDB for semantic search of rules.
+    
+    Persistence: Supabase (survives Railway redeploys)
+    Search: ChromaDB for semantic search (rebuilt on startup)
     """
+    
+    # Supabase table names
+    DOCUMENTS_TABLE = "standards_documents"
+    RULES_TABLE = "standards_rules"
     
     def __init__(self):
         self.rules: Dict[str, ExtractedRule] = {}
         self.documents: Dict[str, StandardsDocument] = {}
         self.chroma_collection = None
+        self._supabase_available = False
+        
+        # Initialize
+        self._init_supabase()
         self._init_chroma()
+        self._load_from_supabase()
+    
+    def _init_supabase(self):
+        """Check if Supabase is available."""
+        client = _get_supabase()
+        if client:
+            self._supabase_available = True
+            logger.info("[STANDARDS] Supabase persistence enabled")
+        else:
+            logger.warning("[STANDARDS] Supabase not available - rules will not persist")
     
     def _init_chroma(self):
-        """Initialize ChromaDB for rule storage."""
+        """Initialize ChromaDB for rule search."""
         try:
             import chromadb
             client = chromadb.Client()
@@ -401,34 +483,224 @@ class RuleRegistry:
                 name="xlr8_standards_rules",
                 metadata={"description": "Extracted compliance rules"}
             )
-            logger.info("[STANDARDS] ChromaDB initialized for rule storage")
+            logger.info("[STANDARDS] ChromaDB initialized for rule search")
         except Exception as e:
             logger.warning(f"[STANDARDS] ChromaDB not available: {e}")
     
+    def _load_from_supabase(self):
+        """Load existing rules from Supabase on startup."""
+        if not self._supabase_available:
+            return
+        
+        client = _get_supabase()
+        if not client:
+            return
+        
+        try:
+            # Load documents
+            doc_result = client.table(self.DOCUMENTS_TABLE).select("*").execute()
+            docs_loaded = 0
+            
+            for row in doc_result.data or []:
+                try:
+                    doc = StandardsDocument(
+                        document_id=row["document_id"],
+                        filename=row.get("filename", ""),
+                        title=row.get("title", ""),
+                        domain=row.get("domain", "general"),
+                        processed_at=row.get("processed_at", ""),
+                        page_count=row.get("page_count", 0),
+                        raw_text=""  # Don't load raw text to save memory
+                    )
+                    self.documents[doc.document_id] = doc
+                    docs_loaded += 1
+                except Exception as e:
+                    logger.warning(f"[STANDARDS] Failed to load document: {e}")
+            
+            # Load rules
+            rules_result = client.table(self.RULES_TABLE).select("*").execute()
+            rules_loaded = 0
+            
+            for row in rules_result.data or []:
+                try:
+                    rule = ExtractedRule(
+                        rule_id=row["rule_id"],
+                        title=row.get("title", ""),
+                        description=row.get("description", ""),
+                        applies_to=row.get("applies_to", {}),
+                        requirement=row.get("requirement", {}),
+                        source_document=row.get("source_document", ""),
+                        source_page=row.get("source_page"),
+                        source_section=row.get("source_section"),
+                        source_text=row.get("source_text", ""),
+                        category=row.get("category", "general"),
+                        severity=row.get("severity", "medium"),
+                        effective_date=row.get("effective_date"),
+                        check_type=row.get("check_type", "data"),
+                        suggested_sql_pattern=row.get("suggested_sql_pattern")
+                    )
+                    self.rules[rule.rule_id] = rule
+                    
+                    # Add to document's rules list
+                    doc_id = row.get("document_id")
+                    if doc_id and doc_id in self.documents:
+                        self.documents[doc_id].rules.append(rule)
+                    
+                    # Add to ChromaDB for search
+                    self._add_to_chroma(rule, row.get("domain", "general"))
+                    
+                    rules_loaded += 1
+                except Exception as e:
+                    logger.warning(f"[STANDARDS] Failed to load rule: {e}")
+            
+            logger.info(f"[STANDARDS] Loaded {docs_loaded} documents and {rules_loaded} rules from Supabase")
+            
+        except Exception as e:
+            logger.error(f"[STANDARDS] Failed to load from Supabase: {e}")
+    
+    def _add_to_chroma(self, rule: ExtractedRule, domain: str):
+        """Add a rule to ChromaDB for semantic search."""
+        if not self.chroma_collection:
+            return
+        
+        try:
+            # Check if already exists
+            try:
+                self.chroma_collection.get(ids=[rule.rule_id])
+                # Already exists, skip
+                return
+            except:
+                pass
+            
+            self.chroma_collection.add(
+                ids=[rule.rule_id],
+                documents=[f"{rule.title}\n{rule.description}\n{rule.source_text}"],
+                metadatas=[{
+                    "category": rule.category,
+                    "severity": rule.severity,
+                    "domain": domain
+                }]
+            )
+        except Exception as e:
+            # Ignore duplicates
+            if "already exists" not in str(e).lower():
+                logger.warning(f"[STANDARDS] Failed to add rule to ChromaDB: {e}")
+    
+    def _save_document_to_supabase(self, doc: StandardsDocument):
+        """Save a document to Supabase."""
+        if not self._supabase_available:
+            return
+        
+        client = _get_supabase()
+        if not client:
+            return
+        
+        try:
+            data = {
+                "document_id": doc.document_id,
+                "filename": doc.filename,
+                "title": doc.title,
+                "domain": doc.domain,
+                "processed_at": doc.processed_at,
+                "page_count": doc.page_count,
+                "rule_count": len(doc.rules)
+            }
+            
+            # Upsert (insert or update)
+            client.table(self.DOCUMENTS_TABLE).upsert(data).execute()
+            logger.info(f"[STANDARDS] Saved document {doc.document_id} to Supabase")
+            
+        except Exception as e:
+            logger.error(f"[STANDARDS] Failed to save document to Supabase: {e}")
+    
+    def _save_rule_to_supabase(self, rule: ExtractedRule, doc: StandardsDocument):
+        """Save a rule to Supabase."""
+        if not self._supabase_available:
+            return
+        
+        client = _get_supabase()
+        if not client:
+            return
+        
+        try:
+            data = {
+                "rule_id": rule.rule_id,
+                "document_id": doc.document_id,
+                "title": rule.title,
+                "description": rule.description,
+                "applies_to": rule.applies_to,
+                "requirement": rule.requirement,
+                "source_document": rule.source_document,
+                "source_page": rule.source_page,
+                "source_section": rule.source_section,
+                "source_text": rule.source_text,
+                "category": rule.category,
+                "severity": rule.severity,
+                "effective_date": rule.effective_date,
+                "check_type": rule.check_type,
+                "suggested_sql_pattern": rule.suggested_sql_pattern,
+                "domain": doc.domain
+            }
+            
+            # Upsert (insert or update)
+            client.table(self.RULES_TABLE).upsert(data).execute()
+            
+        except Exception as e:
+            logger.error(f"[STANDARDS] Failed to save rule to Supabase: {e}")
+    
     def add_document(self, doc: StandardsDocument):
         """Add a processed document and its rules to the registry."""
+        # Add to memory
         self.documents[doc.document_id] = doc
         
+        # Save document to Supabase
+        self._save_document_to_supabase(doc)
+        
         for rule in doc.rules:
+            # Add to memory
             self.rules[rule.rule_id] = rule
             
+            # Save rule to Supabase
+            self._save_rule_to_supabase(rule, doc)
+            
             # Add to ChromaDB for semantic search
-            if self.chroma_collection:
-                try:
-                    self.chroma_collection.add(
-                        ids=[rule.rule_id],
-                        documents=[f"{rule.title}\n{rule.description}\n{rule.source_text}"],
-                        metadatas=[{
-                            "document_id": doc.document_id,
-                            "category": rule.category,
-                            "severity": rule.severity,
-                            "domain": doc.domain
-                        }]
-                    )
-                except Exception as e:
-                    logger.warning(f"[STANDARDS] Failed to add rule to ChromaDB: {e}")
+            self._add_to_chroma(rule, doc.domain)
         
         logger.info(f"[STANDARDS] Added document {doc.document_id} with {len(doc.rules)} rules")
+    
+    def delete_document(self, document_id: str) -> bool:
+        """Delete a document and its rules."""
+        if document_id not in self.documents:
+            return False
+        
+        doc = self.documents[document_id]
+        
+        # Delete rules from memory and ChromaDB
+        for rule in doc.rules:
+            if rule.rule_id in self.rules:
+                del self.rules[rule.rule_id]
+            
+            if self.chroma_collection:
+                try:
+                    self.chroma_collection.delete(ids=[rule.rule_id])
+                except:
+                    pass
+        
+        # Delete from memory
+        del self.documents[document_id]
+        
+        # Delete from Supabase
+        if self._supabase_available:
+            client = _get_supabase()
+            if client:
+                try:
+                    client.table(self.RULES_TABLE).delete().eq("document_id", document_id).execute()
+                    client.table(self.DOCUMENTS_TABLE).delete().eq("document_id", document_id).execute()
+                    logger.info(f"[STANDARDS] Deleted document {document_id} from Supabase")
+                except Exception as e:
+                    logger.error(f"[STANDARDS] Failed to delete from Supabase: {e}")
+        
+        return True
     
     def search_rules(
         self, 
@@ -470,8 +742,14 @@ class RuleRegistry:
     
     def get_rules_by_domain(self, domain: str) -> List[ExtractedRule]:
         """Get all rules for a specific domain."""
-        return [r for r in self.rules.values() 
-                if self.documents.get(r.source_document, StandardsDocument("","","","")).domain == domain]
+        result = []
+        for rule in self.rules.values():
+            # Find the document for this rule
+            for doc in self.documents.values():
+                if doc.domain == domain and rule in doc.rules:
+                    result.append(rule)
+                    break
+        return result
     
     def get_all_rules(self) -> List[ExtractedRule]:
         """Get all rules in the registry."""
