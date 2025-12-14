@@ -15,45 +15,46 @@ import api from '../services/api';
 // =============================================================================
 // THEMES
 // =============================================================================
+// ALIGNED WITH DASHBOARD - Soft Navy dark theme
 const THEMES = {
   dark: {
     name: 'dark',
-    bg: '#1a1f2e',
-    panel: '#242938',
-    panelLight: '#2a3042',
-    panelBorder: '#3d4559',
-    text: '#e2e8f0',
-    textDim: '#8892a6',
+    bg: '#1a2332',           // Soft Navy - matches Dashboard
+    panel: '#232f42',        // Soft Navy cards
+    panelLight: '#2c3b52',   // Slightly lighter
+    panelBorder: '#334766',  // Soft Navy border
+    text: '#e5e7eb',
+    textDim: '#9ca3af',
     textBright: '#ffffff',
-    green: '#00e676',
-    greenDim: '#00c853',
-    greenBg: 'rgba(0, 230, 118, 0.1)',
-    red: '#ff5252',
-    redDim: '#ff1744',
-    redBg: 'rgba(255, 82, 82, 0.12)',
-    yellow: '#ffc107',
-    yellowDim: '#ffab00',
-    yellowBg: 'rgba(255, 193, 7, 0.1)',
-    blue: '#448aff',
-    blueDim: '#2979ff',
-    cyan: '#18ffff',
-    cyanDim: '#00e5ff',
-    purple: '#b388ff',
-    orange: '#ff6e40',
+    green: '#83b16d',        // grassGreen brand color
+    greenDim: '#6b9a57',
+    greenBg: 'rgba(131, 177, 109, 0.15)',
+    red: '#ef4444',
+    redDim: '#dc2626',
+    redBg: 'rgba(239, 68, 68, 0.12)',
+    yellow: '#f59e0b',
+    yellowDim: '#d97706',
+    yellowBg: 'rgba(245, 158, 11, 0.12)',
+    blue: '#3b82f6',
+    blueDim: '#2563eb',
+    cyan: '#06b6d4',
+    cyanDim: '#0891b2',
+    purple: '#8b5cf6',
+    orange: '#f97316',
     shadow: 'rgba(0,0,0,0.3)',
   },
   light: {
     name: 'light',
-    bg: '#f0f4f8',
+    bg: '#f6f5fa',           // Brand light bg - matches Dashboard
     panel: '#ffffff',
     panelLight: '#f8fafc',
     panelBorder: '#e2e8f0',
-    text: '#1e293b',
-    textDim: '#64748b',
-    textBright: '#0f172a',
-    green: '#059669',
-    greenDim: '#10b981',
-    greenBg: 'rgba(5, 150, 105, 0.08)',
+    text: '#2a3441',         // Brand text
+    textDim: '#5f6c7b',
+    textBright: '#1e293b',
+    green: '#83b16d',        // grassGreen brand color
+    greenDim: '#6b9a57',
+    greenBg: 'rgba(131, 177, 109, 0.1)',
     red: '#dc2626',
     redDim: '#ef4444',
     redBg: 'rgba(220, 38, 38, 0.08)',
