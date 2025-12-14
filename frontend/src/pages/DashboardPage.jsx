@@ -13,24 +13,12 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTheme, STATUS, BRAND } from '../context/ThemeContext';
 import { useProject } from '../context/ProjectContext';
+import { getCustomerColorPalette } from '../utils/customerColors';
 import { 
   Upload, Zap, MessageSquare, ClipboardList,
   FolderOpen, PlayCircle, AlertTriangle, Shield, Activity,
   TrendingUp, ArrowRight
 } from 'lucide-react';
-
-// Customer color system - consistent across all displays
-export const CUSTOMER_COLORS = {
-  'MEY1000': { primary: '#83b16d', secondary: '#a8ca99', bg: 'linear-gradient(135deg, #83b16d15, #a8ca9910)' },
-  'ACM2500': { primary: '#93abd9', secondary: '#b4c7e7', bg: 'linear-gradient(135deg, #93abd915, #b4c7e710)' },
-  'GLB3000': { primary: '#f59e0b', secondary: '#fbbf24', bg: 'linear-gradient(135deg, #f59e0b15, #fbbf2410)' },
-  'TEC4000': { primary: '#8b5cf6', secondary: '#a78bfa', bg: 'linear-gradient(135deg, #8b5cf615, #a78bfa10)' },
-  'GLOBAL':  { primary: '#14b8a6', secondary: '#5eead4', bg: 'linear-gradient(135deg, #14b8a615, #5eead410)' },
-};
-
-export const getCustomerColor = (projectName) => {
-  return CUSTOMER_COLORS[projectName] || CUSTOMER_COLORS['GLOBAL'];
-};
 
 // Radial Gauge Component
 function RadialGauge({ value, size = 80, strokeWidth = 8, color, label }) {
@@ -186,7 +174,7 @@ function StatCard({ label, value, icon: Icon, color, trend, sparkData, T, darkMo
 
 // Project Card Component with Gauge
 function ProjectCard({ project, T, darkMode, onClick, isSelected }) {
-  const colors = getCustomerColor(project.name);
+  const colors = getCustomerColorPalette(project.customer || project.name);
   const healthColor = project.health >= 80 ? STATUS.green : project.health >= 60 ? STATUS.amber : STATUS.red;
   
   return (
@@ -218,7 +206,7 @@ function ProjectCard({ project, T, darkMode, onClick, isSelected }) {
         left: 0, 
         right: 0, 
         height: 4, 
-        background: `linear-gradient(90deg, ${colors.primary}, ${colors.secondary})`,
+        background: `linear-gradient(90deg, ${colors.primary}, ${colors.primary}90)`,
       }} />
       
       <div style={{
@@ -255,26 +243,26 @@ function ProjectCard({ project, T, darkMode, onClick, isSelected }) {
                 padding: '0.15rem 0.5rem',
                 borderRadius: '10px',
               }}>
-                {project.activePlaybooks}
+                {project.activePlaybooks || 0}
               </span>
             </div>
             <div>
               <span style={{ color: T.textDim }}>Findings </span>
               <span style={{ 
-                color: project.pendingFindings > 10 ? STATUS.amber : STATUS.green,
+                color: (project.pendingFindings || 0) > 10 ? STATUS.amber : STATUS.green,
                 fontWeight: 600,
-                background: project.pendingFindings > 10 ? `${STATUS.amber}15` : `${STATUS.green}15`,
+                background: (project.pendingFindings || 0) > 10 ? `${STATUS.amber}15` : `${STATUS.green}15`,
                 padding: '0.15rem 0.5rem',
                 borderRadius: '10px',
               }}>
-                {project.pendingFindings}
+                {project.pendingFindings || 0}
               </span>
             </div>
           </div>
         </div>
         
         <RadialGauge 
-          value={project.health} 
+          value={project.health || 75} 
           size={70} 
           strokeWidth={6} 
           color={healthColor}
@@ -301,7 +289,7 @@ function ProjectCard({ project, T, darkMode, onClick, isSelected }) {
 
 // Feed Item Component
 function FeedItem({ item, T, darkMode, onClick }) {
-  const colors = getCustomerColor(item.project);
+  const colors = getCustomerColorPalette(item.project);
   
   const getLevelStyle = (level) => {
     if (level === 'success') return { color: STATUS.green, bg: `${STATUS.green}15` };
@@ -376,7 +364,7 @@ function FeedItem({ item, T, darkMode, onClick }) {
             fontSize: '0.75rem',
             fontWeight: 700,
             color: colors.primary,
-            background: colors.bg,
+            background: colors.bgSolid,
             padding: '0.2rem 0.6rem',
             borderRadius: '10px',
             border: `1px solid ${colors.primary}30`,
@@ -465,7 +453,7 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Mock stats (will be real data later)
+  // Stats - use real project count
   const stats = [
     { label: 'Active Projects', value: realProjects?.length || 0, icon: FolderOpen, color: BRAND.grassGreen, trend: 12, sparkData: [2, 3, 3, 4, 3, 4, 4] },
     { label: 'Playbooks Running', value: 6, icon: PlayCircle, color: STATUS.blue, trend: 8, sparkData: [4, 5, 6, 5, 7, 6, 6] },
@@ -473,26 +461,26 @@ export default function DashboardPage() {
     { label: 'Compliance Score', value: '73%', icon: Shield, color: STATUS.green, trend: 5, sparkData: [65, 68, 70, 69, 72, 73, 73] },
   ];
 
-  // Use real projects if available, otherwise mock data
-  const displayProjects = realProjects?.length > 0 
-    ? realProjects.slice(0, 4).map(p => ({
-        ...p,
-        health: Math.floor(Math.random() * 40) + 60, // Mock health for now
-        activePlaybooks: Math.floor(Math.random() * 4),
-        pendingFindings: Math.floor(Math.random() * 20),
-      }))
-    : [
-        { id: '1', name: 'MEY1000', customer: 'Meyer Corp', health: 92, activePlaybooks: 2, pendingFindings: 3 },
-        { id: '2', name: 'ACM2500', customer: 'Acme Industries', health: 67, activePlaybooks: 1, pendingFindings: 12 },
-        { id: '3', name: 'GLB3000', customer: 'Global Tech', health: 45, activePlaybooks: 0, pendingFindings: 28 },
-        { id: '4', name: 'TEC4000', customer: 'TechFlow Inc', health: 88, activePlaybooks: 3, pendingFindings: 1 },
-      ];
+  // Use real projects, add mock health/playbooks/findings for display
+  const displayProjects = (realProjects || []).slice(0, 4).map((p, i) => ({
+    ...p,
+    health: [92, 67, 45, 88][i] || 75,
+    activePlaybooks: [2, 1, 0, 3][i] || 0,
+    pendingFindings: [3, 12, 28, 1][i] || 0,
+  }));
+
+  // If no real projects, show empty state
+  if (displayProjects.length === 0) {
+    displayProjects.push(
+      { id: 'demo-1', name: 'No Projects', customer: 'Create a project to get started', health: 0, activePlaybooks: 0, pendingFindings: 0 }
+    );
+  }
 
   const liveFeed = [
-    { level: 'info', msg: 'Payroll register processed', project: displayProjects[0]?.name || 'MEY1000', time: '2m', path: '/data' },
-    { level: 'warning', msg: 'SECURE 2.0 gap detected', project: displayProjects[1]?.name || 'ACM2500', time: '15m', path: '/playbooks' },
-    { level: 'success', msg: 'Year-End Checklist passed', project: displayProjects[0]?.name || 'MEY1000', time: '1h', path: '/playbooks' },
-    { level: 'warning', msg: 'Missing deduction codes', project: displayProjects[2]?.name || 'GLB3000', time: '2h', path: '/playbooks' },
+    { level: 'info', msg: 'Payroll register processed', project: displayProjects[0]?.name || 'Project', time: '2m', path: '/data' },
+    { level: 'warning', msg: 'SECURE 2.0 gap detected', project: displayProjects[1]?.name || displayProjects[0]?.name || 'Project', time: '15m', path: '/playbooks' },
+    { level: 'success', msg: 'Year-End Checklist passed', project: displayProjects[0]?.name || 'Project', time: '1h', path: '/playbooks' },
+    { level: 'warning', msg: 'Missing deduction codes', project: displayProjects[2]?.name || displayProjects[0]?.name || 'Project', time: '2h', path: '/playbooks' },
     { level: 'info', msg: 'New standards doc uploaded', project: 'GLOBAL', time: '3h', path: '/reference-library' },
   ];
 
@@ -504,15 +492,17 @@ export default function DashboardPage() {
   ];
 
   const handleProjectClick = (project) => {
-    // Use selectProject with full project object
+    if (project.id === 'demo-1') {
+      navigate('/projects');
+      return;
+    }
     selectProject(project);
     navigate('/data');
   };
 
   const handleFeedClick = (item) => {
-    // Find project by name and select it
     const project = displayProjects.find(p => p.name === item.project);
-    if (project && item.project !== 'GLOBAL') {
+    if (project && item.project !== 'GLOBAL' && project.id !== 'demo-1') {
       selectProject(project);
     }
     navigate(item.path);
