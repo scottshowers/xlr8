@@ -42,15 +42,35 @@ body {
 }
 
 /* ============================================================
-   TRANSITIONS
+   TOAST SLIDE-IN ANIMATION
    ============================================================ */
-.fade-in {
-  animation: fadeIn 0.3s ease-in;
+@keyframes slideIn {
+  from { 
+    opacity: 0; 
+    transform: translateX(100%); 
+  }
+  to { 
+    opacity: 1; 
+    transform: translateX(0); 
+  }
 }
 
+/* ============================================================
+   FADE IN ANIMATION
+   ============================================================ */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { 
+    opacity: 0; 
+    transform: translateY(10px); 
+  }
+  to { 
+    opacity: 1; 
+    transform: translateY(0); 
+  }
+}
+
+.fade-in {
+  animation: fadeIn 0.3s ease-in;
 }
 
 /* ============================================================
@@ -82,7 +102,8 @@ button:disabled {
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,
-select:focus-visible {
+select:focus-visible,
+textarea:focus-visible {
   outline: 2px solid #83b16d;
   outline-offset: 2px;
 }
@@ -106,4 +127,27 @@ select:focus-visible {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #a2a1a0;
+}
+
+/* ============================================================
+   BRAND COLOR UTILITIES
+   ============================================================ */
+.text-brand {
+  color: #83b16d;
+}
+
+.bg-brand {
+  background-color: #83b16d;
+}
+
+.border-brand {
+  border-color: #83b16d;
+}
+
+.bg-brand-light {
+  background-color: #f0fdf4;
+}
+
+.ring-brand {
+  --tw-ring-color: #83b16d;
 }
