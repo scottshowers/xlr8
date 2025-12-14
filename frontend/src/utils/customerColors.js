@@ -1,83 +1,69 @@
 /**
- * Customer Color Utility
+ * customerColors.js - Consistent Customer Color System
  * 
- * Generates consistent, subtle colors from customer names.
- * Same customer always gets same color across the app.
- * 
- * Usage:
- *   import { getCustomerColor } from '../utils/customerColors';
- *   const color = getCustomerColor('Meyer Corporation');
+ * Use these colors for project/customer displays across the app
+ * to maintain visual consistency.
  */
 
-// Subtle color palette - muted, professional tones
-const CUSTOMER_COLORS = [
-  '#7c9eb5', // Steel blue
-  '#8fa888', // Sage green
-  '#b5a07c', // Warm tan
-  '#9b8aa6', // Dusty purple
-  '#7cb5a8', // Seafoam
-  '#a88f8a', // Dusty rose
-  '#8a9fa8', // Slate
-  '#a8a07c', // Olive
-  '#8aa8a6', // Teal gray
-  '#a89b8a', // Taupe
-  '#7c8fb5', // Periwinkle
-  '#a88a9b', // Mauve
-];
+// Customer color system - maps project codes to color palettes
+export const CUSTOMER_COLORS = {
+  'MEY1000': { 
+    primary: '#83b16d',   // grassGreen
+    secondary: '#a8ca99', 
+    bg: 'linear-gradient(135deg, #83b16d15, #a8ca9910)',
+    bgSolid: '#83b16d15',
+  },
+  'ACM2500': { 
+    primary: '#93abd9',   // skyBlue
+    secondary: '#b4c7e7', 
+    bg: 'linear-gradient(135deg, #93abd915, #b4c7e710)',
+    bgSolid: '#93abd915',
+  },
+  'GLB3000': { 
+    primary: '#f59e0b',   // amber
+    secondary: '#fbbf24', 
+    bg: 'linear-gradient(135deg, #f59e0b15, #fbbf2410)',
+    bgSolid: '#f59e0b15',
+  },
+  'TEC4000': { 
+    primary: '#8b5cf6',   // purple
+    secondary: '#a78bfa', 
+    bg: 'linear-gradient(135deg, #8b5cf615, #a78bfa10)',
+    bgSolid: '#8b5cf615',
+  },
+  'GLOBAL':  { 
+    primary: '#14b8a6',   // teal
+    secondary: '#5eead4', 
+    bg: 'linear-gradient(135deg, #14b8a615, #5eead410)',
+    bgSolid: '#14b8a615',
+  },
+};
+
+// Default color for unknown projects
+const DEFAULT_COLOR = { 
+  primary: '#6b7280',   // gray
+  secondary: '#9ca3af', 
+  bg: 'linear-gradient(135deg, #6b728015, #9ca3af10)',
+  bgSolid: '#6b728015',
+};
 
 /**
- * Simple string hash function
- * Produces consistent hash for same input
+ * Get consistent color palette for a project
+ * @param {string} projectName - The project code (e.g., 'MEY1000')
+ * @returns {object} Color palette { primary, secondary, bg, bgSolid }
  */
-function hashString(str) {
-  if (!str) return 0;
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32bit integer
-  }
-  return Math.abs(hash);
+export function getCustomerColor(projectName) {
+  if (!projectName) return DEFAULT_COLOR;
+  return CUSTOMER_COLORS[projectName] || DEFAULT_COLOR;
 }
 
 /**
- * Get consistent color for a customer name
- * @param {string} customerName - Customer/company name
- * @returns {string} Hex color code
+ * Get just the primary color for a project
+ * @param {string} projectName - The project code
+ * @returns {string} Primary color hex value
  */
-export function getCustomerColor(customerName) {
-  if (!customerName) return CUSTOMER_COLORS[0];
-  const hash = hashString(customerName.toLowerCase().trim());
-  return CUSTOMER_COLORS[hash % CUSTOMER_COLORS.length];
+export function getCustomerPrimaryColor(projectName) {
+  return getCustomerColor(projectName).primary;
 }
 
-/**
- * Get customer initials (first 2 chars of first word, or first char of first 2 words)
- * @param {string} customerName - Customer/company name
- * @returns {string} 2-character initials
- */
-export function getCustomerInitials(customerName) {
-  if (!customerName) return '??';
-  const words = customerName.trim().split(/\s+/);
-  if (words.length >= 2) {
-    return (words[0][0] + words[1][0]).toUpperCase();
-  }
-  return customerName.slice(0, 2).toUpperCase();
-}
-
-/**
- * Get text color (white or dark) based on background
- * @param {string} hexColor - Background color
- * @returns {string} 'white' or '#2a3441'
- */
-export function getContrastText(hexColor) {
-  // Convert hex to RGB
-  const r = parseInt(hexColor.slice(1, 3), 16);
-  const g = parseInt(hexColor.slice(3, 5), 16);
-  const b = parseInt(hexColor.slice(5, 7), 16);
-  // Calculate luminance
-  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return luminance > 0.5 ? '#2a3441' : 'white';
-}
-
-export default { getCustomerColor, getCustomerInitials, getContrastText };
+export default CUSTOMER_COLORS;
