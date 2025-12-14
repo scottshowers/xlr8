@@ -1,15 +1,18 @@
 /**
  * DashboardPage - Command Center for Implementation Consultants
  * 
+ * POLISHED: Consistent loading, error states, and navigation patterns
+ * 
  * - Hero with active project spotlight
  * - Playbook progress at a glance
  * - Smart quick actions based on context
  * - Activity feed with real insights
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useProject } from '../context/ProjectContext';
+import { LoadingSpinner, ErrorState, EmptyState, Card } from '../components/ui';
 import api from '../services/api';
 
 // Brand Colors
@@ -34,13 +37,12 @@ export default function DashboardPage() {
   const [recentJobs, setRecentJobs] = useState([]);
   const [playbookProgress, setPlaybookProgress] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, [activeProject]);
-
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async () => {
     setLoading(true);
+    setError(null);
+    
     try {
       const [docsRes, structuredRes, jobsRes] = await Promise.all([
         api.get('/status/documents'),
@@ -64,23 +66,28 @@ export default function DashboardPage() {
         try {
           const progressRes = await api.get(`/playbooks/year-end/progress/${activeProject.id}`);
           const progress = progressRes.data?.progress || {};
-          const total = 55; // Default action count
+          const total = 55;
           const complete = Object.values(progress).filter(p => 
             p.status === 'complete' || p.status === 'na'
           ).length;
           const inProgress = Object.values(progress).filter(p => p.status === 'in_progress').length;
           
           setPlaybookProgress({ total, complete, inProgress });
-        } catch (e) {
+        } catch {
           setPlaybookProgress(null);
         }
       }
     } catch (err) {
       console.error('Failed to fetch dashboard data:', err);
+      setError('Unable to load dashboard data. Please check your connection.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeProject?.id]);
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, [fetchDashboardData]);
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -99,8 +106,6 @@ export default function DashboardPage() {
       maxWidth: '1400px',
       margin: '0 auto',
     },
-    
-    // Hero Section - Compact, subtle
     hero: {
       background: '#f8f9fa',
       borderRadius: '12px',
@@ -165,8 +170,6 @@ export default function DashboardPage() {
       fontSize: '0.75rem',
       color: COLORS.silver,
     },
-
-    // Main Grid
     mainGrid: {
       display: 'grid',
       gridTemplateColumns: '1fr 380px',
@@ -182,8 +185,6 @@ export default function DashboardPage() {
       flexDirection: 'column',
       gap: '1.5rem',
     },
-
-    // Active Project Card
     projectSpotlight: {
       background: 'white',
       borderRadius: '16px',
@@ -211,68 +212,35 @@ export default function DashboardPage() {
       color: COLORS.text,
       margin: '0.5rem 0 0.25rem 0',
     },
-    spotlightCustomer: {
-      color: COLORS.textLight,
-      fontSize: '0.9rem',
-    },
-    changeProjectBtn: {
-      background: 'none',
-      border: `1px solid ${COLORS.iceFlow}`,
-      padding: '0.4rem 0.75rem',
-      borderRadius: '6px',
-      fontSize: '0.8rem',
-      color: COLORS.textLight,
-      cursor: 'pointer',
-    },
-
-    // Playbook Progress
-    progressSection: {
-      marginTop: '1.5rem',
-      padding: '1.25rem',
-      background: `linear-gradient(135deg, ${COLORS.iceFlow}40 0%, ${COLORS.clearwater}40 100%)`,
-      borderRadius: '12px',
-    },
-    progressHeader: {
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: '1rem',
-    },
-    progressTitle: {
-      fontWeight: '600',
-      color: COLORS.text,
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.5rem',
-    },
     progressPercent: {
-      fontSize: '1.25rem',
+      fontSize: '2rem',
       fontWeight: '700',
       color: COLORS.grassGreen,
     },
     progressBar: {
       height: '10px',
-      background: 'white',
+      background: '#e5e7eb',
       borderRadius: '5px',
       overflow: 'hidden',
-      marginBottom: '0.75rem',
+      marginBottom: '1rem',
     },
     progressFill: (pct) => ({
-      height: '100%',
       width: `${pct}%`,
-      background: `linear-gradient(90deg, ${COLORS.grassGreen}, #6aa84f)`,
+      height: '100%',
+      background: `linear-gradient(90deg, ${COLORS.grassGreen}, #6ba356)`,
       borderRadius: '5px',
       transition: 'width 0.5s ease',
     }),
     progressStats: {
       display: 'flex',
       gap: '1.5rem',
-      fontSize: '0.85rem',
+      marginBottom: '1rem',
     },
     progressStatItem: {
       display: 'flex',
       alignItems: 'center',
-      gap: '0.4rem',
+      gap: '0.5rem',
+      fontSize: '0.85rem',
       color: COLORS.textLight,
     },
     progressDot: (color) => ({
@@ -282,23 +250,16 @@ export default function DashboardPage() {
       background: color,
     }),
     continueBtn: {
-      marginTop: '1rem',
       width: '100%',
       padding: '0.75rem',
       background: COLORS.grassGreen,
-      color: 'white',
       border: 'none',
       borderRadius: '8px',
+      color: 'white',
       fontWeight: '600',
-      fontSize: '0.9rem',
       cursor: 'pointer',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: '0.5rem',
+      fontSize: '0.9rem',
     },
-
-    // Quick Actions Grid
     actionsCard: {
       background: 'white',
       borderRadius: '16px',
@@ -318,31 +279,78 @@ export default function DashboardPage() {
     actionsGrid: {
       display: 'grid',
       gridTemplateColumns: 'repeat(3, 1fr)',
-      gap: '1rem',
+      gap: '0.75rem',
     },
     actionCard: (bg) => ({
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
-      padding: '1.25rem 1rem',
+      gap: '0.5rem',
+      padding: '1rem',
       background: bg,
-      borderRadius: '12px',
+      borderRadius: '10px',
       textDecoration: 'none',
-      transition: 'transform 0.2s, box-shadow 0.2s',
+      transition: 'transform 0.2s ease, box-shadow 0.2s ease',
       cursor: 'pointer',
     }),
     actionIcon: {
-      fontSize: '1.75rem',
-      marginBottom: '0.5rem',
+      fontSize: '1.5rem',
     },
     actionLabel: {
-      fontSize: '0.85rem',
+      fontSize: '0.8rem',
       fontWeight: '600',
       color: COLORS.text,
       textAlign: 'center',
     },
-
-    // Recent Projects Mini List
+    activityCard: {
+      background: 'white',
+      borderRadius: '16px',
+      padding: '1.5rem',
+      boxShadow: '0 1px 3px rgba(42, 52, 65, 0.08)',
+    },
+    activityItem: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.75rem',
+      padding: '0.75rem 0',
+      borderBottom: '1px solid #f0f0f0',
+    },
+    activityIcon: (status) => ({
+      width: '32px',
+      height: '32px',
+      borderRadius: '8px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: '0.9rem',
+      background: status === 'complete' ? '#d1fae5' : status === 'failed' ? '#fee2e2' : '#fef3c7',
+      color: status === 'complete' ? '#065f46' : status === 'failed' ? '#991b1b' : '#92400e',
+    }),
+    activityContent: {
+      flex: 1,
+      minWidth: 0,
+    },
+    activityName: {
+      fontSize: '0.85rem',
+      fontWeight: '600',
+      color: COLORS.text,
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+    },
+    activityMeta: {
+      fontSize: '0.75rem',
+      color: COLORS.textLight,
+    },
+    activityStatus: (status) => ({
+      fontSize: '0.7rem',
+      fontWeight: '600',
+      padding: '0.2rem 0.5rem',
+      borderRadius: '4px',
+      background: status === 'complete' ? '#d1fae5' : status === 'failed' ? '#fee2e2' : '#fef3c7',
+      color: status === 'complete' ? '#065f46' : status === 'failed' ? '#991b1b' : '#92400e',
+      textTransform: 'capitalize',
+    }),
     projectsList: {
       background: 'white',
       borderRadius: '16px',
@@ -353,13 +361,13 @@ export default function DashboardPage() {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      padding: '0.75rem 1rem',
-      marginBottom: '0.5rem',
-      background: isActive ? `${COLORS.grassGreen}15` : '#f8fafc',
-      border: isActive ? `2px solid ${COLORS.grassGreen}` : '2px solid transparent',
-      borderRadius: '10px',
+      padding: '0.75rem',
+      borderRadius: '8px',
       cursor: 'pointer',
-      transition: 'all 0.2s',
+      background: isActive ? `${COLORS.grassGreen}10` : 'transparent',
+      border: isActive ? `1px solid ${COLORS.grassGreen}30` : '1px solid transparent',
+      marginBottom: '0.5rem',
+      transition: 'all 0.2s ease',
     }),
     projectInfo: {
       display: 'flex',
@@ -367,164 +375,95 @@ export default function DashboardPage() {
     },
     projectName: {
       fontWeight: '600',
-      fontSize: '0.9rem',
       color: COLORS.text,
+      fontSize: '0.9rem',
     },
     projectCustomer: {
-      fontSize: '0.8rem',
+      fontSize: '0.75rem',
       color: COLORS.textLight,
     },
     projectBadge: {
       fontSize: '0.7rem',
+      fontWeight: '600',
       padding: '0.2rem 0.5rem',
       borderRadius: '4px',
-      background: COLORS.skyBlue + '30',
-      color: COLORS.turkishSea,
-      fontWeight: '600',
+      background: '#f0f4f7',
+      color: COLORS.textLight,
     },
     viewAllLink: {
       display: 'block',
       textAlign: 'center',
-      marginTop: '0.75rem',
+      padding: '0.75rem',
       color: COLORS.grassGreen,
+      fontWeight: '600',
       fontSize: '0.85rem',
-      fontWeight: '600',
       textDecoration: 'none',
+      borderTop: '1px solid #f0f0f0',
+      marginTop: '0.5rem',
     },
-
-    // Activity Feed
-    activityCard: {
-      background: 'white',
-      borderRadius: '16px',
-      padding: '1.5rem',
-      boxShadow: '0 1px 3px rgba(42, 52, 65, 0.08)',
-      flex: 1,
-    },
-    activityItem: {
-      display: 'flex',
-      alignItems: 'flex-start',
-      gap: '0.75rem',
-      padding: '0.75rem 0',
-      borderBottom: '1px solid #f0f4f7',
-    },
-    activityIcon: (status) => ({
-      width: '32px',
-      height: '32px',
-      borderRadius: '8px',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      fontSize: '1rem',
-      background: status === 'complete' ? '#dcfce7' : status === 'failed' ? '#fee2e2' : '#fef3c7',
-    }),
-    activityContent: {
-      flex: 1,
-    },
-    activityName: {
-      fontSize: '0.9rem',
-      fontWeight: '500',
-      color: COLORS.text,
-    },
-    activityMeta: {
-      fontSize: '0.8rem',
-      color: COLORS.textLight,
-      marginTop: '0.15rem',
-    },
-    activityStatus: (status) => ({
-      fontSize: '0.7rem',
-      padding: '0.15rem 0.4rem',
-      borderRadius: '4px',
-      fontWeight: '600',
-      background: status === 'complete' ? '#dcfce7' : status === 'failed' ? '#fee2e2' : '#fef3c7',
-      color: status === 'complete' ? '#166534' : status === 'failed' ? '#b91c1c' : '#92400e',
-    }),
-    
-    // Empty State
     emptyState: {
       textAlign: 'center',
-      padding: '2rem 1rem',
-      color: COLORS.textLight,
+      padding: '2rem',
     },
     emptyIcon: {
       fontSize: '2.5rem',
       marginBottom: '0.75rem',
-      opacity: 0.3,
+      opacity: 0.5,
     },
     emptyText: {
+      color: COLORS.textLight,
       fontSize: '0.9rem',
       marginBottom: '1rem',
     },
     emptyAction: {
-      display: 'inline-block',
-      padding: '0.5rem 1rem',
-      background: COLORS.grassGreen,
-      color: 'white',
-      borderRadius: '6px',
-      textDecoration: 'none',
+      color: COLORS.grassGreen,
       fontWeight: '600',
-      fontSize: '0.85rem',
-    },
-
-    // No project selected state
-    noProjectHero: {
-      background: '#f8f9fa',
-      border: '1px solid #e1e5e9',
-      borderRadius: '12px',
-      padding: '2rem',
-      marginBottom: '1.5rem',
-      textAlign: 'center',
-    },
-    noProjectTitle: {
-      fontFamily: "'Sora', sans-serif",
-      fontSize: '1.25rem',
-      fontWeight: '700',
-      color: COLORS.text,
-      marginBottom: '0.5rem',
-    },
-    noProjectText: {
-      color: COLORS.textLight,
-      fontSize: '0.9rem',
-      marginBottom: '1.25rem',
-    },
-    selectProjectBtn: {
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: '0.5rem',
-      padding: '0.6rem 1.25rem',
-      background: COLORS.grassGreen,
-      color: 'white',
-      border: 'none',
-      borderRadius: '8px',
-      fontWeight: '600',
-      fontSize: '0.9rem',
-      cursor: 'pointer',
       textDecoration: 'none',
     },
   };
 
-  // No active project state
+  // Loading state
+  if (loading) {
+    return <LoadingSpinner fullPage message="Loading dashboard..." />;
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <ErrorState
+        fullPage
+        title="Unable to Load Dashboard"
+        message={error}
+        onRetry={fetchDashboardData}
+      />
+    );
+  }
+
+  // No active project - show welcome state
   if (!activeProject) {
     return (
       <div style={styles.container}>
-        <div style={styles.noProjectHero}>
-          <h1 style={styles.noProjectTitle}>{getGreeting()}! Select a project to get started</h1>
-          <p style={styles.noProjectText}>Choose a project below or create a new one.</p>
-          <Link to="/projects" style={styles.selectProjectBtn}>
-            📁 Go to Projects
-          </Link>
+        <div style={styles.hero}>
+          <div style={styles.heroContent}>
+            <div style={styles.heroIcon}>🚀</div>
+            <div style={styles.heroText}>
+              <div style={styles.greeting}>{getGreeting()}</div>
+              <h1 style={styles.heroTitle}>Welcome to XLR8</h1>
+              <p style={styles.heroSubtitle}>Select a project to get started</p>
+            </div>
+          </div>
         </div>
 
-        {/* Still show recent projects for quick access */}
         <div style={styles.mainGrid}>
           <div style={styles.leftColumn}>
-            <div style={styles.actionsCard}>
+            <Card>
               <h3 style={styles.cardTitle}>⚡ Quick Actions</h3>
               <div style={styles.actionsGrid}>
-                <Link to="/projects" style={styles.actionCard('#E8F5E9')}>
-                  <span style={styles.actionIcon}>📁</span>
+                <Link to="/projects" style={styles.actionCard('#E3F2FD')}>
+                  <span style={styles.actionIcon}>🏢</span>
                   <span style={styles.actionLabel}>Projects</span>
                 </Link>
-                <Link to="/data" style={styles.actionCard('#E3F2FD')}>
+                <Link to="/data" style={styles.actionCard('#E8F5E9')}>
                   <span style={styles.actionIcon}>📤</span>
                   <span style={styles.actionLabel}>Upload Data</span>
                 </Link>
@@ -533,18 +472,18 @@ export default function DashboardPage() {
                   <span style={styles.actionLabel}>Playbooks</span>
                 </Link>
               </div>
-            </div>
+            </Card>
           </div>
 
           <div style={styles.rightColumn}>
             <div style={styles.projectsList}>
               <h3 style={styles.cardTitle}>🏢 Your Projects</h3>
               {projects.length === 0 ? (
-                <div style={styles.emptyState}>
-                  <div style={styles.emptyIcon}>📁</div>
-                  <p style={styles.emptyText}>No projects yet</p>
-                  <Link to="/projects" style={styles.emptyAction}>Create Project</Link>
-                </div>
+                <EmptyState
+                  icon="📁"
+                  title="No projects yet"
+                  action={{ label: 'Create Project', to: '/projects' }}
+                />
               ) : (
                 <>
                   {projects.slice(0, 5).map((project) => (
@@ -574,7 +513,7 @@ export default function DashboardPage() {
 
   return (
     <div style={styles.container}>
-      {/* Hero Section - Compact */}
+      {/* Hero Section */}
       <div style={styles.hero}>
         <div style={styles.heroContent}>
           <div style={styles.heroIcon}>🏢</div>
@@ -685,10 +624,11 @@ export default function DashboardPage() {
           <div style={styles.activityCard}>
             <h3 style={styles.cardTitle}>🕐 Recent Activity</h3>
             {recentJobs.length === 0 ? (
-              <div style={styles.emptyState}>
-                <div style={styles.emptyIcon}>📭</div>
-                <p style={styles.emptyText}>No recent activity</p>
-              </div>
+              <EmptyState
+                icon="📭"
+                title="No recent activity"
+                description="Upload some files or run a playbook to see activity here."
+              />
             ) : (
               recentJobs.map((job) => (
                 <div key={job.id} style={styles.activityItem}>
@@ -738,7 +678,7 @@ export default function DashboardPage() {
             <Link to="/projects" style={styles.viewAllLink}>Manage Projects →</Link>
           </div>
 
-          {/* Tips or Help */}
+          {/* Tips */}
           <div style={{ ...styles.actionsCard, background: `linear-gradient(135deg, ${COLORS.clearwater}30 0%, ${COLORS.aquamarine}30 100%)` }}>
             <h3 style={styles.cardTitle}>💡 Pro Tips</h3>
             <div style={{ fontSize: '0.85rem', color: COLORS.textLight, lineHeight: '1.6' }}>
@@ -757,4 +697,4 @@ export default function DashboardPage() {
       </div>
     </div>
   );
-}
+              }
