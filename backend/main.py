@@ -3,6 +3,7 @@ XLR8 FastAPI Backend
 Main application entry point
 
 Updated: December 12, 2025 - Added intelligence router (Phase 3 Universal Analysis Engine)
+Updated: December 14, 2025 - Added playbook_builder router (P3.6 P3)
 """
 
 from fastapi import FastAPI
@@ -25,6 +26,14 @@ try:
 except ImportError as e:
     PLAYBOOKS_AVAILABLE = False
     logging.error(f"Playbooks router import failed: {e}")
+
+# Import playbook_builder router
+try:
+    from backend.routers import playbook_builder
+    PLAYBOOK_BUILDER_AVAILABLE = True
+except ImportError as e:
+    PLAYBOOK_BUILDER_AVAILABLE = False
+    logging.warning(f"Playbook builder router import failed: {e}")
 
 # Import vacuum router
 try:
@@ -113,6 +122,26 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
+# =============================================================================
+# STARTUP: Load playbooks from Supabase
+# =============================================================================
+
+@app.on_event("startup")
+async def startup_event():
+    """Load playbooks from Supabase on startup."""
+    try:
+        from utils.playbook_loader import load_playbooks_from_supabase
+        results = load_playbooks_from_supabase()
+        logger.info(f"✓ Loaded {sum(results.values())}/{len(results)} playbooks from Supabase")
+    except ImportError:
+        try:
+            from backend.utils.playbook_loader import load_playbooks_from_supabase
+            results = load_playbooks_from_supabase()
+            logger.info(f"✓ Loaded {sum(results.values())}/{len(results)} playbooks from Supabase")
+        except ImportError:
+            logger.warning("Playbook loader not available - using code-defined playbooks only")
+
+
 # Register core routers
 app.include_router(chat.router, prefix="/api")
 app.include_router(upload.router, prefix="/api")
@@ -133,6 +162,13 @@ if PLAYBOOKS_AVAILABLE:
     logger.info("✓ Playbooks router registered at /api/playbooks")
 else:
     logger.warning("Playbooks router not available")
+
+# Register playbook_builder router if available
+if PLAYBOOK_BUILDER_AVAILABLE:
+    app.include_router(playbook_builder.router, prefix="/api", tags=["playbook-builder"])
+    logger.info("✓ Playbook builder router registered at /api/playbook-builder")
+else:
+    logger.warning("Playbook builder router not available")
 
 # Register progress router if available (SSE streaming)
 if PROGRESS_AVAILABLE:
@@ -262,6 +298,7 @@ async def health():
             "status": True,
             "vacuum": VACUUM_AVAILABLE,
             "playbooks": PLAYBOOKS_AVAILABLE,
+            "playbook_builder": PLAYBOOK_BUILDER_AVAILABLE,
             "progress": PROGRESS_AVAILABLE,
             "security": SECURITY_AVAILABLE,
             "auth": AUTH_AVAILABLE,
@@ -287,6 +324,7 @@ async def health():
             "features": {
                 "vacuum": VACUUM_AVAILABLE,
                 "playbooks": PLAYBOOKS_AVAILABLE,
+                "playbook_builder": PLAYBOOK_BUILDER_AVAILABLE,
                 "progress": PROGRESS_AVAILABLE,
                 "security": SECURITY_AVAILABLE,
                 "admin": ADMIN_AVAILABLE,
@@ -356,6 +394,17 @@ async def debug_imports():
         results['project_intelligence'] = 'OK'
     except Exception as e:
         results['project_intelligence'] = f'ERROR: {e}'
+    
+    # Check playbook loader
+    try:
+        from utils.playbook_loader import load_playbooks_from_supabase
+        results['playbook_loader'] = 'OK'
+    except Exception as e:
+        try:
+            from backend.utils.playbook_loader import load_playbooks_from_supabase
+            results['playbook_loader'] = 'OK (alt path)'
+        except Exception as e2:
+            results['playbook_loader'] = f'ERROR: {e2}'
     
     return results
 
