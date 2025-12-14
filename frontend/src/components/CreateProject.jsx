@@ -1,6 +1,15 @@
+/**
+ * CreateProject.jsx - Project Creation Modal
+ * 
+ * POLISHED: All blue → grassGreen for consistency
+ */
+
 import { useState } from 'react';
 import { X, Plus, Loader2 } from 'lucide-react';
 import api from '../services/api';
+import { COLORS } from './ui';
+
+const BRAND = COLORS?.grassGreen || '#83b16d';
 
 export default function CreateProject({ onProjectCreated, onClose }) {
   const [name, setName] = useState('');
@@ -40,6 +49,9 @@ export default function CreateProject({ onProjectCreated, onClose }) {
     }
   };
 
+  const inputClass = `w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:border-transparent`;
+  const inputStyle = { '--tw-ring-color': BRAND };
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
       <div className="bg-white rounded-lg p-6 w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
@@ -60,7 +72,8 @@ export default function CreateProject({ onProjectCreated, onClose }) {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Meyer Company Implementation"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className={inputClass}
+              style={inputStyle}
               disabled={loading}
             />
           </div>
@@ -74,7 +87,8 @@ export default function CreateProject({ onProjectCreated, onClose }) {
               value={customer}
               onChange={(e) => setCustomer(e.target.value)}
               placeholder="Meyer Company"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className={inputClass}
+              style={inputStyle}
               disabled={loading}
             />
           </div>
@@ -86,7 +100,8 @@ export default function CreateProject({ onProjectCreated, onClose }) {
             <select
               value={projectType}
               onChange={(e) => setProjectType(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className={inputClass}
+              style={inputStyle}
               disabled={loading}
             >
               <option value="Implementation">Implementation</option>
@@ -103,7 +118,8 @@ export default function CreateProject({ onProjectCreated, onClose }) {
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className={inputClass}
+              style={inputStyle}
               disabled={loading}
             />
           </div>
@@ -117,7 +133,8 @@ export default function CreateProject({ onProjectCreated, onClose }) {
               onChange={(e) => setNotes(e.target.value)}
               placeholder="SECURE 2.0 implementation with payroll focus..."
               rows={3}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className={inputClass}
+              style={inputStyle}
               disabled={loading}
             />
           </div>
@@ -132,7 +149,8 @@ export default function CreateProject({ onProjectCreated, onClose }) {
             <button
               type="submit"
               disabled={loading}
-              className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium rounded-lg flex items-center justify-center gap-2"
+              className="flex-1 py-2 text-white font-medium rounded-lg flex items-center justify-center gap-2 disabled:opacity-50"
+              style={{ background: loading ? '#9ca3af' : BRAND }}
             >
               {loading ? (
                 <>
