@@ -101,67 +101,50 @@ class Finding:
 
 
 # =============================================================================
-# LLM INTEGRATION
+# LLM INTEGRATION - Uses LLMOrchestrator like standards_processor
 # =============================================================================
 
-def _get_llm_client():
-    """Get LLM client."""
-    try:
-        import requests
-        response = requests.get("http://localhost:11434/api/tags", timeout=2)
-        if response.status_code == 200:
-            return {"type": "ollama", "model": "mistral"}
-    except:
-        pass
-    
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if api_key:
-        return {"type": "claude", "api_key": api_key}
-    
-    return None
+_orchestrator = None
+
+def _get_orchestrator():
+    """Get or create LLMOrchestrator instance."""
+    global _orchestrator
+    if _orchestrator is None:
+        try:
+            try:
+                from utils.llm_orchestrator import LLMOrchestrator
+            except ImportError:
+                from backend.utils.llm_orchestrator import LLMOrchestrator
+            _orchestrator = LLMOrchestrator()
+            logger.info("[COMPLIANCE] LLMOrchestrator initialized")
+        except Exception as e:
+            logger.error(f"[COMPLIANCE] Could not load LLMOrchestrator: {e}")
+            return None
+    return _orchestrator
 
 
 def _call_llm(prompt: str, system_prompt: str = None) -> str:
-    """Call LLM."""
-    client = _get_llm_client()
+    """Call LLM using LLMOrchestrator."""
+    orchestrator = _get_orchestrator()
     
-    if not client:
+    if not orchestrator:
         logger.error("[COMPLIANCE] No LLM available")
         return ""
     
     try:
-        if client["type"] == "ollama":
-            import requests
-            response = requests.post(
-                "http://localhost:11434/api/generate",
-                json={
-                    "model": client["model"],
-                    "prompt": f"{system_prompt}\n\n{prompt}" if system_prompt else prompt,
-                    "stream": False
-                },
-                timeout=120
-            )
-            return response.json().get("response", "")
+        # Use Claude for compliance analysis (text extraction, not SQL)
+        result, success = orchestrator._call_claude(
+            prompt=prompt,
+            system_prompt=system_prompt or "You are a compliance analyst.",
+            operation="compliance_check"
+        )
         
-        elif client["type"] == "claude":
-            import requests
-            response = requests.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": client["api_key"],
-                    "content-type": "application/json",
-                    "anthropic-version": "2023-06-01"
-                },
-                json={
-                    "model": "claude-sonnet-4-20250514",
-                    "max_tokens": 4096,
-                    "system": system_prompt or "You are a compliance analyst.",
-                    "messages": [{"role": "user", "content": prompt}]
-                },
-                timeout=120
-            )
-            data = response.json()
-            return data.get("content", [{}])[0].get("text", "")
+        if success:
+            logger.info(f"[COMPLIANCE] LLM response: {len(result)} chars")
+            return result
+        else:
+            logger.error(f"[COMPLIANCE] LLM call failed: {result}")
+            return ""
     
     except Exception as e:
         logger.error(f"[COMPLIANCE] LLM call failed: {e}")
@@ -727,6 +710,26 @@ def run_compliance_check(
     """
     engine = get_compliance_engine()
     findings = engine.run_compliance_scan(project_id, domain=domain)
+    return [f.to_dict() for f in findings]
+
+
+def run_compliance_scan(
+    project_id: str,
+    rules: List[Dict] = None,
+    domain: str = None
+) -> List[Dict]:
+    """
+    Run a compliance scan with specific rules.
+    
+    Args:
+        project_id: The project to scan
+        rules: List of rule dicts to check
+        domain: Optional domain filter
+    
+    Returns list of findings as dicts.
+    """
+    engine = get_compliance_engine()
+    findings = engine.run_compliance_scan(project_id, rules=rules, domain=domain)
     return [f.to_dict() for f in findings]
 
 
