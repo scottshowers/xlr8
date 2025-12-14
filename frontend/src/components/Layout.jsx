@@ -3,14 +3,19 @@
  * 
  * RESTRUCTURED NAV:
  * Main: Dashboard | Projects | Data | Reference Library | Playbooks | Workspace
- * Admin: Admin | Learning | System (visually separated)
+ * Admin: Admin | Learning | System (moved to Admin Settings tab)
+ * 
+ * Includes: Upload status indicator, theme toggle
  */
 
 import React, { useLayoutEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Rocket } from 'lucide-react';
+import { Rocket, Sun, Moon } from 'lucide-react';
 import ContextBar from './ContextBar';
 import { useAuth, Permissions } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
+import { UploadStatusIndicator } from '../context/UploadContext';
+import { RestartTourButton } from '../context/OnboardingContext';
 
 const COLORS = {
   grassGreen: '#83b16d',
@@ -21,7 +26,7 @@ const COLORS = {
   textLight: '#5f6c7b',
 };
 
-// Main nav items - what consultants use daily
+// Main nav items
 const MAIN_NAV = [
   { path: '/dashboard', label: 'Dashboard', icon: '🏠', permission: null },
   { path: '/projects', label: 'Projects', icon: '🏢', permission: null },
@@ -31,14 +36,13 @@ const MAIN_NAV = [
   { path: '/workspace', label: 'Workspace', icon: '💬', permission: null },
 ];
 
-// Admin nav items - ops/configuration
+// Admin nav items - simplified (System moved to Admin tab)
 const ADMIN_NAV = [
   { path: '/admin', label: 'Admin', icon: '⚙️', permission: Permissions.OPS_CENTER },
   { path: '/learning-admin', label: 'Learning', icon: '🧠', permission: Permissions.OPS_CENTER },
-  { path: '/system', label: 'System', icon: '🖥️', permission: Permissions.OPS_CENTER },
 ];
 
-// Full Detail Green H Logo
+// Logo SVG
 const HLogoGreen = () => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 570 570" style={{ width: '100%', height: '100%' }}>
     <path fill="#698f57" d="M492.04,500v-31.35l-36.53-35.01V163.76c0-15.8,.94-16.74,16.74-16.74h19.79v-31.36l-45.66-45.66H73v31.36l36.53,36.53V406.24c0,15.8-.94,16.74-16.74,16.74h-19.79v31.35l45.66,45.66H492.04Z"/>
@@ -78,15 +82,13 @@ const HLogoGreen = () => (
 function Navigation() {
   const location = useLocation();
   const { hasPermission, user, isAdmin, logout } = useAuth();
+  const { darkMode, toggle } = useTheme();
 
   const isActive = (path) => {
-    if (path === '/dashboard') {
-      return location.pathname === '/dashboard' || location.pathname === '/';
-    }
+    if (path === '/dashboard') return location.pathname === '/dashboard' || location.pathname === '/';
     return location.pathname.startsWith(path);
   };
 
-  // Filter nav items based on permissions
   const filterItems = (items) => items.filter(item => {
     if (!item.permission) return true;
     if (isAdmin) return true;
@@ -101,26 +103,29 @@ function Navigation() {
     nav: {
       background: 'white',
       borderBottom: '1px solid #e1e8ed',
-      padding: '0 1.5rem',
+      position: 'sticky',
+      top: 0,
+      zIndex: 100,
     },
     container: {
       display: 'flex',
-      alignItems: 'center',
       justifyContent: 'space-between',
-      maxWidth: '1400px',
+      alignItems: 'center',
+      padding: '0 1.5rem',
+      maxWidth: '1800px',
       margin: '0 auto',
     },
     left: {
       display: 'flex',
       alignItems: 'center',
-      gap: '1rem',
+      gap: '1.5rem',
     },
     logo: {
       display: 'flex',
       alignItems: 'center',
       gap: '0.5rem',
-      padding: '0.5rem 0',
       textDecoration: 'none',
+      color: COLORS.text,
     },
     logoIcon: {
       width: '32px',
@@ -129,11 +134,11 @@ function Navigation() {
     logoText: {
       display: 'flex',
       alignItems: 'center',
-      gap: '0.25rem',
+      gap: '4px',
     },
     logoName: {
-      fontFamily: "'Ubuntu Mono', monospace",
-      fontWeight: '700',
+      fontFamily: "'Sora', sans-serif",
+      fontWeight: 700,
       fontSize: '1.1rem',
       color: COLORS.text,
     },
@@ -143,7 +148,7 @@ function Navigation() {
     },
     navItems: {
       display: 'flex',
-      gap: '0.125rem',
+      alignItems: 'center',
     },
     navDivider: {
       width: '1px',
@@ -162,7 +167,7 @@ function Navigation() {
       color: active ? COLORS.grassGreen : COLORS.textLight,
       borderBottom: active ? `2px solid ${COLORS.grassGreen}` : '2px solid transparent',
       marginBottom: '-1px',
-      transition: 'color 0.2s ease, border-color 0.2s ease',
+      transition: 'color 0.2s ease',
       whiteSpace: 'nowrap',
     }),
     adminLink: (active) => ({
@@ -176,9 +181,25 @@ function Navigation() {
       color: active ? COLORS.grassGreen : COLORS.textLight,
       borderBottom: active ? `2px solid ${COLORS.grassGreen}` : '2px solid transparent',
       marginBottom: '-1px',
-      transition: 'color 0.2s ease, border-color 0.2s ease',
       opacity: active ? 1 : 0.85,
     }),
+    rightSection: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '1rem',
+    },
+    themeBtn: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.4rem',
+      padding: '0.4rem 0.75rem',
+      background: '#f8fafc',
+      border: '1px solid #e1e8ed',
+      borderRadius: '6px',
+      cursor: 'pointer',
+      color: COLORS.textLight,
+      fontSize: '0.8rem',
+    },
     userMenu: {
       display: 'flex',
       alignItems: 'center',
@@ -206,32 +227,31 @@ function Navigation() {
       color: COLORS.textLight,
       fontSize: '0.8rem',
       cursor: 'pointer',
-      transition: 'all 0.2s ease',
     },
   };
+
+  // Generate data-tour attribute
+  const getTourAttr = (path) => `nav-${path.replace('/', '').replace('-', '')}`;
 
   return (
     <nav style={styles.nav}>
       <div style={styles.container}>
         <div style={styles.left}>
-          {/* Logo */}
           <Link to="/dashboard" style={styles.logo}>
-            <div style={styles.logoIcon}>
-              <HLogoGreen />
-            </div>
+            <div style={styles.logoIcon}><HLogoGreen /></div>
             <div style={styles.logoText}>
               <span style={styles.logoName}>XLR8</span>
               <Rocket style={{ width: 14, height: 14, color: COLORS.grassGreen }} />
             </div>
           </Link>
 
-          {/* Main Nav Items */}
           <div style={styles.navGroup}>
             <div style={styles.navItems}>
               {mainItems.map((item) => (
                 <Link
                   key={item.path}
                   to={item.path}
+                  data-tour={getTourAttr(item.path)}
                   style={styles.navLink(isActive(item.path))}
                 >
                   <span>{item.icon}</span>
@@ -240,7 +260,6 @@ function Navigation() {
               ))}
             </div>
 
-            {/* Divider + Admin Items */}
             {showAdminSection && (
               <>
                 <div style={styles.navDivider} />
@@ -261,33 +280,31 @@ function Navigation() {
           </div>
         </div>
 
-        {/* User menu */}
-        {user && (
-          <div style={styles.userMenu}>
-            <div style={styles.userInfo}>
-              <div style={styles.userName}>
-                {user.full_name || user.email}
+        <div style={styles.rightSection}>
+          {/* Upload Status Indicator */}
+          <UploadStatusIndicator />
+          
+          {/* Theme Toggle */}
+          <button
+            data-tour="theme-toggle"
+            onClick={toggle}
+            style={styles.themeBtn}
+          >
+            {darkMode ? <Sun size={14} /> : <Moon size={14} />}
+            {darkMode ? 'Light' : 'Dark'}
+          </button>
+
+          {/* User menu */}
+          {user && (
+            <div style={styles.userMenu}>
+              <div style={styles.userInfo}>
+                <div style={styles.userName}>{user.full_name || user.email}</div>
+                <div style={styles.userRole}>{user.role}</div>
               </div>
-              <div style={styles.userRole}>
-                {user.role}
-              </div>
+              <button onClick={logout} style={styles.logoutBtn}>Logout</button>
             </div>
-            <button
-              onClick={logout}
-              style={styles.logoutBtn}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = COLORS.grassGreen;
-                e.currentTarget.style.color = COLORS.grassGreen;
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = '#e1e8ed';
-                e.currentTarget.style.color = COLORS.textLight;
-              }}
-            >
-              Logout
-            </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </nav>
   );
@@ -295,30 +312,16 @@ function Navigation() {
 
 export default function Layout({ children }) {
   const location = useLocation();
-  
-  // useLayoutEffect fires BEFORE browser paint - more reliable for scroll
+
   useLayoutEffect(() => {
     window.scrollTo(0, 0);
-    document.documentElement.scrollTop = 0;
-    document.body.scrollTop = 0;
   }, [location.pathname]);
 
   return (
-    <div style={{ 
-      minHeight: '100vh', 
-      background: COLORS.white, 
-      display: 'flex', 
-      flexDirection: 'column' 
-    }}>
-      <ContextBar />
+    <div style={{ minHeight: '100vh', background: '#f6f5fa' }}>
       <Navigation />
-      <main style={{ 
-        flex: 1, 
-        maxWidth: '1400px', 
-        width: '100%',
-        margin: '0 auto', 
-        padding: '1rem 1.5rem',
-      }}>
+      <ContextBar />
+      <main style={{ padding: '1.5rem', maxWidth: '1800px', margin: '0 auto' }}>
         {children}
       </main>
     </div>
