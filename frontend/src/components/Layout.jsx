@@ -1,11 +1,9 @@
 /**
- * Layout - Main App Wrapper
+ * Layout.jsx - Main App Wrapper
  * 
- * POLISHED: Consistent navigation with role-based visibility
- * 
- * - Sticky context bar for project selection
- * - Horizontal nav with active state indicators
- * - Role-based menu filtering
+ * RESTRUCTURED NAV:
+ * Main: Dashboard | Projects | Data | Reference Library | Playbooks | Workspace
+ * Admin: Admin | Learning | System (visually separated)
  */
 
 import React, { useLayoutEffect } from 'react';
@@ -23,16 +21,21 @@ const COLORS = {
   textLight: '#5f6c7b',
 };
 
-// Nav items with required permissions
-const NAV_ITEMS = [
+// Main nav items - what consultants use daily
+const MAIN_NAV = [
   { path: '/dashboard', label: 'Dashboard', icon: '🏠', permission: null },
   { path: '/projects', label: 'Projects', icon: '🏢', permission: null },
   { path: '/data', label: 'Data', icon: '📁', permission: Permissions.UPLOAD },
-  { path: '/data-model', label: 'Data Model', icon: '🔗', permission: Permissions.DATA_MODEL },
+  { path: '/reference-library', label: 'Reference Library', icon: '📚', permission: Permissions.PLAYBOOKS },
   { path: '/playbooks', label: 'Playbooks', icon: '📋', permission: Permissions.PLAYBOOKS },
-  { path: '/standards', label: 'Standards', icon: '📜', permission: Permissions.PLAYBOOKS },
+  { path: '/workspace', label: 'Workspace', icon: '💬', permission: null },
+];
+
+// Admin nav items - ops/configuration
+const ADMIN_NAV = [
   { path: '/admin', label: 'Admin', icon: '⚙️', permission: Permissions.OPS_CENTER },
   { path: '/learning-admin', label: 'Learning', icon: '🧠', permission: Permissions.OPS_CENTER },
+  { path: '/system', label: 'System', icon: '🖥️', permission: Permissions.OPS_CENTER },
 ];
 
 // Full Detail Green H Logo
@@ -78,17 +81,21 @@ function Navigation() {
 
   const isActive = (path) => {
     if (path === '/dashboard') {
-      return location.pathname === '/dashboard';
+      return location.pathname === '/dashboard' || location.pathname === '/';
     }
     return location.pathname.startsWith(path);
   };
 
   // Filter nav items based on permissions
-  const visibleItems = NAV_ITEMS.filter(item => {
+  const filterItems = (items) => items.filter(item => {
     if (!item.permission) return true;
     if (isAdmin) return true;
     return hasPermission(item.permission);
   });
+
+  const mainItems = filterItems(MAIN_NAV);
+  const adminItems = filterItems(ADMIN_NAV);
+  const showAdminSection = adminItems.length > 0;
 
   const styles = {
     nav: {
@@ -106,7 +113,7 @@ function Navigation() {
     left: {
       display: 'flex',
       alignItems: 'center',
-      gap: '1.5rem',
+      gap: '1rem',
     },
     logo: {
       display: 'flex',
@@ -130,22 +137,47 @@ function Navigation() {
       fontSize: '1.1rem',
       color: COLORS.text,
     },
+    navGroup: {
+      display: 'flex',
+      alignItems: 'center',
+    },
     navItems: {
       display: 'flex',
-      gap: '0.25rem',
+      gap: '0.125rem',
+    },
+    navDivider: {
+      width: '1px',
+      height: '24px',
+      background: '#e1e8ed',
+      margin: '0 0.75rem',
     },
     navLink: (active) => ({
       display: 'flex',
       alignItems: 'center',
-      gap: '0.4rem',
-      padding: '0.875rem 1rem',
+      gap: '0.35rem',
+      padding: '0.875rem 0.75rem',
       textDecoration: 'none',
-      fontSize: '0.875rem',
+      fontSize: '0.85rem',
       fontWeight: '600',
       color: active ? COLORS.grassGreen : COLORS.textLight,
       borderBottom: active ? `2px solid ${COLORS.grassGreen}` : '2px solid transparent',
       marginBottom: '-1px',
       transition: 'color 0.2s ease, border-color 0.2s ease',
+      whiteSpace: 'nowrap',
+    }),
+    adminLink: (active) => ({
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.35rem',
+      padding: '0.875rem 0.75rem',
+      textDecoration: 'none',
+      fontSize: '0.8rem',
+      fontWeight: '500',
+      color: active ? COLORS.grassGreen : COLORS.textLight,
+      borderBottom: active ? `2px solid ${COLORS.grassGreen}` : '2px solid transparent',
+      marginBottom: '-1px',
+      transition: 'color 0.2s ease, border-color 0.2s ease',
+      opacity: active ? 1 : 0.85,
     }),
     userMenu: {
       display: 'flex',
@@ -183,7 +215,7 @@ function Navigation() {
       <div style={styles.container}>
         <div style={styles.left}>
           {/* Logo */}
-          <Link to="/" style={styles.logo}>
+          <Link to="/dashboard" style={styles.logo}>
             <div style={styles.logoIcon}>
               <HLogoGreen />
             </div>
@@ -193,18 +225,39 @@ function Navigation() {
             </div>
           </Link>
 
-          {/* Nav Items */}
-          <div style={styles.navItems}>
-            {visibleItems.map((item) => (
-              <Link
-                key={item.path}
-                to={item.path}
-                style={styles.navLink(isActive(item.path))}
-              >
-                <span>{item.icon}</span>
-                {item.label}
-              </Link>
-            ))}
+          {/* Main Nav Items */}
+          <div style={styles.navGroup}>
+            <div style={styles.navItems}>
+              {mainItems.map((item) => (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  style={styles.navLink(isActive(item.path))}
+                >
+                  <span>{item.icon}</span>
+                  {item.label}
+                </Link>
+              ))}
+            </div>
+
+            {/* Divider + Admin Items */}
+            {showAdminSection && (
+              <>
+                <div style={styles.navDivider} />
+                <div style={styles.navItems}>
+                  {adminItems.map((item) => (
+                    <Link
+                      key={item.path}
+                      to={item.path}
+                      style={styles.adminLink(isActive(item.path))}
+                    >
+                      <span>{item.icon}</span>
+                      {item.label}
+                    </Link>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </div>
 
