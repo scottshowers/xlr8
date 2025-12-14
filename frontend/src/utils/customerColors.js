@@ -54,7 +54,8 @@ const DEFAULT_COLOR = {
  */
 export function getCustomerColor(projectName) {
   if (!projectName) return DEFAULT_COLOR;
-  return CUSTOMER_COLORS[projectName] || DEFAULT_COLOR;
+  const key = String(projectName);
+  return CUSTOMER_COLORS[key] || DEFAULT_COLOR;
 }
 
 /**
@@ -74,19 +75,21 @@ export function getCustomerPrimaryColor(projectName) {
 export function getCustomerInitials(name) {
   if (!name) return '??';
   
+  const str = String(name);
+  
   // If it's a project code like MEY1000, take first 2 chars
-  if (/^[A-Z]{3}\d+$/.test(name)) {
-    return name.slice(0, 2);
+  if (/^[A-Z]{3}\d+$/.test(str)) {
+    return str.slice(0, 2);
   }
   
   // Otherwise split by space and take first letter of each word
-  const words = name.trim().split(/\s+/);
+  const words = str.trim().split(/\s+/);
   if (words.length >= 2) {
     return (words[0][0] + words[1][0]).toUpperCase();
   }
   
   // Single word - take first 2 chars
-  return name.slice(0, 2).toUpperCase();
+  return str.slice(0, 2).toUpperCase();
 }
 
 /**
@@ -95,15 +98,28 @@ export function getCustomerInitials(name) {
  * @returns {string} '#ffffff' or '#000000'
  */
 export function getContrastText(hexColor) {
-  if (!hexColor) return '#000000';
+  // Handle null, undefined, objects, etc.
+  if (!hexColor || typeof hexColor !== 'string') {
+    return '#ffffff';
+  }
   
   // Remove # if present
   const hex = hexColor.replace('#', '');
   
+  // Validate hex format
+  if (!/^[0-9A-Fa-f]{6}$/.test(hex) && !/^[0-9A-Fa-f]{3}$/.test(hex)) {
+    return '#ffffff';
+  }
+  
+  // Expand 3-char hex to 6-char
+  const fullHex = hex.length === 3 
+    ? hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2]
+    : hex;
+  
   // Parse RGB values
-  const r = parseInt(hex.substr(0, 2), 16);
-  const g = parseInt(hex.substr(2, 2), 16);
-  const b = parseInt(hex.substr(4, 2), 16);
+  const r = parseInt(fullHex.substr(0, 2), 16);
+  const g = parseInt(fullHex.substr(2, 2), 16);
+  const b = parseInt(fullHex.substr(4, 2), 16);
   
   // Calculate relative luminance
   const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
