@@ -112,8 +112,8 @@ export default function AdminDashboard() {
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-purple-100 rounded-lg">
-                <Shield className="text-purple-600" size={24} />
+              <div className="p-2 bg-green-100 rounded-lg">
+                <Shield className="text-green-600" size={24} />
               </div>
               <div>
                 <h1 className="text-xl font-bold text-gray-900">Learning Admin</h1>
@@ -131,7 +131,7 @@ export default function AdminDashboard() {
               </button>
               <button
                 onClick={() => exportData('all')}
-                className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
               >
                 <Download size={18} />
                 Export All
@@ -150,7 +150,7 @@ export default function AdminDashboard() {
               onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-all ${
                 activeTab === tab.id
-                  ? 'bg-purple-600 text-white'
+                  ? 'bg-green-600 text-white'
                   : 'text-gray-600 hover:bg-gray-100'
               }`}
             >
@@ -163,7 +163,7 @@ export default function AdminDashboard() {
         {/* Content */}
         {loading ? (
           <div className="flex items-center justify-center py-20">
-            <RefreshCw className="animate-spin text-purple-600" size={32} />
+            <RefreshCw className="animate-spin text-green-600" size={32} />
           </div>
         ) : (
           <>
@@ -231,7 +231,7 @@ function OverviewTab({ stats, learnedQueries, feedback, preferences }) {
       label: 'Learned Patterns', 
       value: stats?.learned_queries || 0, 
       icon: Brain, 
-      color: 'purple',
+      color: 'green',
       description: 'Query patterns that can be reused'
     },
     { 
@@ -245,7 +245,7 @@ function OverviewTab({ stats, learnedQueries, feedback, preferences }) {
       label: 'User Preferences', 
       value: stats?.user_preferences || 0, 
       icon: Users, 
-      color: 'green',
+      color: 'teal',
       description: 'Learned user choices'
     },
     { 
@@ -258,9 +258,9 @@ function OverviewTab({ stats, learnedQueries, feedback, preferences }) {
   ]
 
   const colors = {
-    purple: 'bg-purple-100 text-purple-600',
-    blue: 'bg-blue-100 text-blue-600',
     green: 'bg-green-100 text-green-600',
+    blue: 'bg-blue-100 text-blue-600',
+    teal: 'bg-teal-100 text-teal-600',
     amber: 'bg-amber-100 text-amber-600',
   }
 
@@ -323,14 +323,14 @@ function OverviewTab({ stats, learnedQueries, feedback, preferences }) {
 
         <div className="bg-white rounded-xl p-6 border shadow-sm">
           <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
-            <Brain className="text-purple-500" size={20} />
+            <Brain className="text-green-500" size={20} />
             Learning Progress
           </h3>
           
           <div className="space-y-3">
             <div className="flex items-center justify-between text-sm">
               <span className="text-gray-600">Queries that skip clarification</span>
-              <span className="font-medium text-purple-600">
+              <span className="font-medium text-green-600">
                 {preferences.filter(p => p.confidence >= 0.7).length} ready
               </span>
             </div>
@@ -360,8 +360,8 @@ function OverviewTab({ stats, learnedQueries, feedback, preferences }) {
           {learnedQueries.slice(0, 5).map((query, i) => (
             <div key={i} className="flex items-center justify-between py-2 border-b last:border-0">
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-purple-50 rounded-lg">
-                  <Brain className="text-purple-500" size={16} />
+                <div className="p-2 bg-green-50 rounded-lg">
+                  <Brain className="text-green-500" size={16} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-900 truncate max-w-md">
@@ -425,7 +425,7 @@ function QueriesTab({ queries, onDelete, onExport }) {
         </div>
         <button
           onClick={onExport}
-          className="flex items-center gap-2 px-4 py-2 text-purple-600 hover:bg-purple-50 rounded-lg"
+          className="flex items-center gap-2 px-4 py-2 text-green-600 hover:bg-green-50 rounded-lg"
         >
           <Download size={18} />
           Export
@@ -463,7 +463,7 @@ function QueriesTab({ queries, onDelete, onExport }) {
                   )}
                 </td>
                 <td className="px-4 py-3">
-                  <span className="px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full">
+                  <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full">
                     {query.semantic_domain || 'general'}
                   </span>
                 </td>
@@ -525,7 +525,7 @@ function FeedbackTab({ feedback, onDelete }) {
               filter === f
                 ? f === 'positive' ? 'bg-green-100 text-green-700' :
                   f === 'negative' ? 'bg-red-100 text-red-700' :
-                  'bg-purple-100 text-purple-700'
+                  'bg-green-100 text-green-700'
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
             }`}
           >
@@ -560,7 +560,7 @@ function FeedbackTab({ feedback, onDelete }) {
                       {item.was_intelligent_mode && (
                         <>
                           <span>•</span>
-                          <span className="text-purple-600">🧠 Intelligent</span>
+                          <span className="text-green-600">🧠 Intelligent</span>
                         </>
                       )}
                     </div>
@@ -687,7 +687,7 @@ function ClarificationsTab({ patterns, onDelete }) {
                     </div>
                     <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                       <div 
-                        className="h-full bg-purple-500 rounded-full"
+                        className="h-full bg-green-500 rounded-full"
                         style={{ width: `${opt.choice_rate * 100}%` }}
                       />
                     </div>
@@ -773,7 +773,7 @@ function MappingsTab({ mappings, onDelete, onRefresh }) {
                   </code>
                 </td>
                 <td className="px-4 py-3">
-                  <span className="px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full">
+                  <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full">
                     {mapping.semantic_type || 'unknown'}
                   </span>
                 </td>
