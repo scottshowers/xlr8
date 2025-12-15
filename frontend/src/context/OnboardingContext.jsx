@@ -3,8 +3,9 @@
  * 
  * INSTALLATION: npm install react-joyride
  * 
- * Tours auto-trigger on first visit to each page.
+ * Tours auto-trigger on first visit to each page (when enabled).
  * Completion tracked in localStorage.
+ * Master toggle to enable/disable all tours.
  */
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
@@ -80,8 +81,8 @@ export const dataTour = [
 export const vacuumTour = [
   step('vacuum-header', '✨ Vacuum Extract', 'Deep extraction for complex documents.'),
   step('vacuum-upload', '📤 Upload Area', 'Drop your file here for analysis.'),
-  step('vacuum-preview', '👁️ Data Preview', 'See extracted tables and columns.'),
-  step('vacuum-mapping', '🏷️ Column Mapping', 'Map columns to semantic types.'),
+  step('vacuum-preview', '👁 Data Preview', 'See extracted tables and columns.'),
+  step('vacuum-mapping', '🏷 Column Mapping', 'Map columns to semantic types.'),
   step('vacuum-confirm', '✅ Confirm & Load', 'Review and load the data.'),
 ];
 
@@ -153,6 +154,19 @@ export function OnboardingProvider({ children }) {
   const [currentSteps, setCurrentSteps] = useState([]);
   const [stepIndex, setStepIndex] = useState(0);
 
+  // Master toggle for tours (persisted)
+  const [tourEnabled, setTourEnabledState] = useState(() => {
+    try {
+      const saved = localStorage.getItem('xlr8-tour-enabled');
+      return saved !== null ? JSON.parse(saved) : false; // Default OFF
+    } catch { return false; }
+  });
+
+  const setTourEnabled = useCallback((enabled) => {
+    setTourEnabledState(enabled);
+    localStorage.setItem('xlr8-tour-enabled', JSON.stringify(enabled));
+  }, []);
+
   const [completedTours, setCompletedTours] = useState(() => {
     try {
       const saved = localStorage.getItem('xlr8-completed-tours');
@@ -164,7 +178,10 @@ export function OnboardingProvider({ children }) {
     localStorage.setItem('xlr8-completed-tours', JSON.stringify(completedTours));
   }, [completedTours]);
 
+  // Auto-trigger tours only when enabled
   useEffect(() => {
+    if (!tourEnabled) return; // Don't auto-trigger if disabled
+    
     const path = location.pathname;
     const tourConfig = tourRegistry[path];
     if (tourConfig && tourConfig.steps.length > 0 && !completedTours[tourConfig.id]) {
@@ -175,7 +192,7 @@ export function OnboardingProvider({ children }) {
       }, 600);
       return () => clearTimeout(timer);
     }
-  }, [location.pathname, completedTours]);
+  }, [location.pathname, completedTours, tourEnabled]);
 
   const handleJoyrideCallback = useCallback((data) => {
     const { status, index, type } = data;
@@ -217,6 +234,8 @@ export function OnboardingProvider({ children }) {
 
   const value = {
     runTour,
+    tourEnabled,
+    setTourEnabled,
     completedTours,
     startTour,
     startCurrentPageTour,
