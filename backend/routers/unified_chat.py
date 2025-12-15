@@ -2208,8 +2208,7 @@ async def export_to_excel(request: ExportRequest):
         project = request.project
         
         # Get tables for project
-        schema = handler.get_schema_for_project(project) if project else {'tables': []}
-        tables_list = schema.get('tables', [])
+        tables_list = handler.get_tables(project) if project else []
         
         if not tables_list:
             raise HTTPException(404, "No tables found for this project")
@@ -2261,7 +2260,8 @@ async def export_to_excel(request: ExportRequest):
             
             try:
                 sql = f'SELECT * FROM "{table_name}"'
-                rows, cols = handler.execute_query(sql)
+                rows = handler.query(sql)
+                cols = list(rows[0].keys()) if rows else []
                 
                 if not rows:
                     continue
@@ -2357,19 +2357,19 @@ async def get_project_data_summary(project: str):
     
     try:
         handler = get_structured_handler()
-        schema = handler.get_schema_for_project(project)
+        tables = handler.get_tables(project)
         
         return {
             "project": project,
-            "tables": len(schema.get('tables', [])),
+            "tables": len(tables),
             "summary": [
                 {
                     "file": t.get('file'),
-                    "sheet": t.get('sheet'),
+                    "sheet": t.get('sheet_name'),
                     "rows": t.get('row_count'),
                     "columns": len(t.get('columns', []))
                 }
-                for t in schema.get('tables', [])
+                for t in tables
             ]
         }
     except Exception as e:
