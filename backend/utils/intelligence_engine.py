@@ -1373,14 +1373,29 @@ class IntelligenceEngine:
         """
         Select only tables relevant to the question.
         This keeps the SQL prompt small and focused.
+        
+        IMPORTANT: Always includes tables containing filter_candidate columns
+        so the LLM can build proper JOINs for compound queries.
         """
         if not tables:
             return []
         
+        # First, identify tables that contain filter_candidate columns
+        # These MUST be included for compound queries to work
+        filter_candidate_tables = set()
+        if self.filter_candidates:
+            for category, candidates in self.filter_candidates.items():
+                for cand in candidates:
+                    table_name = cand.get('table_name', cand.get('table', ''))
+                    if table_name:
+                        filter_candidate_tables.add(table_name.lower())
+        
+        logger.info(f"[SQL-GEN] Filter candidate tables: {filter_candidate_tables}")
+        
         # Priority keywords for table selection
         table_keywords = {
-            'personal': ['employee', 'employees', 'person', 'people', 'who', 'name', 'ssn', 'birth', 'hire'],
-            'company': ['company', 'organization', 'org', 'entity'],
+            'personal': ['employee', 'employees', 'person', 'people', 'who', 'name', 'ssn', 'birth', 'hire', 'termination', 'termed', 'terminated', 'active'],
+            'company': ['company', 'organization', 'org', 'entity', 'status'],
             'job': ['job', 'position', 'title', 'department', 'dept'],
             'earnings': ['earn', 'earning', 'pay', 'salary', 'wage', 'compensation', 'rate'],
             'deductions': ['deduction', 'benefit', '401k', 'insurance', 'health'],
@@ -1396,6 +1411,11 @@ class IntelligenceEngine:
             short_name = table_name.split('__')[-1] if '__' in table_name else table_name
             
             score = 0
+            
+            # CRITICAL: Boost tables that have filter_candidate columns
+            if table_name in filter_candidate_tables:
+                score += 50  # Very high score to ensure inclusion
+                logger.info(f"[SQL-GEN] Boosting table {short_name} (has filter candidates)")
             
             # Check if table name matches any keyword patterns
             for pattern, keywords in table_keywords.items():
@@ -1422,8 +1442,8 @@ class IntelligenceEngine:
         # Sort by score descending
         scored_tables.sort(key=lambda x: -x[0])
         
-        # Take top 3 tables max (keeps prompt small)
-        relevant = [t for score, t in scored_tables[:3] if score > 0]
+        # Take top 5 tables (increased from 3 to handle compound queries)
+        relevant = [t for score, t in scored_tables[:5] if score > 0]
         
         # If no relevant tables found, just use first table
         if not relevant:
@@ -1549,10 +1569,24 @@ class IntelligenceEngine:
                     for cand in candidates:
                         col_name = cand.get('column_name', cand.get('column', ''))
                         col_type = cand.get('inferred_type', cand.get('type', ''))
-                        if col_type == 'date' or 'termination' in col_name.lower() or 'term_date' in col_name.lower():
-                            date_cols.append(col_name)
+                        table_name = cand.get('table_name', cand.get('table', ''))
+                        short_table = table_name.split('__')[-1] if '__' in table_name else table_name
+                        col_lower = col_name.lower()
+                        logger.warning(f"[SQL-GEN] Status candidate column: {col_name} in {short_table} (type={col_type})")
+                        # Check if this is a termination date column
+                        is_term_date = (
+                            col_type == 'date' or
+                            'termination' in col_lower or 
+                            'term_date' in col_lower or
+                            'term_dt' in col_lower or
+                            'termdate' in col_lower or
+                            col_lower == 'term_date' or
+                            col_lower.endswith('_term_date')
+                        )
+                        if is_term_date:
+                            date_cols.append(f"{short_table}.{col_name}")
                         else:
-                            code_cols.append(col_name)
+                            code_cols.append(f"{short_table}.{col_name}")
                     if date_cols:
                         semantic_hints.append(f"- For termination dates/timing: use {date_cols[0]}")
                     if code_cols:
@@ -1579,6 +1613,8 @@ class IntelligenceEngine:
         if semantic_hints:
             semantic_text = "\n\nCOLUMN USAGE:\n" + "\n".join(semantic_hints)
             logger.warning(f"[SQL-GEN] Semantic hints: {len(semantic_hints)} column mappings added")
+            for hint in semantic_hints:
+                logger.warning(f"[SQL-GEN] Hint: {hint}")
         
         # Simple hint for COUNT queries (no filter - we inject it after)
         query_hint = ""
@@ -1592,10 +1628,11 @@ class IntelligenceEngine:
 QUESTION: {question}
 
 RULES:
-1. Use ONLY columns from schema above
-2. ILIKE for text matching
-3. Quote table names with special chars
-4. Use COLUMN USAGE hints for correct column selection
+1. Use ONLY columns listed in SCHEMA above - NEVER invent column names
+2. DO NOT add WHERE clauses for status/active/terminated filtering - this is handled automatically
+3. Use COLUMN USAGE hints to pick the correct columns
+4. ILIKE for text matching
+5. Quote table names with special chars
 
 SQL:"""
         
