@@ -319,8 +319,8 @@ export default function Layout({ children }) {
 
   return (
     <div style={{ minHeight: '100vh', background: '#f6f5fa' }}>
-      <Navigation />
       <ContextBar />
+      <Navigation />
       <main style={{ padding: '1.5rem', maxWidth: '1800px', margin: '0 auto' }}>
         {children}
       </main>
