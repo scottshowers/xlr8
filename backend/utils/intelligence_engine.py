@@ -1,10 +1,13 @@
 """
-XLR8 INTELLIGENCE ENGINE v5.3
+XLR8 INTELLIGENCE ENGINE v5.4
 ==============================
 
 Deploy to: backend/utils/intelligence_engine.py
 
 UPDATES:
+- v5.4: Location column validation (rejects routing/bank columns)
+        Schema fallback for state/province columns
+        SQL fix uses common location column patterns (not just filter_candidates)
 - v5.3: Added US state name→code fallback (universal knowledge)
         Data-driven approach first, state mapping as fallback
 - v5.2: FULLY DATA-DRIVEN filters
@@ -37,7 +40,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.3 STATE FALLBACK ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.4 LOCATION COLUMN VALIDATION ======")
 
 
 # =============================================================================
@@ -1108,11 +1111,55 @@ class IntelligenceEngine:
         location_filter = self.confirmed_facts.get('location')
         if location_filter and location_filter != 'all':
             location_candidates = self.filter_candidates.get('location', [])
-            if location_candidates:
-                col_name = location_candidates[0].get('column')
-                if col_name:
-                    filters.append(f"{col_name} = '{location_filter}'")
-                    logger.warning(f"[SQL-GEN] Location filter: {col_name} = '{location_filter}'")
+            
+            # Find a VALID location column (reject routing numbers, bank fields, etc.)
+            # This is a safety net for cached profiles from before the profiler fix
+            location_positive = ['state', 'province', 'stateprovince', 'location', 'region', 'city', 'county', 'country', 'site', 'geo']
+            location_negative = ['routing', 'bank', 'account', 'aba', 'swift', 'transit', 'branch_number', 'bsb']
+            
+            valid_col = None
+            valid_table = None
+            
+            # First try filter_candidates
+            for candidate in location_candidates:
+                col_name = candidate.get('column', '')
+                col_lower = col_name.lower()
+                
+                # Skip if column name contains invalid patterns
+                if any(neg in col_lower for neg in location_negative):
+                    logger.warning(f"[SQL-GEN] Skipping invalid location column: {col_name}")
+                    continue
+                
+                # Prefer columns with location-related names
+                if any(pos in col_lower for pos in location_positive):
+                    valid_col = col_name
+                    valid_table = candidate.get('table')
+                    break
+                
+                # Accept as fallback if no obvious red flags
+                if not valid_col:
+                    valid_col = col_name
+                    valid_table = candidate.get('table')
+            
+            # Fallback: search schema for state/province columns if no valid candidate
+            if not valid_col and self.schema:
+                for table_name, table_info in self.schema.items():
+                    columns = table_info.get('columns', [])
+                    for col in columns:
+                        col_lower = col.lower() if isinstance(col, str) else str(col).lower()
+                        if any(pos in col_lower for pos in ['state', 'province', 'stateprovince']):
+                            valid_col = col
+                            valid_table = table_name
+                            logger.warning(f"[SQL-GEN] Found location column from schema: {table_name}.{col}")
+                            break
+                    if valid_col:
+                        break
+            
+            if valid_col:
+                filters.append(f"{valid_col} = '{location_filter}'")
+                logger.warning(f"[SQL-GEN] Location filter: {valid_col} = '{location_filter}'")
+            else:
+                logger.warning(f"[SQL-GEN] No valid location column found, skipping location filter")
         
         # PAY TYPE FILTER
         pay_type_filter = self.confirmed_facts.get('pay_type')
@@ -1171,42 +1218,46 @@ class IntelligenceEngine:
         if not location_filter or location_filter == 'all':
             return sql
         
-        # Get location column name from filter_candidates
-        location_candidates = self.filter_candidates.get('location', [])
-        if not location_candidates:
-            return sql
-        
-        col_name = location_candidates[0].get('column', '')
-        if not col_name:
-            return sql
+        # Common location column patterns to strip (LLM might use any of these)
+        location_col_patterns = [
+            'stateprovince', 'state_province', 'state', 'province', 
+            'work_state', 'home_state', 'location', 'work_location'
+        ]
         
         modified = sql
         
-        # Strip patterns like: column ILIKE '%anything%'
-        # This removes the LLM's location filter so our injection can add the correct one
-        
-        # Pattern 0: WHERE col ILIKE '...' AND ... → WHERE ...
-        pattern0 = rf"WHERE\s+{re.escape(col_name)}\s+ILIKE\s+'%[^']+%'\s*AND\s*"
-        modified = re.sub(pattern0, 'WHERE ', modified, flags=re.IGNORECASE)
-        
-        # Pattern 1: ... AND col ILIKE '...' AND ... → ... AND ...
-        pattern1 = rf"{re.escape(col_name)}\s+ILIKE\s+'%[^']+%'\s*AND\s*"
-        modified = re.sub(pattern1, '', modified, flags=re.IGNORECASE)
-        
-        # Pattern 2: ... AND col ILIKE '...' (at end) → ...
-        pattern2 = rf"\s*AND\s+{re.escape(col_name)}\s+ILIKE\s+'%[^']+%'"
-        modified = re.sub(pattern2, '', modified, flags=re.IGNORECASE)
-        
-        # Pattern 3: WHERE col = 'StateName' AND ... → WHERE ...
-        pattern3 = rf"WHERE\s+{re.escape(col_name)}\s*=\s*'[A-Za-z\s]+'\s*AND\s*"
-        modified = re.sub(pattern3, 'WHERE ', modified, flags=re.IGNORECASE)
-        
-        # Pattern 4: ... AND col = 'StateName' (at end) → ...  
-        pattern4 = rf"\s*AND\s+{re.escape(col_name)}\s*=\s*'[A-Za-z\s]+'"
-        modified = re.sub(pattern4, '', modified, flags=re.IGNORECASE)
+        for col_name in location_col_patterns:
+            # Strip patterns like: column ILIKE '%anything%'
+            # This removes the LLM's location filter so our injection can add the correct one
+            
+            # Pattern 0: WHERE col ILIKE '...' AND ... → WHERE ...
+            pattern0 = rf"WHERE\s+{re.escape(col_name)}\s+ILIKE\s+'%?[^']+%?'\s*AND\s*"
+            modified = re.sub(pattern0, 'WHERE ', modified, flags=re.IGNORECASE)
+            
+            # Pattern 1: ... AND col ILIKE '...' AND ... → ... AND ...
+            pattern1 = rf"{re.escape(col_name)}\s+ILIKE\s+'%?[^']+%?'\s*AND\s*"
+            modified = re.sub(pattern1, '', modified, flags=re.IGNORECASE)
+            
+            # Pattern 2: ... AND col ILIKE '...' (at end) → ...
+            pattern2 = rf"\s*AND\s+{re.escape(col_name)}\s+ILIKE\s+'%?[^']+%?'"
+            modified = re.sub(pattern2, '', modified, flags=re.IGNORECASE)
+            
+            # Pattern 3: WHERE col = 'StateName' AND ... → WHERE ...
+            pattern3 = rf"WHERE\s+{re.escape(col_name)}\s*=\s*'[A-Za-z\s]+'\s*AND\s*"
+            modified = re.sub(pattern3, 'WHERE ', modified, flags=re.IGNORECASE)
+            
+            # Pattern 4: ... AND col = 'StateName' (at end) → ...  
+            pattern4 = rf"\s*AND\s+{re.escape(col_name)}\s*=\s*'[A-Za-z\s]+'"
+            modified = re.sub(pattern4, '', modified, flags=re.IGNORECASE)
+            
+            # Pattern 5: WHERE col ILIKE '...' (standalone, no AND) → WHERE 1=1
+            pattern5 = rf"WHERE\s+{re.escape(col_name)}\s+ILIKE\s+'%?[^']+%?'\s*$"
+            modified = re.sub(pattern5, 'WHERE 1=1 ', modified, flags=re.IGNORECASE)
         
         if modified != sql:
             logger.warning(f"[SQL-FIX] Stripped LLM location filter, will use confirmed_facts['location']={location_filter}")
+        
+        if modified != sql:
             logger.warning(f"[SQL-FIX] Before: {sql[:150]}")
             logger.warning(f"[SQL-FIX] After: {modified[:150]}")
         
