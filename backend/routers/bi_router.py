@@ -243,8 +243,8 @@ def apply_transforms(data: List[Dict], columns: List[str], transforms: List[Tran
     lookups = {}
     if handler and project:
         try:
-            # Get lookup tables from intelligence
-            schema = handler.get_schema_for_project(project)
+            # Get lookup tables from schema
+            schema = _build_bi_schema(handler, project) if handler else {'tables': []}
             for table in schema.get('tables', []):
                 table_name = table.get('table_name', '').lower()
                 if any(p in table_name for p in ['lookup', 'code', 'ref', '_lkp']):
@@ -255,7 +255,7 @@ def apply_transforms(data: List[Dict], columns: List[str], transforms: List[Tran
                         desc_col = cols[1] if len(cols) > 1 else cols[0]
                         try:
                             sql = f'SELECT "{code_col}", "{desc_col}" FROM "{table.get("table_name")}"'
-                            rows, _ = handler.execute_query(sql)
+                            rows = handler.query(sql)
                             lookups[table_name] = {str(r[code_col]): str(r[desc_col]) for r in rows}
                         except:
                             pass
@@ -395,6 +395,88 @@ def apply_transforms(data: List[Dict], columns: List[str], transforms: List[Tran
 
 
 # =============================================================================
+# SCHEMA HELPER (mirrors unified_chat pattern)
+# =============================================================================
+
+def _build_bi_schema(handler, project: str) -> Dict[str, Any]:
+    """
+    Get schema for BI queries - compatible with IntelligenceEngine.
+    Returns {'tables': [...], 'filter_candidates': {...}}
+    """
+    tables = []
+    filter_candidates = {}
+    
+    if not handler or not handler.conn:
+        return {'tables': [], 'filter_candidates': {}}
+    
+    try:
+        # Get all tables from DuckDB
+        all_tables = handler.conn.execute("SHOW TABLES").fetchall()
+        
+        # Build project prefix for filtering
+        project_clean = (project or '').strip()
+        project_prefixes = [
+            project_clean.lower(),
+            project_clean.lower().replace(' ', '_'),
+            project_clean.lower().replace('-', '_'),
+        ]
+        
+        for (table_name,) in all_tables:
+            if table_name.startswith('_'):
+                continue
+            
+            table_lower = table_name.lower()
+            matches_project = any(
+                table_lower.startswith(prefix.lower()) 
+                for prefix in project_prefixes if prefix
+            )
+            
+            if not matches_project and project:
+                continue
+            
+            try:
+                # Get columns
+                columns = []
+                try:
+                    col_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
+                    columns = [row[1] for row in col_result]
+                except:
+                    result = handler.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 0')
+                    columns = [desc[0] for desc in result.description]
+                
+                if not columns:
+                    continue
+                
+                # Get row count
+                try:
+                    count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
+                    row_count = count_result[0] if count_result else 0
+                except:
+                    row_count = 0
+                
+                tables.append({
+                    'table_name': table_name,
+                    'project': project,
+                    'columns': columns,
+                    'row_count': row_count
+                })
+                
+            except Exception as e:
+                logger.warning(f"[BI] Error processing table {table_name}: {e}")
+        
+        # Get filter candidates
+        try:
+            filter_candidates = handler.get_filter_candidates(project)
+        except:
+            pass
+        
+    except Exception as e:
+        logger.error(f"[BI] Schema error: {e}")
+    
+    return {'tables': tables, 'filter_candidates': filter_candidates}
+
+
+# =============================================================================
 # MAIN QUERY ENDPOINT
 # =============================================================================
 
@@ -421,7 +503,7 @@ async def execute_bi_query(request: BIQueryRequest):
         handler = get_structured_handler()
         
         # Get schema for project
-        schema = handler.get_schema_for_project(request.project)
+        schema = _build_bi_schema(handler, request.project)
         if not schema or not schema.get('tables'):
             raise HTTPException(404, f"No data found for project: {request.project}")
         
@@ -479,9 +561,9 @@ async def execute_bi_query(request: BIQueryRequest):
         # If no data in structured_output, try to re-execute SQL
         if sql and not data:
             try:
-                rows, cols = handler.execute_query(sql)
-                data = rows
-                columns = cols
+                result_rows = handler.query(sql)
+                data = result_rows
+                columns = list(result_rows[0].keys()) if result_rows else []
             except Exception as e:
                 logger.warning(f"[BI] Could not execute SQL: {e}")
         
@@ -614,7 +696,7 @@ async def get_suggestions(project: str):
     
     try:
         handler = get_structured_handler()
-        schema = handler.get_schema_for_project(project)
+        schema = _build_bi_schema(handler, project)
         
         if not schema or not schema.get('tables'):
             return {"suggestions": [], "categories": []}
@@ -770,7 +852,7 @@ async def get_bi_schema(project: str):
     
     try:
         handler = get_structured_handler()
-        schema = handler.get_schema_for_project(project)
+        schema = _build_bi_schema(handler, project)
         
         # Simplify for frontend
         tables = []
@@ -820,7 +902,7 @@ async def export_bi_data(request: BIExportRequest):
         sql = request.sql
         if not sql:
             # Generate from NL query
-            schema = handler.get_schema_for_project(request.project)
+            schema = _build_bi_schema(handler, request.project)
             engine = IntelligenceEngine(request.project)
             engine.load_context(structured_handler=handler, schema=schema)
             answer = engine.ask(request.query)
@@ -834,7 +916,8 @@ async def export_bi_data(request: BIExportRequest):
             raise HTTPException(400, "Could not generate SQL for query")
         
         # Execute query
-        rows, columns = handler.execute_query(sql)
+        rows = handler.query(sql)
+        columns = list(rows[0].keys()) if rows else []
         
         if not rows:
             raise HTTPException(404, "No data returned")
