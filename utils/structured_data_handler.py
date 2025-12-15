@@ -2280,7 +2280,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             df = self.encryptor.decrypt_dataframe(df)
             
             for col in df.columns:
-                profile = self._profile_single_column(df, col)
+                profile = self._profile_single_column(df, col, project)
                 profile['project'] = project
                 profile['table_name'] = table_name
                 profile['column_name'] = col
@@ -2323,7 +2323,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             result['error'] = str(e)
             return result
     
-    def _profile_single_column(self, df: pd.DataFrame, col: str) -> Dict[str, Any]:
+    def _profile_single_column(self, df: pd.DataFrame, col: str, project: str = None) -> Dict[str, Any]:
         """
         Profile a single column and return statistics.
         """
@@ -2371,116 +2371,258 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
         # Try to infer type and get type-specific stats
         profile = self._infer_column_type(non_null, distinct_values, profile)
         
-        # DETECT FILTER CATEGORY
-        profile = self._detect_filter_category(col, profile, distinct_values)
+        # DETECT FILTER CATEGORY (data-driven with lookup matching)
+        profile = self._detect_filter_category(col, profile, distinct_values, project)
         
         return profile
     
-    def _detect_filter_category(self, col_name: str, profile: Dict, distinct_values) -> Dict:
+    def _detect_filter_category(self, col_name: str, profile: Dict, distinct_values, project: str = None) -> Dict:
         """
-        Detect if this column is a common filter dimension.
+        Detect if this column is a common filter dimension using INTELLIGENT LOOKUP MATCHING.
         
-        Categories:
-        - status: Employment status (active/terminated)
-        - company: Company/entity code
-        - organization: Org hierarchy (dept, division, cost center)
-        - location: Work location/site
-        - pay_type: Hourly/Salary, FLSA status
-        - employee_type: Regular/Temp/Contractor
-        - job: Job code/family/grade
+        Data-driven approach:
+        1. Load existing lookups from _intelligence_lookups (from config validation reports)
+        2. Compare column values against lookup codes
+        3. If significant overlap (50%+), use that lookup's type as filter_category
+        4. Column name is secondary hint, VALUES are source of truth
+        
+        Categories: status, company, organization, location, pay_type, employee_type, job
         """
         col_lower = col_name.lower()
         distinct_count = profile.get('distinct_count', 0)
         inferred_type = profile.get('inferred_type', 'text')
-        values_upper = set(str(v).upper() for v in distinct_values) if distinct_values is not None else set()
         
-        # STATUS DETECTION
-        # Pattern 1: termination_date column
-        if 'termination' in col_lower and inferred_type == 'date':
-            profile['filter_category'] = 'status'
-            profile['filter_priority'] = 100  # Highest - almost always need to clarify
+        # Skip if too many values (not a filter dimension) or no values
+        if distinct_count > 500 or distinct_count == 0 or distinct_values is None:
             return profile
         
-        # Pattern 2: Status code columns
-        if any(p in col_lower for p in ['employment_status', 'emp_status', 'employee_status', 'status_code', 'active_status']):
-            if distinct_count <= 10:
+        values_set = set(str(v).upper().strip() for v in distinct_values if v is not None and str(v).strip())
+        
+        if not values_set:
+            return profile
+        
+        # =================================================================
+        # STEP 1: Try to match against existing lookups (DATA-DRIVEN)
+        # =================================================================
+        lookup_match = self._match_column_to_lookup(project, col_name, values_set)
+        if lookup_match:
+            profile['filter_category'] = lookup_match['category']
+            profile['filter_priority'] = lookup_match['priority']
+            profile['matched_lookup'] = lookup_match['lookup_name']
+            logger.info(f"[PROFILING] Column '{col_name}' matched lookup '{lookup_match['lookup_name']}' → category '{lookup_match['category']}' ({lookup_match['match_pct']:.0%} overlap)")
+            return profile
+        
+        # =================================================================
+        # STEP 2: Column name + value pattern hints (fallback only)
+        # These are broad semantic hints, not hardcoded values
+        # =================================================================
+        
+        # STATUS: Look for status-related column names with low cardinality
+        if distinct_count <= 10:
+            status_name_hints = ['employment_status', 'emp_status', 'employee_status', 'status_code', 
+                                 'active_status', 'work_status', 'termination']
+            # Negative patterns - NOT employment status
+            status_negative = ['marital', 'tax_status', 'benefit_status', 'visa', 'citizenship',
+                              'military', 'insurance', 'aca', 'cobra', 'union']
+            
+            if any(h in col_lower for h in status_name_hints) and not any(n in col_lower for n in status_negative):
                 profile['filter_category'] = 'status'
-                profile['filter_priority'] = 100
+                profile['filter_priority'] = 90
                 return profile
         
-        # Pattern 3: Values look like status codes
-        status_indicators = {'A', 'T', 'I', 'L', 'ACTIVE', 'TERMINATED', 'INACTIVE', 'LEAVE', 'TERM'}
-        if distinct_count <= 10 and len(values_upper & status_indicators) >= 2:
-            profile['filter_category'] = 'status'
-            profile['filter_priority'] = 90
-            return profile
-        
-        # COMPANY DETECTION
-        if any(p in col_lower for p in ['company_code', 'company_name', 'entity', 'legal_entity', 'home_company']):
-            if 2 <= distinct_count <= 50:
+        # COMPANY: Company/entity columns
+        if 2 <= distinct_count <= 50:
+            company_hints = ['company_code', 'company_name', 'company_id', 'legal_entity', 
+                            'home_company', 'employer', 'entity_code', 'payroll_company']
+            company_negative = ['routing', 'bank', 'account', 'aba', 'swift', 'insurance', 'benefit', 'employee']
+            
+            if any(h in col_lower for h in company_hints) and not any(n in col_lower for n in company_negative):
                 profile['filter_category'] = 'company'
                 profile['filter_priority'] = 80
                 return profile
         
-        # ORGANIZATION DETECTION
-        if any(p in col_lower for p in ['org_level', 'department', 'division', 'cost_center', 'business_unit', 
-                                         'org_code', 'dept_code', 'segment']):
-            if 2 <= distinct_count <= 200:
+        # ORGANIZATION: Dept/division columns
+        if 2 <= distinct_count <= 200:
+            org_hints = ['department', 'dept', 'division', 'cost_center', 'business_unit',
+                        'org_level', 'org_code', 'segment', 'team', 'group', 'profit_center']
+            org_negative = ['routing', 'bank', 'account', 'employee', 'deduction']
+            
+            if any(h in col_lower for h in org_hints) and not any(n in col_lower for n in org_negative):
                 profile['filter_category'] = 'organization'
                 profile['filter_priority'] = 70
                 return profile
         
-        # LOCATION DETECTION
-        if any(p in col_lower for p in ['location', 'site', 'work_location', 'work_state', 'work_country',
-                                         'location_code', 'facility', 'branch', 'region']):
-            if 2 <= distinct_count <= 500:
+        # LOCATION: State/site columns - MUST have location-specific name
+        if 2 <= distinct_count <= 500:
+            location_hints = ['state', 'province', 'stateprovince', 'work_state', 'home_state',
+                             'work_location', 'location_code', 'country', 'city', 'county', 
+                             'region', 'site', 'facility', 'office', 'address_state', 
+                             'mail_state', 'tax_state', 'sui_state', 'work_site', 'geo']
+            location_negative = ['routing', 'bank', 'account', 'aba', 'swift', 'transit', 
+                                'sort_code', 'bsb', 'branch_number', 'employee', 'deduction', 'benefit']
+            
+            if any(h in col_lower for h in location_hints) and not any(n in col_lower for n in location_negative):
                 profile['filter_category'] = 'location'
                 profile['filter_priority'] = 60
                 return profile
         
-        # PAY TYPE DETECTION
-        if any(p in col_lower for p in ['hourly_salary', 'pay_type', 'flsa', 'exempt', 'fullpart_time', 
-                                         'full_part', 'ft_pt', 'salary_hourly']):
-            if distinct_count <= 5:
+        # PAY TYPE: Hourly/salary type columns
+        if distinct_count <= 10:
+            pay_hints = ['hourly_salary', 'pay_type', 'flsa', 'exempt', 'fullpart', 
+                        'full_part', 'ft_pt', 'salary_hourly', 'pay_class', 'wage_type']
+            
+            if any(h in col_lower for h in pay_hints):
                 profile['filter_category'] = 'pay_type'
                 profile['filter_priority'] = 50
                 return profile
         
-        # Check for H/S, F/P values
-        pay_indicators = {'H', 'S', 'HOURLY', 'SALARY', 'F', 'P', 'FULL', 'PART', 'FT', 'PT',
-                          'EXEMPT', 'NON-EXEMPT', 'NONEXEMPT', 'E', 'N'}
-        if distinct_count <= 5 and len(values_upper & pay_indicators) >= 1:
-            # Check column name hints too
-            if any(p in col_lower for p in ['time', 'type', 'class', 'flsa']):
-                profile['filter_category'] = 'pay_type'
-                profile['filter_priority'] = 45
-                return profile
-        
-        # EMPLOYEE TYPE DETECTION
-        if any(p in col_lower for p in ['employee_type', 'worker_type', 'emp_type', 'employment_type',
-                                         'worker_category', 'contingent']):
-            if distinct_count <= 20:
+        # EMPLOYEE TYPE: Worker type columns
+        if distinct_count <= 20:
+            emp_type_hints = ['employee_type', 'worker_type', 'emp_type', 'employment_type',
+                            'worker_category', 'contingent', 'staff_type']
+            
+            if any(h in col_lower for h in emp_type_hints):
                 profile['filter_category'] = 'employee_type'
                 profile['filter_priority'] = 55
                 return profile
         
-        # Check for REG/TMP/CON values
-        emp_type_indicators = {'REG', 'REGULAR', 'TMP', 'TEMP', 'TEMPORARY', 'CON', 'CONTRACTOR', 
-                               'CTR', 'INT', 'INTERN', 'CAS', 'CASUAL', 'FTE', 'PTE'}
-        if distinct_count <= 15 and len(values_upper & emp_type_indicators) >= 1:
-            profile['filter_category'] = 'employee_type'
-            profile['filter_priority'] = 50
-            return profile
-        
-        # JOB DETECTION
-        if any(p in col_lower for p in ['job_code', 'job_title', 'job_family', 'job_grade', 'position_code',
-                                         'occupation', 'job_class', 'pay_grade']):
-            if 2 <= distinct_count <= 500:
+        # JOB: Job code/family columns
+        if 2 <= distinct_count <= 500:
+            job_hints = ['job_code', 'job_title', 'job_family', 'job_grade', 'position_code',
+                        'occupation', 'job_class', 'pay_grade', 'position_title']
+            
+            if any(h in col_lower for h in job_hints):
                 profile['filter_category'] = 'job'
                 profile['filter_priority'] = 40
                 return profile
         
         return profile
+    
+    def _match_column_to_lookup(self, project: str, col_name: str, values_set: set) -> Optional[Dict]:
+        """
+        Match column values against existing lookups from _intelligence_lookups.
+        
+        Returns match info if 50%+ of column values exist in a lookup's codes.
+        This is the DATA-DRIVEN approach - we use actual uploaded configuration data.
+        """
+        if not project or not values_set:
+            return None
+        
+        try:
+            # Check if _intelligence_lookups table exists
+            tables = self.conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='_intelligence_lookups'").fetchall()
+            if not tables:
+                # Try DuckDB syntax
+                try:
+                    tables = self.conn.execute("SELECT table_name FROM information_schema.tables WHERE table_name = '_intelligence_lookups'").fetchall()
+                except:
+                    pass
+            
+            if not tables:
+                return None
+            
+            # Load all lookups for this project
+            lookups = self.conn.execute("""
+                SELECT table_name, code_column, lookup_type, lookup_data_json, entry_count
+                FROM _intelligence_lookups
+                WHERE project_name = ?
+            """, [project]).fetchall()
+            
+            if not lookups:
+                return None
+            
+            best_match = None
+            best_match_pct = 0.5  # Minimum 50% overlap required
+            
+            for lookup_row in lookups:
+                table_name, code_col, lookup_type, lookup_data_json, entry_count = lookup_row
+                
+                if not lookup_data_json:
+                    continue
+                
+                try:
+                    lookup_data = json.loads(lookup_data_json)
+                    lookup_codes = set(str(k).upper().strip() for k in lookup_data.keys())
+                    
+                    if not lookup_codes:
+                        continue
+                    
+                    # Calculate overlap
+                    overlap = values_set & lookup_codes
+                    match_pct = len(overlap) / len(values_set) if values_set else 0
+                    
+                    if match_pct > best_match_pct:
+                        best_match_pct = match_pct
+                        
+                        # Map lookup_type to filter_category
+                        category = self._lookup_type_to_filter_category(lookup_type)
+                        priority = self._get_category_priority(category)
+                        
+                        best_match = {
+                            'category': category,
+                            'priority': priority,
+                            'lookup_name': f"{table_name}.{code_col}",
+                            'lookup_type': lookup_type,
+                            'match_pct': match_pct,
+                            'matched_values': len(overlap)
+                        }
+                
+                except (json.JSONDecodeError, Exception) as e:
+                    logger.debug(f"[PROFILING] Failed to parse lookup {table_name}: {e}")
+                    continue
+            
+            return best_match
+            
+        except Exception as e:
+            logger.debug(f"[PROFILING] Lookup matching failed: {e}")
+            return None
+    
+    def _lookup_type_to_filter_category(self, lookup_type: str) -> str:
+        """Map lookup_type from intelligence to filter_category."""
+        mapping = {
+            'location': 'location',
+            'site': 'location',
+            'state': 'location',
+            'country': 'location',
+            'region': 'location',
+            
+            'department': 'organization',
+            'division': 'organization',
+            'cost_center': 'organization',
+            'org': 'organization',
+            
+            'company': 'company',
+            'entity': 'company',
+            'employer': 'company',
+            
+            'status': 'status',
+            'employment_status': 'status',
+            
+            'pay_group': 'pay_type',
+            'pay_type': 'pay_type',
+            'flsa': 'pay_type',
+            
+            'job': 'job',
+            'position': 'job',
+            'occupation': 'job',
+            
+            'employee_type': 'employee_type',
+            'worker_type': 'employee_type',
+        }
+        return mapping.get(lookup_type.lower(), lookup_type)
+    
+    def _get_category_priority(self, category: str) -> int:
+        """Get filter priority for a category."""
+        priorities = {
+            'status': 100,
+            'company': 80,
+            'organization': 70,
+            'location': 60,
+            'employee_type': 55,
+            'pay_type': 50,
+            'job': 40
+        }
+        return priorities.get(category, 30)
     
     def _infer_column_type(self, series: pd.Series, distinct_values, profile: Dict) -> Dict:
         """
