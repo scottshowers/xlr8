@@ -34,6 +34,7 @@ const MAIN_NAV = [
   { path: '/reference-library', label: 'Reference Library', icon: '📚', permission: Permissions.PLAYBOOKS },
   { path: '/playbooks', label: 'Playbooks', icon: '📋', permission: Permissions.PLAYBOOKS },
   { path: '/workspace', label: 'AI Assist', icon: '💬', permission: null },
+  { path: '/analytics', label: 'Analytics', icon: '📊', permission: null },
 ];
 
 // Admin nav items - simplified (System moved to Admin tab)
