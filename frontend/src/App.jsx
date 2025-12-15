@@ -11,6 +11,8 @@
  * - ThemeProvider (consistent dark/light)
  * - UploadProvider (background uploads)
  * - OnboardingProvider (Joyride tours)
+ * 
+ * Updated: December 15, 2025 - Added WorkAdvisor (replaces PlaybookBuilderPage)
  */
 
 import React from 'react';
@@ -40,7 +42,7 @@ import VacuumUploadPage from './pages/VacuumUploadPage';
 import VacuumExplore from './pages/VacuumExplore';
 import VacuumColumnMapping from './pages/VacuumColumnMapping';
 import PlaybooksPage from './pages/PlaybooksPage';
-import PlaybookBuilderPage from './pages/PlaybookBuilderPage';
+import WorkAdvisor from './pages/WorkAdvisor';  // Replaces PlaybookBuilderPage
 import AdminPage from './pages/AdminPage';
 import AdminDashboard from './pages/AdminDashboard';
 import DataModelPage from './pages/DataModelPage';
@@ -99,8 +101,10 @@ function AppRoutes() {
         <Route path="/playbooks" element={
           <ProtectedRoute><Layout><PlaybooksPage /></Layout></ProtectedRoute>
         } />
-        <Route path="/playbooks/builder" element={
-          <ProtectedRoute><Layout><PlaybookBuilderPage /></Layout></ProtectedRoute>
+        
+        {/* Work Advisor - Conversational guide to features/playbooks */}
+        <Route path="/advisor" element={
+          <ProtectedRoute><Layout><WorkAdvisor /></Layout></ProtectedRoute>
         } />
         
         {/* Workspace (Chat) */}
@@ -141,6 +145,7 @@ function AppRoutes() {
         <Route path="/system" element={<Navigate to="/admin" replace />} />
         <Route path="/secure20" element={<Navigate to="/playbooks" replace />} />
         <Route path="/packs" element={<Navigate to="/playbooks" replace />} />
+        <Route path="/playbooks/builder" element={<Navigate to="/advisor" replace />} />
         
         {/* 404 fallback */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
