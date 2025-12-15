@@ -81,7 +81,7 @@ function StartScreen({ onSelectMode }) {
       icon: '📋',
       title: 'Clone Existing',
       description: 'Copy an existing playbook and customize it. Fastest way to get started.',
-      color: '#9b8cd9',
+      color: COLORS.clearwater,
     },
   ];
 
