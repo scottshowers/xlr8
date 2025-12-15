@@ -1,15 +1,17 @@
 """
-XLR8 INTELLIGENCE ENGINE v5.1
+XLR8 INTELLIGENCE ENGINE v5.2
 ==============================
 
 Deploy to: backend/utils/intelligence_engine.py
 
 UPDATES:
-- v5.1: Filter override logic (detects new values even if category already confirmed)
-        Location column validation (rejects routing_number, bank fields)
-        Stricter state detection (word boundaries, prevents false positives like "many" → NY)
-- v5.0: Fixed state detection - no longer requires state code to be in sample values
-        Added LLM location filter stripping (data-driven, uses column from filter_candidates)
+- v5.2: FULLY DATA-DRIVEN filters
+        - Removed all hardcoded state/value mappings
+        - Location detection uses lookups from _intelligence_lookups
+        - Falls back to actual values in filter_candidates
+        - Profiler now handles column classification via lookup matching
+- v5.1: Filter override logic, location column validation
+- v5.0: Fixed state detection, LLM location filter stripping
 - v4.9: ARE bug fix (common English word blocklist)
 
 SIMPLIFIED:
@@ -33,7 +35,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.1 OVERRIDE + COLUMN VALIDATION ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.2 DATA-DRIVEN FILTERS ======")
 
 
 # =============================================================================
@@ -354,157 +356,127 @@ class IntelligenceEngine:
         if not candidates:
             return None
         
-        # LOCATION DETECTION - States, cities, common patterns
+        # LOCATION DETECTION - Fully data-driven from lookups and profile values
         if category == 'location':
-            # US States - universal mapping (not data-specific)
-            states = {
-                'texas': 'TX', 'tx': 'TX',
-                'california': 'CA', 'ca': 'CA', 
-                'new york': 'NY', 'ny': 'NY',
-                'florida': 'FL', 'fl': 'FL',
-                'illinois': 'IL', 'il': 'IL',
-                'pennsylvania': 'PA', 'pa': 'PA',
-                'ohio': 'OH', 'oh': 'OH',
-                'georgia': 'GA', 'ga': 'GA',
-                'michigan': 'MI', 'mi': 'MI',
-                'north carolina': 'NC', 'nc': 'NC',
-                'new jersey': 'NJ', 'nj': 'NJ',
-                'virginia': 'VA', 'va': 'VA',
-                'washington': 'WA', 'wa': 'WA',
-                'arizona': 'AZ', 'az': 'AZ',
-                'massachusetts': 'MA', 'ma': 'MA',
-                'tennessee': 'TN', 'tn': 'TN',
-                'indiana': 'IN', 'missouri': 'MO',
-                'maryland': 'MD', 'wisconsin': 'WI',
-                'colorado': 'CO', 'minnesota': 'MN',
-                'south carolina': 'SC', 'alabama': 'AL',
-                'louisiana': 'LA', 'kentucky': 'KY',
-                'oregon': 'OR', 'oklahoma': 'OK',
-                'connecticut': 'CT', 'utah': 'UT',
-                'iowa': 'IA', 'nevada': 'NV',
-                'arkansas': 'AR', 'mississippi': 'MS',
-                'kansas': 'KS', 'new mexico': 'NM',
-                'nebraska': 'NE', 'hawaii': 'HI',
-                'idaho': 'ID', 'maine': 'ME',
-                'new hampshire': 'NH', 'rhode island': 'RI',
-                'montana': 'MT', 'delaware': 'DE',
-                'south dakota': 'SD', 'north dakota': 'ND',
-                'alaska': 'AK', 'vermont': 'VT',
-                'wyoming': 'WY', 'west virginia': 'WV'
-            }
+            # STEP 1: Try to find location from lookups (DATA-DRIVEN)
+            lookup_match = self._find_value_in_lookups(q_lower, 'location')
+            if lookup_match:
+                logger.warning(f"[FILTER-DETECT] Found location '{lookup_match}' from lookup")
+                return lookup_match
             
-            # Check for state mentions
-            for state_name, state_code in states.items():
-                # Skip 2-letter codes as standalone patterns (too many false positives)
-                # Only match them with explicit context like "in TX" or "TX employees"
-                if len(state_name) == 2:
-                    # Stricter patterns for 2-letter codes
-                    patterns = [
-                        f' in {state_name}$',  # "in TX" at end
-                        f' in {state_name} ',  # "in TX " with space after
-                        f' in {state_name},',  # "in TX,"
-                        f'{state_name} employees',
-                        f'{state_name} workers',
-                        f'from {state_name}',
-                    ]
-                    for pattern in patterns:
-                        # Use regex for end-of-string patterns
-                        if pattern.endswith('$'):
-                            if q_lower.endswith(pattern[:-1]):
-                                logger.warning(f"[FILTER-DETECT] Found state '{state_name}' → '{state_code}' in question")
-                                return state_code
-                        elif pattern in q_lower:
-                            logger.warning(f"[FILTER-DETECT] Found state '{state_name}' → '{state_code}' in question")
-                            return state_code
-                else:
-                    # Full state names - use word boundary matching
-                    if _is_word_boundary_match(q_lower, state_name):
-                        logger.warning(f"[FILTER-DETECT] Found state '{state_name}' → '{state_code}' in question")
-                        return state_code
-            
-            # Check actual location values in data (with ARE bug fix)
+            # STEP 2: Check actual values in data from filter_candidates
             for candidate in candidates:
                 values = candidate.get('values', [])
                 for value in values:
-                    value_str = str(value).lower()
-                    # Skip short values, blocklisted words, and require word boundary match
-                    if len(value_str) > 2 and not _is_blocklisted(value_str):
-                        if _is_word_boundary_match(q_lower, value_str):
-                            logger.warning(f"[FILTER-DETECT] Found location value {value} in question (word boundary)")
-                            return value
+                    value_str = str(value).strip()
+                    value_lower = value_str.lower()
+                    
+                    # Skip very short values and blocklisted common words
+                    if len(value_str) < 2 or _is_blocklisted(value_lower):
+                        continue
+                    
+                    # Check if value appears in question with word boundary
+                    if _is_word_boundary_match(q_lower, value_lower):
+                        logger.warning(f"[FILTER-DETECT] Found location value '{value_str}' in question")
+                        return value_str
+                    
+                    # Also check for the code's description from lookups
+                    description = self._get_lookup_description('location', value_str)
+                    if description and _is_word_boundary_match(q_lower, description.lower()):
+                        logger.warning(f"[FILTER-DETECT] Found location '{description}' → code '{value_str}'")
+                        return value_str
+            
+            return None
         
-        # COMPANY DETECTION - Check company codes directly (with ARE bug fix)
+        # COMPANY DETECTION - Data-driven from lookups and profile values
         if category == 'company':
+            # Try lookups first
+            lookup_match = self._find_value_in_lookups(q_lower, 'company')
+            if lookup_match:
+                logger.warning(f"[FILTER-DETECT] Found company '{lookup_match}' from lookup")
+                return lookup_match
+            
+            # Fall back to actual values in data
             for candidate in candidates:
                 values = candidate.get('values', [])
                 for value in values:
-                    value_str = str(value).lower()
-                    # Skip blocklisted words
-                    if len(value_str) >= 3 and not _is_blocklisted(value_str):
-                        # Use word boundary matching
-                        if _is_word_boundary_match(q_lower, value_str):
-                            logger.warning(f"[FILTER-DETECT] Found company {value} in question (word boundary)")
-                            return value
+                    value_str = str(value).strip()
+                    value_lower = value_str.lower()
+                    if len(value_str) >= 3 and not _is_blocklisted(value_lower):
+                        if _is_word_boundary_match(q_lower, value_lower):
+                            logger.warning(f"[FILTER-DETECT] Found company '{value_str}' in question")
+                            return value_str
+                        # Check description from lookups
+                        description = self._get_lookup_description('company', value_str)
+                        if description and _is_word_boundary_match(q_lower, description.lower()):
+                            logger.warning(f"[FILTER-DETECT] Found company '{description}' → code '{value_str}'")
+                            return value_str
         
-        # PAY TYPE DETECTION
+        # PAY TYPE DETECTION - Data-driven from lookups and profile values
         if category == 'pay_type':
-            pay_patterns = {
-                'hourly': ['hourly', 'hourly employees', 'hourly workers', 'hourly staff'],
-                'salary': ['salary', 'salaried', 'salaried employees'],
-                'full_time': ['full time', 'full-time', 'fulltime', ' ft '],
-                'part_time': ['part time', 'part-time', 'parttime', ' pt ']
-            }
-            for detected_value, patterns in pay_patterns.items():
-                if any(p in q_lower for p in patterns):
-                    # Map to actual code in data
-                    for candidate in candidates:
-                        values = candidate.get('values', [])
-                        for value in values:
-                            v = str(value).upper()
-                            if detected_value == 'hourly' and v in ['H', 'HOURLY', 'HR']:
-                                return value
-                            if detected_value == 'salary' and v in ['S', 'SALARY', 'SAL', 'SALARIED']:
-                                return value
-                            if detected_value == 'full_time' and v in ['F', 'FT', 'FULL', 'FULL-TIME']:
-                                return value
-                            if detected_value == 'part_time' and v in ['P', 'PT', 'PART', 'PART-TIME']:
-                                return value
-                    # Return the detected value if no mapping found
-                    logger.warning(f"[FILTER-DETECT] Found pay_type {detected_value} in question")
-                    return detected_value
+            # Try lookups first
+            lookup_match = self._find_value_in_lookups(q_lower, 'pay_type')
+            if lookup_match:
+                logger.warning(f"[FILTER-DETECT] Found pay_type '{lookup_match}' from lookup")
+                return lookup_match
+            
+            # Fall back to actual values in data
+            for candidate in candidates:
+                values = candidate.get('values', [])
+                for value in values:
+                    value_str = str(value).strip()
+                    value_lower = value_str.lower()
+                    if len(value_str) >= 1 and not _is_blocklisted(value_lower):
+                        if _is_word_boundary_match(q_lower, value_lower):
+                            logger.warning(f"[FILTER-DETECT] Found pay_type '{value_str}' in question")
+                            return value_str
+                        # Check description from lookups
+                        description = self._get_lookup_description('pay_type', value_str)
+                        if description and _is_word_boundary_match(q_lower, description.lower()):
+                            logger.warning(f"[FILTER-DETECT] Found pay_type '{description}' → code '{value_str}'")
+                            return value_str
         
-        # EMPLOYEE TYPE DETECTION
+        # EMPLOYEE TYPE DETECTION - Data-driven from lookups and profile values
         if category == 'employee_type':
-            emp_patterns = {
-                'regular': ['regular employee', 'regular workers', 'regular staff', 'permanent'],
-                'temp': ['temp ', 'temporary', 'temps ', 'temp employees'],
-                'contractor': ['contractor', 'contractors', 'contract workers', '1099']
-            }
-            for detected_value, patterns in emp_patterns.items():
-                if any(p in q_lower for p in patterns):
-                    # Map to actual code in data
-                    for candidate in candidates:
-                        values = candidate.get('values', [])
-                        for value in values:
-                            v = str(value).upper()
-                            if detected_value == 'regular' and v in ['REG', 'REGULAR', 'R', 'PERM']:
-                                return value
-                            if detected_value == 'temp' and v in ['TMP', 'TEMP', 'T', 'TEMPORARY']:
-                                return value
-                            if detected_value == 'contractor' and v in ['CON', 'CTR', 'CONTRACTOR', 'C']:
-                                return value
-                    logger.warning(f"[FILTER-DETECT] Found employee_type {detected_value} in question")
-                    return detected_value
+            # Try lookups first
+            lookup_match = self._find_value_in_lookups(q_lower, 'employee_type')
+            if lookup_match:
+                logger.warning(f"[FILTER-DETECT] Found employee_type '{lookup_match}' from lookup")
+                return lookup_match
+            
+            # Fall back to actual values in data
+            for candidate in candidates:
+                values = candidate.get('values', [])
+                for value in values:
+                    value_str = str(value).strip()
+                    value_lower = value_str.lower()
+                    if len(value_str) >= 1 and not _is_blocklisted(value_lower):
+                        if _is_word_boundary_match(q_lower, value_lower):
+                            logger.warning(f"[FILTER-DETECT] Found employee_type '{value_str}' in question")
+                            return value_str
+                        # Check description from lookups
+                        description = self._get_lookup_description('employee_type', value_str)
+                        if description and _is_word_boundary_match(q_lower, description.lower()):
+                            logger.warning(f"[FILTER-DETECT] Found employee_type '{description}' → code '{value_str}'")
+                            return value_str
         
-        # GENERIC: Check if any specific value from data is mentioned (with ARE bug fix)
+        # GENERIC: Check any category against lookups and actual values
+        # Try lookups first
+        lookup_match = self._find_value_in_lookups(q_lower, category)
+        if lookup_match:
+            logger.warning(f"[FILTER-DETECT] Found {category} '{lookup_match}' from lookup")
+            return lookup_match
+        
+        # Fall back to actual values in data
         for candidate in candidates:
             values = candidate.get('values', [])
             for value in values:
-                value_str = str(value).lower()
-                if len(value_str) > 2 and not _is_blocklisted(value_str):
-                    if _is_word_boundary_match(q_lower, value_str):
-                        logger.warning(f"[FILTER-DETECT] Found {category} value {value} in question (word boundary)")
-                        return value
+                value_str = str(value).strip()
+                value_lower = value_str.lower()
+                if len(value_str) > 2 and not _is_blocklisted(value_lower):
+                    if _is_word_boundary_match(q_lower, value_lower):
+                        logger.warning(f"[FILTER-DETECT] Found {category} value '{value_str}' in question")
+                        return value_str
         
         return None
     
@@ -548,6 +520,90 @@ class IntelligenceEngine:
         
         return False
     
+    def _find_value_in_lookups(self, q_lower: str, lookup_type: str) -> Optional[str]:
+        """
+        Search lookups for a value mentioned in the question.
+        Returns the code if found, None otherwise.
+        
+        DATA-DRIVEN: Uses lookups from _intelligence_lookups table.
+        """
+        if not self.handler or not hasattr(self.handler, 'conn'):
+            return None
+        
+        try:
+            # Load lookups for this type
+            lookups = self.handler.conn.execute("""
+                SELECT code_column, lookup_data_json
+                FROM _intelligence_lookups
+                WHERE project_name = ? AND lookup_type = ?
+            """, [self.project, lookup_type]).fetchall()
+            
+            for code_col, lookup_json in lookups:
+                if not lookup_json:
+                    continue
+                    
+                lookup_data = json.loads(lookup_json)
+                
+                # Check each code→description pair
+                for code, description in lookup_data.items():
+                    code_lower = str(code).lower()
+                    desc_lower = str(description).lower() if description else ''
+                    
+                    # Check if description appears in question
+                    if desc_lower and len(desc_lower) > 2:
+                        if _is_word_boundary_match(q_lower, desc_lower):
+                            return code
+                    
+                    # Check if code appears in question (for longer codes)
+                    if len(code_lower) > 2 and not _is_blocklisted(code_lower):
+                        if _is_word_boundary_match(q_lower, code_lower):
+                            return code
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"[LOOKUP] Failed to search lookups: {e}")
+            return None
+    
+    def _get_lookup_description(self, lookup_type: str, code: str) -> Optional[str]:
+        """
+        Get the description for a code from lookups.
+        
+        DATA-DRIVEN: Uses lookups from _intelligence_lookups table.
+        """
+        if not self.handler or not hasattr(self.handler, 'conn') or not code:
+            return None
+        
+        try:
+            lookups = self.handler.conn.execute("""
+                SELECT lookup_data_json
+                FROM _intelligence_lookups
+                WHERE project_name = ? AND lookup_type = ?
+            """, [self.project, lookup_type]).fetchall()
+            
+            code_upper = str(code).upper().strip()
+            
+            for (lookup_json,) in lookups:
+                if not lookup_json:
+                    continue
+                    
+                lookup_data = json.loads(lookup_json)
+                
+                # Try exact match first
+                if code_upper in lookup_data:
+                    return lookup_data[code_upper]
+                
+                # Try case-insensitive
+                for k, v in lookup_data.items():
+                    if str(k).upper().strip() == code_upper:
+                        return v
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"[LOOKUP] Failed to get description: {e}")
+            return None
+
     def _request_filter_clarification(self, question: str, category: str) -> SynthesizedAnswer:
         """
         Build a clarification question for a specific filter category.
@@ -1014,29 +1070,10 @@ class IntelligenceEngine:
         if location_filter and location_filter != 'all':
             location_candidates = self.filter_candidates.get('location', [])
             if location_candidates:
-                # Find a valid location column (not routing numbers, banks, etc.)
-                location_column_patterns = ['state', 'province', 'location', 'region', 'city', 'address', 'county']
-                invalid_patterns = ['routing', 'bank', 'account', 'number', 'branch', 'aba']
-                
-                valid_col = None
-                for candidate in location_candidates:
-                    col_name = candidate.get('column', '').lower()
-                    # Check if column name looks like a location field
-                    is_location = any(p in col_name for p in location_column_patterns)
-                    is_invalid = any(p in col_name for p in invalid_patterns)
-                    
-                    if is_location and not is_invalid:
-                        valid_col = candidate.get('column')
-                        break
-                    elif not is_invalid and not valid_col:
-                        # Fallback: accept if not obviously invalid
-                        valid_col = candidate.get('column')
-                
-                if valid_col:
-                    filters.append(f"{valid_col} = '{location_filter}'")
-                    logger.warning(f"[FILTER] Using location column: {valid_col}")
-                else:
-                    logger.warning(f"[FILTER] No valid location column found, skipping location filter")
+                col_name = location_candidates[0].get('column')
+                if col_name:
+                    filters.append(f"{col_name} = '{location_filter}'")
+                    logger.warning(f"[SQL-GEN] Location filter: {col_name} = '{location_filter}'")
         
         # PAY TYPE FILTER
         pay_type_filter = self.confirmed_facts.get('pay_type')
