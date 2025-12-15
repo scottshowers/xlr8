@@ -2,6 +2,11 @@
 Async Upload Router for XLR8
 ============================
 
+v21 CHANGES:
+- Added progress_callback support for structured data uploads
+- Smooth progress updates during large file processing (no more frozen UI)
+- Maps handler progress (5-95%) to job progress (15-65%)
+
 FEATURES:
 - Returns immediately after file save (no timeout!)
 - Processes in background thread
@@ -101,7 +106,7 @@ async def debug_features():
     import os
     
     results = {
-        "version": "2025-12-12-v10-with-intelligence",  # Update this when deploying
+        "version": "2025-12-15-v21-with-progress-callbacks",  # Update this when deploying
         "smart_pdf_available": SMART_PDF_AVAILABLE,
         "structured_handler_available": STRUCTURED_HANDLER_AVAILABLE,
         "openpyxl_available": OPENPYXL_AVAILABLE,
@@ -567,14 +572,34 @@ def process_file_background(
             try:
                 handler = get_structured_handler()
                 
-                ProcessingJobModel.update_progress(job_id, 20, "Parsing spreadsheet structure...")
+                # ===========================================================
+                # PROGRESS CALLBACK - v21 Performance Optimization
+                # Maps handler progress (5-95%) to job progress (15-65%)
+                # This eliminates the "frozen UI" during large file processing
+                # ===========================================================
+                def structured_progress_callback(percent: int, message: str):
+                    """Map structured handler progress to overall job progress"""
+                    # Handler reports 5-95%, we map to 15-65% of overall job
+                    # This leaves room for: 0-15% detection, 65-80% intelligence, 80-100% cleanup
+                    mapped_percent = 15 + int((percent / 100) * 50)
+                    mapped_percent = min(65, max(15, mapped_percent))  # Clamp to 15-65
+                    try:
+                        ProcessingJobModel.update_progress(job_id, mapped_percent, message)
+                    except Exception as cb_e:
+                        logger.warning(f"[PROGRESS] Callback error: {cb_e}")
                 
                 if file_ext == 'csv':
-                    result = handler.store_csv(file_path, project, filename)
+                    result = handler.store_csv(
+                        file_path, project, filename,
+                        progress_callback=structured_progress_callback
+                    )
                     tables_created = 1
                     total_rows = result.get('row_count', 0)
                 else:
-                    result = handler.store_excel(file_path, project, filename)
+                    result = handler.store_excel(
+                        file_path, project, filename,
+                        progress_callback=structured_progress_callback
+                    )
                     tables_created = len(result.get('tables_created', []))
                     total_rows = result.get('total_rows', 0)
                 
