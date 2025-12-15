@@ -99,7 +99,7 @@ function UploadTab({ project, projectName }) {
 
   if (!project) {
     return (
-      <div style={{ textAlign: 'center', padding: '3rem', color: COLORS.textLight }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '3rem', color: COLORS.textLight }}>
         <UploadIcon size={48} style={{ opacity: 0.3, marginBottom: '1rem' }} />
         <h3 style={{ margin: '0 0 0.5rem' }}>Select a Project</h3>
         <p>Choose a project from the top bar to upload data.</p>
@@ -121,9 +121,11 @@ function UploadTab({ project, projectName }) {
           background: dragOver ? '#f0fdf4' : '#fafbfc', transition: 'all 0.2s ease',
         }}
       >
-        <UploadIcon size={48} style={{ color: COLORS.grassGreen, marginBottom: '1rem' }} />
-        <h3 style={{ margin: '0 0 0.5rem', color: COLORS.text }}>{dragOver ? 'Drop files here' : 'Click or drag files to upload'}</h3>
-        <p style={{ color: COLORS.textLight, margin: 0, fontSize: '0.9rem' }}>PDF, Word, Excel, CSV, or Text files</p>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <UploadIcon size={48} style={{ color: COLORS.grassGreen, marginBottom: '1rem' }} />
+          <h3 style={{ margin: '0 0 0.5rem', color: COLORS.text }}>{dragOver ? 'Drop files here' : 'Click or drag files to upload'}</h3>
+          <p style={{ color: COLORS.textLight, margin: 0, fontSize: '0.9rem' }}>PDF, Word, Excel, CSV, or Text files</p>
+        </div>
       </div>
       <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', background: '#f8fafc', borderRadius: '8px', fontSize: '0.85rem', color: COLORS.textLight }}>
         💡 <strong>Tip:</strong> Files upload in the background. You can navigate away and check progress in the top-right indicator.
@@ -135,10 +137,10 @@ function UploadTab({ project, projectName }) {
 // ==================== VACUUM TAB ====================
 function VacuumTab() {
   return (
-    <div style={{ textAlign: 'center', padding: '2rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '2rem' }}>
       <Sparkles size={48} style={{ color: COLORS.grassGreen, marginBottom: '1rem' }} />
       <h2 style={{ margin: '0 0 0.5rem', color: COLORS.text }}>Vacuum Extract</h2>
-      <p style={{ color: COLORS.textLight, maxWidth: '500px', margin: '0 auto 1.5rem', lineHeight: 1.6 }}>
+      <p style={{ color: COLORS.textLight, maxWidth: '500px', margin: '0 auto 1.5rem', lineHeight: 1.6, textAlign: 'center' }}>
         Deep extraction for complex documents. Intelligent table detection, multi-sheet processing, and semantic column mapping.
       </p>
       <Link to="/vacuum" style={{
