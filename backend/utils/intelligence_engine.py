@@ -1711,6 +1711,34 @@ SQL:"""
             sql = re.sub(r'\bYEAR\s*\(\s*([^)]+)\s*\)', r'EXTRACT(YEAR FROM \1)', sql, flags=re.IGNORECASE)
             sql = re.sub(r'\bDAY\s*\(\s*([^)]+)\s*\)', r'EXTRACT(DAY FROM \1)', sql, flags=re.IGNORECASE)
             
+            # FIX: Wrap columns with "date" in name in TRY_CAST for DATE_TRUNC and EXTRACT
+            # This handles VARCHAR date columns that DuckDB can't process directly
+            # Match any column name containing 'date' (case insensitive)
+            # DATE_TRUNC('month', xxx_date) → DATE_TRUNC('month', TRY_CAST(xxx_date AS DATE))
+            sql = re.sub(
+                r"DATE_TRUNC\s*\(\s*'(\w+)'\s*,\s*(\w*date\w*)\s*\)",
+                r"DATE_TRUNC('\1', TRY_CAST(\2 AS DATE))",
+                sql, flags=re.IGNORECASE
+            )
+            # Also handle table.column format: DATE_TRUNC('month', personal.termination_date)
+            sql = re.sub(
+                r"DATE_TRUNC\s*\(\s*'(\w+)'\s*,\s*(\w+\.\w*date\w*)\s*\)",
+                r"DATE_TRUNC('\1', TRY_CAST(\2 AS DATE))",
+                sql, flags=re.IGNORECASE
+            )
+            # EXTRACT(MONTH FROM xxx_date) → EXTRACT(MONTH FROM TRY_CAST(xxx_date AS DATE))
+            sql = re.sub(
+                r"EXTRACT\s*\(\s*(\w+)\s+FROM\s+(\w*date\w*)\s*\)",
+                r"EXTRACT(\1 FROM TRY_CAST(\2 AS DATE))",
+                sql, flags=re.IGNORECASE
+            )
+            # Also handle table.column format
+            sql = re.sub(
+                r"EXTRACT\s*\(\s*(\w+)\s+FROM\s+(\w+\.\w*date\w*)\s*\)",
+                r"EXTRACT(\1 FROM TRY_CAST(\2 AS DATE))",
+                sql, flags=re.IGNORECASE
+            )
+            
             logger.warning(f"[SQL-GEN] Generated: {sql[:150]}")
             
             # Detect query type
