@@ -173,9 +173,10 @@ export default function ContextBar() {
       gap: '0.75rem',
       padding: '0.75rem 1rem',
       cursor: 'pointer',
-      background: isActive ? COLORS.iceFlow : 'white',
+      background: isActive ? `${COLORS.grassGreen}15` : 'white',
+      borderLeft: isActive ? `3px solid ${COLORS.grassGreen}` : '3px solid transparent',
       borderBottom: '1px solid #f0f0f0',
-      transition: 'background 0.15s ease',
+      transition: 'all 0.15s ease',
     }),
     projectItemName: {
       fontWeight: '600',
@@ -185,6 +186,19 @@ export default function ContextBar() {
     projectItemCustomer: {
       fontSize: '0.75rem',
       color: COLORS.textLight,
+    },
+    checkmark: {
+      width: '20px',
+      height: '20px',
+      borderRadius: '50%',
+      background: COLORS.grassGreen,
+      color: 'white',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: '0.7rem',
+      fontWeight: 'bold',
+      flexShrink: 0,
     },
     noProjects: {
       padding: '1.5rem',
@@ -204,9 +218,10 @@ export default function ContextBar() {
       gap: '0.75rem',
       padding: '0.75rem 1rem',
       cursor: 'pointer',
-      background: !activeProject ? COLORS.iceFlow : 'white',
+      background: !activeProject ? `${COLORS.grassGreen}15` : 'white',
+      borderLeft: !activeProject ? `3px solid ${COLORS.grassGreen}` : '3px solid transparent',
       borderBottom: '2px solid #e1e8ed',
-      transition: 'background 0.15s ease',
+      transition: 'all 0.15s ease',
     },
     allProjectsIcon: {
       width: '32px',
@@ -319,14 +334,17 @@ export default function ContextBar() {
                       if (activeProject) e.currentTarget.style.background = '#f8fafc';
                     }}
                     onMouseLeave={(e) => {
-                      e.currentTarget.style.background = !activeProject ? COLORS.iceFlow : 'white';
+                      e.currentTarget.style.background = !activeProject ? `${COLORS.grassGreen}15` : 'white';
                     }}
                   >
                     <div style={styles.allProjectsIcon}>🌐</div>
-                    <div>
+                    <div style={{ flex: 1 }}>
                       <div style={styles.projectItemName}>All Projects</div>
                       <div style={styles.projectItemCustomer}>View global / aggregate data</div>
                     </div>
+                    {!activeProject && (
+                      <div style={styles.checkmark}>✓</div>
+                    )}
                   </div>
                 )}
 
@@ -352,7 +370,7 @@ export default function ContextBar() {
                           }
                         }}
                         onMouseLeave={(e) => {
-                          e.currentTarget.style.background = activeProject?.id === project.id ? COLORS.iceFlow : 'white';
+                          e.currentTarget.style.background = activeProject?.id === project.id ? `${COLORS.grassGreen}15` : 'white';
                         }}
                       >
                         <div style={styles.projectIcon(color)}>
@@ -363,7 +381,7 @@ export default function ContextBar() {
                           <div style={styles.projectItemCustomer}>{project.customer}</div>
                         </div>
                         {activeProject?.id === project.id && (
-                          <span style={{ color: COLORS.grassGreen, fontSize: '0.8rem' }}>✔</span>
+                          <div style={styles.checkmark}>✓</div>
                         )}
                       </div>
                     );
