@@ -382,9 +382,9 @@ export default function PlaybooksPage() {
           { label: projectName },
         ]}
         action={isAdmin ? {
-          label: 'Create Playbook',
-          icon: '➕',
-          to: '/playbooks/builder',
+          label: 'Work Advisor',
+          icon: '💡',
+          to: '/advisor',
         } : null}
       />
 
