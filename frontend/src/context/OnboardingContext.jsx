@@ -144,7 +144,20 @@ const OnboardingContext = createContext(null);
 
 export function useOnboarding() {
   const context = useContext(OnboardingContext);
-  if (!context) throw new Error('useOnboarding must be used within OnboardingProvider');
+  // Return safe defaults if context is not available
+  if (!context) {
+    return {
+      runTour: false,
+      tourEnabled: false,
+      setTourEnabled: () => {},
+      completedTours: {},
+      startTour: () => {},
+      startCurrentPageTour: () => {},
+      resetAllTours: () => {},
+      resetTour: () => {},
+      availableTours: [],
+    };
+  }
   return context;
 }
 
