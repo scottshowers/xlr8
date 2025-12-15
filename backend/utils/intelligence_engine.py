@@ -1556,7 +1556,16 @@ class IntelligenceEngine:
         
         # BUILD SEMANTIC HINTS from filter_candidates
         # This tells the LLM which columns to use for specific purposes
+        # For simple queries, only include columns from the primary table
         semantic_hints = []
+        
+        # Get primary table name for filtering
+        primary_table_full = relevant_tables[0].get('table_name', '') if relevant_tables else ''
+        primary_table_short = primary_table_full.split('__')[-1] if '__' in primary_table_full else primary_table_full
+        
+        # Check if this is a simple "by X" query (should avoid JOINs)
+        is_simple_query = bool(re.search(r'\bshow\s+\w+.*\bby\s+\w+', q_lower)) or bool(re.search(r'\bhow many\b', q_lower))
+        
         if self.filter_candidates:
             for category, candidates in self.filter_candidates.items():
                 if not candidates:
@@ -1603,22 +1612,43 @@ class IntelligenceEngine:
                         code_cols.sort(key=lambda x: -x[1])
                         semantic_hints.append(f"- For employee status (active/termed): use {code_cols[0][0]}")
                 else:
-                    # Other categories - just use first/best
+                    # Other categories - find column in primary table if possible
                     best = candidates[0]
                     col_name = best.get('column_name', best.get('column', ''))
+                    table_name = best.get('table_name', best.get('table', ''))
+                    short_table = table_name.split('__')[-1] if '__' in table_name else table_name
+                    
+                    # For simple queries, prefer columns in the primary table
+                    if is_simple_query and short_table and short_table != primary_table_short:
+                        # Try to find same column in primary table
+                        found_in_primary = False
+                        for cand in candidates:
+                            cand_table = cand.get('table_name', cand.get('table', ''))
+                            cand_short = cand_table.split('__')[-1] if '__' in cand_table else cand_table
+                            if cand_short == primary_table_short:
+                                col_name = cand.get('column_name', cand.get('column', ''))
+                                short_table = cand_short
+                                found_in_primary = True
+                                break
+                        
+                        if not found_in_primary:
+                            logger.warning(f"[SQL-GEN] Skipping hint for {category} - column not in primary table {primary_table_short}")
+                            continue
+                    
+                    full_col = f"{short_table}.{col_name}" if short_table else col_name
                     
                     if category == 'location':
-                        semantic_hints.append(f"- For location/state: use {col_name}")
+                        semantic_hints.append(f"- For location/state: use {full_col}")
                     elif category == 'company':
-                        semantic_hints.append(f"- For company: use {col_name}")
+                        semantic_hints.append(f"- For company: use {full_col}")
                     elif category == 'organization':
-                        semantic_hints.append(f"- For org/department: use {col_name}")
+                        semantic_hints.append(f"- For org/department: use {full_col}")
                     elif category == 'pay_type':
-                        semantic_hints.append(f"- For pay type (hourly/salary): use {col_name}")
+                        semantic_hints.append(f"- For pay type (hourly/salary): use {full_col}")
                     elif category == 'employee_type':
-                        semantic_hints.append(f"- For employee type (regular/temp): use {col_name}")
+                        semantic_hints.append(f"- For employee type (regular/temp): use {full_col}")
                     elif category == 'job':
-                        semantic_hints.append(f"- For job/position: use {col_name}")
+                        semantic_hints.append(f"- For job/position: use {full_col}")
         
         semantic_text = ""
         if semantic_hints:
@@ -1629,10 +1659,36 @@ class IntelligenceEngine:
             for hint in semantic_hints:
                 logger.warning(f"[SQL-GEN] Hint: {hint}")
         
-        # Simple hint for COUNT queries (no filter - we inject it after)
-        query_hint = ""
+        # Build query hints based on question patterns
+        query_hints = []
+        
+        # "Show X by Y" pattern - simple aggregation, no JOINs needed
+        if re.search(r'\bshow\s+\w+\s+\w*\s*by\s+\w+', q_lower) or re.search(r'\bby\s+(job|state|location|company|month|year)\b', q_lower):
+            query_hints.append(f"Use simple aggregation: SELECT column, COUNT(*) FROM {primary_table} GROUP BY column")
+            query_hints.append("Do NOT use JOINs for simple counts")
+        
+        # COUNT hint
         if 'how many' in q_lower or 'count' in q_lower:
-            query_hint = f"\n\nHINT: For COUNT, use: SELECT COUNT(*) FROM \"{primary_table}\""
+            query_hints.append(f"For COUNT, use: SELECT COUNT(*) FROM \"{primary_table}\"")
+        
+        # GROUP BY hint - detect "by X" patterns
+        group_by_patterns = [
+            (r'\bby\s+month\b', 'GROUP BY month - use strftime(\'%Y-%m\', TRY_CAST(date_column AS DATE)) to get YYYY-MM format'),
+            (r'\bby\s+year\b', 'GROUP BY year - use EXTRACT(YEAR FROM date_column)'),
+            (r'\bby\s+(state|location)\b', 'GROUP BY location/state column'),
+            (r'\bby\s+(company|org)\b', 'GROUP BY company/organization column'),
+            (r'\bby\s+(department|dept)\b', 'GROUP BY department/org column'),
+        ]
+        
+        for pattern, hint in group_by_patterns:
+            if re.search(pattern, q_lower):
+                query_hints.append(hint)
+                logger.warning(f"[SQL-GEN] Detected GROUP BY pattern: {pattern}")
+        
+        # Format all hints
+        query_hint = ""
+        if query_hints:
+            query_hint = "\n\nHINTS:\n" + "\n".join(f"- {h}" for h in query_hints)
         
         prompt = f"""SCHEMA:
 {schema_text}{relationships_text}{semantic_text}
@@ -1641,12 +1697,11 @@ class IntelligenceEngine:
 QUESTION: {question}
 
 RULES:
-1. Use ONLY columns listed in SCHEMA above - NEVER invent column names
-2. DO NOT add WHERE clauses for status/active/terminated/termed filtering - filters are added automatically
-3. Use COLUMN USAGE hints to pick the correct columns for GROUP BY and SELECT
-4. If referencing a column from a table, you MUST include that table in FROM/JOIN
+1. Use ONLY columns from SCHEMA - never invent columns
+2. DO NOT add WHERE for status/active/termed - filters injected automatically
+3. For "show X by Y" queries: SELECT Y, COUNT(*) FROM table GROUP BY Y
+4. Keep queries SIMPLE - avoid JOINs unless absolutely needed
 5. ILIKE for text matching
-6. Quote table names with special chars
 
 SQL:"""
         
@@ -1746,6 +1801,20 @@ SQL:"""
                 r"DATE_TRUNC('\1', TRY_CAST(\2 AS DATE))",
                 sql, flags=re.IGNORECASE
             )
+            
+            # Wrap strftime on date columns in TRY_CAST (in case LLM used strftime directly)
+            # strftime('%Y-%m', termination_date) → strftime('%Y-%m', TRY_CAST(termination_date AS DATE))
+            sql = re.sub(
+                r"strftime\s*\(\s*'([^']+)'\s*,\s*(\w*date\w*)\s*\)",
+                r"strftime('\1', TRY_CAST(\2 AS DATE))",
+                sql, flags=re.IGNORECASE
+            )
+            sql = re.sub(
+                r"strftime\s*\(\s*'([^']+)'\s*,\s*(\w+\.\w*date\w*)\s*\)",
+                r"strftime('\1', TRY_CAST(\2 AS DATE))",
+                sql, flags=re.IGNORECASE
+            )
+            
             # EXTRACT(MONTH FROM xxx_date) → EXTRACT(MONTH FROM TRY_CAST(xxx_date AS DATE))
             sql = re.sub(
                 r"EXTRACT\s*\(\s*(\w+)\s+FROM\s+(\w*date\w*)\s*\)",
@@ -1759,7 +1828,45 @@ SQL:"""
                 sql, flags=re.IGNORECASE
             )
             
+            # UPGRADE: Convert EXTRACT(MONTH FROM x) to strftime('%Y-%m', x) for year-month grouping
+            # This gives us "2024-01" instead of just "1" which is much more useful
+            if 'by month' in q_lower or 'per month' in q_lower:
+                # Replace EXTRACT(MONTH FROM TRY_CAST(x AS DATE)) with strftime('%Y-%m', TRY_CAST(x AS DATE))
+                sql = re.sub(
+                    r"EXTRACT\s*\(\s*MONTH\s+FROM\s+TRY_CAST\s*\(\s*([^)]+)\s+AS\s+DATE\s*\)\s*\)",
+                    r"strftime('%Y-%m', TRY_CAST(\1 AS DATE))",
+                    sql, flags=re.IGNORECASE
+                )
+                # Also convert DATE_TRUNC('month', x) to strftime('%Y-%m', x)
+                sql = re.sub(
+                    r"DATE_TRUNC\s*\(\s*'month'\s*,\s*TRY_CAST\s*\(\s*([^)]+)\s+AS\s+DATE\s*\)\s*\)",
+                    r"strftime('%Y-%m', TRY_CAST(\1 AS DATE))",
+                    sql, flags=re.IGNORECASE
+                )
+                logger.warning("[SQL-GEN] Upgraded to strftime('%Y-%m') for year-month grouping")
+            
             logger.warning(f"[SQL-GEN] Generated: {sql[:150]}")
+            
+            # AUTO-FIX: If question asks "by X" but SQL has no GROUP BY, add it
+            sql_upper = sql.upper()
+            if 'GROUP BY' not in sql_upper:
+                # Check if question expects grouping
+                group_match = re.search(r'\bby\s+(month|year|state|location|company|department)\b', q_lower)
+                if group_match:
+                    group_type = group_match.group(1)
+                    logger.warning(f"[SQL-GEN] Question expects GROUP BY {group_type} but SQL has none - checking for aggregation")
+                    
+                    # Find if there's an alias we can GROUP BY
+                    # Look for "AS month" or "AS termination_month" etc.
+                    alias_match = re.search(rf'\bAS\s+(\w*{group_type}\w*)', sql, re.IGNORECASE)
+                    if alias_match:
+                        alias = alias_match.group(1)
+                        # Add GROUP BY before ORDER BY or at end
+                        if 'ORDER BY' in sql_upper:
+                            sql = re.sub(r'\bORDER BY\b', f'GROUP BY {alias} ORDER BY', sql, flags=re.IGNORECASE)
+                        else:
+                            sql = sql.rstrip(';') + f' GROUP BY {alias}'
+                        logger.warning(f"[SQL-GEN] Auto-added: GROUP BY {alias}")
             
             # Detect query type
             sql_upper = sql.upper()
