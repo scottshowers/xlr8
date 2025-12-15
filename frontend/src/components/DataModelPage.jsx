@@ -16,7 +16,7 @@ import {
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
-export default function DataModelPage() {
+export default function DataModelPage({ embedded = false }) {
   const { activeProject } = useProject();
   const [loading, setLoading] = useState(false);
   const [analyzed, setAnalyzed] = useState(false);
@@ -109,7 +109,7 @@ export default function DataModelPage() {
 
   if (!activeProject) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className={embedded ? "py-8 text-center" : "min-h-screen bg-gray-50 flex items-center justify-center"}>
         <div className="text-center text-gray-500">
           <Database className="w-12 h-12 mx-auto mb-4 opacity-50" />
           <p>Select a project from the header to analyze data relationships.</p>
@@ -119,8 +119,9 @@ export default function DataModelPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
+    <div className={embedded ? "" : "min-h-screen bg-gray-50"}>
+      {/* Header - only show when not embedded */}
+      {!embedded && (
       <div className="bg-white border-b px-6 py-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div>
@@ -137,8 +138,8 @@ export default function DataModelPage() {
                 onClick={() => setShowERD(!showERD)}
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                   showERD 
-                    ? 'bg-purple-600 text-white hover:bg-purple-700' 
-                    : 'bg-purple-100 text-purple-700 hover:bg-purple-200 border border-purple-300'
+                    ? 'bg-green-600 text-white hover:bg-green-700' 
+                    : 'bg-green-100 text-green-700 hover:bg-green-200 border border-green-300'
                 }`}
               >
                 {showERD ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -149,7 +150,7 @@ export default function DataModelPage() {
             <button
               onClick={analyzeProject}
               disabled={loading}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium"
+              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium"
             >
               {loading ? (
                 <><RefreshCw className="w-4 h-4 animate-spin" /> Analyzing...</>
@@ -160,8 +161,44 @@ export default function DataModelPage() {
           </div>
         </div>
       </div>
+      )}
 
-      <div className="max-w-6xl mx-auto p-6">
+      <div className={embedded ? "" : "max-w-6xl mx-auto p-6"}>
+        {/* Inline controls when embedded */}
+        {embedded && (
+          <div className="flex items-center justify-between mb-4 pb-4 border-b">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Data Model</h2>
+              <p className="text-sm text-gray-500">{activeProject.name} • Auto-detect relationships</p>
+            </div>
+            <div className="flex items-center gap-3">
+              {analyzed && needsReview.length > 0 && (
+                <button
+                  onClick={() => setShowERD(!showERD)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    showERD 
+                      ? 'bg-green-600 text-white hover:bg-green-700' 
+                      : 'bg-green-100 text-green-700 hover:bg-green-200 border border-green-300'
+                  }`}
+                >
+                  {showERD ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  {showERD ? 'Hide ERD' : 'Visual ERD'}
+                </button>
+              )}
+              <button
+                onClick={analyzeProject}
+                disabled={loading}
+                className="flex items-center gap-2 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium text-sm"
+              >
+                {loading ? (
+                  <><RefreshCw className="w-4 h-4 animate-spin" /> Analyzing...</>
+                ) : (
+                  <><Zap className="w-4 h-4" /> {analyzed ? 'Re-analyze' : 'Analyze'}</>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
         {error && (
           <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
             {error}
@@ -276,14 +313,14 @@ export default function DataModelPage() {
               <CollapsibleSection
                 title="Semantic Types Detected"
                 count={`${semanticTypes.length} columns`}
-                icon={<Database className="w-5 h-5 text-purple-500" />}
+                icon={<Database className="w-5 h-5 text-green-500" />}
                 expanded={showSemanticTypes}
                 onToggle={() => setShowSemanticTypes(!showSemanticTypes)}
               >
                 <div className="p-4 max-h-64 overflow-y-auto">
                   <div className="flex flex-wrap gap-2">
                     {Object.entries(groupByType(semanticTypes)).map(([type, items]) => (
-                      <div key={type} className="px-3 py-1 bg-purple-50 text-purple-700 rounded-full text-sm">
+                      <div key={type} className="px-3 py-1 bg-green-50 text-green-700 rounded-full text-sm">
                         {type}: {items.length}
                       </div>
                     ))}
