@@ -1649,31 +1649,34 @@ SQL:"""
                 sql = re.sub(r'```\s*$', '', sql)
                 sql = sql.replace('```', '').strip()
             
+            logger.warning(f"[SQL-GEN] LLM raw output: {sql[:200]}")
+            
             # EXPAND short aliases to full table names WITH alias preservation
+            # (?!\.) prevents matching table.column references like personal.termination_date
             if hasattr(self, '_table_aliases') and self._table_aliases:
                 for short_name, full_name in self._table_aliases.items():
                     # Replace FROM short_name → FROM "full_name" AS short_name
                     sql = re.sub(
-                        rf'\bFROM\s+{re.escape(short_name)}\b(?!\s+AS)',
+                        rf'\bFROM\s+{re.escape(short_name)}\b(?!\.)(?!\s+AS)',
                         f'FROM "{full_name}" AS {short_name}',
                         sql,
                         flags=re.IGNORECASE
                     )
                     sql = re.sub(
-                        rf'\bFROM\s+"{re.escape(short_name)}"(?!\s+AS)',
+                        rf'\bFROM\s+"{re.escape(short_name)}"(?!\.)(?!\s+AS)',
                         f'FROM "{full_name}" AS {short_name}',
                         sql,
                         flags=re.IGNORECASE
                     )
                     # Replace JOIN short_name → JOIN "full_name" AS short_name
                     sql = re.sub(
-                        rf'\bJOIN\s+{re.escape(short_name)}\b(?!\s+AS)',
+                        rf'\bJOIN\s+{re.escape(short_name)}\b(?!\.)(?!\s+AS)',
                         f'JOIN "{full_name}" AS {short_name}',
                         sql,
                         flags=re.IGNORECASE
                     )
                     sql = re.sub(
-                        rf'\bJOIN\s+"{re.escape(short_name)}"(?!\s+AS)',
+                        rf'\bJOIN\s+"{re.escape(short_name)}"(?!\.)(?!\s+AS)',
                         f'JOIN "{full_name}" AS {short_name}',
                         sql,
                         flags=re.IGNORECASE
