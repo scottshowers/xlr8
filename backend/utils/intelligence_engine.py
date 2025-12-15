@@ -1697,6 +1697,26 @@ SQL:"""
                     )
                 logger.warning(f"[SQL-GEN] After alias expansion: {sql[:200]}")
             
+            # STRIP LLM-generated status filters (we inject the correct one ourselves)
+            # The LLM often ignores our "don't add status WHERE" instruction
+            status_filter_patterns = [
+                r"\bWHERE\s+\w*\.?employment_status_code\s*=\s*'[^']*'\s*",  # WHERE x.employment_status_code = 'TERM'
+                r"\bAND\s+\w*\.?employment_status_code\s*=\s*'[^']*'\s*",    # AND x.employment_status_code = 'TERM'
+                r"\bWHERE\s+\w*\.?employment_status\s*=\s*'[^']*'\s*",       # WHERE employment_status = 'X'
+                r"\bAND\s+\w*\.?employment_status\s*=\s*'[^']*'\s*",
+            ]
+            for pattern in status_filter_patterns:
+                if re.search(pattern, sql, re.IGNORECASE):
+                    logger.warning(f"[SQL-GEN] Stripping LLM-generated status filter")
+                    # If it was the only WHERE clause, remove it entirely
+                    sql = re.sub(pattern, 'WHERE ', sql, count=1, flags=re.IGNORECASE)
+                    # Clean up "WHERE AND" or "WHERE WHERE" that might result
+                    sql = re.sub(r'\bWHERE\s+WHERE\b', 'WHERE', sql, flags=re.IGNORECASE)
+                    sql = re.sub(r'\bWHERE\s+AND\b', 'WHERE', sql, flags=re.IGNORECASE)
+                    sql = re.sub(r'\bWHERE\s+GROUP\b', 'GROUP', sql, flags=re.IGNORECASE)
+                    sql = re.sub(r'\bWHERE\s+ORDER\b', 'ORDER', sql, flags=re.IGNORECASE)
+                    sql = re.sub(r'\bWHERE\s*$', '', sql, flags=re.IGNORECASE)
+            
             # INJECT FILTER CLAUSE (data-driven, not LLM-generated)
             logger.warning(f"[SQL-GEN] About to inject, filter_instructions={filter_instructions}")
             if filter_instructions:
