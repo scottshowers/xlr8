@@ -13,8 +13,9 @@ import api from '../services/api';
 import {
   Upload as UploadIcon, Sparkles, ClipboardList, RefreshCw,
   CheckCircle, XCircle, Clock, Loader2, Trash2, StopCircle,
-  FileText, Table2, Calendar
+  FileText, Table2, Calendar, Database
 } from 'lucide-react';
+import DataModelComponent from '../components/DataModelPage';
 
 const COLORS = {
   grassGreen: '#83b16d',
@@ -26,6 +27,7 @@ const TABS = [
   { id: 'upload', label: 'Upload', icon: UploadIcon },
   { id: 'vacuum', label: 'Vacuum', icon: Sparkles },
   { id: 'jobs', label: 'Jobs', icon: ClipboardList },
+  { id: 'model', label: 'Data Model', icon: Database },
 ];
 
 export default function DataPage() {
@@ -74,6 +76,7 @@ export default function DataPage() {
           {activeTab === 'upload' && <UploadTab project={activeProject} projectName={projectName} />}
           {activeTab === 'vacuum' && <VacuumTab />}
           {activeTab === 'jobs' && <JobsTab />}
+          {activeTab === 'model' && <DataModelComponent embedded />}
         </div>
       </div>
     </div>
