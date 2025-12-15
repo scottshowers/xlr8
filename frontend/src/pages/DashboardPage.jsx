@@ -526,9 +526,7 @@ export default function DashboardPage() {
             margin: 0, 
             letterSpacing: '0.05em', 
             fontFamily: "'Sora', sans-serif",
-            background: `linear-gradient(135deg, ${T.text}, ${T.textDim})`,
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
+            color: T.text,
           }}>
             COMMAND CENTER
           </h1>
