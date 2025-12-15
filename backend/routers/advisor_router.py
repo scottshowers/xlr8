@@ -204,6 +204,8 @@ async def advisor_chat(request: AdvisorChatRequest):
     """
     Process a conversation turn with the Work Advisor.
     Returns a response and potentially a recommendation.
+    
+    Under the hood, this just calls unified chat with the advisor persona.
     """
     try:
         messages = [m.dict() for m in request.messages]
@@ -216,10 +218,9 @@ async def advisor_chat(request: AdvisorChatRequest):
                    f"top={analysis['top_feature']}, "
                    f"ready={analysis['ready_to_recommend']}")
         
-        # Build prompt for LLM
-        system_prompt = request.system_prompt or """You are a friendly implementation consultant helping a colleague figure out the best approach for their task. Ask thoughtful questions to understand what they need."""
+        # Build system prompt with analysis context
+        system_prompt = request.system_prompt or ADVISOR_PERSONA
         
-        # Add analysis context to help LLM
         context_addition = f"""
 
 ANALYSIS OF CONVERSATION SO FAR:
@@ -244,42 +245,80 @@ If recommending, use one of these exact phrases at the END of your response:
         
         full_system = system_prompt + context_addition
         
-        # Call LLM (using orchestrator pattern from existing code)
+        # Get the last user message
+        last_user_message = ""
+        for msg in reversed(messages):
+            if msg['role'] == 'user':
+                last_user_message = msg['content']
+                break
+        
+        # Call LLM (try Ollama first, then Claude, then fallback)
+        response_text = None
+        
+        # Try Ollama/Mistral first
         try:
-            from utils.llm_orchestrator import LLMOrchestrator
-            orchestrator = LLMOrchestrator()
+            import os
+            import httpx
             
-            llm_messages = [{"role": "system", "content": full_system}]
-            llm_messages.extend(messages)
+            ollama_url = os.environ.get('OLLAMA_API_URL', 'http://ollama:11434')
             
-            result = orchestrator.chat(llm_messages)
-            response_text = result.get('response', result.get('content', ''))
+            # Build prompt
+            prompt_parts = [full_system, "\n"]
+            for msg in messages:
+                if msg['role'] == 'user':
+                    prompt_parts.append(f"Human: {msg['content']}\n")
+                elif msg['role'] == 'assistant':
+                    prompt_parts.append(f"Assistant: {msg['content']}\n")
+            prompt_parts.append("Assistant:")
             
-        except ImportError:
-            # Fallback if orchestrator not available
-            logger.warning("[ADVISOR] LLM orchestrator not available, using fallback")
+            full_prompt = "".join(prompt_parts)
             
-            if analysis['ready_to_recommend']:
-                feature = analysis['top_feature']
-                if analysis['wants_playbook'] and feature not in ['PLAYBOOK_EXISTING']:
-                    response_text = f"Based on what you've described, this sounds like something you'll want to do again. I recommend we **build a playbook** for this - that way you'll have a repeatable process with clear steps and outputs."
-                elif feature == 'COMPARE':
-                    response_text = "This sounds like a comparison/reconciliation task. I recommend the **Compare** feature - though I should mention it's still being built. In the meantime, you could use **Chat** to upload both files and work through the comparison manually."
-                elif feature == 'GL_MAPPER':
-                    response_text = "This sounds like a GL configuration task. I recommend the **GL Mapper** - though it's still being built. For now, you could use **Chat** to upload your files and I can help you work through the mapping."
-                elif feature == 'BI_BUILDER':
-                    response_text = "This sounds like you want to analyze and visualize your data. I recommend the **BI Builder** - you can ask questions in plain English and build charts and reports."
-                elif feature == 'VACUUM':
-                    response_text = "First things first - let's get your data into the system. I recommend using **Vacuum** to upload and profile your files."
-                elif feature == 'CHAT':
-                    response_text = "This sounds like an exploratory task where you want to think through something. I recommend using **Chat** - upload your files and have a conversation with AI to work through it."
-                else:
-                    response_text = "I recommend using **Chat** to explore this further."
-            else:
-                # Pick a clarifying question
-                import random
-                question = random.choice(CLARIFYING_QUESTIONS)
-                response_text = question
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                ollama_response = await client.post(
+                    f"{ollama_url}/api/generate",
+                    json={
+                        "model": "mistral",
+                        "prompt": full_prompt,
+                        "stream": False,
+                        "options": {"temperature": 0.7, "num_predict": 500}
+                    }
+                )
+                
+                if ollama_response.status_code == 200:
+                    data = ollama_response.json()
+                    response_text = data.get('response', '').strip()
+                    logger.info("[ADVISOR] Got response from Ollama/Mistral")
+                    
+        except Exception as ollama_error:
+            logger.warning(f"[ADVISOR] Ollama failed: {ollama_error}")
+        
+        # Try Claude if Ollama failed
+        if not response_text:
+            try:
+                import anthropic
+                import os
+                
+                client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
+                
+                claude_messages = [{"role": m['role'], "content": m['content']} for m in messages]
+                
+                claude_response = client.messages.create(
+                    model="claude-3-haiku-20240307",
+                    max_tokens=500,
+                    system=full_system,
+                    messages=claude_messages
+                )
+                
+                response_text = claude_response.content[0].text
+                logger.info("[ADVISOR] Got response from Claude")
+                
+            except Exception as claude_error:
+                logger.warning(f"[ADVISOR] Claude failed: {claude_error}")
+        
+        # Final fallback
+        if not response_text:
+            logger.warning("[ADVISOR] All LLMs failed, using fallback response")
+            response_text = _get_fallback_response(analysis)
         
         # Parse recommendation from response
         recommendation = None
@@ -316,6 +355,29 @@ If recommending, use one of these exact phrases at the END of your response:
         import traceback
         logger.error(traceback.format_exc())
         raise HTTPException(500, f"Advisor error: {str(e)}")
+
+
+def _get_fallback_response(analysis: Dict) -> str:
+    """Generate fallback response when LLM unavailable."""
+    if analysis['ready_to_recommend']:
+        feature = analysis['top_feature']
+        if analysis['wants_playbook'] and feature not in ['PLAYBOOK_EXISTING']:
+            return "Based on what you've described, this sounds like something you'll want to do again. I recommend we **build a playbook** for this - that way you'll have a repeatable process with clear steps and outputs."
+        elif feature == 'COMPARE':
+            return "This sounds like a comparison/reconciliation task. I recommend the **Compare** feature - though I should mention it's still being built. In the meantime, you could use **Chat** to upload both files and work through the comparison manually."
+        elif feature == 'GL_MAPPER':
+            return "This sounds like a GL configuration task. I recommend the **GL Mapper** - though it's still being built. For now, you could use **Chat** to upload your files and I can help you work through the mapping."
+        elif feature == 'BI_BUILDER':
+            return "This sounds like you want to analyze and visualize your data. I recommend the **BI Builder** - you can ask questions in plain English and build charts and reports."
+        elif feature == 'VACUUM':
+            return "First things first - let's get your data into the system. I recommend using **Vacuum** to upload and profile your files."
+        elif feature == 'CHAT':
+            return "This sounds like an exploratory task where you want to think through something. I recommend using **Chat** - upload your files and have a conversation with AI to work through it."
+        else:
+            return "I recommend using **Chat** to explore this further."
+    else:
+        import random
+        return random.choice(CLARIFYING_QUESTIONS)
 
 
 @router.get("/features")
