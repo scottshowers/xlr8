@@ -1,10 +1,12 @@
 """
-XLR8 INTELLIGENCE ENGINE v5.2
+XLR8 INTELLIGENCE ENGINE v5.3
 ==============================
 
 Deploy to: backend/utils/intelligence_engine.py
 
 UPDATES:
+- v5.3: Added US state name→code fallback (universal knowledge)
+        Data-driven approach first, state mapping as fallback
 - v5.2: FULLY DATA-DRIVEN filters
         - Removed all hardcoded state/value mappings
         - Location detection uses lookups from _intelligence_lookups
@@ -35,7 +37,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.2 DATA-DRIVEN FILTERS ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.3 STATE FALLBACK ======")
 
 
 # =============================================================================
@@ -386,6 +388,13 @@ class IntelligenceEngine:
                         logger.warning(f"[FILTER-DETECT] Found location '{description}' → code '{value_str}'")
                         return value_str
             
+            # STEP 3: US State name→code mapping (universal knowledge fallback)
+            # This is acceptable because US state abbreviations are standardized
+            state_code = self._detect_us_state_in_question(q_lower)
+            if state_code:
+                logger.warning(f"[FILTER-DETECT] Found US state → '{state_code}' via standard mapping")
+                return state_code
+            
             return None
         
         # COMPANY DETECTION - Data-driven from lookups and profile values
@@ -603,6 +612,36 @@ class IntelligenceEngine:
         except Exception as e:
             logger.debug(f"[LOOKUP] Failed to get description: {e}")
             return None
+    
+    def _detect_us_state_in_question(self, q_lower: str) -> Optional[str]:
+        """
+        Detect US state names in question and return state code.
+        
+        This is UNIVERSAL KNOWLEDGE fallback - US state abbreviations are standardized.
+        Used only when data-driven lookups don't find a match.
+        """
+        # US States - full name to code mapping
+        us_states = {
+            'alabama': 'AL', 'alaska': 'AK', 'arizona': 'AZ', 'arkansas': 'AR',
+            'california': 'CA', 'colorado': 'CO', 'connecticut': 'CT', 'delaware': 'DE',
+            'florida': 'FL', 'georgia': 'GA', 'hawaii': 'HI', 'idaho': 'ID',
+            'illinois': 'IL', 'indiana': 'IN', 'iowa': 'IA', 'kansas': 'KS',
+            'kentucky': 'KY', 'louisiana': 'LA', 'maine': 'ME', 'maryland': 'MD',
+            'massachusetts': 'MA', 'michigan': 'MI', 'minnesota': 'MN', 'mississippi': 'MS',
+            'missouri': 'MO', 'montana': 'MT', 'nebraska': 'NE', 'nevada': 'NV',
+            'new hampshire': 'NH', 'new jersey': 'NJ', 'new mexico': 'NM', 'new york': 'NY',
+            'north carolina': 'NC', 'north dakota': 'ND', 'ohio': 'OH', 'oklahoma': 'OK',
+            'oregon': 'OR', 'pennsylvania': 'PA', 'rhode island': 'RI', 'south carolina': 'SC',
+            'south dakota': 'SD', 'tennessee': 'TN', 'texas': 'TX', 'utah': 'UT',
+            'vermont': 'VT', 'virginia': 'VA', 'washington': 'WA', 'west virginia': 'WV',
+            'wisconsin': 'WI', 'wyoming': 'WY'
+        }
+        
+        for state_name, state_code in us_states.items():
+            if _is_word_boundary_match(q_lower, state_name):
+                return state_code
+        
+        return None
 
     def _request_filter_clarification(self, question: str, category: str) -> SynthesizedAnswer:
         """
