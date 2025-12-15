@@ -804,4 +804,4 @@ function MappingsTab({ mappings, onDelete, onRefresh }) {
       </div>
     </div>
   )
-}
+        }
