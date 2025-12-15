@@ -121,20 +121,19 @@ def analyze_conversation(messages: List[Dict]) -> Dict:
     max_score = max(scores.values()) if scores else 0
     total_score = sum(scores.values())
     
-    # Need enough conversation AND clear signal
-    ready_to_recommend = (
-        user_turns >= 2 and  # At least 2 exchanges
-        max_score >= 4 and   # Strong signal for something
-        (max_score / max(total_score, 1)) > 0.4  # Clear winner
-    )
-    
-    # Check for playbook indicators
+    # Check for playbook indicators FIRST
     playbook_indicators = [
         'repeatable', 'every time', 'standard process', 'workflow',
         'steps', 'checklist', 'deliverable', 'for other customers',
-        'do this again', 'reusable'
+        'do this again', 'reusable', 'other customers', 'template',
+        'xlsx', 'excel', 'output'
     ]
     wants_playbook = any(ind in user_text for ind in playbook_indicators)
+    
+    # Strong playbook signals - user clearly said yes to repeatable
+    strong_playbook = any(phrase in user_text for phrase in [
+        'other customers', 'yes', 'both', 'every time', 'template'
+    ])
     
     # One-off indicators
     oneoff_indicators = [
@@ -142,6 +141,14 @@ def analyze_conversation(messages: List[Dict]) -> Dict:
         'just need to', 'real quick'
     ]
     wants_oneoff = any(ind in user_text for ind in oneoff_indicators)
+    
+    # Need enough conversation AND clear signal
+    # OR if user has given clear playbook signals after 2+ turns
+    ready_to_recommend = (
+        (user_turns >= 2 and max_score >= 4 and (max_score / max(total_score, 1)) > 0.4) or
+        (user_turns >= 3 and wants_playbook) or
+        (user_turns >= 2 and strong_playbook)  # User clearly said yes to repeatable
+    )
     
     # Get top features
     sorted_features = sorted(scores.items(), key=lambda x: -x[1])
@@ -318,7 +325,7 @@ If recommending, use one of these exact phrases at the END of your response:
         # Final fallback
         if not response_text:
             logger.warning("[ADVISOR] All LLMs failed, using fallback response")
-            response_text = _get_fallback_response(analysis)
+            response_text = _get_fallback_response(analysis, messages)
         
         # Parse recommendation from response
         recommendation = None
@@ -357,13 +364,22 @@ If recommending, use one of these exact phrases at the END of your response:
         raise HTTPException(500, f"Advisor error: {str(e)}")
 
 
-def _get_fallback_response(analysis: Dict) -> str:
+def _get_fallback_response(analysis: Dict, messages: List[Dict] = None) -> str:
     """Generate fallback response when LLM unavailable."""
-    if analysis['ready_to_recommend']:
+    messages = messages or []
+    
+    # If we have enough info, make a recommendation
+    if analysis['ready_to_recommend'] or analysis['user_turns'] >= 3:
         feature = analysis['top_feature']
-        if analysis['wants_playbook'] and feature not in ['PLAYBOOK_EXISTING']:
-            return "Based on what you've described, this sounds like something you'll want to do again. I recommend we **build a playbook** for this - that way you'll have a repeatable process with clear steps and outputs."
-        elif feature == 'COMPARE':
+        
+        # Check for playbook signals
+        if analysis['wants_playbook'] or any(
+            word in analysis.get('user_text', '').lower() 
+            for word in ['other customers', 'repeatable', 'every time', 'again']
+        ):
+            return "Based on what you've described - this is something you'll do repeatedly with a clear output format - I recommend we **build a playbook** for this. That way your whole team can follow the same process and produce consistent deliverables."
+        
+        if feature == 'COMPARE':
             return "This sounds like a comparison/reconciliation task. I recommend the **Compare** feature - though I should mention it's still being built. In the meantime, you could use **Chat** to upload both files and work through the comparison manually."
         elif feature == 'GL_MAPPER':
             return "This sounds like a GL configuration task. I recommend the **GL Mapper** - though it's still being built. For now, you could use **Chat** to upload your files and I can help you work through the mapping."
@@ -374,10 +390,33 @@ def _get_fallback_response(analysis: Dict) -> str:
         elif feature == 'CHAT':
             return "This sounds like an exploratory task where you want to think through something. I recommend using **Chat** - upload your files and have a conversation with AI to work through it."
         else:
-            return "I recommend using **Chat** to explore this further."
-    else:
-        import random
-        return random.choice(CLARIFYING_QUESTIONS)
+            # Default to playbook if they mentioned outputs/templates/repeatable
+            user_text = analysis.get('user_text', '').lower()
+            if any(word in user_text for word in ['template', 'output', 'deliverable', 'xlsx', 'excel']):
+                return "Since you have a defined output template and this is repeatable, I recommend we **build a playbook** for this. It will ensure consistent results every time."
+            return "Based on what you've shared, I recommend we **build a playbook** for this workflow."
+    
+    # Not enough info yet - ask a NEW question based on what we DON'T know
+    user_text = analysis.get('user_text', '').lower()
+    assistant_text = ' '.join([m['content'].lower() for m in messages if m.get('role') == 'assistant'])
+    
+    # Track what we've learned
+    knows_repeatable = any(word in user_text for word in ['other customers', 'every time', 'again', 'repeatable', 'yes'])
+    knows_output = any(word in user_text for word in ['template', 'xlsx', 'excel', 'output', 'deliverable', 'report'])
+    knows_structured = any(word in user_text for word in ['steps', 'structured', 'workflow', 'both'])
+    
+    # Ask about what we DON'T know yet
+    if not knows_output and 'output' not in assistant_text and 'deliverable' not in assistant_text:
+        return "What's the end deliverable? Is there a specific output format you need to produce?"
+    
+    if not knows_repeatable and 'repeat' not in assistant_text and 'other customers' not in assistant_text:
+        return "Is this something you'll do for multiple customers, or just this one?"
+    
+    if not knows_structured and 'structured' not in assistant_text and 'steps' not in assistant_text:
+        return "Do you want a defined workflow with clear steps, or more flexibility to explore?"
+    
+    # If we've asked the main questions, make a recommendation
+    return "Got it! Based on what you've shared - repeatable process with defined outputs - I recommend we **build a playbook** for this. Ready to set it up?"
 
 
 @router.get("/features")
