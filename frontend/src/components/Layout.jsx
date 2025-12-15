@@ -8,14 +8,14 @@
  * Includes: Upload status indicator, theme toggle, help button
  */
 
-import React, { useLayoutEffect, useState } from 'react';
+import React, { useLayoutEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Rocket, Sun, Moon, HelpCircle, X } from 'lucide-react';
+import { Rocket, Sun, Moon, HelpCircle } from 'lucide-react';
 import ContextBar from './ContextBar';
 import { useAuth, Permissions } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { UploadStatusIndicator } from '../context/UploadContext';
-import { RestartTourButton } from '../context/OnboardingContext';
+import { useOnboarding } from '../context/OnboardingContext';
 
 const COLORS = {
   grassGreen: '#83b16d',
@@ -79,94 +79,11 @@ const HLogoGreen = () => (
   </svg>
 );
 
-// Help Panel Component
-function HelpPanel({ isOpen, onClose }) {
-  if (!isOpen) return null;
-
-  const tips = [
-    { icon: '🏠', title: 'Command Center', desc: 'Overview of all projects, recent activity, and quick actions' },
-    { icon: '🏢', title: 'Projects', desc: 'Create and manage customer implementation projects' },
-    { icon: '📁', title: 'Data', desc: 'Upload customer data files for analysis' },
-    { icon: '📚', title: 'Reference Library', desc: 'Global standards and compliance documents' },
-    { icon: '📋', title: 'Playbooks', desc: 'Run analysis playbooks against project data' },
-    { icon: '💬', title: 'Workspace', desc: 'Chat with AI assistant about your data' },
-  ];
-
-  return (
-    <div style={{
-      position: 'fixed',
-      top: '60px',
-      right: '1rem',
-      width: '320px',
-      background: 'white',
-      borderRadius: '12px',
-      boxShadow: '0 10px 40px rgba(0,0,0,0.15)',
-      zIndex: 1000,
-      overflow: 'hidden',
-    }}>
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: '1rem',
-        borderBottom: '1px solid #e1e8ed',
-        background: COLORS.grassGreen,
-      }}>
-        <span style={{ fontWeight: 600, color: 'white' }}>Quick Tips</span>
-        <button
-          onClick={onClose}
-          style={{
-            background: 'rgba(255,255,255,0.2)',
-            border: 'none',
-            borderRadius: '4px',
-            padding: '4px',
-            cursor: 'pointer',
-            display: 'flex',
-          }}
-        >
-          <X size={16} color="white" />
-        </button>
-      </div>
-      <div style={{ padding: '0.75rem', maxHeight: '400px', overflowY: 'auto' }}>
-        {tips.map((tip, i) => (
-          <div key={i} style={{
-            display: 'flex',
-            gap: '0.75rem',
-            padding: '0.75rem',
-            borderRadius: '8px',
-            background: i % 2 === 0 ? '#f8fafc' : 'white',
-          }}>
-            <span style={{ fontSize: '1.25rem' }}>{tip.icon}</span>
-            <div>
-              <div style={{ fontWeight: 600, fontSize: '0.85rem', color: COLORS.text }}>{tip.title}</div>
-              <div style={{ fontSize: '0.8rem', color: COLORS.textLight, marginTop: '2px' }}>{tip.desc}</div>
-            </div>
-          </div>
-        ))}
-        <div style={{
-          marginTop: '0.75rem',
-          padding: '0.75rem',
-          background: `${COLORS.grassGreen}10`,
-          borderRadius: '8px',
-          fontSize: '0.8rem',
-          color: COLORS.textLight,
-        }}>
-          <strong style={{ color: COLORS.grassGreen }}>Keyboard Shortcuts:</strong>
-          <div style={{ marginTop: '0.5rem' }}>
-            <div>⌘/Ctrl + K → Quick search</div>
-            <div>⌘/Ctrl + N → New project</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function Navigation() {
   const location = useLocation();
   const { hasPermission, user, isAdmin, logout } = useAuth();
   const { darkMode, toggle } = useTheme();
-  const [helpOpen, setHelpOpen] = useState(false);
+  const { startTour, tourEnabled, setTourEnabled } = useOnboarding();
 
   const isActive = (path) => {
     if (path === '/dashboard') return location.pathname === '/dashboard' || location.pathname === '/';
@@ -384,16 +301,23 @@ function Navigation() {
           {/* Upload Status Indicator */}
           <UploadStatusIndicator />
           
-          {/* Help Button */}
+          {/* Tour Guide Toggle */}
           <button
-            onClick={() => setHelpOpen(!helpOpen)}
+            onClick={() => {
+              if (tourEnabled) {
+                setTourEnabled(false);
+              } else {
+                setTourEnabled(true);
+                startTour();
+              }
+            }}
             style={{
               ...styles.helpBtn,
-              background: helpOpen ? COLORS.grassGreen : '#f8fafc',
-              color: helpOpen ? 'white' : COLORS.textLight,
-              borderColor: helpOpen ? COLORS.grassGreen : '#e1e8ed',
+              background: tourEnabled ? COLORS.grassGreen : '#f8fafc',
+              color: tourEnabled ? 'white' : COLORS.textLight,
+              borderColor: tourEnabled ? COLORS.grassGreen : '#e1e8ed',
             }}
-            title="Quick Tips"
+            title={tourEnabled ? 'Turn off guide' : 'Turn on guide'}
           >
             <HelpCircle size={16} />
           </button>
@@ -420,9 +344,6 @@ function Navigation() {
           )}
         </div>
       </div>
-      
-      {/* Help Panel */}
-      <HelpPanel isOpen={helpOpen} onClose={() => setHelpOpen(false)} />
     </nav>
   );
 }
