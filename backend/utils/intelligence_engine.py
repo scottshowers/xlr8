@@ -1,10 +1,13 @@
 """
-XLR8 INTELLIGENCE ENGINE v5.0
+XLR8 INTELLIGENCE ENGINE v5.1
 ==============================
 
 Deploy to: backend/utils/intelligence_engine.py
 
 UPDATES:
+- v5.1: Filter override logic (detects new values even if category already confirmed)
+        Location column validation (rejects routing_number, bank fields)
+        Stricter state detection (word boundaries, prevents false positives like "many" → NY)
 - v5.0: Fixed state detection - no longer requires state code to be in sample values
         Added LLM location filter stripping (data-driven, uses column from filter_candidates)
 - v4.9: ARE bug fix (common English word blocklist)
@@ -30,7 +33,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.0 STATE DETECTION FIX ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.1 OVERRIDE + COLUMN VALIDATION ======")
 
 
 # =============================================================================
@@ -308,17 +311,21 @@ class IntelligenceEngine:
         
         # Check each available filter category
         for category in self.filter_candidates.keys():
-            # Skip if already confirmed
-            if category in self.confirmed_facts:
-                logger.warning(f"[CLARIFICATION] Skipping {category} - already confirmed as {self.confirmed_facts[category]}")
+            # ALWAYS detect first - user may be overriding a previous value
+            detected = self._detect_filter_in_question(category, q_lower)
+            
+            if detected:
+                # User specified in THIS question - set/override it
+                if category in self.confirmed_facts and self.confirmed_facts[category] != detected:
+                    logger.warning(f"[INTELLIGENCE] Overriding {category}: {self.confirmed_facts[category]} → {detected}")
+                else:
+                    logger.warning(f"[INTELLIGENCE] Detected {category} in question: {detected}")
+                self.confirmed_facts[category] = detected
                 continue
             
-            # Check if specified in question
-            detected = self._detect_filter_in_question(category, q_lower)
-            if detected:
-                # User specified - set it and skip
-                self.confirmed_facts[category] = detected
-                logger.warning(f"[INTELLIGENCE] Detected {category} in question: {detected}")
+            # Not detected in question - check if already confirmed
+            if category in self.confirmed_facts:
+                logger.warning(f"[CLARIFICATION] Skipping {category} - already confirmed as {self.confirmed_facts[category]}")
                 continue
             
             # Check if this filter is relevant to the question
@@ -388,15 +395,30 @@ class IntelligenceEngine:
             
             # Check for state mentions
             for state_name, state_code in states.items():
-                # Pattern: "in texas", "texas employees", "from tx"
-                patterns = [
-                    f' in {state_name}', f'{state_name} employees', f'{state_name} workers',
-                    f'from {state_name}', f' {state_name} ', f'({state_name})'
-                ]
-                for pattern in patterns:
-                    if pattern in q_lower or q_lower.startswith(state_name):
-                        # We have a location column (candidates exist) - trust the state mapping
-                        # State name → code is universal knowledge, column existence is data-driven
+                # Skip 2-letter codes as standalone patterns (too many false positives)
+                # Only match them with explicit context like "in TX" or "TX employees"
+                if len(state_name) == 2:
+                    # Stricter patterns for 2-letter codes
+                    patterns = [
+                        f' in {state_name}$',  # "in TX" at end
+                        f' in {state_name} ',  # "in TX " with space after
+                        f' in {state_name},',  # "in TX,"
+                        f'{state_name} employees',
+                        f'{state_name} workers',
+                        f'from {state_name}',
+                    ]
+                    for pattern in patterns:
+                        # Use regex for end-of-string patterns
+                        if pattern.endswith('$'):
+                            if q_lower.endswith(pattern[:-1]):
+                                logger.warning(f"[FILTER-DETECT] Found state '{state_name}' → '{state_code}' in question")
+                                return state_code
+                        elif pattern in q_lower:
+                            logger.warning(f"[FILTER-DETECT] Found state '{state_name}' → '{state_code}' in question")
+                            return state_code
+                else:
+                    # Full state names - use word boundary matching
+                    if _is_word_boundary_match(q_lower, state_name):
                         logger.warning(f"[FILTER-DETECT] Found state '{state_name}' → '{state_code}' in question")
                         return state_code
             
@@ -992,8 +1014,29 @@ class IntelligenceEngine:
         if location_filter and location_filter != 'all':
             location_candidates = self.filter_candidates.get('location', [])
             if location_candidates:
-                col_name = location_candidates[0].get('column')
-                filters.append(f"{col_name} = '{location_filter}'")
+                # Find a valid location column (not routing numbers, banks, etc.)
+                location_column_patterns = ['state', 'province', 'location', 'region', 'city', 'address', 'county']
+                invalid_patterns = ['routing', 'bank', 'account', 'number', 'branch', 'aba']
+                
+                valid_col = None
+                for candidate in location_candidates:
+                    col_name = candidate.get('column', '').lower()
+                    # Check if column name looks like a location field
+                    is_location = any(p in col_name for p in location_column_patterns)
+                    is_invalid = any(p in col_name for p in invalid_patterns)
+                    
+                    if is_location and not is_invalid:
+                        valid_col = candidate.get('column')
+                        break
+                    elif not is_invalid and not valid_col:
+                        # Fallback: accept if not obviously invalid
+                        valid_col = candidate.get('column')
+                
+                if valid_col:
+                    filters.append(f"{valid_col} = '{location_filter}'")
+                    logger.warning(f"[FILTER] Using location column: {valid_col}")
+                else:
+                    logger.warning(f"[FILTER] No valid location column found, skipping location filter")
         
         # PAY TYPE FILTER
         pay_type_filter = self.confirmed_facts.get('pay_type')
