@@ -1,8 +1,13 @@
 """
-XLR8 INTELLIGENCE ENGINE v3
-============================
+XLR8 INTELLIGENCE ENGINE v5.0
+==============================
 
 Deploy to: backend/utils/intelligence_engine.py
+
+UPDATES:
+- v5.0: Fixed state detection - no longer requires state code to be in sample values
+        Added LLM location filter stripping (data-driven, uses column from filter_candidates)
+- v4.9: ARE bug fix (common English word blocklist)
 
 SIMPLIFIED:
 - Only asks ONE clarification: active/terminated/all employees
@@ -25,7 +30,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v4.9 ARE BUG FIX ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.0 STATE DETECTION FIX ======")
 
 
 # =============================================================================
@@ -344,7 +349,7 @@ class IntelligenceEngine:
         
         # LOCATION DETECTION - States, cities, common patterns
         if category == 'location':
-            # US States (common ones)
+            # US States - universal mapping (not data-specific)
             states = {
                 'texas': 'TX', 'tx': 'TX',
                 'california': 'CA', 'ca': 'CA', 
@@ -390,12 +395,10 @@ class IntelligenceEngine:
                 ]
                 for pattern in patterns:
                     if pattern in q_lower or q_lower.startswith(state_name):
-                        # Verify this code exists in our data
-                        for candidate in candidates:
-                            values = [str(v).upper() for v in candidate.get('values', [])]
-                            if state_code in values:
-                                logger.warning(f"[FILTER-DETECT] Found location {state_code} in question")
-                                return state_code
+                        # We have a location column (candidates exist) - trust the state mapping
+                        # State name → code is universal knowledge, column existence is data-driven
+                        logger.warning(f"[FILTER-DETECT] Found state '{state_name}' → '{state_code}' in question")
+                        return state_code
             
             # Check actual location values in data (with ARE bug fix)
             for candidate in candidates:
@@ -1036,6 +1039,60 @@ class IntelligenceEngine:
         
         return ""
     
+    def _fix_state_names_in_sql(self, sql: str) -> str:
+        """
+        Strip location/state filters from LLM-generated SQL.
+        
+        We handle location filters via data-driven injection from confirmed_facts.
+        The LLM sometimes adds its own (wrong) location filters like ILIKE '%Texas%'.
+        We strip these and let our filter injection handle it properly.
+        """
+        # Only strip if we have a confirmed location filter (we'll inject the right one)
+        location_filter = self.confirmed_facts.get('location')
+        if not location_filter or location_filter == 'all':
+            return sql
+        
+        # Get location column name from filter_candidates
+        location_candidates = self.filter_candidates.get('location', [])
+        if not location_candidates:
+            return sql
+        
+        col_name = location_candidates[0].get('column', '')
+        if not col_name:
+            return sql
+        
+        modified = sql
+        
+        # Strip patterns like: column ILIKE '%anything%'
+        # This removes the LLM's location filter so our injection can add the correct one
+        
+        # Pattern 0: WHERE col ILIKE '...' AND ... → WHERE ...
+        pattern0 = rf"WHERE\s+{re.escape(col_name)}\s+ILIKE\s+'%[^']+%'\s*AND\s*"
+        modified = re.sub(pattern0, 'WHERE ', modified, flags=re.IGNORECASE)
+        
+        # Pattern 1: ... AND col ILIKE '...' AND ... → ... AND ...
+        pattern1 = rf"{re.escape(col_name)}\s+ILIKE\s+'%[^']+%'\s*AND\s*"
+        modified = re.sub(pattern1, '', modified, flags=re.IGNORECASE)
+        
+        # Pattern 2: ... AND col ILIKE '...' (at end) → ...
+        pattern2 = rf"\s*AND\s+{re.escape(col_name)}\s+ILIKE\s+'%[^']+%'"
+        modified = re.sub(pattern2, '', modified, flags=re.IGNORECASE)
+        
+        # Pattern 3: WHERE col = 'StateName' AND ... → WHERE ...
+        pattern3 = rf"WHERE\s+{re.escape(col_name)}\s*=\s*'[A-Za-z\s]+'\s*AND\s*"
+        modified = re.sub(pattern3, 'WHERE ', modified, flags=re.IGNORECASE)
+        
+        # Pattern 4: ... AND col = 'StateName' (at end) → ...  
+        pattern4 = rf"\s*AND\s+{re.escape(col_name)}\s*=\s*'[A-Za-z\s]+'"
+        modified = re.sub(pattern4, '', modified, flags=re.IGNORECASE)
+        
+        if modified != sql:
+            logger.warning(f"[SQL-FIX] Stripped LLM location filter, will use confirmed_facts['location']={location_filter}")
+            logger.warning(f"[SQL-FIX] Before: {sql[:150]}")
+            logger.warning(f"[SQL-FIX] After: {modified[:150]}")
+        
+        return modified
+    
     def _inject_where_clause(self, sql: str, filter_clause: str) -> str:
         """
         Inject a WHERE clause into SQL that may or may not already have one.
@@ -1371,6 +1428,9 @@ SQL:"""
             if filter_instructions:
                 sql = self._inject_where_clause(sql, filter_instructions)
                 logger.warning(f"[SQL-GEN] After filter injection: {sql[:200]}")
+            
+            # FIX STATE NAME PATTERNS - convert "Texas" to "TX" etc in ILIKE clauses
+            sql = self._fix_state_names_in_sql(sql)
             
             logger.warning(f"[SQL-GEN] Generated: {sql[:150]}")
             
