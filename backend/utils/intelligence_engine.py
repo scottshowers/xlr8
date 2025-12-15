@@ -527,12 +527,12 @@ class IntelligenceEngine:
         
         DATA-DRIVEN: Uses lookups from _intelligence_lookups table.
         """
-        if not self.handler or not hasattr(self.handler, 'conn'):
+        if not self.structured_handler or not hasattr(self.structured_handler, 'conn'):
             return None
         
         try:
             # Load lookups for this type
-            lookups = self.handler.conn.execute("""
+            lookups = self.structured_handler.conn.execute("""
                 SELECT code_column, lookup_data_json
                 FROM _intelligence_lookups
                 WHERE project_name = ? AND lookup_type = ?
@@ -571,11 +571,11 @@ class IntelligenceEngine:
         
         DATA-DRIVEN: Uses lookups from _intelligence_lookups table.
         """
-        if not self.handler or not hasattr(self.handler, 'conn') or not code:
+        if not self.structured_handler or not hasattr(self.structured_handler, 'conn') or not code:
             return None
         
         try:
-            lookups = self.handler.conn.execute("""
+            lookups = self.structured_handler.conn.execute("""
                 SELECT lookup_data_json
                 FROM _intelligence_lookups
                 WHERE project_name = ? AND lookup_type = ?
