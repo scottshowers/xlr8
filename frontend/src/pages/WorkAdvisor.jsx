@@ -11,127 +11,113 @@ import {
   CheckSquare,
   Sparkles,
   RotateCcw,
-  ChevronRight
+  ChevronRight,
+  Zap,
+  Target,
+  Compass,
+  Bot
 } from 'lucide-react'
 
 /**
- * WorkAdvisor - A conversational guide that helps users figure out 
- * the best approach for their task.
+ * WorkAdvisor - Conversational guide to help users find the right approach
  * 
- * Philosophy: Most people don't know what they want, they know what 
- * they don't want. So we ask questions, listen, and guide them to
- * the right tool or help them build a playbook.
+ * POLISHED VERSION - Matches platform visual style with gradients, 
+ * animations, and consistent brand colors
  */
 
-const ADVISOR_PERSONA = `You are a friendly, experienced implementation consultant helping a colleague figure out the best approach for their task. You're not pushy - you ask thoughtful questions to understand what they're really trying to accomplish.
+// Brand colors from the platform
+const COLORS = {
+  grassGreen: '#83b16d',
+  grassGreenDark: '#6a9a54',
+  skyBlue: '#93abd9',
+  iceFlow: '#c9d3d4',
+  text: '#2a3441',
+  textLight: '#5f6c7b',
+}
 
-Your goal is to guide them to one of these outcomes:
-1. CHAT - They just need to explore/analyze something with AI assistance (no structured workflow)
-2. VACUUM - They need to upload and profile data first
-3. BI_BUILDER - They want to build reports, dashboards, or analyze trends
-4. PLAYBOOK_EXISTING - Their need matches an existing playbook (Year-End Readiness, etc.)
-5. PLAYBOOK_NEW - They need a structured, repeatable workflow that doesn't exist yet
-6. COMPARE - They need to compare two datasets and reconcile differences (FUTURE FEATURE)
-7. GL_MAPPER - They need to map legacy GL to new system rules (FUTURE FEATURE)
+const ADVISOR_PERSONA = `You are a friendly, experienced implementation consultant helping a colleague figure out the best approach for their task. Ask thoughtful questions to understand what they need.
 
-Ask 3-5 questions before making a recommendation. Questions to consider:
-- What's the end goal? What deliverable do they need?
-- Is this a one-time thing or will they do it repeatedly?
-- Do they have files to upload? What kind?
-- Do they need structured steps or just guidance?
-- Are they comparing things, building something, or analyzing?
-- Is there a customer deadline or deliverable involved?
+Guide them to: CHAT, VACUUM, BI_BUILDER, PLAYBOOK_EXISTING, PLAYBOOK_NEW, COMPARE, or GL_MAPPER.
 
-Be conversational, not robotic. Use their language back to them. If they're vague, dig deeper. If they're clear, move faster.
-
-When ready to recommend, be clear about WHY you're recommending that path.`
+Ask 2-3 questions before recommending. When ready, use exact phrases like:
+- "I recommend using **Chat**" 
+- "I recommend we **build a playbook**"
+- "I recommend the **BI Builder**"
+`
 
 const INITIAL_MESSAGE = {
   role: 'assistant',
   content: `Hey! 👋 I'm here to help you figure out the best approach for what you're working on.
 
-Tell me a bit about what you're trying to accomplish. Don't worry about using the "right" words - just describe the situation or problem you're dealing with.`,
+Tell me about what you're trying to accomplish - what's the problem you're solving or the deliverable you need?`,
   timestamp: new Date()
 }
 
-// Feature cards for recommendations
+// Feature cards with brand-consistent styling
 const FEATURES = {
   CHAT: {
     icon: MessageSquare,
-    title: 'Use Chat',
-    description: 'Upload files and have a conversation. Great for exploration, analysis, and getting AI help thinking through problems.',
-    color: 'blue',
-    route: '/chat',
+    title: 'Chat',
+    description: 'Upload files and explore with AI. Great for thinking through problems.',
+    color: COLORS.skyBlue,
+    bgColor: 'rgba(147, 171, 217, 0.1)',
+    route: '/workspace',
     available: true
   },
   VACUUM: {
     icon: Upload,
-    title: 'Upload Data (Vacuum)',
-    description: 'Ingest and profile your data files. This gets them into the system so you can analyze, query, and use them in playbooks.',
-    color: 'green',
-    route: '/data/vacuum',
+    title: 'Upload Data',
+    description: 'Ingest and profile your files to use across the platform.',
+    color: COLORS.grassGreen,
+    bgColor: 'rgba(131, 177, 109, 0.1)',
+    route: '/vacuum',
     available: true
   },
   BI_BUILDER: {
     icon: BarChart3,
     title: 'BI Builder',
-    description: 'Ask questions about your data in plain English. Build charts, reports, and dashboards.',
-    color: 'purple',
-    route: '/bi-builder',
+    description: 'Ask questions in plain English. Build charts and dashboards.',
+    color: '#9b7ed9',
+    bgColor: 'rgba(155, 126, 217, 0.1)',
+    route: '/analytics',
     available: true
   },
   PLAYBOOK_EXISTING: {
     icon: CheckSquare,
-    title: 'Run a Playbook',
-    description: 'Follow a structured workflow with defined steps, checks, and deliverables.',
-    color: 'amber',
+    title: 'Run Playbook',
+    description: 'Execute a structured workflow with defined steps.',
+    color: '#e8a838',
+    bgColor: 'rgba(232, 168, 56, 0.1)',
     route: '/playbooks',
     available: true
   },
   PLAYBOOK_NEW: {
     icon: Sparkles,
-    title: 'Build a New Playbook',
-    description: "Let's create a reusable workflow for this. I'll help you define the steps, inputs, and outputs.",
-    color: 'emerald',
-    route: null, // Handled specially
+    title: 'Build Playbook',
+    description: "Create a reusable workflow. I'll help define it.",
+    color: '#4ecdc4',
+    bgColor: 'rgba(78, 205, 196, 0.1)',
+    route: null,
     available: true
   },
   COMPARE: {
     icon: GitCompare,
-    title: 'Compare & Reconcile',
-    description: 'Compare two datasets, find variances, and categorize differences. Perfect for parallel testing and go-live validation.',
-    color: 'orange',
+    title: 'Compare',
+    description: 'Compare datasets and find variances.',
+    color: '#ff6b6b',
+    bgColor: 'rgba(255, 107, 107, 0.1)',
     route: '/compare',
-    available: false // Not built yet
+    available: false
   },
   GL_MAPPER: {
     icon: FileText,
-    title: 'GL Configuration',
-    description: 'Map legacy GL structure to new system rules. Upload your files and let AI figure out the mapping.',
-    color: 'cyan',
+    title: 'GL Mapper',
+    description: 'Map legacy GL to new system rules.',
+    color: '#45b7d1',
+    bgColor: 'rgba(69, 183, 209, 0.1)',
     route: '/gl-mapper',
-    available: false // Not built yet
+    available: false
   }
-}
-
-const colorClasses = {
-  blue: 'bg-blue-50 border-blue-200 text-blue-700',
-  green: 'bg-green-50 border-green-200 text-green-700',
-  purple: 'bg-purple-50 border-purple-200 text-purple-700',
-  amber: 'bg-amber-50 border-amber-200 text-amber-700',
-  emerald: 'bg-emerald-50 border-emerald-200 text-emerald-700',
-  orange: 'bg-orange-50 border-orange-200 text-orange-700',
-  cyan: 'bg-cyan-50 border-cyan-200 text-cyan-700'
-}
-
-const iconColorClasses = {
-  blue: 'text-blue-500',
-  green: 'text-green-500',
-  purple: 'text-purple-500',
-  amber: 'text-amber-500',
-  emerald: 'text-emerald-500',
-  orange: 'text-orange-500',
-  cyan: 'text-cyan-500'
 }
 
 export default function WorkAdvisor() {
@@ -144,12 +130,10 @@ export default function WorkAdvisor() {
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
 
-  // Auto-scroll to bottom of messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // Focus input on load
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
@@ -157,58 +141,41 @@ export default function WorkAdvisor() {
   const handleSend = async () => {
     if (!input.trim() || isLoading) return
 
-    const userMessage = {
-      role: 'user',
-      content: input.trim(),
-      timestamp: new Date()
-    }
-
+    const userMessage = { role: 'user', content: input.trim(), timestamp: new Date() }
     setMessages(prev => [...prev, userMessage])
     setInput('')
     setIsLoading(true)
 
     try {
-      // Build conversation history for AI
       const conversationHistory = [...messages, userMessage].map(m => ({
-        role: m.role,
-        content: m.content
+        role: m.role, content: m.content
       }))
 
       const response = await fetch('/api/advisor/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: conversationHistory,
-          system_prompt: ADVISOR_PERSONA
-        })
+        body: JSON.stringify({ messages: conversationHistory, system_prompt: ADVISOR_PERSONA })
       })
 
       if (!response.ok) throw new Error('Advisor request failed')
-
       const data = await response.json()
 
-      // Check if AI made a recommendation
       if (data.recommendation) {
         setRecommendation(data.recommendation)
-        if (data.playbook_draft) {
-          setPlaybookDraft(data.playbook_draft)
-        }
+        if (data.playbook_draft) setPlaybookDraft(data.playbook_draft)
       }
 
-      const assistantMessage = {
+      setMessages(prev => [...prev, {
         role: 'assistant',
         content: data.response,
         timestamp: new Date(),
         recommendation: data.recommendation || null
-      }
-
-      setMessages(prev => [...prev, assistantMessage])
-
+      }])
     } catch (error) {
       console.error('Advisor error:', error)
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: "Sorry, I hit a snag. Let me try again - what were you working on?",
+        content: "Sorry, I hit a snag. What were you working on?",
         timestamp: new Date()
       }])
     } finally {
@@ -234,26 +201,21 @@ export default function WorkAdvisor() {
   const handleFeatureSelect = (featureKey) => {
     const feature = FEATURES[featureKey]
     if (!feature.available) {
-      // Show "coming soon" message
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: `The ${feature.title} feature is on our roadmap but not built yet. For now, you could use **Chat** to upload your files and work through this manually, or we could **build a playbook** to structure the workflow. What sounds better?`,
+        content: `**${feature.title}** is coming soon! For now, try **Chat** to work through it manually, or we can **build a playbook** for the workflow.`,
         timestamp: new Date()
       }])
       return
     }
-
     if (featureKey === 'PLAYBOOK_NEW') {
       setShowPlaybookBuilder(true)
       return
     }
-
-    // Navigate to feature
     window.location.href = feature.route
   }
 
   const handleSkipAdvisor = () => {
-    // Show quick access menu
     setMessages(prev => [...prev, {
       role: 'assistant', 
       content: `No problem! Here's what's available:`,
@@ -262,48 +224,250 @@ export default function WorkAdvisor() {
     }])
   }
 
-  // Render a single message
+  const styles = {
+    container: {
+      display: 'flex',
+      flexDirection: 'column',
+      height: '100%',
+      background: 'linear-gradient(135deg, #f8faf7 0%, #ffffff 50%, #f5f8fc 100%)',
+    },
+    header: {
+      padding: '1.25rem 1.5rem',
+      background: 'white',
+      borderBottom: '1px solid #e8ecef',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+    },
+    headerInner: {
+      maxWidth: '900px',
+      margin: '0 auto',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    headerLeft: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '1rem',
+    },
+    iconWrapper: {
+      position: 'relative',
+    },
+    mainIcon: {
+      width: '56px',
+      height: '56px',
+      borderRadius: '16px',
+      background: `linear-gradient(135deg, ${COLORS.grassGreen} 0%, ${COLORS.grassGreenDark} 100%)`,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      boxShadow: '0 4px 12px rgba(131, 177, 109, 0.3)',
+    },
+    sparkBadge: {
+      position: 'absolute',
+      bottom: '-4px',
+      right: '-4px',
+      width: '22px',
+      height: '22px',
+      borderRadius: '8px',
+      background: 'linear-gradient(135deg, #ffd93d 0%, #ff9f43 100%)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      boxShadow: '0 2px 6px rgba(255, 159, 67, 0.4)',
+    },
+    title: {
+      fontFamily: "'Sora', sans-serif",
+      fontSize: '1.5rem',
+      fontWeight: '700',
+      color: COLORS.text,
+      margin: 0,
+    },
+    subtitle: {
+      fontSize: '0.875rem',
+      color: COLORS.textLight,
+      margin: 0,
+    },
+    headerActions: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.75rem',
+    },
+    skipButton: {
+      padding: '0.5rem 1rem',
+      fontSize: '0.875rem',
+      fontWeight: '500',
+      color: COLORS.textLight,
+      background: 'transparent',
+      border: 'none',
+      borderRadius: '10px',
+      cursor: 'pointer',
+      transition: 'all 0.2s',
+    },
+    resetButton: {
+      padding: '0.625rem',
+      background: '#f5f7f9',
+      border: 'none',
+      borderRadius: '10px',
+      cursor: 'pointer',
+      color: COLORS.textLight,
+      transition: 'all 0.2s',
+    },
+    messagesArea: {
+      flex: 1,
+      overflowY: 'auto',
+      padding: '1.5rem',
+    },
+    messagesInner: {
+      maxWidth: '900px',
+      margin: '0 auto',
+    },
+    messageRow: (isUser) => ({
+      display: 'flex',
+      justifyContent: isUser ? 'flex-end' : 'flex-start',
+      marginBottom: '1rem',
+      animation: 'fadeSlideIn 0.3s ease-out',
+    }),
+    avatar: (isUser) => ({
+      width: '40px',
+      height: '40px',
+      borderRadius: '12px',
+      background: isUser 
+        ? 'linear-gradient(135deg, #4a5568 0%, #2d3748 100%)'
+        : `linear-gradient(135deg, ${COLORS.grassGreen} 0%, ${COLORS.grassGreenDark} 100%)`,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+      boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+      marginRight: isUser ? 0 : '0.75rem',
+      marginLeft: isUser ? '0.75rem' : 0,
+    }),
+    messageBubble: (isUser) => ({
+      maxWidth: '70%',
+      padding: '1rem 1.25rem',
+      borderRadius: '16px',
+      borderBottomLeftRadius: isUser ? '16px' : '6px',
+      borderBottomRightRadius: isUser ? '6px' : '16px',
+      background: isUser 
+        ? `linear-gradient(135deg, ${COLORS.grassGreen} 0%, ${COLORS.grassGreenDark} 100%)`
+        : 'white',
+      color: isUser ? 'white' : COLORS.text,
+      boxShadow: isUser 
+        ? '0 2px 12px rgba(131, 177, 109, 0.3)'
+        : '0 2px 8px rgba(0,0,0,0.06)',
+      border: isUser ? 'none' : '1px solid #e8ecef',
+    }),
+    messageText: {
+      lineHeight: '1.6',
+      whiteSpace: 'pre-wrap',
+      margin: 0,
+    },
+    loadingBubble: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.5rem',
+      padding: '1rem 1.5rem',
+    },
+    loadingDot: (delay) => ({
+      width: '8px',
+      height: '8px',
+      borderRadius: '50%',
+      background: COLORS.grassGreen,
+      animation: 'bounce 1s infinite',
+      animationDelay: delay,
+    }),
+    inputArea: {
+      padding: '1rem 1.5rem 1.25rem',
+      background: 'white',
+      borderTop: '1px solid #e8ecef',
+    },
+    inputInner: {
+      maxWidth: '900px',
+      margin: '0 auto',
+    },
+    inputWrapper: {
+      position: 'relative',
+      display: 'flex',
+      alignItems: 'flex-end',
+      gap: '0.75rem',
+    },
+    textarea: {
+      flex: 1,
+      padding: '1rem 3.5rem 1rem 1.25rem',
+      fontSize: '0.9375rem',
+      border: '2px solid #e8ecef',
+      borderRadius: '16px',
+      resize: 'none',
+      outline: 'none',
+      fontFamily: 'inherit',
+      lineHeight: '1.5',
+      transition: 'all 0.2s',
+      background: '#f8faf9',
+    },
+    sendButton: {
+      position: 'absolute',
+      right: '0.75rem',
+      bottom: '0.75rem',
+      width: '40px',
+      height: '40px',
+      borderRadius: '12px',
+      border: 'none',
+      background: `linear-gradient(135deg, ${COLORS.grassGreen} 0%, ${COLORS.grassGreenDark} 100%)`,
+      color: 'white',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      transition: 'all 0.2s',
+      boxShadow: '0 2px 8px rgba(131, 177, 109, 0.3)',
+    },
+    hint: {
+      marginTop: '0.75rem',
+      textAlign: 'center',
+      fontSize: '0.75rem',
+      color: '#9ca3af',
+    },
+    kbd: {
+      display: 'inline-block',
+      padding: '0.125rem 0.375rem',
+      fontSize: '0.7rem',
+      fontFamily: 'monospace',
+      background: '#f0f2f4',
+      borderRadius: '4px',
+      color: '#6b7280',
+    },
+  }
+
   const renderMessage = (message, index) => {
     const isUser = message.role === 'user'
     
     return (
-      <div 
-        key={index}
-        className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}
-      >
-        <div 
-          className={`max-w-[80%] rounded-2xl px-4 py-3 ${
-            isUser 
-              ? 'bg-[#008751] text-white rounded-br-md' 
-              : 'bg-gray-100 text-gray-800 rounded-bl-md'
-          }`}
-        >
-          <div className="whitespace-pre-wrap">{message.content}</div>
+      <div key={index} style={styles.messageRow(isUser)}>
+        {!isUser && (
+          <div style={styles.avatar(false)}>
+            <Bot size={20} color="white" />
+          </div>
+        )}
+        
+        <div style={styles.messageBubble(isUser)}>
+          <p style={styles.messageText}>{message.content}</p>
           
-          {/* Show recommendation cards if present */}
           {message.recommendation && (
-            <div className="mt-4 space-y-2">
-              {Array.isArray(message.recommendation) 
-                ? message.recommendation.map(rec => (
-                    <RecommendationCard 
-                      key={rec} 
-                      featureKey={rec} 
-                      onSelect={handleFeatureSelect}
-                    />
-                  ))
-                : (
-                    <RecommendationCard 
-                      featureKey={message.recommendation} 
-                      onSelect={handleFeatureSelect}
-                    />
-                  )
-              }
+            <div style={{ marginTop: '1rem' }}>
+              <RecommendationCard 
+                featureKey={message.recommendation} 
+                onSelect={handleFeatureSelect}
+              />
             </div>
           )}
 
-          {/* Quick access grid */}
           {message.showQuickAccess && (
-            <div className="mt-4 grid grid-cols-2 gap-2">
+            <div style={{ 
+              marginTop: '1rem', 
+              display: 'grid', 
+              gridTemplateColumns: 'repeat(2, 1fr)', 
+              gap: '0.75rem' 
+            }}>
               {Object.entries(FEATURES).map(([key, feature]) => (
                 <QuickAccessCard 
                   key={key}
@@ -315,151 +479,266 @@ export default function WorkAdvisor() {
             </div>
           )}
         </div>
+        
+        {isUser && (
+          <div style={styles.avatar(true)}>
+            <span style={{ color: 'white', fontWeight: '600', fontSize: '0.75rem' }}>You</span>
+          </div>
+        )}
       </div>
     )
   }
 
-  // Playbook Builder Flow
   if (showPlaybookBuilder) {
     return (
       <PlaybookBuilderFlow 
         draft={playbookDraft}
-        conversationContext={messages}
         onBack={() => setShowPlaybookBuilder(false)}
-        onComplete={(playbook) => {
-          console.log('Playbook created:', playbook)
-          // TODO: Save playbook and navigate
-        }}
+        onComplete={(playbook) => console.log('Created:', playbook)}
       />
     )
   }
 
   return (
-    <div className="flex flex-col h-full bg-white">
+    <div style={styles.container}>
+      <style>{`
+        @keyframes fadeSlideIn {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes bounce {
+          0%, 60%, 100% { transform: translateY(0); }
+          30% { transform: translateY(-6px); }
+        }
+        textarea:focus {
+          border-color: ${COLORS.grassGreen} !important;
+          background: white !important;
+          box-shadow: 0 0 0 3px rgba(131, 177, 109, 0.15) !important;
+        }
+        button:hover {
+          transform: translateY(-1px);
+        }
+      `}</style>
+
       {/* Header */}
-      <div className="flex-none px-6 py-4 border-b border-gray-200">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-[#008751]/10 rounded-xl">
-              <Lightbulb className="w-6 h-6 text-[#008751]" />
+      <div style={styles.header}>
+        <div style={styles.headerInner}>
+          <div style={styles.headerLeft}>
+            <div style={styles.iconWrapper}>
+              <div style={styles.mainIcon}>
+                <Lightbulb size={28} color="white" />
+              </div>
+              <div style={styles.sparkBadge}>
+                <Zap size={12} color="white" />
+              </div>
             </div>
             <div>
-              <h1 className="text-xl font-semibold text-gray-900">Work Advisor</h1>
-              <p className="text-sm text-gray-500">Let's figure out the best approach together</p>
+              <h1 style={styles.title}>Work Advisor</h1>
+              <p style={styles.subtitle}>Let's find the right approach together</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button
+          <div style={styles.headerActions}>
+            <button 
+              style={styles.skipButton}
               onClick={handleSkipAdvisor}
-              className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+              onMouseEnter={(e) => e.target.style.background = '#f5f7f9'}
+              onMouseLeave={(e) => e.target.style.background = 'transparent'}
             >
               I know what I want
             </button>
-            <button
+            <button 
+              style={styles.resetButton}
               onClick={handleRestart}
-              className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
               title="Start over"
+              onMouseEnter={(e) => e.target.style.background = '#e8ecef'}
+              onMouseLeave={(e) => e.target.style.background = '#f5f7f9'}
             >
-              <RotateCcw className="w-4 h-4" />
+              <RotateCcw size={18} />
             </button>
           </div>
         </div>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-6 py-4">
-        {messages.map((message, index) => renderMessage(message, index))}
-        
-        {isLoading && (
-          <div className="flex justify-start mb-4">
-            <div className="bg-gray-100 rounded-2xl rounded-bl-md px-4 py-3">
-              <div className="flex items-center gap-2 text-gray-500">
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+      <div style={styles.messagesArea}>
+        <div style={styles.messagesInner}>
+          {messages.map((msg, i) => renderMessage(msg, i))}
+          
+          {isLoading && (
+            <div style={styles.messageRow(false)}>
+              <div style={styles.avatar(false)}>
+                <Bot size={20} color="white" />
+              </div>
+              <div style={{ ...styles.messageBubble(false), ...styles.loadingBubble }}>
+                <div style={styles.loadingDot('0ms')} />
+                <div style={styles.loadingDot('150ms')} />
+                <div style={styles.loadingDot('300ms')} />
               </div>
             </div>
-          </div>
-        )}
-        
-        <div ref={messagesEndRef} />
+          )}
+          
+          <div ref={messagesEndRef} />
+        </div>
       </div>
 
       {/* Input */}
-      <div className="flex-none px-6 py-4 border-t border-gray-200">
-        <div className="flex items-end gap-3">
-          <div className="flex-1 relative">
+      <div style={styles.inputArea}>
+        <div style={styles.inputInner}>
+          <div style={styles.inputWrapper}>
             <textarea
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Describe what you're working on..."
-              className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-[#008751]/20 focus:border-[#008751] transition-all"
+              style={styles.textarea}
               rows={2}
               disabled={isLoading}
             />
             <button
               onClick={handleSend}
               disabled={!input.trim() || isLoading}
-              className="absolute right-2 bottom-2 p-2 bg-[#008751] text-white rounded-lg hover:bg-[#007244] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              style={{
+                ...styles.sendButton,
+                opacity: (!input.trim() || isLoading) ? 0.5 : 1,
+                cursor: (!input.trim() || isLoading) ? 'not-allowed' : 'pointer',
+              }}
             >
-              <Send className="w-4 h-4" />
+              <Send size={18} />
             </button>
           </div>
+          <p style={styles.hint}>
+            Press <span style={styles.kbd}>Enter</span> to send • <span style={styles.kbd}>Shift+Enter</span> for new line
+          </p>
         </div>
-        <p className="mt-2 text-xs text-gray-400 text-center">
-          Press Enter to send • Shift+Enter for new line
-        </p>
       </div>
     </div>
   )
 }
 
-// Recommendation card component
+// Recommendation Card
 function RecommendationCard({ featureKey, onSelect }) {
   const feature = FEATURES[featureKey]
   if (!feature) return null
-
   const Icon = feature.icon
-  
+
   return (
     <button
       onClick={() => onSelect(featureKey)}
-      className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 transition-all hover:scale-[1.02] ${colorClasses[feature.color]} ${!feature.available ? 'opacity-60' : ''}`}
+      style={{
+        width: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '1rem',
+        padding: '1rem',
+        background: feature.bgColor,
+        border: `2px solid ${feature.color}20`,
+        borderRadius: '14px',
+        cursor: 'pointer',
+        transition: 'all 0.2s',
+        textAlign: 'left',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.transform = 'translateY(-2px)'
+        e.currentTarget.style.boxShadow = `0 4px 12px ${feature.color}30`
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.transform = 'translateY(0)'
+        e.currentTarget.style.boxShadow = 'none'
+      }}
     >
-      <Icon className={`w-5 h-5 ${iconColorClasses[feature.color]}`} />
-      <div className="flex-1 text-left">
-        <div className="font-medium flex items-center gap-2">
+      <div style={{
+        width: '48px',
+        height: '48px',
+        borderRadius: '12px',
+        background: feature.color,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+        boxShadow: `0 3px 10px ${feature.color}40`,
+      }}>
+        <Icon size={24} color="white" />
+      </div>
+      <div style={{ flex: 1 }}>
+        <div style={{ 
+          fontWeight: '700', 
+          color: COLORS.text,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+        }}>
           {feature.title}
           {!feature.available && (
-            <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">Coming Soon</span>
+            <span style={{
+              fontSize: '0.65rem',
+              padding: '0.2rem 0.5rem',
+              background: '#e5e7eb',
+              color: '#6b7280',
+              borderRadius: '4px',
+              fontWeight: '600',
+            }}>SOON</span>
           )}
         </div>
-        <div className="text-sm opacity-80">{feature.description}</div>
+        <div style={{ fontSize: '0.85rem', color: COLORS.textLight, marginTop: '0.25rem' }}>
+          {feature.description}
+        </div>
       </div>
-      <ChevronRight className="w-5 h-5 opacity-50" />
+      <ChevronRight size={20} color={COLORS.textLight} />
     </button>
   )
 }
 
-// Quick access card (smaller, for grid)
+// Quick Access Card
 function QuickAccessCard({ featureKey, feature, onSelect }) {
   const Icon = feature.icon
-  
+
   return (
     <button
       onClick={() => onSelect(featureKey)}
-      className={`flex items-center gap-2 p-2 rounded-lg border transition-all hover:scale-[1.02] ${colorClasses[feature.color]} ${!feature.available ? 'opacity-60' : ''}`}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.75rem',
+        padding: '0.75rem',
+        background: feature.bgColor,
+        border: `1px solid ${feature.color}20`,
+        borderRadius: '10px',
+        cursor: feature.available ? 'pointer' : 'default',
+        transition: 'all 0.2s',
+        opacity: feature.available ? 1 : 0.6,
+      }}
+      onMouseEnter={(e) => feature.available && (e.currentTarget.style.transform = 'translateY(-1px)')}
+      onMouseLeave={(e) => feature.available && (e.currentTarget.style.transform = 'translateY(0)')}
     >
-      <Icon className={`w-4 h-4 ${iconColorClasses[feature.color]}`} />
-      <span className="text-sm font-medium truncate">{feature.title}</span>
+      <div style={{
+        width: '32px',
+        height: '32px',
+        borderRadius: '8px',
+        background: feature.color,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+      }}>
+        <Icon size={16} color="white" />
+      </div>
+      <span style={{ 
+        fontSize: '0.8rem', 
+        fontWeight: '600', 
+        color: COLORS.text,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      }}>
+        {feature.title}
+      </span>
     </button>
   )
 }
 
-// Playbook Builder Flow (simplified for now)
-function PlaybookBuilderFlow({ draft, conversationContext, onBack, onComplete }) {
+// Simplified Playbook Builder
+function PlaybookBuilderFlow({ draft, onBack, onComplete }) {
   const [step, setStep] = useState(0)
   const [playbook, setPlaybook] = useState({
     name: draft?.name || '',
@@ -469,94 +748,144 @@ function PlaybookBuilderFlow({ draft, conversationContext, onBack, onComplete })
     outputs: draft?.outputs || []
   })
 
-  const steps = [
-    { title: 'Name & Purpose', component: StepNamePurpose },
-    { title: 'Inputs', component: StepInputs },
-    { title: 'Workflow Steps', component: StepWorkflow },
-    { title: 'Outputs', component: StepOutputs },
-    { title: 'Review', component: StepReview }
-  ]
-
-  const CurrentStepComponent = steps[step].component
+  const stepTitles = ['Name & Purpose', 'Inputs', 'Workflow', 'Outputs', 'Review']
 
   return (
-    <div className="flex flex-col h-full bg-white">
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      height: '100%',
+      background: 'linear-gradient(135deg, #f8faf7 0%, #ffffff 50%, #f5f8fc 100%)',
+    }}>
       {/* Header */}
-      <div className="flex-none px-6 py-4 border-b border-gray-200">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
+      <div style={{
+        padding: '1.25rem 1.5rem',
+        background: 'white',
+        borderBottom: '1px solid #e8ecef',
+      }}>
+        <div style={{ maxWidth: '700px', margin: '0 auto' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
             <button
               onClick={onBack}
-              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              style={{
+                padding: '0.5rem',
+                background: '#f5f7f9',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+              }}
             >
-              <ArrowRight className="w-5 h-5 rotate-180 text-gray-600" />
+              <ArrowRight size={18} style={{ transform: 'rotate(180deg)', color: COLORS.textLight }} />
             </button>
             <div>
-              <h1 className="text-xl font-semibold text-gray-900">Build Playbook</h1>
-              <p className="text-sm text-gray-500">Step {step + 1} of {steps.length}: {steps[step].title}</p>
+              <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: '700', color: COLORS.text }}>
+                Build Playbook
+              </h1>
+              <p style={{ margin: 0, fontSize: '0.875rem', color: COLORS.textLight }}>
+                Step {step + 1} of {stepTitles.length}: {stepTitles[step]}
+              </p>
             </div>
           </div>
-        </div>
-        
-        {/* Progress bar */}
-        <div className="mt-4 flex gap-1">
-          {steps.map((s, i) => (
-            <div 
-              key={i}
-              className={`flex-1 h-1 rounded-full transition-colors ${i <= step ? 'bg-[#008751]' : 'bg-gray-200'}`}
-            />
-          ))}
+          
+          {/* Progress bar */}
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            {stepTitles.map((_, i) => (
+              <div
+                key={i}
+                style={{
+                  flex: 1,
+                  height: '4px',
+                  borderRadius: '2px',
+                  background: i <= step ? COLORS.grassGreen : '#e5e7eb',
+                  transition: 'background 0.3s',
+                }}
+              />
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* Step content */}
-      <div className="flex-1 overflow-y-auto p-6">
-        <CurrentStepComponent 
-          playbook={playbook}
-          setPlaybook={setPlaybook}
-          conversationContext={conversationContext}
-        />
+      {/* Content */}
+      <div style={{ flex: 1, overflow: 'auto', padding: '1.5rem' }}>
+        <div style={{ maxWidth: '700px', margin: '0 auto' }}>
+          {step === 0 && <StepName playbook={playbook} setPlaybook={setPlaybook} />}
+          {step === 1 && <StepInputs playbook={playbook} setPlaybook={setPlaybook} />}
+          {step === 2 && <StepWorkflow playbook={playbook} setPlaybook={setPlaybook} />}
+          {step === 3 && <StepOutputs playbook={playbook} setPlaybook={setPlaybook} />}
+          {step === 4 && <StepReview playbook={playbook} />}
+        </div>
       </div>
 
-      {/* Navigation */}
-      <div className="flex-none px-6 py-4 border-t border-gray-200">
-        <div className="flex justify-between">
+      {/* Footer */}
+      <div style={{
+        padding: '1rem 1.5rem',
+        background: 'white',
+        borderTop: '1px solid #e8ecef',
+      }}>
+        <div style={{ 
+          maxWidth: '700px', 
+          margin: '0 auto',
+          display: 'flex',
+          justifyContent: 'space-between',
+        }}>
           <button
             onClick={() => setStep(Math.max(0, step - 1))}
             disabled={step === 0}
-            className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            style={{
+              padding: '0.625rem 1.25rem',
+              background: '#f5f7f9',
+              border: 'none',
+              borderRadius: '10px',
+              fontWeight: '600',
+              color: COLORS.textLight,
+              cursor: step === 0 ? 'not-allowed' : 'pointer',
+              opacity: step === 0 ? 0.5 : 1,
+            }}
           >
             Back
           </button>
-          {step < steps.length - 1 ? (
-            <button
-              onClick={() => setStep(step + 1)}
-              className="px-6 py-2 bg-[#008751] text-white rounded-lg hover:bg-[#007244] transition-colors flex items-center gap-2"
-            >
-              Continue
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          ) : (
-            <button
-              onClick={() => onComplete(playbook)}
-              className="px-6 py-2 bg-[#008751] text-white rounded-lg hover:bg-[#007244] transition-colors flex items-center gap-2"
-            >
-              Create Playbook
-              <Sparkles className="w-4 h-4" />
-            </button>
-          )}
+          <button
+            onClick={() => step < 4 ? setStep(step + 1) : onComplete(playbook)}
+            style={{
+              padding: '0.625rem 1.5rem',
+              background: `linear-gradient(135deg, ${COLORS.grassGreen} 0%, ${COLORS.grassGreenDark} 100%)`,
+              border: 'none',
+              borderRadius: '10px',
+              fontWeight: '600',
+              color: 'white',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              boxShadow: '0 2px 8px rgba(131, 177, 109, 0.3)',
+            }}
+          >
+            {step < 4 ? 'Continue' : 'Create Playbook'}
+            {step < 4 ? <ArrowRight size={16} /> : <Sparkles size={16} />}
+          </button>
         </div>
       </div>
     </div>
   )
 }
 
-// Step components (simplified placeholders - we'll flesh these out)
-function StepNamePurpose({ playbook, setPlaybook }) {
+// Step components (simplified)
+const inputStyle = {
+  width: '100%',
+  padding: '0.875rem 1rem',
+  border: '2px solid #e8ecef',
+  borderRadius: '10px',
+  fontSize: '0.9375rem',
+  outline: 'none',
+  transition: 'all 0.2s',
+  background: '#f8faf9',
+}
+
+function StepName({ playbook, setPlaybook }) {
   return (
-    <div className="max-w-2xl space-y-6">
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      <div style={{ background: 'white', padding: '1.5rem', borderRadius: '14px', border: '1px solid #e8ecef' }}>
+        <label style={{ display: 'block', fontWeight: '600', marginBottom: '0.75rem', color: COLORS.text }}>
           Playbook Name
         </label>
         <input
@@ -564,19 +893,19 @@ function StepNamePurpose({ playbook, setPlaybook }) {
           value={playbook.name}
           onChange={(e) => setPlaybook({ ...playbook, name: e.target.value })}
           placeholder="e.g., Parallel Testing Reconciliation"
-          className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#008751]/20 focus:border-[#008751]"
+          style={inputStyle}
         />
       </div>
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">
+      <div style={{ background: 'white', padding: '1.5rem', borderRadius: '14px', border: '1px solid #e8ecef' }}>
+        <label style={{ display: 'block', fontWeight: '600', marginBottom: '0.75rem', color: COLORS.text }}>
           What problem does this solve?
         </label>
         <textarea
           value={playbook.description}
           onChange={(e) => setPlaybook({ ...playbook, description: e.target.value })}
-          placeholder="Describe the use case and what success looks like..."
+          placeholder="Describe the use case..."
           rows={4}
-          className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#008751]/20 focus:border-[#008751] resize-none"
+          style={{ ...inputStyle, resize: 'none' }}
         />
       </div>
     </div>
@@ -584,214 +913,158 @@ function StepNamePurpose({ playbook, setPlaybook }) {
 }
 
 function StepInputs({ playbook, setPlaybook }) {
-  const addInput = () => {
-    setPlaybook({
-      ...playbook,
-      inputs: [...playbook.inputs, { name: '', type: 'file', description: '' }]
-    })
-  }
-
+  const add = () => setPlaybook({ ...playbook, inputs: [...playbook.inputs, { name: '', description: '' }] })
   return (
-    <div className="max-w-2xl space-y-6">
-      <p className="text-gray-600">What files or data does this playbook need to get started?</p>
-      
-      {playbook.inputs.map((input, i) => (
-        <div key={i} className="p-4 border border-gray-200 rounded-xl space-y-3">
+    <div>
+      <p style={{ color: COLORS.textLight, marginBottom: '1rem' }}>What files or data does this playbook need?</p>
+      {playbook.inputs.map((inp, i) => (
+        <div key={i} style={{ background: 'white', padding: '1rem', borderRadius: '12px', border: '1px solid #e8ecef', marginBottom: '0.75rem' }}>
           <input
             type="text"
-            value={input.name}
+            value={inp.name}
             onChange={(e) => {
-              const updated = [...playbook.inputs]
-              updated[i].name = e.target.value
-              setPlaybook({ ...playbook, inputs: updated })
+              const u = [...playbook.inputs]; u[i].name = e.target.value
+              setPlaybook({ ...playbook, inputs: u })
             }}
-            placeholder="Input name (e.g., Historical Pay Register)"
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#008751]/20 focus:border-[#008751]"
+            placeholder="Input name"
+            style={{ ...inputStyle, marginBottom: '0.5rem' }}
           />
           <input
             type="text"
-            value={input.description}
+            value={inp.description}
             onChange={(e) => {
-              const updated = [...playbook.inputs]
-              updated[i].description = e.target.value
-              setPlaybook({ ...playbook, inputs: updated })
+              const u = [...playbook.inputs]; u[i].description = e.target.value
+              setPlaybook({ ...playbook, inputs: u })
             }}
-            placeholder="Description (e.g., Last 3 months of pay data from legacy system)"
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#008751]/20 focus:border-[#008751]"
+            placeholder="Description"
+            style={inputStyle}
           />
         </div>
       ))}
-      
-      <button
-        onClick={addInput}
-        className="w-full py-3 border-2 border-dashed border-gray-300 rounded-xl text-gray-500 hover:border-[#008751] hover:text-[#008751] transition-colors"
-      >
-        + Add Input
-      </button>
+      <button onClick={add} style={{
+        width: '100%', padding: '1rem', border: '2px dashed #d1d5db', borderRadius: '12px',
+        background: 'transparent', color: COLORS.textLight, fontWeight: '600', cursor: 'pointer'
+      }}>+ Add Input</button>
     </div>
   )
 }
 
 function StepWorkflow({ playbook, setPlaybook }) {
-  const addStep = () => {
-    setPlaybook({
-      ...playbook,
-      steps: [...playbook.steps, { title: '', description: '', ai_assisted: true }]
-    })
-  }
-
+  const add = () => setPlaybook({ ...playbook, steps: [...playbook.steps, { title: '', description: '' }] })
   return (
-    <div className="max-w-2xl space-y-6">
-      <p className="text-gray-600">What are the steps in this workflow?</p>
-      
-      {playbook.steps.map((step, i) => (
-        <div key={i} className="p-4 border border-gray-200 rounded-xl space-y-3">
-          <div className="flex items-center gap-3">
-            <span className="w-8 h-8 flex items-center justify-center bg-[#008751]/10 text-[#008751] font-semibold rounded-full">
-              {i + 1}
-            </span>
+    <div>
+      <p style={{ color: COLORS.textLight, marginBottom: '1rem' }}>What are the workflow steps?</p>
+      {playbook.steps.map((s, i) => (
+        <div key={i} style={{ background: 'white', padding: '1rem', borderRadius: '12px', border: '1px solid #e8ecef', marginBottom: '0.75rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+            <span style={{
+              width: '28px', height: '28px', borderRadius: '8px',
+              background: COLORS.grassGreen, color: 'white', fontWeight: '700',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.85rem'
+            }}>{i + 1}</span>
             <input
               type="text"
-              value={step.title}
+              value={s.title}
               onChange={(e) => {
-                const updated = [...playbook.steps]
-                updated[i].title = e.target.value
-                setPlaybook({ ...playbook, steps: updated })
+                const u = [...playbook.steps]; u[i].title = e.target.value
+                setPlaybook({ ...playbook, steps: u })
               }}
               placeholder="Step title"
-              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#008751]/20 focus:border-[#008751]"
+              style={{ ...inputStyle, flex: 1 }}
             />
           </div>
           <textarea
-            value={step.description}
+            value={s.description}
             onChange={(e) => {
-              const updated = [...playbook.steps]
-              updated[i].description = e.target.value
-              setPlaybook({ ...playbook, steps: updated })
+              const u = [...playbook.steps]; u[i].description = e.target.value
+              setPlaybook({ ...playbook, steps: u })
             }}
-            placeholder="What happens in this step?"
+            placeholder="What happens?"
             rows={2}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#008751]/20 focus:border-[#008751] resize-none"
+            style={{ ...inputStyle, resize: 'none' }}
           />
-          <label className="flex items-center gap-2 text-sm text-gray-600">
-            <input
-              type="checkbox"
-              checked={step.ai_assisted}
-              onChange={(e) => {
-                const updated = [...playbook.steps]
-                updated[i].ai_assisted = e.target.checked
-                setPlaybook({ ...playbook, steps: updated })
-              }}
-              className="rounded border-gray-300 text-[#008751] focus:ring-[#008751]"
-            />
-            AI assists with this step
-          </label>
         </div>
       ))}
-      
-      <button
-        onClick={addStep}
-        className="w-full py-3 border-2 border-dashed border-gray-300 rounded-xl text-gray-500 hover:border-[#008751] hover:text-[#008751] transition-colors"
-      >
-        + Add Step
-      </button>
+      <button onClick={add} style={{
+        width: '100%', padding: '1rem', border: '2px dashed #d1d5db', borderRadius: '12px',
+        background: 'transparent', color: COLORS.textLight, fontWeight: '600', cursor: 'pointer'
+      }}>+ Add Step</button>
     </div>
   )
 }
 
 function StepOutputs({ playbook, setPlaybook }) {
-  const addOutput = () => {
-    setPlaybook({
-      ...playbook,
-      outputs: [...playbook.outputs, { name: '', format: 'report', description: '' }]
-    })
-  }
-
+  const add = () => setPlaybook({ ...playbook, outputs: [...playbook.outputs, { name: '', format: 'report' }] })
   return (
-    <div className="max-w-2xl space-y-6">
-      <p className="text-gray-600">What deliverables come out of this playbook?</p>
-      
-      {playbook.outputs.map((output, i) => (
-        <div key={i} className="p-4 border border-gray-200 rounded-xl space-y-3">
+    <div>
+      <p style={{ color: COLORS.textLight, marginBottom: '1rem' }}>What deliverables come out?</p>
+      {playbook.outputs.map((o, i) => (
+        <div key={i} style={{ background: 'white', padding: '1rem', borderRadius: '12px', border: '1px solid #e8ecef', marginBottom: '0.75rem' }}>
           <input
             type="text"
-            value={output.name}
+            value={o.name}
             onChange={(e) => {
-              const updated = [...playbook.outputs]
-              updated[i].name = e.target.value
-              setPlaybook({ ...playbook, outputs: updated })
+              const u = [...playbook.outputs]; u[i].name = e.target.value
+              setPlaybook({ ...playbook, outputs: u })
             }}
-            placeholder="Output name (e.g., Variance Report)"
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#008751]/20 focus:border-[#008751]"
+            placeholder="Output name"
+            style={{ ...inputStyle, marginBottom: '0.5rem' }}
           />
           <select
-            value={output.format}
+            value={o.format}
             onChange={(e) => {
-              const updated = [...playbook.outputs]
-              updated[i].format = e.target.value
-              setPlaybook({ ...playbook, outputs: updated })
+              const u = [...playbook.outputs]; u[i].format = e.target.value
+              setPlaybook({ ...playbook, outputs: u })
             }}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#008751]/20 focus:border-[#008751]"
+            style={inputStyle}
           >
             <option value="report">Report (PDF/Word)</option>
             <option value="spreadsheet">Spreadsheet (Excel)</option>
             <option value="data">Data File (CSV)</option>
             <option value="checklist">Checklist</option>
-            <option value="config">Configuration File</option>
           </select>
         </div>
       ))}
-      
-      <button
-        onClick={addOutput}
-        className="w-full py-3 border-2 border-dashed border-gray-300 rounded-xl text-gray-500 hover:border-[#008751] hover:text-[#008751] transition-colors"
-      >
-        + Add Output
-      </button>
+      <button onClick={add} style={{
+        width: '100%', padding: '1rem', border: '2px dashed #d1d5db', borderRadius: '12px',
+        background: 'transparent', color: COLORS.textLight, fontWeight: '600', cursor: 'pointer'
+      }}>+ Add Output</button>
     </div>
   )
 }
 
 function StepReview({ playbook }) {
   return (
-    <div className="max-w-2xl space-y-6">
-      <div className="p-6 bg-gray-50 rounded-xl space-y-4">
-        <h3 className="text-xl font-semibold text-gray-900">{playbook.name || 'Untitled Playbook'}</h3>
-        <p className="text-gray-600">{playbook.description || 'No description'}</p>
-        
-        {playbook.inputs.length > 0 && (
-          <div>
-            <h4 className="font-medium text-gray-700 mb-2">Inputs</h4>
-            <ul className="list-disc list-inside text-gray-600">
-              {playbook.inputs.map((input, i) => (
-                <li key={i}>{input.name || 'Unnamed input'}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-        
-        {playbook.steps.length > 0 && (
-          <div>
-            <h4 className="font-medium text-gray-700 mb-2">Steps</h4>
-            <ol className="list-decimal list-inside text-gray-600">
-              {playbook.steps.map((step, i) => (
-                <li key={i}>{step.title || 'Unnamed step'}</li>
-              ))}
-            </ol>
-          </div>
-        )}
-        
-        {playbook.outputs.length > 0 && (
-          <div>
-            <h4 className="font-medium text-gray-700 mb-2">Outputs</h4>
-            <ul className="list-disc list-inside text-gray-600">
-              {playbook.outputs.map((output, i) => (
-                <li key={i}>{output.name || 'Unnamed output'} ({output.format})</li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
+    <div style={{ background: 'white', padding: '1.5rem', borderRadius: '14px', border: '1px solid #e8ecef' }}>
+      <h2 style={{ margin: '0 0 0.5rem', color: COLORS.text }}>{playbook.name || 'Untitled'}</h2>
+      <p style={{ color: COLORS.textLight, marginBottom: '1.5rem' }}>{playbook.description || 'No description'}</p>
+      
+      {playbook.inputs.length > 0 && (
+        <div style={{ marginBottom: '1rem' }}>
+          <h4 style={{ margin: '0 0 0.5rem', color: COLORS.text, fontSize: '0.9rem' }}>📥 Inputs</h4>
+          <ul style={{ margin: 0, paddingLeft: '1.25rem', color: COLORS.textLight }}>
+            {playbook.inputs.map((i, idx) => <li key={idx}>{i.name || 'Unnamed'}</li>)}
+          </ul>
+        </div>
+      )}
+      
+      {playbook.steps.length > 0 && (
+        <div style={{ marginBottom: '1rem' }}>
+          <h4 style={{ margin: '0 0 0.5rem', color: COLORS.text, fontSize: '0.9rem' }}>📋 Steps</h4>
+          <ol style={{ margin: 0, paddingLeft: '1.25rem', color: COLORS.textLight }}>
+            {playbook.steps.map((s, idx) => <li key={idx}>{s.title || 'Unnamed'}</li>)}
+          </ol>
+        </div>
+      )}
+      
+      {playbook.outputs.length > 0 && (
+        <div>
+          <h4 style={{ margin: '0 0 0.5rem', color: COLORS.text, fontSize: '0.9rem' }}>📤 Outputs</h4>
+          <ul style={{ margin: 0, paddingLeft: '1.25rem', color: COLORS.textLight }}>
+            {playbook.outputs.map((o, idx) => <li key={idx}>{o.name || 'Unnamed'} ({o.format})</li>)}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }
