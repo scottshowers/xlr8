@@ -1,6 +1,8 @@
 /**
  * Chat.jsx - REVOLUTIONARY INTELLIGENT CHAT
  * 
+ * v13: Updated to use unified_chat endpoint
+ * 
  * POLISHED: All purple/blue → grassGreen for consistency
  * 
  * Features:
@@ -98,7 +100,7 @@ export default function Chat({ functionalAreas = [] }) {
   // Reset preferences (clear learned filters)
   const resetPreferences = async (resetType = 'session') => {
     try {
-      const response = await api.post('/chat/intelligent/reset-preferences', {
+      const response = await api.post('/chat/unified/reset-preferences', {
         session_id: sessionId,
         project: projectName || null,
         reset_type: resetType
@@ -172,13 +174,16 @@ export default function Chat({ functionalAreas = [] }) {
     setPendingClarification(null)
 
     try {
-      const response = await api.post('/chat/intelligent', {
+      const response = await api.post('/chat/unified', {
         message: messageText,
         project: projectName || null,
         persona: currentPersona?.id || 'bessie',
         scope: scope,
         session_id: sessionId,
-        clarifications: clarifications
+        clarifications: clarifications,
+        include_citations: true,
+        include_quality_alerts: true,
+        include_follow_ups: true
       })
 
       const data = response.data
@@ -216,6 +221,10 @@ export default function Chat({ functionalAreas = [] }) {
           auto_applied_note: data.auto_applied_note || null,
           auto_applied_facts: data.auto_applied_facts || null,
           can_reset_preferences: data.can_reset_preferences || false,
+          // New unified_chat fields
+          quality_alerts: data.quality_alerts || null,
+          follow_up_suggestions: data.follow_up_suggestions || [],
+          citations: data.citations || null,
           timestamp: new Date().toISOString()
         }])
       }
