@@ -105,6 +105,14 @@ except ImportError as e:
     UNIFIED_CHAT_AVAILABLE = False
     logging.warning(f"Unified chat router import failed: {e}")
 
+# Import bi_router (Phase 5 BI Builder)
+try:
+    from backend.routers import bi_router
+    BI_ROUTER_AVAILABLE = True
+except ImportError as e:
+    BI_ROUTER_AVAILABLE = False
+    logging.warning(f"BI router import failed: {e}")
+
 # Standards endpoints are now in upload.py (no separate router needed)
 
 logging.basicConfig(level=logging.INFO)
@@ -280,6 +288,13 @@ if UNIFIED_CHAT_AVAILABLE:
 else:
     logger.warning("Unified chat router not available")
 
+# Register bi_router if available (Phase 5 BI Builder)
+if BI_ROUTER_AVAILABLE:
+    app.include_router(bi_router.router, prefix="/api", tags=["bi"])
+    logger.info("✓ BI router registered at /api/bi")
+else:
+    logger.warning("BI router not available")
+
 
 
 
@@ -307,6 +322,7 @@ async def health():
             "api_connections": API_CONNECTIONS_AVAILABLE,
             "intelligence": INTELLIGENCE_AVAILABLE,
             "unified_chat": UNIFIED_CHAT_AVAILABLE,
+            "bi": BI_ROUTER_AVAILABLE,
             "standards": True,  # Via upload.py
         }
         
@@ -331,6 +347,7 @@ async def health():
                 "api_connections": API_CONNECTIONS_AVAILABLE,
                 "intelligence": INTELLIGENCE_AVAILABLE,
                 "unified_chat": UNIFIED_CHAT_AVAILABLE,
+                "bi": BI_ROUTER_AVAILABLE,
                 "standards": True,  # Via upload.py
             }
         }
