@@ -1488,7 +1488,8 @@ class IntelligenceEngine:
             sample_str = ""
             if i == 0:
                 try:
-                    rows, cols = self.structured_handler.execute_query(f'SELECT * FROM "{table_name}" LIMIT 2')
+                    rows = self.structured_handler.query(f'SELECT * FROM "{table_name}" LIMIT 2')
+                    cols = list(rows[0].keys()) if rows else []
                     if rows and cols:
                         samples = []
                         for col in cols[:4]:  # Limit to 4 columns
@@ -1722,7 +1723,8 @@ SQL:"""
             if sql:
                 for attempt in range(3):
                     try:
-                        rows, cols = self.structured_handler.execute_query(sql)
+                        rows = self.structured_handler.query(sql)
+                        cols = list(rows[0].keys()) if rows else []
                         self.last_executed_sql = sql
                         
                         if rows:
