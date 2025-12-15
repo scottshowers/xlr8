@@ -573,6 +573,9 @@ async def execute_bi_query(request: BIQueryRequest):
         # Get available transforms based on columns
         available_transforms = _get_available_transforms(columns, data, schema)
         
+        # Post-process: Convert month numbers to names for better display
+        data = _convert_month_numbers_to_names(data, columns)
+        
         return {
             "success": True,
             "needs_clarification": False,
@@ -597,6 +600,67 @@ async def execute_bi_query(request: BIQueryRequest):
         import traceback
         logger.error(traceback.format_exc())
         raise HTTPException(500, f"Query failed: {str(e)}")
+
+
+def _convert_month_numbers_to_names(data: List[Dict], columns: List[str]) -> List[Dict]:
+    """
+    Convert month columns to readable format.
+    Handles:
+    - YYYY-MM format (2024-01) → January 2024
+    - Month numbers (1-12) → January, February, etc. (less useful without year)
+    """
+    if not data or not columns:
+        return data
+    
+    MONTH_NAMES = {
+        1: 'January', 2: 'February', 3: 'March', 4: 'April',
+        5: 'May', 6: 'June', 7: 'July', 8: 'August',
+        9: 'September', 10: 'October', 11: 'November', 12: 'December',
+        '01': 'January', '02': 'February', '03': 'March', '04': 'April',
+        '05': 'May', '06': 'June', '07': 'July', '08': 'August',
+        '09': 'September', '10': 'October', '11': 'November', '12': 'December'
+    }
+    
+    # Find month columns
+    month_cols = []
+    for col in columns:
+        col_lower = col.lower()
+        if 'month' in col_lower or col_lower == 'month':
+            month_cols.append(col)
+    
+    if not month_cols:
+        return data
+    
+    # Convert month values to readable format
+    converted = []
+    for row in data:
+        new_row = dict(row)
+        for col in month_cols:
+            val = row.get(col)
+            if val is not None:
+                val_str = str(val)
+                
+                # Handle YYYY-MM format (e.g., "2024-01")
+                if '-' in val_str and len(val_str) >= 7:
+                    parts = val_str.split('-')
+                    if len(parts) >= 2:
+                        year = parts[0]
+                        month = parts[1]
+                        month_name = MONTH_NAMES.get(month) or MONTH_NAMES.get(int(month)) if month.isdigit() else month
+                        if month_name:
+                            new_row[col] = f"{month_name} {year}"
+                            continue
+                
+                # Handle plain month number (1-12)
+                try:
+                    month_num = int(val)
+                    if 1 <= month_num <= 12:
+                        new_row[col] = MONTH_NAMES[month_num]
+                except (ValueError, TypeError):
+                    pass
+        converted.append(new_row)
+    
+    return converted
 
 
 def _get_available_transforms(columns: List[str], data: List[Dict], schema: Dict) -> List[Dict]:
