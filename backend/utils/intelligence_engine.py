@@ -778,9 +778,9 @@ class IntelligenceEngine:
         best_candidate = None
         
         for candidate in status_candidates:
-            col_name = candidate.get('column', '').lower()
-            total_count = candidate.get('total_count', 0)
-            col_type = candidate.get('type', '')
+            col_name = candidate.get('column_name', candidate.get('column', '')).lower()
+            total_count = candidate.get('distinct_count', candidate.get('total_count', 0))
+            col_type = candidate.get('inferred_type', candidate.get('type', ''))
             
             # Skip transaction tables (too many rows per employee)
             if total_count > 20000:
@@ -808,13 +808,15 @@ class IntelligenceEngine:
         if not best_candidate:
             return []
         
-        logger.warning(f"[CLARIFICATION] Using status column: {best_candidate.get('column')} from {best_candidate.get('table', '').split('__')[-1]}")
+        col_name = best_candidate.get('column_name', best_candidate.get('column'))
+        table_name = best_candidate.get('table_name', best_candidate.get('table', ''))
+        logger.warning(f"[CLARIFICATION] Using status column: {col_name} from {table_name.split('__')[-1]}")
         
-        col_type = best_candidate.get('type', '')
+        col_type = best_candidate.get('inferred_type', best_candidate.get('type', ''))
         
         # Handle termination_date (date type)
         if col_type == 'date':
-            total = best_candidate.get('total_count', 0)
+            total = best_candidate.get('distinct_count', best_candidate.get('total_count', 0))
             null_count = best_candidate.get('null_count', 0)
             active_count = null_count  # null termination_date = active
             termed_count = total - null_count
@@ -826,9 +828,9 @@ class IntelligenceEngine:
             ]
         
         # Handle categorical status column (A/T codes)
-        values = best_candidate.get('values', [])
-        distribution = best_candidate.get('distribution', {})
-        total = best_candidate.get('total_count', 0)
+        values = best_candidate.get('distinct_values', best_candidate.get('values', []))
+        distribution = best_candidate.get('value_distribution', best_candidate.get('distribution', {}))
+        total = best_candidate.get('distinct_count', best_candidate.get('total_count', 0))
         
         # Map codes to active/termed
         active_codes = ['A', 'ACTIVE', 'ACT']
@@ -1032,9 +1034,9 @@ class IntelligenceEngine:
             best_candidate = None
             
             for candidate in status_candidates:
-                col_name = candidate.get('column', '').lower()
-                total_count = candidate.get('total_count', 0)
-                col_type = candidate.get('type', '')
+                col_name = candidate.get('column_name', candidate.get('column', '')).lower()
+                total_count = candidate.get('distinct_count', candidate.get('total_count', 0))
+                col_type = candidate.get('inferred_type', candidate.get('type', ''))
                 
                 # Skip transaction tables (too many rows per employee)
                 if total_count > 20000:
@@ -1059,9 +1061,9 @@ class IntelligenceEngine:
                 best_candidate = status_candidates[0]
             
             if best_candidate:
-                col_name = best_candidate.get('column')
-                col_type = best_candidate.get('type')
-                values = best_candidate.get('values', [])
+                col_name = best_candidate.get('column_name', best_candidate.get('column'))
+                col_type = best_candidate.get('inferred_type', best_candidate.get('type'))
+                values = best_candidate.get('distinct_values', best_candidate.get('values', []))
                 
                 logger.warning(f"[SQL-GEN] Status candidate: col={col_name}, type={col_type}")
                 
@@ -1104,7 +1106,7 @@ class IntelligenceEngine:
         if company_filter and company_filter != 'all':
             company_candidates = self.filter_candidates.get('company', [])
             if company_candidates:
-                col_name = company_candidates[0].get('column')
+                col_name = company_candidates[0].get('column_name', company_candidates[0].get('column'))
                 filters.append(f"{col_name} = '{company_filter}'")
         
         # LOCATION FILTER
@@ -1122,7 +1124,7 @@ class IntelligenceEngine:
             
             # First try filter_candidates
             for candidate in location_candidates:
-                col_name = candidate.get('column', '')
+                col_name = candidate.get('column_name', candidate.get('column', ''))
                 col_lower = col_name.lower()
                 
                 # Skip if column name contains invalid patterns
@@ -1133,13 +1135,13 @@ class IntelligenceEngine:
                 # Prefer columns with location-related names
                 if any(pos in col_lower for pos in location_positive):
                     valid_col = col_name
-                    valid_table = candidate.get('table')
+                    valid_table = candidate.get('table_name', candidate.get('table'))
                     break
                 
                 # Accept as fallback if no obvious red flags
                 if not valid_col:
                     valid_col = col_name
-                    valid_table = candidate.get('table')
+                    valid_table = candidate.get('table_name', candidate.get('table'))
             
             # Fallback: search schema for state/province columns if no valid candidate
             if not valid_col and self.schema:
@@ -1166,8 +1168,8 @@ class IntelligenceEngine:
         if pay_type_filter and pay_type_filter != 'all':
             pay_candidates = self.filter_candidates.get('pay_type', [])
             if pay_candidates:
-                col_name = pay_candidates[0].get('column')
-                values = pay_candidates[0].get('values', [])
+                col_name = pay_candidates[0].get('column_name', pay_candidates[0].get('column'))
+                values = pay_candidates[0].get('distinct_values', pay_candidates[0].get('values', []))
                 # Map common terms to actual codes
                 if pay_type_filter in ['hourly', 'h']:
                     codes = [v for v in values if str(v).upper() in ['H', 'HOURLY']]
@@ -1184,8 +1186,8 @@ class IntelligenceEngine:
         if emp_type_filter and emp_type_filter != 'all':
             emp_candidates = self.filter_candidates.get('employee_type', [])
             if emp_candidates:
-                col_name = emp_candidates[0].get('column')
-                values = emp_candidates[0].get('values', [])
+                col_name = emp_candidates[0].get('column_name', emp_candidates[0].get('column'))
+                values = emp_candidates[0].get('distinct_values', emp_candidates[0].get('values', []))
                 # Map common terms
                 if emp_type_filter in ['regular', 'reg']:
                     codes = [v for v in values if str(v).upper() in ['REG', 'REGULAR']]
