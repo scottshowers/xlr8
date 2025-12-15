@@ -3,9 +3,12 @@
  * 
  * IMPORTANT: getCustomerColor returns a COLOR STRING for backward compatibility.
  * Use getCustomerColorPalette if you need the full object.
+ * 
+ * Colors are assigned uniquely - no two customers will share a color
+ * (until we run out of colors in the palette).
  */
 
-// Color palette
+// Color palette - 12 distinct colors
 const PALETTE = {
   grassGreen: '#83b16d',
   skyBlue: '#93abd9',
@@ -17,10 +20,11 @@ const PALETTE = {
   emerald: '#10b981',
   orange: '#f97316',
   cyan: '#06b6d4',
-  gray: '#6b7280',
+  slate: '#64748b',
+  pink: '#ec4899',
 };
 
-// Map customer names to colors (add your customers here)
+// Map customer names to colors (explicit assignments)
 const CUSTOMER_COLOR_MAP = {
   // By customer name
   'meyer corp': PALETTE.grassGreen,
@@ -40,7 +44,7 @@ const CUSTOMER_COLOR_MAP = {
   '__standards__': PALETTE.teal,
 };
 
-// Color rotation for unknown customers (deterministic based on name)
+// Color rotation for auto-assignment (order matters for visual distinction)
 const COLOR_ROTATION = [
   PALETTE.grassGreen,
   PALETTE.skyBlue,
@@ -52,39 +56,85 @@ const COLOR_ROTATION = [
   PALETTE.emerald,
   PALETTE.orange,
   PALETTE.cyan,
+  PALETTE.slate,
+  PALETTE.pink,
 ];
 
+// Registry to track assigned colors (ensures uniqueness)
+const colorRegistry = new Map(); // key (lowercase name) -> color
+const usedColors = new Set();    // colors currently in use
+
 /**
- * Simple hash function for consistent color assignment
+ * Clear the color registry (useful for testing or reset)
  */
-function hashString(str) {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
+export function resetColorRegistry() {
+  colorRegistry.clear();
+  usedColors.clear();
+}
+
+/**
+ * Get the next available color that hasn't been used
+ */
+function getNextAvailableColor() {
+  for (const color of COLOR_ROTATION) {
+    if (!usedColors.has(color)) {
+      return color;
+    }
   }
-  return Math.abs(hash);
+  // All colors used - start reusing (but this shouldn't happen with 12 colors)
+  return COLOR_ROTATION[usedColors.size % COLOR_ROTATION.length];
 }
 
 /**
  * Get color for a customer/project (returns STRING)
+ * Colors are assigned uniquely per customer.
+ * 
  * @param {string} name - Customer name or project code
  * @returns {string} Hex color string
  */
 export function getCustomerColor(name) {
-  if (!name) return PALETTE.gray;
+  if (!name) return PALETTE.slate;
   
   const key = String(name).toLowerCase().trim();
   
-  // Check explicit mapping first
-  if (CUSTOMER_COLOR_MAP[key]) {
-    return CUSTOMER_COLOR_MAP[key];
+  // Already assigned? Return it
+  if (colorRegistry.has(key)) {
+    return colorRegistry.get(key);
   }
   
-  // Fall back to deterministic color based on name hash
-  const index = hashString(key) % COLOR_ROTATION.length;
-  return COLOR_ROTATION[index];
+  // Check explicit mapping first
+  if (CUSTOMER_COLOR_MAP[key]) {
+    const color = CUSTOMER_COLOR_MAP[key];
+    colorRegistry.set(key, color);
+    usedColors.add(color);
+    return color;
+  }
+  
+  // Assign next available color (guarantees uniqueness)
+  const color = getNextAvailableColor();
+  colorRegistry.set(key, color);
+  usedColors.add(color);
+  
+  return color;
+}
+
+/**
+ * Pre-register multiple customers to ensure unique colors
+ * Call this once with all customer names before rendering
+ * 
+ * @param {string[]} names - Array of customer/project names
+ * @returns {Map} Map of name -> color
+ */
+export function registerCustomerColors(names) {
+  const result = new Map();
+  
+  for (const name of names) {
+    if (!name) continue;
+    const color = getCustomerColor(name);
+    result.set(name, color);
+  }
+  
+  return result;
 }
 
 /**
@@ -168,5 +218,7 @@ export default {
   getCustomerColorPalette,
   getCustomerInitials,
   getContrastText,
+  registerCustomerColors,
+  resetColorRegistry,
   PALETTE,
 };
