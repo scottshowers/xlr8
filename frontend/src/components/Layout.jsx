@@ -83,7 +83,7 @@ function Navigation() {
   const location = useLocation();
   const { hasPermission, user, isAdmin, logout } = useAuth();
   const { darkMode, toggle } = useTheme();
-  const { startTour, tourEnabled, setTourEnabled } = useOnboarding();
+  const { startCurrentPageTour, tourEnabled, setTourEnabled } = useOnboarding();
 
   const isActive = (path) => {
     if (path === '/dashboard') return location.pathname === '/dashboard' || location.pathname === '/';
@@ -308,7 +308,7 @@ function Navigation() {
                 setTourEnabled(false);
               } else {
                 setTourEnabled(true);
-                startTour();
+                startCurrentPageTour();
               }
             }}
             style={{
