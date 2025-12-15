@@ -2,15 +2,15 @@
  * Layout.jsx - Main App Wrapper
  * 
  * RESTRUCTURED NAV:
- * Main: Dashboard | Projects | Data | Reference Library | Playbooks | Workspace
- * Admin: Admin | Learning | System (moved to Admin Settings tab)
+ * Main: Command Center | Projects | Data | Reference Library | Playbooks | Workspace
+ * Admin: Admin | Learning (visually separated with thicker divider)
  * 
- * Includes: Upload status indicator, theme toggle
+ * Includes: Upload status indicator, theme toggle, help button
  */
 
-import React, { useLayoutEffect } from 'react';
+import React, { useLayoutEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Rocket, Sun, Moon } from 'lucide-react';
+import { Rocket, Sun, Moon, HelpCircle, X } from 'lucide-react';
 import ContextBar from './ContextBar';
 import { useAuth, Permissions } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -28,7 +28,7 @@ const COLORS = {
 
 // Main nav items
 const MAIN_NAV = [
-  { path: '/dashboard', label: 'Dashboard', icon: '🏠', permission: null },
+  { path: '/dashboard', label: 'Command Center', icon: '🏠', permission: null },
   { path: '/projects', label: 'Projects', icon: '🏢', permission: null },
   { path: '/data', label: 'Data', icon: '📁', permission: Permissions.UPLOAD },
   { path: '/reference-library', label: 'Reference Library', icon: '📚', permission: Permissions.PLAYBOOKS },
@@ -79,10 +79,94 @@ const HLogoGreen = () => (
   </svg>
 );
 
+// Help Panel Component
+function HelpPanel({ isOpen, onClose }) {
+  if (!isOpen) return null;
+
+  const tips = [
+    { icon: '🏠', title: 'Command Center', desc: 'Overview of all projects, recent activity, and quick actions' },
+    { icon: '🏢', title: 'Projects', desc: 'Create and manage customer implementation projects' },
+    { icon: '📁', title: 'Data', desc: 'Upload customer data files for analysis' },
+    { icon: '📚', title: 'Reference Library', desc: 'Global standards and compliance documents' },
+    { icon: '📋', title: 'Playbooks', desc: 'Run analysis playbooks against project data' },
+    { icon: '💬', title: 'Workspace', desc: 'Chat with AI assistant about your data' },
+  ];
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: '60px',
+      right: '1rem',
+      width: '320px',
+      background: 'white',
+      borderRadius: '12px',
+      boxShadow: '0 10px 40px rgba(0,0,0,0.15)',
+      zIndex: 1000,
+      overflow: 'hidden',
+    }}>
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '1rem',
+        borderBottom: '1px solid #e1e8ed',
+        background: COLORS.grassGreen,
+      }}>
+        <span style={{ fontWeight: 600, color: 'white' }}>Quick Tips</span>
+        <button
+          onClick={onClose}
+          style={{
+            background: 'rgba(255,255,255,0.2)',
+            border: 'none',
+            borderRadius: '4px',
+            padding: '4px',
+            cursor: 'pointer',
+            display: 'flex',
+          }}
+        >
+          <X size={16} color="white" />
+        </button>
+      </div>
+      <div style={{ padding: '0.75rem', maxHeight: '400px', overflowY: 'auto' }}>
+        {tips.map((tip, i) => (
+          <div key={i} style={{
+            display: 'flex',
+            gap: '0.75rem',
+            padding: '0.75rem',
+            borderRadius: '8px',
+            background: i % 2 === 0 ? '#f8fafc' : 'white',
+          }}>
+            <span style={{ fontSize: '1.25rem' }}>{tip.icon}</span>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: '0.85rem', color: COLORS.text }}>{tip.title}</div>
+              <div style={{ fontSize: '0.8rem', color: COLORS.textLight, marginTop: '2px' }}>{tip.desc}</div>
+            </div>
+          </div>
+        ))}
+        <div style={{
+          marginTop: '0.75rem',
+          padding: '0.75rem',
+          background: `${COLORS.grassGreen}10`,
+          borderRadius: '8px',
+          fontSize: '0.8rem',
+          color: COLORS.textLight,
+        }}>
+          <strong style={{ color: COLORS.grassGreen }}>Keyboard Shortcuts:</strong>
+          <div style={{ marginTop: '0.5rem' }}>
+            <div>⌘/Ctrl + K → Quick search</div>
+            <div>⌘/Ctrl + N → New project</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Navigation() {
   const location = useLocation();
   const { hasPermission, user, isAdmin, logout } = useAuth();
   const { darkMode, toggle } = useTheme();
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const isActive = (path) => {
     if (path === '/dashboard') return location.pathname === '/dashboard' || location.pathname === '/';
@@ -151,10 +235,11 @@ function Navigation() {
       alignItems: 'center',
     },
     navDivider: {
-      width: '1px',
-      height: '24px',
-      background: '#e1e8ed',
-      margin: '0 0.75rem',
+      width: '2px',
+      height: '28px',
+      background: '#c9d3d4',
+      margin: '0 1rem',
+      borderRadius: '1px',
     },
     navLink: (active) => ({
       display: 'flex',
@@ -170,23 +255,38 @@ function Navigation() {
       transition: 'color 0.2s ease',
       whiteSpace: 'nowrap',
     }),
+    // Admin links now use SAME font size as main nav
     adminLink: (active) => ({
       display: 'flex',
       alignItems: 'center',
       gap: '0.35rem',
       padding: '0.875rem 0.75rem',
       textDecoration: 'none',
-      fontSize: '0.8rem',
-      fontWeight: '500',
+      fontSize: '0.85rem',
+      fontWeight: '600',
       color: active ? COLORS.grassGreen : COLORS.textLight,
       borderBottom: active ? `2px solid ${COLORS.grassGreen}` : '2px solid transparent',
       marginBottom: '-1px',
-      opacity: active ? 1 : 0.85,
+      transition: 'color 0.2s ease',
+      whiteSpace: 'nowrap',
     }),
     rightSection: {
       display: 'flex',
       alignItems: 'center',
-      gap: '1rem',
+      gap: '0.75rem',
+    },
+    helpBtn: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '32px',
+      height: '32px',
+      background: '#f8fafc',
+      border: '1px solid #e1e8ed',
+      borderRadius: '6px',
+      cursor: 'pointer',
+      color: COLORS.textLight,
+      transition: 'all 0.2s ease',
     },
     themeBtn: {
       display: 'flex',
@@ -284,6 +384,20 @@ function Navigation() {
           {/* Upload Status Indicator */}
           <UploadStatusIndicator />
           
+          {/* Help Button */}
+          <button
+            onClick={() => setHelpOpen(!helpOpen)}
+            style={{
+              ...styles.helpBtn,
+              background: helpOpen ? COLORS.grassGreen : '#f8fafc',
+              color: helpOpen ? 'white' : COLORS.textLight,
+              borderColor: helpOpen ? COLORS.grassGreen : '#e1e8ed',
+            }}
+            title="Quick Tips"
+          >
+            <HelpCircle size={16} />
+          </button>
+          
           {/* Theme Toggle */}
           <button
             data-tour="theme-toggle"
@@ -306,6 +420,9 @@ function Navigation() {
           )}
         </div>
       </div>
+      
+      {/* Help Panel */}
+      <HelpPanel isOpen={helpOpen} onClose={() => setHelpOpen(false)} />
     </nav>
   );
 }
