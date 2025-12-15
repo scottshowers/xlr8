@@ -83,7 +83,14 @@ function Navigation() {
   const location = useLocation();
   const { hasPermission, user, isAdmin, logout } = useAuth();
   const { darkMode, toggle } = useTheme();
-  const { startCurrentPageTour, tourEnabled, setTourEnabled } = useOnboarding();
+  
+  // Defensive: get onboarding context with fallbacks
+  const onboarding = useOnboarding() || {};
+  const { 
+    startCurrentPageTour = () => {}, 
+    tourEnabled = false, 
+    setTourEnabled = () => {} 
+  } = onboarding;
 
   const isActive = (path) => {
     if (path === '/dashboard') return location.pathname === '/dashboard' || location.pathname === '/';
@@ -304,11 +311,15 @@ function Navigation() {
           {/* Tour Guide Toggle */}
           <button
             onClick={() => {
-              if (tourEnabled) {
-                setTourEnabled(false);
-              } else {
-                setTourEnabled(true);
-                startCurrentPageTour();
+              try {
+                if (tourEnabled) {
+                  setTourEnabled(false);
+                } else {
+                  setTourEnabled(true);
+                  startCurrentPageTour();
+                }
+              } catch (err) {
+                console.error('Tour toggle error:', err);
               }
             }}
             style={{
