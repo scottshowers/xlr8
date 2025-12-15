@@ -1666,6 +1666,12 @@ class IntelligenceEngine:
         if re.search(r'\bshow\s+\w+\s+\w*\s*by\s+\w+', q_lower) or re.search(r'\bby\s+(job|state|location|company|month|year)\b', q_lower):
             query_hints.append(f"Use simple aggregation: SELECT column, COUNT(*) FROM {primary_table} GROUP BY column")
             query_hints.append("Do NOT use JOINs for simple counts")
+            
+            # Add ORDER BY hints
+            if 'month' in q_lower or 'year' in q_lower or 'date' in q_lower:
+                query_hints.append("ORDER BY the date/month column ASC for chronological order")
+            else:
+                query_hints.append("ORDER BY COUNT(*) DESC to show highest counts first")
         
         # COUNT hint
         if 'how many' in q_lower or 'count' in q_lower:
@@ -1867,6 +1873,29 @@ SQL:"""
                         else:
                             sql = sql.rstrip(';') + f' GROUP BY {alias}'
                         logger.warning(f"[SQL-GEN] Auto-added: GROUP BY {alias}")
+            
+            # AUTO-FIX: Add ORDER BY if missing for aggregate queries
+            sql_upper = sql.upper()
+            logger.warning(f"[SQL-GEN] ORDER BY check: GROUP BY={('GROUP BY' in sql_upper)}, ORDER BY missing={('ORDER BY' not in sql_upper)}")
+            if 'GROUP BY' in sql_upper and 'ORDER BY' not in sql_upper:
+                # For month/year queries, order chronologically
+                logger.warning(f"[SQL-GEN] Checking month/year: month={('month' in q_lower)}, year={('year' in q_lower)}")
+                if 'month' in q_lower or 'year' in q_lower:
+                    # Find the month/date alias or column
+                    month_match = re.search(r'\bAS\s+(\w*month\w*)', sql, re.IGNORECASE)
+                    logger.warning(f"[SQL-GEN] Month alias match: {month_match.group(1) if month_match else 'None'}")
+                    if month_match:
+                        sql = sql.rstrip(';') + f' ORDER BY {month_match.group(1)} ASC'
+                        logger.warning(f"[SQL-GEN] Auto-added: ORDER BY {month_match.group(1)} ASC (chronological)")
+                else:
+                    # For other groupings, order by count descending
+                    count_match = re.search(r'COUNT\s*\([^)]*\)\s*(?:AS\s+)?(\w+)?', sql, re.IGNORECASE)
+                    if count_match:
+                        count_alias = count_match.group(1) if count_match.group(1) else 'COUNT(*)'
+                        sql = sql.rstrip(';') + f' ORDER BY {count_alias} DESC'
+                        logger.warning(f"[SQL-GEN] Auto-added: ORDER BY {count_alias} DESC (highest first)")
+            
+            logger.warning(f"[SQL-GEN] Final SQL: {sql[-100:]}")
             
             # Detect query type
             sql_upper = sql.upper()
