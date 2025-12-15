@@ -1584,13 +1584,24 @@ class IntelligenceEngine:
                             col_lower.endswith('_term_date')
                         )
                         if is_term_date:
-                            date_cols.append(f"{short_table}.{col_name}")
+                            date_cols.append((f"{short_table}.{col_name}", col_lower))
                         else:
-                            code_cols.append(f"{short_table}.{col_name}")
+                            # Prioritize employment_status columns
+                            priority = 0
+                            if 'employment_status' in col_lower:
+                                priority = 100
+                            elif 'emp_status' in col_lower:
+                                priority = 90
+                            elif col_lower == 'status' or col_lower.endswith('_status'):
+                                priority = 50
+                            code_cols.append((f"{short_table}.{col_name}", priority))
+                    
                     if date_cols:
-                        semantic_hints.append(f"- For termination dates/timing: use {date_cols[0]}")
+                        semantic_hints.append(f"- For termination dates/timing: use {date_cols[0][0]}")
                     if code_cols:
-                        semantic_hints.append(f"- For employee status (active/termed): use {code_cols[0]}")
+                        # Sort by priority descending, pick best
+                        code_cols.sort(key=lambda x: -x[1])
+                        semantic_hints.append(f"- For employee status (active/termed): use {code_cols[0][0]}")
                 else:
                     # Other categories - just use first/best
                     best = candidates[0]
@@ -1611,6 +1622,8 @@ class IntelligenceEngine:
         
         semantic_text = ""
         if semantic_hints:
+            # Add note about automatic status filtering
+            semantic_hints.insert(0, "NOTE: Status filtering (active/termed) is applied automatically - do not add WHERE clauses for it")
             semantic_text = "\n\nCOLUMN USAGE:\n" + "\n".join(semantic_hints)
             logger.warning(f"[SQL-GEN] Semantic hints: {len(semantic_hints)} column mappings added")
             for hint in semantic_hints:
@@ -1629,10 +1642,11 @@ QUESTION: {question}
 
 RULES:
 1. Use ONLY columns listed in SCHEMA above - NEVER invent column names
-2. DO NOT add WHERE clauses for status/active/terminated filtering - this is handled automatically
-3. Use COLUMN USAGE hints to pick the correct columns
-4. ILIKE for text matching
-5. Quote table names with special chars
+2. DO NOT add WHERE clauses for status/active/terminated/termed filtering - filters are added automatically
+3. Use COLUMN USAGE hints to pick the correct columns for GROUP BY and SELECT
+4. If referencing a column from a table, you MUST include that table in FROM/JOIN
+5. ILIKE for text matching
+6. Quote table names with special chars
 
 SQL:"""
         
@@ -1691,6 +1705,11 @@ SQL:"""
             
             # FIX STATE NAME PATTERNS - convert "Texas" to "TX" etc in ILIKE clauses
             sql = self._fix_state_names_in_sql(sql)
+            
+            # FIX DuckDB syntax: MONTH(x) → EXTRACT(MONTH FROM x)
+            sql = re.sub(r'\bMONTH\s*\(\s*([^)]+)\s*\)', r'EXTRACT(MONTH FROM \1)', sql, flags=re.IGNORECASE)
+            sql = re.sub(r'\bYEAR\s*\(\s*([^)]+)\s*\)', r'EXTRACT(YEAR FROM \1)', sql, flags=re.IGNORECASE)
+            sql = re.sub(r'\bDAY\s*\(\s*([^)]+)\s*\)', r'EXTRACT(DAY FROM \1)', sql, flags=re.IGNORECASE)
             
             logger.warning(f"[SQL-GEN] Generated: {sql[:150]}")
             
