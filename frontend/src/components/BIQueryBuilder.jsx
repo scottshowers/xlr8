@@ -33,7 +33,8 @@ import {
   LineChart as LineIcon, TrendingUp, RefreshCw, ChevronDown, ChevronRight,
   Plus, X, GripVertical, Eye, EyeOff, ArrowRight, FileSpreadsheet,
   Lightbulb, Clock, Star, Filter, Columns, Wand2, Check, AlertCircle,
-  Database, Play, Loader2, Settings, Layout, MoreHorizontal, Copy
+  Database, Play, Loader2, Settings, Layout, MoreHorizontal, Copy,
+  Maximize2, Minimize2, ZoomIn, ZoomOut
 } from 'lucide-react'
 
 // Brand colors (matching Chat.jsx)
@@ -78,8 +79,18 @@ export default function BIQueryBuilder({
   // Clarification
   const [pendingClarification, setPendingClarification] = useState(null)
   
+  // Fullscreen chart view
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  
   // Refs
   const inputRef = useRef(null)
+  
+  // Sync initialQuery prop to query state
+  useEffect(() => {
+    if (initialQuery && initialQuery !== query) {
+      setQuery(initialQuery)
+    }
+  }, [initialQuery])
   
   // Load suggestions on mount
   useEffect(() => {
@@ -331,8 +342,123 @@ export default function BIQueryBuilder({
       )
     }
     
-    // Default: table
-    return renderChart('table')
+    // Default: table fallback
+    return (
+      <div className="overflow-auto max-h-96">
+        <table className="w-full text-sm">
+          <thead className="sticky top-0">
+            <tr style={{ backgroundColor: BRAND }}>
+              {results.columns?.map(col => (
+                <th key={col} className="px-3 py-2 text-left text-white font-medium">
+                  {col.replace(/_/g, ' ')}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {data.slice(0, 100).map((row, i) => (
+              <tr key={i} className={i % 2 === 0 ? 'bg-gray-50' : 'bg-white'}>
+                {results.columns?.map(col => (
+                  <td key={col} className="px-3 py-2 border-b border-gray-100">
+                    {formatValue(row[col])}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+  
+  // ===========================================
+  // RENDER CHART FULLSCREEN (larger version)
+  // ===========================================
+  
+  const renderChartFullscreen = () => {
+    if (!results?.data || results.data.length === 0) return null
+    
+    const data = results.data
+    const config = results.chart?.config || {}
+    const xKey = config.xAxis || results.columns?.[0]
+    const yKey = config.yAxis || results.columns?.[1]
+    
+    // Bar chart - fullscreen
+    if (chartType === 'bar') {
+      return (
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 100 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+            <XAxis 
+              dataKey={xKey} 
+              tick={{ fill: '#6b7280', fontSize: 12 }}
+              angle={-45}
+              textAnchor="end"
+              height={100}
+            />
+            <YAxis tick={{ fill: '#6b7280', fontSize: 12 }} tickFormatter={formatNumber} />
+            <Tooltip 
+              contentStyle={{ backgroundColor: 'white', border: '1px solid #e5e7eb', borderRadius: '8px' }}
+              formatter={(value) => formatNumber(value)}
+            />
+            <Bar dataKey={yKey} fill={BRAND} radius={[4, 4, 0, 0]} maxBarSize={80} />
+          </BarChart>
+        </ResponsiveContainer>
+      )
+    }
+    
+    // Pie chart - fullscreen
+    if (chartType === 'pie') {
+      return (
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie
+              data={data}
+              cx="50%"
+              cy="50%"
+              innerRadius={80}
+              outerRadius={180}
+              paddingAngle={2}
+              dataKey={yKey}
+              nameKey={xKey}
+              label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+            >
+              {data.map((_, index) => (
+                <Cell key={index} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+              ))}
+            </Pie>
+            <Tooltip formatter={(value) => formatNumber(value)} />
+          </PieChart>
+        </ResponsiveContainer>
+      )
+    }
+    
+    // Line chart - fullscreen
+    if (chartType === 'line' || chartType === 'area') {
+      const ChartComponent = chartType === 'area' ? AreaChart : LineChart
+      const DataComponent = chartType === 'area' ? Area : Line
+      
+      return (
+        <ResponsiveContainer width="100%" height="100%">
+          <ChartComponent data={data} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+            <XAxis dataKey={xKey} tick={{ fill: '#6b7280', fontSize: 12 }} />
+            <YAxis tick={{ fill: '#6b7280', fontSize: 12 }} tickFormatter={formatNumber} />
+            <Tooltip formatter={(value) => formatNumber(value)} />
+            <DataComponent 
+              type="monotone" 
+              dataKey={yKey} 
+              stroke={BRAND} 
+              fill={chartType === 'area' ? BRAND : 'none'}
+              fillOpacity={0.2}
+              strokeWidth={3}
+            />
+          </ChartComponent>
+        </ResponsiveContainer>
+      )
+    }
+    
+    return null
   }
   
   // ===========================================
@@ -489,6 +615,17 @@ export default function BIQueryBuilder({
                 {results.total_rows?.toLocaleString()} rows
                 {results.truncated && ' (truncated)'}
               </span>
+              
+              {/* Fullscreen toggle for charts */}
+              {chartType !== 'table' && (
+                <button
+                  onClick={() => setIsFullscreen(!isFullscreen)}
+                  className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-700"
+                  title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+                >
+                  {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                </button>
+              )}
             </div>
             
             <div className="flex items-center gap-2">
@@ -541,6 +678,67 @@ export default function BIQueryBuilder({
           <div className="p-4">
             {renderChart()}
           </div>
+          
+          {/* Fullscreen Modal */}
+          {isFullscreen && chartType !== 'table' && (
+            <div 
+              className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-8"
+              onClick={() => setIsFullscreen(false)}
+            >
+              <div 
+                className="bg-white rounded-xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Fullscreen Header */}
+                <div className="p-4 border-b flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="font-medium text-gray-800">
+                      {query}
+                    </span>
+                    <span className="text-sm text-gray-500">
+                      {results.total_rows?.toLocaleString()} rows
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {/* Chart type selector in fullscreen */}
+                    <div className="flex bg-gray-100 rounded-lg p-1">
+                      {[
+                        { type: 'bar', icon: BarChart3, label: 'Bar' },
+                        { type: 'pie', icon: PieIcon, label: 'Pie' },
+                        { type: 'line', icon: LineIcon, label: 'Line' },
+                      ].map(({ type, icon: Icon, label }) => (
+                        <button
+                          key={type}
+                          onClick={() => setChartType(type)}
+                          className={`p-2 rounded transition-all ${
+                            chartType === type 
+                              ? 'text-white' 
+                              : 'text-gray-500 hover:text-gray-700'
+                          }`}
+                          style={chartType === type ? { backgroundColor: BRAND } : {}}
+                          title={label}
+                        >
+                          <Icon size={16} />
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => setIsFullscreen(false)}
+                      className="p-2 rounded-lg hover:bg-gray-100 text-gray-500"
+                      title="Close"
+                    >
+                      <X size={20} />
+                    </button>
+                  </div>
+                </div>
+                
+                {/* Fullscreen Chart - Larger */}
+                <div className="p-8" style={{ height: '70vh' }}>
+                  {renderChartFullscreen()}
+                </div>
+              </div>
+            </div>
+          )}
           
           {/* SQL Preview */}
           {results.sql && (
