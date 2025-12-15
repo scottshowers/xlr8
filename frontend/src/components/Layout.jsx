@@ -2,7 +2,7 @@
  * Layout.jsx - Main App Wrapper
  * 
  * RESTRUCTURED NAV:
- * Main: Command Center | Projects | Data | Reference Library | Playbooks | Workspace
+ * Main: Command Center | Projects | Data | Reference Library | Playbooks | AI Assist
  * Admin: Admin | Learning (visually separated with thicker divider)
  * 
  * Includes: Upload status indicator, theme toggle, help button
@@ -33,7 +33,7 @@ const MAIN_NAV = [
   { path: '/data', label: 'Data', icon: '📁', permission: Permissions.UPLOAD },
   { path: '/reference-library', label: 'Reference Library', icon: '📚', permission: Permissions.PLAYBOOKS },
   { path: '/playbooks', label: 'Playbooks', icon: '📋', permission: Permissions.PLAYBOOKS },
-  { path: '/workspace', label: 'Workspace', icon: '💬', permission: null },
+  { path: '/workspace', label: 'AI Assist', icon: '💬', permission: null },
 ];
 
 // Admin nav items - simplified (System moved to Admin tab)
@@ -83,14 +83,7 @@ function Navigation() {
   const location = useLocation();
   const { hasPermission, user, isAdmin, logout } = useAuth();
   const { darkMode, toggle } = useTheme();
-  
-  // Defensive: get onboarding context with fallbacks
-  const onboarding = useOnboarding() || {};
-  const { 
-    startCurrentPageTour = () => {}, 
-    tourEnabled = false, 
-    setTourEnabled = () => {} 
-  } = onboarding;
+  const { startCurrentPageTour, tourEnabled, setTourEnabled } = useOnboarding();
 
   const isActive = (path) => {
     if (path === '/dashboard') return location.pathname === '/dashboard' || location.pathname === '/';
@@ -311,15 +304,11 @@ function Navigation() {
           {/* Tour Guide Toggle */}
           <button
             onClick={() => {
-              try {
-                if (tourEnabled) {
-                  setTourEnabled(false);
-                } else {
-                  setTourEnabled(true);
-                  startCurrentPageTour();
-                }
-              } catch (err) {
-                console.error('Tour toggle error:', err);
+              if (tourEnabled) {
+                setTourEnabled(false);
+              } else {
+                setTourEnabled(true);
+                startCurrentPageTour();
               }
             }}
             style={{
