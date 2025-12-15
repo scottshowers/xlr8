@@ -1534,13 +1534,59 @@ class IntelligenceEngine:
         filter_instructions = self._build_filter_instructions(relevant_tables)
         logger.warning(f"[SQL-GEN] filter_instructions: {filter_instructions if filter_instructions else 'NONE'}")
         
+        # BUILD SEMANTIC HINTS from filter_candidates
+        # This tells the LLM which columns to use for specific purposes
+        semantic_hints = []
+        if self.filter_candidates:
+            for category, candidates in self.filter_candidates.items():
+                if not candidates:
+                    continue
+                    
+                if category == 'status':
+                    # Status can have multiple useful columns - list them all
+                    date_cols = []
+                    code_cols = []
+                    for cand in candidates:
+                        col_name = cand.get('column_name', cand.get('column', ''))
+                        col_type = cand.get('inferred_type', cand.get('type', ''))
+                        if col_type == 'date' or 'termination' in col_name.lower() or 'term_date' in col_name.lower():
+                            date_cols.append(col_name)
+                        else:
+                            code_cols.append(col_name)
+                    if date_cols:
+                        semantic_hints.append(f"- For termination dates/timing: use {date_cols[0]}")
+                    if code_cols:
+                        semantic_hints.append(f"- For employee status (active/termed): use {code_cols[0]}")
+                else:
+                    # Other categories - just use first/best
+                    best = candidates[0]
+                    col_name = best.get('column_name', best.get('column', ''))
+                    
+                    if category == 'location':
+                        semantic_hints.append(f"- For location/state: use {col_name}")
+                    elif category == 'company':
+                        semantic_hints.append(f"- For company: use {col_name}")
+                    elif category == 'organization':
+                        semantic_hints.append(f"- For org/department: use {col_name}")
+                    elif category == 'pay_type':
+                        semantic_hints.append(f"- For pay type (hourly/salary): use {col_name}")
+                    elif category == 'employee_type':
+                        semantic_hints.append(f"- For employee type (regular/temp): use {col_name}")
+                    elif category == 'job':
+                        semantic_hints.append(f"- For job/position: use {col_name}")
+        
+        semantic_text = ""
+        if semantic_hints:
+            semantic_text = "\n\nCOLUMN USAGE:\n" + "\n".join(semantic_hints)
+            logger.warning(f"[SQL-GEN] Semantic hints: {len(semantic_hints)} column mappings added")
+        
         # Simple hint for COUNT queries (no filter - we inject it after)
         query_hint = ""
         if 'how many' in q_lower or 'count' in q_lower:
             query_hint = f"\n\nHINT: For COUNT, use: SELECT COUNT(*) FROM \"{primary_table}\""
         
         prompt = f"""SCHEMA:
-{schema_text}{relationships_text}
+{schema_text}{relationships_text}{semantic_text}
 {query_hint}
 
 QUESTION: {question}
@@ -1549,6 +1595,7 @@ RULES:
 1. Use ONLY columns from schema above
 2. ILIKE for text matching
 3. Quote table names with special chars
+4. Use COLUMN USAGE hints for correct column selection
 
 SQL:"""
         
@@ -1634,6 +1681,24 @@ SQL:"""
         """Try to fix SQL based on error message."""
         from difflib import SequenceMatcher
         
+        # Fix 1: VARCHAR column used with date functions - add TRY_CAST
+        if 'date_part' in error_msg.lower() and 'VARCHAR' in error_msg:
+            # Find EXTRACT(... FROM column_name) patterns and wrap in TRY_CAST
+            pattern = r"EXTRACT\s*\(\s*(\w+)\s+FROM\s+(\w+)\s*\)"
+            match = re.search(pattern, sql, re.IGNORECASE)
+            if match:
+                part = match.group(1)  # MONTH, YEAR, etc.
+                col = match.group(2)   # column name
+                fixed_sql = re.sub(
+                    pattern,
+                    f"EXTRACT({part} FROM TRY_CAST({col} AS DATE))",
+                    sql,
+                    flags=re.IGNORECASE
+                )
+                logger.info(f"[SQL-FIX] Added TRY_CAST for date extraction on {col}")
+                return fixed_sql
+        
+        # Fix 2: Column not found errors
         patterns = [
             r'does not have a column named "([^"]+)"',
             r'Referenced column "([^"]+)" not found',
