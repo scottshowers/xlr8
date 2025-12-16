@@ -2235,14 +2235,37 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
         }
         
         try:
-            # Get basic stats via SQL (fast, always uses full table)
-            stats = self.conn.execute(f"""
-                SELECT 
-                    COUNT(*) as total,
-                    SUM(CASE WHEN "{col}" IS NULL OR TRIM("{col}") = '' OR "{col}" = 'nan' THEN 1 ELSE 0 END) as null_count,
-                    COUNT(DISTINCT "{col}") as distinct_count
-                FROM {table_name}
+            # First, get the column's actual data type
+            col_type_result = self.conn.execute(f"""
+                SELECT data_type FROM information_schema.columns 
+                WHERE table_name = '{table_name}' AND column_name = '{col}'
             """).fetchone()
+            
+            col_type = col_type_result[0].upper() if col_type_result else 'VARCHAR'
+            profile['original_dtype'] = col_type
+            
+            # Determine if column is numeric (no TRIM needed)
+            is_numeric = any(t in col_type for t in ['INT', 'DOUBLE', 'FLOAT', 'DECIMAL', 'NUMERIC', 'BIGINT', 'SMALLINT', 'REAL'])
+            
+            # Get basic stats via SQL - different query for numeric vs string
+            if is_numeric:
+                # Numeric columns - just check NULL
+                stats = self.conn.execute(f"""
+                    SELECT 
+                        COUNT(*) as total,
+                        SUM(CASE WHEN "{col}" IS NULL THEN 1 ELSE 0 END) as null_count,
+                        COUNT(DISTINCT "{col}") as distinct_count
+                    FROM {table_name}
+                """).fetchone()
+            else:
+                # String columns - check NULL, empty, and 'nan'
+                stats = self.conn.execute(f"""
+                    SELECT 
+                        COUNT(*) as total,
+                        SUM(CASE WHEN "{col}" IS NULL OR TRIM(CAST("{col}" AS VARCHAR)) = '' OR CAST("{col}" AS VARCHAR) = 'nan' THEN 1 ELSE 0 END) as null_count,
+                        COUNT(DISTINCT "{col}") as distinct_count
+                    FROM {table_name}
+                """).fetchone()
             
             profile['total_count'] = stats[0]
             profile['null_count'] = stats[1] or 0
@@ -2254,17 +2277,43 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 uniqueness = profile['distinct_count'] / non_null_count
                 profile['is_likely_key'] = uniqueness > 0.95 and profile['distinct_count'] > 10
             
-            # Get sample values
-            samples = self.conn.execute(f"""
-                SELECT DISTINCT "{col}" 
-                FROM {table_name} 
-                WHERE "{col}" IS NOT NULL AND TRIM("{col}") != '' AND "{col}" != 'nan'
-                LIMIT 5
-            """).fetchall()
+            # Get sample values - different query for numeric vs string
+            if is_numeric:
+                samples = self.conn.execute(f"""
+                    SELECT DISTINCT "{col}" 
+                    FROM {table_name} 
+                    WHERE "{col}" IS NOT NULL
+                    LIMIT 5
+                """).fetchall()
+            else:
+                samples = self.conn.execute(f"""
+                    SELECT DISTINCT "{col}" 
+                    FROM {table_name} 
+                    WHERE "{col}" IS NOT NULL AND TRIM(CAST("{col}" AS VARCHAR)) != '' AND CAST("{col}" AS VARCHAR) != 'nan'
+                    LIMIT 5
+                """).fetchall()
             profile['sample_values'] = [str(s[0]) for s in samples]
             
+            # If already numeric type, set profile accordingly
+            if is_numeric:
+                profile['inferred_type'] = 'numeric'
+                try:
+                    numeric_stats = self.conn.execute(f"""
+                        SELECT 
+                            MIN("{col}") as min_val,
+                            MAX("{col}") as max_val,
+                            AVG("{col}") as mean_val
+                        FROM {table_name}
+                        WHERE "{col}" IS NOT NULL
+                    """).fetchone()
+                    profile['min_value'] = float(numeric_stats[0]) if numeric_stats[0] is not None else None
+                    profile['max_value'] = float(numeric_stats[1]) if numeric_stats[1] is not None else None
+                    profile['mean_value'] = float(numeric_stats[2]) if numeric_stats[2] is not None else None
+                except:
+                    pass
+            
             # For categorical (low cardinality), get distinct values and distribution
-            if profile['distinct_count'] <= 100:
+            elif profile['distinct_count'] <= 100:
                 profile['is_categorical'] = True
                 profile['inferred_type'] = 'categorical'
                 
@@ -2272,7 +2321,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 distinct_result = self.conn.execute(f"""
                     SELECT DISTINCT "{col}"
                     FROM {table_name}
-                    WHERE "{col}" IS NOT NULL AND TRIM("{col}") != '' AND "{col}" != 'nan'
+                    WHERE "{col}" IS NOT NULL AND TRIM(CAST("{col}" AS VARCHAR)) != '' AND CAST("{col}" AS VARCHAR) != 'nan'
                     ORDER BY "{col}"
                 """).fetchall()
                 profile['distinct_values'] = sorted([str(d[0]) for d in distinct_result if d[0]])
@@ -2300,18 +2349,18 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                         profile['inferred_type'] = 'boolean'
                         break
             
-            # Try numeric detection via SQL
-            if profile['inferred_type'] not in ['categorical', 'boolean']:
+            # Try numeric detection via SQL (for string columns that might be numeric)
+            if profile['inferred_type'] not in ['categorical', 'boolean', 'numeric']:
                 try:
                     # Try to cast and get numeric stats
                     numeric_stats = self.conn.execute(f"""
                         SELECT 
-                            MIN(TRY_CAST(REPLACE(REPLACE("{col}", ',', ''), '$', '') AS DOUBLE)) as min_val,
-                            MAX(TRY_CAST(REPLACE(REPLACE("{col}", ',', ''), '$', '') AS DOUBLE)) as max_val,
-                            AVG(TRY_CAST(REPLACE(REPLACE("{col}", ',', ''), '$', '') AS DOUBLE)) as mean_val,
-                            COUNT(TRY_CAST(REPLACE(REPLACE("{col}", ',', ''), '$', '') AS DOUBLE)) as numeric_count
+                            MIN(TRY_CAST(REPLACE(REPLACE(CAST("{col}" AS VARCHAR), ',', ''), '$', '') AS DOUBLE)) as min_val,
+                            MAX(TRY_CAST(REPLACE(REPLACE(CAST("{col}" AS VARCHAR), ',', ''), '$', '') AS DOUBLE)) as max_val,
+                            AVG(TRY_CAST(REPLACE(REPLACE(CAST("{col}" AS VARCHAR), ',', ''), '$', '') AS DOUBLE)) as mean_val,
+                            COUNT(TRY_CAST(REPLACE(REPLACE(CAST("{col}" AS VARCHAR), ',', ''), '$', '') AS DOUBLE)) as numeric_count
                         FROM {table_name}
-                        WHERE "{col}" IS NOT NULL AND TRIM("{col}") != ''
+                        WHERE "{col}" IS NOT NULL AND TRIM(CAST("{col}" AS VARCHAR)) != ''
                     """).fetchone()
                     
                     if numeric_stats and numeric_stats[3] and numeric_stats[3] > non_null_count * 0.8:
@@ -2331,7 +2380,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                             MAX(TRY_CAST("{col}" AS DATE)) as max_date,
                             COUNT(TRY_CAST("{col}" AS DATE)) as date_count
                         FROM {table_name}
-                        WHERE "{col}" IS NOT NULL AND TRIM("{col}") != ''
+                        WHERE "{col}" IS NOT NULL AND TRIM(CAST("{col}" AS VARCHAR)) != ''
                     """).fetchone()
                     
                     if date_stats and date_stats[2] and date_stats[2] > non_null_count * 0.8:
