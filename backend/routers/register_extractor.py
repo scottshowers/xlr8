@@ -690,7 +690,7 @@ class RegisterExtractor:
         """
         Parse employees using LLM - CHUNKED LOCAL FIRST, Claude fallback.
         
-        Chunks pages into groups of 3 to avoid timeouts and get faster responses.
+        Chunks pages into groups of 2 to avoid timeouts and get faster responses.
         
         Returns: (employees, llm_used, cost_usd)
         """
@@ -702,8 +702,8 @@ class RegisterExtractor:
         if ollama_url:
             logger.info(f"[REGISTER] Attempting chunked local extraction ({len(pages_text)} pages)...")
             
-            # Chunk pages - 3 pages per chunk
-            CHUNK_SIZE = 3
+            # Chunk pages - 2 pages per chunk for faster responses
+            CHUNK_SIZE = 2
             chunks = [pages_text[i:i+CHUNK_SIZE] for i in range(0, len(pages_text), CHUNK_SIZE)]
             
             all_employees = []
@@ -713,11 +713,14 @@ class RegisterExtractor:
                 chunk_num = chunk_idx + 1
                 total_chunks = len(chunks)
                 
+                # First chunk gets longer timeout (model cold start)
+                timeout = 300 if chunk_idx == 0 else 180  # 5 min first, 3 min after
+                
                 if job_id:
                     progress = 80 + int((chunk_idx / total_chunks) * 15)  # 80-95%
                     update_job(job_id, message=f'Processing chunk {chunk_num}/{total_chunks}...', progress=progress)
                 
-                logger.info(f"[REGISTER] Processing chunk {chunk_num}/{total_chunks} ({len(chunk_pages)} pages)...")
+                logger.info(f"[REGISTER] Processing chunk {chunk_num}/{total_chunks} ({len(chunk_pages)} pages, timeout={timeout}s)...")
                 
                 chunk_text = "\n\n--- PAGE BREAK ---\n\n".join(chunk_pages)
                 prompt_template = self._get_vendor_prompt(vendor_type)
@@ -734,6 +737,7 @@ Return ONLY a valid JSON array of employee objects. No markdown, no explanation,
                         "model": "qwen2.5-coder:14b",
                         "prompt": local_prompt,
                         "stream": False,
+                        "keep_alive": "10m",  # Keep model loaded for 10 min
                         "options": {
                             "temperature": 0.1,
                             "num_predict": 16384,
@@ -746,13 +750,13 @@ Return ONLY a valid JSON array of employee objects. No markdown, no explanation,
                             f"{ollama_url}/api/generate",
                             json=payload,
                             auth=HTTPBasicAuth(ollama_user, ollama_pass),
-                            timeout=120  # 2 min per chunk is plenty
+                            timeout=timeout
                         )
                     else:
                         response = requests.post(
                             f"{ollama_url}/api/generate",
                             json=payload,
-                            timeout=120
+                            timeout=timeout
                         )
                     
                     if response.status_code == 200:
@@ -770,7 +774,7 @@ Return ONLY a valid JSON array of employee objects. No markdown, no explanation,
                         failed_chunks += 1
                         
                 except requests.exceptions.Timeout:
-                    logger.warning(f"[REGISTER] Chunk {chunk_num} timed out")
+                    logger.warning(f"[REGISTER] Chunk {chunk_num} timed out after {timeout}s")
                     failed_chunks += 1
                 except Exception as e:
                     logger.warning(f"[REGISTER] Chunk {chunk_num} error: {e}")
