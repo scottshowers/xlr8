@@ -6,6 +6,7 @@ Updated: December 12, 2025 - Added intelligence router (Phase 3 Universal Analys
 Updated: December 14, 2025 - Added playbook_builder router (P3.6 P3)
 Updated: December 15, 2025 - Added advisor router (Work Advisor)
 Updated: December 17, 2025 - Added cleanup router (data deletion endpoints)
+Updated: December 17, 2025 - Replaced vacuum with register_extractor (local LLM + DuckDB)
 """
 
 from fastapi import FastAPI
@@ -45,12 +46,13 @@ except ImportError as e:
     ADVISOR_AVAILABLE = False
     logging.warning(f"Advisor router import failed: {e}")
 
-# Import vacuum router
+# Import register_extractor router (formerly vacuum - includes backward compat routes)
 try:
-    from backend.routers import vacuum
-    VACUUM_AVAILABLE = True
+    from backend.routers import register_extractor
+    REGISTER_EXTRACTOR_AVAILABLE = True
 except ImportError:
-    VACUUM_AVAILABLE = False
+    REGISTER_EXTRACTOR_AVAILABLE = False
+    logging.warning("Register extractor router import failed")
 
 # Import progress router (SSE streaming)
 try:
@@ -182,12 +184,12 @@ if CLEANUP_AVAILABLE:
 else:
     logger.warning("Cleanup router not available")
 
-# Register vacuum router if available
-if VACUUM_AVAILABLE:
-    app.include_router(vacuum.router, prefix="/api", tags=["vacuum"])
-    logger.info("Vacuum router registered")
+# Register register_extractor router if available (pay register extraction + DuckDB storage)
+if REGISTER_EXTRACTOR_AVAILABLE:
+    app.include_router(register_extractor.router, prefix="/api", tags=["register-extractor"])
+    logger.info("Register extractor router registered (includes /vacuum backward compat)")
 else:
-    logger.warning("Vacuum router not available")
+    logger.warning("Register extractor router not available")
 
 # Register playbooks router if available
 if PLAYBOOKS_AVAILABLE:
@@ -343,7 +345,7 @@ async def health():
             "chat": True,
             "upload": True,
             "status": True,
-            "vacuum": VACUUM_AVAILABLE,
+            "register_extractor": REGISTER_EXTRACTOR_AVAILABLE,
             "playbooks": PLAYBOOKS_AVAILABLE,
             "playbook_builder": PLAYBOOK_BUILDER_AVAILABLE,
             "advisor": ADVISOR_AVAILABLE,
@@ -372,7 +374,7 @@ async def health():
             "status": "degraded",
             "error": str(e),
             "features": {
-                "vacuum": VACUUM_AVAILABLE,
+                "register_extractor": REGISTER_EXTRACTOR_AVAILABLE,
                 "playbooks": PLAYBOOKS_AVAILABLE,
                 "playbook_builder": PLAYBOOK_BUILDER_AVAILABLE,
                 "advisor": ADVISOR_AVAILABLE,
