@@ -688,105 +688,137 @@ class RegisterExtractor:
     
     def _parse_with_llm(self, pages_text: List[str], vendor_type: str, job_id: str = None) -> tuple:
         """
-        Parse employees using LLM - LOCAL FIRST via direct TCP, Claude fallback.
+        Parse employees using Groq (page-by-page) + code merge.
+        
+        Strategy:
+        1. Extract each page individually via Groq (fast, accurate)
+        2. Merge employees by employee_id in code (deterministic)
         
         Returns: (employees, llm_used, cost_usd)
         """
-        full_text = "\n\n--- PAGE BREAK ---\n\n".join(pages_text)
+        groq_api_key = os.getenv("GROQ_API_KEY", "")
         
-        if len(full_text) > 100000:
-            logger.warning(f"Text too long ({len(full_text)}), truncating to 100k chars")
-            full_text = full_text[:100000]
+        if not groq_api_key:
+            # Fallback to Claude if no Groq
+            if self.claude_api_key:
+                logger.info("[REGISTER] No Groq API key, falling back to Claude...")
+                employees = self._parse_with_claude_direct(pages_text, vendor_type, job_id)
+                return employees, "claude", 0.05
+            return [], "none", 0.0
         
-        # Try local LLM first - direct TCP connection (no Cloudflare timeout)
-        ollama_url = os.getenv("LLM_ENDPOINT", "").rstrip('/')
+        logger.info(f"[REGISTER] Groq page-by-page extraction ({len(pages_text)} pages)...")
         
-        if ollama_url:
-            logger.info(f"[REGISTER] Attempting local LLM extraction via {ollama_url}...")
+        prompt_template = self._get_vendor_prompt(vendor_type)
+        all_employees = []
+        
+        for page_idx, page_text in enumerate(pages_text):
+            page_num = page_idx + 1
             
             if job_id:
-                update_job(job_id, message='AI processing (local)...', progress=80)
+                progress = 80 + int((page_idx / len(pages_text)) * 15)
+                update_job(job_id, message=f'Extracting page {page_num}/{len(pages_text)}...', progress=progress)
             
-            prompt_template = self._get_vendor_prompt(vendor_type)
-            local_prompt = f"""CRITICAL INSTRUCTIONS FOR EXTRACTION:
-1. This is ONE payroll register document split across multiple pages
-2. Each employee should appear ONLY ONCE in your output
-3. If an employee's data spans multiple pages, combine it into ONE record
-4. Do NOT duplicate employees - each employee_id should be unique
-5. Page breaks (--- PAGE BREAK ---) are just formatting, not new data sets
-
-{prompt_template}
-
-PAYROLL DATA TO EXTRACT:
-{full_text}
-
-Return ONLY a valid JSON array of employee objects. Each employee appears ONCE. No markdown, no explanation, just the JSON array starting with [ and ending with ]."""
+            logger.info(f"[REGISTER] Processing page {page_num}/{len(pages_text)}...")
             
+            page_prompt = f"""{prompt_template}
+
+PAGE {page_num} OF {len(pages_text)}:
+{page_text}
+
+Extract ALL employees visible on this page. If an employee's data is partial (continues from previous or to next page), extract what you see - we will merge later.
+
+Return ONLY a valid JSON array. No markdown, no explanation."""
+
             try:
-                payload = {
-                    "model": "qwen2.5-coder:14b",
-                    "prompt": local_prompt,
-                    "stream": False,
-                    "keep_alive": "30m",
-                    "options": {
-                        "temperature": 0.1,
-                        "num_predict": 65536,
-                        "num_ctx": 32768
-                    }
-                }
-                
-                logger.info(f"[REGISTER] Sending {len(full_text)} chars to qwen2.5-coder:14b...")
-                
-                # Direct TCP - no auth needed, generous timeout
                 response = requests.post(
-                    f"{ollama_url}/api/generate",
-                    json=payload,
-                    timeout=1800  # 30 min - large extractions need time
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {groq_api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": "llama-3.3-70b-versatile",
+                        "messages": [{"role": "user", "content": page_prompt}],
+                        "temperature": 0.1,
+                        "max_tokens": 8192
+                    },
+                    timeout=60
                 )
                 
                 if response.status_code == 200:
-                    result = response.json().get("response", "")
-                    logger.info(f"[REGISTER] qwen2.5-coder:14b returned {len(result)} chars")
+                    result = response.json()
+                    content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    page_employees = self._parse_json_response(content)
                     
-                    if job_id:
-                        update_job(job_id, message=f'Parsing response ({len(result):,} chars)...', progress=92)
-                    
-                    employees = self._parse_json_response(result)
-                    if employees and len(employees) > 0:
-                        # Deduplicate by employee_id
-                        seen_ids = set()
-                        unique_employees = []
-                        for emp in employees:
-                            emp_id = emp.get('employee_id', '') or emp.get('name', '')
-                            if emp_id and emp_id not in seen_ids:
-                                seen_ids.add(emp_id)
-                                unique_employees.append(emp)
-                            elif not emp_id:
-                                unique_employees.append(emp)  # Keep if no ID
-                        
-                        if len(unique_employees) < len(employees):
-                            logger.info(f"[REGISTER] Deduplicated: {len(employees)} -> {len(unique_employees)} employees")
-                        
-                        logger.info(f"[REGISTER] qwen2.5-coder:14b extracted {len(unique_employees)} employees - SUCCESS")
-                        return unique_employees, "local_qwen2.5-coder", 0.0
+                    if page_employees:
+                        logger.info(f"[REGISTER] Page {page_num}: {len(page_employees)} employees")
+                        all_employees.extend(page_employees)
                     else:
-                        logger.warning(f"[REGISTER] qwen2.5-coder:14b returned no valid employees")
+                        logger.warning(f"[REGISTER] Page {page_num}: no employees found")
                 else:
-                    logger.warning(f"[REGISTER] qwen2.5-coder:14b HTTP {response.status_code}: {response.text[:200]}")
+                    logger.warning(f"[REGISTER] Page {page_num} Groq error: {response.status_code} - {response.text[:200]}")
                     
-            except requests.exceptions.Timeout:
-                logger.warning("[REGISTER] qwen2.5-coder:14b timed out after 30 minutes")
             except Exception as e:
-                logger.warning(f"[REGISTER] qwen2.5-coder:14b error: {e}")
+                logger.warning(f"[REGISTER] Page {page_num} error: {e}")
+        
+        # Merge employees by employee_id
+        if all_employees:
+            merged = self._merge_employees(all_employees)
+            logger.info(f"[REGISTER] Groq extraction complete: {len(all_employees)} raw -> {len(merged)} merged")
+            return merged, "groq_llama70b", 0.001
         
         # Fallback to Claude
         if self.claude_api_key:
-            logger.info("[REGISTER] Falling back to Claude...")
+            logger.info("[REGISTER] Groq returned no employees, falling back to Claude...")
             employees = self._parse_with_claude_direct(pages_text, vendor_type, job_id)
             return employees, "claude", 0.05
         
-        logger.error("[REGISTER] No LLM available for extraction")
         return [], "none", 0.0
+    
+    def _merge_employees(self, employees: List[Dict]) -> List[Dict]:
+        """
+        Merge employee records by employee_id.
+        Handles employees split across pages.
+        """
+        merged = {}
+        
+        for emp in employees:
+            emp_id = emp.get('employee_id', '') or emp.get('name', '')
+            
+            if not emp_id:
+                # No ID, can't merge - keep as separate
+                merged[f"_unknown_{len(merged)}"] = emp
+                continue
+            
+            if emp_id not in merged:
+                merged[emp_id] = emp
+            else:
+                # Merge: combine arrays, prefer non-zero values
+                existing = merged[emp_id]
+                
+                # Merge earnings, taxes, deductions arrays
+                for field in ['earnings', 'taxes', 'deductions']:
+                    existing_items = existing.get(field, [])
+                    new_items = emp.get(field, [])
+                    # Combine and dedupe by description
+                    seen = {(item.get('type', ''), item.get('description', '')) for item in existing_items}
+                    for item in new_items:
+                        key = (item.get('type', ''), item.get('description', ''))
+                        if key not in seen:
+                            existing_items.append(item)
+                            seen.add(key)
+                    existing[field] = existing_items
+                
+                # Prefer non-zero/non-empty values for scalars
+                for field in ['gross_pay', 'net_pay', 'total_taxes', 'total_deductions']:
+                    if not existing.get(field) and emp.get(field):
+                        existing[field] = emp[field]
+                
+                for field in ['name', 'department', 'company_name', 'check_number', 'check_date']:
+                    if not existing.get(field) and emp.get(field):
+                        existing[field] = emp[field]
+        
+        return list(merged.values())
     
     def _parse_with_claude_direct(self, pages_text: List[str], vendor_type: str = "unknown", job_id: str = None) -> List[Dict]:
         """Send REDACTED text to Claude for parsing - with progress updates"""
