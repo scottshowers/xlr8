@@ -21,14 +21,18 @@ export function useUpload() {
 export function UploadProvider({ children }) {
   const [uploads, setUploads] = useState([]);
 
-  const addUpload = useCallback((file, projectId, projectName, options = {}) => {
+  const addUpload = useCallback((file, project, projectName, options = {}) => {
     const id = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Extract project name and ID properly from the project object
+    const projName = projectName || project?.name || 'Unknown';
+    const projId = project?.id || null;
     
     const uploadEntry = {
       id,
       filename: file.name,
-      projectId,
-      projectName,
+      projectId: projId,
+      projectName: projName,
       progress: 0,
       status: 'uploading',
       error: null,
@@ -39,7 +43,10 @@ export function UploadProvider({ children }) {
 
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('project', projectId);
+    formData.append('project', projName);
+    if (projId) {
+      formData.append('project_id', projId);
+    }
     
     if (options.standards_mode) {
       formData.append('standards_mode', 'true');
