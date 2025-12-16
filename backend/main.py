@@ -5,6 +5,7 @@ Main application entry point
 Updated: December 12, 2025 - Added intelligence router (Phase 3 Universal Analysis Engine)
 Updated: December 14, 2025 - Added playbook_builder router (P3.6 P3)
 Updated: December 15, 2025 - Added advisor router (Work Advisor)
+Updated: December 17, 2025 - Added cleanup router (data deletion endpoints)
 """
 
 from fastapi import FastAPI
@@ -122,6 +123,14 @@ except ImportError as e:
     BI_ROUTER_AVAILABLE = False
     logging.warning(f"BI router import failed: {e}")
 
+# Import cleanup router (data deletion endpoints)
+try:
+    from backend.routers import cleanup
+    CLEANUP_AVAILABLE = True
+except ImportError as e:
+    CLEANUP_AVAILABLE = False
+    logging.warning(f"Cleanup router import failed: {e}")
+
 # Standards endpoints are now in upload.py (no separate router needed)
 
 logging.basicConfig(level=logging.INFO)
@@ -165,6 +174,13 @@ app.include_router(upload.router, prefix="/api")
 app.include_router(status.router, prefix="/api")
 app.include_router(projects.router, prefix="/api/projects")
 app.include_router(jobs.router, prefix="/api")
+
+# Register cleanup router if available (data deletion endpoints)
+if CLEANUP_AVAILABLE:
+    app.include_router(cleanup.router, prefix="/api", tags=["cleanup"])
+    logger.info("Cleanup router registered at /api (jobs, structured, documents deletion)")
+else:
+    logger.warning("Cleanup router not available")
 
 # Register vacuum router if available
 if VACUUM_AVAILABLE:
@@ -340,6 +356,7 @@ async def health():
             "intelligence": INTELLIGENCE_AVAILABLE,
             "unified_chat": UNIFIED_CHAT_AVAILABLE,
             "bi": BI_ROUTER_AVAILABLE,
+            "cleanup": CLEANUP_AVAILABLE,
             "standards": True,
         }
         
@@ -366,6 +383,7 @@ async def health():
                 "intelligence": INTELLIGENCE_AVAILABLE,
                 "unified_chat": UNIFIED_CHAT_AVAILABLE,
                 "bi": BI_ROUTER_AVAILABLE,
+                "cleanup": CLEANUP_AVAILABLE,
                 "standards": True,
             }
         }
@@ -403,6 +421,13 @@ async def debug_imports():
         results['advisor_router'] = 'OK'
     except Exception as e:
         results['advisor_router'] = f'ERROR: {e}'
+    
+    # Check cleanup router
+    try:
+        from backend.routers.cleanup import router
+        results['cleanup_router'] = 'OK'
+    except Exception as e:
+        results['cleanup_router'] = f'ERROR: {e}'
     
     return results
 
