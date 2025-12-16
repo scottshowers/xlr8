@@ -646,98 +646,20 @@ class RegisterExtractor:
     
     def _parse_with_llm(self, pages_text: List[str], vendor_type: str) -> tuple:
         """
-        Parse employees using LLM - LOCAL FIRST, Claude fallback.
+        Parse employees using LLM.
+        
+        TODO: Local LLM extraction for 7B models struggles with 32K+ token output.
+        Options to revisit:
+        1. Chunked extraction (one page at a time, combine results)
+        2. Larger model (Mixtral 8x22B, Llama 70B)
+        3. Fine-tuned extraction model
+        
+        For now: Claude direct (proven, ~$0.05/file)
         
         Returns: (employees, llm_used, cost_usd)
         """
-        full_text = "\n\n--- PAGE BREAK ---\n\n".join(pages_text)
-        
-        if len(full_text) > 80000:
-            logger.warning(f"Text too long ({len(full_text)}), truncating to 80k chars")
-            full_text = full_text[:80000]
-        
-        # Try local LLM first - direct call with proper limits for large extraction
-        ollama_url = os.getenv("LLM_ENDPOINT", "").rstrip('/')
-        ollama_user = os.getenv("LLM_USERNAME", "")
-        ollama_pass = os.getenv("LLM_PASSWORD", "")
-        
-        if ollama_url:
-            logger.info("[REGISTER] Attempting local LLM extraction...")
-            
-            # Simpler, more explicit prompt for local models
-            local_prompt = f"""Extract employee payroll data from this pay register and return as a JSON array.
-
-RULES:
-1. Return ONLY a JSON array starting with [ and ending with ]
-2. Each employee object needs: name, employee_id, department, gross_pay, net_pay, total_taxes, total_deductions
-3. Use numbers for pay amounts (not strings)
-4. No markdown, no explanation, just the JSON array
-
-PAY REGISTER DATA:
-{full_text}
-
-JSON array:
-["""
-            
-            # Try models in order
-            for model in ['mistral:7b', 'deepseek-coder:6.7b']:
-                try:
-                    logger.info(f"[REGISTER] Trying {model}...")
-                    
-                    payload = {
-                        "model": model,
-                        "prompt": local_prompt,
-                        "stream": False,
-                        "options": {
-                            "temperature": 0.1,
-                            "num_predict": 65536
-                        }
-                    }
-                    
-                    if ollama_user and ollama_pass:
-                        response = requests.post(
-                            f"{ollama_url}/api/generate",
-                            json=payload,
-                            auth=HTTPBasicAuth(ollama_user, ollama_pass),
-                            timeout=300
-                        )
-                    else:
-                        response = requests.post(
-                            f"{ollama_url}/api/generate",
-                            json=payload,
-                            timeout=300
-                        )
-                    
-                    if response.status_code == 200:
-                        result = response.json().get("response", "")
-                        logger.info(f"[REGISTER] {model} returned {len(result)} chars")
-                        
-                        # DEBUG: Log first 500 chars of response
-                        logger.info(f"[REGISTER] {model} response preview: {result[:500]}...")
-                        
-                        # Prepend the [ we used in the prompt
-                        result = "[" + result
-                        
-                        employees = self._parse_json_response(result)
-                        if employees and len(employees) > 0:
-                            logger.info(f"[REGISTER] {model} extracted {len(employees)} employees - SUCCESS")
-                            return employees, f"local_{model.split(':')[0]}", 0.0
-                        else:
-                            logger.warning(f"[REGISTER] {model} returned no valid employees")
-                    else:
-                        logger.warning(f"[REGISTER] {model} HTTP {response.status_code}: {response.text[:200]}")
-                        
-                except requests.exceptions.Timeout:
-                    logger.warning(f"[REGISTER] {model} timed out after 5 minutes")
-                except Exception as e:
-                    logger.warning(f"[REGISTER] {model} error: {e}")
-                    continue
-            
-            logger.warning("[REGISTER] All local models failed, falling back to Claude...")
-        
-        # Fallback to Claude
+        # Claude extraction - proven to work
         if self.claude_api_key:
-            logger.info("[REGISTER] Using Claude...")
             employees = self._parse_with_claude_direct(pages_text, vendor_type)
             return employees, "claude", 0.05
         
