@@ -2,15 +2,15 @@
  * Layout.jsx - Main App Wrapper
  * 
  * RESTRUCTURED NAV:
- * Main: Command Center | Projects | Data | Reference Library | Playbooks | AI Assist
- * Admin: Admin | Learning (visually separated with thicker divider)
+ * Main: Command Center | Projects | Data | Playbooks | AI Assist
+ * Admin: Collapsible dropdown with Standards, Work Advisor, Playbook Builder, Learning, System
  * 
  * Includes: Upload status indicator, theme toggle, help button
  */
 
-import React, { useLayoutEffect } from 'react';
+import React, { useLayoutEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Rocket, Sun, Moon, HelpCircle } from 'lucide-react';
+import { Rocket, Sun, Moon, HelpCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import ContextBar from './ContextBar';
 import { useAuth, Permissions } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -26,21 +26,22 @@ const COLORS = {
   textLight: '#5f6c7b',
 };
 
-// Main nav items
+// Main nav items - core workflow
 const MAIN_NAV = [
   { path: '/dashboard', label: 'Command Center', icon: '🏠', permission: null },
   { path: '/projects', label: 'Projects', icon: '🏢', permission: null },
-  { path: '/data', label: 'Data', icon: '📁', permission: Permissions.UPLOAD },
-  { path: '/reference-library', label: 'Reference Library', icon: '📚', permission: Permissions.PLAYBOOKS },
+  { path: '/data', label: 'Data', icon: '📂', permission: Permissions.UPLOAD },
   { path: '/playbooks', label: 'Playbooks', icon: '📋', permission: Permissions.PLAYBOOKS },
   { path: '/workspace', label: 'AI Assist', icon: '💬', permission: null },
-  { path: '/analytics', label: 'Analytics', icon: '📊', permission: null },
 ];
 
-// Admin nav items - simplified (System moved to Admin tab)
+// Admin nav items - collapsible
 const ADMIN_NAV = [
-  { path: '/admin', label: 'Admin', icon: '⚙️', permission: Permissions.OPS_CENTER },
+  { path: '/standards', label: 'Standards', icon: '📜', permission: Permissions.OPS_CENTER },
+  { path: '/advisor', label: 'Work Advisor', icon: '💡', permission: Permissions.OPS_CENTER },
+  { path: '/playbooks/builder', label: 'Playbook Builder', icon: '🔧', permission: Permissions.OPS_CENTER },
   { path: '/learning-admin', label: 'Learning', icon: '🧠', permission: Permissions.OPS_CENTER },
+  { path: '/admin', label: 'System', icon: '⚙️', permission: Permissions.OPS_CENTER },
 ];
 
 // Logo SVG
@@ -85,11 +86,15 @@ function Navigation() {
   const { hasPermission, user, isAdmin, logout } = useAuth();
   const { darkMode, toggle } = useTheme();
   const { startCurrentPageTour, tourEnabled, setTourEnabled } = useOnboarding();
+  const [adminExpanded, setAdminExpanded] = useState(false);
 
   const isActive = (path) => {
     if (path === '/dashboard') return location.pathname === '/dashboard' || location.pathname === '/';
     return location.pathname.startsWith(path);
   };
+
+  // Check if any admin path is active
+  const isAdminActive = ADMIN_NAV.some(item => isActive(item.path));
 
   const filterItems = (items) => items.filter(item => {
     if (!item.permission) return true;
@@ -156,7 +161,7 @@ function Navigation() {
       width: '2px',
       height: '28px',
       background: '#c9d3d4',
-      margin: '0 1rem',
+      margin: '0 0.75rem',
       borderRadius: '1px',
     },
     navLink: (active) => ({
@@ -173,20 +178,46 @@ function Navigation() {
       transition: 'color 0.2s ease',
       whiteSpace: 'nowrap',
     }),
-    // Admin links now use SAME font size as main nav
-    adminLink: (active) => ({
+    adminToggle: (active, expanded) => ({
       display: 'flex',
       alignItems: 'center',
       gap: '0.35rem',
       padding: '0.875rem 0.75rem',
-      textDecoration: 'none',
       fontSize: '0.85rem',
       fontWeight: '600',
-      color: active ? COLORS.grassGreen : COLORS.textLight,
+      color: active || expanded ? COLORS.grassGreen : COLORS.textLight,
       borderBottom: active ? `2px solid ${COLORS.grassGreen}` : '2px solid transparent',
       marginBottom: '-1px',
-      transition: 'color 0.2s ease',
+      cursor: 'pointer',
+      background: 'none',
+      border: 'none',
       whiteSpace: 'nowrap',
+      transition: 'color 0.2s ease',
+    }),
+    adminDropdown: {
+      position: 'absolute',
+      top: '100%',
+      left: 0,
+      background: 'white',
+      border: '1px solid #e1e8ed',
+      borderRadius: '8px',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+      minWidth: '180px',
+      zIndex: 200,
+      overflow: 'hidden',
+    },
+    adminDropdownItem: (active) => ({
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.5rem',
+      padding: '0.75rem 1rem',
+      textDecoration: 'none',
+      fontSize: '0.85rem',
+      fontWeight: active ? '600' : '500',
+      color: active ? COLORS.grassGreen : COLORS.text,
+      background: active ? '#f0fdf4' : 'transparent',
+      borderBottom: '1px solid #f0f0f0',
+      transition: 'background 0.2s ease',
     }),
     rightSection: {
       display: 'flex',
@@ -264,6 +295,7 @@ function Navigation() {
           </Link>
 
           <div style={styles.navGroup}>
+            {/* Main Nav Items */}
             <div style={styles.navItems}>
               {mainItems.map((item) => (
                 <Link
@@ -278,20 +310,37 @@ function Navigation() {
               ))}
             </div>
 
+            {/* Admin Dropdown */}
             {showAdminSection && (
               <>
                 <div style={styles.navDivider} />
-                <div style={styles.navItems}>
-                  {adminItems.map((item) => (
-                    <Link
-                      key={item.path}
-                      to={item.path}
-                      style={styles.adminLink(isActive(item.path))}
-                    >
-                      <span>{item.icon}</span>
-                      {item.label}
-                    </Link>
-                  ))}
+                <div style={{ position: 'relative' }}>
+                  <button
+                    onClick={() => setAdminExpanded(!adminExpanded)}
+                    onBlur={() => setTimeout(() => setAdminExpanded(false), 200)}
+                    style={styles.adminToggle(isAdminActive, adminExpanded)}
+                  >
+                    <span>🔧</span>
+                    Admin
+                    {adminExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  </button>
+
+                  {adminExpanded && (
+                    <div style={styles.adminDropdown}>
+                      {adminItems.map((item) => (
+                        <Link
+                          key={item.path}
+                          to={item.path}
+                          style={styles.adminDropdownItem(isActive(item.path))}
+                          onMouseEnter={(e) => { if (!isActive(item.path)) e.currentTarget.style.background = '#f8fafc'; }}
+                          onMouseLeave={(e) => { if (!isActive(item.path)) e.currentTarget.style.background = 'transparent'; }}
+                        >
+                          <span>{item.icon}</span>
+                          {item.label}
+                        </Link>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </>
             )}
