@@ -248,9 +248,79 @@ async def delete_structured_file(project: str, filename: str):
     
     try:
         handler = get_structured_handler()
-        result = handler.delete_file(project, filename)
+        conn = handler.conn
+        deleted_tables = []
+        
+        # 1. Find tables for this file from _schema_metadata
+        try:
+            tables_result = conn.execute("""
+                SELECT table_name FROM _schema_metadata 
+                WHERE project = ? AND file_name = ?
+            """, [project, filename]).fetchall()
+            
+            for (table_name,) in tables_result:
+                try:
+                    conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+                    deleted_tables.append(table_name)
+                    logger.info(f"[DELETE] Dropped table: {table_name}")
+                except Exception as te:
+                    logger.warning(f"[DELETE] Could not drop {table_name}: {te}")
+            
+            # Clean up metadata
+            conn.execute("""
+                DELETE FROM _schema_metadata WHERE project = ? AND file_name = ?
+            """, [project, filename])
+            
+        except Exception as meta_e:
+            logger.warning(f"[DELETE] Metadata lookup failed: {meta_e}")
+        
+        # 2. Also check _pdf_tables for PDF-derived data
+        try:
+            pdf_result = conn.execute("""
+                SELECT table_name FROM _pdf_tables 
+                WHERE source_file = ? OR (project = ? AND source_file LIKE ?)
+            """, [filename, project, f"%{filename}%"]).fetchall()
+            
+            for (table_name,) in pdf_result:
+                try:
+                    conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+                    deleted_tables.append(table_name)
+                    logger.info(f"[DELETE] Dropped PDF table: {table_name}")
+                except Exception as te:
+                    logger.warning(f"[DELETE] Could not drop PDF table {table_name}: {te}")
+            
+            conn.execute("""
+                DELETE FROM _pdf_tables WHERE source_file = ? OR (project = ? AND source_file LIKE ?)
+            """, [filename, project, f"%{filename}%"])
+            
+        except Exception as pdf_e:
+            logger.debug(f"[DELETE] PDF tables check: {pdf_e}")
+        
+        # 3. Try fallback: match by generated table name pattern
+        if not deleted_tables:
+            try:
+                # Generate expected table name pattern
+                safe_project = project.lower().replace(' ', '_').replace('-', '_')
+                safe_file = filename.rsplit('.', 1)[0].lower().replace(' ', '_').replace('-', '_')
+                pattern = f"{safe_project}__{safe_file}%"
+                
+                all_tables = conn.execute("SHOW TABLES").fetchall()
+                for (tbl,) in all_tables:
+                    if tbl.lower().startswith(f"{safe_project}__{safe_file}"):
+                        conn.execute(f'DROP TABLE IF EXISTS "{tbl}"')
+                        deleted_tables.append(tbl)
+                        logger.info(f"[DELETE] Dropped by pattern match: {tbl}")
+            except Exception as fb_e:
+                logger.warning(f"[DELETE] Fallback pattern match failed: {fb_e}")
+        
+        result = {
+            "deleted_tables": deleted_tables,
+            "count": len(deleted_tables)
+        }
+        
         logger.warning(f"[DELETE] Result: {result}")
         return {"success": True, "message": f"Deleted {filename}", "details": result}
+        
     except Exception as e:
         logger.error(f"Failed to delete structured file: {e}")
         raise HTTPException(status_code=500, detail=str(e))
