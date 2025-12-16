@@ -688,106 +688,77 @@ class RegisterExtractor:
     
     def _parse_with_llm(self, pages_text: List[str], vendor_type: str, job_id: str = None) -> tuple:
         """
-        Parse employees using LLM - CHUNKED LOCAL FIRST, Claude fallback.
-        
-        Chunks pages into groups of 2 to avoid timeouts and get faster responses.
+        Parse employees using LLM - LOCAL FIRST via direct TCP, Claude fallback.
         
         Returns: (employees, llm_used, cost_usd)
         """
-        # Try local LLM first with chunking
+        full_text = "\n\n--- PAGE BREAK ---\n\n".join(pages_text)
+        
+        if len(full_text) > 100000:
+            logger.warning(f"Text too long ({len(full_text)}), truncating to 100k chars")
+            full_text = full_text[:100000]
+        
+        # Try local LLM first - direct TCP connection (no Cloudflare timeout)
         ollama_url = os.getenv("LLM_ENDPOINT", "").rstrip('/')
-        ollama_user = os.getenv("LLM_USERNAME", "")
-        ollama_pass = os.getenv("LLM_PASSWORD", "")
         
         if ollama_url:
-            logger.info(f"[REGISTER] Attempting chunked local extraction ({len(pages_text)} pages)...")
+            logger.info(f"[REGISTER] Attempting local LLM extraction via {ollama_url}...")
             
-            # Chunk pages - 2 pages per chunk for faster responses
-            CHUNK_SIZE = 2
-            chunks = [pages_text[i:i+CHUNK_SIZE] for i in range(0, len(pages_text), CHUNK_SIZE)]
+            if job_id:
+                update_job(job_id, message='AI processing (local)...', progress=80)
             
-            all_employees = []
-            failed_chunks = 0
-            
-            for chunk_idx, chunk_pages in enumerate(chunks):
-                chunk_num = chunk_idx + 1
-                total_chunks = len(chunks)
-                
-                # First chunk gets longer timeout (model cold start)
-                timeout = 300 if chunk_idx == 0 else 180  # 5 min first, 3 min after
-                
-                if job_id:
-                    progress = 80 + int((chunk_idx / total_chunks) * 15)  # 80-95%
-                    update_job(job_id, message=f'Processing chunk {chunk_num}/{total_chunks}...', progress=progress)
-                
-                logger.info(f"[REGISTER] Processing chunk {chunk_num}/{total_chunks} ({len(chunk_pages)} pages, timeout={timeout}s)...")
-                
-                chunk_text = "\n\n--- PAGE BREAK ---\n\n".join(chunk_pages)
-                prompt_template = self._get_vendor_prompt(vendor_type)
-                
-                local_prompt = f"""{prompt_template}
+            prompt_template = self._get_vendor_prompt(vendor_type)
+            local_prompt = f"""{prompt_template}
 
-PAYROLL DATA TO EXTRACT (chunk {chunk_num} of {total_chunks}):
-{chunk_text}
+PAYROLL DATA TO EXTRACT:
+{full_text}
 
 Return ONLY a valid JSON array of employee objects. No markdown, no explanation, just the JSON array starting with [ and ending with ]."""
-                
-                try:
-                    payload = {
-                        "model": "qwen2.5-coder:14b",
-                        "prompt": local_prompt,
-                        "stream": False,
-                        "keep_alive": "10m",  # Keep model loaded for 10 min
-                        "options": {
-                            "temperature": 0.1,
-                            "num_predict": 16384,
-                            "num_ctx": 16384
-                        }
-                    }
-                    
-                    if ollama_user and ollama_pass:
-                        response = requests.post(
-                            f"{ollama_url}/api/generate",
-                            json=payload,
-                            auth=HTTPBasicAuth(ollama_user, ollama_pass),
-                            timeout=timeout
-                        )
-                    else:
-                        response = requests.post(
-                            f"{ollama_url}/api/generate",
-                            json=payload,
-                            timeout=timeout
-                        )
-                    
-                    if response.status_code == 200:
-                        result = response.json().get("response", "")
-                        chunk_employees = self._parse_json_response(result)
-                        
-                        if chunk_employees:
-                            logger.info(f"[REGISTER] Chunk {chunk_num}: extracted {len(chunk_employees)} employees")
-                            all_employees.extend(chunk_employees)
-                        else:
-                            logger.warning(f"[REGISTER] Chunk {chunk_num}: no valid employees")
-                            failed_chunks += 1
-                    else:
-                        logger.warning(f"[REGISTER] Chunk {chunk_num} HTTP {response.status_code}")
-                        failed_chunks += 1
-                        
-                except requests.exceptions.Timeout:
-                    logger.warning(f"[REGISTER] Chunk {chunk_num} timed out after {timeout}s")
-                    failed_chunks += 1
-                except Exception as e:
-                    logger.warning(f"[REGISTER] Chunk {chunk_num} error: {e}")
-                    failed_chunks += 1
             
-            # If we got employees, return them
-            if all_employees:
-                logger.info(f"[REGISTER] Chunked extraction complete: {len(all_employees)} employees from {len(chunks) - failed_chunks}/{len(chunks)} chunks")
-                return all_employees, "local_qwen2.5-coder", 0.0
-            else:
-                logger.warning(f"[REGISTER] All chunks failed, falling back to Claude...")
+            try:
+                payload = {
+                    "model": "qwen2.5-coder:14b",
+                    "prompt": local_prompt,
+                    "stream": False,
+                    "keep_alive": "30m",
+                    "options": {
+                        "temperature": 0.1,
+                        "num_predict": 65536,
+                        "num_ctx": 32768
+                    }
+                }
+                
+                logger.info(f"[REGISTER] Sending {len(full_text)} chars to qwen2.5-coder:14b...")
+                
+                # Direct TCP - no auth needed, generous timeout
+                response = requests.post(
+                    f"{ollama_url}/api/generate",
+                    json=payload,
+                    timeout=900  # 15 min - no Cloudflare to kill us
+                )
+                
+                if response.status_code == 200:
+                    result = response.json().get("response", "")
+                    logger.info(f"[REGISTER] qwen2.5-coder:14b returned {len(result)} chars")
+                    
+                    if job_id:
+                        update_job(job_id, message=f'Parsing response ({len(result):,} chars)...', progress=92)
+                    
+                    employees = self._parse_json_response(result)
+                    if employees and len(employees) > 0:
+                        logger.info(f"[REGISTER] qwen2.5-coder:14b extracted {len(employees)} employees - SUCCESS")
+                        return employees, "local_qwen2.5-coder", 0.0
+                    else:
+                        logger.warning(f"[REGISTER] qwen2.5-coder:14b returned no valid employees")
+                else:
+                    logger.warning(f"[REGISTER] qwen2.5-coder:14b HTTP {response.status_code}: {response.text[:200]}")
+                    
+            except requests.exceptions.Timeout:
+                logger.warning("[REGISTER] qwen2.5-coder:14b timed out after 15 minutes")
+            except Exception as e:
+                logger.warning(f"[REGISTER] qwen2.5-coder:14b error: {e}")
         
-        # Fallback to Claude (non-chunked, it handles long context well)
+        # Fallback to Claude
         if self.claude_api_key:
             logger.info("[REGISTER] Falling back to Claude...")
             employees = self._parse_with_claude_direct(pages_text, vendor_type, job_id)
