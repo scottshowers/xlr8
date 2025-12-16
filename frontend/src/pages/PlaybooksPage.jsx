@@ -1,10 +1,11 @@
 /**
  * PlaybooksPage - Analysis Playbooks
  * 
- * POLISHED: Consistent loading, error states, and navigation patterns
+ * UPDATED: Added Configure button for admins to link standards to playbooks
  * 
  * - Run pre-built analysis playbooks against project data
- * - Create new playbooks via Playbook Builder
+ * - Create new playbooks via Work Advisor
+ * - Configure playbooks to link standards (admin only)
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -18,6 +19,7 @@ import api from '../services/api';
 // Brand Colors
 const COLORS = {
   grassGreen: '#83b16d',
+  grassGreenDark: '#6a9a54',
   skyBlue: '#93abd9',
   iceFlow: '#c9d3d4',
   white: '#f6f5fa',
@@ -49,7 +51,7 @@ const PLAYBOOKS = [
     outputs: ['Executive Summary', 'Gap Analysis', 'Configuration Guide', 'Action Items'],
     estimatedTime: '5-10 minutes',
     dataRequired: ['Employee Census', 'Benefit Plans', 'Deduction Codes'],
-    hasRunner: false,
+    hasRunner: true,  // Now enabled with standards linkage!
   },
   {
     id: 'one-big-bill',
@@ -89,8 +91,529 @@ const PLAYBOOKS = [
   },
 ];
 
-// Playbook Card Component
-function PlaybookCard({ playbook, onRun, hasProgress, isAssigned }) {
+// =============================================================================
+// PLAYBOOK CONFIG MODAL - Link standards to playbooks
+// =============================================================================
+
+function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
+  const [linkedStandards, setLinkedStandards] = useState([]);
+  const [availableStandards, setAvailableStandards] = useState([]);
+  const [rules, setRules] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [linking, setLinking] = useState(false);
+  const [executing, setExecuting] = useState(false);
+  const [showAvailable, setShowAvailable] = useState(false);
+  const [showRules, setShowRules] = useState(false);
+  const [error, setError] = useState(null);
+  const [successMsg, setSuccessMsg] = useState(null);
+  const [executionResult, setExecutionResult] = useState(null);
+
+  const playbook_id = playbook?.id;
+
+  useEffect(() => {
+    if (playbook_id) {
+      loadData();
+    }
+  }, [playbook_id]);
+
+  const loadData = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      // Load playbook info with linked standards
+      try {
+        const infoRes = await api.get(`/playbooks/${playbook_id}/info`);
+        setLinkedStandards(infoRes.data.linked_standards || []);
+        setRules(infoRes.data.rules || []);
+      } catch (e) {
+        console.log('Playbook info not available yet:', e);
+        setLinkedStandards([]);
+        setRules([]);
+      }
+      
+      // Load available standards
+      try {
+        const availRes = await api.get('/playbooks/available-standards');
+        setAvailableStandards(availRes.data.standards || []);
+      } catch (e) {
+        console.log('Available standards not loaded:', e);
+        setAvailableStandards([]);
+      }
+      
+    } catch (err) {
+      console.error('Failed to load data:', err);
+      setError('Failed to load configuration');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLink = async (standardId) => {
+    setLinking(true);
+    setError(null);
+    try {
+      await api.post(`/playbooks/${playbook_id}/standards`, {
+        standard_id: standardId,
+        usage_type: 'compliance'
+      });
+      setSuccessMsg('Standard linked!');
+      setTimeout(() => setSuccessMsg(null), 3000);
+      await loadData();
+    } catch (err) {
+      console.error('Failed to link standard:', err);
+      setError('Failed to link standard');
+    } finally {
+      setLinking(false);
+    }
+  };
+
+  const handleUnlink = async (standardId) => {
+    setError(null);
+    try {
+      await api.delete(`/playbooks/${playbook_id}/standards/${standardId}`);
+      setSuccessMsg('Standard unlinked');
+      setTimeout(() => setSuccessMsg(null), 3000);
+      await loadData();
+    } catch (err) {
+      console.error('Failed to unlink standard:', err);
+      setError('Failed to unlink standard');
+    }
+  };
+
+  const handleExecute = async () => {
+    if (!projectId) {
+      setError('No project selected');
+      return;
+    }
+    
+    setExecuting(true);
+    setError(null);
+    setExecutionResult(null);
+    
+    try {
+      const res = await api.post(`/playbooks/execute/${playbook_id}`, {
+        project_id: projectId,
+        run_by: 'user'
+      });
+      setExecutionResult(res.data);
+      setSuccessMsg(`Playbook complete! ${res.data.violations_found} issues found.`);
+    } catch (err) {
+      console.error('Execution failed:', err);
+      setError('Failed to run playbook: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setExecuting(false);
+    }
+  };
+
+  // Filter out already linked standards
+  const linkedIds = linkedStandards.map(ls => ls.id);
+  const unlinkedStandards = availableStandards.filter(s => !linkedIds.includes(s.id));
+
+  const modalStyles = {
+    overlay: {
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      background: 'rgba(0, 0, 0, 0.5)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000,
+      padding: '2rem',
+    },
+    modal: {
+      background: 'white',
+      borderRadius: '16px',
+      width: '100%',
+      maxWidth: '640px',
+      maxHeight: '85vh',
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column',
+      boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+    },
+    header: {
+      padding: '1.5rem',
+      borderBottom: '1px solid #e8ecef',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    headerLeft: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '1rem',
+    },
+    icon: {
+      width: '52px',
+      height: '52px',
+      borderRadius: '12px',
+      background: `linear-gradient(135deg, ${COLORS.grassGreen} 0%, ${COLORS.grassGreenDark} 100%)`,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: '1.5rem',
+    },
+    title: {
+      margin: 0,
+      fontSize: '1.25rem',
+      fontWeight: '700',
+      color: COLORS.text,
+    },
+    subtitle: {
+      margin: 0,
+      fontSize: '0.85rem',
+      color: COLORS.textLight,
+    },
+    closeBtn: {
+      padding: '0.5rem',
+      background: '#f5f7f9',
+      border: 'none',
+      borderRadius: '8px',
+      cursor: 'pointer',
+      color: COLORS.textLight,
+      fontSize: '1.25rem',
+    },
+    body: {
+      flex: 1,
+      overflow: 'auto',
+      padding: '1.5rem',
+    },
+    section: {
+      marginBottom: '1.5rem',
+    },
+    sectionHeader: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: '0.75rem',
+    },
+    sectionTitle: {
+      fontSize: '0.9rem',
+      fontWeight: '600',
+      color: COLORS.text,
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.5rem',
+    },
+    badge: {
+      padding: '0.25rem 0.6rem',
+      background: rules.length > 0 ? '#dcfce7' : '#f3f4f6',
+      color: rules.length > 0 ? '#166534' : COLORS.textLight,
+      borderRadius: '12px',
+      fontSize: '0.75rem',
+      fontWeight: '600',
+    },
+    linkedItem: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '0.75rem 1rem',
+      background: '#f8faf9',
+      borderRadius: '10px',
+      border: '1px solid #e8ecef',
+      marginBottom: '0.5rem',
+    },
+    linkedIcon: {
+      width: '36px',
+      height: '36px',
+      borderRadius: '8px',
+      background: COLORS.skyBlue,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      color: 'white',
+      marginRight: '0.75rem',
+    },
+    unlinkBtn: {
+      padding: '0.4rem 0.75rem',
+      background: 'white',
+      border: '1px solid #fecaca',
+      borderRadius: '6px',
+      color: '#dc2626',
+      cursor: 'pointer',
+      fontSize: '0.8rem',
+    },
+    addBtn: {
+      width: '100%',
+      padding: '0.75rem',
+      background: showAvailable ? '#f0f4f7' : 'white',
+      border: '2px dashed #d1d5db',
+      borderRadius: '10px',
+      color: COLORS.textLight,
+      cursor: 'pointer',
+      fontSize: '0.85rem',
+      fontWeight: '600',
+      marginTop: '0.5rem',
+    },
+    dropdown: {
+      marginTop: '0.75rem',
+      background: '#f8faf9',
+      borderRadius: '10px',
+      border: '1px solid #e8ecef',
+      maxHeight: '180px',
+      overflow: 'auto',
+    },
+    dropdownItem: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '0.75rem 1rem',
+      borderBottom: '1px solid #e8ecef',
+    },
+    linkBtn: {
+      padding: '0.35rem 0.75rem',
+      background: COLORS.grassGreen,
+      border: 'none',
+      borderRadius: '6px',
+      color: 'white',
+      cursor: 'pointer',
+      fontSize: '0.8rem',
+      fontWeight: '600',
+    },
+    alert: (type) => ({
+      padding: '0.75rem 1rem',
+      background: type === 'error' ? '#fef2f2' : '#f0fdf4',
+      border: `1px solid ${type === 'error' ? '#fecaca' : '#bbf7d0'}`,
+      borderRadius: '8px',
+      color: type === 'error' ? '#dc2626' : '#166534',
+      fontSize: '0.85rem',
+      marginBottom: '1rem',
+    }),
+    footer: {
+      padding: '1rem 1.5rem',
+      borderTop: '1px solid #e8ecef',
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    executeBtn: {
+      padding: '0.75rem 1.5rem',
+      background: `linear-gradient(135deg, ${COLORS.grassGreen} 0%, ${COLORS.grassGreenDark} 100%)`,
+      border: 'none',
+      borderRadius: '8px',
+      color: 'white',
+      fontWeight: '600',
+      fontSize: '0.9rem',
+      cursor: 'pointer',
+      boxShadow: '0 2px 8px rgba(131, 177, 109, 0.3)',
+    },
+    resultCard: {
+      padding: '1rem',
+      background: '#f0fdf4',
+      border: '1px solid #bbf7d0',
+      borderRadius: '10px',
+      marginTop: '1rem',
+    },
+    resultTitle: {
+      fontWeight: '700',
+      color: '#166534',
+      marginBottom: '0.5rem',
+    },
+    findingItem: {
+      padding: '0.5rem 0',
+      borderBottom: '1px solid #dcfce7',
+      fontSize: '0.85rem',
+    },
+  };
+
+  return (
+    <div style={modalStyles.overlay} onClick={onClose}>
+      <div style={modalStyles.modal} onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div style={modalStyles.header}>
+          <div style={modalStyles.headerLeft}>
+            <div style={modalStyles.icon}>{playbook?.icon || '📋'}</div>
+            <div>
+              <h2 style={modalStyles.title}>{playbook?.name || 'Configure Playbook'}</h2>
+              <p style={modalStyles.subtitle}>Link standards for compliance checking</p>
+            </div>
+          </div>
+          <button style={modalStyles.closeBtn} onClick={onClose}>×</button>
+        </div>
+
+        {/* Body */}
+        <div style={modalStyles.body}>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '2rem' }}>
+              <p style={{ color: COLORS.textLight }}>Loading...</p>
+            </div>
+          ) : (
+            <>
+              {/* Alerts */}
+              {error && <div style={modalStyles.alert('error')}>{error}</div>}
+              {successMsg && <div style={modalStyles.alert('success')}>{successMsg}</div>}
+
+              {/* Linked Standards */}
+              <div style={modalStyles.section}>
+                <div style={modalStyles.sectionHeader}>
+                  <div style={modalStyles.sectionTitle}>
+                    🛡️ Linked Standards
+                  </div>
+                  <span style={modalStyles.badge}>{rules.length} rules</span>
+                </div>
+
+                {linkedStandards.length > 0 ? (
+                  linkedStandards.map(ls => (
+                    <div key={ls.id} style={modalStyles.linkedItem}>
+                      <div style={{ display: 'flex', alignItems: 'center' }}>
+                        <div style={modalStyles.linkedIcon}>📄</div>
+                        <div>
+                          <div style={{ fontWeight: '600', color: COLORS.text }}>
+                            {ls.name || `Standard ${ls.id}`}
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: COLORS.textLight }}>
+                            {ls.domain || 'General'}
+                          </div>
+                        </div>
+                      </div>
+                      <button style={modalStyles.unlinkBtn} onClick={() => handleUnlink(ls.id)}>
+                        Unlink
+                      </button>
+                    </div>
+                  ))
+                ) : (
+                  <div style={{ padding: '1.5rem', textAlign: 'center', color: COLORS.textLight, background: '#f8faf9', borderRadius: '10px' }}>
+                    <p style={{ margin: 0 }}>No standards linked yet</p>
+                    <p style={{ fontSize: '0.8rem', margin: '0.25rem 0 0' }}>
+                      Link a standard to enable compliance checking
+                    </p>
+                  </div>
+                )}
+
+                {/* Add Standard */}
+                {availableStandards.length > 0 && (
+                  <>
+                    <button style={modalStyles.addBtn} onClick={() => setShowAvailable(!showAvailable)}>
+                      ➕ Link a Standard {showAvailable ? '▲' : '▼'}
+                    </button>
+
+                    {showAvailable && (
+                      <div style={modalStyles.dropdown}>
+                        {unlinkedStandards.length > 0 ? (
+                          unlinkedStandards.map(s => (
+                            <div key={s.id} style={modalStyles.dropdownItem}>
+                              <div>
+                                <div style={{ fontWeight: '600', color: COLORS.text }}>{s.title || s.filename}</div>
+                                <div style={{ fontSize: '0.75rem', color: COLORS.textLight }}>{s.domain || 'General'}</div>
+                              </div>
+                              <button style={modalStyles.linkBtn} onClick={() => handleLink(s.id)} disabled={linking}>
+                                {linking ? '...' : 'Link'}
+                              </button>
+                            </div>
+                          ))
+                        ) : (
+                          <div style={{ padding: '1rem', textAlign: 'center', color: COLORS.textLight }}>
+                            All standards are linked
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {availableStandards.length === 0 && linkedStandards.length === 0 && (
+                  <div style={{ padding: '1rem', background: '#fef3c7', borderRadius: '8px', marginTop: '0.75rem', fontSize: '0.85rem' }}>
+                    ⚠️ No standards uploaded yet. Go to <strong>Standards</strong> page to upload compliance documents first.
+                  </div>
+                )}
+              </div>
+
+              {/* Rules Preview */}
+              {rules.length > 0 && (
+                <div style={modalStyles.section}>
+                  <button 
+                    style={{ ...modalStyles.addBtn, border: '1px solid #e8ecef' }}
+                    onClick={() => setShowRules(!showRules)}
+                  >
+                    ✓ View {rules.length} Rules {showRules ? '▲' : '▼'}
+                  </button>
+                  
+                  {showRules && (
+                    <div style={{ ...modalStyles.dropdown, marginTop: '0.5rem' }}>
+                      {rules.map((rule, i) => (
+                        <div key={i} style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #e8ecef', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <span style={{
+                            width: '8px', height: '8px', borderRadius: '50%',
+                            background: { critical: '#dc2626', high: '#f97316', medium: '#eab308', low: '#22c55e' }[rule.severity] || '#9ca3af'
+                          }} />
+                          <span style={{ fontSize: '0.85rem', color: COLORS.text }}>{rule.title}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Execution Result */}
+              {executionResult && (
+                <div style={modalStyles.resultCard}>
+                  <div style={modalStyles.resultTitle}>
+                    ✅ Playbook Complete
+                  </div>
+                  <div style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>
+                    <strong>{executionResult.total_rules_checked}</strong> rules checked • 
+                    <strong style={{ color: executionResult.violations_found > 0 ? '#dc2626' : '#166534' }}> {executionResult.violations_found}</strong> violations • 
+                    <strong style={{ color: '#f97316' }}> {executionResult.warnings_found}</strong> warnings
+                  </div>
+                  {executionResult.findings?.length > 0 && (
+                    <div style={{ marginTop: '0.75rem' }}>
+                      <div style={{ fontWeight: '600', fontSize: '0.85rem', marginBottom: '0.5rem' }}>Findings:</div>
+                      {executionResult.findings.slice(0, 5).map((f, i) => (
+                        <div key={i} style={modalStyles.findingItem}>
+                          <span style={{
+                            display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', marginRight: '0.5rem',
+                            background: { critical: '#dc2626', high: '#f97316', medium: '#eab308', low: '#22c55e' }[f.severity] || '#9ca3af'
+                          }} />
+                          {f.title} ({f.affected_count} affected)
+                        </div>
+                      ))}
+                      {executionResult.findings.length > 5 && (
+                        <div style={{ fontSize: '0.8rem', color: COLORS.textLight, marginTop: '0.5rem' }}>
+                          ...and {executionResult.findings.length - 5} more
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={modalStyles.footer}>
+          <div style={{ fontSize: '0.85rem', color: COLORS.textLight }}>
+            {linkedStandards.length > 0 
+              ? `${linkedStandards.length} standard${linkedStandards.length > 1 ? 's' : ''} linked`
+              : 'Link standards to run compliance checks'
+            }
+          </div>
+          <button 
+            style={{
+              ...modalStyles.executeBtn,
+              opacity: (rules.length === 0 || executing) ? 0.5 : 1,
+              cursor: (rules.length === 0 || executing) ? 'not-allowed' : 'pointer',
+            }}
+            onClick={handleExecute}
+            disabled={rules.length === 0 || executing}
+          >
+            {executing ? '⏳ Running...' : '▶️ Run Playbook'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// PLAYBOOK CARD COMPONENT
+// =============================================================================
+
+function PlaybookCard({ playbook, onRun, onConfigure, hasProgress, isAssigned, isAdmin }) {
   const styles = {
     card: {
       background: 'white',
@@ -173,6 +696,23 @@ function PlaybookCard({ playbook, onRun, hasProgress, isAssigned }) {
       fontSize: '0.8rem',
       color: COLORS.textLight,
     },
+    buttons: {
+      display: 'flex',
+      gap: '0.5rem',
+    },
+    configBtn: {
+      padding: '0.5rem 0.75rem',
+      background: '#f5f7f9',
+      border: '1px solid #e1e8ed',
+      borderRadius: '6px',
+      color: COLORS.textLight,
+      fontWeight: '600',
+      fontSize: '0.8rem',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.35rem',
+    },
     button: {
       padding: '0.5rem 1rem',
       background: playbook.hasRunner ? COLORS.grassGreen : COLORS.textLight,
@@ -222,17 +762,34 @@ function PlaybookCard({ playbook, onRun, hasProgress, isAssigned }) {
 
       <div style={styles.footer}>
         <span style={styles.time}>⏱️ {playbook.estimatedTime}</span>
-        <button 
-          style={styles.button} 
-          onClick={() => onRun(playbook)}
-          disabled={!playbook.hasRunner}
-        >
-          {playbook.hasRunner ? (hasProgress ? 'Continue →' : 'Kickoff →') : 'Coming Soon'}
-        </button>
+        <div style={styles.buttons}>
+          {isAdmin && (
+            <button 
+              style={styles.configBtn}
+              onClick={(e) => {
+                e.stopPropagation();
+                onConfigure(playbook);
+              }}
+            >
+              ⚙️ Configure
+            </button>
+          )}
+          <button 
+            style={styles.button} 
+            onClick={() => onRun(playbook)}
+            disabled={!playbook.hasRunner}
+          >
+            {playbook.hasRunner ? (hasProgress ? 'Continue →' : 'Kickoff →') : 'Coming Soon'}
+          </button>
+        </div>
       </div>
     </div>
   );
 }
+
+// =============================================================================
+// MAIN PAGE COMPONENT
+// =============================================================================
 
 export default function PlaybooksPage() {
   const { activeProject, projectName, customerName, hasActiveProject, loading: projectLoading } = useProject();
@@ -240,6 +797,7 @@ export default function PlaybooksPage() {
   const navigate = useNavigate();
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [activePlaybook, setActivePlaybook] = useState(null);
+  const [configPlaybook, setConfigPlaybook] = useState(null);
   const [playbookProgress, setPlaybookProgress] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -256,7 +814,6 @@ export default function PlaybooksPage() {
       const hasStarted = Object.keys(progress).length > 0;
       setPlaybookProgress(prev => ({ ...prev, 'year-end-checklist': hasStarted }));
     } catch (err) {
-      // Don't show error for 404 (no progress yet)
       if (err.response?.status !== 404) {
         console.error('Failed to fetch playbook progress:', err);
       }
@@ -270,12 +827,10 @@ export default function PlaybooksPage() {
     fetchPlaybookProgress();
   }, [fetchPlaybookProgress]);
 
-  // Loading state
   if (projectLoading || loading) {
     return <LoadingSpinner fullPage message="Loading playbooks..." />;
   }
 
-  // No project selected
   if (!hasActiveProject) {
     return (
       <EmptyState
@@ -288,7 +843,6 @@ export default function PlaybooksPage() {
     );
   }
 
-  // If a playbook runner is active, show it
   if (activePlaybook) {
     if (activePlaybook.id === 'year-end-checklist') {
       return (
@@ -302,11 +856,9 @@ export default function PlaybooksPage() {
     }
   }
 
-  // Get assigned playbooks for this project
   const assignedPlaybookIds = activeProject?.playbooks || [];
   const availablePlaybooks = PLAYBOOKS.filter(p => assignedPlaybookIds.includes(p.id));
 
-  // No playbooks assigned
   if (availablePlaybooks.length === 0) {
     return (
       <>
@@ -373,7 +925,6 @@ export default function PlaybooksPage() {
 
   return (
     <div>
-      {/* Header */}
       <PageHeader
         title="Playbooks"
         subtitle="Run pre-built analysis templates to generate deliverables."
@@ -388,7 +939,6 @@ export default function PlaybooksPage() {
         } : null}
       />
 
-      {/* Error state (inline) */}
       {error && (
         <ErrorState
           compact
@@ -398,7 +948,6 @@ export default function PlaybooksPage() {
         />
       )}
 
-      {/* Category Filters */}
       <div style={styles.filters}>
         {categories.map(cat => (
           <button
@@ -411,18 +960,31 @@ export default function PlaybooksPage() {
         ))}
       </div>
 
-      {/* Playbooks Grid */}
       <div style={styles.grid}>
         {filteredPlaybooks.map(playbook => (
           <PlaybookCard 
             key={playbook.id}
             playbook={playbook} 
             onRun={handleRunPlaybook}
+            onConfigure={setConfigPlaybook}
             hasProgress={playbookProgress[playbook.id] || false}
             isAssigned={true}
+            isAdmin={isAdmin}
           />
         ))}
       </div>
+
+      {configPlaybook && (
+        <PlaybookConfigModal
+          playbook={configPlaybook}
+          projectId={activeProject?.id}
+          onClose={() => setConfigPlaybook(null)}
+          onExecute={(pb) => {
+            setConfigPlaybook(null);
+            handleRunPlaybook(pb);
+          }}
+        />
+      )}
     </div>
   );
 }
