@@ -1,24 +1,37 @@
 /**
- * DataPage.jsx - Streamlined Data Hub
+ * DataPage.jsx - Restructured Data Hub
  * 
- * 3 tabs: Upload | Vacuum | Jobs
- * Jobs tab has 3 columns: Processing, Structured, Documents
+ * Tabs: Upload | Vacuum | Files | Data Model
+ * 
+ * Files tab shows:
+ * - Structured Data (queryable tables)
+ * - Documents (searchable PDFs/docs)
+ * - Reference Data (standards, lookups)
+ * - Processing History (collapsed, at bottom)
+ * 
+ * Features:
+ * - Multi-select delete with checkboxes
+ * - Metadata: uploaded by, date
+ * - Bulk actions
  */
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useProject } from '../context/ProjectContext';
 import { useUpload } from '../context/UploadContext';
+import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import {
-  Upload as UploadIcon, Sparkles, ClipboardList, RefreshCw,
+  Upload as UploadIcon, Sparkles, Database, RefreshCw,
   CheckCircle, XCircle, Clock, Loader2, Trash2, StopCircle,
-  FileText, Table2, Calendar, Database
+  FileText, Table2, ChevronDown, ChevronUp, User, Calendar,
+  CheckSquare, Square, BookOpen, AlertCircle
 } from 'lucide-react';
 import DataModelComponent from '../components/DataModelPage';
 
 const COLORS = {
   grassGreen: '#83b16d',
+  skyBlue: '#93abd9',
   text: '#2a3441',
   textLight: '#5f6c7b',
 };
@@ -26,7 +39,7 @@ const COLORS = {
 const TABS = [
   { id: 'upload', label: 'Upload', icon: UploadIcon },
   { id: 'vacuum', label: 'Vacuum', icon: Sparkles },
-  { id: 'jobs', label: 'Jobs', icon: ClipboardList },
+  { id: 'files', label: 'Files', icon: Database },
   { id: 'model', label: 'Data Model', icon: Database },
 ];
 
@@ -41,7 +54,7 @@ export default function DataPage() {
           Data
         </h1>
         <p data-tour="data-project-context" style={{ color: COLORS.textLight, marginTop: '0.25rem' }}>
-          Upload and process project data
+          Upload and manage project data
           {projectName && <span> • <strong>{projectName}</strong></span>}
         </p>
       </div>
@@ -75,7 +88,7 @@ export default function DataPage() {
         <div style={{ padding: '1.5rem' }}>
           {activeTab === 'upload' && <UploadTab project={activeProject} projectName={projectName} />}
           {activeTab === 'vacuum' && <VacuumTab />}
-          {activeTab === 'jobs' && <JobsTab />}
+          {activeTab === 'files' && <FilesTab />}
           {activeTab === 'model' && <DataModelComponent embedded />}
         </div>
       </div>
@@ -167,81 +180,54 @@ function VacuumTab() {
   );
 }
 
-// ==================== JOBS TAB (3 Sections) ====================
-function JobsTab() {
-  const { projects } = useProject();
-  const [jobs, setJobs] = useState([]);
+// ==================== FILES TAB (Restructured) ====================
+function FilesTab() {
+  const { projects, activeProject } = useProject();
+  const { user } = useAuth();
   const [structuredData, setStructuredData] = useState(null);
   const [documents, setDocuments] = useState(null);
+  const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [deleting, setDeleting] = useState(null);
-  const [killing, setKilling] = useState(null);
-  const [deleteStartDate, setDeleteStartDate] = useState('');
-  const [deleteEndDate, setDeleteEndDate] = useState('');
-  const [deletingRange, setDeletingRange] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  
+  // Multi-select state
+  const [selectedStructured, setSelectedStructured] = useState(new Set());
+  const [selectedDocs, setSelectedDocs] = useState(new Set());
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 5000);
+    const interval = setInterval(loadData, 10000); // Slower refresh
     return () => clearInterval(interval);
-  }, []);
+  }, [activeProject?.id]);
 
   const loadData = async () => {
     try {
-      const [jobsRes, structRes, docsRes] = await Promise.all([
-        api.get('/jobs').catch(() => ({ data: { jobs: [] } })),
+      const [structRes, docsRes, jobsRes] = await Promise.all([
         api.get('/status/structured').catch(() => ({ data: { files: [], total_rows: 0 } })),
         api.get('/status/documents').catch(() => ({ data: { documents: [] } })),
+        api.get('/jobs').catch(() => ({ data: { jobs: [] } })),
       ]);
-      setJobs(jobsRes.data.jobs || []);
       setStructuredData(structRes.data);
       setDocuments(docsRes.data);
-    } catch (err) { console.error('Failed to load:', err); }
-    finally { setLoading(false); }
+      setJobs(jobsRes.data.jobs || []);
+    } catch (err) { 
+      console.error('Failed to load:', err); 
+    } finally { 
+      setLoading(false); 
+    }
   };
 
-  const killJob = async (jobId) => {
-    if (!confirm('Kill this stuck job?')) return;
-    setKilling(jobId);
-    try { await api.post(`/jobs/${jobId}/fail`, null, { params: { error_message: 'Manually terminated' } }); loadData(); }
-    catch (err) { alert('Error: ' + (err.response?.data?.detail || err.message)); }
-    finally { setKilling(null); }
-  };
-
-  const deleteJob = async (jobId) => {
-    if (!confirm('Delete this job?')) return;
-    setDeleting(jobId);
-    try { await api.delete(`/jobs/${jobId}`); loadData(); }
-    catch (err) { alert('Error: ' + (err.response?.data?.detail || err.message)); }
-    finally { setDeleting(null); }
-  };
-
-  const deleteJobsInRange = async () => {
-    if (!deleteStartDate || !deleteEndDate) { alert('Select both dates'); return; }
-    if (!confirm(`Delete all jobs between ${deleteStartDate} and ${deleteEndDate}?`)) return;
-    setDeletingRange(true);
-    try {
-      await api.delete('/jobs/range', { params: { start_date: deleteStartDate, end_date: deleteEndDate } });
-      setDeleteStartDate(''); setDeleteEndDate(''); loadData();
-    } catch (err) { alert('Error: ' + (err.response?.data?.detail || err.message)); }
-    finally { setDeletingRange(false); }
-  };
-
-  const deleteStructuredFile = async (project, filename) => {
-    if (!confirm(`Delete ${filename}?`)) return;
-    setDeleting(`struct:${project}:${filename}`);
-    try { await api.delete(`/status/structured/${encodeURIComponent(project)}/${encodeURIComponent(filename)}`); loadData(); }
-    catch (err) { alert('Error: ' + (err.response?.data?.detail || err.message)); }
-    finally { setDeleting(null); }
-  };
-
-  const deleteDocument = async (filename) => {
-    if (!confirm(`Delete ${filename}?`)) return;
-    setDeleting(`doc:${filename}`);
-    try { await api.delete(`/status/documents/${encodeURIComponent(filename)}`); loadData(); }
-    catch (err) { alert('Error: ' + (err.response?.data?.detail || err.message)); }
-    finally { setDeleting(null); }
-  };
+  // Filter by active project if selected
+  const structuredFiles = (structuredData?.files || []).filter(f => 
+    !activeProject || f.project === activeProject.id || f.project === activeProject.name
+  );
+  const docs = (documents?.documents || []).filter(d => 
+    !activeProject || d.project === activeProject.id || d.project === activeProject.name
+  );
+  const recentJobs = jobs.filter(j => 
+    !activeProject || j.project_id === activeProject.id
+  ).slice(0, 20);
 
   const getProjectName = (pv) => {
     if (!pv) return 'Unknown';
@@ -253,11 +239,101 @@ function JobsTab() {
     return pv;
   };
 
+  const formatDate = (dateStr) => {
+    if (!dateStr) return '—';
+    try {
+      const d = new Date(dateStr);
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch { return '—'; }
+  };
+
+  // Toggle selection
+  const toggleStructured = (key) => {
+    const newSet = new Set(selectedStructured);
+    if (newSet.has(key)) newSet.delete(key);
+    else newSet.add(key);
+    setSelectedStructured(newSet);
+  };
+
+  const toggleDoc = (key) => {
+    const newSet = new Set(selectedDocs);
+    if (newSet.has(key)) newSet.delete(key);
+    else newSet.add(key);
+    setSelectedDocs(newSet);
+  };
+
+  const selectAllStructured = () => {
+    if (selectedStructured.size === structuredFiles.length) {
+      setSelectedStructured(new Set());
+    } else {
+      setSelectedStructured(new Set(structuredFiles.map(f => `${f.project}:${f.filename}`)));
+    }
+  };
+
+  const selectAllDocs = () => {
+    if (selectedDocs.size === docs.length) {
+      setSelectedDocs(new Set());
+    } else {
+      setSelectedDocs(new Set(docs.map(d => d.filename)));
+    }
+  };
+
+  // Bulk delete
+  const deleteSelectedStructured = async () => {
+    if (selectedStructured.size === 0) return;
+    if (!confirm(`Delete ${selectedStructured.size} structured file(s)?`)) return;
+    
+    setDeleting(true);
+    try {
+      for (const key of selectedStructured) {
+        const [project, filename] = key.split(':');
+        await api.delete(`/status/structured/${encodeURIComponent(project)}/${encodeURIComponent(filename)}`);
+      }
+      setSelectedStructured(new Set());
+      loadData();
+    } catch (err) {
+      alert('Error: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const deleteSelectedDocs = async () => {
+    if (selectedDocs.size === 0) return;
+    if (!confirm(`Delete ${selectedDocs.size} document(s)?`)) return;
+    
+    setDeleting(true);
+    try {
+      for (const filename of selectedDocs) {
+        await api.delete(`/status/documents/${encodeURIComponent(filename)}`);
+      }
+      setSelectedDocs(new Set());
+      loadData();
+    } catch (err) {
+      alert('Error: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const clearAllJobs = async () => {
+    if (!confirm('Clear all processing history?')) return;
+    setDeleting(true);
+    try {
+      await api.delete('/jobs/all');
+      loadData();
+    } catch (err) {
+      alert('Error: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const getStatusIcon = (status) => {
-    if (status === 'completed') return <CheckCircle size={16} style={{ color: '#10b981' }} />;
-    if (status === 'failed') return <XCircle size={16} style={{ color: '#ef4444' }} />;
-    if (status === 'processing') return <Loader2 size={16} style={{ color: '#3b82f6', animation: 'spin 1s linear infinite' }} />;
-    return <Clock size={16} style={{ color: '#f59e0b' }} />;
+    if (status === 'completed') return <CheckCircle size={14} style={{ color: '#10b981' }} />;
+    if (status === 'failed') return <XCircle size={14} style={{ color: '#ef4444' }} />;
+    if (status === 'processing') return <Loader2 size={14} style={{ color: '#3b82f6', animation: 'spin 1s linear infinite' }} />;
+    return <Clock size={14} style={{ color: '#f59e0b' }} />;
   };
 
   if (loading) {
@@ -270,142 +346,279 @@ function JobsTab() {
     );
   }
 
-  const recentJobs = jobs.slice(0, 30);
-  const activeJobs = jobs.filter(j => j.status === 'processing' || j.status === 'pending');
-  const structuredFiles = structuredData?.files || [];
-  const docs = documents?.documents || [];
+  const sectionStyle = { 
+    background: 'white', 
+    border: '1px solid #e1e8ed', 
+    borderRadius: '12px', 
+    overflow: 'hidden',
+    marginBottom: '1.5rem',
+  };
+  
+  const headerStyle = { 
+    padding: '0.875rem 1rem', 
+    borderBottom: '1px solid #e1e8ed', 
+    display: 'flex', 
+    alignItems: 'center', 
+    gap: '0.75rem',
+    background: '#fafbfc',
+  };
 
-  const sectionStyle = { background: '#f8fafc', border: '1px solid #e1e8ed', borderRadius: '12px', overflow: 'hidden' };
-  const headerStyle = { padding: '0.75rem 1rem', borderBottom: '1px solid #e1e8ed', display: 'flex', alignItems: 'center', gap: '0.5rem' };
-  const countBadge = { background: '#e1e8ed', padding: '0.1rem 0.5rem', borderRadius: '10px', fontSize: '0.75rem', color: COLORS.textLight };
+  const rowStyle = {
+    display: 'grid',
+    gridTemplateColumns: '32px 1fr 120px 140px 40px',
+    alignItems: 'center',
+    padding: '0.75rem 1rem',
+    borderBottom: '1px solid #f0f0f0',
+    gap: '0.5rem',
+  };
+
+  const colHeaderStyle = {
+    display: 'grid',
+    gridTemplateColumns: '32px 1fr 120px 140px 40px',
+    alignItems: 'center',
+    padding: '0.5rem 1rem',
+    background: '#f8fafc',
+    borderBottom: '1px solid #e1e8ed',
+    gap: '0.5rem',
+    fontSize: '0.7rem',
+    fontWeight: 600,
+    color: COLORS.textLight,
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+  };
 
   return (
     <div>
       {/* Summary Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
         {[
-          { label: 'Active Jobs', value: activeJobs.length, color: '#3b82f6' },
-          { label: 'Structured Files', value: structuredFiles.length, color: '#f59e0b' },
-          { label: 'Documents', value: docs.length, color: '#10b981' },
-          { label: 'Total Rows', value: (structuredData?.total_rows || 0).toLocaleString(), color: COLORS.grassGreen },
-        ].map((s, i) => (
-          <div key={i} style={{ background: '#f8fafc', borderRadius: '8px', padding: '1rem', textAlign: 'center' }}>
-            <div style={{ fontSize: '1.5rem', fontWeight: 700, color: s.color, fontFamily: 'monospace' }}>{s.value}</div>
-            <div style={{ fontSize: '0.75rem', color: COLORS.textLight, marginTop: '0.25rem' }}>{s.label}</div>
-          </div>
-        ))}
+          { label: 'Structured Files', value: structuredFiles.length, color: '#f59e0b', icon: Table2 },
+          { label: 'Documents', value: docs.length, color: '#10b981', icon: FileText },
+          { label: 'Total Rows', value: (structuredData?.total_rows || 0).toLocaleString(), color: COLORS.grassGreen, icon: Database },
+        ].map((s, i) => {
+          const Icon = s.icon;
+          return (
+            <div key={i} style={{ background: '#f8fafc', borderRadius: '10px', padding: '1rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: `${s.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon size={20} style={{ color: s.color }} />
+              </div>
+              <div>
+                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: s.color, fontFamily: 'monospace' }}>{s.value}</div>
+                <div style={{ fontSize: '0.75rem', color: COLORS.textLight }}>{s.label}</div>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
-      {/* 3-Column Layout */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
-        {/* JOBS SECTION */}
-        <div style={sectionStyle}>
-          <div style={headerStyle}>
-            <ClipboardList size={18} style={{ color: '#3b82f6' }} />
-            <span style={{ fontWeight: 600, color: COLORS.text }}>Jobs</span>
-            <span style={countBadge}>{recentJobs.length}</span>
-            <button onClick={loadData} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: COLORS.textLight }}>
-              <RefreshCw size={14} />
+      {/* STRUCTURED DATA SECTION */}
+      <div style={sectionStyle}>
+        <div style={headerStyle}>
+          <Table2 size={20} style={{ color: '#f59e0b' }} />
+          <span style={{ fontWeight: 600, color: COLORS.text, flex: 1 }}>Structured Data</span>
+          <span style={{ background: '#fef3c7', color: '#92400e', padding: '0.2rem 0.6rem', borderRadius: '10px', fontSize: '0.75rem', fontWeight: 600 }}>
+            {structuredFiles.length}
+          </span>
+          {selectedStructured.size > 0 && (
+            <button
+              onClick={deleteSelectedStructured}
+              disabled={deleting}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '0.35rem',
+                padding: '0.4rem 0.75rem', background: '#fef2f2', border: '1px solid #fecaca',
+                borderRadius: '6px', color: '#dc2626', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              <Trash2 size={14} />
+              Delete ({selectedStructured.size})
             </button>
-          </div>
-          
-          {/* Delete Range */}
-          <div style={{ padding: '0.5rem 1rem', borderBottom: '1px solid #e1e8ed', background: 'white' }}>
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-              <Calendar size={14} style={{ color: COLORS.textLight }} />
-              <input type="date" value={deleteStartDate} onChange={(e) => setDeleteStartDate(e.target.value)}
-                style={{ padding: '0.25rem 0.5rem', border: '1px solid #e1e8ed', borderRadius: '4px', fontSize: '0.7rem', flex: 1, minWidth: '90px' }} />
-              <span style={{ color: COLORS.textLight, fontSize: '0.7rem' }}>to</span>
-              <input type="date" value={deleteEndDate} onChange={(e) => setDeleteEndDate(e.target.value)}
-                style={{ padding: '0.25rem 0.5rem', border: '1px solid #e1e8ed', borderRadius: '4px', fontSize: '0.7rem', flex: 1, minWidth: '90px' }} />
-              <button onClick={deleteJobsInRange} disabled={deletingRange || !deleteStartDate || !deleteEndDate}
-                style={{ padding: '0.25rem 0.5rem', background: deleteStartDate && deleteEndDate ? '#ef4444' : '#e1e8ed', color: deleteStartDate && deleteEndDate ? 'white' : COLORS.textLight, border: 'none', borderRadius: '4px', fontSize: '0.65rem', cursor: deleteStartDate && deleteEndDate ? 'pointer' : 'not-allowed' }}>
-                {deletingRange ? '...' : 'Delete'}
-              </button>
-            </div>
-          </div>
+          )}
+          <button onClick={loadData} style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.textLight, padding: '0.25rem' }}>
+            <RefreshCw size={16} />
+          </button>
+        </div>
 
-          <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+        {structuredFiles.length > 0 && (
+          <div style={colHeaderStyle}>
+            <button onClick={selectAllStructured} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+              {selectedStructured.size === structuredFiles.length ? <CheckSquare size={16} style={{ color: COLORS.grassGreen }} /> : <Square size={16} style={{ color: COLORS.textLight }} />}
+            </button>
+            <span>File Name</span>
+            <span>Uploaded By</span>
+            <span>Date</span>
+            <span></span>
+          </div>
+        )}
+
+        <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+          {structuredFiles.length === 0 ? (
+            <div style={{ padding: '2rem', textAlign: 'center', color: COLORS.textLight }}>
+              <Table2 size={32} style={{ opacity: 0.3, marginBottom: '0.5rem' }} />
+              <p style={{ margin: 0 }}>No structured data files</p>
+            </div>
+          ) : (
+            structuredFiles.map((file, i) => {
+              const key = `${file.project}:${file.filename}`;
+              const isSelected = selectedStructured.has(key);
+              return (
+                <div key={i} style={{ ...rowStyle, background: isSelected ? '#f0fdf4' : 'white' }}>
+                  <button onClick={() => toggleStructured(key)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                    {isSelected ? <CheckSquare size={16} style={{ color: COLORS.grassGreen }} /> : <Square size={16} style={{ color: COLORS.textLight }} />}
+                  </button>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: COLORS.text }}>
+                      {file.filename}
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: COLORS.textLight }}>
+                      {(file.total_rows || 0).toLocaleString()} rows • {getProjectName(file.project)}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: COLORS.textLight, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <User size={12} />
+                    {file.uploaded_by || 'System'}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: COLORS.textLight, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <Calendar size={12} />
+                    {formatDate(file.uploaded_at || file.created_at)}
+                  </div>
+                  <div></div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      {/* DOCUMENTS SECTION */}
+      <div style={sectionStyle}>
+        <div style={headerStyle}>
+          <FileText size={20} style={{ color: '#10b981' }} />
+          <span style={{ fontWeight: 600, color: COLORS.text, flex: 1 }}>Documents</span>
+          <span style={{ background: '#d1fae5', color: '#065f46', padding: '0.2rem 0.6rem', borderRadius: '10px', fontSize: '0.75rem', fontWeight: 600 }}>
+            {docs.length}
+          </span>
+          {selectedDocs.size > 0 && (
+            <button
+              onClick={deleteSelectedDocs}
+              disabled={deleting}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '0.35rem',
+                padding: '0.4rem 0.75rem', background: '#fef2f2', border: '1px solid #fecaca',
+                borderRadius: '6px', color: '#dc2626', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              <Trash2 size={14} />
+              Delete ({selectedDocs.size})
+            </button>
+          )}
+        </div>
+
+        {docs.length > 0 && (
+          <div style={colHeaderStyle}>
+            <button onClick={selectAllDocs} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+              {selectedDocs.size === docs.length ? <CheckSquare size={16} style={{ color: COLORS.grassGreen }} /> : <Square size={16} style={{ color: COLORS.textLight }} />}
+            </button>
+            <span>Document Name</span>
+            <span>Uploaded By</span>
+            <span>Date</span>
+            <span></span>
+          </div>
+        )}
+
+        <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+          {docs.length === 0 ? (
+            <div style={{ padding: '2rem', textAlign: 'center', color: COLORS.textLight }}>
+              <FileText size={32} style={{ opacity: 0.3, marginBottom: '0.5rem' }} />
+              <p style={{ margin: 0 }}>No documents</p>
+            </div>
+          ) : (
+            docs.map((doc, i) => {
+              const isSelected = selectedDocs.has(doc.filename);
+              return (
+                <div key={i} style={{ ...rowStyle, background: isSelected ? '#f0fdf4' : 'white' }}>
+                  <button onClick={() => toggleDoc(doc.filename)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                    {isSelected ? <CheckSquare size={16} style={{ color: COLORS.grassGreen }} /> : <Square size={16} style={{ color: COLORS.textLight }} />}
+                  </button>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: COLORS.text }}>
+                      {doc.filename}
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: COLORS.textLight }}>
+                      {doc.chunk_count || doc.chunks || 0} chunks • {getProjectName(doc.project)}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: COLORS.textLight, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <User size={12} />
+                    {doc.uploaded_by || 'System'}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: COLORS.textLight, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <Calendar size={12} />
+                    {formatDate(doc.uploaded_at || doc.created_at)}
+                  </div>
+                  <div></div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      {/* PROCESSING HISTORY (Collapsed) */}
+      <div style={{ ...sectionStyle, marginBottom: 0 }}>
+        <button
+          onClick={() => setShowHistory(!showHistory)}
+          style={{
+            ...headerStyle,
+            cursor: 'pointer',
+            width: '100%',
+            border: 'none',
+            borderBottom: showHistory ? '1px solid #e1e8ed' : 'none',
+          }}
+        >
+          <Clock size={20} style={{ color: '#3b82f6' }} />
+          <span style={{ fontWeight: 600, color: COLORS.text, flex: 1, textAlign: 'left' }}>Processing History</span>
+          <span style={{ background: '#dbeafe', color: '#1e40af', padding: '0.2rem 0.6rem', borderRadius: '10px', fontSize: '0.75rem', fontWeight: 600 }}>
+            {recentJobs.length}
+          </span>
+          {showHistory && recentJobs.length > 0 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); clearAllJobs(); }}
+              disabled={deleting}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '0.35rem',
+                padding: '0.35rem 0.6rem', background: '#f5f5f5', border: '1px solid #e1e8ed',
+                borderRadius: '6px', color: COLORS.textLight, fontSize: '0.75rem', cursor: 'pointer',
+              }}
+            >
+              Clear All
+            </button>
+          )}
+          {showHistory ? <ChevronUp size={18} style={{ color: COLORS.textLight }} /> : <ChevronDown size={18} style={{ color: COLORS.textLight }} />}
+        </button>
+
+        {showHistory && (
+          <div style={{ maxHeight: '250px', overflowY: 'auto' }}>
             {recentJobs.length === 0 ? (
-              <div style={{ padding: '2rem', textAlign: 'center', color: COLORS.textLight, fontSize: '0.85rem' }}>No recent jobs</div>
+              <div style={{ padding: '1.5rem', textAlign: 'center', color: COLORS.textLight, fontSize: '0.85rem' }}>
+                No processing history
+              </div>
             ) : (
               recentJobs.map((job) => (
-                <div key={job.id} style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #f0f0f0', background: 'white', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <div key={job.id} style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                   {getStatusIcon(job.status)}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '0.75rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{job.filename}</div>
-                    <div style={{ fontSize: '0.65rem', color: COLORS.textLight }}>{getProjectName(job.project_id)}</div>
-                  </div>
-                  <div style={{ display: 'flex', gap: '0.2rem' }}>
-                    {job.status === 'processing' && (
-                      <button onClick={() => killJob(job.id)} disabled={killing === job.id} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#f59e0b', padding: '0.2rem' }} title="Kill">
-                        <StopCircle size={12} />
-                      </button>
-                    )}
-                    <button onClick={() => deleteJob(job.id)} disabled={deleting === job.id} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', padding: '0.2rem' }} title="Delete">
-                      <Trash2 size={12} />
-                    </button>
+                    <div style={{ fontSize: '0.8rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {job.filename}
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: COLORS.textLight }}>
+                      {job.status} • {formatDate(job.created_at)}
+                    </div>
                   </div>
                 </div>
               ))
             )}
           </div>
-        </div>
-
-        {/* STRUCTURED DATA SECTION */}
-        <div style={sectionStyle}>
-          <div style={headerStyle}>
-            <Table2 size={18} style={{ color: '#f59e0b' }} />
-            <span style={{ fontWeight: 600, color: COLORS.text }}>Structured Data</span>
-            <span style={countBadge}>{structuredFiles.length}</span>
-          </div>
-          <div style={{ maxHeight: '450px', overflowY: 'auto' }}>
-            {structuredFiles.length === 0 ? (
-              <div style={{ padding: '2rem', textAlign: 'center', color: COLORS.textLight, fontSize: '0.85rem' }}>No structured files</div>
-            ) : (
-              structuredFiles.map((file, i) => (
-                <div key={i} style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #f0f0f0', background: 'white', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <Table2 size={14} style={{ color: '#f59e0b', flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '0.75rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.filename}</div>
-                    <div style={{ fontSize: '0.65rem', color: COLORS.textLight }}>{getProjectName(file.project)} • {(file.total_rows || 0).toLocaleString()} rows</div>
-                  </div>
-                  <button onClick={() => deleteStructuredFile(file.project, file.filename)} disabled={deleting === `struct:${file.project}:${file.filename}`} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', padding: '0.2rem' }}>
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* DOCUMENTS SECTION */}
-        <div style={sectionStyle}>
-          <div style={headerStyle}>
-            <FileText size={18} style={{ color: '#10b981' }} />
-            <span style={{ fontWeight: 600, color: COLORS.text }}>Documents</span>
-            <span style={countBadge}>{docs.length}</span>
-          </div>
-          <div style={{ maxHeight: '450px', overflowY: 'auto' }}>
-            {docs.length === 0 ? (
-              <div style={{ padding: '2rem', textAlign: 'center', color: COLORS.textLight, fontSize: '0.85rem' }}>No documents</div>
-            ) : (
-              docs.slice(0, 50).map((doc, i) => (
-                <div key={i} style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #f0f0f0', background: 'white', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <FileText size={14} style={{ color: '#10b981', flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '0.75rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.filename}</div>
-                    <div style={{ fontSize: '0.65rem', color: COLORS.textLight }}>{getProjectName(doc.project)} • {doc.chunk_count || doc.chunks || 0} chunks</div>
-                  </div>
-                  <button onClick={() => deleteDocument(doc.filename)} disabled={deleting === `doc:${doc.filename}`} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', padding: '0.2rem' }}>
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              ))
-            )}
-            {docs.length > 50 && <div style={{ padding: '0.5rem', textAlign: 'center', color: COLORS.textLight, fontSize: '0.7rem' }}>+{docs.length - 50} more</div>}
-          </div>
-        </div>
+        )}
       </div>
 
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
