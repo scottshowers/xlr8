@@ -734,7 +734,7 @@ Return ONLY a valid JSON array of employee objects. No markdown, no explanation,
                 response = requests.post(
                     f"{ollama_url}/api/generate",
                     json=payload,
-                    timeout=900  # 15 min - no Cloudflare to kill us
+                    timeout=1800  # 30 min - large extractions need time
                 )
                 
                 if response.status_code == 200:
@@ -754,7 +754,7 @@ Return ONLY a valid JSON array of employee objects. No markdown, no explanation,
                     logger.warning(f"[REGISTER] qwen2.5-coder:14b HTTP {response.status_code}: {response.text[:200]}")
                     
             except requests.exceptions.Timeout:
-                logger.warning("[REGISTER] qwen2.5-coder:14b timed out after 15 minutes")
+                logger.warning("[REGISTER] qwen2.5-coder:14b timed out after 30 minutes")
             except Exception as e:
                 logger.warning(f"[REGISTER] qwen2.5-coder:14b error: {e}")
         
