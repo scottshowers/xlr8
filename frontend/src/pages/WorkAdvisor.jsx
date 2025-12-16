@@ -493,6 +493,7 @@ export default function WorkAdvisor() {
     return (
       <PlaybookBuilderFlow 
         draft={playbookDraft}
+        conversationContext={messages}
         onBack={() => setShowPlaybookBuilder(false)}
         onComplete={(playbook) => console.log('Created:', playbook)}
       />
@@ -737,9 +738,10 @@ function QuickAccessCard({ featureKey, feature, onSelect }) {
   )
 }
 
-// Simplified Playbook Builder
-function PlaybookBuilderFlow({ draft, onBack, onComplete }) {
+// Simplified Playbook Builder with AI-generated suggestions
+function PlaybookBuilderFlow({ draft, conversationContext, onBack, onComplete }) {
   const [step, setStep] = useState(0)
+  const [isGenerating, setIsGenerating] = useState(false)
   const [playbook, setPlaybook] = useState({
     name: draft?.name || '',
     description: draft?.description || '',
@@ -748,7 +750,48 @@ function PlaybookBuilderFlow({ draft, onBack, onComplete }) {
     outputs: draft?.outputs || []
   })
 
-  const stepTitles = ['Name & Purpose', 'Inputs', 'Workflow', 'Outputs', 'Review']
+  // On mount, if we have conversation context, generate suggestions
+  useEffect(() => {
+    if (conversationContext && conversationContext.length > 1 && playbook.steps.length === 0) {
+      generatePlaybookSuggestions()
+    }
+  }, [])
+
+  const generatePlaybookSuggestions = async () => {
+    setIsGenerating(true)
+    
+    // Extract user's description from conversation
+    const userMessages = conversationContext
+      .filter(m => m.role === 'user')
+      .map(m => m.content)
+      .join('\n')
+    
+    try {
+      const response = await fetch('/api/advisor/generate-playbook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description: userMessages })
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        setPlaybook(prev => ({
+          ...prev,
+          name: data.name || prev.name,
+          description: data.description || prev.description,
+          inputs: data.inputs || prev.inputs,
+          steps: data.steps || prev.steps,
+          outputs: data.outputs || prev.outputs
+        }))
+      }
+    } catch (error) {
+      console.error('Failed to generate playbook suggestions:', error)
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  const stepTitles = ['Review Plan', 'Refine Inputs', 'Refine Steps', 'Refine Outputs', 'Confirm']
 
   return (
     <div style={{
@@ -763,7 +806,7 @@ function PlaybookBuilderFlow({ draft, onBack, onComplete }) {
         background: 'white',
         borderBottom: '1px solid #e8ecef',
       }}>
-        <div style={{ maxWidth: '700px', margin: '0 auto' }}>
+        <div style={{ maxWidth: '800px', margin: '0 auto' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
             <button
               onClick={onBack}
@@ -779,91 +822,289 @@ function PlaybookBuilderFlow({ draft, onBack, onComplete }) {
             </button>
             <div>
               <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: '700', color: COLORS.text }}>
-                Build Playbook
+                {isGenerating ? '✨ Designing Your Playbook...' : 'Build Playbook'}
               </h1>
               <p style={{ margin: 0, fontSize: '0.875rem', color: COLORS.textLight }}>
-                Step {step + 1} of {stepTitles.length}: {stepTitles[step]}
+                {isGenerating 
+                  ? 'AI is drafting steps based on your description'
+                  : `Step ${step + 1} of ${stepTitles.length}: ${stepTitles[step]}`
+                }
               </p>
             </div>
           </div>
           
           {/* Progress bar */}
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            {stepTitles.map((_, i) => (
-              <div
-                key={i}
-                style={{
-                  flex: 1,
-                  height: '4px',
-                  borderRadius: '2px',
-                  background: i <= step ? COLORS.grassGreen : '#e5e7eb',
-                  transition: 'background 0.3s',
-                }}
-              />
-            ))}
-          </div>
+          {!isGenerating && (
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              {stepTitles.map((_, i) => (
+                <div
+                  key={i}
+                  style={{
+                    flex: 1,
+                    height: '4px',
+                    borderRadius: '2px',
+                    background: i <= step ? COLORS.grassGreen : '#e5e7eb',
+                    transition: 'background 0.3s',
+                  }}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
       {/* Content */}
       <div style={{ flex: 1, overflow: 'auto', padding: '1.5rem' }}>
-        <div style={{ maxWidth: '700px', margin: '0 auto' }}>
-          {step === 0 && <StepName playbook={playbook} setPlaybook={setPlaybook} />}
-          {step === 1 && <StepInputs playbook={playbook} setPlaybook={setPlaybook} />}
-          {step === 2 && <StepWorkflow playbook={playbook} setPlaybook={setPlaybook} />}
-          {step === 3 && <StepOutputs playbook={playbook} setPlaybook={setPlaybook} />}
-          {step === 4 && <StepReview playbook={playbook} />}
+        <div style={{ maxWidth: '800px', margin: '0 auto' }}>
+          {isGenerating ? (
+            <GeneratingState />
+          ) : (
+            <>
+              {step === 0 && <StepReviewPlan playbook={playbook} setPlaybook={setPlaybook} onRegenerate={generatePlaybookSuggestions} />}
+              {step === 1 && <StepInputs playbook={playbook} setPlaybook={setPlaybook} />}
+              {step === 2 && <StepWorkflow playbook={playbook} setPlaybook={setPlaybook} />}
+              {step === 3 && <StepOutputs playbook={playbook} setPlaybook={setPlaybook} />}
+              {step === 4 && <StepReview playbook={playbook} />}
+            </>
+          )}
         </div>
       </div>
 
       {/* Footer */}
-      <div style={{
-        padding: '1rem 1.5rem',
-        background: 'white',
-        borderTop: '1px solid #e8ecef',
-      }}>
-        <div style={{ 
-          maxWidth: '700px', 
-          margin: '0 auto',
-          display: 'flex',
-          justifyContent: 'space-between',
+      {!isGenerating && (
+        <div style={{
+          padding: '1rem 1.5rem',
+          background: 'white',
+          borderTop: '1px solid #e8ecef',
         }}>
-          <button
-            onClick={() => setStep(Math.max(0, step - 1))}
-            disabled={step === 0}
-            style={{
-              padding: '0.625rem 1.25rem',
-              background: '#f5f7f9',
-              border: 'none',
-              borderRadius: '10px',
-              fontWeight: '600',
-              color: COLORS.textLight,
-              cursor: step === 0 ? 'not-allowed' : 'pointer',
-              opacity: step === 0 ? 0.5 : 1,
-            }}
-          >
-            Back
-          </button>
-          <button
-            onClick={() => step < 4 ? setStep(step + 1) : onComplete(playbook)}
-            style={{
-              padding: '0.625rem 1.5rem',
-              background: `linear-gradient(135deg, ${COLORS.grassGreen} 0%, ${COLORS.grassGreenDark} 100%)`,
-              border: 'none',
-              borderRadius: '10px',
-              fontWeight: '600',
-              color: 'white',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              boxShadow: '0 2px 8px rgba(131, 177, 109, 0.3)',
-            }}
-          >
-            {step < 4 ? 'Continue' : 'Create Playbook'}
-            {step < 4 ? <ArrowRight size={16} /> : <Sparkles size={16} />}
-          </button>
+          <div style={{ 
+            maxWidth: '800px', 
+            margin: '0 auto',
+            display: 'flex',
+            justifyContent: 'space-between',
+          }}>
+            <button
+              onClick={() => setStep(Math.max(0, step - 1))}
+              disabled={step === 0}
+              style={{
+                padding: '0.625rem 1.25rem',
+                background: '#f5f7f9',
+                border: 'none',
+                borderRadius: '10px',
+                fontWeight: '600',
+                color: COLORS.textLight,
+                cursor: step === 0 ? 'not-allowed' : 'pointer',
+                opacity: step === 0 ? 0.5 : 1,
+              }}
+            >
+              Back
+            </button>
+            <button
+              onClick={() => step < 4 ? setStep(step + 1) : onComplete(playbook)}
+              style={{
+                padding: '0.625rem 1.5rem',
+                background: `linear-gradient(135deg, ${COLORS.grassGreen} 0%, ${COLORS.grassGreenDark} 100%)`,
+                border: 'none',
+                borderRadius: '10px',
+                fontWeight: '600',
+                color: 'white',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                boxShadow: '0 2px 8px rgba(131, 177, 109, 0.3)',
+              }}
+            >
+              {step < 4 ? 'Continue' : 'Create Playbook'}
+              {step < 4 ? <ArrowRight size={16} /> : <Sparkles size={16} />}
+            </button>
+          </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+// Loading state while AI generates
+function GeneratingState() {
+  return (
+    <div style={{ 
+      display: 'flex', 
+      flexDirection: 'column', 
+      alignItems: 'center', 
+      justifyContent: 'center',
+      padding: '4rem 2rem',
+      textAlign: 'center'
+    }}>
+      <div style={{
+        width: '80px',
+        height: '80px',
+        borderRadius: '20px',
+        background: `linear-gradient(135deg, ${COLORS.grassGreen} 0%, ${COLORS.grassGreenDark} 100%)`,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: '1.5rem',
+        boxShadow: '0 4px 20px rgba(131, 177, 109, 0.3)',
+        animation: 'pulse 2s infinite',
+      }}>
+        <Sparkles size={36} color="white" />
+      </div>
+      <h2 style={{ margin: '0 0 0.5rem', color: COLORS.text }}>Designing Your Playbook</h2>
+      <p style={{ color: COLORS.textLight, maxWidth: '400px' }}>
+        Based on your description, I'm drafting the inputs, workflow steps, and outputs. 
+        You'll be able to review and refine everything.
+      </p>
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.05); }
+        }
+      `}</style>
+    </div>
+  )
+}
+
+// Step 0: Review AI-generated plan
+function StepReviewPlan({ playbook, setPlaybook, onRegenerate }) {
+  return (
+    <div>
+      <div style={{ 
+        background: 'linear-gradient(135deg, rgba(131, 177, 109, 0.1) 0%, rgba(147, 171, 217, 0.1) 100%)',
+        border: '1px solid rgba(131, 177, 109, 0.2)',
+        borderRadius: '14px',
+        padding: '1.25rem',
+        marginBottom: '1.5rem',
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: '1rem'
+      }}>
+        <div style={{
+          width: '40px',
+          height: '40px',
+          borderRadius: '10px',
+          background: COLORS.grassGreen,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0
+        }}>
+          <Sparkles size={20} color="white" />
+        </div>
+        <div>
+          <div style={{ fontWeight: '600', color: COLORS.text, marginBottom: '0.25rem' }}>
+            AI-Generated Draft
+          </div>
+          <div style={{ fontSize: '0.875rem', color: COLORS.textLight }}>
+            I've drafted a playbook based on your description. Review and edit anything that needs adjustment.
+          </div>
+        </div>
+        <button
+          onClick={onRegenerate}
+          style={{
+            padding: '0.5rem 1rem',
+            background: 'white',
+            border: '1px solid #e8ecef',
+            borderRadius: '8px',
+            fontSize: '0.8rem',
+            fontWeight: '600',
+            color: COLORS.textLight,
+            cursor: 'pointer',
+            whiteSpace: 'nowrap'
+          }}
+        >
+          ↻ Regenerate
+        </button>
+      </div>
+
+      {/* Name & Description */}
+      <div style={{ background: 'white', padding: '1.5rem', borderRadius: '14px', border: '1px solid #e8ecef', marginBottom: '1rem' }}>
+        <label style={{ display: 'block', fontWeight: '600', marginBottom: '0.75rem', color: COLORS.text }}>
+          Playbook Name
+        </label>
+        <input
+          type="text"
+          value={playbook.name}
+          onChange={(e) => setPlaybook({ ...playbook, name: e.target.value })}
+          placeholder="e.g., IRS Reconciliation Analysis"
+          style={inputStyle}
+        />
+        <label style={{ display: 'block', fontWeight: '600', margin: '1rem 0 0.75rem', color: COLORS.text }}>
+          Description
+        </label>
+        <textarea
+          value={playbook.description}
+          onChange={(e) => setPlaybook({ ...playbook, description: e.target.value })}
+          placeholder="What this playbook accomplishes..."
+          rows={3}
+          style={{ ...inputStyle, resize: 'none' }}
+        />
+      </div>
+
+      {/* Summary cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
+        <SummaryCard 
+          icon={Upload} 
+          label="Inputs" 
+          count={playbook.inputs.length}
+          items={playbook.inputs.map(i => i.name)}
+          color="#4ecdc4"
+        />
+        <SummaryCard 
+          icon={Compass} 
+          label="Steps" 
+          count={playbook.steps.length}
+          items={playbook.steps.map(s => s.title)}
+          color={COLORS.grassGreen}
+        />
+        <SummaryCard 
+          icon={FileText} 
+          label="Outputs" 
+          count={playbook.outputs.length}
+          items={playbook.outputs.map(o => o.name)}
+          color="#9b7ed9"
+        />
+      </div>
+    </div>
+  )
+}
+
+function SummaryCard({ icon: Icon, label, count, items, color }) {
+  return (
+    <div style={{
+      background: 'white',
+      borderRadius: '14px',
+      border: '1px solid #e8ecef',
+      padding: '1.25rem',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+        <div style={{
+          width: '36px',
+          height: '36px',
+          borderRadius: '10px',
+          background: `${color}15`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}>
+          <Icon size={18} color={color} />
+        </div>
+        <div>
+          <div style={{ fontSize: '1.5rem', fontWeight: '700', color: COLORS.text }}>{count}</div>
+          <div style={{ fontSize: '0.75rem', color: COLORS.textLight, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
+        </div>
+      </div>
+      <div style={{ fontSize: '0.8rem', color: COLORS.textLight }}>
+        {items.length > 0 ? (
+          <ul style={{ margin: 0, paddingLeft: '1rem' }}>
+            {items.slice(0, 3).map((item, i) => (
+              <li key={i} style={{ marginBottom: '0.25rem' }}>{item || 'Unnamed'}</li>
+            ))}
+            {items.length > 3 && <li style={{ fontStyle: 'italic' }}>+{items.length - 3} more</li>}
+          </ul>
+        ) : (
+          <span style={{ fontStyle: 'italic' }}>None defined yet</span>
+        )}
       </div>
     </div>
   )
