@@ -708,12 +708,19 @@ class RegisterExtractor:
                 update_job(job_id, message='AI processing (local)...', progress=80)
             
             prompt_template = self._get_vendor_prompt(vendor_type)
-            local_prompt = f"""{prompt_template}
+            local_prompt = f"""CRITICAL INSTRUCTIONS FOR EXTRACTION:
+1. This is ONE payroll register document split across multiple pages
+2. Each employee should appear ONLY ONCE in your output
+3. If an employee's data spans multiple pages, combine it into ONE record
+4. Do NOT duplicate employees - each employee_id should be unique
+5. Page breaks (--- PAGE BREAK ---) are just formatting, not new data sets
+
+{prompt_template}
 
 PAYROLL DATA TO EXTRACT:
 {full_text}
 
-Return ONLY a valid JSON array of employee objects. No markdown, no explanation, just the JSON array starting with [ and ending with ]."""
+Return ONLY a valid JSON array of employee objects. Each employee appears ONCE. No markdown, no explanation, just the JSON array starting with [ and ending with ]."""
             
             try:
                 payload = {
@@ -746,8 +753,22 @@ Return ONLY a valid JSON array of employee objects. No markdown, no explanation,
                     
                     employees = self._parse_json_response(result)
                     if employees and len(employees) > 0:
-                        logger.info(f"[REGISTER] qwen2.5-coder:14b extracted {len(employees)} employees - SUCCESS")
-                        return employees, "local_qwen2.5-coder", 0.0
+                        # Deduplicate by employee_id
+                        seen_ids = set()
+                        unique_employees = []
+                        for emp in employees:
+                            emp_id = emp.get('employee_id', '') or emp.get('name', '')
+                            if emp_id and emp_id not in seen_ids:
+                                seen_ids.add(emp_id)
+                                unique_employees.append(emp)
+                            elif not emp_id:
+                                unique_employees.append(emp)  # Keep if no ID
+                        
+                        if len(unique_employees) < len(employees):
+                            logger.info(f"[REGISTER] Deduplicated: {len(employees)} -> {len(unique_employees)} employees")
+                        
+                        logger.info(f"[REGISTER] qwen2.5-coder:14b extracted {len(unique_employees)} employees - SUCCESS")
+                        return unique_employees, "local_qwen2.5-coder", 0.0
                     else:
                         logger.warning(f"[REGISTER] qwen2.5-coder:14b returned no valid employees")
                 else:
