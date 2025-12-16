@@ -30,6 +30,8 @@ import tempfile
 import shutil
 import uuid
 import pandas as pd
+import requests
+from requests.auth import HTTPBasicAuth
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -654,48 +656,96 @@ class RegisterExtractor:
             logger.warning(f"Text too long ({len(full_text)}), truncating to 80k chars")
             full_text = full_text[:80000]
         
-        prompt_template = self._get_vendor_prompt(vendor_type)
-        prompt = self._build_prompt(prompt_template, full_text, vendor_type)
+        # Try local LLM first - direct call with proper limits for large extraction
+        ollama_url = os.getenv("LLM_ENDPOINT", "").rstrip('/')
+        ollama_user = os.getenv("LLM_USERNAME", "")
+        ollama_pass = os.getenv("LLM_PASSWORD", "")
         
-        # Try local LLM first
-        if LLM_ORCHESTRATOR_AVAILABLE and self.orchestrator:
-            logger.info("[REGISTER] Attempting local LLM extraction (DeepSeek)...")
+        if ollama_url:
+            logger.info("[REGISTER] Attempting local LLM extraction...")
             
-            try:
-                system_prompt = """You are a payroll data extraction expert. Extract employee payroll data from the provided text and return ONLY a valid JSON array. No explanations."""
-                
-                response, success = self.orchestrator._call_ollama(
-                    model='deepseek-coder:6.7b',
-                    prompt=prompt,
-                    system_prompt=system_prompt
-                )
-                
-                if success and response:
-                    employees = self._parse_json_response(response)
-                    if employees and len(employees) > 0:
-                        logger.info(f"[REGISTER] Local LLM extracted {len(employees)} employees")
-                        return employees, "local_deepseek", 0.0  # No cost for local
-            except Exception as e:
-                logger.warning(f"[REGISTER] Local LLM failed: {e}")
+            prompt_template = self._get_vendor_prompt(vendor_type)
+            local_prompt = f"""{prompt_template}
+
+DATA TO EXTRACT:
+{full_text}
+
+Return ONLY the JSON array, no explanation:"""
+            
+            # Try models in order
+            for model in ['deepseek-coder:6.7b', 'mistral:7b']:
+                try:
+                    logger.info(f"[REGISTER] Trying {model}...")
+                    
+                    payload = {
+                        "model": model,
+                        "prompt": local_prompt,
+                        "stream": False,
+                        "options": {
+                            "temperature": 0.1,
+                            "num_predict": 65536  # Large limit for payroll JSON
+                        }
+                    }
+                    
+                    # Use auth if configured
+                    if ollama_user and ollama_pass:
+                        response = requests.post(
+                            f"{ollama_url}/api/generate",
+                            json=payload,
+                            auth=HTTPBasicAuth(ollama_user, ollama_pass),
+                            timeout=300  # 5 min timeout for large extractions
+                        )
+                    else:
+                        response = requests.post(
+                            f"{ollama_url}/api/generate",
+                            json=payload,
+                            timeout=300
+                        )
+                    
+                    if response.status_code == 200:
+                        result = response.json().get("response", "")
+                        logger.info(f"[REGISTER] {model} returned {len(result)} chars")
+                        
+                        employees = self._parse_json_response(result)
+                        if employees and len(employees) > 0:
+                            logger.info(f"[REGISTER] {model} extracted {len(employees)} employees - SUCCESS")
+                            return employees, f"local_{model.split(':')[0]}", 0.0
+                        else:
+                            logger.warning(f"[REGISTER] {model} returned no valid employees")
+                    else:
+                        logger.warning(f"[REGISTER] {model} HTTP {response.status_code}")
+                        
+                except requests.exceptions.Timeout:
+                    logger.warning(f"[REGISTER] {model} timed out after 5 minutes")
+                except Exception as e:
+                    logger.warning(f"[REGISTER] {model} error: {e}")
+                    continue
+            
+            logger.warning("[REGISTER] All local models failed, falling back to Claude...")
         
         # Fallback to Claude
         if self.claude_api_key:
-            logger.info("[REGISTER] Falling back to Claude...")
-            return self._parse_with_claude(pages_text, vendor_type)
+            logger.info("[REGISTER] Using Claude...")
+            employees = self._parse_with_claude_direct(pages_text, vendor_type)
+            return employees, "claude", 0.05
         
         logger.error("[REGISTER] No LLM available for extraction")
         return [], "none", 0.0
     
-    def _parse_with_claude(self, pages_text: List[str], vendor_type: str) -> tuple:
-        """Parse with Claude API (fallback). Returns (employees, llm_name, cost)."""
+    def _parse_with_claude_direct(self, pages_text: List[str], vendor_type: str = "unknown") -> List[Dict]:
+        """Send REDACTED text to Claude for parsing - EXACT COPY from vacuum.py"""
+        
         full_text = "\n\n--- PAGE BREAK ---\n\n".join(pages_text)
         
         if len(full_text) > 80000:
+            logger.warning(f"Text too long ({len(full_text)}), truncating to 80k chars")
             full_text = full_text[:80000]
+        
+        logger.info(f"Sending {len(full_text)} characters to Claude ({len(pages_text)} pages), vendor: {vendor_type}")
         
         prompt_template = self._get_vendor_prompt(vendor_type)
         prompt = self._build_prompt(prompt_template, full_text, vendor_type)
-        
+
         try:
             response_text = ""
             with self.claude.messages.stream(
@@ -707,7 +757,6 @@ class RegisterExtractor:
                 for text in stream.text_stream:
                     response_text += text
                 
-                # Get usage for cost tracking
                 try:
                     final_message = stream.get_final_message()
                     if final_message and hasattr(final_message, 'usage'):
@@ -722,13 +771,14 @@ class RegisterExtractor:
                 except Exception as cost_err:
                     logger.debug(f"Cost tracking failed: {cost_err}")
             
-            employees = self._parse_json_response(response_text)
-            cost = 0.05  # Approximate Claude cost
-            return employees, "claude", cost
+            logger.info(f"Claude response length: {len(response_text)}")
             
         except Exception as e:
             logger.error(f"Claude API error: {e}")
-            return [], "claude_error", 0.0
+            return []
+        
+        employees = self._parse_json_response(response_text)
+        return employees
     
     def _extract_with_pymupdf(self, file_path: str, max_pages: int, job_id: str = None, vendor_type: str = "unknown") -> tuple:
         """Extract text using PyMuPDF (local, free, private)."""
