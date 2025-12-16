@@ -477,3 +477,227 @@ async def get_features():
             }
         ]
     }
+
+
+class GeneratePlaybookRequest(BaseModel):
+    description: str
+
+
+PLAYBOOK_GENERATION_PROMPT = """You are an expert implementation consultant. Based on the user's description, design a structured playbook with clear inputs, steps, and outputs.
+
+USER'S DESCRIPTION:
+{description}
+
+Generate a JSON response with this exact structure:
+{{
+  "name": "Short descriptive name for the playbook",
+  "description": "1-2 sentence summary of what this playbook accomplishes",
+  "inputs": [
+    {{"name": "Input name", "type": "file", "description": "What this input is and what format"}}
+  ],
+  "steps": [
+    {{"title": "Step title", "description": "What happens in this step and what AI does", "ai_assisted": true}}
+  ],
+  "outputs": [
+    {{"name": "Output name", "format": "spreadsheet or report or data", "description": "What this deliverable contains"}}
+  ]
+}}
+
+Guidelines:
+- Steps should be logical and sequential
+- Each step should have a clear purpose
+- Mark steps as ai_assisted: true if AI does analysis/comparison/generation
+- Mark steps as ai_assisted: false if it's human review/approval
+- Include data profiling/validation as early steps
+- Include a final review/QA step
+- Outputs should be concrete deliverables the customer receives
+- Be specific about what each step does, not vague
+
+Return ONLY valid JSON, no explanation or markdown."""
+
+
+@router.post("/generate-playbook")
+async def generate_playbook(request: GeneratePlaybookRequest):
+    """
+    Use AI to generate a playbook structure based on user's description.
+    """
+    try:
+        description = request.description
+        logger.info(f"[ADVISOR] Generating playbook for: {description[:100]}...")
+        
+        prompt = PLAYBOOK_GENERATION_PROMPT.format(description=description)
+        response_text = None
+        
+        # Try Ollama/Mistral first
+        try:
+            import os
+            import httpx
+            
+            ollama_url = os.environ.get('OLLAMA_API_URL', 'http://ollama:11434')
+            
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                ollama_response = await client.post(
+                    f"{ollama_url}/api/generate",
+                    json={
+                        "model": "mistral",
+                        "prompt": prompt,
+                        "stream": False,
+                        "options": {"temperature": 0.3, "num_predict": 2000}
+                    }
+                )
+                
+                if ollama_response.status_code == 200:
+                    data = ollama_response.json()
+                    response_text = data.get('response', '').strip()
+                    logger.info("[ADVISOR] Got playbook structure from Ollama")
+                    
+        except Exception as ollama_error:
+            logger.warning(f"[ADVISOR] Ollama failed for playbook gen: {ollama_error}")
+        
+        # Try Claude if Ollama failed
+        if not response_text:
+            try:
+                import anthropic
+                import os
+                
+                client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
+                
+                claude_response = client.messages.create(
+                    model="claude-3-haiku-20240307",
+                    max_tokens=2000,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                
+                response_text = claude_response.content[0].text
+                logger.info("[ADVISOR] Got playbook structure from Claude")
+                
+            except Exception as claude_error:
+                logger.warning(f"[ADVISOR] Claude failed for playbook gen: {claude_error}")
+        
+        # Parse JSON from response
+        if response_text:
+            # Clean up response - remove markdown if present
+            response_text = response_text.strip()
+            if response_text.startswith('```'):
+                response_text = response_text.split('```')[1]
+                if response_text.startswith('json'):
+                    response_text = response_text[4:]
+            response_text = response_text.strip()
+            
+            try:
+                playbook = json.loads(response_text)
+                return playbook
+            except json.JSONDecodeError as e:
+                logger.error(f"[ADVISOR] Failed to parse playbook JSON: {e}")
+        
+        # Fallback: Generate a basic structure based on keywords
+        return _generate_fallback_playbook(description)
+        
+    except Exception as e:
+        logger.error(f"[ADVISOR] Playbook generation error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return _generate_fallback_playbook(request.description)
+
+
+def _generate_fallback_playbook(description: str) -> Dict:
+    """Generate a basic playbook structure when AI is unavailable."""
+    desc_lower = description.lower()
+    
+    # Detect common patterns
+    is_comparison = any(w in desc_lower for w in ['compare', 'reconcile', 'variance', 'difference', 'match'])
+    is_irs = any(w in desc_lower for w in ['irs', 'w-2', 'w2', '941', 'tax'])
+    is_gl = any(w in desc_lower for w in ['gl', 'general ledger', 'account', 'mapping'])
+    has_multiple_files = any(w in desc_lower for w in ['files', 'both', 'two', '2 '])
+    
+    # IRS/Tax comparison
+    if is_irs and (is_comparison or has_multiple_files):
+        return {
+            "name": "IRS Reconciliation Analysis",
+            "description": "Compare IRS tax files against customer payroll data to identify and categorize variances.",
+            "inputs": [
+                {"name": "IRS Tax File(s)", "type": "file", "description": "941, W-2 totals, or other IRS reports"},
+                {"name": "Customer Payroll Data", "type": "file", "description": "Pay register, YTD totals, or employee data"}
+            ],
+            "steps": [
+                {"title": "Profile & Validate Files", "description": "AI examines each uploaded file to understand structure, identify key columns, and flag data quality issues.", "ai_assisted": True},
+                {"title": "Identify Join Keys", "description": "Find common fields between IRS and customer data (EIN, SSN, Employee ID). Validate keys exist in both sources.", "ai_assisted": True},
+                {"title": "Map Comparison Fields", "description": "Match IRS fields to customer equivalents (e.g., Box 1 Wages → Gross Pay YTD). Define tolerance thresholds.", "ai_assisted": True},
+                {"title": "Execute Comparison", "description": "Run matching analysis between datasets. Calculate variances and flag discrepancies by severity.", "ai_assisted": True},
+                {"title": "Categorize Findings", "description": "Group variances into: Expected differences (timing, rounding), Errors requiring correction, Items needing investigation.", "ai_assisted": True},
+                {"title": "Review & Approve", "description": "Human review of AI findings. Approve categorizations and add notes for customer discussion.", "ai_assisted": False},
+                {"title": "Generate Deliverables", "description": "Create final reports: Executive summary, variance detail by category, and recommended actions.", "ai_assisted": True}
+            ],
+            "outputs": [
+                {"name": "IRS Reconciliation Report", "format": "spreadsheet", "description": "Detailed variance analysis with all records compared"},
+                {"name": "Executive Summary", "format": "report", "description": "High-level findings and recommendations for customer"},
+                {"name": "Action Items Checklist", "format": "data", "description": "List of items requiring correction or follow-up"}
+            ]
+        }
+    
+    # GL Mapping
+    elif is_gl:
+        return {
+            "name": "GL Configuration Mapping",
+            "description": "Map legacy general ledger structure to new system configuration rules.",
+            "inputs": [
+                {"name": "Legacy GL Structure", "type": "file", "description": "Current chart of accounts or GL configuration"},
+                {"name": "Target GL Template", "type": "file", "description": "New system GL structure or mapping template"}
+            ],
+            "steps": [
+                {"title": "Profile GL Structures", "description": "Analyze both source and target GL configurations to understand segments, hierarchies, and rules.", "ai_assisted": True},
+                {"title": "Auto-Map Common Accounts", "description": "AI identifies obvious mappings based on account names, numbers, and patterns.", "ai_assisted": True},
+                {"title": "Flag Ambiguous Mappings", "description": "Highlight accounts that need human decision - multiple possible targets or no clear match.", "ai_assisted": True},
+                {"title": "Human Resolution", "description": "Review and resolve flagged mappings. Make decisions on ambiguous accounts.", "ai_assisted": False},
+                {"title": "Validate Mapping Rules", "description": "Check mapping completeness - ensure all source accounts have targets and no orphans exist.", "ai_assisted": True},
+                {"title": "Generate Configuration", "description": "Create import-ready configuration files for the new system.", "ai_assisted": True}
+            ],
+            "outputs": [
+                {"name": "GL Mapping Document", "format": "spreadsheet", "description": "Complete source-to-target mapping with all accounts"},
+                {"name": "Configuration Import File", "format": "data", "description": "Ready-to-load file for new system"},
+                {"name": "Mapping Exceptions Report", "format": "report", "description": "Documentation of decisions made on ambiguous mappings"}
+            ]
+        }
+    
+    # Generic comparison
+    elif is_comparison or has_multiple_files:
+        return {
+            "name": "Data Comparison Analysis",
+            "description": "Compare two datasets to identify matches, variances, and discrepancies.",
+            "inputs": [
+                {"name": "Source File 1", "type": "file", "description": "First dataset for comparison"},
+                {"name": "Source File 2", "type": "file", "description": "Second dataset for comparison"}
+            ],
+            "steps": [
+                {"title": "Profile Both Files", "description": "Analyze structure, columns, data types, and row counts for each file.", "ai_assisted": True},
+                {"title": "Identify Join Keys", "description": "Determine which fields can be used to match records between files.", "ai_assisted": True},
+                {"title": "Execute Comparison", "description": "Match records and calculate differences for comparable fields.", "ai_assisted": True},
+                {"title": "Categorize Results", "description": "Group findings: Exact matches, Within tolerance, Significant variances, Orphan records.", "ai_assisted": True},
+                {"title": "Review Findings", "description": "Human review of significant variances and orphan records.", "ai_assisted": False},
+                {"title": "Generate Report", "description": "Create comparison summary and detailed variance report.", "ai_assisted": True}
+            ],
+            "outputs": [
+                {"name": "Comparison Summary", "format": "report", "description": "Executive summary of comparison results"},
+                {"name": "Variance Detail", "format": "spreadsheet", "description": "All records with variance details"}
+            ]
+        }
+    
+    # Generic analysis
+    else:
+        return {
+            "name": "Data Analysis Playbook",
+            "description": "Structured analysis of uploaded data with findings and recommendations.",
+            "inputs": [
+                {"name": "Source Data", "type": "file", "description": "Data file(s) to analyze"}
+            ],
+            "steps": [
+                {"title": "Profile Data", "description": "Analyze file structure, data quality, and key statistics.", "ai_assisted": True},
+                {"title": "Identify Patterns", "description": "Find trends, anomalies, and notable patterns in the data.", "ai_assisted": True},
+                {"title": "Generate Insights", "description": "Create findings and recommendations based on analysis.", "ai_assisted": True},
+                {"title": "Review & Refine", "description": "Human review of AI findings. Add context and refine recommendations.", "ai_assisted": False},
+                {"title": "Create Deliverable", "description": "Generate final analysis report.", "ai_assisted": True}
+            ],
+            "outputs": [
+                {"name": "Analysis Report", "format": "report", "description": "Complete analysis with findings and recommendations"}
+            ]
+        }
