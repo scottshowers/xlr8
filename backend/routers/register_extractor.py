@@ -316,7 +316,7 @@ def delete_extraction(extract_id: str) -> bool:
 # =============================================================================
 
 def store_to_duckdb(
-    project: str,
+    project_id: str,
     source_file: str,
     employees: List[Dict],
     vendor_type: str = "unknown"
@@ -340,8 +340,20 @@ def store_to_duckdb(
     try:
         handler = get_structured_handler()
         
-        # Generate table name
-        safe_project = re.sub(r'[^a-zA-Z0-9]', '_', project.lower())
+        # Look up project name from UUID
+        project_name = project_id  # Default to ID if lookup fails
+        supabase = get_supabase()
+        if supabase and project_id:
+            try:
+                result = supabase.table('projects').select('name').eq('id', project_id).execute()
+                if result.data and len(result.data) > 0:
+                    project_name = result.data[0].get('name', project_id)
+                    logger.info(f"[REGISTER] Resolved project: {project_id} -> {project_name}")
+            except Exception as e:
+                logger.warning(f"[REGISTER] Could not look up project name: {e}")
+        
+        # Generate table name using project NAME (not UUID)
+        safe_project = re.sub(r'[^a-zA-Z0-9]', '_', project_name.lower())
         safe_file = re.sub(r'[^a-zA-Z0-9]', '_', source_file.lower().replace('.pdf', ''))
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         table_name = f"{safe_project}__payroll__{safe_file}_{timestamp}"
@@ -404,7 +416,7 @@ def store_to_duckdb(
                 (id, project, file_name, sheet_name, table_name, columns, row_count, version, is_current)
                 VALUES (nextval('schema_metadata_seq'), ?, ?, 'payroll', ?, ?, ?, 1, TRUE)
             """, [
-                project,
+                project_name,
                 source_file,
                 table_name,
                 json.dumps(columns_info),
@@ -417,7 +429,7 @@ def store_to_duckdb(
         
         # Run profiling
         try:
-            handler.profile_columns_fast(project, table_name)
+            handler.profile_columns_fast(project_name, table_name)
             logger.info(f"[REGISTER] Profiled table: {table_name}")
         except Exception as prof_err:
             logger.warning(f"[REGISTER] Profiling failed: {prof_err}")
