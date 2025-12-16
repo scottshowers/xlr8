@@ -319,7 +319,8 @@ def store_to_duckdb(
     project_id: str,
     source_file: str,
     employees: List[Dict],
-    vendor_type: str = "unknown"
+    vendor_type: str = "unknown",
+    job_id: str = None
 ) -> Optional[str]:
     """
     Store extracted payroll data to DuckDB for chat/intelligence queries.
@@ -338,6 +339,9 @@ def store_to_duckdb(
         return None
     
     try:
+        if job_id:
+            update_job(job_id, message='Storing to database...', progress=96)
+        
         handler = get_structured_handler()
         
         # Look up project name from UUID
@@ -363,6 +367,9 @@ def store_to_duckdb(
             table_name = table_name[:60]
         
         # Build flat records - convert nested arrays to JSON strings
+        if job_id:
+            update_job(job_id, message=f'Processing {len(employees)} employees...', progress=97)
+        
         flat_records = []
         for emp in employees:
             record = {
@@ -403,6 +410,9 @@ def store_to_duckdb(
         df = pd.DataFrame(flat_records)
         
         # Store in DuckDB
+        if job_id:
+            update_job(job_id, message='Writing to DuckDB...', progress=98)
+        
         handler.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
         handler.conn.register('temp_payroll', df)
         handler.conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM temp_payroll")
@@ -427,12 +437,32 @@ def store_to_duckdb(
         
         logger.info(f"[REGISTER] Stored {len(employees)} employees to DuckDB: {table_name}")
         
-        # Run profiling
+        # Queue profiling in background (don't block on it)
+        if job_id:
+            update_job(job_id, message='Profiling queued...', progress=100)
+        
         try:
-            handler.profile_columns_fast(project_name, table_name)
-            logger.info(f"[REGISTER] Profiled table: {table_name}")
+            # Import the queue function from structured_data_handler
+            from utils.structured_data_handler import queue_inference_job
+            
+            # Build tables_info for the queue
+            tables_info = [{
+                'table_name': table_name,
+                'columns': list(df.columns),
+                'row_count': len(df)
+            }]
+            
+            # Queue it - don't wait
+            queue_inference_job(handler, f"reg_{table_name[:20]}", project_name, source_file, tables_info)
+            logger.info(f"[REGISTER] Queued profiling for: {table_name}")
         except Exception as prof_err:
-            logger.warning(f"[REGISTER] Profiling failed: {prof_err}")
+            # Fallback to sync profiling if queue not available
+            logger.warning(f"[REGISTER] Queue not available, running sync profiling: {prof_err}")
+            try:
+                handler.profile_columns_fast(project_name, table_name)
+                logger.info(f"[REGISTER] Profiled table: {table_name}")
+            except Exception as e:
+                logger.warning(f"[REGISTER] Profiling failed: {e}")
         
         return table_name
         
@@ -577,7 +607,7 @@ class RegisterExtractor:
             if job_id:
                 update_job(job_id, message=f'Parsing with AI ({vendor_type})...', progress=80)
             
-            employees, llm_used, cost = self._parse_with_llm(redacted_pages, vendor_type)
+            employees, llm_used, cost = self._parse_with_llm(redacted_pages, vendor_type, job_id)
             
             # Step 3.5: Fix truncated descriptions using ORIGINAL text
             if vendor_type != 'dayforce' and employees:
@@ -604,7 +634,7 @@ class RegisterExtractor:
             # Step 5: Store to DuckDB
             duckdb_table = None
             if employees and project_id:
-                duckdb_table = store_to_duckdb(project_id, filename, employees, vendor_type)
+                duckdb_table = store_to_duckdb(project_id, filename, employees, vendor_type, job_id)
             
             result = {
                 "success": len(employees) > 0,
@@ -656,7 +686,7 @@ class RegisterExtractor:
             
             return error_result
     
-    def _parse_with_llm(self, pages_text: List[str], vendor_type: str) -> tuple:
+    def _parse_with_llm(self, pages_text: List[str], vendor_type: str, job_id: str = None) -> tuple:
         """
         Parse employees using LLM.
         
@@ -672,14 +702,14 @@ class RegisterExtractor:
         """
         # Claude extraction - proven to work
         if self.claude_api_key:
-            employees = self._parse_with_claude_direct(pages_text, vendor_type)
+            employees = self._parse_with_claude_direct(pages_text, vendor_type, job_id)
             return employees, "claude", 0.05
         
         logger.error("[REGISTER] No LLM available for extraction")
         return [], "none", 0.0
     
-    def _parse_with_claude_direct(self, pages_text: List[str], vendor_type: str = "unknown") -> List[Dict]:
-        """Send REDACTED text to Claude for parsing - EXACT COPY from vacuum.py"""
+    def _parse_with_claude_direct(self, pages_text: List[str], vendor_type: str = "unknown", job_id: str = None) -> List[Dict]:
+        """Send REDACTED text to Claude for parsing - with progress updates"""
         
         full_text = "\n\n--- PAGE BREAK ---\n\n".join(pages_text)
         
@@ -689,11 +719,15 @@ class RegisterExtractor:
         
         logger.info(f"Sending {len(full_text)} characters to Claude ({len(pages_text)} pages), vendor: {vendor_type}")
         
+        if job_id:
+            update_job(job_id, message=f'AI processing {len(pages_text)} pages...', progress=80)
+        
         prompt_template = self._get_vendor_prompt(vendor_type)
         prompt = self._build_prompt(prompt_template, full_text, vendor_type)
 
         try:
             response_text = ""
+            chunk_count = 0
             with self.claude.messages.stream(
                 model="claude-sonnet-4-20250514",
                 max_tokens=64000,
@@ -702,6 +736,14 @@ class RegisterExtractor:
             ) as stream:
                 for text in stream.text_stream:
                     response_text += text
+                    chunk_count += 1
+                    
+                    # Update progress every 100 chunks
+                    if job_id and chunk_count % 100 == 0:
+                        # Progress from 80 to 95 during streaming
+                        chars_received = len(response_text)
+                        progress = min(95, 80 + int(chars_received / 5000))  # ~1% per 5KB
+                        update_job(job_id, message=f'Extracting employees ({chars_received:,} chars received)...', progress=progress)
                 
                 try:
                     final_message = stream.get_final_message()
