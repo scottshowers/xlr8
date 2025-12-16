@@ -688,20 +688,87 @@ class RegisterExtractor:
     
     def _parse_with_llm(self, pages_text: List[str], vendor_type: str, job_id: str = None) -> tuple:
         """
-        Parse employees using LLM.
-        
-        TODO: Local LLM extraction for 7B models struggles with 32K+ token output.
-        Options to revisit:
-        1. Chunked extraction (one page at a time, combine results)
-        2. Larger model (Mixtral 8x22B, Llama 70B)
-        3. Fine-tuned extraction model
-        
-        For now: Claude direct (proven, ~$0.05/file)
+        Parse employees using LLM - LOCAL FIRST (qwen2.5-coder:14b), Claude fallback.
         
         Returns: (employees, llm_used, cost_usd)
         """
-        # Claude extraction - proven to work
+        full_text = "\n\n--- PAGE BREAK ---\n\n".join(pages_text)
+        
+        if len(full_text) > 100000:
+            logger.warning(f"Text too long ({len(full_text)}), truncating to 100k chars")
+            full_text = full_text[:100000]
+        
+        # Try local LLM first - qwen2.5-coder:14b (128K context, great at JSON)
+        ollama_url = os.getenv("LLM_ENDPOINT", "").rstrip('/')
+        ollama_user = os.getenv("LLM_USERNAME", "")
+        ollama_pass = os.getenv("LLM_PASSWORD", "")
+        
+        if ollama_url:
+            logger.info("[REGISTER] Attempting local LLM extraction with qwen2.5-coder:14b...")
+            
+            if job_id:
+                update_job(job_id, message='AI processing (local)...', progress=80)
+            
+            prompt_template = self._get_vendor_prompt(vendor_type)
+            local_prompt = f"""{prompt_template}
+
+PAYROLL DATA TO EXTRACT:
+{full_text}
+
+Return ONLY a valid JSON array of employee objects. No markdown, no explanation, just the JSON array starting with [ and ending with ]."""
+            
+            try:
+                payload = {
+                    "model": "qwen2.5-coder:14b",
+                    "prompt": local_prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.1,
+                        "num_predict": 65536,  # Large output limit
+                        "num_ctx": 32768       # Context window
+                    }
+                }
+                
+                logger.info(f"[REGISTER] Sending {len(full_text)} chars to qwen2.5-coder:14b...")
+                
+                if ollama_user and ollama_pass:
+                    response = requests.post(
+                        f"{ollama_url}/api/generate",
+                        json=payload,
+                        auth=HTTPBasicAuth(ollama_user, ollama_pass),
+                        timeout=600  # 10 min timeout for large extractions
+                    )
+                else:
+                    response = requests.post(
+                        f"{ollama_url}/api/generate",
+                        json=payload,
+                        timeout=600
+                    )
+                
+                if response.status_code == 200:
+                    result = response.json().get("response", "")
+                    logger.info(f"[REGISTER] qwen2.5-coder:14b returned {len(result)} chars")
+                    
+                    if job_id:
+                        update_job(job_id, message=f'Parsing response ({len(result):,} chars)...', progress=92)
+                    
+                    employees = self._parse_json_response(result)
+                    if employees and len(employees) > 0:
+                        logger.info(f"[REGISTER] qwen2.5-coder:14b extracted {len(employees)} employees - SUCCESS")
+                        return employees, "local_qwen2.5-coder", 0.0
+                    else:
+                        logger.warning(f"[REGISTER] qwen2.5-coder:14b returned no valid employees, falling back...")
+                else:
+                    logger.warning(f"[REGISTER] qwen2.5-coder:14b HTTP {response.status_code}: {response.text[:200]}")
+                    
+            except requests.exceptions.Timeout:
+                logger.warning("[REGISTER] qwen2.5-coder:14b timed out after 10 minutes")
+            except Exception as e:
+                logger.warning(f"[REGISTER] qwen2.5-coder:14b error: {e}")
+        
+        # Fallback to Claude
         if self.claude_api_key:
+            logger.info("[REGISTER] Falling back to Claude...")
             employees = self._parse_with_claude_direct(pages_text, vendor_type, job_id)
             return employees, "claude", 0.05
         
