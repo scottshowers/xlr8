@@ -664,16 +664,23 @@ class RegisterExtractor:
         if ollama_url:
             logger.info("[REGISTER] Attempting local LLM extraction...")
             
-            prompt_template = self._get_vendor_prompt(vendor_type)
-            local_prompt = f"""{prompt_template}
+            # Simpler, more explicit prompt for local models
+            local_prompt = f"""Extract employee payroll data from this pay register and return as a JSON array.
 
-DATA TO EXTRACT:
+RULES:
+1. Return ONLY a JSON array starting with [ and ending with ]
+2. Each employee object needs: name, employee_id, department, gross_pay, net_pay, total_taxes, total_deductions
+3. Use numbers for pay amounts (not strings)
+4. No markdown, no explanation, just the JSON array
+
+PAY REGISTER DATA:
 {full_text}
 
-Return ONLY the JSON array, no explanation:"""
+JSON array:
+["""
             
             # Try models in order
-            for model in ['deepseek-coder:6.7b', 'mistral:7b']:
+            for model in ['mistral:7b', 'deepseek-coder:6.7b']:
                 try:
                     logger.info(f"[REGISTER] Trying {model}...")
                     
@@ -683,17 +690,16 @@ Return ONLY the JSON array, no explanation:"""
                         "stream": False,
                         "options": {
                             "temperature": 0.1,
-                            "num_predict": 65536  # Large limit for payroll JSON
+                            "num_predict": 65536
                         }
                     }
                     
-                    # Use auth if configured
                     if ollama_user and ollama_pass:
                         response = requests.post(
                             f"{ollama_url}/api/generate",
                             json=payload,
                             auth=HTTPBasicAuth(ollama_user, ollama_pass),
-                            timeout=300  # 5 min timeout for large extractions
+                            timeout=300
                         )
                     else:
                         response = requests.post(
@@ -706,6 +712,12 @@ Return ONLY the JSON array, no explanation:"""
                         result = response.json().get("response", "")
                         logger.info(f"[REGISTER] {model} returned {len(result)} chars")
                         
+                        # DEBUG: Log first 500 chars of response
+                        logger.info(f"[REGISTER] {model} response preview: {result[:500]}...")
+                        
+                        # Prepend the [ we used in the prompt
+                        result = "[" + result
+                        
                         employees = self._parse_json_response(result)
                         if employees and len(employees) > 0:
                             logger.info(f"[REGISTER] {model} extracted {len(employees)} employees - SUCCESS")
@@ -713,7 +725,7 @@ Return ONLY the JSON array, no explanation:"""
                         else:
                             logger.warning(f"[REGISTER] {model} returned no valid employees")
                     else:
-                        logger.warning(f"[REGISTER] {model} HTTP {response.status_code}")
+                        logger.warning(f"[REGISTER] {model} HTTP {response.status_code}: {response.text[:200]}")
                         
                 except requests.exceptions.Timeout:
                     logger.warning(f"[REGISTER] {model} timed out after 5 minutes")
