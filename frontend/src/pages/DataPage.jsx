@@ -460,28 +460,56 @@ function FilesTab() {
             structuredFiles.map((file, i) => {
               const key = `${file.project}:${file.filename}`;
               const isSelected = selectedStructured.has(key);
+              const sheets = file.sheets || [];
               return (
-                <div key={i} style={{ ...rowStyle, background: isSelected ? '#f0fdf4' : 'white' }}>
-                  <button onClick={() => toggleStructured(key)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-                    {isSelected ? <CheckSquare size={16} style={{ color: COLORS.grassGreen }} /> : <Square size={16} style={{ color: COLORS.textLight }} />}
-                  </button>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: '0.85rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: COLORS.text }}>
-                      {file.filename}
+                <div key={i} style={{ background: isSelected ? '#f0fdf4' : 'white', borderBottom: '1px solid #f0f0f0' }}>
+                  <div style={{ ...rowStyle, borderBottom: 'none' }}>
+                    <button onClick={() => toggleStructured(key)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                      {isSelected ? <CheckSquare size={16} style={{ color: COLORS.grassGreen }} /> : <Square size={16} style={{ color: COLORS.textLight }} />}
+                    </button>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: COLORS.text }}>
+                        {file.filename}
+                      </div>
+                      <div style={{ fontSize: '0.7rem', color: COLORS.textLight }}>
+                        {(file.total_rows || 0).toLocaleString()} rows • {sheets.length} table{sheets.length !== 1 ? 's' : ''} • {getProjectName(file.project)}
+                      </div>
                     </div>
-                    <div style={{ fontSize: '0.7rem', color: COLORS.textLight }}>
-                      {(file.total_rows || 0).toLocaleString()} rows • {getProjectName(file.project)}
+                    <div style={{ fontSize: '0.75rem', color: COLORS.textLight, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <User size={12} />
+                      {file.uploaded_by || 'System'}
                     </div>
+                    <div style={{ fontSize: '0.75rem', color: COLORS.textLight, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <Calendar size={12} />
+                      {formatDate(file.loaded_at || file.uploaded_at || file.created_at)}
+                    </div>
+                    <div></div>
                   </div>
-                  <div style={{ fontSize: '0.75rem', color: COLORS.textLight, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <User size={12} />
-                    {file.uploaded_by || 'System'}
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: COLORS.textLight, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <Calendar size={12} />
-                    {formatDate(file.uploaded_at || file.created_at)}
-                  </div>
-                  <div></div>
+                  {/* Show tables/sheets loaded */}
+                  {sheets.length > 0 && (
+                    <div style={{ marginLeft: '2.5rem', marginRight: '1rem', paddingBottom: '0.75rem' }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                        {sheets.slice(0, 8).map((sheet, si) => (
+                          <div key={si} style={{ 
+                            fontSize: '0.65rem', 
+                            padding: '0.2rem 0.4rem', 
+                            background: '#f0f9ff', 
+                            borderRadius: '4px',
+                            color: '#0369a1',
+                            border: '1px solid #bae6fd'
+                          }}>
+                            <strong>{sheet.sheet_name || sheet.table_name?.split('_').pop() || `Table ${si + 1}`}</strong>
+                            <span style={{ opacity: 0.7 }}> ({(sheet.row_count || 0).toLocaleString()})</span>
+                          </div>
+                        ))}
+                        {sheets.length > 8 && (
+                          <div style={{ fontSize: '0.65rem', padding: '0.2rem 0.4rem', color: COLORS.textLight }}>
+                            +{sheets.length - 8} more
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })
@@ -607,11 +635,15 @@ function FilesTab() {
                 <div key={job.id} style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                   {getStatusIcon(job.status)}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '0.8rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {job.filename}
+                    <div style={{ fontSize: '0.8rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: COLORS.text }}>
+                      {job.filename && job.filename !== 'Unknown' ? job.filename : (job.result || 'Processing job')}
                     </div>
                     <div style={{ fontSize: '0.7rem', color: COLORS.textLight }}>
-                      {job.status} • {formatDate(job.created_at)}
+                      {job.status === 'completed' && job.result ? (
+                        <>{job.result} • {getProjectName(job.project)} • {formatDate(job.created_at)}</>
+                      ) : (
+                        <>{job.status} • {getProjectName(job.project)} • {formatDate(job.created_at)}</>
+                      )}
                     </div>
                   </div>
                 </div>
