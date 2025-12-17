@@ -106,7 +106,7 @@ async def get_job(job_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/jobs/all")
+@router.delete("/jobs/clear-all")
 async def delete_all_jobs():
     """Delete all processing jobs"""
     try:
