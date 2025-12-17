@@ -466,9 +466,9 @@ export default function DashboardPage() {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        // Get playbook count
+        // Get playbook builder configs count
         const playbooksRes = await fetch('/api/playbook-builder/configs').then(r => r.json()).catch(() => ({ total: 0 }));
-        const playbooksRunning = playbooksRes.total || playbooksRes.configs?.length || 0;
+        const builderPlaybooks = playbooksRes.total || playbooksRes.configs?.length || 0;
         
         // Get findings/stats for each project
         const projectStats = {};
@@ -476,9 +476,24 @@ export default function DashboardPage() {
         let totalCritical = 0;
         let totalTasks = 0;
         let totalComplete = 0;
+        let totalPlaybooks = builderPlaybooks;
         
         for (const project of (realProjects || [])) {
           try {
+            // Check Year-End playbook progress for this project
+            let hasYearEndPlaybook = false;
+            try {
+              const progressRes = await fetch(`/api/playbooks/year-end/progress/${project.id}`).then(r => r.json()).catch(() => null);
+              // If progress exists and has any actions tracked, count as active playbook
+              if (progressRes && Object.keys(progressRes).length > 0) {
+                hasYearEndPlaybook = true;
+                totalPlaybooks++;
+              }
+            } catch (e) {
+              // No Year-End progress for this project
+            }
+            
+            // Get intelligence summary
             const summaryRes = await fetch(`/api/intelligence/${project.id}/summary`).then(r => r.json()).catch(() => null);
             
             if (summaryRes && summaryRes.analyzed) {
@@ -493,7 +508,7 @@ export default function DashboardPage() {
               projectStats[project.id] = {
                 health,
                 pendingFindings: (findings.critical || 0) + (findings.warning || 0),
-                activePlaybooks: 0 // Would need per-project playbook tracking
+                activePlaybooks: hasYearEndPlaybook ? 1 : 0
               };
               
               totalFindings += (findings.critical || 0) + (findings.warning || 0);
@@ -501,7 +516,12 @@ export default function DashboardPage() {
               totalTasks += tasks.total || 0;
               totalComplete += tasks.complete || 0;
             } else {
-              projectStats[project.id] = { health: 100, pendingFindings: 0, activePlaybooks: 0 };
+              // No intelligence analysis yet - show health based on just playbook status
+              projectStats[project.id] = { 
+                health: 100, 
+                pendingFindings: 0, 
+                activePlaybooks: hasYearEndPlaybook ? 1 : 0 
+              };
             }
           } catch (e) {
             projectStats[project.id] = { health: 100, pendingFindings: 0, activePlaybooks: 0 };
@@ -512,7 +532,7 @@ export default function DashboardPage() {
         const complianceScore = totalTasks > 0 ? Math.round((totalComplete / totalTasks) * 100) : 100;
         
         setDashboardStats({
-          playbooksRunning,
+          playbooksRunning: totalPlaybooks,
           pendingFindings: totalFindings,
           complianceScore,
           projectStats
