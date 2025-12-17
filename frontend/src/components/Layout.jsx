@@ -32,6 +32,7 @@ const MAIN_NAV = [
   { path: '/projects', label: 'Projects', icon: '🏢', permission: null },
   { path: '/data', label: 'Data', icon: '📂', permission: Permissions.UPLOAD },
   { path: '/playbooks', label: 'Playbooks', icon: '📋', permission: Permissions.PLAYBOOKS },
+  { path: '/analytics', label: 'Query Builder', icon: '📊', permission: null },
   { path: '/workspace', label: 'AI Assist', icon: '💬', permission: null },
 ];
 
