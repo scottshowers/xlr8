@@ -1,10 +1,12 @@
 """
-XLR8 INTELLIGENCE ENGINE v5.5
+XLR8 INTELLIGENCE ENGINE v5.6
 ==============================
 
 Deploy to: backend/utils/intelligence_engine.py
 
 UPDATES:
+- v5.6: FIXED table alias collision - now uses sheet_name from metadata
+        instead of keyword matching that caused personal→personal_ethnic_co bug
 - v5.5: FIXED table alias extraction for long/truncated table names
         Now extracts meaningful short names (personal, deductions, etc.)
         instead of using full 60-char truncated names that LLM mangles
@@ -43,7 +45,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.5 SMART TABLE ALIASES ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.6 SHEET_NAME ALIASES ======")
 
 
 # =============================================================================
@@ -1458,7 +1460,7 @@ class IntelligenceEngine:
     
     def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
         """Generate SQL query using LLMOrchestrator with SMART table selection."""
-        logger.warning(f"[SQL-GEN] v5.5 - Starting SQL generation")
+        logger.warning(f"[SQL-GEN] v5.6 - Starting SQL generation")
         logger.warning(f"[SQL-GEN] confirmed_facts: {self.confirmed_facts}")
         
         if not self.structured_handler or not self.schema:
@@ -1491,44 +1493,43 @@ class IntelligenceEngine:
         table_aliases = {}  # Map short alias to full name
         used_aliases = set()  # Track used aliases to avoid duplicates
         
-        # Common sheet/table name keywords to look for
-        KNOWN_SHEET_KEYWORDS = [
-            'personal', 'deductions', 'company', 'earnings', 'direct_deposit',
-            'fit', 'sit', 'lit', 'web', 'job', 'rates', 'taxes', 'benefits',
-            'supervisor', 'scheduled', 'org_level', 'pay_group', 'summary',
-            'employee', 'position', 'department', 'location', 'bank', 'ach',
-            'garnishment', 'accruals', 'time', 'attendance', 'job_codes'
-        ]
-        
-        def extract_short_alias(full_table_name: str, used: set) -> str:
-            """Extract a meaningful short alias from a long table name."""
-            # First check for __ delimiter (old format)
+        def extract_short_alias(table_info: dict, used: set) -> str:
+            """Extract a meaningful short alias from table info.
+            
+            Priority:
+            1. Use sheet_name from metadata (most reliable)
+            2. Extract from table_name as fallback
+            """
+            full_table_name = table_info.get('table_name', '')
+            
+            # BEST: Use sheet_name from metadata if available
+            sheet_name = table_info.get('sheet_name', '')
+            if sheet_name:
+                # Clean up sheet name for SQL alias
+                clean_sheet = re.sub(r'[^\w]', '_', sheet_name.lower()).strip('_')
+                clean_sheet = re.sub(r'_+', '_', clean_sheet)  # Remove double underscores
+                if clean_sheet and len(clean_sheet) <= 30:
+                    if clean_sheet not in used:
+                        return clean_sheet
+                    # If duplicate, append a number
+                    for suffix in range(2, 10):
+                        candidate = f"{clean_sheet}{suffix}"
+                        if candidate not in used:
+                            return candidate
+            
+            # FALLBACK: Check for __ delimiter (old format)
             if '__' in full_table_name:
                 candidate = full_table_name.split('__')[-1]
                 if candidate and candidate not in used:
                     return candidate
             
-            # Look for known keywords in the table name
-            name_lower = full_table_name.lower()
-            for keyword in KNOWN_SHEET_KEYWORDS:
-                # Check if keyword appears as a word boundary (not substring)
-                pattern = rf'_{keyword}(?:_|$)'
-                if re.search(pattern, name_lower):
-                    if keyword not in used:
-                        return keyword
-                    # If duplicate, append a number
-                    for suffix in range(2, 10):
-                        candidate = f"{keyword}{suffix}"
-                        if candidate not in used:
-                            return candidate
-            
-            # Fallback: use last segment(s) after splitting by underscore
+            # FALLBACK: Use last meaningful segment after splitting
             parts = full_table_name.split('_')
             if len(parts) >= 2:
-                # Try last 1-2 meaningful parts
-                for i in range(1, min(4, len(parts))):
+                # Try last 2-3 parts for uniqueness
+                for i in range(2, min(5, len(parts))):
                     candidate = '_'.join(parts[-i:])
-                    if len(candidate) <= 20 and candidate not in used:
+                    if len(candidate) <= 25 and candidate not in used:
                         return candidate
             
             # Last resort: truncated name with index
@@ -1553,12 +1554,12 @@ class IntelligenceEngine:
             
             all_columns.update(col_names)
             
-            # Create SHORT alias from table name - IMPROVED EXTRACTION
-            short_name = extract_short_alias(table_name, used_aliases)
+            # Create SHORT alias - use sheet_name from metadata when available
+            short_name = extract_short_alias(table, used_aliases)
             used_aliases.add(short_name)
             table_aliases[short_name] = table_name
             
-            logger.info(f"[SQL-GEN] Table alias: {short_name} → {table_name[:50]}...")
+            logger.warning(f"[SQL-GEN] Table alias: {short_name} → {table_name}")
             
             # First relevant table is "primary"
             if i == 0:
