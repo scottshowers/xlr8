@@ -1320,10 +1320,11 @@ async def upload_file(
         # Look up project to get UUID
         project_id = None
         try:
-            # Handle global project
-            if project.lower() in ['global', '__global__', 'global/universal']:
+            # Handle global/reference library project
+            global_names = ['global', '__global__', 'global/universal', 'reference library', 'reference_library', '__standards__']
+            if project.lower() in global_names:
                 project_id = None
-                logger.info(f"[UPLOAD] Using GLOBAL project (no project_id)")
+                logger.info(f"[UPLOAD] Using GLOBAL/Reference Library project (no project_id)")
             else:
                 # Check if project is already a UUID (frontend might send ID directly)
                 import re
