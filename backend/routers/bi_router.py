@@ -972,7 +972,7 @@ async def execute_raw_sql(request: BIExecuteRequest):
         logger.warning(f"[BI-EXECUTE] Running SQL for project {request.project}")
         logger.warning(f"[BI-EXECUTE] SQL: {request.sql[:200]}...")
         
-        result = handler.query(request.sql, project=request.project)
+        result = handler.query(request.sql)
         
         execution_time = int((time.time() - start_time) * 1000)
         
