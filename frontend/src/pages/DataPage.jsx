@@ -100,28 +100,47 @@ export default function DataPage() {
 function UploadTab({ project, projectName }) {
   const { addUpload } = useUpload();
   const [dragOver, setDragOver] = useState(false);
+  const [targetProject, setTargetProject] = useState('current');
   const fileInputRef = useRef(null);
 
+  const getEffectiveProject = () => {
+    if (targetProject === 'current') return { id: project, name: projectName };
+    if (targetProject === 'reference') return { id: 'reference_library', name: 'Reference Library' };
+    return { id: project, name: projectName };
+  };
+
   const handleFiles = (files) => {
-    if (!project) { alert('Please select a project first'); return; }
-    Array.from(files).forEach(file => addUpload(file, project, projectName));
+    const effective = getEffectiveProject();
+    if (!effective.id) { alert('Please select a project first'); return; }
+    Array.from(files).forEach(file => addUpload(file, effective.id, effective.name));
   };
 
   const handleDrop = (e) => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); };
   const handleFileSelect = (e) => { handleFiles(e.target.files); e.target.value = ''; };
 
-  if (!project) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '3rem', color: COLORS.textLight }}>
-        <UploadIcon size={48} style={{ opacity: 0.3, marginBottom: '1rem' }} />
-        <h3 style={{ margin: '0 0 0.5rem' }}>Select a Project</h3>
-        <p>Choose a project from the top bar to upload data.</p>
-      </div>
-    );
-  }
-
   return (
     <div>
+      {/* Project Target Selector */}
+      <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        <label style={{ fontWeight: 500, color: COLORS.text }}>Upload to:</label>
+        <select
+          value={targetProject}
+          onChange={(e) => setTargetProject(e.target.value)}
+          style={{
+            padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid #e1e8ed',
+            fontSize: '0.9rem', cursor: 'pointer', minWidth: '200px'
+          }}
+        >
+          <option value="current">{projectName || 'Current Project'}{project ? '' : ' (select one above)'}</option>
+          <option value="reference">📚 Reference Library (Global)</option>
+        </select>
+        {targetProject === 'reference' && (
+          <span style={{ fontSize: '0.8rem', color: COLORS.grassGreen }}>
+            ✓ Year-End Checklist and global standards
+          </span>
+        )}
+      </div>
+
       <input type="file" ref={fileInputRef} style={{ display: 'none' }} multiple accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.txt,.md" onChange={handleFileSelect} />
       <div
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
