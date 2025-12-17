@@ -1,10 +1,12 @@
 """
-XLR8 INTELLIGENCE ENGINE v5.6
+XLR8 INTELLIGENCE ENGINE v5.7
 ==============================
 
 Deploy to: backend/utils/intelligence_engine.py
 
 UPDATES:
+- v5.7: CONSULTATIVE SYNTHESIS - Uses LLM to generate natural, helpful responses
+        instead of raw data dumps. Adds context, insights, professional tone.
 - v5.6: FIXED table alias collision - now uses sheet_name from metadata
         instead of keyword matching that caused personal→personal_ethnic_co bug
 - v5.5: FIXED table alias extraction for long/truncated table names
@@ -45,7 +47,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.6 SHEET_NAME ALIASES ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.7 CONSULTATIVE SYNTHESIS ======")
 
 
 # =============================================================================
@@ -2291,53 +2293,74 @@ SQL:"""
         insights: List[Insight],
         context: Dict = None
     ) -> SynthesizedAnswer:
-        """Synthesize answer from all sources."""
+        """Synthesize a CONSULTATIVE answer from all sources using LLM."""
         reasoning = []
-        context_parts = []
+        
+        # Gather data context
+        data_context = []
+        query_type = 'list'
+        result_value = None
+        result_rows = []
+        result_columns = []
+        executed_sql = None
         
         if reality:
-            context_parts.append("=== DATA RESULTS ===")
             for truth in reality[:3]:
                 if isinstance(truth.content, dict) and 'rows' in truth.content:
                     rows = truth.content['rows']
                     cols = truth.content['columns']
                     query_type = truth.content.get('query_type', 'list')
+                    executed_sql = truth.content.get('sql', '')
                     
                     if query_type == 'count' and rows:
-                        count_val = list(rows[0].values())[0] if rows[0] else 0
-                        context_parts.append(f"\n**ANSWER: {count_val}**")
-                        context_parts.append(f"SQL: {truth.content.get('sql', '')[:200]}")
+                        result_value = list(rows[0].values())[0] if rows[0] else 0
+                        data_context.append(f"COUNT RESULT: {result_value}")
                     elif query_type in ['sum', 'average'] and rows:
-                        result_val = list(rows[0].values())[0] if rows[0] else 0
-                        context_parts.append(f"\n**RESULT: {result_val}**")
-                        context_parts.append(f"SQL: {truth.content.get('sql', '')[:200]}")
+                        result_value = list(rows[0].values())[0] if rows[0] else 0
+                        data_context.append(f"{query_type.upper()} RESULT: {result_value}")
                     else:
-                        context_parts.append(f"\nResults ({len(rows)} rows):")
-                        for row in rows[:10]:
-                            row_str = " | ".join(f"{k}: {v}" for k, v in list(row.items())[:6])
-                            context_parts.append(f"  {row_str}")
+                        result_rows = rows[:20]
+                        result_columns = cols
+                        data_context.append(f"Found {len(rows)} rows with columns: {', '.join(cols[:8])}")
+                        # Add sample data
+                        for row in rows[:5]:
+                            row_str = " | ".join(f"{k}: {v}" for k, v in list(row.items())[:5])
+                            data_context.append(f"  {row_str}")
             reasoning.append(f"Found {len(reality)} data results")
         
+        # Gather document context
+        doc_context = []
         if intent:
-            context_parts.append("\n=== CUSTOMER DOCS ===")
-            for truth in intent[:3]:
-                context_parts.append(f"\n{truth.source_name}: {str(truth.content)[:300]}")
+            for truth in intent[:2]:
+                doc_context.append(f"Customer doc ({truth.source_name}): {str(truth.content)[:200]}")
             reasoning.append(f"Found {len(intent)} customer documents")
         
         if best_practice:
-            context_parts.append("\n=== BEST PRACTICE ===")
-            for truth in best_practice[:3]:
-                context_parts.append(f"\n{truth.source_name}: {str(truth.content)[:300]}")
+            for truth in best_practice[:2]:
+                doc_context.append(f"Best practice ({truth.source_name}): {str(truth.content)[:200]}")
             reasoning.append(f"Found {len(best_practice)} best practice docs")
         
-        if insights:
-            context_parts.append("\n=== INSIGHTS ===")
-            for insight in insights:
-                icon = '🔴' if insight.severity == 'high' else '🟡'
-                context_parts.append(f"{icon} {insight.title}: {insight.description}")
+        # Build filters context
+        filters_applied = []
+        if self.confirmed_facts:
+            for key, val in self.confirmed_facts.items():
+                if val and val != 'all':
+                    filters_applied.append(f"{key}={val}")
         
-        combined = '\n'.join(context_parts)
+        # Generate CONSULTATIVE response using LLM
+        answer_text = self._generate_consultative_response(
+            question=question,
+            query_type=query_type,
+            result_value=result_value,
+            result_rows=result_rows,
+            result_columns=result_columns,
+            data_context=data_context,
+            doc_context=doc_context,
+            filters_applied=filters_applied,
+            insights=insights
+        )
         
+        # Calculate confidence
         confidence = 0.5
         if reality:
             confidence += 0.3
@@ -2348,7 +2371,7 @@ SQL:"""
         
         return SynthesizedAnswer(
             question=question,
-            answer=combined,
+            answer=answer_text,
             confidence=min(confidence, 0.95),
             from_reality=reality,
             from_intent=intent,
@@ -2357,8 +2380,113 @@ SQL:"""
             insights=insights,
             structured_output=None,
             reasoning=reasoning,
-            executed_sql=self.last_executed_sql
+            executed_sql=executed_sql or self.last_executed_sql
         )
+    
+    def _generate_consultative_response(
+        self,
+        question: str,
+        query_type: str,
+        result_value: Any,
+        result_rows: List[Dict],
+        result_columns: List[str],
+        data_context: List[str],
+        doc_context: List[str],
+        filters_applied: List[str],
+        insights: List[Insight]
+    ) -> str:
+        """Generate a natural, consultative response using LLM."""
+        
+        # Try to use LLM for consultative synthesis
+        try:
+            try:
+                from utils.llm_orchestrator import LLMOrchestrator
+            except ImportError:
+                from backend.utils.llm_orchestrator import LLMOrchestrator
+            
+            orchestrator = LLMOrchestrator()
+            
+            # Build context for LLM
+            context_parts = [f"Question: {question}"]
+            
+            if filters_applied:
+                context_parts.append(f"Filters applied: {', '.join(filters_applied)}")
+            
+            if query_type == 'count' and result_value is not None:
+                context_parts.append(f"Query result: COUNT = {result_value}")
+            elif query_type in ['sum', 'average'] and result_value is not None:
+                context_parts.append(f"Query result: {query_type.upper()} = {result_value}")
+            elif result_rows:
+                context_parts.append(f"Query result: {len(result_rows)} rows")
+                context_parts.append(f"Columns: {', '.join(result_columns[:10])}")
+                # Include sample
+                for row in result_rows[:3]:
+                    row_preview = {k: v for k, v in list(row.items())[:5]}
+                    context_parts.append(f"Sample: {row_preview}")
+            
+            if doc_context:
+                context_parts.append("\nRelevant documentation:")
+                context_parts.extend(doc_context[:2])
+            
+            if insights:
+                context_parts.append("\nData insights:")
+                for insight in insights[:3]:
+                    context_parts.append(f"- {insight.title}: {insight.description}")
+            
+            prompt = f"""You are a helpful data consultant. Based on the query results below, provide a brief, 
+consultative response that:
+1. Directly answers the question with the key finding
+2. Adds 1-2 sentences of context or insight if relevant
+3. Notes any data quality observations if present
+4. Is conversational but professional
+
+{chr(10).join(context_parts)}
+
+Respond in 2-4 sentences. Start with the answer, then add brief context. Do not repeat the SQL or technical details."""
+
+            response = orchestrator.generate(
+                prompt=prompt,
+                task_type="synthesis",
+                max_tokens=300
+            )
+            
+            if response and len(response) > 20:
+                return response.strip()
+                
+        except Exception as e:
+            logger.warning(f"[SYNTHESIS] LLM synthesis failed: {e}, using fallback")
+        
+        # FALLBACK: Build a decent response without LLM
+        parts = []
+        
+        if query_type == 'count' and result_value is not None:
+            parts.append(f"**{result_value:,}** employees match your criteria.")
+            if filters_applied:
+                parts.append(f"(Filtered by: {', '.join(filters_applied)})")
+        elif query_type in ['sum', 'average'] and result_value is not None:
+            parts.append(f"**{query_type.title()}: {result_value:,}**")
+        elif result_rows:
+            parts.append(f"Found **{len(result_rows):,}** results:")
+            # Format as simple table preview
+            if result_columns:
+                header = " | ".join(result_columns[:6])
+                parts.append(f"\n| {header} |")
+                parts.append("|" + "---|" * min(6, len(result_columns)))
+                for row in result_rows[:10]:
+                    vals = [str(row.get(c, ''))[:20] for c in result_columns[:6]]
+                    parts.append(f"| {' | '.join(vals)} |")
+                if len(result_rows) > 10:
+                    parts.append(f"\n*Showing first 10 of {len(result_rows)} results*")
+        else:
+            parts.append("No results found matching your criteria.")
+        
+        if insights:
+            parts.append("\n**Insights:**")
+            for insight in insights[:2]:
+                icon = '🔴' if insight.severity == 'high' else '🟡'
+                parts.append(f"{icon} {insight.title}: {insight.description}")
+        
+        return "\n".join(parts)
     
     def clear_clarifications(self):
         """Clear confirmed facts."""
