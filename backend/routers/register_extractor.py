@@ -731,10 +731,9 @@ Extract ALL employees visible on this page. If an employee's data is partial (co
 Return ONLY a valid JSON array. No markdown, no explanation."""
 
             try:
-                # Retry logic for rate limits
-                # Groq free tier: 12k TPM, each page ~3-4k tokens = need ~20s between pages
-                max_retries = 5
-                retry_delay = 15  # seconds - longer for rate limit recovery
+                # Retry logic - paid tier has high limits but keep as safety net
+                max_retries = 3
+                retry_delay = 5  # seconds - quick retry on paid tier
                 
                 for attempt in range(max_retries):
                     response = requests.post(
@@ -768,10 +767,9 @@ Return ONLY a valid JSON array. No markdown, no explanation."""
                             logger.warning(f"[REGISTER] Page {page_num}: NO employees parsed from response")
                             logger.warning(f"[REGISTER] Page {page_num} response preview: {content[:500]}...")
                         
-                        # Small delay between pages to avoid rate limiting
-                        # Groq free tier: 12k TPM, need ~15-20s between pages
+                        # Paid tier - minimal delay just to be safe
                         if page_idx < len(pages_text) - 1:  # Don't delay after last page
-                            time.sleep(5)  # 5 second delay between pages
+                            time.sleep(1)  # 1 second courtesy delay
                         break  # Success, exit retry loop
                         
                     elif response.status_code == 429:
