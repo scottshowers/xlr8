@@ -972,13 +972,13 @@ async def execute_raw_sql(request: BIExecuteRequest):
         logger.warning(f"[BI-EXECUTE] Running SQL for project {request.project}")
         logger.warning(f"[BI-EXECUTE] SQL: {request.sql[:200]}...")
         
-        result = handler.query(request.sql)
+        # query() returns List[Dict] directly
+        data = handler.query(request.sql)
         
         execution_time = int((time.time() - start_time) * 1000)
         
-        if result.get('success') and result.get('data'):
-            data = result['data']
-            columns = result.get('columns', list(data[0].keys()) if data else [])
+        if data:
+            columns = list(data[0].keys()) if data else []
             
             logger.warning(f"[BI-EXECUTE] Success: {len(data)} rows in {execution_time}ms")
             
@@ -991,9 +991,15 @@ async def execute_raw_sql(request: BIExecuteRequest):
                 "sql": request.sql
             }
         else:
-            error = result.get('error', 'Query returned no results')
-            logger.warning(f"[BI-EXECUTE] Failed: {error}")
-            raise HTTPException(400, error)
+            logger.warning(f"[BI-EXECUTE] Query returned no results")
+            return {
+                "success": True,
+                "data": [],
+                "columns": [],
+                "row_count": 0,
+                "execution_time": execution_time,
+                "sql": request.sql
+            }
             
     except HTTPException:
         raise
