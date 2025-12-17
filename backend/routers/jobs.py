@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 import sys
 import logging
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -20,20 +21,36 @@ async def get_jobs(limit: int = 50):
         # Format for frontend
         formatted_jobs = []
         for job in jobs:
+            # Handle result_data - could be string or dict
             result_data = job.get('result_data') or {}
+            if isinstance(result_data, str):
+                try:
+                    result_data = json.loads(result_data)
+                except:
+                    result_data = {}
+            
+            # Handle input_data - could be string or dict
             input_data = job.get('input_data') or {}
+            if isinstance(input_data, str):
+                try:
+                    input_data = json.loads(input_data)
+                except:
+                    input_data = {}
             
             # Debug log for first few jobs
             if len(formatted_jobs) < 3:
-                logger.warning(f"[JOBS] Raw job: id={job.get('id')[:8]}, input_data={input_data}, result_data keys={list(result_data.keys()) if result_data else 'None'}")
+                logger.warning(f"[JOBS] Raw job: id={job.get('id')[:8] if job.get('id') else 'none'}, input_data type={type(input_data).__name__}, input_data={input_data}")
             
             # Get filename from multiple possible locations
-            filename = (
-                input_data.get('filename') or 
-                result_data.get('filename') or 
-                input_data.get('project_name') or
-                job.get('filename')
-            )
+            filename = None
+            if input_data.get('filename') and input_data.get('filename') != 'Unknown':
+                filename = input_data.get('filename')
+            elif result_data.get('filename') and result_data.get('filename') != 'Unknown':
+                filename = result_data.get('filename')
+            elif input_data.get('project_name'):
+                filename = input_data.get('project_name')
+            elif job.get('filename'):
+                filename = job.get('filename')
             
             # Build a useful result message
             result_msg = None
