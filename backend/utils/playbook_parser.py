@@ -126,34 +126,50 @@ def find_year_end_tables() -> List[Dict[str, Any]]:
             logger.info(f"[PARSER]   Project='{row[0]}', Sheet='{row[1]}', File='{row[2]}'")
         
         # Get the specific year-end tables - broader project match
+        # Use ROW_NUMBER to get only the most recent table for each sheet_name
         result = conn.execute("""
-            SELECT 
-                project,
-                file_name,
-                sheet_name,
-                table_name,
-                columns,
-                row_count
-            FROM _schema_metadata
-            WHERE is_current = TRUE
-            AND (
-                LOWER(project) IN ('global', 'reference library', 'reference_library', '__standards__')
-                OR LOWER(project) LIKE '%reference%'
-                OR LOWER(project) LIKE '%global%'
-                OR LOWER(project) LIKE '%library%'
+            WITH ranked AS (
+                SELECT 
+                    project,
+                    file_name,
+                    sheet_name,
+                    table_name,
+                    columns,
+                    row_count,
+                    ROW_NUMBER() OVER (PARTITION BY LOWER(sheet_name) ORDER BY table_name DESC) as rn
+                FROM _schema_metadata
+                WHERE is_current = TRUE
+                AND (
+                    LOWER(project) IN ('global', 'reference library', 'reference_library', '__standards__')
+                    OR LOWER(project) LIKE '%reference%'
+                    OR LOWER(project) LIKE '%global%'
+                    OR LOWER(project) LIKE '%library%'
+                )
+                AND (
+                    LOWER(sheet_name) LIKE '%before%payroll%'
+                    OR LOWER(sheet_name) LIKE '%after%payroll%'
+                    OR LOWER(sheet_name) LIKE '%before%final%'
+                    OR LOWER(sheet_name) LIKE '%after%final%'
+                )
             )
-            AND (
-                LOWER(sheet_name) LIKE '%before%payroll%'
-                OR LOWER(sheet_name) LIKE '%after%payroll%'
-                OR LOWER(sheet_name) LIKE '%before%final%'
-                OR LOWER(sheet_name) LIKE '%after%final%'
-            )
+            SELECT project, file_name, sheet_name, table_name, columns, row_count
+            FROM ranked
+            WHERE rn = 1
             ORDER BY sheet_name
         """).fetchall()
         
         tables = []
+        seen_sheets = set()
         for row in result:
             project, file_name, sheet_name, table_name, columns_json, row_count = row
+            sheet_key = sheet_name.lower().strip()
+            
+            # Extra safety: skip if we've seen this sheet
+            if sheet_key in seen_sheets:
+                logger.warning(f"[PARSER] Skipping duplicate sheet: {sheet_name}")
+                continue
+            seen_sheets.add(sheet_key)
+            
             tables.append({
                 'project': project,
                 'file_name': file_name,
@@ -546,6 +562,19 @@ def parse_year_end_from_duckdb() -> Dict[str, Any]:
         if not all_actions:
             logger.warning("[PARSER] No actions extracted, using default")
             return get_default_structure()
+        
+        # Deduplicate actions by action_id (keep first occurrence)
+        seen_action_ids = set()
+        unique_actions = []
+        for action in all_actions:
+            if action['action_id'] not in seen_action_ids:
+                seen_action_ids.add(action['action_id'])
+                unique_actions.append(action)
+            else:
+                logger.warning(f"[PARSER] Skipping duplicate action: {action['action_id']}")
+        
+        logger.info(f"[PARSER] Actions after dedup: {len(unique_actions)} (was {len(all_actions)})")
+        all_actions = unique_actions
         
         # Deduplicate Fast Track by ft_id (keep first occurrence)
         seen_ft_ids = set()
