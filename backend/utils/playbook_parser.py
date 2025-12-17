@@ -118,7 +118,7 @@ def find_year_end_tables() -> List[Dict[str, Any]]:
                 row_count
             FROM _schema_metadata
             WHERE is_current = TRUE
-            AND LOWER(project) = 'global'
+            AND LOWER(project) IN ('global', 'reference library', 'reference_library', '__standards__')
             AND (
                 LOWER(sheet_name) LIKE '%before%payroll%'
                 OR LOWER(sheet_name) LIKE '%after%payroll%'
@@ -169,7 +169,7 @@ def load_step_documents() -> Dict[str, List[Dict[str, Any]]]:
             SELECT table_name, columns
             FROM _schema_metadata
             WHERE is_current = TRUE
-            AND LOWER(project) = 'global'
+            AND LOWER(project) IN ('global', 'reference library', 'reference_library', '__standards__')
             AND LOWER(sheet_name) LIKE '%step_documents%'
             LIMIT 1
         """).fetchone()
