@@ -1,1210 +1,2364 @@
 """
-XLR8 BI ROUTER - Natural Language Analytics
-=============================================
+XLR8 INTELLIGENCE ENGINE v5.5
+==============================
 
-Deploy to: backend/routers/bi_router.py
+Deploy to: backend/utils/intelligence_engine.py
 
-FEATURES:
-- Natural language → SQL via IntelligenceEngine
-- Smart chart type recommendation based on result shape
-- Export with user-friendly transforms
-- Suggestions from filter_candidates + intelligence findings
-- Reusable by playbooks and other components
+UPDATES:
+- v5.5: FIXED table alias extraction for long/truncated table names
+        Now extracts meaningful short names (personal, deductions, etc.)
+        instead of using full 60-char truncated names that LLM mangles
+- v5.4: Location column validation (rejects routing/bank columns)
+        Schema fallback for state/province columns
+        SQL fix uses common location column patterns (not just filter_candidates)
+- v5.3: Added US state name→code fallback (universal knowledge)
+        Data-driven approach first, state mapping as fallback
+- v5.2: FULLY DATA-DRIVEN filters
+        - Removed all hardcoded state/value mappings
+        - Location detection uses lookups from _intelligence_lookups
+        - Falls back to actual values in filter_candidates
+        - Profiler now handles column classification via lookup matching
+- v5.1: Filter override logic, location column validation
+- v5.0: Fixed state detection, LLM location filter stripping
+- v4.9: ARE bug fix (common English word blocklist)
 
-ENDPOINTS:
-- POST /api/bi/query - NL query → SQL → results + chart
-- GET /api/bi/suggestions/{project} - Smart query suggestions
-- POST /api/bi/export - Export with transforms
-- GET /api/bi/schema/{project} - Schema for project
-- GET /api/bi/saved/{project} - Saved queries/reports
-
-Author: XLR8 Team
-Version: 1.0.0
+SIMPLIFIED:
+- Only asks ONE clarification: active/terminated/all employees
+- Only when the question is about employees
+- Everything else: just query the data
+- LLM used for SQL generation only (where it adds value)
 """
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from typing import Dict, List, Optional, Any
-import logging
+import os
+import re
 import json
-import re
-import re
-import time
-import io
+import logging
+import requests
+from requests.auth import HTTPBasicAuth
+from typing import Dict, List, Optional, Any, Tuple
+from dataclasses import dataclass, field
+from enum import Enum
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["bi"])
+# LOAD VERIFICATION - this line proves the new file is loaded
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.5 SMART TABLE ALIASES ======")
 
 
 # =============================================================================
-# IMPORTS - Graceful degradation
+# COMMON ENGLISH WORDS BLOCKLIST (ARE BUG FIX)
+# Language-level filtering - these words should NEVER be treated as data codes
+# even if they match values in the data (e.g., "ARE" is UAE but also "are")
 # =============================================================================
-
-try:
-    from utils.intelligence_engine import IntelligenceEngine, IntelligenceMode
-    INTELLIGENCE_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.intelligence_engine import IntelligenceEngine, IntelligenceMode
-        INTELLIGENCE_AVAILABLE = True
-    except ImportError:
-        INTELLIGENCE_AVAILABLE = False
-        logger.warning("[BI] Intelligence engine not available")
-
-try:
-    from utils.structured_data_handler import get_structured_handler
-    STRUCTURED_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.structured_data_handler import get_structured_handler
-        STRUCTURED_AVAILABLE = True
-    except ImportError:
-        STRUCTURED_AVAILABLE = False
-        logger.warning("[BI] Structured data handler not available")
-
-try:
-    from utils.rag_handler import RAGHandler
-    RAG_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.rag_handler import RAGHandler
-        RAG_AVAILABLE = True
-    except ImportError:
-        RAG_AVAILABLE = False
-
-try:
-    from utils.database.supabase_client import get_supabase
-    SUPABASE_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.database.supabase_client import get_supabase
-        SUPABASE_AVAILABLE = True
-    except ImportError:
-        SUPABASE_AVAILABLE = False
-
-
-# =============================================================================
-# REQUEST/RESPONSE MODELS
-# =============================================================================
-
-class BIQueryRequest(BaseModel):
-    """Natural language BI query request."""
-    query: str
-    project: str
-    filters: Optional[Dict[str, Any]] = None
-    session_id: Optional[str] = None
-
-
-class TransformOperation(BaseModel):
-    """A single transform operation."""
-    type: str  # rename, map_lookup, combine, split, format_currency, etc.
-    column: str
-    params: Optional[Dict[str, Any]] = None
-
-
-class BIExportRequest(BaseModel):
-    """Export request with transforms."""
-    query: str
-    project: str
-    sql: Optional[str] = None  # Pre-generated SQL (skip NL processing)
-    transforms: Optional[List[TransformOperation]] = []
-    format: str = "xlsx"  # xlsx, csv
-    include_metadata: bool = True
-
-
-class SavedQueryRequest(BaseModel):
-    """Save a query for reuse."""
-    name: str
-    query: str
-    project: str
-    sql: str
-    chart_type: Optional[str] = None
-    transforms: Optional[List[Dict]] = []
-
-
-# =============================================================================
-# CHART TYPE RECOMMENDATION
-# =============================================================================
-
-def recommend_chart_type(columns: List[str], data: List[Dict], sql: str) -> Dict[str, Any]:
-    """
-    Recommend chart type based on query results.
+COMMON_ENGLISH_BLOCKLIST = {
+    # Common verbs
+    'are', 'was', 'were', 'been', 'being', 'have', 'has', 'had', 'having',
+    'can', 'could', 'may', 'might', 'must', 'shall', 'should', 'will', 'would',
+    'get', 'got', 'let', 'put', 'say', 'see', 'use', 'try', 'ask', 'run',
+    'set', 'add', 'end', 'own', 'pay', 'cut', 'win', 'hit', 'buy', 'sit',
+    'do', 'did', 'does', 'done', 'go', 'goes', 'went', 'gone', 'come', 'came',
     
-    Returns:
-        {
-            'recommended': 'bar',
-            'alternatives': ['pie', 'table'],
-            'config': {
-                'xAxis': 'department',
-                'yAxis': 'count',
-                'series': []
-            }
-        }
-    """
-    if not data or not columns:
-        return {'recommended': 'table', 'alternatives': [], 'config': {}}
+    # Common nouns/adjectives
+    'the', 'and', 'for', 'not', 'all', 'one', 'two', 'new', 'now', 'old',
+    'any', 'day', 'way', 'man', 'men', 'our', 'out', 'her', 'him', 'his',
+    'who', 'how', 'its', 'job', 'few', 'top', 'low', 'big', 'lot', 'per',
+    'each', 'every', 'both', 'many', 'much', 'more', 'most', 'some',
     
-    sql_upper = sql.upper() if sql else ''
-    num_rows = len(data)
-    num_cols = len(columns)
+    # Question words
+    'what', 'when', 'where', 'why', 'which',
     
-    # Detect column types from first row
-    numeric_cols = []
-    categorical_cols = []
-    date_cols = []
+    # Pronouns  
+    'you', 'your', 'they', 'them', 'their', 'she', 'hers', 'we', 'us',
     
-    sample = data[0] if data else {}
-    for col in columns:
-        val = sample.get(col)
-        if val is None:
-            continue
-        if isinstance(val, (int, float)):
-            numeric_cols.append(col)
-        elif isinstance(val, str):
-            # Check for date patterns
-            if re.match(r'\d{4}-\d{2}-\d{2}', str(val)):
-                date_cols.append(col)
-            else:
-                categorical_cols.append(col)
+    # Prepositions
+    'from', 'with', 'into', 'over', 'under', 'after', 'before', 'by', 'at', 'in', 'on', 'to',
     
-    # Determine chart type
-    config = {}
+    # Articles and conjunctions
+    'but', 'yet', 'nor', 'so', 'or',
     
-    # COUNT/SUM with GROUP BY → Bar or Pie
-    if ('COUNT(' in sql_upper or 'SUM(' in sql_upper) and 'GROUP BY' in sql_upper:
-        if len(categorical_cols) >= 1 and len(numeric_cols) >= 1:
-            config['xAxis'] = categorical_cols[0]
-            config['yAxis'] = numeric_cols[0]
-            
-            if num_rows <= 6:
-                return {'recommended': 'pie', 'alternatives': ['bar', 'table'], 'config': config}
-            elif num_rows <= 20:
-                return {'recommended': 'bar', 'alternatives': ['pie', 'table'], 'config': config}
-            else:
-                return {'recommended': 'bar', 'alternatives': ['table'], 'config': config}
-    
-    # Time series (date column + numeric)
-    if date_cols and numeric_cols:
-        config['xAxis'] = date_cols[0]
-        config['yAxis'] = numeric_cols[0]
-        return {'recommended': 'line', 'alternatives': ['area', 'bar', 'table'], 'config': config}
-    
-    # Two numeric columns → Scatter
-    if len(numeric_cols) >= 2:
-        config['xAxis'] = numeric_cols[0]
-        config['yAxis'] = numeric_cols[1]
-        return {'recommended': 'scatter', 'alternatives': ['table'], 'config': config}
-    
-    # Single aggregate (COUNT(*) without GROUP BY)
-    if num_rows == 1 and num_cols == 1:
-        return {'recommended': 'metric', 'alternatives': ['table'], 'config': {'value': columns[0]}}
-    
-    # Default to table for complex/list results
-    return {'recommended': 'table', 'alternatives': ['bar'], 'config': config}
-
-
-# =============================================================================
-# TRANSFORM ENGINE
-# =============================================================================
-
-# US State code → name mapping (for state_names transform)
-STATE_NAMES = {
-    'AL': 'Alabama', 'AK': 'Alaska', 'AZ': 'Arizona', 'AR': 'Arkansas',
-    'CA': 'California', 'CO': 'Colorado', 'CT': 'Connecticut', 'DE': 'Delaware',
-    'FL': 'Florida', 'GA': 'Georgia', 'HI': 'Hawaii', 'ID': 'Idaho',
-    'IL': 'Illinois', 'IN': 'Indiana', 'IA': 'Iowa', 'KS': 'Kansas',
-    'KY': 'Kentucky', 'LA': 'Louisiana', 'ME': 'Maine', 'MD': 'Maryland',
-    'MA': 'Massachusetts', 'MI': 'Michigan', 'MN': 'Minnesota', 'MS': 'Mississippi',
-    'MO': 'Missouri', 'MT': 'Montana', 'NE': 'Nebraska', 'NV': 'Nevada',
-    'NH': 'New Hampshire', 'NJ': 'New Jersey', 'NM': 'New Mexico', 'NY': 'New York',
-    'NC': 'North Carolina', 'ND': 'North Dakota', 'OH': 'Ohio', 'OK': 'Oklahoma',
-    'OR': 'Oregon', 'PA': 'Pennsylvania', 'RI': 'Rhode Island', 'SC': 'South Carolina',
-    'SD': 'South Dakota', 'TN': 'Tennessee', 'TX': 'Texas', 'UT': 'Utah',
-    'VT': 'Vermont', 'VA': 'Virginia', 'WA': 'Washington', 'WV': 'West Virginia',
-    'WI': 'Wisconsin', 'WY': 'Wyoming', 'DC': 'District of Columbia'
+    # Common query words
+    'total', 'count', 'list', 'show', 'find', 'give', 'tell', 'need',
+    'only', 'just', 'also', 'even', 'still', 'again', 'then', 'than',
+    'first', 'last', 'next', 'this', 'that', 'these', 'those',
 }
 
 
-def apply_transforms(data: List[Dict], columns: List[str], transforms: List[TransformOperation], handler=None, project: str = None) -> tuple:
+def _is_word_boundary_match(text: str, word: str) -> bool:
     """
-    Apply user-defined transforms to data.
-    
-    Returns: (transformed_data, new_columns, column_renames)
+    Check if word appears in text with word boundaries (not as substring).
+    Prevents "are" matching in "compare", etc.
     """
-    if not transforms:
-        return data, columns, {}
-    
-    result = [row.copy() for row in data]
-    new_columns = list(columns)
-    column_renames = {}  # original -> display name
-    
-    # Load lookups if needed
-    lookups = {}
-    if handler and project:
-        try:
-            # Get lookup tables from schema
-            schema = _build_bi_schema(handler, project) if handler else {'tables': []}
-            for table in schema.get('tables', []):
-                table_name = table.get('table_name', '').lower()
-                if any(p in table_name for p in ['lookup', 'code', 'ref', '_lkp']):
-                    # Load as lookup
-                    cols = table.get('columns', [])
-                    if len(cols) >= 2:
-                        code_col = cols[0]
-                        desc_col = cols[1] if len(cols) > 1 else cols[0]
-                        try:
-                            sql = f'SELECT "{code_col}", "{desc_col}" FROM "{table.get("table_name")}"'
-                            rows = handler.query(sql)
-                            lookups[table_name] = {str(r[code_col]): str(r[desc_col]) for r in rows}
-                        except:
-                            pass
-        except Exception as e:
-            logger.warning(f"[BI] Could not load lookups: {e}")
-    
-    for transform in transforms:
-        t_type = transform.type
-        col = transform.column
-        params = transform.params or {}
-        
-        if t_type == 'rename':
-            # Rename column header
-            new_name = params.get('new_name', col)
-            column_renames[col] = new_name
-        
-        elif t_type == 'state_names':
-            # Convert state codes to full names
-            for row in result:
-                if col in row and row[col]:
-                    code = str(row[col]).upper().strip()
-                    row[col] = STATE_NAMES.get(code, row[col])
-        
-        elif t_type == 'format_currency':
-            # Format as $X,XXX.XX
-            for row in result:
-                if col in row and row[col] is not None:
-                    try:
-                        val = float(row[col])
-                        row[col] = f"${val:,.2f}"
-                    except (ValueError, TypeError):
-                        pass
-        
-        elif t_type == 'format_percent':
-            # Format as XX.X%
-            for row in result:
-                if col in row and row[col] is not None:
-                    try:
-                        val = float(row[col])
-                        row[col] = f"{val * 100:.1f}%"
-                    except (ValueError, TypeError):
-                        pass
-        
-        elif t_type == 'uppercase':
-            for row in result:
-                if col in row and row[col]:
-                    row[col] = str(row[col]).upper()
-        
-        elif t_type == 'titlecase':
-            for row in result:
-                if col in row and row[col]:
-                    row[col] = str(row[col]).title()
-        
-        elif t_type == 'map_lookup':
-            # Map codes to descriptions using lookup table
-            lookup_table = params.get('lookup_table', '').lower()
-            if lookup_table in lookups:
-                lookup = lookups[lookup_table]
-                for row in result:
-                    if col in row and row[col]:
-                        code = str(row[col])
-                        row[col] = lookup.get(code, code)
-        
-        elif t_type == 'combine':
-            # Combine multiple columns
-            source_cols = params.get('columns', [])
-            separator = params.get('separator', ' ')
-            new_col = params.get('new_column', f"{col}_combined")
-            
-            for row in result:
-                parts = [str(row.get(c, '')) for c in source_cols if row.get(c)]
-                row[new_col] = separator.join(parts)
-            
-            if new_col not in new_columns:
-                new_columns.append(new_col)
-        
-        elif t_type == 'split':
-            # Split column by delimiter
-            delimiter = params.get('delimiter', ',')
-            new_col_names = params.get('new_columns', [f"{col}_1", f"{col}_2"])
-            
-            for row in result:
-                if col in row and row[col]:
-                    parts = str(row[col]).split(delimiter)
-                    for i, new_col in enumerate(new_col_names):
-                        row[new_col] = parts[i].strip() if i < len(parts) else ''
-            
-            for nc in new_col_names:
-                if nc not in new_columns:
-                    new_columns.append(nc)
-        
-        elif t_type == 'calculated':
-            # Add calculated column
-            formula = params.get('formula', '')
-            new_col = params.get('new_column', 'calculated')
-            
-            # Simple formula parsing (col1 + col2, col1 * 100, etc.)
-            for row in result:
-                try:
-                    # Replace column names with values
-                    expr = formula
-                    for c in columns:
-                        if c in expr:
-                            val = row.get(c, 0)
-                            if val is None:
-                                val = 0
-                            expr = expr.replace(c, str(float(val)))
-                    row[new_col] = eval(expr)  # Safe because we control the formula
-                except:
-                    row[new_col] = None
-            
-            if new_col not in new_columns:
-                new_columns.append(new_col)
-        
-        elif t_type == 'filter':
-            # Filter rows
-            filter_col = params.get('column', col)
-            operator = params.get('operator', '=')
-            value = params.get('value')
-            
-            def matches(row_val):
-                if operator == '=':
-                    return str(row_val) == str(value)
-                elif operator == '!=':
-                    return str(row_val) != str(value)
-                elif operator == '>':
-                    return float(row_val) > float(value)
-                elif operator == '<':
-                    return float(row_val) < float(value)
-                elif operator == 'contains':
-                    return str(value).lower() in str(row_val).lower()
-                return True
-            
-            result = [row for row in result if filter_col in row and matches(row[filter_col])]
-    
-    return result, new_columns, column_renames
+    pattern = r'\b' + re.escape(word) + r'\b'
+    return bool(re.search(pattern, text, re.IGNORECASE))
+
+
+def _is_blocklisted(word: str) -> bool:
+    """Check if word is in the common English blocklist."""
+    return word.lower() in COMMON_ENGLISH_BLOCKLIST
 
 
 # =============================================================================
-# SCHEMA HELPER (mirrors unified_chat pattern)
+# DATA CLASSES
 # =============================================================================
 
-def _build_bi_schema(handler, project: str) -> Dict[str, Any]:
-    """
-    Get schema for BI queries - compatible with IntelligenceEngine.
-    Returns {'tables': [...], 'filter_candidates': {...}}
-    
-    v2.0 FIX (2025-12-17): Now uses handler.get_tables() which queries 
-    _schema_metadata with exact project match, instead of unreliable 
-    prefix guessing from SHOW TABLES.
-    """
-    tables = []
-    filter_candidates = {}
-    
-    if not handler or not handler.conn:
-        return {'tables': [], 'filter_candidates': {}}
-    
-    try:
-        # ================================================================
-        # FIX: Use get_tables() which queries _schema_metadata correctly
-        # ================================================================
-        metadata_tables = handler.get_tables(project)
-        
-        logger.info(f"[BI] get_tables('{project}') returned {len(metadata_tables)} tables")
-        
-        if metadata_tables:
-            # Primary path: use metadata
-            for table_info in metadata_tables:
-                table_name = table_info.get('table_name', '')
-                if not table_name:
-                    continue
-                
-                # Get columns
-                columns = table_info.get('columns', [])
-                if columns and isinstance(columns[0], dict):
-                    columns = [c.get('name', str(c)) for c in columns]
-                
-                if not columns:
-                    try:
-                        col_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
-                        columns = [row[1] for row in col_result]
-                    except:
-                        try:
-                            result = handler.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 0')
-                            columns = [desc[0] for desc in result.description]
-                        except:
-                            columns = []
-                
-                row_count = table_info.get('row_count', 0)
-                
-                tables.append({
-                    'table_name': table_name,
-                    'project': project,
-                    'columns': columns,
-                    'row_count': row_count
-                })
-        
-        else:
-            # Fallback: prefix matching (only if metadata is empty)
-            logger.warning(f"[BI] No tables in _schema_metadata for '{project}', using fallback")
-            
-            all_tables = handler.conn.execute("SHOW TABLES").fetchall()
-            
-            # Sanitize project name same way as _generate_table_name
-            project_clean = (project or '').strip()
-            sanitized_project = re.sub(r'[^\w\s]', '', project_clean)
-            sanitized_project = re.sub(r'\s+', '_', sanitized_project.strip()).lower()
-            
-            project_prefixes = [
-                sanitized_project,
-                project_clean.lower(),
-                project_clean.lower().replace(' ', '_'),
-                project_clean.lower().replace('-', '_'),
-            ]
-            project_prefixes = list(dict.fromkeys([p for p in project_prefixes if p]))
-            
-            for (table_name,) in all_tables:
-                if table_name.startswith('_'):
-                    continue
-                
-                table_lower = table_name.lower()
-                matches_project = any(
-                    table_lower.startswith(prefix) 
-                    for prefix in project_prefixes
-                )
-                
-                if not matches_project and project:
-                    continue
-                
-                try:
-                    # Get columns
-                    columns = []
-                    try:
-                        col_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
-                        columns = [row[1] for row in col_result]
-                    except:
-                        result = handler.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 0')
-                        columns = [desc[0] for desc in result.description]
-                    
-                    if not columns:
-                        continue
-                    
-                    # Get row count
-                    try:
-                        count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
-                        row_count = count_result[0] if count_result else 0
-                    except:
-                        row_count = 0
-                    
-                    tables.append({
-                        'table_name': table_name,
-                        'project': project,
-                        'columns': columns,
-                        'row_count': row_count
-                    })
-                    
-                except Exception as e:
-                    logger.warning(f"[BI] Error processing table {table_name}: {e}")
-        
-        # Get filter candidates
-        try:
-            filter_candidates = handler.get_filter_candidates(project)
-        except:
-            pass
-        
-        logger.info(f"[BI] Returning {len(tables)} tables for project '{project}'")
-        
-    except Exception as e:
-        logger.error(f"[BI] Schema error: {e}")
-    
-    return {'tables': tables, 'filter_candidates': filter_candidates}
+@dataclass
+class Truth:
+    """A piece of information from one source of truth."""
+    source_type: str
+    source_name: str
+    content: Any
+    confidence: float
+    location: str
+
+
+@dataclass  
+class Conflict:
+    """A detected conflict between sources of truth."""
+    description: str
+    reality: Optional[Truth] = None
+    intent: Optional[Truth] = None
+    best_practice: Optional[Truth] = None
+    severity: str = "medium"
+    recommendation: str = ""
+
+
+@dataclass
+class Insight:
+    """A proactive insight discovered while processing."""
+    type: str
+    title: str
+    description: str
+    data: Any
+    severity: str
+    action_required: bool = False
+
+
+@dataclass
+class SynthesizedAnswer:
+    """A complete answer synthesized from all sources."""
+    question: str
+    answer: str
+    confidence: float
+    from_reality: List[Truth] = field(default_factory=list)
+    from_intent: List[Truth] = field(default_factory=list)
+    from_best_practice: List[Truth] = field(default_factory=list)
+    conflicts: List[Conflict] = field(default_factory=list)
+    insights: List[Insight] = field(default_factory=list)
+    structured_output: Optional[Dict] = None
+    reasoning: List[str] = field(default_factory=list)
+    executed_sql: Optional[str] = None
+
+
+class IntelligenceMode(Enum):
+    SEARCH = "search"
+    ANALYZE = "analyze"
+    COMPARE = "compare"
+    VALIDATE = "validate"
+    CONFIGURE = "configure"
+    INTERVIEW = "interview"
+    WORKFLOW = "workflow"
+    POPULATE = "populate"
+    REPORT = "report"
 
 
 # =============================================================================
-# MAIN QUERY ENDPOINT
+# SEMANTIC PATTERNS (for column matching only)
 # =============================================================================
 
-@router.post("/bi/query")
-async def execute_bi_query(request: BIQueryRequest):
-    """
-    Execute a natural language BI query.
+SEMANTIC_TYPES = {
+    'employee_id': [
+        r'^emp.*id', r'^ee.*num', r'^employee.*number', r'^worker.*id',
+        r'^person.*id', r'^emp.*num', r'^emp.*no$', r'^ee.*id',
+        r'^employee.*id', r'^staff.*id', r'^associate.*id', r'^emp.*key',
+    ],
+    'company_code': [
+        r'^comp.*code', r'^co.*code', r'^company.*id', r'^org.*code',
+        r'^entity.*code', r'^legal.*entity', r'^business.*unit',
+        r'^company$', r'^comp$',
+    ],
+}
+
+
+# =============================================================================
+# INTELLIGENCE ENGINE
+# =============================================================================
+
+class IntelligenceEngine:
+    """The brain of XLR8."""
     
-    Uses IntelligenceEngine for:
-    - SQL generation via LLM
-    - Filter handling (status, location, etc.)
-    - Schema awareness
+    def __init__(self, project_name: str):
+        self.project = project_name
+        self.structured_handler = None
+        self.rag_handler = None
+        self.schema = {}
+        self.relationships = []
+        self.conversation_history = []
+        self.confirmed_facts = {}
+        self.pending_questions = []
+        self.conversation_context = {}
+        self.last_executed_sql = None
+        self.filter_candidates = {}  # Detected filter dimensions
     
-    Returns:
-    - SQL generated
-    - Query results
-    - Chart recommendation
-    - Available transforms
-    """
-    if not INTELLIGENCE_AVAILABLE or not STRUCTURED_AVAILABLE:
-        raise HTTPException(503, "BI service not available")
+    def load_context(
+        self, 
+        structured_handler=None, 
+        rag_handler=None,
+        schema: Dict = None,
+        relationships: List[Dict] = None
+    ):
+        """Load data context for this project."""
+        self.structured_handler = structured_handler
+        self.rag_handler = rag_handler
+        self.schema = schema or {}
+        self.relationships = relationships or []
+        
+        # Extract filter candidates for intelligent clarification
+        self.filter_candidates = self.schema.get('filter_candidates', {})
+        if self.filter_candidates:
+            logger.warning(f"[INTELLIGENCE] Filter candidates loaded: {list(self.filter_candidates.keys())}")
     
-    try:
-        handler = get_structured_handler()
+    def ask(
+        self, 
+        question: str,
+        mode: IntelligenceMode = None,
+        context: Dict = None
+    ) -> SynthesizedAnswer:
+        """Main entry point - ask the engine a question."""
+        logger.warning(f"[INTELLIGENCE] Question: {question[:100]}...")
+        logger.warning(f"[INTELLIGENCE] Current confirmed_facts: {self.confirmed_facts}")
+        logger.warning(f"[INTELLIGENCE] Available filter categories: {list(self.filter_candidates.keys())}")
         
-        # Get schema for project
-        schema = _build_bi_schema(handler, request.project)
-        if not schema or not schema.get('tables'):
-            raise HTTPException(404, f"No data found for project: {request.project}")
+        q_lower = question.lower()
         
-        # Get relationships
-        relationships = []
-        try:
-            relationships = handler.get_relationships(request.project)
-        except:
-            pass
+        # Simple analysis
+        mode = mode or self._detect_mode(q_lower)
+        is_employee_question = self._is_employee_question(q_lower)
+        logger.warning(f"[INTELLIGENCE] is_employee_question: {is_employee_question}")
         
-        # Initialize intelligence engine
-        engine = IntelligenceEngine(request.project)
-        engine.load_context(
-            structured_handler=handler,
-            schema=schema,
-            relationships=relationships
+        # INTELLIGENT CLARIFICATION
+        # For employee questions, determine which filters need clarification
+        if is_employee_question:
+            needed_clarifications = self._get_needed_clarifications(q_lower)
+            logger.warning(f"[INTELLIGENCE] Needed clarifications: {needed_clarifications}")
+            
+            if needed_clarifications:
+                # Build clarification question for first needed filter
+                first_filter = needed_clarifications[0]
+                return self._request_filter_clarification(question, first_filter)
+        
+        logger.warning(f"[INTELLIGENCE] Proceeding with facts: {self.confirmed_facts}")
+        
+        # Gather the three truths
+        analysis = {'domains': self._detect_domains(q_lower), 'mode': mode}
+        
+        reality = self._gather_reality(question, analysis)
+        logger.info(f"[INTELLIGENCE] Reality gathered: {len(reality)} truths")
+        
+        intent = self._gather_intent(question, analysis)
+        best_practice = self._gather_best_practice(question, analysis)
+        
+        conflicts = self._detect_conflicts(reality, intent, best_practice)
+        insights = self._run_proactive_checks(analysis)
+        
+        answer = self._synthesize_answer(
+            question=question,
+            mode=mode,
+            reality=reality,
+            intent=intent,
+            best_practice=best_practice,
+            conflicts=conflicts,
+            insights=insights,
+            context=context
         )
         
-        # Apply any pre-set filters
-        if request.filters:
-            engine.confirmed_facts.update(request.filters)
-        
-        # Execute query via intelligence engine
-        start_time = time.time()
-        answer = engine.ask(request.query)
-        execution_time = time.time() - start_time
-        
-        # Check if clarification needed
-        if answer.structured_output and answer.structured_output.get('type') == 'clarification_needed':
-            return {
-                "success": True,
-                "needs_clarification": True,
-                "clarification": answer.structured_output,
-                "session_id": request.session_id
-            }
-        
-        # Extract SQL and results from answer
-        sql = None
-        data = []
-        columns = []
-        
-        # Get the SQL that was executed
-        if hasattr(engine, 'last_executed_sql') and engine.last_executed_sql:
-            sql = engine.last_executed_sql
-        
-        # Try to get structured output data
-        if answer.structured_output:
-            if 'data' in answer.structured_output:
-                data = answer.structured_output['data']
-            if 'columns' in answer.structured_output:
-                columns = answer.structured_output['columns']
-            if 'sql' in answer.structured_output:
-                sql = answer.structured_output['sql']
-        
-        # If no data in structured_output, try to re-execute SQL
-        if sql and not data:
-            try:
-                result_rows = handler.query(sql)
-                data = result_rows
-                columns = list(result_rows[0].keys()) if result_rows else []
-            except Exception as e:
-                logger.warning(f"[BI] Could not execute SQL: {e}")
-        
-        # Get chart recommendation
-        chart_rec = recommend_chart_type(columns, data, sql or '')
-        
-        # Get available transforms based on columns
-        available_transforms = _get_available_transforms(columns, data, schema)
-        
-        # Post-process: Convert month numbers to names for better display
-        data = _convert_month_numbers_to_names(data, columns)
-        
-        return {
-            "success": True,
-            "needs_clarification": False,
-            "query": request.query,
-            "sql": sql,
-            "data": data[:1000],  # Limit for response size
-            "columns": columns,
-            "total_rows": len(data),
-            "truncated": len(data) > 1000,
-            "chart": chart_rec,
-            "available_transforms": available_transforms,
-            "execution_time": round(execution_time, 3),
-            "answer_text": answer.answer,  # Natural language answer
-            "confidence": answer.confidence,
-            "filters_applied": dict(engine.confirmed_facts)
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[BI] Query error: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        raise HTTPException(500, f"Query failed: {str(e)}")
-
-
-def _convert_month_numbers_to_names(data: List[Dict], columns: List[str]) -> List[Dict]:
-    """
-    Convert month columns to readable format.
-    Handles:
-    - YYYY-MM format (2024-01) → January 2024
-    - Month numbers (1-12) → January, February, etc. (less useful without year)
-    """
-    if not data or not columns:
-        return data
-    
-    MONTH_NAMES = {
-        1: 'January', 2: 'February', 3: 'March', 4: 'April',
-        5: 'May', 6: 'June', 7: 'July', 8: 'August',
-        9: 'September', 10: 'October', 11: 'November', 12: 'December',
-        '01': 'January', '02': 'February', '03': 'March', '04': 'April',
-        '05': 'May', '06': 'June', '07': 'July', '08': 'August',
-        '09': 'September', '10': 'October', '11': 'November', '12': 'December'
-    }
-    
-    # Find month columns
-    month_cols = []
-    for col in columns:
-        col_lower = col.lower()
-        if 'month' in col_lower or col_lower == 'month':
-            month_cols.append(col)
-    
-    if not month_cols:
-        return data
-    
-    # Convert month values to readable format
-    converted = []
-    for row in data:
-        new_row = dict(row)
-        for col in month_cols:
-            val = row.get(col)
-            if val is not None:
-                val_str = str(val)
-                
-                # Handle YYYY-MM format (e.g., "2024-01")
-                if '-' in val_str and len(val_str) >= 7:
-                    parts = val_str.split('-')
-                    if len(parts) >= 2:
-                        year = parts[0]
-                        month = parts[1]
-                        month_name = MONTH_NAMES.get(month) or MONTH_NAMES.get(int(month)) if month.isdigit() else month
-                        if month_name:
-                            new_row[col] = f"{month_name} {year}"
-                            continue
-                
-                # Handle plain month number (1-12)
-                try:
-                    month_num = int(val)
-                    if 1 <= month_num <= 12:
-                        new_row[col] = MONTH_NAMES[month_num]
-                except (ValueError, TypeError):
-                    pass
-        converted.append(new_row)
-    
-    return converted
-
-
-def _get_available_transforms(columns: List[str], data: List[Dict], schema: Dict) -> List[Dict]:
-    """Get available transforms based on column types and data."""
-    transforms = []
-    
-    if not columns or not data:
-        return transforms
-    
-    sample = data[0] if data else {}
-    
-    # Get column profiles from schema
-    profiles = {}
-    for table in schema.get('tables', []):
-        for col_profile in table.get('column_profiles', {}).items() if isinstance(table.get('column_profiles'), dict) else []:
-            col_name, profile = col_profile
-            profiles[col_name] = profile
-    
-    for col in columns:
-        val = sample.get(col)
-        col_lower = col.lower()
-        
-        # Always offer rename
-        transforms.append({
-            'column': col,
-            'type': 'rename',
-            'label': 'Rename Column',
-            'icon': '✏️'
+        self.conversation_history.append({
+            'question': question,
+            'answer_preview': answer.answer[:200] if answer.answer else '',
+            'mode': mode.value if mode else 'search',
+            'timestamp': datetime.now().isoformat()
         })
         
-        # State columns → state_names
-        if any(p in col_lower for p in ['state', 'province', 'st_', '_st']):
-            if val and isinstance(val, str) and len(val) == 2:
-                transforms.append({
-                    'column': col,
-                    'type': 'state_names',
-                    'label': 'Expand State Codes',
-                    'icon': '🗺️'
-                })
+        return answer
+    
+    def _is_employee_question(self, q_lower: str) -> bool:
+        """Check if question is about employees/people."""
+        employee_words = [
+            'employee', 'employees', 'worker', 'workers', 'staff', 
+            'people', 'person', 'who ', 'how many', 'count',
+            'headcount', 'roster', 'census'
+        ]
+        return any(w in q_lower for w in employee_words)
+    
+    def _detect_status_in_question(self, q_lower: str) -> Optional[str]:
+        """
+        Check if user specified employee status in their question.
+        Returns the detected status ('active', 'termed', 'all') or None.
+        """
+        # Active patterns
+        if any(p in q_lower for p in ['active only', 'active employees', 'only active', 'current employees']):
+            return 'active'
         
-        # Numeric columns → currency/percent
-        if isinstance(val, (int, float)):
-            if any(p in col_lower for p in ['amount', 'salary', 'pay', 'rate', 'price', 'cost', 'earning']):
-                transforms.append({
-                    'column': col,
-                    'type': 'format_currency',
-                    'label': 'Format as Currency',
-                    'icon': '💰'
-                })
-            if any(p in col_lower for p in ['percent', 'pct', 'ratio', 'rate']):
-                transforms.append({
-                    'column': col,
-                    'type': 'format_percent',
-                    'label': 'Format as Percent',
-                    'icon': '%'
-                })
+        # Terminated patterns
+        if any(p in q_lower for p in ['terminated', 'termed', 'inactive', 'former employees']):
+            return 'termed'
         
-        # Text columns → case transforms
-        if isinstance(val, str) and len(val) > 1:
-            if val == val.lower() or val == val.upper():
-                transforms.append({
-                    'column': col,
-                    'type': 'titlecase',
-                    'label': 'Title Case',
-                    'icon': 'Aa'
-                })
+        # All patterns
+        if any(p in q_lower for p in ['all employees', 'everyone', 'all staff', 'all workers', 'total employees']):
+            return 'all'
         
-        # Code columns → lookup mapping
-        if any(p in col_lower for p in ['code', '_cd', 'type', 'category']):
-            transforms.append({
-                'column': col,
-                'type': 'map_lookup',
-                'label': 'Map to Description',
-                'icon': '🔗'
+        return None
+    
+    def _get_needed_clarifications(self, q_lower: str) -> List[str]:
+        """
+        Determine which filter categories need clarification for this question.
+        
+        Returns list of filter category names that need clarification.
+        """
+        needed = []
+        
+        logger.warning(f"[CLARIFICATION] Checking needed. confirmed_facts={self.confirmed_facts}, filter_candidates={list(self.filter_candidates.keys())}")
+        
+        # Check each available filter category
+        for category in self.filter_candidates.keys():
+            # ALWAYS detect first - user may be overriding a previous value
+            detected = self._detect_filter_in_question(category, q_lower)
+            
+            if detected:
+                # User specified in THIS question - set/override it
+                if category in self.confirmed_facts and self.confirmed_facts[category] != detected:
+                    logger.warning(f"[INTELLIGENCE] Overriding {category}: {self.confirmed_facts[category]} → {detected}")
+                else:
+                    logger.warning(f"[INTELLIGENCE] Detected {category} in question: {detected}")
+                self.confirmed_facts[category] = detected
+                continue
+            
+            # Not detected in question - check if already confirmed
+            if category in self.confirmed_facts:
+                logger.warning(f"[CLARIFICATION] Skipping {category} - already confirmed as {self.confirmed_facts[category]}")
+                continue
+            
+            # Check if this filter is relevant to the question
+            if self._is_filter_relevant(category, q_lower):
+                needed.append(category)
+        
+        # Sort by priority (status first, then company, etc.)
+        priority_order = ['status', 'company', 'organization', 'location', 'employee_type', 'pay_type', 'job']
+        needed.sort(key=lambda x: priority_order.index(x) if x in priority_order else 99)
+        
+        logger.warning(f"[CLARIFICATION] Needed clarifications: {needed}")
+        return needed
+    
+    def _detect_filter_in_question(self, category: str, q_lower: str) -> Optional[str]:
+        """
+        Check if user specified a filter value in their question.
+        Returns the detected value or None.
+        
+        This is the SMART DETECTION that auto-applies filters without asking.
+        """
+        if category == 'status':
+            return self._detect_status_in_question(q_lower)
+        
+        # Get filter candidates for this category
+        candidates = self.filter_candidates.get(category, [])
+        if not candidates:
+            return None
+        
+        # LOCATION DETECTION - Fully data-driven from lookups and profile values
+        if category == 'location':
+            # STEP 1: Try to find location from lookups (DATA-DRIVEN)
+            lookup_match = self._find_value_in_lookups(q_lower, 'location')
+            if lookup_match:
+                logger.warning(f"[FILTER-DETECT] Found location '{lookup_match}' from lookup")
+                return lookup_match
+            
+            # STEP 2: Check actual values in data from filter_candidates
+            for candidate in candidates:
+                values = candidate.get('values', [])
+                for value in values:
+                    value_str = str(value).strip()
+                    value_lower = value_str.lower()
+                    
+                    # Skip very short values and blocklisted common words
+                    if len(value_str) < 2 or _is_blocklisted(value_lower):
+                        continue
+                    
+                    # Check if value appears in question with word boundary
+                    if _is_word_boundary_match(q_lower, value_lower):
+                        logger.warning(f"[FILTER-DETECT] Found location value '{value_str}' in question")
+                        return value_str
+                    
+                    # Also check for the code's description from lookups
+                    description = self._get_lookup_description('location', value_str)
+                    if description and _is_word_boundary_match(q_lower, description.lower()):
+                        logger.warning(f"[FILTER-DETECT] Found location '{description}' → code '{value_str}'")
+                        return value_str
+            
+            # STEP 3: US State name→code mapping (universal knowledge fallback)
+            # This is acceptable because US state abbreviations are standardized
+            state_code = self._detect_us_state_in_question(q_lower)
+            if state_code:
+                logger.warning(f"[FILTER-DETECT] Found US state → '{state_code}' via standard mapping")
+                return state_code
+            
+            return None
+        
+        # COMPANY DETECTION - Data-driven from lookups and profile values
+        if category == 'company':
+            # Try lookups first
+            lookup_match = self._find_value_in_lookups(q_lower, 'company')
+            if lookup_match:
+                logger.warning(f"[FILTER-DETECT] Found company '{lookup_match}' from lookup")
+                return lookup_match
+            
+            # Fall back to actual values in data
+            for candidate in candidates:
+                values = candidate.get('values', [])
+                for value in values:
+                    value_str = str(value).strip()
+                    value_lower = value_str.lower()
+                    if len(value_str) >= 3 and not _is_blocklisted(value_lower):
+                        if _is_word_boundary_match(q_lower, value_lower):
+                            logger.warning(f"[FILTER-DETECT] Found company '{value_str}' in question")
+                            return value_str
+                        # Check description from lookups
+                        description = self._get_lookup_description('company', value_str)
+                        if description and _is_word_boundary_match(q_lower, description.lower()):
+                            logger.warning(f"[FILTER-DETECT] Found company '{description}' → code '{value_str}'")
+                            return value_str
+        
+        # PAY TYPE DETECTION - Data-driven from lookups and profile values
+        if category == 'pay_type':
+            # Try lookups first
+            lookup_match = self._find_value_in_lookups(q_lower, 'pay_type')
+            if lookup_match:
+                logger.warning(f"[FILTER-DETECT] Found pay_type '{lookup_match}' from lookup")
+                return lookup_match
+            
+            # Fall back to actual values in data
+            for candidate in candidates:
+                values = candidate.get('values', [])
+                for value in values:
+                    value_str = str(value).strip()
+                    value_lower = value_str.lower()
+                    if len(value_str) >= 1 and not _is_blocklisted(value_lower):
+                        if _is_word_boundary_match(q_lower, value_lower):
+                            logger.warning(f"[FILTER-DETECT] Found pay_type '{value_str}' in question")
+                            return value_str
+                        # Check description from lookups
+                        description = self._get_lookup_description('pay_type', value_str)
+                        if description and _is_word_boundary_match(q_lower, description.lower()):
+                            logger.warning(f"[FILTER-DETECT] Found pay_type '{description}' → code '{value_str}'")
+                            return value_str
+        
+        # EMPLOYEE TYPE DETECTION - Data-driven from lookups and profile values
+        if category == 'employee_type':
+            # Try lookups first
+            lookup_match = self._find_value_in_lookups(q_lower, 'employee_type')
+            if lookup_match:
+                logger.warning(f"[FILTER-DETECT] Found employee_type '{lookup_match}' from lookup")
+                return lookup_match
+            
+            # Fall back to actual values in data
+            for candidate in candidates:
+                values = candidate.get('values', [])
+                for value in values:
+                    value_str = str(value).strip()
+                    value_lower = value_str.lower()
+                    if len(value_str) >= 1 and not _is_blocklisted(value_lower):
+                        if _is_word_boundary_match(q_lower, value_lower):
+                            logger.warning(f"[FILTER-DETECT] Found employee_type '{value_str}' in question")
+                            return value_str
+                        # Check description from lookups
+                        description = self._get_lookup_description('employee_type', value_str)
+                        if description and _is_word_boundary_match(q_lower, description.lower()):
+                            logger.warning(f"[FILTER-DETECT] Found employee_type '{description}' → code '{value_str}'")
+                            return value_str
+        
+        # GENERIC: Check any category against lookups and actual values
+        # Try lookups first
+        lookup_match = self._find_value_in_lookups(q_lower, category)
+        if lookup_match:
+            logger.warning(f"[FILTER-DETECT] Found {category} '{lookup_match}' from lookup")
+            return lookup_match
+        
+        # Fall back to actual values in data
+        for candidate in candidates:
+            values = candidate.get('values', [])
+            for value in values:
+                value_str = str(value).strip()
+                value_lower = value_str.lower()
+                if len(value_str) > 2 and not _is_blocklisted(value_lower):
+                    if _is_word_boundary_match(q_lower, value_lower):
+                        logger.warning(f"[FILTER-DETECT] Found {category} value '{value_str}' in question")
+                        return value_str
+        
+        return None
+    
+    def _is_filter_relevant(self, category: str, q_lower: str) -> bool:
+        """
+        Determine if a filter category is relevant to this question.
+        Returns True if we should ASK about this filter (not auto-detected).
+        
+        Smart logic:
+        - Status: Always relevant for employee questions (unless "all")
+        - Company: Ask if "by company" or multiple companies exist and asking totals
+        - Location: Ask if "by location/state" mentioned
+        - Others: Only if explicitly requested with "by X"
+        """
+        # Status is almost always relevant for employee questions
+        if category == 'status':
+            # Skip if user said "all employees" or similar
+            if any(p in q_lower for p in ['all employees', 'all staff', 'everyone', 'all workers']):
+                self.confirmed_facts['status'] = 'all'
+                return False
+            return True
+        
+        # Check for "by X" patterns that trigger clarification
+        by_patterns = {
+            'company': ['by company', 'per company', 'each company', 'by entity', 'by legal entity'],
+            'location': ['by location', 'by state', 'per state', 'by site', 'each location', 'by region'],
+            'organization': ['by department', 'by org', 'by cost center', 'per department', 'by division'],
+            'pay_type': ['by pay type', 'hourly vs salary', 'hourly and salary'],
+            'employee_type': ['by employee type', 'by worker type', 'regular vs temp']
+        }
+        
+        patterns = by_patterns.get(category, [])
+        if any(p in q_lower for p in patterns):
+            # Check if we have multiple values to ask about
+            candidates = self.filter_candidates.get(category, [])
+            if candidates:
+                distinct_count = candidates[0].get('distinct_count', 0)
+                if distinct_count > 1:
+                    logger.warning(f"[FILTER-RELEVANT] {category} relevant due to 'by X' pattern, {distinct_count} values")
+                    return True
+        
+        return False
+    
+    def _find_value_in_lookups(self, q_lower: str, lookup_type: str) -> Optional[str]:
+        """
+        Search lookups for a value mentioned in the question.
+        Returns the code if found, None otherwise.
+        
+        DATA-DRIVEN: Uses lookups from _intelligence_lookups table.
+        """
+        if not self.structured_handler or not hasattr(self.structured_handler, 'conn'):
+            return None
+        
+        try:
+            # Load lookups for this type
+            lookups = self.structured_handler.conn.execute("""
+                SELECT code_column, lookup_data_json
+                FROM _intelligence_lookups
+                WHERE project_name = ? AND lookup_type = ?
+            """, [self.project, lookup_type]).fetchall()
+            
+            for code_col, lookup_json in lookups:
+                if not lookup_json:
+                    continue
+                    
+                lookup_data = json.loads(lookup_json)
+                
+                # Check each code→description pair
+                for code, description in lookup_data.items():
+                    code_lower = str(code).lower()
+                    desc_lower = str(description).lower() if description else ''
+                    
+                    # Check if description appears in question
+                    if desc_lower and len(desc_lower) > 2:
+                        if _is_word_boundary_match(q_lower, desc_lower):
+                            return code
+                    
+                    # Check if code appears in question (for longer codes)
+                    if len(code_lower) > 2 and not _is_blocklisted(code_lower):
+                        if _is_word_boundary_match(q_lower, code_lower):
+                            return code
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"[LOOKUP] Failed to search lookups: {e}")
+            return None
+    
+    def _get_lookup_description(self, lookup_type: str, code: str) -> Optional[str]:
+        """
+        Get the description for a code from lookups.
+        
+        DATA-DRIVEN: Uses lookups from _intelligence_lookups table.
+        """
+        if not self.structured_handler or not hasattr(self.structured_handler, 'conn') or not code:
+            return None
+        
+        try:
+            lookups = self.structured_handler.conn.execute("""
+                SELECT lookup_data_json
+                FROM _intelligence_lookups
+                WHERE project_name = ? AND lookup_type = ?
+            """, [self.project, lookup_type]).fetchall()
+            
+            code_upper = str(code).upper().strip()
+            
+            for (lookup_json,) in lookups:
+                if not lookup_json:
+                    continue
+                    
+                lookup_data = json.loads(lookup_json)
+                
+                # Try exact match first
+                if code_upper in lookup_data:
+                    return lookup_data[code_upper]
+                
+                # Try case-insensitive
+                for k, v in lookup_data.items():
+                    if str(k).upper().strip() == code_upper:
+                        return v
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"[LOOKUP] Failed to get description: {e}")
+            return None
+    
+    def _detect_us_state_in_question(self, q_lower: str) -> Optional[str]:
+        """
+        Detect US state names in question and return state code.
+        
+        This is UNIVERSAL KNOWLEDGE fallback - US state abbreviations are standardized.
+        Used only when data-driven lookups don't find a match.
+        """
+        # US States - full name to code mapping
+        us_states = {
+            'alabama': 'AL', 'alaska': 'AK', 'arizona': 'AZ', 'arkansas': 'AR',
+            'california': 'CA', 'colorado': 'CO', 'connecticut': 'CT', 'delaware': 'DE',
+            'florida': 'FL', 'georgia': 'GA', 'hawaii': 'HI', 'idaho': 'ID',
+            'illinois': 'IL', 'indiana': 'IN', 'iowa': 'IA', 'kansas': 'KS',
+            'kentucky': 'KY', 'louisiana': 'LA', 'maine': 'ME', 'maryland': 'MD',
+            'massachusetts': 'MA', 'michigan': 'MI', 'minnesota': 'MN', 'mississippi': 'MS',
+            'missouri': 'MO', 'montana': 'MT', 'nebraska': 'NE', 'nevada': 'NV',
+            'new hampshire': 'NH', 'new jersey': 'NJ', 'new mexico': 'NM', 'new york': 'NY',
+            'north carolina': 'NC', 'north dakota': 'ND', 'ohio': 'OH', 'oklahoma': 'OK',
+            'oregon': 'OR', 'pennsylvania': 'PA', 'rhode island': 'RI', 'south carolina': 'SC',
+            'south dakota': 'SD', 'tennessee': 'TN', 'texas': 'TX', 'utah': 'UT',
+            'vermont': 'VT', 'virginia': 'VA', 'washington': 'WA', 'west virginia': 'WV',
+            'wisconsin': 'WI', 'wyoming': 'WY'
+        }
+        
+        for state_name, state_code in us_states.items():
+            if _is_word_boundary_match(q_lower, state_name):
+                return state_code
+        
+        return None
+
+    def _request_filter_clarification(self, question: str, category: str) -> SynthesizedAnswer:
+        """
+        Build a clarification question for a specific filter category.
+        Uses actual values from profile data.
+        """
+        # Get candidates for this category
+        candidates = self.filter_candidates.get(category, [])
+        
+        if category == 'status':
+            return self._request_employee_status_clarification(question)
+        
+        # Build options from profile data
+        options = self._build_filter_options(category, candidates)
+        
+        if not options:
+            # Skip this category if we can't build options
+            return self._continue_without_filter(question, category)
+        
+        # Category-specific question text
+        question_text = {
+            'company': "Which company should I include?",
+            'organization': "Which department/organization?",
+            'location': "Which location(s)?",
+            'pay_type': "Which pay type?",
+            'employee_type': "Which employee type?",
+            'job': "Which job family/code?"
+        }.get(category, f"Which {category}?")
+        
+        return SynthesizedAnswer(
+            question=question,
+            answer="",
+            confidence=0.0,
+            structured_output={
+                'type': 'clarification_needed',
+                'filter_category': category,
+                'questions': [{
+                    'id': category,
+                    'text': question_text,
+                    'type': 'single_select',
+                    'options': options
+                }],
+                'detected_domains': ['employees']
+            },
+            reasoning=f"Need to clarify {category} filter"
+        )
+    
+    def _build_filter_options(self, category: str, candidates: List[Dict]) -> List[Dict]:
+        """Build filter options from profile data."""
+        if not candidates:
+            return []
+        
+        # Use first candidate (highest priority)
+        candidate = candidates[0]
+        values = candidate.get('values', [])
+        distribution = candidate.get('distribution', {})
+        total_count = candidate.get('total_count', 0)
+        
+        if not values:
+            return []
+        
+        options = []
+        for value in values[:10]:  # Limit to 10 options
+            count = distribution.get(str(value), 0)
+            label = f"{value} ({count:,})" if count else str(value)
+            options.append({
+                'id': str(value).lower().replace(' ', '_'),
+                'label': label,
+                'value': value
             })
+        
+        # Add "All" option
+        options.append({
+            'id': 'all',
+            'label': f'All ({total_count:,} total)'
+        })
+        
+        return options
     
-    return transforms
-
-
-# =============================================================================
-# SUGGESTIONS ENDPOINT
-# =============================================================================
-
-@router.get("/bi/suggestions/{project}")
-async def get_suggestions(project: str):
-    """
-    Get smart query suggestions for a project.
+    def _continue_without_filter(self, question: str, category: str) -> SynthesizedAnswer:
+        """Continue processing without this filter (skip clarification)."""
+        self.confirmed_facts[category] = 'all'
+        return self.ask(question)  # Recursive call to continue
     
-    Sources:
-    - filter_candidates (what dimensions exist)
-    - Intelligence findings (data quality issues)
-    - Common query patterns
-    - Recently used queries
-    """
-    if not STRUCTURED_AVAILABLE:
-        raise HTTPException(503, "BI service not available")
+    def _request_employee_status_clarification(self, question: str) -> SynthesizedAnswer:
+        """Ask for employee status clarification using ACTUAL values from filter_candidates."""
+        
+        # Get status options from filter_candidates (smarter selection)
+        status_options = self._get_status_options_from_filter_candidates()
+        
+        if not status_options:
+            # Fallback to generic options if no profile data
+            status_options = [
+                {'id': 'active', 'label': 'Active only', 'default': True},
+                {'id': 'termed', 'label': 'Terminated only'},
+                {'id': 'all', 'label': 'All employees'}
+            ]
+        
+        return SynthesizedAnswer(
+            question=question,
+            answer="",
+            confidence=0.0,
+            structured_output={
+                'type': 'clarification_needed',
+                'questions': [{
+                    'id': 'status',  # Use 'status' consistently (was 'employee_status')
+                    'question': 'Which employees should I include?',
+                    'type': 'radio',
+                    'options': status_options
+                }],
+                'original_question': question,
+                'detected_mode': 'search',
+                'detected_domains': ['employees']
+            },
+            reasoning=['Need to know which employees to include']
+        )
     
-    try:
-        handler = get_structured_handler()
-        schema = _build_bi_schema(handler, project)
+    def _get_status_options_from_filter_candidates(self) -> List[Dict]:
+        """
+        Get employee status options from filter_candidates.
+        Prioritizes columns from employee-level tables (lower row counts).
+        """
+        status_candidates = self.filter_candidates.get('status', [])
         
-        if not schema or not schema.get('tables'):
-            return {"suggestions": [], "categories": []}
+        if not status_candidates:
+            return []
         
-        suggestions = []
-        categories = set()
+        # Find the BEST status column:
+        # 1. Prefer employment_status_code/employment_status over others
+        # 2. Prefer tables with ~14k rows (employee-level) over 60k+ (transaction-level)
+        best_candidate = None
         
-        # 1. Build suggestions from filter_candidates
-        filter_candidates = schema.get('filter_candidates', {})
-        
-        for category, candidates in filter_candidates.items():
-            categories.add(category)
+        for candidate in status_candidates:
+            col_name = candidate.get('column_name', candidate.get('column', '')).lower()
+            total_count = candidate.get('distinct_count', candidate.get('total_count', 0))
+            col_type = candidate.get('inferred_type', candidate.get('type', ''))
             
-            if category == 'status':
-                suggestions.append({
-                    'text': 'How many active employees?',
-                    'type': 'common',
-                    'category': 'employees'
-                })
-                suggestions.append({
-                    'text': 'Show terminated employees by month',
-                    'type': 'common',
-                    'category': 'employees'
-                })
+            # Skip transaction tables (too many rows per employee)
+            if total_count > 20000:
+                continue
             
-            elif category == 'location':
-                if candidates:
-                    # Get a sample location value
-                    sample_values = candidates[0].get('values', [])[:3] if candidates else []
-                    if sample_values:
-                        suggestions.append({
-                            'text': f'Employees by {candidates[0].get("column", "location")}',
-                            'type': 'common',
-                            'category': 'location'
-                        })
+            # Prefer employment_status columns
+            if 'employment_status' in col_name:
+                best_candidate = candidate
+                break
             
-            elif category == 'company':
-                suggestions.append({
-                    'text': 'Headcount by company',
-                    'type': 'common',
-                    'category': 'organization'
-                })
+            # termination_date is good but harder to show counts
+            if col_type == 'date' and 'termination' in col_name:
+                if not best_candidate:
+                    best_candidate = candidate
+                continue
             
-            elif category == 'organization':
-                suggestions.append({
-                    'text': 'Employee count by department',
-                    'type': 'common',
-                    'category': 'organization'
-                })
+            # Any categorical status column from employee-level table
+            if not best_candidate and col_type == 'categorical':
+                best_candidate = candidate
         
-        # 2. Add suggestions from table structure
-        for table in schema.get('tables', []):
+        if not best_candidate:
+            # Fallback to first candidate
+            best_candidate = status_candidates[0] if status_candidates else None
+        
+        if not best_candidate:
+            return []
+        
+        col_name = best_candidate.get('column_name', best_candidate.get('column'))
+        table_name = best_candidate.get('table_name', best_candidate.get('table', ''))
+        logger.warning(f"[CLARIFICATION] Using status column: {col_name} from {table_name.split('__')[-1]}")
+        
+        col_type = best_candidate.get('inferred_type', best_candidate.get('type', ''))
+        
+        # Handle termination_date (date type)
+        if col_type == 'date':
+            total = best_candidate.get('distinct_count', best_candidate.get('total_count', 0))
+            null_count = best_candidate.get('null_count', 0)
+            active_count = null_count  # null termination_date = active
+            termed_count = total - null_count
+            
+            return [
+                {'id': 'active', 'label': f'Active only ({active_count:,} employees)', 'default': True},
+                {'id': 'termed', 'label': f'Terminated only ({termed_count:,} employees)'},
+                {'id': 'all', 'label': f'All employees ({total:,} total)'}
+            ]
+        
+        # Handle categorical status column (A/T codes)
+        values = best_candidate.get('distinct_values', best_candidate.get('values', []))
+        distribution = best_candidate.get('value_distribution', best_candidate.get('distribution', {}))
+        total = best_candidate.get('distinct_count', best_candidate.get('total_count', 0))
+        
+        # Map codes to active/termed
+        active_codes = ['A', 'ACTIVE', 'ACT']
+        termed_codes = ['T', 'TERMINATED', 'TERM', 'I', 'INACTIVE']
+        leave_codes = ['L', 'LEAVE', 'LOA']
+        
+        active_count = sum(distribution.get(v, 0) for v in values if str(v).upper() in active_codes)
+        termed_count = sum(distribution.get(v, 0) for v in values if str(v).upper() in termed_codes)
+        leave_count = sum(distribution.get(v, 0) for v in values if str(v).upper() in leave_codes)
+        
+        options = []
+        if active_count > 0:
+            options.append({'id': 'active', 'label': f'Active only ({active_count:,} employees)', 'default': True})
+        if termed_count > 0:
+            options.append({'id': 'termed', 'label': f'Terminated only ({termed_count:,} employees)'})
+        if leave_count > 0:
+            options.append({'id': 'leave', 'label': f'On Leave ({leave_count:,} employees)'})
+        options.append({'id': 'all', 'label': f'All employees ({total:,} total)'})
+        
+        return options
+    
+    def _get_status_options_from_profiles(self) -> List[Dict]:
+        """
+        Get employee status options from actual profile data.
+        This is the key Phase 2 feature - data-driven clarification.
+        """
+        if not self.schema:
+            return []
+        
+        tables = self.schema.get('tables', [])
+        
+        # Look for status-related columns in the profiles
+        status_patterns = ['status', 'employment_status', 'emp_status', 'employee_status', 
+                          'employment_status_code', 'termination_date', 'term_date']
+        
+        for table in tables:
+            categorical_cols = table.get('categorical_columns', [])
+            column_profiles = table.get('column_profiles', {})
+            
+            # Check categorical columns for status-like values
+            for cat_col in categorical_cols:
+                col_name = cat_col.get('column', '').lower()
+                
+                # Is this a status column?
+                if any(pattern in col_name for pattern in status_patterns):
+                    values = cat_col.get('values', [])
+                    distribution = cat_col.get('distribution', {})
+                    
+                    if values:
+                        return self._build_status_options(values, distribution, col_name)
+            
+            # Also check column_profiles directly
+            for col_name, profile in column_profiles.items():
+                col_lower = col_name.lower()
+                if any(pattern in col_lower for pattern in status_patterns):
+                    if profile.get('is_categorical') and profile.get('distinct_values'):
+                        values = profile['distinct_values']
+                        distribution = profile.get('value_distribution', {})
+                        return self._build_status_options(values, distribution, col_name)
+        
+        return []
+    
+    def _build_status_options(self, values: List[str], distribution: Dict, col_name: str) -> List[Dict]:
+        """Build clarification options from actual data values."""
+        options = []
+        
+        # Common status code mappings
+        status_labels = {
+            'A': 'Active', 'T': 'Terminated', 'L': 'Leave', 'I': 'Inactive',
+            'ACTIVE': 'Active', 'TERMED': 'Terminated', 'TERM': 'Terminated',
+            'LOA': 'Leave of Absence', 'LEAVE': 'Leave', 'INACTIVE': 'Inactive',
+            'REG': 'Regular', 'TEMP': 'Temporary', 'PART': 'Part-time',
+            'FT': 'Full-time', 'PT': 'Part-time'
+        }
+        
+        # Build options with counts
+        active_values = []
+        termed_values = []
+        other_values = []
+        
+        for val in values:
+            val_upper = str(val).upper().strip()
+            count = distribution.get(val, distribution.get(str(val), 0))
+            
+            # Categorize
+            if val_upper in ['A', 'ACTIVE', 'ACT']:
+                active_values.append((val, count))
+            elif val_upper in ['T', 'TERMINATED', 'TERM', 'TERMED', 'I', 'INACTIVE']:
+                termed_values.append((val, count))
+            else:
+                other_values.append((val, count))
+        
+        # Build options with actual counts
+        if active_values:
+            active_count = sum(c for _, c in active_values)
+            active_codes = ', '.join(v for v, _ in active_values)
+            options.append({
+                'id': 'active',
+                'label': f'Active only ({active_count:,} employees)',
+                'codes': active_codes,
+                'default': True
+            })
+        
+        if termed_values:
+            termed_count = sum(c for _, c in termed_values)
+            termed_codes = ', '.join(v for v, _ in termed_values)
+            options.append({
+                'id': 'termed',
+                'label': f'Terminated only ({termed_count:,} employees)',
+                'codes': termed_codes
+            })
+        
+        # Add "All" option with total
+        total_count = sum(distribution.values()) if distribution else 0
+        options.append({
+            'id': 'all',
+            'label': f'All employees ({total_count:,} total)'
+        })
+        
+        # If we couldn't categorize well, show raw values
+        if not active_values and not termed_values and other_values:
+            options = []
+            for val, count in sorted(other_values, key=lambda x: -x[1])[:5]:
+                label = status_labels.get(str(val).upper(), str(val))
+                options.append({
+                    'id': str(val).lower(),
+                    'label': f'{label} ({count:,})',
+                    'code': val
+                })
+            options.append({'id': 'all', 'label': f'All ({total_count:,} total)'})
+        
+        logger.info(f"[CLARIFICATION] Built {len(options)} options from {col_name}: {[o['id'] for o in options]}")
+        return options
+    
+    def _get_status_column_and_codes(self, status_filter: str) -> Tuple[Optional[str], List[str]]:
+        """
+        Get the actual column name and codes to use for filtering.
+        Returns (column_name, [list of codes])
+        """
+        if not self.schema:
+            return None, []
+        
+        tables = self.schema.get('tables', [])
+        status_patterns = ['status', 'employment_status', 'emp_status', 'employee_status', 'employment_status_code']
+        
+        for table in tables:
+            categorical_cols = table.get('categorical_columns', [])
+            column_profiles = table.get('column_profiles', {})
+            
+            for cat_col in categorical_cols:
+                col_name = cat_col.get('column', '')
+                col_lower = col_name.lower()
+                
+                if any(pattern in col_lower for pattern in status_patterns):
+                    values = cat_col.get('values', [])
+                    
+                    # Find matching codes based on status_filter
+                    if status_filter == 'active':
+                        codes = [v for v in values if str(v).upper() in ['A', 'ACTIVE', 'ACT']]
+                    elif status_filter == 'termed':
+                        codes = [v for v in values if str(v).upper() in ['T', 'TERMINATED', 'TERM', 'TERMED', 'I', 'INACTIVE']]
+                    else:
+                        # Check if filter matches a specific code
+                        codes = [v for v in values if str(v).lower() == status_filter.lower()]
+                    
+                    if codes:
+                        return col_name, codes
+            
+            # Also check column_profiles
+            for col_name, profile in column_profiles.items():
+                col_lower = col_name.lower()
+                if any(pattern in col_lower for pattern in status_patterns):
+                    values = profile.get('distinct_values', [])
+                    
+                    if status_filter == 'active':
+                        codes = [v for v in values if str(v).upper() in ['A', 'ACTIVE', 'ACT']]
+                    elif status_filter == 'termed':
+                        codes = [v for v in values if str(v).upper() in ['T', 'TERMINATED', 'TERM', 'TERMED', 'I', 'INACTIVE']]
+                    else:
+                        codes = [v for v in values if str(v).lower() == status_filter.lower()]
+                    
+                    if codes:
+                        return col_name, codes
+        
+        return None, []
+    
+    def _build_filter_instructions(self, relevant_tables: List[Dict]) -> str:
+        """
+        Build SQL filter instructions from confirmed_facts and filter_candidates.
+        Uses profile data to generate accurate WHERE clauses.
+        """
+        filters = []
+        
+        # STATUS FILTER
+        status_filter = self.confirmed_facts.get('status')
+        logger.warning(f"[SQL-GEN] Building filters. status={status_filter}, all_facts={self.confirmed_facts}")
+        
+        if status_filter and status_filter != 'all':
+            # Use SAME logic as _get_status_options_from_filter_candidates to pick column
+            status_candidates = self.filter_candidates.get('status', [])
+            best_candidate = None
+            
+            for candidate in status_candidates:
+                col_name = candidate.get('column_name', candidate.get('column', '')).lower()
+                total_count = candidate.get('distinct_count', candidate.get('total_count', 0))
+                col_type = candidate.get('inferred_type', candidate.get('type', ''))
+                
+                # Skip transaction tables (too many rows per employee)
+                if total_count > 20000:
+                    continue
+                
+                # Prefer employment_status columns (categorical with A/T codes)
+                if 'employment_status' in col_name:
+                    best_candidate = candidate
+                    break
+                
+                # termination_date is fallback
+                if col_type == 'date' and 'termination' in col_name:
+                    if not best_candidate:
+                        best_candidate = candidate
+                    continue
+                
+                # Any categorical status column from employee-level table
+                if not best_candidate and col_type == 'categorical':
+                    best_candidate = candidate
+            
+            if not best_candidate and status_candidates:
+                best_candidate = status_candidates[0]
+            
+            if best_candidate:
+                col_name = best_candidate.get('column_name', best_candidate.get('column'))
+                col_type = best_candidate.get('inferred_type', best_candidate.get('type'))
+                values = best_candidate.get('distinct_values', best_candidate.get('values', []))
+                
+                logger.warning(f"[SQL-GEN] Status candidate: col={col_name}, type={col_type}")
+                
+                if col_type == 'date':  # termination_date
+                    if status_filter == 'active':
+                        filters.append(f"({col_name} IS NULL OR {col_name} = '' OR CAST({col_name} AS VARCHAR) = '')")
+                    elif status_filter == 'termed':
+                        filters.append(f"({col_name} IS NOT NULL AND {col_name} != '' AND CAST({col_name} AS VARCHAR) != '')")
+                else:  # categorical status code
+                    # Find matching codes
+                    if status_filter == 'active':
+                        codes = [v for v in values if str(v).upper() in ['A', 'ACTIVE', 'ACT']]
+                    elif status_filter == 'termed':
+                        codes = [v for v in values if str(v).upper() in ['T', 'TERMINATED', 'TERM', 'TERMED', 'I', 'INACTIVE']]
+                    elif status_filter == 'leave':
+                        codes = [v for v in values if str(v).upper() in ['L', 'LEAVE', 'LOA']]
+                    else:
+                        codes = [v for v in values if str(v).lower() == status_filter.lower()]
+                    
+                    if codes:
+                        codes_str = ', '.join(f"'{c}'" for c in codes)
+                        filters.append(f"{col_name} IN ({codes_str})")
+                    else:
+                        logger.warning(f"[SQL-GEN] No matching codes for status={status_filter} in values={values}")
+            else:
+                # Last resort fallback: look for termination_date in tables
+                for table in relevant_tables:
+                    columns = table.get('columns', [])
+                    for col in columns:
+                        col_name = col.get('name', str(col)) if isinstance(col, dict) else str(col)
+                        if 'termination_date' in col_name.lower():
+                            if status_filter == 'active':
+                                filters.append(f"({col_name} IS NULL OR {col_name} = '')")
+                            elif status_filter == 'termed':
+                                filters.append(f"({col_name} IS NOT NULL AND {col_name} != '')")
+                            break
+        
+        # COMPANY FILTER
+        company_filter = self.confirmed_facts.get('company')
+        if company_filter and company_filter != 'all':
+            company_candidates = self.filter_candidates.get('company', [])
+            if company_candidates:
+                col_name = company_candidates[0].get('column_name', company_candidates[0].get('column'))
+                filters.append(f"{col_name} = '{company_filter}'")
+        
+        # LOCATION FILTER
+        location_filter = self.confirmed_facts.get('location')
+        if location_filter and location_filter != 'all':
+            location_candidates = self.filter_candidates.get('location', [])
+            
+            # Find a VALID location column (reject routing numbers, bank fields, etc.)
+            # This is a safety net for cached profiles from before the profiler fix
+            location_positive = ['state', 'province', 'stateprovince', 'location', 'region', 'city', 'county', 'country', 'site', 'geo']
+            location_negative = ['routing', 'bank', 'account', 'aba', 'swift', 'transit', 'branch_number', 'bsb']
+            
+            valid_col = None
+            valid_table = None
+            
+            # First try filter_candidates
+            for candidate in location_candidates:
+                col_name = candidate.get('column_name', candidate.get('column', ''))
+                col_lower = col_name.lower()
+                
+                # Skip if column name contains invalid patterns
+                if any(neg in col_lower for neg in location_negative):
+                    logger.warning(f"[SQL-GEN] Skipping invalid location column: {col_name}")
+                    continue
+                
+                # Prefer columns with location-related names
+                if any(pos in col_lower for pos in location_positive):
+                    valid_col = col_name
+                    valid_table = candidate.get('table_name', candidate.get('table'))
+                    break
+                
+                # Accept as fallback if no obvious red flags
+                if not valid_col:
+                    valid_col = col_name
+                    valid_table = candidate.get('table_name', candidate.get('table'))
+            
+            # Fallback: search schema for state/province columns if no valid candidate
+            if not valid_col and self.schema:
+                for table_name, table_info in self.schema.items():
+                    columns = table_info.get('columns', [])
+                    for col in columns:
+                        col_lower = col.lower() if isinstance(col, str) else str(col).lower()
+                        if any(pos in col_lower for pos in ['state', 'province', 'stateprovince']):
+                            valid_col = col
+                            valid_table = table_name
+                            logger.warning(f"[SQL-GEN] Found location column from schema: {table_name}.{col}")
+                            break
+                    if valid_col:
+                        break
+            
+            if valid_col:
+                filters.append(f"{valid_col} = '{location_filter}'")
+                logger.warning(f"[SQL-GEN] Location filter: {valid_col} = '{location_filter}'")
+            else:
+                logger.warning(f"[SQL-GEN] No valid location column found, skipping location filter")
+        
+        # PAY TYPE FILTER
+        pay_type_filter = self.confirmed_facts.get('pay_type')
+        if pay_type_filter and pay_type_filter != 'all':
+            pay_candidates = self.filter_candidates.get('pay_type', [])
+            if pay_candidates:
+                col_name = pay_candidates[0].get('column_name', pay_candidates[0].get('column'))
+                values = pay_candidates[0].get('distinct_values', pay_candidates[0].get('values', []))
+                # Map common terms to actual codes
+                if pay_type_filter in ['hourly', 'h']:
+                    codes = [v for v in values if str(v).upper() in ['H', 'HOURLY']]
+                elif pay_type_filter in ['salary', 'salaried', 's']:
+                    codes = [v for v in values if str(v).upper() in ['S', 'SALARY', 'SALARIED']]
+                else:
+                    codes = [pay_type_filter]
+                if codes:
+                    codes_str = ', '.join(f"'{c}'" for c in codes)
+                    filters.append(f"{col_name} IN ({codes_str})")
+        
+        # EMPLOYEE TYPE FILTER
+        emp_type_filter = self.confirmed_facts.get('employee_type')
+        if emp_type_filter and emp_type_filter != 'all':
+            emp_candidates = self.filter_candidates.get('employee_type', [])
+            if emp_candidates:
+                col_name = emp_candidates[0].get('column_name', emp_candidates[0].get('column'))
+                values = emp_candidates[0].get('distinct_values', emp_candidates[0].get('values', []))
+                # Map common terms
+                if emp_type_filter in ['regular', 'reg']:
+                    codes = [v for v in values if str(v).upper() in ['REG', 'REGULAR']]
+                elif emp_type_filter in ['temp', 'temporary']:
+                    codes = [v for v in values if str(v).upper() in ['TMP', 'TEMP', 'TEMPORARY']]
+                elif emp_type_filter in ['contractor', 'contract']:
+                    codes = [v for v in values if str(v).upper() in ['CON', 'CTR', 'CONTRACTOR']]
+                else:
+                    codes = [emp_type_filter]
+                if codes:
+                    codes_str = ', '.join(f"'{c}'" for c in codes)
+                    filters.append(f"{col_name} IN ({codes_str})")
+        
+        # Build final filter string
+        if filters:
+            return "WHERE " + " AND ".join(filters)
+        
+        return ""
+    
+    def _fix_state_names_in_sql(self, sql: str) -> str:
+        """
+        Strip location/state filters from LLM-generated SQL.
+        
+        We handle location filters via data-driven injection from confirmed_facts.
+        The LLM sometimes adds its own (wrong) location filters like ILIKE '%Texas%'.
+        We strip these and let our filter injection handle it properly.
+        """
+        # Only strip if we have a confirmed location filter (we'll inject the right one)
+        location_filter = self.confirmed_facts.get('location')
+        if not location_filter or location_filter == 'all':
+            return sql
+        
+        # Common location column patterns to strip (LLM might use any of these)
+        location_col_patterns = [
+            'stateprovince', 'state_province', 'state', 'province', 
+            'work_state', 'home_state', 'location', 'work_location'
+        ]
+        
+        modified = sql
+        
+        for col_name in location_col_patterns:
+            # Strip patterns like: column ILIKE '%anything%'
+            # This removes the LLM's location filter so our injection can add the correct one
+            
+            # Pattern 0: WHERE col ILIKE '...' AND ... → WHERE ...
+            pattern0 = rf"WHERE\s+{re.escape(col_name)}\s+ILIKE\s+'%?[^']+%?'\s*AND\s*"
+            modified = re.sub(pattern0, 'WHERE ', modified, flags=re.IGNORECASE)
+            
+            # Pattern 1: ... AND col ILIKE '...' AND ... → ... AND ...
+            pattern1 = rf"{re.escape(col_name)}\s+ILIKE\s+'%?[^']+%?'\s*AND\s*"
+            modified = re.sub(pattern1, '', modified, flags=re.IGNORECASE)
+            
+            # Pattern 2: ... AND col ILIKE '...' (at end) → ...
+            pattern2 = rf"\s*AND\s+{re.escape(col_name)}\s+ILIKE\s+'%?[^']+%?'"
+            modified = re.sub(pattern2, '', modified, flags=re.IGNORECASE)
+            
+            # Pattern 3: WHERE col = 'StateName' AND ... → WHERE ...
+            pattern3 = rf"WHERE\s+{re.escape(col_name)}\s*=\s*'[A-Za-z\s]+'\s*AND\s*"
+            modified = re.sub(pattern3, 'WHERE ', modified, flags=re.IGNORECASE)
+            
+            # Pattern 4: ... AND col = 'StateName' (at end) → ...  
+            pattern4 = rf"\s*AND\s+{re.escape(col_name)}\s*=\s*'[A-Za-z\s]+'"
+            modified = re.sub(pattern4, '', modified, flags=re.IGNORECASE)
+            
+            # Pattern 5: WHERE col ILIKE '...' (standalone, no AND) → WHERE 1=1
+            pattern5 = rf"WHERE\s+{re.escape(col_name)}\s+ILIKE\s+'%?[^']+%?'\s*$"
+            modified = re.sub(pattern5, 'WHERE 1=1 ', modified, flags=re.IGNORECASE)
+        
+        if modified != sql:
+            logger.warning(f"[SQL-FIX] Stripped LLM location filter, will use confirmed_facts['location']={location_filter}")
+        
+        if modified != sql:
+            logger.warning(f"[SQL-FIX] Before: {sql[:150]}")
+            logger.warning(f"[SQL-FIX] After: {modified[:150]}")
+        
+        return modified
+    
+    def _inject_where_clause(self, sql: str, filter_clause: str) -> str:
+        """
+        Inject a WHERE clause into SQL that may or may not already have one.
+        
+        This is the data-driven approach: LLM generates structure, we inject filters.
+        """
+        # Clean up filter_clause - remove leading WHERE if present
+        conditions = filter_clause.strip()
+        if conditions.upper().startswith('WHERE '):
+            conditions = conditions[6:].strip()
+        
+        if not conditions:
+            logger.warning(f"[FILTER-INJECT] No conditions to inject")
+            return sql
+        
+        logger.warning(f"[FILTER-INJECT] Injecting: {conditions}")
+        logger.warning(f"[FILTER-INJECT] SQL length before: {len(sql)}")
+        
+        sql_upper = sql.upper()
+        
+        # Check if SQL already has WHERE
+        where_match = re.search(r'\bWHERE\b', sql, re.IGNORECASE)
+        
+        if where_match:
+            # Has WHERE - add with AND after existing conditions
+            logger.warning(f"[FILTER-INJECT] Found existing WHERE at position {where_match.start()}")
+            where_pos = where_match.end()
+            
+            # Find the end of existing WHERE conditions
+            end_keywords = ['GROUP BY', 'ORDER BY', 'LIMIT', 'HAVING', ';']
+            end_pos = len(sql)
+            
+            for keyword in end_keywords:
+                kw_match = re.search(rf'\b{keyword}\b', sql[where_pos:], re.IGNORECASE)
+                if kw_match:
+                    candidate_pos = where_pos + kw_match.start()
+                    if candidate_pos < end_pos:
+                        end_pos = candidate_pos
+            
+            # Insert AND + conditions before end_pos
+            sql = sql[:end_pos].rstrip() + f" AND {conditions} " + sql[end_pos:]
+        
+        else:
+            # No WHERE - find where to insert
+            logger.warning(f"[FILTER-INJECT] No existing WHERE found")
+            
+            # Insert before GROUP BY, ORDER BY, LIMIT, or at end
+            insert_keywords = ['GROUP BY', 'ORDER BY', 'LIMIT', 'HAVING']
+            insert_pos = len(sql.rstrip().rstrip(';'))
+            
+            for keyword in insert_keywords:
+                kw_match = re.search(rf'\b{keyword}\b', sql, re.IGNORECASE)
+                if kw_match and kw_match.start() < insert_pos:
+                    insert_pos = kw_match.start()
+                    logger.warning(f"[FILTER-INJECT] Found {keyword} at {insert_pos}")
+            
+            logger.warning(f"[FILTER-INJECT] Insert position: {insert_pos}")
+            
+            # Insert WHERE clause
+            before = sql[:insert_pos].rstrip()
+            after = sql[insert_pos:].lstrip()
+            
+            logger.warning(f"[FILTER-INJECT] Before part ends with: ...{before[-50:] if len(before) > 50 else before}")
+            logger.warning(f"[FILTER-INJECT] After part: {after[:50] if after else 'EMPTY'}")
+            
+            if after:
+                sql = f"{before} WHERE {conditions} {after}"
+            else:
+                sql = f"{before} WHERE {conditions}"
+        
+        logger.warning(f"[FILTER-INJECT] SQL length after: {len(sql)}")
+        return sql.strip()
+    
+    def _detect_mode(self, q_lower: str) -> IntelligenceMode:
+        """Detect the appropriate intelligence mode."""
+        if any(w in q_lower for w in ['validate', 'check', 'verify', 'issues', 'problems']):
+            return IntelligenceMode.VALIDATE
+        if any(w in q_lower for w in ['configure', 'set up', 'setup']):
+            return IntelligenceMode.CONFIGURE
+        if any(w in q_lower for w in ['compare', 'versus', 'vs', 'difference']):
+            return IntelligenceMode.COMPARE
+        if any(w in q_lower for w in ['report', 'summary', 'overview']):
+            return IntelligenceMode.REPORT
+        if any(w in q_lower for w in ['analyze', 'trend', 'pattern']):
+            return IntelligenceMode.ANALYZE
+        return IntelligenceMode.SEARCH
+    
+    def _detect_domains(self, q_lower: str) -> List[str]:
+        """Detect which data domains are relevant."""
+        domains = []
+        
+        if any(w in q_lower for w in ['employee', 'worker', 'staff', 'people', 'who', 'how many', 'count']):
+            domains.append('employees')
+        if any(w in q_lower for w in ['earn', 'pay', 'salary', 'wage', 'rate', 'hour', '$', 'compensation']):
+            domains.append('earnings')
+        if any(w in q_lower for w in ['deduction', 'benefit', '401k', 'insurance', 'health']):
+            domains.append('deductions')
+        if any(w in q_lower for w in ['tax', 'withhold', 'federal', 'state']):
+            domains.append('taxes')
+        if any(w in q_lower for w in ['job', 'position', 'title', 'department']):
+            domains.append('jobs')
+        
+        return domains if domains else ['general']
+    
+    def _select_relevant_tables(self, tables: List[Dict], q_lower: str) -> List[Dict]:
+        """
+        Select only tables relevant to the question.
+        This keeps the SQL prompt small and focused.
+        
+        IMPORTANT: Always includes tables containing filter_candidate columns
+        so the LLM can build proper JOINs for compound queries.
+        """
+        if not tables:
+            return []
+        
+        # First, identify tables that contain filter_candidate columns
+        # These MUST be included for compound queries to work
+        filter_candidate_tables = set()
+        if self.filter_candidates:
+            for category, candidates in self.filter_candidates.items():
+                for cand in candidates:
+                    table_name = cand.get('table_name', cand.get('table', ''))
+                    if table_name:
+                        filter_candidate_tables.add(table_name.lower())
+        
+        logger.info(f"[SQL-GEN] Filter candidate tables: {filter_candidate_tables}")
+        
+        # Priority keywords for table selection
+        table_keywords = {
+            'personal': ['employee', 'employees', 'person', 'people', 'who', 'name', 'ssn', 'birth', 'hire', 'termination', 'termed', 'terminated', 'active'],
+            'company': ['company', 'organization', 'org', 'entity', 'status'],
+            'job': ['job', 'position', 'title', 'department', 'dept'],
+            'earnings': ['earn', 'earning', 'pay', 'salary', 'wage', 'compensation', 'rate'],
+            'deductions': ['deduction', 'benefit', '401k', 'insurance', 'health'],
+            'taxes': ['tax', 'withhold', 'federal', 'state'],
+            'time': ['time', 'hours', 'attendance', 'schedule'],
+            'address': ['address', 'location', 'city', 'state', 'zip'],
+        }
+        
+        # Score each table
+        scored_tables = []
+        for table in tables:
             table_name = table.get('table_name', '').lower()
             short_name = table_name.split('__')[-1] if '__' in table_name else table_name
             
-            if 'earning' in short_name:
-                suggestions.append({
-                    'text': 'Total earnings by pay type',
-                    'type': 'common',
-                    'category': 'compensation'
-                })
-                suggestions.append({
-                    'text': 'Average salary by department',
-                    'type': 'common',
-                    'category': 'compensation'
-                })
-                categories.add('compensation')
+            score = 0
             
-            if 'deduction' in short_name:
-                suggestions.append({
-                    'text': 'Deductions by type',
-                    'type': 'common',
-                    'category': 'benefits'
-                })
-                categories.add('benefits')
+            # CRITICAL: Boost tables that have filter_candidate columns
+            if table_name in filter_candidate_tables:
+                score += 50  # Very high score to ensure inclusion
+                logger.info(f"[SQL-GEN] Boosting table {short_name} (has filter candidates)")
             
-            if 'job' in short_name or 'position' in short_name:
-                suggestions.append({
-                    'text': 'Employees by job title',
-                    'type': 'common',
-                    'category': 'organization'
-                })
+            # Check if table name matches any keyword patterns
+            for pattern, keywords in table_keywords.items():
+                if pattern in short_name:
+                    # Check if any keyword is in the question
+                    if any(kw in q_lower for kw in keywords):
+                        score += 10
+                    else:
+                        score += 1  # Table exists but question doesn't directly ask about it
+            
+            # Boost "personal" table for general employee questions
+            if 'personal' in short_name and any(kw in q_lower for kw in ['employee', 'how many', 'count', 'who']):
+                score += 20
+            
+            # Boost tables with high row counts (they're likely the main tables)
+            row_count = table.get('row_count', 0)
+            if row_count > 1000:
+                score += 5
+            elif row_count > 100:
+                score += 2
+            
+            scored_tables.append((score, table))
         
-        # 3. Try to get intelligence findings as suggestions
+        # Sort by score descending
+        scored_tables.sort(key=lambda x: -x[0])
+        
+        # Take top 5 tables (increased from 3 to handle compound queries)
+        relevant = [t for score, t in scored_tables[:5] if score > 0]
+        
+        # If no relevant tables found, just use first table
+        if not relevant:
+            relevant = [tables[0]]
+        
+        logger.info(f"[SQL-GEN] Selected {len(relevant)} relevant tables: {[t.get('table_name', '').split('__')[-1] for t in relevant]}")
+        
+        return relevant
+    
+    def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
+        """Generate SQL query using LLMOrchestrator with SMART table selection."""
+        logger.warning(f"[SQL-GEN] v5.5 - Starting SQL generation")
+        logger.warning(f"[SQL-GEN] confirmed_facts: {self.confirmed_facts}")
+        
+        if not self.structured_handler or not self.schema:
+            return None
+        
+        tables = self.schema.get('tables', [])
+        if not tables:
+            return None
+        
+        # Get LLMOrchestrator
         try:
-            if INTELLIGENCE_AVAILABLE:
-                engine = IntelligenceEngine(project)
-                engine.load_context(structured_handler=handler, schema=schema)
-                
-                # Run quick analysis for findings
-                # (In production, cache these or run async)
-                # For now, add placeholder for common data quality issues
-                
-                # Check for location mismatches
-                if 'location' in filter_candidates:
-                    suggestions.append({
-                        'text': 'Employees where home state differs from work state',
-                        'type': 'finding',
-                        'category': 'data_quality',
-                        'badge': 'Potential issue'
-                    })
-        except Exception as e:
-            logger.warning(f"[BI] Could not get intelligence findings: {e}")
-        
-        # 4. Add saved queries (from Supabase)
-        if SUPABASE_AVAILABLE:
             try:
-                supabase = get_supabase()
-                saved = supabase.table('bi_saved_queries').select('name, query').eq(
-                    'project', project
-                ).limit(5).execute()
-                
-                for item in saved.data or []:
-                    suggestions.append({
-                        'text': item['query'],
-                        'type': 'saved',
-                        'name': item['name'],
-                        'category': 'saved'
-                    })
-                    categories.add('saved')
+                from utils.llm_orchestrator import LLMOrchestrator
+            except ImportError:
+                from backend.utils.llm_orchestrator import LLMOrchestrator
+            
+            orchestrator = LLMOrchestrator()
+        except Exception as e:
+            logger.error(f"[SQL-GEN] Could not load LLMOrchestrator: {e}")
+            return None
+        
+        # SMART TABLE SELECTION - only include relevant tables
+        q_lower = question.lower()
+        relevant_tables = self._select_relevant_tables(tables, q_lower)
+        
+        # Build COMPACT schema with SHORT ALIASES
+        tables_info = []
+        all_columns = set()
+        primary_table = None
+        table_aliases = {}  # Map short alias to full name
+        used_aliases = set()  # Track used aliases to avoid duplicates
+        
+        # Common sheet/table name keywords to look for
+        KNOWN_SHEET_KEYWORDS = [
+            'personal', 'deductions', 'company', 'earnings', 'direct_deposit',
+            'fit', 'sit', 'lit', 'web', 'job', 'rates', 'taxes', 'benefits',
+            'supervisor', 'scheduled', 'org_level', 'pay_group', 'summary',
+            'employee', 'position', 'department', 'location', 'bank', 'ach',
+            'garnishment', 'accruals', 'time', 'attendance', 'job_codes'
+        ]
+        
+        def extract_short_alias(full_table_name: str, used: set) -> str:
+            """Extract a meaningful short alias from a long table name."""
+            # First check for __ delimiter (old format)
+            if '__' in full_table_name:
+                candidate = full_table_name.split('__')[-1]
+                if candidate and candidate not in used:
+                    return candidate
+            
+            # Look for known keywords in the table name
+            name_lower = full_table_name.lower()
+            for keyword in KNOWN_SHEET_KEYWORDS:
+                # Check if keyword appears as a word boundary (not substring)
+                pattern = rf'_{keyword}(?:_|$)'
+                if re.search(pattern, name_lower):
+                    if keyword not in used:
+                        return keyword
+                    # If duplicate, append a number
+                    for suffix in range(2, 10):
+                        candidate = f"{keyword}{suffix}"
+                        if candidate not in used:
+                            return candidate
+            
+            # Fallback: use last segment(s) after splitting by underscore
+            parts = full_table_name.split('_')
+            if len(parts) >= 2:
+                # Try last 1-2 meaningful parts
+                for i in range(1, min(4, len(parts))):
+                    candidate = '_'.join(parts[-i:])
+                    if len(candidate) <= 20 and candidate not in used:
+                        return candidate
+            
+            # Last resort: truncated name with index
+            base = full_table_name[:15]
+            if base not in used:
+                return base
+            for suffix in range(2, 100):
+                candidate = f"{base}_{suffix}"
+                if candidate not in used:
+                    return candidate
+            
+            return full_table_name  # Give up, use full name
+        
+        for i, table in enumerate(relevant_tables):
+            table_name = table.get('table_name', '')
+            columns = table.get('columns', [])
+            if columns and isinstance(columns[0], dict):
+                col_names = [c.get('name', str(c)) for c in columns]
+            else:
+                col_names = [str(c) for c in columns] if columns else []
+            row_count = table.get('row_count', 0)
+            
+            all_columns.update(col_names)
+            
+            # Create SHORT alias from table name - IMPROVED EXTRACTION
+            short_name = extract_short_alias(table_name, used_aliases)
+            used_aliases.add(short_name)
+            table_aliases[short_name] = table_name
+            
+            logger.info(f"[SQL-GEN] Table alias: {short_name} → {table_name[:50]}...")
+            
+            # First relevant table is "primary"
+            if i == 0:
+                primary_table = short_name
+            
+            # Only include sample for primary table
+            sample_str = ""
+            if i == 0:
+                try:
+                    rows = self.structured_handler.query(f'SELECT * FROM "{table_name}" LIMIT 2')
+                    cols = list(rows[0].keys()) if rows else []
+                    if rows and cols:
+                        samples = []
+                        for col in cols[:4]:  # Limit to 4 columns
+                            vals = set(str(row.get(col, ''))[:15] for row in rows if row.get(col))
+                            if vals:
+                                samples.append(f"    {col}: {', '.join(list(vals)[:2])}")
+                        sample_str = "\n  Sample:\n" + "\n".join(samples[:4]) if samples else ""
+                except:
+                    pass
+            
+            # Compact column list
+            col_str = ', '.join(col_names[:15])
+            if len(col_names) > 15:
+                col_str += f" (+{len(col_names) - 15} more)"
+            
+            # Use SHORT name in schema
+            tables_info.append(f"Table: {short_name}\n  Columns: {col_str}\n  Rows: {row_count}{sample_str}")
+        
+        # Store aliases for SQL post-processing
+        self._table_aliases = table_aliases
+        
+        schema_text = '\n\n'.join(tables_info)
+        
+        # SIMPLIFIED relationships - only between relevant tables
+        relationships_text = ""
+        if self.relationships and len(relevant_tables) > 1:
+            relevant_table_names = {t.get('table_name', '') for t in relevant_tables}
+            rel_lines = []
+            for rel in self.relationships[:10]:
+                src_table = rel.get('source_table', '')
+                tgt_table = rel.get('target_table', '')
+                if src_table in relevant_table_names and tgt_table in relevant_table_names:
+                    src = f"{src_table.split('__')[-1]}.{rel.get('source_column')}"
+                    tgt = f"{tgt_table.split('__')[-1]}.{rel.get('target_column')}"
+                    rel_lines.append(f"  {src} → {tgt}")
+            if rel_lines:
+                relationships_text = "\n\nJOIN ON:\n" + "\n".join(rel_lines[:5])
+        
+        # BUILD FILTER INSTRUCTIONS FROM CONFIRMED FACTS (for post-injection)
+        filter_instructions = self._build_filter_instructions(relevant_tables)
+        logger.warning(f"[SQL-GEN] filter_instructions: {filter_instructions if filter_instructions else 'NONE'}")
+        
+        # BUILD SEMANTIC HINTS from filter_candidates
+        # This tells the LLM which columns to use for specific purposes
+        # For simple queries, only include columns from the primary table
+        semantic_hints = []
+        
+        # Get primary table name for filtering
+        primary_table_full = relevant_tables[0].get('table_name', '') if relevant_tables else ''
+        primary_table_short = primary_table_full.split('__')[-1] if '__' in primary_table_full else primary_table_full
+        
+        # Check if this is a simple "by X" query (should avoid JOINs)
+        is_simple_query = bool(re.search(r'\bshow\s+\w+.*\bby\s+\w+', q_lower)) or bool(re.search(r'\bhow many\b', q_lower))
+        
+        if self.filter_candidates:
+            for category, candidates in self.filter_candidates.items():
+                if not candidates:
+                    continue
+                    
+                if category == 'status':
+                    # Status can have multiple useful columns - list them all
+                    date_cols = []
+                    code_cols = []
+                    for cand in candidates:
+                        col_name = cand.get('column_name', cand.get('column', ''))
+                        col_type = cand.get('inferred_type', cand.get('type', ''))
+                        table_name = cand.get('table_name', cand.get('table', ''))
+                        short_table = table_name.split('__')[-1] if '__' in table_name else table_name
+                        col_lower = col_name.lower()
+                        logger.warning(f"[SQL-GEN] Status candidate column: {col_name} in {short_table} (type={col_type})")
+                        # Check if this is a termination date column
+                        is_term_date = (
+                            col_type == 'date' or
+                            'termination' in col_lower or 
+                            'term_date' in col_lower or
+                            'term_dt' in col_lower or
+                            'termdate' in col_lower or
+                            col_lower == 'term_date' or
+                            col_lower.endswith('_term_date')
+                        )
+                        if is_term_date:
+                            date_cols.append((f"{short_table}.{col_name}", col_lower))
+                        else:
+                            # Prioritize employment_status columns
+                            priority = 0
+                            if 'employment_status' in col_lower:
+                                priority = 100
+                            elif 'emp_status' in col_lower:
+                                priority = 90
+                            elif col_lower == 'status' or col_lower.endswith('_status'):
+                                priority = 50
+                            code_cols.append((f"{short_table}.{col_name}", priority))
+                    
+                    if date_cols:
+                        semantic_hints.append(f"- For termination dates/timing: use {date_cols[0][0]}")
+                    if code_cols:
+                        # Sort by priority descending, pick best
+                        code_cols.sort(key=lambda x: -x[1])
+                        semantic_hints.append(f"- For employee status (active/termed): use {code_cols[0][0]}")
+                else:
+                    # Other categories - find column in primary table if possible
+                    best = candidates[0]
+                    col_name = best.get('column_name', best.get('column', ''))
+                    table_name = best.get('table_name', best.get('table', ''))
+                    short_table = table_name.split('__')[-1] if '__' in table_name else table_name
+                    
+                    # For simple queries, prefer columns in the primary table
+                    if is_simple_query and short_table and short_table != primary_table_short:
+                        # Try to find same column in primary table
+                        found_in_primary = False
+                        for cand in candidates:
+                            cand_table = cand.get('table_name', cand.get('table', ''))
+                            cand_short = cand_table.split('__')[-1] if '__' in cand_table else cand_table
+                            if cand_short == primary_table_short:
+                                col_name = cand.get('column_name', cand.get('column', ''))
+                                short_table = cand_short
+                                found_in_primary = True
+                                break
+                        
+                        if not found_in_primary:
+                            logger.warning(f"[SQL-GEN] Skipping hint for {category} - column not in primary table {primary_table_short}")
+                            continue
+                    
+                    full_col = f"{short_table}.{col_name}" if short_table else col_name
+                    
+                    if category == 'location':
+                        semantic_hints.append(f"- For location/state: use {full_col}")
+                    elif category == 'company':
+                        semantic_hints.append(f"- For company: use {full_col}")
+                    elif category == 'organization':
+                        semantic_hints.append(f"- For org/department: use {full_col}")
+                    elif category == 'pay_type':
+                        semantic_hints.append(f"- For pay type (hourly/salary): use {full_col}")
+                    elif category == 'employee_type':
+                        semantic_hints.append(f"- For employee type (regular/temp): use {full_col}")
+                    elif category == 'job':
+                        semantic_hints.append(f"- For job/position: use {full_col}")
+        
+        semantic_text = ""
+        if semantic_hints:
+            # Add note about automatic status filtering
+            semantic_hints.insert(0, "NOTE: Status filtering (active/termed) is applied automatically - do not add WHERE clauses for it")
+            semantic_text = "\n\nCOLUMN USAGE:\n" + "\n".join(semantic_hints)
+            logger.warning(f"[SQL-GEN] Semantic hints: {len(semantic_hints)} column mappings added")
+            for hint in semantic_hints:
+                logger.warning(f"[SQL-GEN] Hint: {hint}")
+        
+        # Build query hints based on question patterns
+        query_hints = []
+        
+        # "Show X by Y" pattern - simple aggregation, no JOINs needed
+        if re.search(r'\bshow\s+\w+\s+\w*\s*by\s+\w+', q_lower) or re.search(r'\bby\s+(job|state|location|company|month|year)\b', q_lower):
+            query_hints.append(f"Use simple aggregation: SELECT column, COUNT(*) FROM {primary_table} GROUP BY column")
+            query_hints.append("Do NOT use JOINs for simple counts")
+            
+            # Add ORDER BY hints
+            if 'month' in q_lower or 'year' in q_lower or 'date' in q_lower:
+                query_hints.append("ORDER BY the date/month column ASC for chronological order")
+            else:
+                query_hints.append("ORDER BY COUNT(*) DESC to show highest counts first")
+        
+        # COUNT hint
+        if 'how many' in q_lower or 'count' in q_lower:
+            query_hints.append(f"For COUNT, use: SELECT COUNT(*) FROM \"{primary_table}\"")
+        
+        # GROUP BY hint - detect "by X" patterns
+        group_by_patterns = [
+            (r'\bby\s+month\b', 'GROUP BY month - use strftime(\'%Y-%m\', TRY_CAST(date_column AS DATE)) to get YYYY-MM format'),
+            (r'\bby\s+year\b', 'GROUP BY year - use EXTRACT(YEAR FROM date_column)'),
+            (r'\bby\s+(state|location)\b', 'GROUP BY location/state column'),
+            (r'\bby\s+(company|org)\b', 'GROUP BY company/organization column'),
+            (r'\bby\s+(department|dept)\b', 'GROUP BY department/org column'),
+        ]
+        
+        for pattern, hint in group_by_patterns:
+            if re.search(pattern, q_lower):
+                query_hints.append(hint)
+                logger.warning(f"[SQL-GEN] Detected GROUP BY pattern: {pattern}")
+        
+        # Format all hints
+        query_hint = ""
+        if query_hints:
+            query_hint = "\n\nHINTS:\n" + "\n".join(f"- {h}" for h in query_hints)
+        
+        prompt = f"""SCHEMA:
+{schema_text}{relationships_text}{semantic_text}
+{query_hint}
+
+QUESTION: {question}
+
+RULES:
+1. Use ONLY columns from SCHEMA - never invent columns
+2. DO NOT add WHERE for status/active/termed - filters injected automatically
+3. For "show X by Y" queries: SELECT Y, COUNT(*) FROM table GROUP BY Y
+4. Keep queries SIMPLE - avoid JOINs unless absolutely needed
+5. ILIKE for text matching
+
+SQL:"""
+        
+        logger.warning(f"[SQL-GEN] Calling orchestrator ({len(prompt)} chars, {len(relevant_tables)} tables)")
+        
+        result = orchestrator.generate_sql(prompt, all_columns)
+        
+        if result.get('success') and result.get('sql'):
+            sql = result['sql'].strip()
+            
+            # Clean markdown
+            if '```' in sql:
+                sql = re.sub(r'```sql\s*', '', sql, flags=re.IGNORECASE)
+                sql = re.sub(r'```\s*$', '', sql)
+                sql = sql.replace('```', '').strip()
+            
+            logger.warning(f"[SQL-GEN] LLM raw output: {sql[:200]}")
+            
+            # EXPAND short aliases to full table names WITH alias preservation
+            # (?!\.) prevents matching table.column references like personal.termination_date
+            if hasattr(self, '_table_aliases') and self._table_aliases:
+                for short_name, full_name in self._table_aliases.items():
+                    # Replace FROM short_name → FROM "full_name" AS short_name
+                    sql = re.sub(
+                        rf'\bFROM\s+{re.escape(short_name)}\b(?!\.)(?!\s+AS)',
+                        f'FROM "{full_name}" AS {short_name}',
+                        sql,
+                        flags=re.IGNORECASE
+                    )
+                    sql = re.sub(
+                        rf'\bFROM\s+"{re.escape(short_name)}"(?!\.)(?!\s+AS)',
+                        f'FROM "{full_name}" AS {short_name}',
+                        sql,
+                        flags=re.IGNORECASE
+                    )
+                    # Replace JOIN short_name → JOIN "full_name" AS short_name
+                    sql = re.sub(
+                        rf'\bJOIN\s+{re.escape(short_name)}\b(?!\.)(?!\s+AS)',
+                        f'JOIN "{full_name}" AS {short_name}',
+                        sql,
+                        flags=re.IGNORECASE
+                    )
+                    sql = re.sub(
+                        rf'\bJOIN\s+"{re.escape(short_name)}"(?!\.)(?!\s+AS)',
+                        f'JOIN "{full_name}" AS {short_name}',
+                        sql,
+                        flags=re.IGNORECASE
+                    )
+                logger.warning(f"[SQL-GEN] After alias expansion: {sql[:200]}")
+            
+            # STRIP LLM-generated status filters (we inject the correct one ourselves)
+            # The LLM often ignores our "don't add status WHERE" instruction
+            status_filter_patterns = [
+                r"\bWHERE\s+\w*\.?employment_status_code\s*=\s*'[^']*'\s*",  # WHERE x.employment_status_code = 'TERM'
+                r"\bAND\s+\w*\.?employment_status_code\s*=\s*'[^']*'\s*",    # AND x.employment_status_code = 'TERM'
+                r"\bWHERE\s+\w*\.?employment_status\s*=\s*'[^']*'\s*",       # WHERE employment_status = 'X'
+                r"\bAND\s+\w*\.?employment_status\s*=\s*'[^']*'\s*",
+            ]
+            for pattern in status_filter_patterns:
+                if re.search(pattern, sql, re.IGNORECASE):
+                    logger.warning(f"[SQL-GEN] Stripping LLM-generated status filter")
+                    # If it was the only WHERE clause, remove it entirely
+                    sql = re.sub(pattern, 'WHERE ', sql, count=1, flags=re.IGNORECASE)
+                    # Clean up "WHERE AND" or "WHERE WHERE" that might result
+                    sql = re.sub(r'\bWHERE\s+WHERE\b', 'WHERE', sql, flags=re.IGNORECASE)
+                    sql = re.sub(r'\bWHERE\s+AND\b', 'WHERE', sql, flags=re.IGNORECASE)
+                    sql = re.sub(r'\bWHERE\s+GROUP\b', 'GROUP', sql, flags=re.IGNORECASE)
+                    sql = re.sub(r'\bWHERE\s+ORDER\b', 'ORDER', sql, flags=re.IGNORECASE)
+                    sql = re.sub(r'\bWHERE\s*$', '', sql, flags=re.IGNORECASE)
+            
+            # INJECT FILTER CLAUSE (data-driven, not LLM-generated)
+            logger.warning(f"[SQL-GEN] About to inject, filter_instructions={filter_instructions}")
+            if filter_instructions:
+                sql = self._inject_where_clause(sql, filter_instructions)
+                logger.warning(f"[SQL-GEN] After filter injection: {sql[:200]}")
+            
+            # FIX STATE NAME PATTERNS - convert "Texas" to "TX" etc in ILIKE clauses
+            sql = self._fix_state_names_in_sql(sql)
+            
+            # FIX DuckDB syntax: MONTH(x) → EXTRACT(MONTH FROM x)
+            sql = re.sub(r'\bMONTH\s*\(\s*([^)]+)\s*\)', r'EXTRACT(MONTH FROM \1)', sql, flags=re.IGNORECASE)
+            sql = re.sub(r'\bYEAR\s*\(\s*([^)]+)\s*\)', r'EXTRACT(YEAR FROM \1)', sql, flags=re.IGNORECASE)
+            sql = re.sub(r'\bDAY\s*\(\s*([^)]+)\s*\)', r'EXTRACT(DAY FROM \1)', sql, flags=re.IGNORECASE)
+            
+            # FIX: Wrap columns with "date" in name in TRY_CAST for DATE_TRUNC and EXTRACT
+            # This handles VARCHAR date columns that DuckDB can't process directly
+            # Match any column name containing 'date' (case insensitive)
+            # DATE_TRUNC('month', xxx_date) → DATE_TRUNC('month', TRY_CAST(xxx_date AS DATE))
+            sql = re.sub(
+                r"DATE_TRUNC\s*\(\s*'(\w+)'\s*,\s*(\w*date\w*)\s*\)",
+                r"DATE_TRUNC('\1', TRY_CAST(\2 AS DATE))",
+                sql, flags=re.IGNORECASE
+            )
+            # Also handle table.column format: DATE_TRUNC('month', personal.termination_date)
+            sql = re.sub(
+                r"DATE_TRUNC\s*\(\s*'(\w+)'\s*,\s*(\w+\.\w*date\w*)\s*\)",
+                r"DATE_TRUNC('\1', TRY_CAST(\2 AS DATE))",
+                sql, flags=re.IGNORECASE
+            )
+            
+            # Wrap strftime on date columns in TRY_CAST (in case LLM used strftime directly)
+            # strftime('%Y-%m', termination_date) → strftime('%Y-%m', TRY_CAST(termination_date AS DATE))
+            sql = re.sub(
+                r"strftime\s*\(\s*'([^']+)'\s*,\s*(\w*date\w*)\s*\)",
+                r"strftime('\1', TRY_CAST(\2 AS DATE))",
+                sql, flags=re.IGNORECASE
+            )
+            sql = re.sub(
+                r"strftime\s*\(\s*'([^']+)'\s*,\s*(\w+\.\w*date\w*)\s*\)",
+                r"strftime('\1', TRY_CAST(\2 AS DATE))",
+                sql, flags=re.IGNORECASE
+            )
+            
+            # EXTRACT(MONTH FROM xxx_date) → EXTRACT(MONTH FROM TRY_CAST(xxx_date AS DATE))
+            sql = re.sub(
+                r"EXTRACT\s*\(\s*(\w+)\s+FROM\s+(\w*date\w*)\s*\)",
+                r"EXTRACT(\1 FROM TRY_CAST(\2 AS DATE))",
+                sql, flags=re.IGNORECASE
+            )
+            # Also handle table.column format
+            sql = re.sub(
+                r"EXTRACT\s*\(\s*(\w+)\s+FROM\s+(\w+\.\w*date\w*)\s*\)",
+                r"EXTRACT(\1 FROM TRY_CAST(\2 AS DATE))",
+                sql, flags=re.IGNORECASE
+            )
+            
+            # UPGRADE: Convert EXTRACT(MONTH FROM x) to strftime('%Y-%m', x) for year-month grouping
+            # This gives us "2024-01" instead of just "1" which is much more useful
+            if 'by month' in q_lower or 'per month' in q_lower:
+                # Replace EXTRACT(MONTH FROM TRY_CAST(x AS DATE)) with strftime('%Y-%m', TRY_CAST(x AS DATE))
+                sql = re.sub(
+                    r"EXTRACT\s*\(\s*MONTH\s+FROM\s+TRY_CAST\s*\(\s*([^)]+)\s+AS\s+DATE\s*\)\s*\)",
+                    r"strftime('%Y-%m', TRY_CAST(\1 AS DATE))",
+                    sql, flags=re.IGNORECASE
+                )
+                # Also convert DATE_TRUNC('month', x) to strftime('%Y-%m', x)
+                sql = re.sub(
+                    r"DATE_TRUNC\s*\(\s*'month'\s*,\s*TRY_CAST\s*\(\s*([^)]+)\s+AS\s+DATE\s*\)\s*\)",
+                    r"strftime('%Y-%m', TRY_CAST(\1 AS DATE))",
+                    sql, flags=re.IGNORECASE
+                )
+                logger.warning("[SQL-GEN] Upgraded to strftime('%Y-%m') for year-month grouping")
+            
+            logger.warning(f"[SQL-GEN] Generated: {sql[:150]}")
+            
+            # AUTO-FIX: If question asks "by X" but SQL has no GROUP BY, add it
+            sql_upper = sql.upper()
+            if 'GROUP BY' not in sql_upper:
+                # Check if question expects grouping
+                group_match = re.search(r'\bby\s+(month|year|state|location|company|department)\b', q_lower)
+                if group_match:
+                    group_type = group_match.group(1)
+                    logger.warning(f"[SQL-GEN] Question expects GROUP BY {group_type} but SQL has none - checking for aggregation")
+                    
+                    # Find if there's an alias we can GROUP BY
+                    # Look for "AS month" or "AS termination_month" etc.
+                    alias_match = re.search(rf'\bAS\s+(\w*{group_type}\w*)', sql, re.IGNORECASE)
+                    if alias_match:
+                        alias = alias_match.group(1)
+                        # Add GROUP BY before ORDER BY or at end
+                        if 'ORDER BY' in sql_upper:
+                            sql = re.sub(r'\bORDER BY\b', f'GROUP BY {alias} ORDER BY', sql, flags=re.IGNORECASE)
+                        else:
+                            sql = sql.rstrip(';') + f' GROUP BY {alias}'
+                        logger.warning(f"[SQL-GEN] Auto-added: GROUP BY {alias}")
+            
+            # AUTO-FIX: Add ORDER BY if missing for aggregate queries
+            sql_upper = sql.upper()
+            logger.warning(f"[SQL-GEN] ORDER BY check: GROUP BY={('GROUP BY' in sql_upper)}, ORDER BY missing={('ORDER BY' not in sql_upper)}")
+            if 'GROUP BY' in sql_upper and 'ORDER BY' not in sql_upper:
+                # For month/year queries, order chronologically
+                logger.warning(f"[SQL-GEN] Checking month/year: month={('month' in q_lower)}, year={('year' in q_lower)}")
+                if 'month' in q_lower or 'year' in q_lower:
+                    # Find the month/date alias or column
+                    month_match = re.search(r'\bAS\s+(\w*month\w*)', sql, re.IGNORECASE)
+                    logger.warning(f"[SQL-GEN] Month alias match: {month_match.group(1) if month_match else 'None'}")
+                    if month_match:
+                        sql = sql.rstrip(';') + f' ORDER BY {month_match.group(1)} ASC'
+                        logger.warning(f"[SQL-GEN] Auto-added: ORDER BY {month_match.group(1)} ASC (chronological)")
+                else:
+                    # For other groupings, order by count descending
+                    count_match = re.search(r'COUNT\s*\([^)]*\)\s*(?:AS\s+)?(\w+)?', sql, re.IGNORECASE)
+                    if count_match:
+                        count_alias = count_match.group(1) if count_match.group(1) else 'COUNT(*)'
+                        sql = sql.rstrip(';') + f' ORDER BY {count_alias} DESC'
+                        logger.warning(f"[SQL-GEN] Auto-added: ORDER BY {count_alias} DESC (highest first)")
+            
+            logger.warning(f"[SQL-GEN] Final SQL: {sql[-100:]}")
+            
+            # Detect query type
+            sql_upper = sql.upper()
+            if 'COUNT(' in sql_upper:
+                query_type = 'count'
+            elif 'SUM(' in sql_upper:
+                query_type = 'sum'
+            elif 'AVG(' in sql_upper:
+                query_type = 'average'
+            else:
+                query_type = 'list'
+            
+            table_match = re.search(r'FROM\s+"?([^"\s]+)"?', sql, re.IGNORECASE)
+            table_name = table_match.group(1) if table_match else 'unknown'
+            
+            return {
+                'sql': sql,
+                'table': table_name,
+                'query_type': query_type,
+                'all_columns': all_columns
+            }
+        
+        return None
+    
+    def _try_fix_sql_from_error(self, sql: str, error_msg: str, all_columns: set) -> Optional[str]:
+        """Try to fix SQL based on error message."""
+        from difflib import SequenceMatcher
+        
+        # Fix 1: VARCHAR column used with date functions - add TRY_CAST
+        if 'date_part' in error_msg.lower() and 'VARCHAR' in error_msg:
+            # Find EXTRACT(... FROM column_name) patterns and wrap in TRY_CAST
+            pattern = r"EXTRACT\s*\(\s*(\w+)\s+FROM\s+(\w+)\s*\)"
+            match = re.search(pattern, sql, re.IGNORECASE)
+            if match:
+                part = match.group(1)  # MONTH, YEAR, etc.
+                col = match.group(2)   # column name
+                fixed_sql = re.sub(
+                    pattern,
+                    f"EXTRACT({part} FROM TRY_CAST({col} AS DATE))",
+                    sql,
+                    flags=re.IGNORECASE
+                )
+                logger.info(f"[SQL-FIX] Added TRY_CAST for date extraction on {col}")
+                return fixed_sql
+        
+        # Fix 2: Column not found errors
+        patterns = [
+            r'does not have a column named "([^"]+)"',
+            r'Referenced column "([^"]+)" not found',
+            r'column "([^"]+)" not found',
+        ]
+        
+        bad_col = None
+        for pattern in patterns:
+            match = re.search(pattern, error_msg, re.IGNORECASE)
+            if match:
+                bad_col = match.group(1)
+                break
+        
+        if not bad_col:
+            return None
+        
+        valid_cols_lower = {c.lower() for c in all_columns}
+        
+        known_fixes = {
+            'rate': 'hourly_pay_rate',
+            'hourly_rate': 'hourly_pay_rate',
+            'pay_rate': 'hourly_pay_rate',
+            'employee_id': 'employee_number',
+            'emp_id': 'employee_number',
+        }
+        
+        fix = known_fixes.get(bad_col.lower())
+        if fix and fix.lower() in valid_cols_lower:
+            logger.info(f"[SQL-FIX] {bad_col} → {fix}")
+            return re.sub(r'\b' + re.escape(bad_col) + r'\b', f'"{fix}"', sql, flags=re.IGNORECASE)
+        
+        # Fuzzy match
+        if '_' in bad_col:
+            best_score = 0.6
+            for col in all_columns:
+                score = SequenceMatcher(None, bad_col.lower(), col.lower()).ratio()
+                if score > best_score:
+                    best_score = score
+                    fix = col
+            if fix:
+                logger.info(f"[SQL-FIX] Fuzzy: {bad_col} → {fix}")
+                return re.sub(r'\b' + re.escape(bad_col) + r'\b', f'"{fix}"', sql, flags=re.IGNORECASE)
+        
+        return None
+    
+    def _gather_reality(self, question: str, analysis: Dict) -> List[Truth]:
+        """Gather REALITY - what the customer's DATA shows."""
+        if not self.structured_handler or not self.schema:
+            return []
+        
+        truths = []
+        domains = analysis.get('domains', ['general'])
+        
+        # Pattern cache
+        pattern_cache = None
+        try:
+            from utils.sql_pattern_cache import initialize_patterns
+            if self.project:
+                pattern_cache = initialize_patterns(self.project, self.schema)
+        except:
+            try:
+                from backend.utils.sql_pattern_cache import initialize_patterns
+                if self.project:
+                    pattern_cache = initialize_patterns(self.project, self.schema)
             except:
                 pass
         
-        # Deduplicate by text
-        seen = set()
-        unique_suggestions = []
-        for s in suggestions:
-            if s['text'] not in seen:
-                seen.add(s['text'])
-                unique_suggestions.append(s)
+        try:
+            sql = None
+            sql_source = None
+            sql_info = None
+            
+            # Check cache
+            if pattern_cache:
+                cached = pattern_cache.find_matching_pattern(question)
+                if cached and cached.get('sql'):
+                    sql = cached['sql']
+                    sql_source = 'cache'
+                    logger.warning("[SQL] Cache hit!")
+            
+            # Generate if no cache
+            if not sql:
+                sql_info = self._generate_sql_for_question(question, analysis)
+                if sql_info:
+                    sql = sql_info['sql']
+                    sql_source = 'llm'
+            
+            # Execute
+            if sql:
+                for attempt in range(3):
+                    try:
+                        rows = self.structured_handler.query(sql)
+                        cols = list(rows[0].keys()) if rows else []
+                        self.last_executed_sql = sql
+                        
+                        if rows:
+                            table_name = sql_info.get('table', 'query') if sql_info else 'query'
+                            
+                            truths.append(Truth(
+                                source_type='reality',
+                                source_name=f"SQL: {table_name}",
+                                content={
+                                    'sql': sql,
+                                    'columns': cols,
+                                    'rows': rows,
+                                    'total': len(rows),
+                                    'query_type': sql_info.get('query_type', 'list') if sql_info else 'list',
+                                    'table': table_name,
+                                    'is_targeted_query': True
+                                },
+                                confidence=0.98,
+                                location=f"Query: {sql}"
+                            ))
+                            
+                            if pattern_cache and sql_source == 'llm':
+                                pattern_cache.learn_pattern(question, sql, success=True)
+                            
+                            return truths
+                        break
+                        
+                    except Exception as e:
+                        error_msg = str(e)
+                        logger.warning(f"[SQL] Failed attempt {attempt + 1}: {error_msg}")
+                        
+                        if sql_info and attempt < 2:
+                            fixed = self._try_fix_sql_from_error(sql, error_msg, sql_info.get('all_columns', set()))
+                            if fixed and fixed != sql:
+                                sql = fixed
+                                continue
+                        break
         
-        return {
-            "suggestions": unique_suggestions,
-            "categories": list(categories),
-            "filter_candidates": filter_candidates,
-            "table_count": len(schema.get('tables', []))
-        }
+        except Exception as e:
+            logger.error(f"Error gathering reality: {e}")
         
-    except Exception as e:
-        logger.error(f"[BI] Suggestions error: {e}")
-        raise HTTPException(500, str(e))
-
-
-# =============================================================================
-# SCHEMA ENDPOINT
-# =============================================================================
-
-@router.get("/bi/schema/{project}")
-async def get_bi_schema(project: str):
-    """Get schema info for BI builder."""
-    if not STRUCTURED_AVAILABLE:
-        raise HTTPException(503, "Not available")
+        return truths
     
-    try:
-        handler = get_structured_handler()
-        schema = _build_bi_schema(handler, project)
+    def _gather_intent(self, question: str, analysis: Dict) -> List[Truth]:
+        """Gather INTENT - what customer's DOCUMENTS say."""
+        if not self.rag_handler:
+            return []
         
-        # Simplify for frontend
-        tables = []
-        for t in schema.get('tables', []):
-            tables.append({
-                'name': t.get('table_name', '').split('__')[-1],
-                'full_name': t.get('table_name'),
-                'rows': t.get('row_count', 0),
-                'columns': [c.get('name') if isinstance(c, dict) else c for c in t.get('columns', [])],
-                'file': t.get('file'),
-                'sheet': t.get('sheet')
-            })
+        truths = []
         
-        return {
-            "project": project,
-            "tables": tables,
-            "filter_candidates": schema.get('filter_candidates', {}),
-            "relationships": schema.get('relationships', [])
-        }
-        
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-
-# =============================================================================
-# EXPORT ENDPOINT
-# =============================================================================
-
-@router.post("/bi/export")
-async def export_bi_data(request: BIExportRequest):
-    """
-    Export query results with transforms.
-    
-    Can either:
-    - Use provided SQL directly
-    - Generate SQL from natural language query
-    
-    Applies transforms before export.
-    """
-    if not STRUCTURED_AVAILABLE:
-        raise HTTPException(503, "Export not available")
-    
-    try:
-        handler = get_structured_handler()
-        
-        # Get SQL
-        sql = request.sql
-        if not sql:
-            # Generate from NL query
-            schema = _build_bi_schema(handler, request.project)
-            engine = IntelligenceEngine(request.project)
-            engine.load_context(structured_handler=handler, schema=schema)
-            answer = engine.ask(request.query)
+        try:
+            collection_name = self._get_document_collection_name()
+            if not collection_name:
+                return []
             
-            if hasattr(engine, 'last_executed_sql'):
-                sql = engine.last_executed_sql
-            elif answer.structured_output and 'sql' in answer.structured_output:
-                sql = answer.structured_output['sql']
-        
-        if not sql:
-            raise HTTPException(400, "Could not generate SQL for query")
-        
-        # Execute query
-        rows = handler.query(sql)
-        columns = list(rows[0].keys()) if rows else []
-        
-        if not rows:
-            raise HTTPException(404, "No data returned")
-        
-        # Apply transforms
-        transformed_data, new_columns, renames = apply_transforms(
-            rows, columns, 
-            [TransformOperation(**t) if isinstance(t, dict) else t for t in request.transforms or []],
-            handler, request.project
-        )
-        
-        # Apply column renames
-        final_columns = [renames.get(c, c) for c in new_columns]
-        
-        if request.format == 'csv':
-            # CSV export
-            output = io.StringIO()
-            output.write(','.join(final_columns) + '\n')
-            for row in transformed_data:
-                values = [str(row.get(c, '')) for c in new_columns]
-                output.write(','.join(values) + '\n')
-            
-            output.seek(0)
-            filename = f"xlr8_export_{int(time.time())}.csv"
-            
-            return StreamingResponse(
-                iter([output.getvalue()]),
-                media_type="text/csv",
-                headers={"Content-Disposition": f"attachment; filename={filename}"}
-            )
-        
-        else:
-            # Excel export
-            from openpyxl import Workbook
-            from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-            from openpyxl.utils import get_column_letter
-            
-            wb = Workbook()
-            ws = wb.active
-            ws.title = "Data"
-            
-            # Styling
-            header_font = Font(bold=True, color="FFFFFF")
-            header_fill = PatternFill(start_color="4A7C59", end_color="4A7C59", fill_type="solid")  # Brand green
-            thin_border = Border(
-                left=Side(style='thin'),
-                right=Side(style='thin'),
-                top=Side(style='thin'),
-                bottom=Side(style='thin')
+            results = self.rag_handler.search(
+                collection_name=collection_name,
+                query=question,
+                n_results=10,
+                project_id=self.project if self.project else None
             )
             
-            # Headers
-            for col_idx, col_name in enumerate(final_columns, 1):
-                cell = ws.cell(row=1, column=col_idx, value=col_name)
-                cell.font = header_font
-                cell.fill = header_fill
-                cell.border = thin_border
-                cell.alignment = Alignment(horizontal='center')
-            
-            # Data
-            for row_idx, row_data in enumerate(transformed_data, 2):
-                for col_idx, col_name in enumerate(new_columns, 1):
-                    cell = ws.cell(row=row_idx, column=col_idx, value=row_data.get(col_name, ''))
-                    cell.border = thin_border
-            
-            # Auto-width
-            for col_idx, col_name in enumerate(final_columns, 1):
-                max_len = len(str(col_name))
-                for row in transformed_data[:100]:
-                    val = row.get(new_columns[col_idx-1], '')
-                    if val:
-                        max_len = max(max_len, len(str(val)))
-                ws.column_dimensions[get_column_letter(col_idx)].width = min(max_len + 2, 50)
-            
-            # Metadata sheet
-            if request.include_metadata:
-                ws_meta = wb.create_sheet(title="Metadata")
-                ws_meta['A1'] = "XLR8 BI Export"
-                ws_meta['A1'].font = Font(bold=True, size=14)
-                ws_meta['A2'] = f"Query: {request.query}"
-                ws_meta['A3'] = f"Project: {request.project}"
-                ws_meta['A4'] = f"Rows: {len(transformed_data)}"
-                ws_meta['A5'] = f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}"
+            for result in results:
+                metadata = result.get('metadata', {})
+                distance = result.get('distance', 1.0)
+                doc = result.get('document', '')
                 
-                if request.transforms:
-                    ws_meta['A7'] = "Transforms Applied:"
-                    ws_meta['A7'].font = Font(bold=True)
-                    for i, t in enumerate(request.transforms, 8):
-                        t_dict = t if isinstance(t, dict) else t.dict()
-                        ws_meta[f'A{i}'] = f"• {t_dict.get('type', '')} on {t_dict.get('column', '')}"
+                project_id = metadata.get('project_id', '').lower()
+                if project_id in ['global', '__global__', 'global/universal']:
+                    continue
+                
+                truths.append(Truth(
+                    source_type='intent',
+                    source_name=metadata.get('filename', 'Document'),
+                    content=doc,
+                    confidence=max(0.3, 1.0 - distance) if distance else 0.7,
+                    location=f"Page {metadata.get('page', '?')}"
+                ))
+        
+        except Exception as e:
+            logger.error(f"Error gathering intent: {e}")
+        
+        return truths
+    
+    def _get_document_collection_name(self) -> Optional[str]:
+        """Find the document collection name."""
+        if not self.rag_handler:
+            return None
+        
+        if hasattr(self, '_doc_collection_name'):
+            return self._doc_collection_name
+        
+        try:
+            collections = self.rag_handler.list_collections()
+            for name in ['hcmpact_docs', 'documents', 'hcm_docs', 'xlr8_docs']:
+                if name in collections:
+                    self._doc_collection_name = name
+                    return name
             
-            # Save to buffer
-            output = io.BytesIO()
-            wb.save(output)
-            output.seek(0)
+            for name in collections:
+                if 'doc' in name.lower():
+                    self._doc_collection_name = name
+                    return name
             
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
-            safe_query = re.sub(r'[^\w\s]', '', request.query[:20]).strip().replace(' ', '_')
-            filename = f"xlr8_{safe_query}_{timestamp}.xlsx"
+            if collections:
+                self._doc_collection_name = collections[0]
+                return collections[0]
+        except:
+            pass
+        
+        return None
+    
+    def _gather_best_practice(self, question: str, analysis: Dict) -> List[Truth]:
+        """Gather BEST PRACTICE - what UKG docs say."""
+        if not self.rag_handler:
+            return []
+        
+        truths = []
+        
+        try:
+            collection_name = self._get_document_collection_name()
+            if not collection_name:
+                return []
             
-            return StreamingResponse(
-                output,
-                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                headers={"Content-Disposition": f"attachment; filename={filename}"}
+            results = self.rag_handler.search(
+                collection_name=collection_name,
+                query=question,
+                n_results=10,
+                project_id="Global/Universal"
             )
+            
+            for result in results:
+                metadata = result.get('metadata', {})
+                distance = result.get('distance', 1.0)
+                doc = result.get('document', '')
+                
+                truths.append(Truth(
+                    source_type='best_practice',
+                    source_name=metadata.get('filename', 'UKG Documentation'),
+                    content=doc,
+                    confidence=max(0.3, 1.0 - distance) if distance else 0.7,
+                    location=f"Page {metadata.get('page', '?')}"
+                ))
         
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[BI] Export error: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        raise HTTPException(500, f"Export failed: {str(e)}")
-
-
-# =============================================================================
-# SAVED QUERIES ENDPOINTS
-# =============================================================================
-
-@router.get("/bi/saved/{project}")
-async def get_saved_queries(project: str):
-    """Get saved queries for a project."""
-    if not SUPABASE_AVAILABLE:
-        return {"queries": []}
-    
-    try:
-        supabase = get_supabase()
-        result = supabase.table('bi_saved_queries').select('*').eq(
-            'project', project
-        ).order('created_at', desc=True).execute()
+        except Exception as e:
+            logger.error(f"Error gathering best practice: {e}")
         
-        return {"queries": result.data or []}
-    except Exception as e:
-        logger.error(f"[BI] Error loading saved queries: {e}")
-        return {"queries": []}
-
-
-@router.post("/bi/saved")
-async def save_query(request: SavedQueryRequest):
-    """Save a query for reuse."""
-    if not SUPABASE_AVAILABLE:
-        raise HTTPException(503, "Save not available")
+        return truths
     
-    try:
-        supabase = get_supabase()
-        result = supabase.table('bi_saved_queries').insert({
-            'name': request.name,
-            'query': request.query,
-            'project': request.project,
-            'sql': request.sql,
-            'chart_type': request.chart_type,
-            'transforms': request.transforms
-        }).execute()
+    def _detect_conflicts(self, reality, intent, best_practice) -> List[Conflict]:
+        return []
+    
+    def _run_proactive_checks(self, analysis: Dict) -> List[Insight]:
+        insights = []
         
-        return {"success": True, "id": result.data[0]['id'] if result.data else None}
-    except Exception as e:
-        logger.error(f"[BI] Error saving query: {e}")
-        raise HTTPException(500, str(e))
-
-
-@router.delete("/bi/saved/{query_id}")
-async def delete_saved_query(query_id: str):
-    """Delete a saved query."""
-    if not SUPABASE_AVAILABLE:
-        raise HTTPException(503, "Not available")
+        if not self.structured_handler:
+            return insights
+        
+        try:
+            tables = self.schema.get('tables', [])
+            domains = analysis.get('domains', ['general'])
+            
+            if 'employees' in domains or domains == ['general']:
+                for table in tables:
+                    table_name = table.get('table_name', '')
+                    if any(c in table_name.lower() for c in ['personal', 'employee']):
+                        try:
+                            sql = f'SELECT COUNT(*) as cnt FROM "{table_name}" WHERE ssn IS NULL OR ssn = \'\''
+                            result = self.structured_handler.conn.execute(sql).fetchone()
+                            if result and result[0] > 0:
+                                insights.append(Insight(
+                                    type='anomaly',
+                                    title='Missing SSN',
+                                    description=f'{result[0]} employees missing SSN',
+                                    data={'count': result[0]},
+                                    severity='high',
+                                    action_required=True
+                                ))
+                        except:
+                            pass
+                        break
+        except:
+            pass
+        
+        return insights
     
-    try:
-        supabase = get_supabase()
-        supabase.table('bi_saved_queries').delete().eq('id', query_id).execute()
-        return {"success": True}
-    except Exception as e:
-        raise HTTPException(500, str(e))
+    def _synthesize_answer(
+        self,
+        question: str,
+        mode: IntelligenceMode,
+        reality: List[Truth],
+        intent: List[Truth],
+        best_practice: List[Truth],
+        conflicts: List[Conflict],
+        insights: List[Insight],
+        context: Dict = None
+    ) -> SynthesizedAnswer:
+        """Synthesize answer from all sources."""
+        reasoning = []
+        context_parts = []
+        
+        if reality:
+            context_parts.append("=== DATA RESULTS ===")
+            for truth in reality[:3]:
+                if isinstance(truth.content, dict) and 'rows' in truth.content:
+                    rows = truth.content['rows']
+                    cols = truth.content['columns']
+                    query_type = truth.content.get('query_type', 'list')
+                    
+                    if query_type == 'count' and rows:
+                        count_val = list(rows[0].values())[0] if rows[0] else 0
+                        context_parts.append(f"\n**ANSWER: {count_val}**")
+                        context_parts.append(f"SQL: {truth.content.get('sql', '')[:200]}")
+                    elif query_type in ['sum', 'average'] and rows:
+                        result_val = list(rows[0].values())[0] if rows[0] else 0
+                        context_parts.append(f"\n**RESULT: {result_val}**")
+                        context_parts.append(f"SQL: {truth.content.get('sql', '')[:200]}")
+                    else:
+                        context_parts.append(f"\nResults ({len(rows)} rows):")
+                        for row in rows[:10]:
+                            row_str = " | ".join(f"{k}: {v}" for k, v in list(row.items())[:6])
+                            context_parts.append(f"  {row_str}")
+            reasoning.append(f"Found {len(reality)} data results")
+        
+        if intent:
+            context_parts.append("\n=== CUSTOMER DOCS ===")
+            for truth in intent[:3]:
+                context_parts.append(f"\n{truth.source_name}: {str(truth.content)[:300]}")
+            reasoning.append(f"Found {len(intent)} customer documents")
+        
+        if best_practice:
+            context_parts.append("\n=== BEST PRACTICE ===")
+            for truth in best_practice[:3]:
+                context_parts.append(f"\n{truth.source_name}: {str(truth.content)[:300]}")
+            reasoning.append(f"Found {len(best_practice)} best practice docs")
+        
+        if insights:
+            context_parts.append("\n=== INSIGHTS ===")
+            for insight in insights:
+                icon = '🔴' if insight.severity == 'high' else '🟡'
+                context_parts.append(f"{icon} {insight.title}: {insight.description}")
+        
+        combined = '\n'.join(context_parts)
+        
+        confidence = 0.5
+        if reality:
+            confidence += 0.3
+        if intent:
+            confidence += 0.1
+        if best_practice:
+            confidence += 0.05
+        
+        return SynthesizedAnswer(
+            question=question,
+            answer=combined,
+            confidence=min(confidence, 0.95),
+            from_reality=reality,
+            from_intent=intent,
+            from_best_practice=best_practice,
+            conflicts=conflicts,
+            insights=insights,
+            structured_output=None,
+            reasoning=reasoning,
+            executed_sql=self.last_executed_sql
+        )
+    
+    def clear_clarifications(self):
+        """Clear confirmed facts."""
+        self.confirmed_facts = {}
