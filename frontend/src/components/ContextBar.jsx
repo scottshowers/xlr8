@@ -151,7 +151,7 @@ export default function ContextBar() {
       borderRadius: '10px',
       boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
       overflow: 'hidden',
-      zIndex: 200,
+      zIndex: 9999,
       minWidth: '280px',
     },
     searchInput: {
