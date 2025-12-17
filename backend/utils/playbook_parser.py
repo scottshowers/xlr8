@@ -107,7 +107,25 @@ def find_year_end_tables() -> List[Dict[str, Any]]:
         return []
     
     try:
-        # Get the specific year-end tables we know exist
+        # First, let's see what projects exist with year-end-like sheets
+        debug_result = conn.execute("""
+            SELECT DISTINCT project, sheet_name, file_name
+            FROM _schema_metadata
+            WHERE is_current = TRUE
+            AND (
+                LOWER(sheet_name) LIKE '%before%'
+                OR LOWER(sheet_name) LIKE '%after%'
+                OR LOWER(sheet_name) LIKE '%payroll%'
+                OR LOWER(sheet_name) LIKE '%year%'
+                OR LOWER(sheet_name) LIKE '%checklist%'
+            )
+        """).fetchall()
+        
+        logger.info(f"[PARSER] DEBUG - Found sheets matching year-end patterns:")
+        for row in debug_result:
+            logger.info(f"[PARSER]   Project='{row[0]}', Sheet='{row[1]}', File='{row[2]}'")
+        
+        # Get the specific year-end tables - broader project match
         result = conn.execute("""
             SELECT 
                 project,
@@ -118,10 +136,17 @@ def find_year_end_tables() -> List[Dict[str, Any]]:
                 row_count
             FROM _schema_metadata
             WHERE is_current = TRUE
-            AND LOWER(project) IN ('global', 'reference library', 'reference_library', '__standards__')
+            AND (
+                LOWER(project) IN ('global', 'reference library', 'reference_library', '__standards__')
+                OR LOWER(project) LIKE '%reference%'
+                OR LOWER(project) LIKE '%global%'
+                OR LOWER(project) LIKE '%library%'
+            )
             AND (
                 LOWER(sheet_name) LIKE '%before%payroll%'
                 OR LOWER(sheet_name) LIKE '%after%payroll%'
+                OR LOWER(sheet_name) LIKE '%before%final%'
+                OR LOWER(sheet_name) LIKE '%after%final%'
             )
             ORDER BY sheet_name
         """).fetchall()
@@ -169,7 +194,12 @@ def load_step_documents() -> Dict[str, List[Dict[str, Any]]]:
             SELECT table_name, columns
             FROM _schema_metadata
             WHERE is_current = TRUE
-            AND LOWER(project) IN ('global', 'reference library', 'reference_library', '__standards__')
+            AND (
+                LOWER(project) IN ('global', 'reference library', 'reference_library', '__standards__')
+                OR LOWER(project) LIKE '%reference%'
+                OR LOWER(project) LIKE '%global%'
+                OR LOWER(project) LIKE '%library%'
+            )
             AND LOWER(sheet_name) LIKE '%step_documents%'
             LIMIT 1
         """).fetchone()
