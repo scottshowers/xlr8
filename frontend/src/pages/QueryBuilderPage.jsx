@@ -1,12 +1,9 @@
 /**
- * QueryBuilderPage.jsx - Production BI Query Builder
- * ===================================================
+ * QueryBuilderPage.jsx - Visual Query Builder
+ * ============================================
  * 
- * Features:
- * - Light/Dark theme toggle
- * - Smart joins (auto-detect relationships)
- * - Wired to intelligence engine
- * - No SQL knowledge required
+ * Clean design matching existing XLR8 pages.
+ * Smart joins, no SQL knowledge required.
  * 
  * Deploy to: frontend/src/pages/QueryBuilderPage.jsx
  */
@@ -17,82 +14,21 @@ import { useTheme } from '../context/ThemeContext'
 import api from '../services/api'
 import { 
   Database, Table2, Columns, Filter, Play, Download, 
-  Plus, X, ChevronDown, ArrowUpDown, BarChart3, 
-  FileSpreadsheet, RefreshCw, Eye, EyeOff, Code2,
-  ChevronRight, Check, AlertCircle, Sparkles, Zap,
-  TableProperties, ArrowRight, Link2, Unlink,
-  Copy, CheckCheck, Activity, Gauge, Search,
-  Sun, Moon, Loader2, ExternalLink, PieChart, LineChart
+  Plus, X, ChevronRight, Check, AlertCircle, Sparkles,
+  RefreshCw, Code2, Copy, CheckCheck, Link2,
+  Loader2, Activity
 } from 'lucide-react'
 
 // =============================================================================
-// THEME SYSTEM
+// CONSTANTS
 // =============================================================================
 
-const themes = {
-  light: {
-    bg: 'bg-gradient-to-br from-slate-50 via-white to-slate-100',
-    surface: 'bg-white',
-    surfaceHover: 'hover:bg-slate-50',
-    surfaceActive: 'bg-emerald-50',
-    border: 'border-slate-200',
-    borderHover: 'hover:border-slate-300',
-    borderActive: 'border-emerald-500',
-    text: 'text-slate-900',
-    textSecondary: 'text-slate-600',
-    textMuted: 'text-slate-400',
-    input: 'bg-slate-50 border-slate-200 text-slate-900',
-    inputFocus: 'focus:ring-emerald-500 focus:border-emerald-500',
-    card: 'bg-white border-slate-200 shadow-sm',
-    cardHover: 'hover:shadow-md hover:border-slate-300',
-    pill: 'bg-slate-100 text-slate-600',
-    pillActive: 'bg-emerald-100 text-emerald-700',
-    tableHeader: 'bg-slate-50',
-    tableRow: 'hover:bg-slate-50',
-    tableRowAlt: 'bg-slate-50/50',
-    codeBlock: 'bg-slate-900 text-emerald-400',
-    button: 'bg-slate-100 text-slate-700 hover:bg-slate-200',
-    buttonPrimary: 'bg-gradient-to-r from-emerald-500 to-cyan-500 text-white shadow-lg shadow-emerald-500/25',
-    glowOrb1: 'bg-emerald-200',
-    glowOrb2: 'bg-blue-200',
-  },
-  dark: {
-    bg: 'bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950',
-    surface: 'bg-white/5',
-    surfaceHover: 'hover:bg-white/10',
-    surfaceActive: 'bg-emerald-500/10',
-    border: 'border-white/10',
-    borderHover: 'hover:border-white/20',
-    borderActive: 'border-emerald-500/50',
-    text: 'text-white',
-    textSecondary: 'text-slate-300',
-    textMuted: 'text-slate-500',
-    input: 'bg-white/10 border-white/10 text-white',
-    inputFocus: 'focus:ring-emerald-500/50 focus:border-emerald-500/50',
-    card: 'bg-white/5 border-white/10 backdrop-blur-sm',
-    cardHover: 'hover:bg-white/10 hover:border-white/20',
-    pill: 'bg-white/10 text-slate-300',
-    pillActive: 'bg-emerald-500/20 text-emerald-400',
-    tableHeader: 'bg-white/5',
-    tableRow: 'hover:bg-white/5',
-    tableRowAlt: 'bg-white/[0.02]',
-    codeBlock: 'bg-black/40 text-emerald-400',
-    button: 'bg-white/10 text-slate-300 hover:bg-white/20 hover:text-white',
-    buttonPrimary: 'bg-gradient-to-r from-emerald-500 to-cyan-500 text-white shadow-lg shadow-emerald-500/30',
-    glowOrb1: 'bg-emerald-500',
-    glowOrb2: 'bg-indigo-500',
-  }
-}
-
-// Glow orbs for dark mode
-const GlowOrbs = ({ theme }) => {
-  if (theme === 'light') return null
-  return (
-    <>
-      <div className={`absolute -top-48 -left-48 w-96 h-96 rounded-full ${themes.dark.glowOrb1} blur-3xl opacity-20 pointer-events-none`} />
-      <div className={`absolute -bottom-32 -right-32 w-80 h-80 rounded-full ${themes.dark.glowOrb2} blur-3xl opacity-20 pointer-events-none`} />
-    </>
-  )
+const COLORS = {
+  grassGreen: '#83b16d',
+  grassGreenLight: '#f0f7ed',
+  text: '#2a3441',
+  textLight: '#5f6c7b',
+  border: '#e1e8ed',
 }
 
 // =============================================================================
@@ -101,8 +37,7 @@ const GlowOrbs = ({ theme }) => {
 
 export default function QueryBuilderPage() {
   const { projectName } = useProject()
-  const { theme, setTheme } = useTheme()
-  const t = themes[theme] || themes.light
+  const { darkMode, T } = useTheme()
   
   // Schema state
   const [tables, setTables] = useState([])
@@ -110,12 +45,11 @@ export default function QueryBuilderPage() {
   const [isLoadingSchema, setIsLoadingSchema] = useState(true)
   
   // Query builder state
-  const [selectedTables, setSelectedTables] = useState([]) // [{name, alias, columns: [...]}]
-  const [selectedColumns, setSelectedColumns] = useState([]) // [{table, column}]
+  const [selectedTables, setSelectedTables] = useState([])
+  const [selectedColumns, setSelectedColumns] = useState([])
   const [filters, setFilters] = useState([])
   const [orderBy, setOrderBy] = useState({ column: '', direction: 'DESC' })
   const [limit, setLimit] = useState(100)
-  const [searchTerm, setSearchTerm] = useState('')
   
   // Results state
   const [isLoading, setIsLoading] = useState(false)
@@ -125,7 +59,7 @@ export default function QueryBuilderPage() {
   const [copied, setCopied] = useState(false)
 
   // ===========================================
-  // LOAD SCHEMA FROM BACKEND
+  // LOAD SCHEMA
   // ===========================================
   
   useEffect(() => {
@@ -137,17 +71,14 @@ export default function QueryBuilderPage() {
   const loadSchema = async () => {
     setIsLoadingSchema(true)
     try {
-      // Get tables from intelligence engine
       const response = await api.get(`/intelligence/${projectName}/schema`)
       const schema = response.data
       
-      // Transform to our format
       const tableList = (schema.tables || []).map(t => ({
         name: t.name,
         displayName: formatTableName(t.name),
         rows: t.row_count || t.rows || 0,
         columns: t.columns || [],
-        // Detect relationships from column names (employee_id, company_code, etc.)
         keyColumns: (t.columns || []).filter(c => 
           c.toLowerCase().endsWith('_id') || 
           c.toLowerCase().endsWith('_code') ||
@@ -156,14 +87,9 @@ export default function QueryBuilderPage() {
       }))
       
       setTables(tableList)
-      
-      // Auto-detect relationships based on common key columns
-      const rels = detectRelationships(tableList)
-      setRelationships(rels)
-      
+      setRelationships(detectRelationships(tableList))
     } catch (err) {
       console.error('Failed to load schema:', err)
-      // Fallback to mock for demo
       loadMockSchema()
     } finally {
       setIsLoadingSchema(false)
@@ -191,15 +117,11 @@ export default function QueryBuilderPage() {
   
   const detectRelationships = (tableList) => {
     const rels = []
-    // Find tables that share key columns
     tableList.forEach((t1, i) => {
       tableList.forEach((t2, j) => {
-        if (i >= j) return // Don't duplicate
-        
-        // Check for matching key columns
+        if (i >= j) return
         t1.keyColumns.forEach(k1 => {
           t2.keyColumns.forEach(k2 => {
-            // Match on same column name or common patterns
             if (k1 === k2 || 
                 (k1.replace('_id', '_code') === k2) ||
                 (k1.replace('_code', '_id') === k2) ||
@@ -218,11 +140,7 @@ export default function QueryBuilderPage() {
   }
   
   const formatTableName = (name) => {
-    // Convert "meyer_cor" to "Meyer Cor" etc
-    return name
-      .split('_')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ')
+    return name.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
   }
 
   // ===========================================
@@ -231,12 +149,10 @@ export default function QueryBuilderPage() {
   
   const selectTable = (table) => {
     if (selectedTables.find(t => t.name === table.name)) {
-      // Already selected, remove it
       setSelectedTables(prev => prev.filter(t => t.name !== table.name))
       setSelectedColumns(prev => prev.filter(c => c.table !== table.name))
     } else {
-      // Add table
-      setSelectedTables(prev => [...prev, { ...table, alias: table.name }])
+      setSelectedTables(prev => [...prev, { ...table }])
     }
   }
   
@@ -270,11 +186,9 @@ export default function QueryBuilderPage() {
   const selectAllColumns = (tableName) => {
     const table = tables.find(t => t.name === tableName)
     if (!table) return
-    
     const newCols = table.columns
       .filter(col => !selectedColumns.find(c => c.table === tableName && c.column === col))
       .map(col => ({ table: tableName, column: col }))
-    
     setSelectedColumns(prev => [...prev, ...newCols])
   }
   
@@ -305,74 +219,59 @@ export default function QueryBuilderPage() {
   const removeFilter = (id) => {
     setFilters(prev => prev.filter(f => f.id !== id))
   }
+  
+  const getAllColumns = () => {
+    const cols = []
+    selectedTables.forEach(table => {
+      table.columns.forEach(col => {
+        cols.push({ table: table.name, column: col, display: selectedTables.length > 1 ? `${table.name}.${col}` : col })
+      })
+    })
+    return cols
+  }
 
   // ===========================================
-  // SQL GENERATION (Smart Joins!)
+  // SQL GENERATION
   // ===========================================
   
   const generateSQL = () => {
     if (selectedTables.length === 0) return '-- Select a table to begin'
     
-    // SELECT clause
     const cols = selectedColumns.length > 0
-      ? selectedColumns.map(c => 
-          selectedTables.length > 1 ? `${c.table}.${c.column}` : c.column
-        ).join(',\n       ')
+      ? selectedColumns.map(c => selectedTables.length > 1 ? `${c.table}.${c.column}` : c.column).join(', ')
       : '*'
     
-    let sql = `SELECT ${cols}`
+    let sql = `SELECT ${cols}\nFROM ${selectedTables[0].name}`
     
-    // FROM clause with smart joins
-    const primaryTable = selectedTables[0]
-    sql += `\n  FROM ${primaryTable.name}`
-    
-    // Auto-join additional tables
     if (selectedTables.length > 1) {
       selectedTables.slice(1).forEach(table => {
-        // Find relationship
         const rel = relationships.find(r => 
-          (r.from.table === primaryTable.name && r.to.table === table.name) ||
-          (r.to.table === primaryTable.name && r.from.table === table.name)
+          (r.from.table === selectedTables[0].name && r.to.table === table.name) ||
+          (r.to.table === selectedTables[0].name && r.from.table === table.name)
         )
-        
         if (rel) {
-          const isFromPrimary = rel.from.table === primaryTable.name
+          const isFromPrimary = rel.from.table === selectedTables[0].name
           const joinCol1 = isFromPrimary ? rel.from.column : rel.to.column
           const joinCol2 = isFromPrimary ? rel.to.column : rel.from.column
-          sql += `\n  LEFT JOIN ${table.name} ON ${primaryTable.name}.${joinCol1} = ${table.name}.${joinCol2}`
-        } else {
-          // No relationship found, just add table (user needs to handle)
-          sql += `\n  -- JOIN ${table.name} ON ??? (no auto-join found)`
+          sql += `\nLEFT JOIN ${table.name} ON ${selectedTables[0].name}.${joinCol1} = ${table.name}.${joinCol2}`
         }
       })
     }
     
-    // WHERE clause
     const validFilters = filters.filter(f => f.column && f.operator)
     if (validFilters.length > 0) {
       const whereClauses = validFilters.map(f => {
         const colRef = selectedTables.length > 1 ? `${f.table}.${f.column}` : f.column
-        if (f.operator === 'IS NULL' || f.operator === 'IS NOT NULL') {
-          return `${colRef} ${f.operator}`
-        }
-        if (f.operator === 'LIKE') {
-          return `${colRef} ILIKE '%${f.value}%'`
-        }
+        if (f.operator === 'IS NULL' || f.operator === 'IS NOT NULL') return `${colRef} ${f.operator}`
+        if (f.operator === 'LIKE') return `${colRef} ILIKE '%${f.value}%'`
         const quote = isNaN(f.value) ? "'" : ''
         return `${colRef} ${f.operator} ${quote}${f.value}${quote}`
       })
-      sql += `\n WHERE ${whereClauses.join('\n   AND ')}`
+      sql += `\nWHERE ${whereClauses.join(' AND ')}`
     }
     
-    // ORDER BY
-    if (orderBy.column) {
-      sql += `\n ORDER BY ${orderBy.column} ${orderBy.direction}`
-    }
-    
-    // LIMIT
-    if (limit) {
-      sql += `\n LIMIT ${limit}`
-    }
+    if (orderBy.column) sql += `\nORDER BY ${orderBy.column} ${orderBy.direction}`
+    if (limit) sql += `\nLIMIT ${limit}`
     
     return sql
   }
@@ -397,7 +296,6 @@ export default function QueryBuilderPage() {
     setError(null)
     
     try {
-      // Use the BI endpoint with generated SQL
       const response = await api.post('/bi/execute', {
         sql: generateSQL(),
         project: projectName
@@ -405,20 +303,14 @@ export default function QueryBuilderPage() {
       
       setResults({
         columns: response.data.columns || [],
-        data: response.data.data || response.data.rows || [],
-        rowCount: response.data.row_count || response.data.data?.length || 0,
-        executionTime: response.data.execution_time || 0,
-        sql: generateSQL()
+        data: response.data.data || [],
+        rowCount: response.data.row_count || 0,
+        executionTime: response.data.execution_time || 0
       })
-      
     } catch (err) {
       console.error('Query failed:', err)
-      
-      // If real endpoint fails, show mock data for demo
       if (err.response?.status === 404 || err.code === 'ERR_NETWORK') {
-        // Generate mock results
-        const mockData = generateMockResults()
-        setResults(mockData)
+        setResults(generateMockResults())
       } else {
         setError(err.response?.data?.detail || err.message || 'Query failed')
       }
@@ -432,34 +324,23 @@ export default function QueryBuilderPage() {
       ? selectedColumns.map(c => c.column)
       : selectedTables[0]?.columns?.slice(0, 6) || []
     
-    const data = Array.from({ length: Math.min(limit, 50) }, (_, i) => {
+    const data = Array.from({ length: Math.min(limit, 25) }, (_, i) => {
       const row = {}
       cols.forEach(col => {
-        if (col.includes('id')) row[col] = `ID-${String(1000 + i).padStart(5, '0')}`
-        else if (col.includes('first_name')) row[col] = ['James', 'Emma', 'Liam', 'Olivia', 'Noah'][i % 5]
-        else if (col.includes('last_name')) row[col] = ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones'][i % 5]
-        else if (col.includes('status')) row[col] = i % 6 === 0 ? 'T' : 'A'
-        else if (col.includes('date')) row[col] = `2024-${String((i % 12) + 1).padStart(2, '0')}-15`
-        else if (col.includes('state') || col.includes('province')) row[col] = ['TX', 'CA', 'NY', 'FL', 'WA'][i % 5]
+        if (col.includes('id')) row[col] = `ID-${1000 + i}`
+        else if (col.includes('first_name')) row[col] = ['James', 'Emma', 'Liam', 'Olivia'][i % 4]
+        else if (col.includes('last_name')) row[col] = ['Smith', 'Johnson', 'Williams', 'Brown'][i % 4]
+        else if (col.includes('status')) row[col] = i % 5 === 0 ? 'T' : 'A'
+        else if (col.includes('state') || col.includes('province')) row[col] = ['TX', 'CA', 'NY', 'FL'][i % 4]
         else if (col.includes('salary') || col.includes('amount')) row[col] = 55000 + (i * 2500)
         else row[col] = `Value ${i + 1}`
       })
       return row
     })
     
-    return {
-      columns: cols,
-      data,
-      rowCount: data.length,
-      executionTime: Math.floor(Math.random() * 100) + 30,
-      sql: generateSQL()
-    }
+    return { columns: cols, data, rowCount: data.length, executionTime: 45 }
   }
 
-  // ===========================================
-  // RESET
-  // ===========================================
-  
   const resetAll = () => {
     setSelectedTables([])
     setSelectedColumns([])
@@ -467,21 +348,237 @@ export default function QueryBuilderPage() {
     setOrderBy({ column: '', direction: 'DESC' })
     setResults(null)
     setError(null)
-    setSearchTerm('')
   }
 
   // ===========================================
-  // GET ALL AVAILABLE COLUMNS FOR FILTERS/SORT
+  // STYLES
   // ===========================================
   
-  const getAllColumns = () => {
-    const cols = []
-    selectedTables.forEach(table => {
-      table.columns.forEach(col => {
-        cols.push({ table: table.name, column: col, display: selectedTables.length > 1 ? `${table.name}.${col}` : col })
-      })
-    })
-    return cols
+  const styles = {
+    container: {
+      minHeight: '100%',
+    },
+    header: {
+      marginBottom: '1.5rem',
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+    },
+    title: {
+      fontFamily: "'Sora', sans-serif",
+      fontSize: '1.75rem',
+      fontWeight: 700,
+      color: T.text,
+      margin: 0,
+    },
+    subtitle: {
+      color: T.textDim,
+      marginTop: '0.25rem',
+    },
+    headerActions: {
+      display: 'flex',
+      gap: '0.5rem',
+    },
+    btn: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.5rem',
+      padding: '0.5rem 1rem',
+      border: `1px solid ${T.border}`,
+      borderRadius: '8px',
+      background: T.bgCard,
+      color: T.textDim,
+      fontSize: '0.875rem',
+      fontWeight: 500,
+      cursor: 'pointer',
+    },
+    btnActive: {
+      background: COLORS.grassGreenLight,
+      borderColor: COLORS.grassGreen,
+      color: COLORS.grassGreen,
+    },
+    mainCard: {
+      background: T.bgCard,
+      borderRadius: '16px',
+      boxShadow: '0 1px 3px rgba(42, 52, 65, 0.08)',
+      overflow: 'hidden',
+    },
+    grid: {
+      display: 'grid',
+      gridTemplateColumns: '380px 1fr',
+      minHeight: '600px',
+    },
+    leftPanel: {
+      borderRight: `1px solid ${T.border}`,
+      padding: '1.5rem',
+      overflowY: 'auto',
+      maxHeight: '75vh',
+    },
+    rightPanel: {
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+    },
+    section: {
+      marginBottom: '1.5rem',
+    },
+    sectionHeader: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.75rem',
+      marginBottom: '1rem',
+    },
+    stepNumber: {
+      width: '28px',
+      height: '28px',
+      borderRadius: '8px',
+      background: COLORS.grassGreen,
+      color: 'white',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: '0.875rem',
+      fontWeight: 600,
+    },
+    sectionTitle: {
+      fontWeight: 600,
+      color: T.text,
+      fontSize: '0.95rem',
+    },
+    tableCard: {
+      padding: '1rem',
+      border: `2px solid ${T.border}`,
+      borderRadius: '12px',
+      cursor: 'pointer',
+      marginBottom: '0.5rem',
+      transition: 'all 0.15s ease',
+    },
+    tableCardSelected: {
+      borderColor: COLORS.grassGreen,
+      background: darkMode ? 'rgba(131, 177, 109, 0.1)' : COLORS.grassGreenLight,
+    },
+    columnGrid: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(2, 1fr)',
+      gap: '0.25rem',
+      maxHeight: '160px',
+      overflowY: 'auto',
+      padding: '0.5rem',
+      background: T.panelLight,
+      borderRadius: '8px',
+    },
+    columnBtn: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.5rem',
+      padding: '0.5rem',
+      border: 'none',
+      borderRadius: '6px',
+      background: 'transparent',
+      color: T.textDim,
+      fontSize: '0.8rem',
+      cursor: 'pointer',
+      textAlign: 'left',
+    },
+    columnBtnSelected: {
+      background: darkMode ? 'rgba(131, 177, 109, 0.15)' : COLORS.grassGreenLight,
+      color: COLORS.grassGreen,
+      fontWeight: 500,
+    },
+    checkbox: (checked) => ({
+      width: '14px',
+      height: '14px',
+      borderRadius: '4px',
+      border: `2px solid ${checked ? COLORS.grassGreen : T.border}`,
+      background: checked ? COLORS.grassGreen : 'transparent',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+    }),
+    filterRow: {
+      display: 'flex',
+      gap: '0.5rem',
+      alignItems: 'center',
+      marginBottom: '0.5rem',
+      padding: '0.75rem',
+      background: T.panelLight,
+      borderRadius: '8px',
+    },
+    select: {
+      flex: 1,
+      padding: '0.5rem',
+      border: `1px solid ${T.border}`,
+      borderRadius: '6px',
+      background: T.bgCard,
+      color: T.text,
+      fontSize: '0.85rem',
+    },
+    input: {
+      flex: 1,
+      padding: '0.5rem',
+      border: `1px solid ${T.border}`,
+      borderRadius: '6px',
+      background: T.bgCard,
+      color: T.text,
+      fontSize: '0.85rem',
+    },
+    runBtn: {
+      width: '100%',
+      padding: '1rem',
+      border: 'none',
+      borderRadius: '12px',
+      background: COLORS.grassGreen,
+      color: 'white',
+      fontSize: '1rem',
+      fontWeight: 600,
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: '0.5rem',
+    },
+    sqlPreview: {
+      background: '#1e293b',
+      color: '#4ade80',
+      padding: '1rem',
+      fontFamily: 'monospace',
+      fontSize: '0.85rem',
+      whiteSpace: 'pre-wrap',
+      borderBottom: `1px solid ${T.border}`,
+    },
+    resultsHeader: {
+      padding: '1rem 1.5rem',
+      borderBottom: `1px solid ${T.border}`,
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    table: {
+      width: '100%',
+      borderCollapse: 'collapse',
+      fontSize: '0.875rem',
+    },
+    th: {
+      textAlign: 'left',
+      padding: '0.75rem 1rem',
+      background: T.panelLight,
+      borderBottom: `1px solid ${T.border}`,
+      fontWeight: 600,
+      color: T.text,
+    },
+    td: {
+      padding: '0.75rem 1rem',
+      borderBottom: `1px solid ${T.border}`,
+      color: T.textDim,
+    },
+    emptyState: {
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '4rem 2rem',
+      textAlign: 'center',
+    },
   }
 
   // ===========================================
@@ -490,472 +587,334 @@ export default function QueryBuilderPage() {
   
   if (!projectName) {
     return (
-      <div className={`h-full flex items-center justify-center ${t.bg} ${t.text}`}>
-        <div className="text-center">
-          <Database size={48} className={`mx-auto ${t.textMuted} mb-4`} />
-          <h2 className="text-xl font-semibold mb-2">Select a Project</h2>
-          <p className={t.textMuted}>Choose a project from the header to start querying</p>
+      <div style={styles.container}>
+        <div style={styles.emptyState}>
+          <Database size={48} color={T.textDim} style={{ marginBottom: '1rem' }} />
+          <h2 style={{ color: T.text, marginBottom: '0.5rem' }}>Select a Project</h2>
+          <p style={{ color: T.textDim }}>Choose a project from the header to start querying</p>
         </div>
       </div>
     )
   }
 
   // ===========================================
-  // RENDER: MAIN
+  // RENDER
   // ===========================================
   
   return (
-    <div className={`h-full flex flex-col ${t.bg} ${t.text} overflow-hidden relative`}>
-      <GlowOrbs theme={theme} />
-      
+    <div style={styles.container}>
       {/* Header */}
-      <div className={`relative z-10 px-8 py-5 border-b ${t.border}`}>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center shadow-lg ${theme === 'dark' ? 'shadow-emerald-500/30' : 'shadow-emerald-500/20'}`}>
-              <Database size={24} className="text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold">Query Builder</h1>
-              <div className="flex items-center gap-3 mt-0.5">
-                <div className={`flex items-center gap-2 text-sm ${t.textSecondary}`}>
-                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>{projectName}</span>
-                </div>
-                <span className={t.textMuted}>•</span>
-                <span className={`text-sm ${t.textMuted}`}>
-                  {isLoadingSchema ? 'Loading...' : `${tables.length} tables`}
-                </span>
-              </div>
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-3">
-            {/* Theme Toggle */}
-            <button
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-              className={`p-2.5 rounded-xl ${t.button} transition-all`}
-              title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
-            >
-              {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-            </button>
-            
-            <button
-              onClick={resetAll}
-              className={`px-4 py-2.5 rounded-xl ${t.button} flex items-center gap-2 transition-all`}
-            >
-              <RefreshCw size={16} />
-              Reset
-            </button>
-            
-            <div className={`h-8 w-px ${t.border}`} />
-            
-            <button
-              onClick={() => setShowSQL(!showSQL)}
-              className={`px-4 py-2.5 rounded-xl flex items-center gap-2 transition-all ${
-                showSQL 
-                  ? 'bg-emerald-500/20 text-emerald-500 border border-emerald-500/30' 
-                  : t.button
-              }`}
-            >
-              <Code2 size={16} />
-              SQL
-            </button>
-          </div>
+      <div style={styles.header}>
+        <div>
+          <h1 style={styles.title}>Query Builder</h1>
+          <p style={styles.subtitle}>
+            Build queries visually • <strong>{projectName}</strong>
+            {!isLoadingSchema && ` • ${tables.length} tables`}
+          </p>
+        </div>
+        
+        <div style={styles.headerActions}>
+          <button style={styles.btn} onClick={resetAll}>
+            <RefreshCw size={16} />
+            Reset
+          </button>
+          <button 
+            style={{ ...styles.btn, ...(showSQL ? styles.btnActive : {}) }} 
+            onClick={() => setShowSQL(!showSQL)}
+          >
+            <Code2 size={16} />
+            SQL
+          </button>
         </div>
       </div>
       
-      <div className="flex-1 flex overflow-hidden relative z-10">
-        {/* Left Panel - Query Builder */}
-        <div className={`w-[440px] border-r ${t.border} overflow-y-auto`}>
-          <div className="p-6 space-y-6">
+      {/* Main Card */}
+      <div style={styles.mainCard}>
+        <div style={styles.grid}>
+          {/* Left Panel - Builder */}
+          <div style={styles.leftPanel}>
             
-            {/* Step 1: Table Selection */}
-            <section>
-              <StepHeader number={1} title="Select Tables" subtitle="Choose your data sources" theme={theme} t={t} color="violet" />
+            {/* Step 1: Tables */}
+            <div style={styles.section}>
+              <div style={styles.sectionHeader}>
+                <div style={styles.stepNumber}>1</div>
+                <span style={styles.sectionTitle}>Select Tables</span>
+              </div>
               
               {isLoadingSchema ? (
-                <div className={`flex items-center justify-center py-8 ${t.textMuted}`}>
-                  <Loader2 size={24} className="animate-spin mr-2" />
-                  Loading schema...
+                <div style={{ textAlign: 'center', padding: '2rem', color: T.textDim }}>
+                  <Loader2 size={24} style={{ animation: 'spin 1s linear infinite' }} />
+                  <p style={{ marginTop: '0.5rem' }}>Loading schema...</p>
                 </div>
               ) : (
-                <div className="space-y-2">
-                  {tables.map(table => {
-                    const isSelected = selectedTables.find(t => t.name === table.name)
-                    const relatedTables = isSelected ? getRelatedTables(table.name) : []
-                    
-                    return (
-                      <div key={table.name}>
-                        <button
-                          onClick={() => selectTable(table)}
-                          className={`w-full p-4 rounded-2xl text-left transition-all duration-200 border-2 ${
-                            isSelected
-                              ? `${t.surfaceActive} ${t.borderActive}`
-                              : `${t.surface} ${t.border} ${t.cardHover}`
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <Table2 size={16} className={isSelected ? 'text-emerald-500' : t.textMuted} />
-                                <span className="font-semibold truncate">{table.displayName}</span>
-                                {isSelected && (
-                                  <Check size={16} className="text-emerald-500" />
-                                )}
-                              </div>
-                              <div className={`text-xs ${t.textMuted} mt-1`}>
-                                {table.name} • {table.rows.toLocaleString()} rows • {table.columns.length} cols
-                              </div>
+                tables.map(table => {
+                  const isSelected = selectedTables.find(t => t.name === table.name)
+                  const related = isSelected ? getRelatedTables(table.name) : []
+                  
+                  return (
+                    <div key={table.name}>
+                      <div 
+                        style={{ ...styles.tableCard, ...(isSelected ? styles.tableCardSelected : {}) }}
+                        onClick={() => selectTable(table)}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div>
+                            <div style={{ fontWeight: 600, color: T.text, marginBottom: '0.25rem' }}>
+                              {table.displayName}
+                            </div>
+                            <div style={{ fontSize: '0.8rem', color: T.textDim }}>
+                              {table.rows.toLocaleString()} rows • {table.columns.length} columns
                             </div>
                           </div>
-                        </button>
-                        
-                        {/* Related Tables (Smart Join Suggestions) */}
-                        {isSelected && relatedTables.length > 0 && (
-                          <div className="ml-4 mt-2 space-y-1">
-                            <div className={`text-xs ${t.textMuted} flex items-center gap-1 mb-2`}>
-                              <Link2 size={12} />
-                              Related tables (click to auto-join):
-                            </div>
-                            {relatedTables.map(rel => (
-                              <button
-                                key={rel.table.name}
-                                onClick={() => selectTable(rel.table)}
-                                className={`w-full p-3 rounded-xl text-left text-sm transition-all ${t.surface} ${t.border} ${t.cardHover} flex items-center gap-2`}
-                              >
-                                <Plus size={14} className="text-emerald-500" />
-                                <span className={t.textSecondary}>{rel.table.displayName}</span>
-                                <span className={`text-xs ${t.textMuted}`}>
-                                  via {rel.joinOn.from}
-                                </span>
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </section>
-            
-            {/* Step 2: Column Selection */}
-            {selectedTables.length > 0 && (
-              <section className="animate-in slide-in-from-bottom-4 duration-300">
-                <StepHeader number={2} title="Select Columns" subtitle={`${selectedColumns.length} selected`} theme={theme} t={t} color="blue" />
-                
-                <div className="space-y-4">
-                  {selectedTables.map(table => (
-                    <div key={table.name} className={`${t.card} rounded-2xl border overflow-hidden`}>
-                      <div className={`px-4 py-3 ${t.tableHeader} border-b ${t.border} flex items-center justify-between`}>
-                        <span className="font-medium text-sm">{table.displayName}</span>
-                        <div className="flex gap-2">
-                          <button 
-                            onClick={() => selectAllColumns(table.name)}
-                            className={`text-xs ${t.textMuted} hover:text-emerald-500`}
-                          >
-                            All
-                          </button>
-                          <button 
-                            onClick={() => clearTableColumns(table.name)}
-                            className={`text-xs ${t.textMuted} hover:text-red-500`}
-                          >
-                            Clear
-                          </button>
+                          {isSelected && <Check size={18} color={COLORS.grassGreen} />}
                         </div>
                       </div>
                       
-                      <div className="p-2 max-h-40 overflow-y-auto">
-                        <div className="grid grid-cols-2 gap-1">
-                          {table.columns
-                            .filter(col => col.toLowerCase().includes(searchTerm.toLowerCase()))
-                            .map(col => {
-                              const isSelected = selectedColumns.find(c => c.table === table.name && c.column === col)
-                              return (
-                                <button
-                                  key={col}
-                                  onClick={() => toggleColumn(table.name, col)}
-                                  className={`px-3 py-2 rounded-lg text-left text-xs transition-all flex items-center gap-2 ${
-                                    isSelected
-                                      ? `${t.pillActive} font-medium`
-                                      : `${t.surfaceHover} ${t.textSecondary}`
-                                  }`}
-                                >
-                                  <div className={`w-3 h-3 rounded border-2 flex items-center justify-center transition-all ${
-                                    isSelected ? 'bg-emerald-500 border-emerald-500' : `${t.border}`
-                                  }`}>
-                                    {isSelected && <Check size={8} className="text-white" />}
-                                  </div>
-                                  <span className="truncate">{col}</span>
-                                </button>
-                              )
-                            })}
+                      {/* Related tables for smart joins */}
+                      {related.length > 0 && (
+                        <div style={{ marginLeft: '1rem', marginBottom: '0.5rem' }}>
+                          <div style={{ fontSize: '0.75rem', color: T.textDim, marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                            <Link2 size={12} /> Auto-join available:
+                          </div>
+                          {related.map(r => (
+                            <button
+                              key={r.table.name}
+                              onClick={() => selectTable(r.table)}
+                              style={{ 
+                                display: 'flex', alignItems: 'center', gap: '0.5rem',
+                                padding: '0.5rem 0.75rem', marginBottom: '0.25rem',
+                                border: `1px dashed ${T.border}`, borderRadius: '8px',
+                                background: 'transparent', color: T.textDim,
+                                fontSize: '0.8rem', cursor: 'pointer', width: '100%',
+                              }}
+                            >
+                              <Plus size={14} color={COLORS.grassGreen} />
+                              {r.table.displayName}
+                              <span style={{ fontSize: '0.7rem', color: T.textDim }}>via {r.joinOn.from}</span>
+                            </button>
+                          ))}
                         </div>
+                      )}
+                    </div>
+                  )
+                })
+              )}
+            </div>
+            
+            {/* Step 2: Columns */}
+            {selectedTables.length > 0 && (
+              <div style={styles.section}>
+                <div style={styles.sectionHeader}>
+                  <div style={styles.stepNumber}>2</div>
+                  <span style={styles.sectionTitle}>
+                    Columns {selectedColumns.length > 0 && `(${selectedColumns.length})`}
+                  </span>
+                </div>
+                
+                {selectedTables.map(table => (
+                  <div key={table.name} style={{ marginBottom: '1rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 500, color: T.text }}>{table.displayName}</span>
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <button onClick={() => selectAllColumns(table.name)} style={{ fontSize: '0.75rem', color: COLORS.grassGreen, background: 'none', border: 'none', cursor: 'pointer' }}>All</button>
+                        <button onClick={() => clearTableColumns(table.name)} style={{ fontSize: '0.75rem', color: T.textDim, background: 'none', border: 'none', cursor: 'pointer' }}>Clear</button>
                       </div>
                     </div>
-                  ))}
-                </div>
-              </section>
+                    <div style={styles.columnGrid}>
+                      {table.columns.map(col => {
+                        const isSelected = selectedColumns.find(c => c.table === table.name && c.column === col)
+                        return (
+                          <button
+                            key={col}
+                            onClick={() => toggleColumn(table.name, col)}
+                            style={{ ...styles.columnBtn, ...(isSelected ? styles.columnBtnSelected : {}) }}
+                          >
+                            <div style={styles.checkbox(isSelected)}>
+                              {isSelected && <Check size={10} color="white" />}
+                            </div>
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{col}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
             
             {/* Step 3: Filters */}
             {selectedTables.length > 0 && (
-              <section className="animate-in slide-in-from-bottom-4 duration-300 delay-75">
-                <div className="flex items-center justify-between mb-4">
-                  <StepHeader number={3} title="Filters" subtitle="Optional" theme={theme} t={t} color="amber" inline />
-                  <button
+              <div style={styles.section}>
+                <div style={{ ...styles.sectionHeader, justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <div style={styles.stepNumber}>3</div>
+                    <span style={styles.sectionTitle}>Filters</span>
+                  </div>
+                  <button 
                     onClick={addFilter}
-                    className="px-3 py-1.5 rounded-xl text-xs font-medium bg-amber-500/20 text-amber-600 hover:bg-amber-500/30 flex items-center gap-1.5 transition-all"
+                    style={{ ...styles.btn, padding: '0.25rem 0.75rem', fontSize: '0.8rem' }}
                   >
-                    <Plus size={14} />
-                    Add
+                    <Plus size={14} /> Add
                   </button>
                 </div>
                 
                 {filters.length === 0 ? (
-                  <div className={`text-center py-4 ${t.textMuted} text-sm ${t.surface} rounded-xl border ${t.border} border-dashed`}>
-                    No filters - showing all rows
+                  <div style={{ padding: '1rem', textAlign: 'center', color: T.textDim, fontSize: '0.85rem', background: T.panelLight, borderRadius: '8px' }}>
+                    No filters — showing all rows
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    {filters.map(filter => (
-                      <div key={filter.id} className={`${t.card} rounded-xl border p-3`}>
-                        <div className="flex items-center gap-2 mb-2">
-                          <select
-                            value={`${filter.table}.${filter.column}`}
-                            onChange={(e) => {
-                              const [table, column] = e.target.value.split('.')
-                              updateFilter(filter.id, 'table', table)
-                              updateFilter(filter.id, 'column', column)
-                            }}
-                            className={`flex-1 text-sm rounded-lg px-3 py-2 ${t.input} ${t.inputFocus} border`}
-                          >
-                            {getAllColumns().map(c => (
-                              <option key={c.display} value={`${c.table}.${c.column}`}>{c.display}</option>
-                            ))}
-                          </select>
-                          
-                          <select
-                            value={filter.operator}
-                            onChange={(e) => updateFilter(filter.id, 'operator', e.target.value)}
-                            className={`w-28 text-sm rounded-lg px-3 py-2 ${t.input} ${t.inputFocus} border`}
-                          >
-                            <option value="=">equals</option>
-                            <option value="!=">not equals</option>
-                            <option value=">">greater</option>
-                            <option value="<">less</option>
-                            <option value="LIKE">contains</option>
-                            <option value="IS NULL">is empty</option>
-                            <option value="IS NOT NULL">has value</option>
-                          </select>
-                          
-                          <button
-                            onClick={() => removeFilter(filter.id)}
-                            className={`p-2 rounded-lg ${t.textMuted} hover:text-red-500 hover:bg-red-500/10 transition-all`}
-                          >
-                            <X size={16} />
-                          </button>
-                        </div>
-                        
-                        {!['IS NULL', 'IS NOT NULL'].includes(filter.operator) && (
-                          <input
-                            type="text"
-                            value={filter.value}
-                            onChange={(e) => updateFilter(filter.id, 'value', e.target.value)}
-                            placeholder="Enter value..."
-                            className={`w-full text-sm rounded-lg px-3 py-2 ${t.input} ${t.inputFocus} border`}
-                          />
-                        )}
-                      </div>
-                    ))}
-                  </div>
+                  filters.map(filter => (
+                    <div key={filter.id} style={styles.filterRow}>
+                      <select
+                        style={styles.select}
+                        value={`${filter.table}.${filter.column}`}
+                        onChange={(e) => {
+                          const [table, column] = e.target.value.split('.')
+                          updateFilter(filter.id, 'table', table)
+                          updateFilter(filter.id, 'column', column)
+                        }}
+                      >
+                        {getAllColumns().map(c => (
+                          <option key={c.display} value={`${c.table}.${c.column}`}>{c.display}</option>
+                        ))}
+                      </select>
+                      <select
+                        style={{ ...styles.select, width: '100px', flex: 'none' }}
+                        value={filter.operator}
+                        onChange={(e) => updateFilter(filter.id, 'operator', e.target.value)}
+                      >
+                        <option value="=">=</option>
+                        <option value="!=">≠</option>
+                        <option value=">">{">"}</option>
+                        <option value="<">{"<"}</option>
+                        <option value="LIKE">contains</option>
+                        <option value="IS NULL">empty</option>
+                        <option value="IS NOT NULL">not empty</option>
+                      </select>
+                      {!['IS NULL', 'IS NOT NULL'].includes(filter.operator) && (
+                        <input
+                          style={styles.input}
+                          value={filter.value}
+                          onChange={(e) => updateFilter(filter.id, 'value', e.target.value)}
+                          placeholder="value"
+                        />
+                      )}
+                      <button onClick={() => removeFilter(filter.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.textDim }}>
+                        <X size={16} />
+                      </button>
+                    </div>
+                  ))
                 )}
-              </section>
+              </div>
             )}
             
             {/* Step 4: Sort & Limit */}
             {selectedTables.length > 0 && (
-              <section className="animate-in slide-in-from-bottom-4 duration-300 delay-150">
-                <StepHeader number={4} title="Sort & Limit" subtitle="Order results" theme={theme} t={t} color="pink" />
-                
-                <div className={`${t.card} rounded-2xl border p-4 space-y-4`}>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className={`text-xs ${t.textMuted} mb-2 block`}>Sort by</label>
-                      <select
-                        value={orderBy.column}
-                        onChange={(e) => setOrderBy(prev => ({ ...prev, column: e.target.value }))}
-                        className={`w-full text-sm rounded-xl px-3 py-2.5 ${t.input} ${t.inputFocus} border`}
-                      >
-                        <option value="">Default</option>
-                        {getAllColumns().map(c => (
-                          <option key={c.display} value={c.display}>{c.display}</option>
-                        ))}
-                      </select>
-                    </div>
-                    
-                    <div>
-                      <label className={`text-xs ${t.textMuted} mb-2 block`}>Direction</label>
-                      <select
-                        value={orderBy.direction}
-                        onChange={(e) => setOrderBy(prev => ({ ...prev, direction: e.target.value }))}
-                        className={`w-full text-sm rounded-xl px-3 py-2.5 ${t.input} ${t.inputFocus} border`}
-                      >
-                        <option value="ASC">↑ Ascending</option>
-                        <option value="DESC">↓ Descending</option>
-                      </select>
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <label className={`text-xs ${t.textMuted} mb-2 block`}>Row limit</label>
-                    <div className="flex gap-2">
-                      {[50, 100, 500, 1000].map(n => (
-                        <button
-                          key={n}
-                          onClick={() => setLimit(n)}
-                          className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                            limit === n
-                              ? 'bg-gradient-to-r from-emerald-500 to-cyan-500 text-white shadow-lg'
-                              : `${t.button}`
-                          }`}
-                        >
-                          {n.toLocaleString()}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+              <div style={styles.section}>
+                <div style={styles.sectionHeader}>
+                  <div style={styles.stepNumber}>4</div>
+                  <span style={styles.sectionTitle}>Sort & Limit</span>
                 </div>
-              </section>
+                
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                  <select style={styles.select} value={orderBy.column} onChange={(e) => setOrderBy(p => ({ ...p, column: e.target.value }))}>
+                    <option value="">Sort by...</option>
+                    {getAllColumns().map(c => <option key={c.display} value={c.display}>{c.display}</option>)}
+                  </select>
+                  <select style={styles.select} value={orderBy.direction} onChange={(e) => setOrderBy(p => ({ ...p, direction: e.target.value }))}>
+                    <option value="ASC">↑ Ascending</option>
+                    <option value="DESC">↓ Descending</option>
+                  </select>
+                </div>
+                
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  {[50, 100, 500, 1000].map(n => (
+                    <button
+                      key={n}
+                      onClick={() => setLimit(n)}
+                      style={{
+                        flex: 1, padding: '0.5rem', border: 'none', borderRadius: '6px',
+                        background: limit === n ? COLORS.grassGreen : T.panelLight,
+                        color: limit === n ? 'white' : T.textDim,
+                        fontWeight: 500, cursor: 'pointer', fontSize: '0.85rem',
+                      }}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
             
             {/* Run Button */}
             {selectedTables.length > 0 && (
-              <button
-                onClick={runQuery}
-                disabled={isLoading}
-                className={`w-full py-4 rounded-2xl font-semibold text-lg flex items-center justify-center gap-3 transition-all ${t.buttonPrimary} hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:hover:scale-100`}
-              >
-                {isLoading ? (
-                  <>
-                    <Loader2 size={22} className="animate-spin" />
-                    <span>Executing...</span>
-                  </>
-                ) : (
-                  <>
-                    <Play size={22} />
-                    <span>Run Query</span>
-                    <ArrowRight size={20} className="opacity-60" />
-                  </>
-                )}
+              <button style={styles.runBtn} onClick={runQuery} disabled={isLoading}>
+                {isLoading ? <Loader2 size={20} style={{ animation: 'spin 1s linear infinite' }} /> : <Play size={20} />}
+                {isLoading ? 'Running...' : 'Run Query'}
               </button>
             )}
           </div>
-        </div>
-        
-        {/* Right Panel - Results */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {/* SQL Preview */}
-          {showSQL && (
-            <div className={`${t.codeBlock} border-b ${t.border}`}>
-              <div className={`px-6 py-3 flex items-center justify-between border-b border-white/10`}>
-                <div className="flex items-center gap-2 text-sm text-slate-400">
-                  <Code2 size={14} className="text-emerald-400" />
-                  <span>Generated SQL</span>
-                  {selectedTables.length > 1 && (
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-xs">
-                      Auto-joined
-                    </span>
-                  )}
+          
+          {/* Right Panel - Results */}
+          <div style={styles.rightPanel}>
+            {/* SQL Preview */}
+            {showSQL && (
+              <div style={styles.sqlPreview}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <span style={{ color: '#94a3b8', fontSize: '0.75rem' }}>Generated SQL</span>
+                  <button onClick={copySQL} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    {copied ? <CheckCheck size={14} /> : <Copy size={14} />}
+                    {copied ? 'Copied!' : 'Copy'}
+                  </button>
                 </div>
-                <button 
-                  onClick={copySQL}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
-                    copied 
-                      ? 'bg-emerald-500/20 text-emerald-400' 
-                      : 'bg-white/10 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  {copied ? <CheckCheck size={14} /> : <Copy size={14} />}
-                  {copied ? 'Copied!' : 'Copy'}
-                </button>
-              </div>
-              <pre className="p-6 text-sm font-mono overflow-x-auto text-emerald-400">
                 {generateSQL()}
-              </pre>
-            </div>
-          )}
-          
-          {/* Error */}
-          {error && (
-            <div className="m-6 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-red-500/20 flex items-center justify-center">
-                <AlertCircle size={20} className="text-red-500" />
               </div>
-              <div>
-                <p className="font-medium text-red-500">Query Error</p>
-                <p className={`text-sm ${t.textMuted}`}>{error}</p>
+            )}
+            
+            {/* Error */}
+            {error && (
+              <div style={{ margin: '1rem', padding: '1rem', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <AlertCircle size={20} color="#ef4444" />
+                <span style={{ color: '#dc2626' }}>{error}</span>
               </div>
-            </div>
-          )}
-          
-          {/* Results */}
-          {results ? (
-            <div className="flex-1 flex flex-col overflow-hidden">
-              {/* Results Header */}
-              <div className={`px-6 py-4 border-b ${t.border} flex items-center justify-between`}>
-                <div className="flex items-center gap-4">
-                  <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 flex items-center justify-center border ${t.border}`}>
-                    <Activity size={24} className="text-emerald-500" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-lg">Query Results</h3>
-                    <div className={`flex items-center gap-3 text-sm ${t.textMuted}`}>
-                      <span className="flex items-center gap-1">
-                        <Gauge size={14} />
-                        {results.executionTime}ms
-                      </span>
-                      <span>•</span>
-                      <span>{results.rowCount.toLocaleString()} rows</span>
+            )}
+            
+            {/* Results */}
+            {results ? (
+              <>
+                <div style={styles.resultsHeader}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <Activity size={20} color={COLORS.grassGreen} />
+                    <div>
+                      <div style={{ fontWeight: 600, color: T.text }}>Results</div>
+                      <div style={{ fontSize: '0.8rem', color: T.textDim }}>
+                        {results.rowCount} rows • {results.executionTime}ms
+                      </div>
                     </div>
                   </div>
+                  <button style={styles.btn}>
+                    <Download size={16} /> Export
+                  </button>
                 </div>
                 
-                <div className="flex items-center gap-2">
-                  <button className={`px-4 py-2 rounded-xl text-sm ${t.button} flex items-center gap-2 transition-all`}>
-                    <BarChart3 size={16} />
-                    Chart
-                  </button>
-                  <button className={`px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 transition-all ${theme === 'dark' ? 'bg-white text-slate-900 hover:bg-slate-100' : 'bg-slate-900 text-white hover:bg-slate-800'}`}>
-                    <Download size={16} />
-                    Export
-                  </button>
-                </div>
-              </div>
-              
-              {/* Results Table */}
-              <div className="flex-1 overflow-auto p-6">
-                <div className={`${t.card} rounded-2xl border overflow-hidden`}>
-                  <table className="w-full text-sm">
+                <div style={{ flex: 1, overflow: 'auto', padding: '1rem' }}>
+                  <table style={styles.table}>
                     <thead>
-                      <tr className={`${t.tableHeader} border-b ${t.border}`}>
-                        {results.columns.map(col => (
-                          <th key={col} className={`px-4 py-3 text-left font-semibold ${t.textSecondary}`}>
-                            {col}
-                          </th>
-                        ))}
+                      <tr>
+                        {results.columns.map(col => <th key={col} style={styles.th}>{col}</th>)}
                       </tr>
                     </thead>
                     <tbody>
                       {results.data.map((row, i) => (
-                        <tr 
-                          key={i} 
-                          className={`border-b ${t.border} ${t.tableRow} transition-colors ${i % 2 === 1 ? t.tableRowAlt : ''}`}
-                        >
+                        <tr key={i}>
                           {results.columns.map(col => (
-                            <td key={col} className={`px-4 py-3 ${t.textSecondary}`}>
-                              {formatCellValue(col, row[col], t)}
+                            <td key={col} style={styles.td}>
+                              {col.includes('salary') || col.includes('amount') 
+                                ? `$${Number(row[col]).toLocaleString()}`
+                                : col.includes('status')
+                                  ? <span style={{ padding: '0.25rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', background: row[col] === 'A' ? '#d1fae5' : '#f3f4f6', color: row[col] === 'A' ? '#059669' : '#6b7280' }}>{row[col] === 'A' ? 'Active' : 'Termed'}</span>
+                                  : row[col]
+                              }
                             </td>
                           ))}
                         </tr>
@@ -963,102 +922,28 @@ export default function QueryBuilderPage() {
                     </tbody>
                   </table>
                 </div>
-              </div>
-            </div>
-          ) : (
-            <div className="flex-1 flex items-center justify-center">
-              <div className="text-center max-w-lg">
-                <div className="relative inline-block mb-8">
-                  <div className={`absolute inset-0 bg-gradient-to-r from-emerald-500 to-cyan-500 rounded-3xl blur-2xl opacity-20`} />
-                  <div className={`relative w-24 h-24 rounded-3xl ${t.card} border flex items-center justify-center`}>
-                    <Sparkles size={40} className={t.textMuted} />
-                  </div>
-                </div>
-                
-                <h3 className="text-2xl font-bold mb-3">Build Your Query</h3>
-                <p className={`${t.textMuted} mb-8`}>
-                  Select tables, choose columns, add filters, and execute to see results.
-                  <br />
-                  <span className="text-emerald-500">Smart joins are automatic!</span>
+              </>
+            ) : (
+              <div style={styles.emptyState}>
+                <Sparkles size={48} color={T.textDim} style={{ marginBottom: '1rem' }} />
+                <h3 style={{ color: T.text, marginBottom: '0.5rem' }}>Build Your Query</h3>
+                <p style={{ color: T.textDim, maxWidth: '300px' }}>
+                  Select tables, choose columns, add filters, and click Run Query.
+                  <br /><br />
+                  <span style={{ color: COLORS.grassGreen }}>Smart joins are automatic!</span>
                 </p>
-                
-                <div className="flex items-center justify-center gap-3">
-                  {[
-                    { icon: Table2, label: 'Tables' },
-                    { icon: Columns, label: 'Columns' },
-                    { icon: Filter, label: 'Filters' },
-                    { icon: Play, label: 'Execute' },
-                  ].map((step, i) => (
-                    <div key={step.label} className="flex items-center">
-                      <div className="flex flex-col items-center gap-2">
-                        <div className={`w-10 h-10 rounded-xl ${t.surface} border ${t.border} flex items-center justify-center`}>
-                          <step.icon size={18} className={t.textMuted} />
-                        </div>
-                        <span className={`text-xs ${t.textMuted}`}>{step.label}</span>
-                      </div>
-                      {i < 3 && <ArrowRight size={16} className={`${t.textMuted} mx-2 mt-[-16px]`} />}
-                    </div>
-                  ))}
-                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
+      
+      <style>{`
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   )
-}
-
-// =============================================================================
-// STEP HEADER COMPONENT
-// =============================================================================
-
-function StepHeader({ number, title, subtitle, theme, t, color, inline }) {
-  const colors = {
-    violet: 'from-violet-500 to-purple-600 shadow-violet-500/30',
-    blue: 'from-blue-500 to-cyan-600 shadow-blue-500/30',
-    amber: 'from-amber-500 to-orange-600 shadow-amber-500/30',
-    pink: 'from-pink-500 to-rose-600 shadow-pink-500/30',
-  }
-  
-  return (
-    <div className={`flex items-center gap-3 ${inline ? '' : 'mb-4'}`}>
-      <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${colors[color]} flex items-center justify-center text-sm font-bold text-white shadow-lg`}>
-        {number}
-      </div>
-      <div>
-        <h3 className="font-semibold">{title}</h3>
-        <p className={`text-xs ${t.textMuted}`}>{subtitle}</p>
-      </div>
-    </div>
-  )
-}
-
-// =============================================================================
-// FORMAT CELL VALUE
-// =============================================================================
-
-function formatCellValue(col, value, t) {
-  if (value === null || value === undefined) {
-    return <span className={t.textMuted}>—</span>
-  }
-  
-  const colLower = col.toLowerCase()
-  
-  if (colLower.includes('salary') || colLower.includes('amount') || colLower.includes('pay')) {
-    return <span className="text-emerald-500 font-medium">${Number(value).toLocaleString()}</span>
-  }
-  
-  if (colLower.includes('status')) {
-    const isActive = value === 'A' || value === 'Active' || value === 'active'
-    return (
-      <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-        isActive ? 'bg-emerald-500/20 text-emerald-600' : 'bg-slate-500/20 text-slate-500'
-      }`}>
-        {isActive ? 'Active' : 'Inactive'}
-      </span>
-    )
-  }
-  
-  return value
 }
