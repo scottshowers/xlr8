@@ -38,7 +38,7 @@ const MAIN_NAV = [
 
 // Admin nav items - collapsible
 const ADMIN_NAV = [
-  { path: '/standards', label: 'Standards', icon: '📜', permission: Permissions.OPS_CENTER },
+  { path: '/reference-library', label: 'Reference Library', icon: '📚', permission: Permissions.OPS_CENTER },
   { path: '/advisor', label: 'Work Advisor', icon: '💡', permission: Permissions.OPS_CENTER },
   { path: '/playbooks/builder', label: 'Playbook Builder', icon: '🔧', permission: Permissions.OPS_CENTER },
   { path: '/learning-admin', label: 'Learning', icon: '🧠', permission: Permissions.OPS_CENTER },
