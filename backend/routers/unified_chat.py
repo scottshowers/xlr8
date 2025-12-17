@@ -1166,7 +1166,8 @@ def get_or_create_session(session_id: str, project: str) -> Tuple[str, Dict]:
             'last_question': None,
             'skip_learning': False,
             'data_model': None,
-            'conversation_history': []
+            'conversation_history': [],
+            'interaction_count': 0  # Track interactions for learning control
         }
     
     return session_id, unified_sessions[session_id]
@@ -1646,8 +1647,13 @@ async def unified_chat(request: UnifiedChatRequest):
         answer = engine.ask(message, mode=mode, context={'learned_sql': learned_sql} if learned_sql else None)
         
         # Check if we can skip clarification using learning
+        # BUT only after the first interaction in a session (let users see clarification first)
         if answer.structured_output and answer.structured_output.get('type') == 'clarification_needed':
-            if LEARNING_AVAILABLE and not session.get('skip_learning'):
+            session_interactions = session.get('interaction_count', 0)
+            
+            # Only auto-apply learning if user has already interacted this session
+            # First question should show clarification so user knows the system asks
+            if LEARNING_AVAILABLE and not session.get('skip_learning') and session_interactions > 0:
                 try:
                     learning = get_learning_module()
                     questions = answer.structured_output.get('questions', [])
@@ -1832,6 +1838,7 @@ async def unified_chat(request: UnifiedChatRequest):
         session['last_sql'] = actual_sql
         session['last_result'] = response["answer"][:1000] if response.get("answer") else None
         session['last_question'] = message
+        session['interaction_count'] = session.get('interaction_count', 0) + 1
         
         # Cleanup old sessions
         cleanup_old_sessions()
