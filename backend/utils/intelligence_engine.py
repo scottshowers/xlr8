@@ -2425,43 +2425,113 @@ SQL:"""
         filters_applied: List[str],
         insights: List[Insight]
     ) -> str:
-        """Generate a natural, consultative response.
+        """Generate a consultative response using the Three Truths.
         
-        NOTE: Skipping LLM synthesis to avoid Claude API costs.
-        The fallback formatting is sufficient for demo.
+        The Three Truths:
+        1. REALITY - What the data actually shows (DuckDB)
+        2. INTENT - What the customer's documents say they want (ChromaDB customer docs)
+        3. BEST PRACTICE - Industry standards and recommendations (ChromaDB global docs)
+        
+        A good consultant synthesizes all three, noting conflicts and providing actionable insights.
         """
-        
-        # BUILD a decent response without LLM
         parts = []
         
-        if query_type == 'count' and result_value is not None:
-            parts.append(f"There are **{result_value:,}** employees matching your criteria.")
-            if filters_applied:
-                parts.append(f"\n\n*Filters: {', '.join(filters_applied)}*")
-        elif query_type in ['sum', 'average'] and result_value is not None:
-            parts.append(f"**{query_type.title()}: {result_value:,}**")
-            if filters_applied:
-                parts.append(f"\n\n*Filters: {', '.join(filters_applied)}*")
-        elif result_rows:
-            parts.append(f"Found **{len(result_rows):,}** results:")
-            # Format as simple table preview
-            if result_columns:
-                header = " | ".join(result_columns[:6])
-                parts.append(f"\n| {header} |")
-                parts.append("|" + "---|" * min(6, len(result_columns)))
-                for row in result_rows[:10]:
-                    vals = [str(row.get(c, ''))[:25] for c in result_columns[:6]]
-                    parts.append(f"| {' | '.join(vals)} |")
-                if len(result_rows) > 10:
-                    parts.append(f"\n*Showing first 10 of {len(result_rows):,} results*")
-        else:
-            parts.append("No results found matching your criteria.")
+        # Get filter context
+        status_filter = self.confirmed_facts.get('status', '')
         
+        # =================================================================
+        # TRUTH 1: REALITY (Data Results)
+        # =================================================================
+        if query_type == 'count' and result_value is not None:
+            count = result_value
+            
+            if status_filter == 'active':
+                parts.append(f"📊 **Reality:** You have **{count:,} active employees** in your current workforce.")
+            elif status_filter == 'termed':
+                parts.append(f"📊 **Reality:** Your data shows **{count:,} terminated employees**.")
+            elif status_filter == 'all':
+                parts.append(f"📊 **Reality:** Your data contains **{count:,} total employee records** across all statuses.")
+            else:
+                parts.append(f"📊 **Reality:** Found **{count:,}** employees matching your criteria.")
+                
+            # Add percentage context if we have distribution data
+            if self.filter_candidates.get('status'):
+                for cand in self.filter_candidates['status']:
+                    dist = cand.get('value_distribution', {})
+                    if dist:
+                        total = sum(dist.values())
+                        if total > 0 and count != total:
+                            pct = (count / total) * 100
+                            parts.append(f"\n*({pct:.1f}% of {total:,} total records)*")
+                        break
+                        
+        elif query_type in ['sum', 'average'] and result_value is not None:
+            parts.append(f"📊 **Reality:** {query_type.title()} = **{result_value:,}**")
+            
+        elif result_rows:
+            row_count = len(result_rows)
+            parts.append(f"📊 **Reality:** Found **{row_count:,}** matching records\n")
+            
+            if result_columns:
+                display_cols = result_columns[:6]
+                header = " | ".join(display_cols)
+                parts.append(f"| {header} |")
+                parts.append("|" + "---|" * len(display_cols))
+                
+                for row in result_rows[:12]:
+                    vals = [str(row.get(c, ''))[:25] for c in display_cols]
+                    parts.append(f"| {' | '.join(vals)} |")
+                    
+                if row_count > 12:
+                    parts.append(f"\n*Showing first 12 of {row_count:,} results*")
+        else:
+            parts.append("📊 **Reality:** No data found matching your criteria.")
+        
+        # =================================================================
+        # TRUTH 2: INTENT (Customer Documents)  
+        # =================================================================
+        customer_docs = [d for d in doc_context if 'Customer doc' in d]
+        if customer_docs:
+            parts.append("\n\n📋 **Customer Intent:**")
+            for doc in customer_docs[:2]:
+                # Extract the content part
+                content = doc.split('): ', 1)[-1] if '): ' in doc else doc
+                parts.append(f"- {content[:300]}")
+        
+        # =================================================================
+        # TRUTH 3: BEST PRACTICE (Industry Standards)
+        # =================================================================
+        bp_docs = [d for d in doc_context if 'Best practice' in d]
+        if bp_docs:
+            parts.append("\n\n✅ **Best Practice:**")
+            for doc in bp_docs[:2]:
+                content = doc.split('): ', 1)[-1] if '): ' in doc else doc
+                parts.append(f"- {content[:300]}")
+        
+        # =================================================================
+        # INSIGHTS & CONFLICTS
+        # =================================================================
         if insights:
-            parts.append("\n\n**Insights:**")
-            for insight in insights[:2]:
-                icon = '🔴' if insight.severity == 'high' else '🟡'
-                parts.append(f"\n{icon} {insight.title}: {insight.description}")
+            parts.append("\n\n---\n💡 **Insights:**")
+            for insight in insights[:3]:
+                icon = '🔴' if insight.severity == 'high' else '🟡' if insight.severity == 'medium' else '💡'
+                parts.append(f"\n{icon} **{insight.title}**: {insight.description}")
+        
+        # =================================================================
+        # FOLLOW-UP SUGGESTIONS (Consultative)
+        # =================================================================
+        if query_type == 'count' and result_value is not None:
+            parts.append("\n\n---\n**Next Steps:**")
+            if status_filter == 'active':
+                parts.append("- \"Break down by location\" - see geographic distribution")
+                parts.append("- \"Show by department\" - understand org structure")
+                parts.append("- \"How many are hourly vs salary?\" - workforce composition")
+            elif status_filter == 'termed':
+                parts.append("- \"Show terminations by month\" - identify trends")
+                parts.append("- \"Which departments had most terminations?\"")
+            else:
+                parts.append("- \"Filter to active only\" - focus on current workforce")
+                parts.append("- \"Show breakdown by status\" - see the full picture")
         
         return "\n".join(parts)
     
