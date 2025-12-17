@@ -1,5 +1,8 @@
 from fastapi import APIRouter, HTTPException
 import sys
+import logging
+
+logger = logging.getLogger(__name__)
 
 sys.path.insert(0, '/app')
 sys.path.insert(0, '/data')
@@ -17,8 +20,12 @@ async def get_jobs(limit: int = 50):
         # Format for frontend
         formatted_jobs = []
         for job in jobs:
-            result_data = job.get('result_data', {}) or {}
-            input_data = job.get('input_data', {}) or {}
+            result_data = job.get('result_data') or {}
+            input_data = job.get('input_data') or {}
+            
+            # Debug log for first few jobs
+            if len(formatted_jobs) < 3:
+                logger.warning(f"[JOBS] Raw job: id={job.get('id')[:8]}, input_data={input_data}, result_data keys={list(result_data.keys()) if result_data else 'None'}")
             
             # Get filename from multiple possible locations
             filename = (
@@ -36,7 +43,7 @@ async def get_jobs(limit: int = 50):
                 if tables or rows:
                     result_msg = f"{tables} table(s), {rows:,} rows loaded"
                 else:
-                    result_msg = result_data.get('message', result_data.get('filename'))
+                    result_msg = result_data.get('message') or result_data.get('filename')
             
             # Better display name fallback based on job type
             job_type = job.get('job_type', 'upload')
@@ -53,7 +60,7 @@ async def get_jobs(limit: int = 50):
             formatted_jobs.append({
                 'id': job['id'],
                 'filename': filename,
-                'project': input_data.get('project_name') or job.get('project_id', 'Unknown'),
+                'project': input_data.get('project_name') or job.get('project_id') or 'Unknown',
                 'project_id': job.get('project_id'),
                 'status': job['status'],
                 'progress': job.get('progress', {}).get('percent', 0) if job.get('progress') else 0,
@@ -68,6 +75,7 @@ async def get_jobs(limit: int = 50):
         
         return {"jobs": formatted_jobs}
     except Exception as e:
+        logger.exception(f"[JOBS] Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/jobs/{job_id}")
