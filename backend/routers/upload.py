@@ -1224,7 +1224,7 @@ async def upload_file(
             filename = file.filename
             ext = filename.split('.')[-1].lower()
             
-            if ext not in ['pdf', 'docx', 'doc', 'txt', 'md']:
+            if ext not in ['pdf', 'docx', 'doc', 'txt', 'md', 'xlsx', 'xls', 'csv']:
                 raise HTTPException(status_code=400, detail=f"File type '{ext}' not supported for standards")
             
             logger.info(f"[STANDARDS] Upload: {filename}, domain={domain or 'general'}")
@@ -1242,6 +1242,32 @@ async def upload_file(
             try:
                 if ext == 'pdf':
                     doc = standards_process_pdf(file_path, domain or 'general')
+                elif ext in ['xlsx', 'xls']:
+                    # Convert Excel to text for processing
+                    import pandas as pd
+                    try:
+                        dfs = pd.read_excel(file_path, sheet_name=None)
+                        text_parts = []
+                        for sheet_name, df in dfs.items():
+                            text_parts.append(f"=== {sheet_name} ===\n")
+                            text_parts.append(df.to_string(index=False))
+                            text_parts.append("\n\n")
+                        text = "\n".join(text_parts)
+                    except Exception as e:
+                        logger.warning(f"[STANDARDS] Excel parse error: {e}")
+                        raise HTTPException(status_code=400, detail=f"Failed to parse Excel file: {str(e)}")
+                    doc = standards_process_text(text, filename, domain or 'general')
+                elif ext == 'csv':
+                    # Read CSV as text
+                    import pandas as pd
+                    try:
+                        df = pd.read_csv(file_path)
+                        text = df.to_string(index=False)
+                    except Exception as e:
+                        logger.warning(f"[STANDARDS] CSV parse error: {e}")
+                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            text = f.read()
+                    doc = standards_process_text(text, filename, domain or 'general')
                 else:
                     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                         text = f.read()
