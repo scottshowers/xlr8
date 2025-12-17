@@ -29,7 +29,6 @@ from typing import Dict, List, Optional, Any
 import logging
 import json
 import re
-import re
 import time
 import io
 
@@ -403,10 +402,6 @@ def _build_bi_schema(handler, project: str) -> Dict[str, Any]:
     """
     Get schema for BI queries - compatible with IntelligenceEngine.
     Returns {'tables': [...], 'filter_candidates': {...}}
-    
-    v2.0 FIX (2025-12-17): Now uses handler.get_tables() which queries 
-    _schema_metadata with exact project match, instead of unreliable 
-    prefix guessing from SHOW TABLES.
     """
     tables = []
     filter_candidates = {}
@@ -415,37 +410,49 @@ def _build_bi_schema(handler, project: str) -> Dict[str, Any]:
         return {'tables': [], 'filter_candidates': {}}
     
     try:
-        # ================================================================
-        # FIX: Use get_tables() which queries _schema_metadata correctly
-        # ================================================================
-        metadata_tables = handler.get_tables(project)
+        # Get all tables from DuckDB
+        all_tables = handler.conn.execute("SHOW TABLES").fetchall()
         
-        logger.info(f"[BI] get_tables('{project}') returned {len(metadata_tables)} tables")
+        # Build project prefix for filtering
+        project_clean = (project or '').strip()
+        project_prefixes = [
+            project_clean.lower(),
+            project_clean.lower().replace(' ', '_'),
+            project_clean.lower().replace('-', '_'),
+        ]
         
-        if metadata_tables:
-            # Primary path: use metadata
-            for table_info in metadata_tables:
-                table_name = table_info.get('table_name', '')
-                if not table_name:
-                    continue
-                
+        for (table_name,) in all_tables:
+            if table_name.startswith('_'):
+                continue
+            
+            table_lower = table_name.lower()
+            matches_project = any(
+                table_lower.startswith(prefix.lower()) 
+                for prefix in project_prefixes if prefix
+            )
+            
+            if not matches_project and project:
+                continue
+            
+            try:
                 # Get columns
-                columns = table_info.get('columns', [])
-                if columns and isinstance(columns[0], dict):
-                    columns = [c.get('name', str(c)) for c in columns]
+                columns = []
+                try:
+                    col_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
+                    columns = [row[1] for row in col_result]
+                except:
+                    result = handler.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 0')
+                    columns = [desc[0] for desc in result.description]
                 
                 if not columns:
-                    try:
-                        col_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
-                        columns = [row[1] for row in col_result]
-                    except:
-                        try:
-                            result = handler.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 0')
-                            columns = [desc[0] for desc in result.description]
-                        except:
-                            columns = []
+                    continue
                 
-                row_count = table_info.get('row_count', 0)
+                # Get row count
+                try:
+                    count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
+                    row_count = count_result[0] if count_result else 0
+                except:
+                    row_count = 0
                 
                 tables.append({
                     'table_name': table_name,
@@ -453,76 +460,15 @@ def _build_bi_schema(handler, project: str) -> Dict[str, Any]:
                     'columns': columns,
                     'row_count': row_count
                 })
-        
-        else:
-            # Fallback: prefix matching (only if metadata is empty)
-            logger.warning(f"[BI] No tables in _schema_metadata for '{project}', using fallback")
-            
-            all_tables = handler.conn.execute("SHOW TABLES").fetchall()
-            
-            # Sanitize project name same way as _generate_table_name
-            project_clean = (project or '').strip()
-            sanitized_project = re.sub(r'[^\w\s]', '', project_clean)
-            sanitized_project = re.sub(r'\s+', '_', sanitized_project.strip()).lower()
-            
-            project_prefixes = [
-                sanitized_project,
-                project_clean.lower(),
-                project_clean.lower().replace(' ', '_'),
-                project_clean.lower().replace('-', '_'),
-            ]
-            project_prefixes = list(dict.fromkeys([p for p in project_prefixes if p]))
-            
-            for (table_name,) in all_tables:
-                if table_name.startswith('_'):
-                    continue
                 
-                table_lower = table_name.lower()
-                matches_project = any(
-                    table_lower.startswith(prefix) 
-                    for prefix in project_prefixes
-                )
-                
-                if not matches_project and project:
-                    continue
-                
-                try:
-                    # Get columns
-                    columns = []
-                    try:
-                        col_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
-                        columns = [row[1] for row in col_result]
-                    except:
-                        result = handler.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 0')
-                        columns = [desc[0] for desc in result.description]
-                    
-                    if not columns:
-                        continue
-                    
-                    # Get row count
-                    try:
-                        count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
-                        row_count = count_result[0] if count_result else 0
-                    except:
-                        row_count = 0
-                    
-                    tables.append({
-                        'table_name': table_name,
-                        'project': project,
-                        'columns': columns,
-                        'row_count': row_count
-                    })
-                    
-                except Exception as e:
-                    logger.warning(f"[BI] Error processing table {table_name}: {e}")
+            except Exception as e:
+                logger.warning(f"[BI] Error processing table {table_name}: {e}")
         
         # Get filter candidates
         try:
             filter_candidates = handler.get_filter_candidates(project)
         except:
             pass
-        
-        logger.info(f"[BI] Returning {len(tables)} tables for project '{project}'")
         
     except Exception as e:
         logger.error(f"[BI] Schema error: {e}")
@@ -992,6 +938,67 @@ async def get_bi_schema(project: str):
         }
         
     except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# =============================================================================
+# EXECUTE RAW SQL ENDPOINT
+# =============================================================================
+
+class BIExecuteRequest(BaseModel):
+    """Raw SQL execution request."""
+    sql: str
+    project: str
+
+
+@router.post("/bi/execute")
+async def execute_raw_sql(request: BIExecuteRequest):
+    """
+    Execute raw SQL query against project data.
+    
+    Used by the visual Query Builder for direct SQL execution.
+    Returns data, columns, row count, and execution time.
+    """
+    if not STRUCTURED_AVAILABLE:
+        raise HTTPException(503, "Data handler not available")
+    
+    import time
+    start_time = time.time()
+    
+    try:
+        handler = get_structured_handler()
+        
+        # Execute the SQL
+        logger.warning(f"[BI-EXECUTE] Running SQL for project {request.project}")
+        logger.warning(f"[BI-EXECUTE] SQL: {request.sql[:200]}...")
+        
+        result = handler.query(request.sql, project=request.project)
+        
+        execution_time = int((time.time() - start_time) * 1000)
+        
+        if result.get('success') and result.get('data'):
+            data = result['data']
+            columns = result.get('columns', list(data[0].keys()) if data else [])
+            
+            logger.warning(f"[BI-EXECUTE] Success: {len(data)} rows in {execution_time}ms")
+            
+            return {
+                "success": True,
+                "data": data,
+                "columns": columns,
+                "row_count": len(data),
+                "execution_time": execution_time,
+                "sql": request.sql
+            }
+        else:
+            error = result.get('error', 'Query returned no results')
+            logger.warning(f"[BI-EXECUTE] Failed: {error}")
+            raise HTTPException(400, error)
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[BI-EXECUTE] Error: {e}")
         raise HTTPException(500, str(e))
 
 
