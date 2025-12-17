@@ -51,7 +51,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.11.2 COLUMN NAME FIX ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.11.3 COLUMN FIX FROM HINTS ======")
 
 
 # =============================================================================
@@ -1568,7 +1568,7 @@ class IntelligenceEngine:
     
     def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
         """Generate SQL query using LLMOrchestrator with SMART table selection."""
-        logger.warning(f"[SQL-GEN] v5.11.2 - Starting SQL generation")
+        logger.warning(f"[SQL-GEN] v5.11.3 - Starting SQL generation")
         logger.warning(f"[SQL-GEN] confirmed_facts: {self.confirmed_facts}")
         
         if not self.structured_handler or not self.schema:
@@ -1826,27 +1826,35 @@ class IntelligenceEngine:
             logger.warning(f"[SQL-GEN] Semantic hints: {len(semantic_hints)} column mappings added")
             for hint in semantic_hints:
                 logger.warning(f"[SQL-GEN] Hint: {hint}")
-        
-        # Build column mappings from filter_candidates (data-driven, not hardcoded)
-        # This maps generic terms like "location" to the actual column from data profiling
-        if self.filter_candidates:
-            for category, candidates in self.filter_candidates.items():
-                if candidates:
-                    actual_col = candidates[0].get('column_name', candidates[0].get('column', ''))
-                    if actual_col:
-                        column_mappings[category] = actual_col
-                        # Also map common synonyms
-                        if category == 'location':
-                            column_mappings['state'] = actual_col
-                            column_mappings['site'] = actual_col
-                            column_mappings['region'] = actual_col
-                        elif category == 'organization':
-                            column_mappings['department'] = actual_col
-                            column_mappings['dept'] = actual_col
-                            column_mappings['org'] = actual_col
+                
+                # Extract column mappings from hints (these are TABLE-SPECIFIC, not global)
+                # Format: "- For location/state: use table.actual_column"
+                if ': use ' in hint:
+                    full_col = hint.split(': use ')[-1].strip()
+                    actual_col = full_col.split('.')[-1] if '.' in full_col else full_col
+                    
+                    # Map based on hint text
+                    hint_lower = hint.lower()
+                    if 'location' in hint_lower or 'state' in hint_lower:
+                        column_mappings['location'] = actual_col
+                        column_mappings['state'] = actual_col
+                        column_mappings['site'] = actual_col
+                    elif 'company' in hint_lower:
+                        column_mappings['company'] = actual_col
+                    elif 'org' in hint_lower or 'department' in hint_lower:
+                        column_mappings['organization'] = actual_col
+                        column_mappings['department'] = actual_col
+                        column_mappings['dept'] = actual_col
+                        column_mappings['org'] = actual_col
+                    elif 'employee type' in hint_lower:
+                        column_mappings['employee_type'] = actual_col
+                    elif 'pay type' in hint_lower:
+                        column_mappings['pay_type'] = actual_col
+                    elif 'job' in hint_lower or 'position' in hint_lower:
+                        column_mappings['job'] = actual_col
         
         if column_mappings:
-            logger.warning(f"[SQL-GEN] Column mappings from filter_candidates: {column_mappings}")
+            logger.warning(f"[SQL-GEN] Column mappings from hints: {column_mappings}")
         
         # Store for use in SQL post-processing
         self._column_mappings = column_mappings
@@ -1950,21 +1958,31 @@ SQL:"""
                     )
                 logger.warning(f"[SQL-GEN] After alias expansion: {sql[:200]}")
             
-            # FIX GENERIC COLUMN NAMES - LLM often uses "location" instead of "stateprovince" etc.
-            # Use the mappings we built from semantic hints
-            if hasattr(self, '_column_mappings') and self._column_mappings:
+            # FIX GENERIC COLUMN NAMES - LLM often uses "location" instead of actual column
+            # Use the mappings we built from semantic hints (table-specific), validate against selected table's columns
+            if hasattr(self, '_column_mappings') and self._column_mappings and all_columns:
+                # all_columns contains actual columns from selected tables
+                all_columns_lower = {c.lower() for c in all_columns}
+                
                 for generic_term, actual_col in self._column_mappings.items():
-                    # Only replace if the generic term appears as a column name (not part of a longer word)
-                    # And only if the actual column is different
+                    # Only replace if:
+                    # 1. The generic term appears in the SQL as a column
+                    # 2. The actual column EXISTS in the selected table(s)
+                    # 3. They're different
                     if generic_term.lower() != actual_col.lower():
-                        # Match: SELECT location, ... or GROUP BY location or location, COUNT(*)
-                        # But not: employment_status_code (don't match partial)
-                        pattern = rf'\b{re.escape(generic_term)}\b(?!\w)'
-                        if re.search(pattern, sql, re.IGNORECASE):
-                            old_sql = sql
-                            sql = re.sub(pattern, actual_col, sql, flags=re.IGNORECASE)
-                            if sql != old_sql:
-                                logger.warning(f"[SQL-GEN] Fixed column name: {generic_term} → {actual_col}")
+                        if actual_col.lower() in all_columns_lower:
+                            pattern = rf'\b{re.escape(generic_term)}\b(?!\w)'
+                            if re.search(pattern, sql, re.IGNORECASE):
+                                old_sql = sql
+                                sql = re.sub(pattern, actual_col, sql, flags=re.IGNORECASE)
+                                if sql != old_sql:
+                                    logger.warning(f"[SQL-GEN] Fixed column name: {generic_term} → {actual_col}")
+                        else:
+                            # Column doesn't exist in selected table - check if generic term is valid
+                            if generic_term.lower() in all_columns_lower:
+                                logger.warning(f"[SQL-GEN] Keeping '{generic_term}' - mapped column '{actual_col}' not in selected tables")
+                            else:
+                                logger.warning(f"[SQL-GEN] Neither '{generic_term}' nor '{actual_col}' in selected tables - LLM may have wrong column")
             
             # STRIP LLM-generated status filters (we inject the correct one ourselves)
             # The LLM often ignores our "don't add status WHERE" instruction
