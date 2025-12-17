@@ -2518,22 +2518,81 @@ SQL:"""
                 parts.append(f"\n{icon} **{insight.title}**: {insight.description}")
         
         # =================================================================
-        # FOLLOW-UP SUGGESTIONS (Consultative)
+        # FOLLOW-UP SUGGESTIONS (Data-Driven from actual schema)
         # =================================================================
-        if query_type == 'count' and result_value is not None:
-            parts.append("\n\n---\n**Next Steps:**")
-            if status_filter == 'active':
-                parts.append("- \"Break down by location\" - see geographic distribution")
-                parts.append("- \"Show by department\" - understand org structure")
-                parts.append("- \"How many are hourly vs salary?\" - workforce composition")
-            elif status_filter == 'termed':
-                parts.append("- \"Show terminations by month\" - identify trends")
-                parts.append("- \"Which departments had most terminations?\"")
-            else:
-                parts.append("- \"Filter to active only\" - focus on current workforce")
-                parts.append("- \"Show breakdown by status\" - see the full picture")
+        if query_type == 'count' and result_value is not None and self.schema:
+            suggestions = self._generate_data_driven_suggestions()
+            if suggestions:
+                parts.append("\n\n---\n**Next Steps:**")
+                for suggestion in suggestions[:3]:
+                    parts.append(f"- {suggestion}")
         
         return "\n".join(parts)
+    
+    def _generate_data_driven_suggestions(self) -> List[str]:
+        """Generate follow-up suggestions based on actual columns in the schema."""
+        suggestions = []
+        
+        if not self.schema:
+            return suggestions
+        
+        tables = self.schema.get('tables', [])
+        if not tables:
+            return suggestions
+        
+        # Collect all column names from all tables
+        all_columns = set()
+        for table in tables:
+            cols = table.get('columns', [])
+            for col in cols:
+                if isinstance(col, dict):
+                    all_columns.add(col.get('name', '').lower())
+                else:
+                    all_columns.add(str(col).lower())
+        
+        # Check filter_candidates for what's actually available
+        available_filters = list(self.filter_candidates.keys()) if self.filter_candidates else []
+        
+        # Location-based suggestions
+        location_cols = [c for c in all_columns if any(x in c for x in ['location', 'state', 'city', 'region', 'site'])]
+        if location_cols or 'location' in available_filters:
+            suggestions.append('"Show breakdown by location" - see geographic distribution')
+        
+        # Organization/department suggestions
+        org_cols = [c for c in all_columns if any(x in c for x in ['department', 'dept', 'org', 'division', 'cost_center', 'business_unit'])]
+        if org_cols or 'organization' in available_filters:
+            suggestions.append('"Break down by department" - understand org structure')
+        
+        # Job/position suggestions
+        job_cols = [c for c in all_columns if any(x in c for x in ['job', 'position', 'title', 'role'])]
+        if job_cols or 'job' in available_filters:
+            suggestions.append('"Show by job title" - see role distribution')
+        
+        # Pay type suggestions
+        pay_cols = [c for c in all_columns if any(x in c for x in ['hourly', 'salary', 'exempt', 'pay_type', 'fullpart', 'full_part'])]
+        if pay_cols or 'pay_type' in available_filters:
+            suggestions.append('"How many are hourly vs salary?" - workforce composition')
+        
+        # Employee type suggestions
+        emp_type_cols = [c for c in all_columns if any(x in c for x in ['employee_type', 'emp_type', 'regular', 'temp', 'contractor'])]
+        if emp_type_cols or 'employee_type' in available_filters:
+            suggestions.append('"Show regular vs temporary" - employment types')
+        
+        # Company suggestions (for multi-company)
+        company_cols = [c for c in all_columns if any(x in c for x in ['company', 'entity', 'legal_entity'])]
+        if company_cols or 'company' in available_filters:
+            suggestions.append('"Break down by company" - multi-entity view')
+        
+        # If status is 'termed', suggest termination analysis
+        if self.confirmed_facts.get('status') == 'termed':
+            term_cols = [c for c in all_columns if any(x in c for x in ['termination', 'term_date', 'separation'])]
+            if term_cols:
+                suggestions = [
+                    '"Show terminations by month" - identify trends',
+                    '"Which departments had most terminations?" - attrition hotspots'
+                ]
+        
+        return suggestions
     
     def clear_clarifications(self):
         """Clear confirmed facts."""
