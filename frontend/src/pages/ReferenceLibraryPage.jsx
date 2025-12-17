@@ -396,10 +396,13 @@ function UploadTab({ T, darkMode }) {
           </label>
           <input
             type="file"
-            accept=".pdf,.docx,.doc,.txt"
+            accept=".pdf,.docx,.doc,.txt,.xlsx,.xls,.csv"
             onChange={(e) => setFile(e.target.files[0])}
             style={inputStyle}
           />
+          <span style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem', display: 'block' }}>
+            Supported: PDF, Word, Excel, CSV, Text
+          </span>
         </div>
 
         <div style={{ marginBottom: '1.5rem' }}>
