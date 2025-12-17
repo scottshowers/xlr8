@@ -907,17 +907,24 @@ Return ONLY a valid JSON array. No markdown, no explanation."""
                 if not existing.get('employee_id') and emp_id:
                     existing['employee_id'] = emp_id
                 
-                # Merge earnings, taxes, deductions arrays
+                # Merge earnings, taxes, deductions arrays - dedupe by normalized type+description
                 for field in ['earnings', 'taxes', 'deductions']:
                     existing_items = existing.get(field, [])
                     new_items = emp.get(field, [])
-                    # Combine and dedupe by description
-                    seen = {(item.get('type', ''), item.get('description', '')) for item in existing_items}
+                    
+                    # Normalize function for consistent matching
+                    def norm(s):
+                        return ' '.join(str(s or '').lower().split())
+                    
+                    # Build seen set from existing items
+                    seen = {(norm(item.get('type', '')), norm(item.get('description', ''))) for item in existing_items}
+                    
                     for item in new_items:
-                        key = (item.get('type', ''), item.get('description', ''))
+                        key = (norm(item.get('type', '')), norm(item.get('description', '')))
                         if key not in seen:
                             existing_items.append(item)
                             seen.add(key)
+                    
                     existing[field] = existing_items
                 
                 # Prefer non-zero/non-empty values for scalars
