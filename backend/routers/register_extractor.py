@@ -712,6 +712,9 @@ class RegisterExtractor:
         prompt_template = self._get_vendor_prompt(vendor_type)
         all_employees = []
         
+        # Overlap settings for page-spanning records
+        OVERLAP_CHARS = 600  # Include last 600 chars from previous page
+        
         for page_idx, page_text in enumerate(pages_text):
             page_num = page_idx + 1
             
@@ -719,14 +722,27 @@ class RegisterExtractor:
                 progress = 80 + int((page_idx / len(pages_text)) * 15)
                 update_job(job_id, message=f'Extracting page {page_num}/{len(pages_text)}...', progress=progress)
             
-            logger.warning(f"[REGISTER] Processing page {page_num}/{len(pages_text)} ({len(page_text)} chars)...")
+            # Build context with overlap from previous page
+            if page_idx > 0 and len(pages_text[page_idx - 1]) > 0:
+                prev_page = pages_text[page_idx - 1]
+                overlap_text = prev_page[-OVERLAP_CHARS:] if len(prev_page) > OVERLAP_CHARS else prev_page
+                context_text = f"[END OF PREVIOUS PAGE - for context only, may contain partial employee data:]\n{overlap_text}\n\n[CURRENT PAGE {page_num} - extract employees from here:]\n{page_text}"
+                has_overlap = True
+            else:
+                context_text = page_text
+                has_overlap = False
+            
+            logger.warning(f"[REGISTER] Processing page {page_num}/{len(pages_text)} ({len(page_text)} chars, overlap={has_overlap})...")
             
             page_prompt = f"""{prompt_template}
 
-PAGE {page_num} OF {len(pages_text)}:
-{page_text}
+{context_text}
 
-Extract ALL employees visible on this page. If an employee's data is partial (continues from previous or to next page), extract what you see - we will merge later.
+INSTRUCTIONS:
+- Extract ALL employees visible on the CURRENT PAGE (page {page_num})
+- If an employee's data started on the previous page (shown in context), include their FULL record with all data you can see
+- If an employee's data appears partial at the end of this page, still extract what you see
+- We will merge duplicate records later, so it's OK to extract the same employee twice
 
 Return ONLY a valid JSON array. No markdown, no explanation."""
 
@@ -807,7 +823,7 @@ Return ONLY a valid JSON array. No markdown, no explanation."""
     
     def _merge_employees(self, employees: List[Dict]) -> List[Dict]:
         """
-        Merge employee records by employee_id.
+        Merge employee records by employee_id or name.
         Handles employees split across pages.
         """
         logger.warning(f"[REGISTER] Starting merge of {len(employees)} raw employee records...")
@@ -815,22 +831,38 @@ Return ONLY a valid JSON array. No markdown, no explanation."""
         merged = {}
         
         for emp in employees:
-            emp_id = emp.get('employee_id', '') or emp.get('name', '')
+            # Get name and employee_id separately
+            name = emp.get('name', '').strip()
+            emp_id = emp.get('employee_id', '').strip()
             
-            if not emp_id:
-                # No ID, can't merge - keep as separate
-                key = f"_unknown_{len(merged)}"
-                merged[key] = emp
-                logger.warning(f"[REGISTER] No ID for employee, keeping as {key}")
+            # Skip completely empty records
+            if not name and not emp_id:
+                logger.warning(f"[REGISTER] Skipping blank employee record")
                 continue
             
-            if emp_id not in merged:
-                merged[emp_id] = emp
-                logger.warning(f"[REGISTER] New employee: {emp_id}")
+            # Determine merge key: prefer employee_id if present, else use normalized name
+            if emp_id:
+                merge_key = emp_id
+            elif name:
+                # Normalize name for matching: uppercase, remove extra spaces
+                merge_key = ' '.join(name.upper().split())
+            else:
+                merge_key = f"_unknown_{len(merged)}"
+            
+            # Display name for logging
+            display_name = name if name else f"(ID only: {emp_id})"
+            
+            if merge_key not in merged:
+                merged[merge_key] = emp
+                logger.warning(f"[REGISTER] New employee: {display_name}")
             else:
                 # Merge: combine arrays, prefer non-zero values
-                logger.warning(f"[REGISTER] Merging duplicate: {emp_id}")
-                existing = merged[emp_id]
+                logger.warning(f"[REGISTER] Merging duplicate: {display_name}")
+                existing = merged[merge_key]
+                
+                # If existing has no name but new one does, use the name
+                if not existing.get('name') and name:
+                    existing['name'] = name
                 
                 # Merge earnings, taxes, deductions arrays
                 for field in ['earnings', 'taxes', 'deductions']:
@@ -850,12 +882,20 @@ Return ONLY a valid JSON array. No markdown, no explanation."""
                     if not existing.get(field) and emp.get(field):
                         existing[field] = emp[field]
                 
-                for field in ['name', 'department', 'company_name', 'check_number', 'check_date']:
+                for field in ['name', 'department', 'company_name', 'check_number', 'check_date', 'employee_id']:
                     if not existing.get(field) and emp.get(field):
                         existing[field] = emp[field]
         
-        logger.warning(f"[REGISTER] Merge complete: {len(employees)} raw -> {len(merged)} unique employees")
-        return list(merged.values())
+        # Final cleanup: ensure all records have names
+        result = []
+        for key, emp in merged.items():
+            if not emp.get('name') and emp.get('employee_id'):
+                # Record has ID but no name - flag it
+                logger.warning(f"[REGISTER] WARNING: Employee {emp.get('employee_id')} has no name!")
+            result.append(emp)
+        
+        logger.warning(f"[REGISTER] Merge complete: {len(employees)} raw -> {len(result)} unique employees")
+        return result
     
     def _parse_with_claude_direct(self, pages_text: List[str], vendor_type: str = "unknown", job_id: str = None) -> List[Dict]:
         """Send REDACTED text to Claude for parsing - with progress updates"""
