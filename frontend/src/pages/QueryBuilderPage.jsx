@@ -41,100 +41,76 @@ const CHART_COLORS = ['#83b16d', '#93abd9', '#f59e0b', '#ef4444', '#8b5cf6', '#0
 // =============================================================================
 
 function parseSmartTableName(fullName, file, sheet) {
-  // Handle various naming patterns:
-  // - tea1000__payroll__paycom_register_20251217_154008 (double underscore)
-  // - TEA1000_EMPLOYEE_CONVERSION_TESTING_MEYER_COMPANY_MEYER_CORP (single underscore)
+  // The LAST segment is what makes each table unique - show that!
+  // TEA1000_EMPLOYEE_CONVERSION_TESTING_MEYER_COMPANY_MEYER_CORP → "Meyer Corp"
+  // TEA1000_EMPLOYEE_CONVERSION_TESTING_MEYER_COMPANY_MEYER_COR → "Meyer Cor"
   
-  if (!fullName) return { display: 'Unknown', customer: '' }
+  if (!fullName) return { display: 'Unknown', customer: '', subtitle: '' }
   
-  // First check for double-underscore format
+  // Use sheet name if meaningful
+  if (sheet && !['Sheet1', 'Sheet 1', 'Data', 'Sheet'].includes(sheet)) {
+    const firstPart = fullName.split(/__|_/)[0]?.toUpperCase() || ''
+    return {
+      display: sheet.substring(0, 35),
+      customer: firstPart,
+      subtitle: ''
+    }
+  }
+  
+  // Handle double-underscore format: project__category__source
   if (fullName.includes('__')) {
     const parts = fullName.split('__')
-    const customerCode = parts[0]?.toUpperCase() || ''
-    let sourceName = parts[parts.length - 1] || fullName
-    sourceName = sourceName.replace(/_\d{8}_\d{6}$/, '')
-    
+    const customer = parts[0]?.toUpperCase() || ''
+    let lastPart = parts[parts.length - 1] || ''
+    // Remove timestamp
+    lastPart = lastPart.replace(/_\d{8}_\d{6}$/, '')
     return {
-      display: cleanSourceName(sourceName, sheet),
-      customer: customerCode
+      display: formatSegment(lastPart),
+      customer: customer,
+      subtitle: parts.length > 2 ? formatSegment(parts[1]) : ''
     }
   }
   
-  // Single underscore format - try to parse intelligently
-  const upper = fullName.toUpperCase()
+  // Single underscore format - take last 2 meaningful segments
+  const segments = fullName.split('_').filter(s => s.length > 0)
   
-  // Extract customer code (first part before known keywords)
-  const keywords = ['EMPLOYEE', 'PAYROLL', 'DEDUCTION', 'EARNING', 'TAX', 'BENEFIT', 'COMPANY', 'DEPARTMENT', 'JOB', 'LOCATION', 'PAY_CODE', 'MASTER', 'CORP', 'COR']
-  
-  let customerCode = ''
-  let remainder = fullName
-  
-  for (const kw of keywords) {
-    const idx = upper.indexOf(kw)
-    if (idx > 0) {
-      // Customer code is everything before this keyword
-      customerCode = fullName.substring(0, idx).replace(/_+$/, '').toUpperCase()
-      remainder = fullName.substring(idx)
-      break
+  if (segments.length <= 2) {
+    return {
+      display: formatSegment(fullName),
+      customer: '',
+      subtitle: ''
     }
   }
   
-  // If no keyword found, use first segment as customer
-  if (!customerCode) {
-    const firstUnderscore = fullName.indexOf('_')
-    if (firstUnderscore > 0 && firstUnderscore < 15) {
-      customerCode = fullName.substring(0, firstUnderscore).toUpperCase()
-      remainder = fullName.substring(firstUnderscore + 1)
-    }
-  }
+  // First segment is usually customer code
+  const customer = segments[0].toUpperCase()
+  
+  // Last 2 segments are usually the unique identifier
+  const last2 = segments.slice(-2).join('_')
+  const last1 = segments[segments.length - 1]
+  
+  // Check if last 2 make sense together (like MEYER_CORP)
+  const display = formatSegment(last2)
+  
+  // Middle segments give context
+  const middle = segments.slice(1, -2)
+  const subtitle = middle.length > 0 ? formatSegment(middle.slice(0, 2).join('_')) : ''
   
   return {
-    display: cleanSourceName(remainder, sheet),
-    customer: customerCode
+    display: display,
+    customer: customer,
+    subtitle: subtitle
   }
 }
 
-function cleanSourceName(sourceName, sheet) {
-  // Use sheet name if meaningful
-  if (sheet && !['Sheet1', 'Sheet 1', 'Data'].includes(sheet)) {
-    return sheet.substring(0, 30)
-  }
-  
-  // Clean up common patterns
-  const nameMap = {
-    'paycom_register': 'Paycom Register',
-    'employee_master': 'Employee Master',
-    'employee_conversion': 'Employee Conversion',
-    'earnings': 'Earnings',
-    'deductions': 'Deductions',
-    'taxes': 'Taxes',
-    'benefits': 'Benefits',
-    'companies': 'Companies',
-    'company': 'Companies',
-    'departments': 'Departments',
-    'jobs': 'Jobs',
-    'locations': 'Locations',
-    'pay_codes': 'Pay Codes',
-    'employee': 'Employees',
-    'meyer_corp': 'Meyer Corp',
-    'meyer_cor': 'Meyer Master',
-  }
-  
-  const lower = sourceName.toLowerCase()
-  for (const [pattern, replacement] of Object.entries(nameMap)) {
-    if (lower.includes(pattern)) {
-      return replacement
-    }
-  }
-  
-  // Generic cleanup
-  return sourceName
+function formatSegment(segment) {
+  if (!segment) return ''
+  return segment
     .replace(/_/g, ' ')
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
     .split(' ')
     .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
     .join(' ')
-    .substring(0, 30)
+    .substring(0, 35)
 }
 
 // =============================================================================
@@ -200,6 +176,7 @@ export default function QueryBuilderPage() {
         return {
           sqlName: t.full_name || t.name, // ALWAYS use for SQL queries
           displayName: parsed.display,
+          subtitle: parsed.subtitle,
           customerCode: parsed.customer,
           rows: t.row_count || t.rows || 0,
           columns: t.columns || [],
@@ -609,15 +586,19 @@ export default function QueryBuilderPage() {
                         onClick={() => selectTable(table)}
                         title={table.sqlName}
                       >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={styles.tableName}>{table.displayName}</div>
+                            {table.subtitle && (
+                              <div style={{ fontSize: '0.7rem', color: T.textDim, marginTop: '0.15rem' }}>
+                                {table.subtitle}
+                              </div>
+                            )}
                             <div style={styles.tableMeta}>
                               {table.rows.toLocaleString()} rows • {table.columns.length} cols
-                              {table.customerCode && ` • ${table.customerCode}`}
                             </div>
                           </div>
-                          {isSelected && <Check size={16} color={COLORS.grassGreen} />}
+                          {isSelected && <Check size={16} color={COLORS.grassGreen} style={{ marginTop: '0.25rem' }} />}
                         </div>
                       </div>
                       
