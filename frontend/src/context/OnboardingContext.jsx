@@ -72,15 +72,15 @@ export const projectsTour = [
 export const dataTour = [
   step('data-header', '📤 Data Management', 'This is where you get customer data into XLR8.'),
   step('data-tab-upload', '📁 Upload Tab', 'Drag and drop files or click to browse. Uploads continue in the background.'),
-  step('data-tab-vacuum', '✨ Vacuum Tab', 'Deep extraction for complex documents with intelligent table detection.'),
+  step('data-tab-vacuum', '✨ Register Extractor', 'Deep extraction for pay registers with intelligent employee detection.'),
   step('data-tab-jobs', '📋 Jobs Tab', 'Track processing status and manage uploaded files.'),
   step('data-project-context', '🎯 Project Context', 'Files upload to the currently selected project.'),
 ];
 
 export const vacuumTour = [
-  step('vacuum-header', '✨ Vacuum Extract', 'Deep extraction for complex documents.'),
-  step('vacuum-upload', '📤 Upload Area', 'Drop your file here for analysis.'),
-  step('vacuum-preview', '👁 Data Preview', 'See extracted tables and columns.'),
+  step('vacuum-header', '✨ Register Extractor', 'Deep extraction for payroll registers.'),
+  step('vacuum-upload', '📤 Upload Area', 'Drop your pay register PDF here.'),
+  step('vacuum-preview', '👁 Data Preview', 'See extracted employees and pay data.'),
   step('vacuum-mapping', '🏷 Column Mapping', 'Map columns to semantic types.'),
   step('vacuum-confirm', '✅ Confirm & Load', 'Review and load the data.'),
 ];
