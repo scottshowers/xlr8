@@ -1192,6 +1192,10 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
     """
     Get comprehensive schema for project including column profiles.
     
+    v2.0 FIX (2025-12-17): Now uses handler.get_tables() which queries 
+    _schema_metadata with exact project match, instead of unreliable 
+    prefix guessing from SHOW TABLES.
+    
     This is the foundation for intelligent clarification - we need to know
     what's in the data before we can ask smart questions.
     """
@@ -1203,67 +1207,130 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
         return {'tables': [], 'filter_candidates': {}}
     
     try:
-        # Get all tables directly from DuckDB
-        all_tables = handler.conn.execute("SHOW TABLES").fetchall()
-        logger.info(f"[SCHEMA] DuckDB has {len(all_tables)} total tables")
+        # ================================================================
+        # FIX: Use get_tables() which queries _schema_metadata correctly
+        # This ensures we find tables by EXACT project match, not prefix
+        # ================================================================
+        metadata_tables = handler.get_tables(project)
         
-        # Build project prefix for filtering
-        project_clean = (project or '').strip()
-        project_prefixes = [
-            project_clean.lower(),
-            project_clean.lower().replace(' ', '_'),
-            project_clean.lower().replace(' ', '_').replace('-', '_'),
-            project_clean.upper(),
-            project_clean,
-        ]
+        logger.warning(f"[SCHEMA] get_tables('{project}') returned {len(metadata_tables)} tables")
         
-        matched_tables = []
-        all_valid_tables = []
-        
-        for (table_name,) in all_tables:
-            if table_name.startswith('_'):
-                continue
+        # If no tables found via metadata, try fallback to SHOW TABLES
+        # This handles edge cases where metadata might be missing
+        if not metadata_tables:
+            logger.warning(f"[SCHEMA] No tables in _schema_metadata for '{project}', trying SHOW TABLES fallback")
             
-            all_valid_tables.append(table_name)
+            # Fallback: Get all tables from DuckDB directly
+            all_tables = handler.conn.execute("SHOW TABLES").fetchall()
+            logger.warning(f"[SCHEMA] DuckDB SHOW TABLES returned {len(all_tables)} total tables")
             
-            table_lower = table_name.lower()
-            matches_project = any(
-                table_lower.startswith(prefix.lower()) 
-                for prefix in project_prefixes if prefix
-            )
+            # Build project prefix for filtering (fallback only)
+            project_clean = (project or '').strip()
+            # Sanitize the same way as _generate_table_name does
+            sanitized_project = re.sub(r'[^\w\s]', '', project_clean)
+            sanitized_project = re.sub(r'\s+', '_', sanitized_project.strip()).lower()
             
-            if matches_project:
-                matched_tables.append(table_name)
-        
-        tables_to_process = matched_tables if matched_tables else all_valid_tables
-        
-        if not matched_tables and all_valid_tables:
-            logger.warning(f"[SCHEMA] No tables match project '{project}', using all tables")
-        
-        for table_name in tables_to_process:
-            try:
-                # Get columns
-                columns = []
-                try:
-                    col_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
-                    columns = [row[1] for row in col_result]
-                except:
-                    try:
-                        col_result = handler.conn.execute(f'DESCRIBE "{table_name}"').fetchall()
-                        columns = [row[0] for row in col_result]
-                    except:
-                        result = handler.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 0')
-                        columns = [desc[0] for desc in result.description]
-                
-                if not columns:
+            project_prefixes = [
+                sanitized_project,  # Primary: sanitized version
+                project_clean.lower(),
+                project_clean.lower().replace(' ', '_'),
+                project_clean.lower().replace(' ', '_').replace('-', '_'),
+            ]
+            # Remove empty and duplicate prefixes
+            project_prefixes = list(dict.fromkeys([p for p in project_prefixes if p]))
+            
+            logger.warning(f"[SCHEMA] Fallback prefixes: {project_prefixes}")
+            
+            matched_tables = []
+            all_valid_tables = []
+            
+            for (table_name,) in all_tables:
+                if table_name.startswith('_'):
                     continue
                 
-                # Get row count
+                all_valid_tables.append(table_name)
+                
+                table_lower = table_name.lower()
+                matches_project = any(
+                    table_lower.startswith(prefix) 
+                    for prefix in project_prefixes
+                )
+                
+                if matches_project:
+                    matched_tables.append(table_name)
+                    logger.info(f"[SCHEMA] Matched table: {table_name}")
+            
+            if matched_tables:
+                logger.warning(f"[SCHEMA] Fallback found {len(matched_tables)} matching tables")
+            else:
+                logger.warning(f"[SCHEMA] No tables match project '{project}', using all {len(all_valid_tables)} tables")
+            
+            tables_to_process = matched_tables if matched_tables else all_valid_tables
+            
+            # Build table info from fallback
+            for table_name in tables_to_process:
                 try:
-                    count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
-                    row_count = count_result[0] if count_result else 0
-                except:
-                    row_count = 0
+                    # Get columns
+                    columns = []
+                    try:
+                        col_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
+                        columns = [row[1] for row in col_result]
+                    except:
+                        try:
+                            col_result = handler.conn.execute(f'DESCRIBE "{table_name}"').fetchall()
+                            columns = [row[0] for row in col_result]
+                        except:
+                            result = handler.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 0')
+                            columns = [desc[0] for desc in result.description]
+                    
+                    if not columns:
+                        continue
+                    
+                    # Get row count
+                    try:
+                        count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
+                        row_count = count_result[0] if count_result else 0
+                    except:
+                        row_count = 0
+                    
+                    tables.append({
+                        'table_name': table_name,
+                        'project': project or 'unknown',
+                        'columns': columns,
+                        'row_count': row_count,
+                        'column_profiles': {},
+                        'categorical_columns': []
+                    })
+                    
+                except Exception as col_e:
+                    logger.warning(f"[SCHEMA] Error processing {table_name}: {col_e}")
+        
+        else:
+            # ================================================================
+            # PRIMARY PATH: Use metadata_tables from get_tables()
+            # ================================================================
+            for table_info in metadata_tables:
+                table_name = table_info.get('table_name', '')
+                if not table_name:
+                    continue
+                
+                # Get columns - use metadata columns or query
+                columns = table_info.get('columns', [])
+                if columns and isinstance(columns[0], dict):
+                    columns = [c.get('name', str(c)) for c in columns]
+                
+                if not columns:
+                    try:
+                        col_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
+                        columns = [row[1] for row in col_result]
+                    except:
+                        try:
+                            result = handler.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 0')
+                            columns = [desc[0] for desc in result.description]
+                        except:
+                            columns = []
+                
+                row_count = table_info.get('row_count', 0)
                 
                 # Get column profiles (Phase 2: Data-driven clarification)
                 categorical_columns = []
@@ -1324,9 +1391,6 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
                     'column_profiles': column_profiles,
                     'categorical_columns': categorical_columns
                 })
-                
-            except Exception as col_e:
-                logger.warning(f"[SCHEMA] Error processing {table_name}: {col_e}")
         
         # Get filter candidates
         try:
@@ -1334,7 +1398,7 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
         except:
             pass
         
-        logger.info(f"[SCHEMA] Returning {len(tables)} tables for project '{project}'")
+        logger.warning(f"[SCHEMA] Returning {len(tables)} tables for project '{project}'")
         
     except Exception as e:
         logger.error(f"[SCHEMA] Failed: {e}")
