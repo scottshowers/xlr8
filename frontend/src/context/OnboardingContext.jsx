@@ -52,14 +52,13 @@ const step = (target, title, content, options = {}) => ({
 // TOUR DEFINITIONS
 export const dashboardTour = [
   { target: 'body', title: '👋 Welcome to XLR8!', content: 'Your implementation analysis platform. This quick tour shows you around.', placement: 'center', disableBeacon: true },
-  step('nav-projects', '📁 Projects', 'Each customer engagement gets its own project. Start here to create or select one.'),
-  step('nav-data', '📤 Data', 'Upload customer data - Excel, PDF, CSV. We extract and analyze it automatically.'),
-  step('nav-referencelibrary', '📚 Reference Library', 'Compliance standards and best practices. Upload docs here to check data against.'),
+  step('nav-projects', '🏢 Projects', 'Each customer engagement gets its own project. Start here to create or select one.'),
+  step('nav-data', '📂 Data', 'Upload customer data - Excel, PDF, CSV. We extract and analyze it automatically.'),
   step('nav-playbooks', '📋 Playbooks', 'Run analysis playbooks to generate findings and insights from your data.'),
-  step('nav-workspace', '💬 Workspace', 'Chat with AI to explore data, ask questions, and generate reports.'),
+  step('nav-analytics', '📊 Smart Analytics', 'Build custom queries visually. Select tables, columns, and filters - no SQL needed.'),
+  step('nav-workspace', '💬 AI Assist', 'Chat with AI to explore data, ask questions, and generate reports.'),
   step('dashboard-stats', '📊 Command Center', 'Your at-a-glance view of active projects, running playbooks, and pending findings.'),
   step('dashboard-projects', '🏢 Active Engagements', 'Quick access to your projects. Click any card to dive into that engagement.'),
-  step('dashboard-actions', '⚡ Quick Actions', 'Keyboard shortcuts for power users.'),
   step('theme-toggle', '🌓 Theme Toggle', 'Switch between light and dark mode.'),
 ];
 
@@ -104,11 +103,19 @@ export const workspaceTour = [
 ];
 
 export const referenceLibraryTour = [
-  step('reference-header', '📚 Reference Library', 'Compliance standards and rules.'),
-  step('reference-documents', '📄 Documents Tab', 'View uploaded compliance documents.'),
-  step('reference-upload', '📤 Upload Tab', 'Add new compliance docs.'),
-  step('reference-rules', '📋 Rules Tab', 'Browse extracted rules.'),
-  step('reference-compliance', '🔍 Compliance Check', 'Run rules against project data.'),
+  step('standards-header', '📚 Standards Library', 'Compliance standards and rules for validation.'),
+  step('standards-documents', '📄 Documents', 'View uploaded compliance documents.'),
+  step('standards-upload', '📤 Upload', 'Add new compliance docs.'),
+  step('standards-rules', '📋 Rules', 'Browse extracted rules.'),
+];
+
+export const analyticsTour = [
+  step('analytics-header', '📊 Smart Analytics', 'Build queries visually without SQL.'),
+  step('analytics-tables', '📋 Select Tables', 'Choose which data tables to query. Related tables auto-join.'),
+  step('analytics-columns', '📝 Select Columns', 'Pick the columns you want to see in results.'),
+  step('analytics-filters', '🔍 Add Filters', 'Filter your data by any column value.'),
+  step('analytics-run', '▶️ Run Query', 'Execute your query and see results instantly.'),
+  step('analytics-chart', '📈 Visualize', 'Create charts from your query results.'),
 ];
 
 export const adminTour = [
@@ -134,8 +141,9 @@ const tourRegistry = {
   '/data': { id: 'data', steps: dataTour },
   '/vacuum': { id: 'vacuum', steps: vacuumTour },
   '/playbooks': { id: 'playbooks', steps: playbooksTour },
+  '/analytics': { id: 'analytics', steps: analyticsTour },
   '/workspace': { id: 'workspace', steps: workspaceTour },
-  '/reference-library': { id: 'reference-library', steps: referenceLibraryTour },
+  '/standards': { id: 'standards', steps: referenceLibraryTour },
   '/admin': { id: 'admin', steps: adminTour },
   '/system': { id: 'system-monitor', steps: systemMonitorTour },
 };
