@@ -20,6 +20,14 @@ async def get_jobs(limit: int = 50):
             result_data = job.get('result_data', {}) or {}
             input_data = job.get('input_data', {}) or {}
             
+            # Get filename from multiple possible locations
+            filename = (
+                input_data.get('filename') or 
+                result_data.get('filename') or 
+                input_data.get('project_name') or
+                job.get('filename')
+            )
+            
             # Build a useful result message
             result_msg = None
             if result_data:
@@ -30,14 +38,26 @@ async def get_jobs(limit: int = 50):
                 else:
                     result_msg = result_data.get('message', result_data.get('filename'))
             
+            # Better display name fallback based on job type
+            job_type = job.get('job_type', 'upload')
+            if not filename or filename == 'Unknown':
+                if job_type == 'upload':
+                    filename = 'File upload'
+                elif job_type == 'analysis':
+                    filename = 'Document analysis'
+                elif job_type == 'extraction':
+                    filename = 'Data extraction'
+                else:
+                    filename = f"{job_type.title()} job"
+            
             formatted_jobs.append({
                 'id': job['id'],
-                'filename': input_data.get('filename') or result_data.get('filename') or 'Unknown',
-                'project': job.get('project_id', 'Unknown'),
+                'filename': filename,
+                'project': input_data.get('project_name') or job.get('project_id', 'Unknown'),
                 'project_id': job.get('project_id'),
                 'status': job['status'],
-                'progress': job.get('progress', {}).get('percent', 0),
-                'current_step': job.get('progress', {}).get('step', ''),
+                'progress': job.get('progress', {}).get('percent', 0) if job.get('progress') else 0,
+                'current_step': job.get('progress', {}).get('step', '') if job.get('progress') else '',
                 'error': job.get('error_message'),
                 'result': result_msg,
                 'tables_created': result_data.get('tables_created'),
