@@ -29,6 +29,7 @@ import logging
 import tempfile
 import shutil
 import uuid
+import time
 import pandas as pd
 import requests
 from requests.auth import HTTPBasicAuth
@@ -730,38 +731,64 @@ Extract ALL employees visible on this page. If an employee's data is partial (co
 Return ONLY a valid JSON array. No markdown, no explanation."""
 
             try:
-                response = requests.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {groq_api_key}",
-                        "Content-Type": "application/json"
-                    },
-                    json={
-                        "model": "llama-3.3-70b-versatile",
-                        "messages": [{"role": "user", "content": page_prompt}],
-                        "temperature": 0.1,
-                        "max_tokens": 8192
-                    },
-                    timeout=60
-                )
+                # Retry logic for rate limits
+                # Groq free tier: 12k TPM, each page ~3-4k tokens = need ~20s between pages
+                max_retries = 5
+                retry_delay = 15  # seconds - longer for rate limit recovery
                 
-                if response.status_code == 200:
-                    result = response.json()
-                    content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-                    logger.warning(f"[REGISTER] Page {page_num} raw response length: {len(content)}")
+                for attempt in range(max_retries):
+                    response = requests.post(
+                        "https://api.groq.com/openai/v1/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {groq_api_key}",
+                            "Content-Type": "application/json"
+                        },
+                        json={
+                            "model": "llama-3.3-70b-versatile",
+                            "messages": [{"role": "user", "content": page_prompt}],
+                            "temperature": 0.1,
+                            "max_tokens": 8192
+                        },
+                        timeout=60
+                    )
                     
-                    page_employees = self._parse_json_response(content)
-                    
-                    if page_employees:
-                        logger.warning(f"[REGISTER] Page {page_num}: {len(page_employees)} employees extracted")
-                        for emp in page_employees:
-                            logger.warning(f"[REGISTER]   - {emp.get('name', 'NO NAME')} (ID: {emp.get('employee_id', 'NO ID')})")
-                        all_employees.extend(page_employees)
+                    if response.status_code == 200:
+                        result = response.json()
+                        content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                        logger.warning(f"[REGISTER] Page {page_num} raw response length: {len(content)}")
+                        
+                        page_employees = self._parse_json_response(content)
+                        
+                        if page_employees:
+                            logger.warning(f"[REGISTER] Page {page_num}: {len(page_employees)} employees extracted")
+                            for emp in page_employees:
+                                logger.warning(f"[REGISTER]   - {emp.get('name', 'NO NAME')} (ID: {emp.get('employee_id', 'NO ID')})")
+                            all_employees.extend(page_employees)
+                        else:
+                            logger.warning(f"[REGISTER] Page {page_num}: NO employees parsed from response")
+                            logger.warning(f"[REGISTER] Page {page_num} response preview: {content[:500]}...")
+                        
+                        # Small delay between pages to avoid rate limiting
+                        # Groq free tier: 12k TPM, need ~15-20s between pages
+                        if page_idx < len(pages_text) - 1:  # Don't delay after last page
+                            time.sleep(5)  # 5 second delay between pages
+                        break  # Success, exit retry loop
+                        
+                    elif response.status_code == 429:
+                        # Rate limited - wait and retry
+                        wait_time = retry_delay * (attempt + 1)  # Exponential backoff
+                        logger.warning(f"[REGISTER] Page {page_num} rate limited, waiting {wait_time}s (attempt {attempt + 1}/{max_retries})...")
+                        
+                        if job_id:
+                            update_job(job_id, message=f'Rate limited, waiting {wait_time}s... (page {page_num})')
+                        
+                        time.sleep(wait_time)
+                        
+                        if attempt == max_retries - 1:
+                            logger.warning(f"[REGISTER] Page {page_num} failed after {max_retries} retries due to rate limiting")
                     else:
-                        logger.warning(f"[REGISTER] Page {page_num}: NO employees parsed from response")
-                        logger.warning(f"[REGISTER] Page {page_num} response preview: {content[:500]}...")
-                else:
-                    logger.warning(f"[REGISTER] Page {page_num} Groq error: {response.status_code} - {response.text[:200]}")
+                        logger.warning(f"[REGISTER] Page {page_num} Groq error: {response.status_code} - {response.text[:200]}")
+                        break  # Non-rate-limit error, don't retry
                     
             except Exception as e:
                 logger.warning(f"[REGISTER] Page {page_num} error: {e}")
