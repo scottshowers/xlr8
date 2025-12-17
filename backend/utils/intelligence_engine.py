@@ -1,10 +1,14 @@
 """
-XLR8 INTELLIGENCE ENGINE v5.10
+XLR8 INTELLIGENCE ENGINE v5.11
 ==============================
 
 Deploy to: backend/utils/intelligence_engine.py
 
 UPDATES:
+- v5.11: LOCATION + GROUP BY FIX
+        - Fixed table selection: "location" keyword now boosts tables with location columns
+        - Fixed GROUP BY query handling: Now displays as table, not single count value
+        - Tables with stateprovince/state/city get +40 boost for location questions
 - v5.10: SMART FILTER INJECTION - checks if filter column exists in selected table
          before injecting. Prevents "column not found" errors when LLM picks
          wrong table for GROUP BY queries.
@@ -45,7 +49,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.10 SMART FILTER INJECTION ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.11 LOCATION + GROUP BY FIX ======")
 
 
 # =============================================================================
@@ -1467,15 +1471,18 @@ class IntelligenceEngine:
         
         # Priority keywords for table selection
         table_keywords = {
-            'personal': ['employee', 'employees', 'person', 'people', 'who', 'name', 'ssn', 'birth', 'hire', 'termination', 'termed', 'terminated', 'active'],
-            'company': ['company', 'organization', 'org', 'entity', 'status', 'location', 'job'],
+            'personal': ['employee', 'employees', 'person', 'people', 'who', 'name', 'ssn', 'birth', 'hire', 'termination', 'termed', 'terminated', 'active', 'location', 'state', 'city', 'address'],
+            'company': ['company', 'organization', 'org', 'entity'],
             'job': ['job', 'position', 'title', 'department', 'dept'],
             'earnings': ['earn', 'earning', 'pay', 'salary', 'wage', 'compensation', 'rate'],
             'deductions': ['deduction', 'benefit', '401k', 'insurance', 'health'],
-            'taxes': ['tax', 'withhold', 'federal', 'state'],
+            'taxes': ['tax', 'withhold', 'federal', 'state tax'],
             'time': ['time', 'hours', 'attendance', 'schedule'],
-            'address': ['address', 'location', 'city', 'state', 'zip'],
+            'address': ['address', 'zip', 'postal'],
         }
+        
+        # Columns that indicate location data (boost tables with these)
+        LOCATION_COLUMNS = ['stateprovince', 'state', 'city', 'location', 'region', 'site', 'work_location', 'home_state']
         
         # Score each table
         scored_tables = []
@@ -1529,6 +1536,13 @@ class IntelligenceEngine:
             elif len(columns) > 8:
                 score += 5
             
+            # SMART BOOST: If question asks about location, boost tables that HAVE location columns
+            if any(loc_word in q_lower for loc_word in ['location', 'state', 'by state', 'by location', 'geographic']):
+                col_names = [c.get('name', '').lower() if isinstance(c, dict) else str(c).lower() for c in columns]
+                if any(loc_col in ' '.join(col_names) for loc_col in LOCATION_COLUMNS):
+                    score += 40  # Big boost for tables with actual location data
+                    logger.warning(f"[SQL-GEN] Boosting table {table_name[-40:]} - has location columns")
+            
             scored_tables.append((score, table))
             logger.debug(f"[SQL-GEN] Table {table_name[-30:]} score={score} (rows={row_count}, cols={len(columns)}, lookup={is_lookup})")
         
@@ -1552,7 +1566,7 @@ class IntelligenceEngine:
     
     def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
         """Generate SQL query using LLMOrchestrator with SMART table selection."""
-        logger.warning(f"[SQL-GEN] v5.10 - Starting SQL generation")
+        logger.warning(f"[SQL-GEN] v5.11 - Starting SQL generation")
         logger.warning(f"[SQL-GEN] confirmed_facts: {self.confirmed_facts}")
         
         if not self.structured_handler or not self.schema:
@@ -2056,11 +2070,16 @@ SQL:"""
             
             # Detect query type
             sql_upper = sql.upper()
-            if 'COUNT(' in sql_upper:
+            has_group_by = 'GROUP BY' in sql_upper
+            
+            # GROUP BY queries return multiple rows - they're 'list' type even if they have COUNT
+            if has_group_by:
+                query_type = 'group'  # Special type for grouped aggregations
+            elif 'COUNT(' in sql_upper and not has_group_by:
                 query_type = 'count'
-            elif 'SUM(' in sql_upper:
+            elif 'SUM(' in sql_upper and not has_group_by:
                 query_type = 'sum'
-            elif 'AVG(' in sql_upper:
+            elif 'AVG(' in sql_upper and not has_group_by:
                 query_type = 'average'
             else:
                 query_type = 'list'
@@ -2414,6 +2433,11 @@ SQL:"""
                     elif query_type in ['sum', 'average'] and rows:
                         result_value = list(rows[0].values())[0] if rows[0] else 0
                         data_context.append(f"{query_type.upper()} RESULT: {result_value}")
+                    elif query_type == 'group' and rows:
+                        # GROUP BY query - show as table
+                        result_rows = rows[:20]
+                        result_columns = cols
+                        data_context.append(f"Grouped results: {len(rows)} groups with columns: {', '.join(cols[:8])}")
                     else:
                         result_rows = rows[:20]
                         result_columns = cols
@@ -2549,6 +2573,31 @@ SQL:"""
                 parts.append(f"📊 **Reality:** {query_type.title()} = **{val:,.2f}**")
             except (ValueError, TypeError):
                 parts.append(f"📊 **Reality:** {query_type.title()} = **{result_value}**")
+        
+        elif query_type == 'group' and result_rows:
+            # GROUP BY results - show as breakdown table
+            row_count = len(result_rows)
+            parts.append(f"📊 **Reality:** Breakdown by {result_columns[0] if result_columns else 'category'}:\n")
+            
+            if result_columns:
+                display_cols = result_columns[:4]  # Show fewer cols for group results
+                header = " | ".join(display_cols)
+                parts.append(f"| {header} |")
+                parts.append("|" + "---|" * len(display_cols))
+                
+                for row in result_rows[:15]:  # Show more rows for breakdowns
+                    vals = []
+                    for c in display_cols:
+                        v = row.get(c, '')
+                        # Format counts with commas
+                        if isinstance(v, (int, float)) and c.lower() in ['count', 'count(*)', 'total']:
+                            vals.append(f"{int(v):,}")
+                        else:
+                            vals.append(str(v)[:30])
+                    parts.append(f"| {' | '.join(vals)} |")
+                    
+                if row_count > 15:
+                    parts.append(f"\n*Showing top 15 of {row_count:,} groups*")
             
         elif result_rows:
             row_count = len(result_rows)
