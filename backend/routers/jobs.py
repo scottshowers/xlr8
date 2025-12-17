@@ -78,6 +78,19 @@ async def get_jobs(limit: int = 50):
         logger.exception(f"[JOBS] Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@router.post("/jobs/clear-all")
+async def delete_all_jobs():
+    """Delete all processing jobs"""
+    try:
+        deleted = ProcessingJobModel.delete_all()
+        logger.info(f"[JOBS] Deleted {deleted} jobs")
+        return {"success": True, "deleted": deleted}
+    except Exception as e:
+        logger.exception(f"[JOBS] Clear all error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/jobs/{job_id}")
 async def get_job(job_id: str):
     """Get a specific job"""
@@ -102,16 +115,6 @@ async def get_job(job_id: str):
         }
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.delete("/jobs/clear-all")
-async def delete_all_jobs():
-    """Delete all processing jobs"""
-    try:
-        deleted = ProcessingJobModel.delete_all()
-        return {"success": True, "deleted": deleted}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
