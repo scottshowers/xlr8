@@ -655,14 +655,12 @@ function FilesTab() {
                   {getStatusIcon(job.status)}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: '0.8rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: COLORS.text }}>
-                      {job.filename && job.filename !== 'Unknown' ? job.filename : (job.result || 'Processing job')}
+                      {job.filename || 'Processing job'}
                     </div>
                     <div style={{ fontSize: '0.7rem', color: COLORS.textLight }}>
-                      {job.status === 'completed' && job.result ? (
-                        <>{job.result} • {getProjectName(job.project)} • {formatDate(job.created_at)}</>
-                      ) : (
-                        <>{job.status} • {getProjectName(job.project)} • {formatDate(job.created_at)}</>
-                      )}
+                      {job.result && <span style={{ color: COLORS.grassGreen }}>{job.result} • </span>}
+                      {getProjectName(job.project)} • {formatDate(job.created_at)}
+                      {job.error && <span style={{ color: '#ef4444' }}> • {job.error}</span>}
                     </div>
                   </div>
                 </div>
