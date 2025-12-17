@@ -1,9 +1,11 @@
 /**
- * QueryBuilderPage.jsx - Visual Query Builder
- * ============================================
+ * QueryBuilderPage.jsx - Smart Analytics
+ * =======================================
  * 
- * Clean design matching existing XLR8 pages.
- * Smart joins, no SQL knowledge required.
+ * Visual query builder with:
+ * - Smart table display names
+ * - Auto-joins
+ * - Charts/Visualizations
  * 
  * Deploy to: frontend/src/pages/QueryBuilderPage.jsx
  */
@@ -13,11 +15,12 @@ import { useProject } from '../context/ProjectContext'
 import { useTheme } from '../context/ThemeContext'
 import api from '../services/api'
 import { 
-  Database, Table2, Columns, Filter, Play, Download, 
-  Plus, X, ChevronRight, Check, AlertCircle, Sparkles,
+  Database, Table2, Play, Download, 
+  Plus, X, Check, AlertCircle, Sparkles,
   RefreshCw, Code2, Copy, CheckCheck, Link2,
-  Loader2, Activity
+  Loader2, Activity, BarChart3, PieChart, TrendingUp
 } from 'lucide-react'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart as RePieChart, Pie, Cell, LineChart, Line } from 'recharts'
 
 // =============================================================================
 // CONSTANTS
@@ -29,6 +32,43 @@ const COLORS = {
   text: '#2a3441',
   textLight: '#5f6c7b',
   border: '#e1e8ed',
+}
+
+const CHART_COLORS = ['#83b16d', '#93abd9', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#14b8a6']
+
+// =============================================================================
+// SMART TABLE NAME PARSER
+// =============================================================================
+
+function parseTableDisplayName(fullName, shortName, file, sheet) {
+  // Priority: sheet name > file name > short name
+  if (sheet && sheet !== 'Sheet1' && sheet !== 'Sheet 1') {
+    // Clean up sheet name
+    return cleanName(sheet)
+  }
+  if (file) {
+    // Extract filename without extension
+    const fileName = file.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ')
+    return cleanName(fileName)
+  }
+  if (shortName) {
+    return cleanName(shortName)
+  }
+  // Fallback: parse full name
+  const parts = fullName.split('__')
+  return cleanName(parts[parts.length - 1])
+}
+
+function cleanName(name) {
+  if (!name) return 'Unknown'
+  return name
+    .replace(/[-_]/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2') // camelCase to spaces
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ')
+    .trim()
+    .substring(0, 30) // Max 30 chars
 }
 
 // =============================================================================
@@ -57,6 +97,11 @@ export default function QueryBuilderPage() {
   const [error, setError] = useState(null)
   const [showSQL, setShowSQL] = useState(false)
   const [copied, setCopied] = useState(false)
+  
+  // Chart state
+  const [showChart, setShowChart] = useState(false)
+  const [chartType, setChartType] = useState('bar')
+  const [chartConfig, setChartConfig] = useState({ xAxis: '', yAxis: '' })
 
   // ===========================================
   // LOAD SCHEMA
@@ -75,10 +120,13 @@ export default function QueryBuilderPage() {
       const schema = response.data
       
       const tableList = (schema.tables || []).map(t => ({
-        name: t.name,
-        displayName: formatTableName(t.name),
+        name: t.full_name || t.name, // Use full_name for SQL!
+        shortName: t.name,
+        displayName: parseTableDisplayName(t.full_name || t.name, t.name, t.file, t.sheet),
         rows: t.row_count || t.rows || 0,
         columns: t.columns || [],
+        file: t.file,
+        sheet: t.sheet,
         keyColumns: (t.columns || []).filter(c => 
           c.toLowerCase().endsWith('_id') || 
           c.toLowerCase().endsWith('_code') ||
@@ -90,29 +138,10 @@ export default function QueryBuilderPage() {
       setRelationships(detectRelationships(tableList))
     } catch (err) {
       console.error('Failed to load schema:', err)
-      loadMockSchema()
+      setTables([])
     } finally {
       setIsLoadingSchema(false)
     }
-  }
-  
-  const loadMockSchema = () => {
-    const mockTables = [
-      { name: 'meyer_cor', displayName: 'Employee Master', rows: 14474, 
-        columns: ['employee_id', 'first_name', 'last_name', 'employment_status_code', 'hire_date', 'termination_date', 'stateprovince', 'city', 'department', 'job_code', 'salary', 'home_company_code'],
-        keyColumns: ['employee_id', 'job_code', 'home_company_code'] },
-      { name: 'meyer_corp', displayName: 'Companies', rows: 156,
-        columns: ['company_code', 'company_name', 'address', 'city', 'state', 'zip', 'ein'],
-        keyColumns: ['company_code'] },
-      { name: 'deductions', displayName: 'Deductions', rows: 45000,
-        columns: ['employee_id', 'deduction_code', 'description', 'amount', 'effective_date', 'benefit_status'],
-        keyColumns: ['employee_id', 'deduction_code'] },
-      { name: 'job_codes', displayName: 'Job Codes', rows: 150,
-        columns: ['job_code', 'job_title', 'job_family', 'pay_grade', 'flsa_status'],
-        keyColumns: ['job_code'] },
-    ]
-    setTables(mockTables)
-    setRelationships(detectRelationships(mockTables))
   }
   
   const detectRelationships = (tableList) => {
@@ -124,9 +153,7 @@ export default function QueryBuilderPage() {
           t2.keyColumns.forEach(k2 => {
             if (k1 === k2 || 
                 (k1.replace('_id', '_code') === k2) ||
-                (k1.replace('_code', '_id') === k2) ||
-                (k1 === 'home_company_code' && k2 === 'company_code') ||
-                (k1 === 'company_code' && k2 === 'home_company_code')) {
+                (k1.replace('_code', '_id') === k2)) {
               rels.push({
                 from: { table: t1.name, column: k1 },
                 to: { table: t2.name, column: k2 }
@@ -137,10 +164,6 @@ export default function QueryBuilderPage() {
       })
     })
     return rels
-  }
-  
-  const formatTableName = (name) => {
-    return name.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
   }
 
   // ===========================================
@@ -160,18 +183,18 @@ export default function QueryBuilderPage() {
     const related = []
     relationships.forEach(rel => {
       if (rel.from.table === tableName) {
-        related.push({ 
-          table: tables.find(t => t.name === rel.to.table),
-          joinOn: { from: rel.from.column, to: rel.to.column }
-        })
+        const t = tables.find(t => t.name === rel.to.table)
+        if (t && !selectedTables.find(st => st.name === t.name)) {
+          related.push({ table: t, joinOn: { from: rel.from.column, to: rel.to.column } })
+        }
       } else if (rel.to.table === tableName) {
-        related.push({ 
-          table: tables.find(t => t.name === rel.from.table),
-          joinOn: { from: rel.to.column, to: rel.from.column }
-        })
+        const t = tables.find(t => t.name === rel.from.table)
+        if (t && !selectedTables.find(st => st.name === t.name)) {
+          related.push({ table: t, joinOn: { from: rel.to.column, to: rel.from.column } })
+        }
       }
     })
-    return related.filter(r => r.table && !selectedTables.find(t => t.name === r.table.name))
+    return related
   }
   
   const toggleColumn = (tableName, columnName) => {
@@ -224,44 +247,56 @@ export default function QueryBuilderPage() {
     const cols = []
     selectedTables.forEach(table => {
       table.columns.forEach(col => {
-        cols.push({ table: table.name, column: col, display: selectedTables.length > 1 ? `${table.name}.${col}` : col })
+        cols.push({ 
+          table: table.name, 
+          column: col, 
+          display: selectedTables.length > 1 ? `${table.displayName}.${col}` : col 
+        })
       })
     })
     return cols
   }
 
   // ===========================================
-  // SQL GENERATION
+  // SQL GENERATION - Use full table names!
   // ===========================================
   
   const generateSQL = () => {
     if (selectedTables.length === 0) return '-- Select a table to begin'
     
+    const primaryTable = selectedTables[0]
+    
+    // Quote table name if it contains special chars
+    const quoteName = (name) => name.includes('__') || name.includes('-') ? `"${name}"` : name
+    
     const cols = selectedColumns.length > 0
-      ? selectedColumns.map(c => selectedTables.length > 1 ? `${c.table}.${c.column}` : c.column).join(', ')
+      ? selectedColumns.map(c => {
+          const colName = selectedTables.length > 1 ? `${quoteName(c.table)}.${c.column}` : c.column
+          return colName
+        }).join(', ')
       : '*'
     
-    let sql = `SELECT ${cols}\nFROM ${selectedTables[0].name}`
+    let sql = `SELECT ${cols}\nFROM ${quoteName(primaryTable.name)}`
     
     if (selectedTables.length > 1) {
       selectedTables.slice(1).forEach(table => {
         const rel = relationships.find(r => 
-          (r.from.table === selectedTables[0].name && r.to.table === table.name) ||
-          (r.to.table === selectedTables[0].name && r.from.table === table.name)
+          (r.from.table === primaryTable.name && r.to.table === table.name) ||
+          (r.to.table === primaryTable.name && r.from.table === table.name)
         )
         if (rel) {
-          const isFromPrimary = rel.from.table === selectedTables[0].name
+          const isFromPrimary = rel.from.table === primaryTable.name
           const joinCol1 = isFromPrimary ? rel.from.column : rel.to.column
           const joinCol2 = isFromPrimary ? rel.to.column : rel.from.column
-          sql += `\nLEFT JOIN ${table.name} ON ${selectedTables[0].name}.${joinCol1} = ${table.name}.${joinCol2}`
+          sql += `\nLEFT JOIN ${quoteName(table.name)} ON ${quoteName(primaryTable.name)}.${joinCol1} = ${quoteName(table.name)}.${joinCol2}`
         }
       })
     }
     
-    const validFilters = filters.filter(f => f.column && f.operator)
+    const validFilters = filters.filter(f => f.column && f.operator && (f.operator.includes('NULL') || f.value))
     if (validFilters.length > 0) {
       const whereClauses = validFilters.map(f => {
-        const colRef = selectedTables.length > 1 ? `${f.table}.${f.column}` : f.column
+        const colRef = selectedTables.length > 1 ? `${quoteName(f.table)}.${f.column}` : f.column
         if (f.operator === 'IS NULL' || f.operator === 'IS NOT NULL') return `${colRef} ${f.operator}`
         if (f.operator === 'LIKE') return `${colRef} ILIKE '%${f.value}%'`
         const quote = isNaN(f.value) ? "'" : ''
@@ -270,8 +305,11 @@ export default function QueryBuilderPage() {
       sql += `\nWHERE ${whereClauses.join(' AND ')}`
     }
     
-    if (orderBy.column) sql += `\nORDER BY ${orderBy.column} ${orderBy.direction}`
-    if (limit) sql += `\nLIMIT ${limit}`
+    if (orderBy.column) {
+      sql += `\nORDER BY ${orderBy.column} ${orderBy.direction}`
+    }
+    
+    sql += `\nLIMIT ${limit}`
     
     return sql
   }
@@ -294,51 +332,74 @@ export default function QueryBuilderPage() {
     
     setIsLoading(true)
     setError(null)
+    setShowChart(false)
     
     try {
-      const response = await api.post('/bi/execute', {
-        sql: generateSQL(),
-        project: projectName
-      })
+      const sql = generateSQL()
+      console.log('[Smart Analytics] Running SQL:', sql)
+      
+      const response = await api.post('/bi/execute', { sql, project: projectName })
+      
+      const data = response.data.data || []
+      const columns = response.data.columns || (data.length > 0 ? Object.keys(data[0]) : [])
       
       setResults({
-        columns: response.data.columns || [],
-        data: response.data.data || [],
-        rowCount: response.data.row_count || 0,
+        columns,
+        data,
+        rowCount: response.data.row_count || data.length,
         executionTime: response.data.execution_time || 0
       })
+      
+      // Auto-detect chart config
+      autoDetectChartConfig(columns, data)
+      
     } catch (err) {
       console.error('Query failed:', err)
-      if (err.response?.status === 404 || err.code === 'ERR_NETWORK') {
-        setResults(generateMockResults())
-      } else {
-        setError(err.response?.data?.detail || err.message || 'Query failed')
-      }
+      setError(err.response?.data?.detail || err.message || 'Query failed')
     } finally {
       setIsLoading(false)
     }
   }
   
-  const generateMockResults = () => {
-    const cols = selectedColumns.length > 0 
-      ? selectedColumns.map(c => c.column)
-      : selectedTables[0]?.columns?.slice(0, 6) || []
+  // ===========================================
+  // CHART AUTO-CONFIG
+  // ===========================================
+  
+  const autoDetectChartConfig = (columns, data) => {
+    if (!data || data.length === 0) return
     
-    const data = Array.from({ length: Math.min(limit, 25) }, (_, i) => {
-      const row = {}
-      cols.forEach(col => {
-        if (col.includes('id')) row[col] = `ID-${1000 + i}`
-        else if (col.includes('first_name')) row[col] = ['James', 'Emma', 'Liam', 'Olivia'][i % 4]
-        else if (col.includes('last_name')) row[col] = ['Smith', 'Johnson', 'Williams', 'Brown'][i % 4]
-        else if (col.includes('status')) row[col] = i % 5 === 0 ? 'T' : 'A'
-        else if (col.includes('state') || col.includes('province')) row[col] = ['TX', 'CA', 'NY', 'FL'][i % 4]
-        else if (col.includes('salary') || col.includes('amount')) row[col] = 55000 + (i * 2500)
-        else row[col] = `Value ${i + 1}`
-      })
-      return row
+    // Find first string column (for X axis) and first numeric column (for Y axis)
+    let xCol = ''
+    let yCol = ''
+    
+    const sample = data[0]
+    for (const col of columns) {
+      const val = sample[col]
+      if (!xCol && typeof val === 'string') xCol = col
+      if (!yCol && typeof val === 'number') yCol = col
+    }
+    
+    // Fallback
+    if (!xCol && columns.length > 0) xCol = columns[0]
+    if (!yCol && columns.length > 1) yCol = columns[1]
+    
+    setChartConfig({ xAxis: xCol, yAxis: yCol })
+  }
+  
+  const getChartData = () => {
+    if (!results?.data || !chartConfig.xAxis || !chartConfig.yAxis) return []
+    
+    // Aggregate if needed (group by xAxis, sum yAxis)
+    const grouped = {}
+    results.data.forEach(row => {
+      const key = String(row[chartConfig.xAxis] || 'Unknown')
+      const val = Number(row[chartConfig.yAxis]) || 0
+      grouped[key] = (grouped[key] || 0) + val
     })
     
-    return { columns: cols, data, rowCount: data.length, executionTime: 45 }
+    return Object.entries(grouped)
+      .map(([name, value]) => ({ name, value }))
+      .slice(0, 20) // Max 20 items for chart
   }
 
   const resetAll = () => {
@@ -348,6 +409,7 @@ export default function QueryBuilderPage() {
     setOrderBy({ column: '', direction: 'DESC' })
     setResults(null)
     setError(null)
+    setShowChart(false)
   }
 
   // ===========================================
@@ -355,230 +417,40 @@ export default function QueryBuilderPage() {
   // ===========================================
   
   const styles = {
-    container: {
-      minHeight: '100%',
-    },
-    header: {
-      marginBottom: '1.5rem',
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'flex-start',
-    },
-    title: {
-      fontFamily: "'Sora', sans-serif",
-      fontSize: '1.75rem',
-      fontWeight: 700,
-      color: T.text,
-      margin: 0,
-    },
-    subtitle: {
-      color: T.textDim,
-      marginTop: '0.25rem',
-    },
-    headerActions: {
-      display: 'flex',
-      gap: '0.5rem',
-    },
-    btn: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.5rem',
-      padding: '0.5rem 1rem',
-      border: `1px solid ${T.border}`,
-      borderRadius: '8px',
-      background: T.bgCard,
-      color: T.textDim,
-      fontSize: '0.875rem',
-      fontWeight: 500,
-      cursor: 'pointer',
-    },
-    btnActive: {
-      background: COLORS.grassGreenLight,
-      borderColor: COLORS.grassGreen,
-      color: COLORS.grassGreen,
-    },
-    mainCard: {
-      background: T.bgCard,
-      borderRadius: '16px',
-      boxShadow: '0 1px 3px rgba(42, 52, 65, 0.08)',
-      overflow: 'hidden',
-    },
-    grid: {
-      display: 'grid',
-      gridTemplateColumns: '380px 1fr',
-      minHeight: '600px',
-    },
-    leftPanel: {
-      borderRight: `1px solid ${T.border}`,
-      padding: '1.5rem',
-      overflowY: 'auto',
-      maxHeight: '75vh',
-    },
-    rightPanel: {
-      display: 'flex',
-      flexDirection: 'column',
-      overflow: 'hidden',
-    },
-    section: {
-      marginBottom: '1.5rem',
-    },
-    sectionHeader: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.75rem',
-      marginBottom: '1rem',
-    },
-    stepNumber: {
-      width: '28px',
-      height: '28px',
-      borderRadius: '8px',
-      background: COLORS.grassGreen,
-      color: 'white',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      fontSize: '0.875rem',
-      fontWeight: 600,
-    },
-    sectionTitle: {
-      fontWeight: 600,
-      color: T.text,
-      fontSize: '0.95rem',
-    },
-    tableCard: {
-      padding: '1rem',
-      border: `2px solid ${T.border}`,
-      borderRadius: '12px',
-      cursor: 'pointer',
-      marginBottom: '0.5rem',
-      transition: 'all 0.15s ease',
-    },
-    tableCardSelected: {
-      borderColor: COLORS.grassGreen,
-      background: darkMode ? 'rgba(131, 177, 109, 0.1)' : COLORS.grassGreenLight,
-    },
-    columnGrid: {
-      display: 'grid',
-      gridTemplateColumns: 'repeat(2, 1fr)',
-      gap: '0.25rem',
-      maxHeight: '160px',
-      overflowY: 'auto',
-      padding: '0.5rem',
-      background: T.panelLight,
-      borderRadius: '8px',
-    },
-    columnBtn: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.5rem',
-      padding: '0.5rem',
-      border: 'none',
-      borderRadius: '6px',
-      background: 'transparent',
-      color: T.textDim,
-      fontSize: '0.8rem',
-      cursor: 'pointer',
-      textAlign: 'left',
-    },
-    columnBtnSelected: {
-      background: darkMode ? 'rgba(131, 177, 109, 0.15)' : COLORS.grassGreenLight,
-      color: COLORS.grassGreen,
-      fontWeight: 500,
-    },
-    checkbox: (checked) => ({
-      width: '14px',
-      height: '14px',
-      borderRadius: '4px',
-      border: `2px solid ${checked ? COLORS.grassGreen : T.border}`,
-      background: checked ? COLORS.grassGreen : 'transparent',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-    }),
-    filterRow: {
-      display: 'flex',
-      gap: '0.5rem',
-      alignItems: 'center',
-      marginBottom: '0.5rem',
-      padding: '0.75rem',
-      background: T.panelLight,
-      borderRadius: '8px',
-    },
-    select: {
-      flex: 1,
-      padding: '0.5rem',
-      border: `1px solid ${T.border}`,
-      borderRadius: '6px',
-      background: T.bgCard,
-      color: T.text,
-      fontSize: '0.85rem',
-    },
-    input: {
-      flex: 1,
-      padding: '0.5rem',
-      border: `1px solid ${T.border}`,
-      borderRadius: '6px',
-      background: T.bgCard,
-      color: T.text,
-      fontSize: '0.85rem',
-    },
-    runBtn: {
-      width: '100%',
-      padding: '1rem',
-      border: 'none',
-      borderRadius: '12px',
-      background: COLORS.grassGreen,
-      color: 'white',
-      fontSize: '1rem',
-      fontWeight: 600,
-      cursor: 'pointer',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: '0.5rem',
-    },
-    sqlPreview: {
-      background: '#1e293b',
-      color: '#4ade80',
-      padding: '1rem',
-      fontFamily: 'monospace',
-      fontSize: '0.85rem',
-      whiteSpace: 'pre-wrap',
-      borderBottom: `1px solid ${T.border}`,
-    },
-    resultsHeader: {
-      padding: '1rem 1.5rem',
-      borderBottom: `1px solid ${T.border}`,
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-    },
-    table: {
-      width: '100%',
-      borderCollapse: 'collapse',
-      fontSize: '0.875rem',
-    },
-    th: {
-      textAlign: 'left',
-      padding: '0.75rem 1rem',
-      background: T.panelLight,
-      borderBottom: `1px solid ${T.border}`,
-      fontWeight: 600,
-      color: T.text,
-    },
-    td: {
-      padding: '0.75rem 1rem',
-      borderBottom: `1px solid ${T.border}`,
-      color: T.textDim,
-    },
-    emptyState: {
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: '4rem 2rem',
-      textAlign: 'center',
-    },
+    container: { minHeight: '100%' },
+    header: { marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' },
+    title: { fontFamily: "'Sora', sans-serif", fontSize: '1.75rem', fontWeight: 700, color: T.text, margin: 0 },
+    subtitle: { color: T.textDim, marginTop: '0.25rem' },
+    headerActions: { display: 'flex', gap: '0.5rem' },
+    btn: { display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem', border: `1px solid ${T.border}`, borderRadius: '8px', background: T.bgCard, color: T.textDim, fontSize: '0.875rem', fontWeight: 500, cursor: 'pointer' },
+    btnActive: { background: COLORS.grassGreenLight, borderColor: COLORS.grassGreen, color: COLORS.grassGreen },
+    mainCard: { background: T.bgCard, borderRadius: '16px', boxShadow: '0 1px 3px rgba(42, 52, 65, 0.08)', overflow: 'hidden' },
+    grid: { display: 'grid', gridTemplateColumns: '340px 1fr', minHeight: '600px' },
+    leftPanel: { borderRight: `1px solid ${T.border}`, padding: '1rem', overflowY: 'auto', maxHeight: '75vh' },
+    rightPanel: { display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+    section: { marginBottom: '1.25rem' },
+    sectionHeader: { display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' },
+    stepNumber: { width: '24px', height: '24px', borderRadius: '6px', background: COLORS.grassGreen, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 600 },
+    sectionTitle: { fontWeight: 600, color: T.text, fontSize: '0.875rem' },
+    tableCard: { padding: '0.75rem', border: `2px solid ${T.border}`, borderRadius: '10px', cursor: 'pointer', marginBottom: '0.5rem', transition: 'all 0.15s ease' },
+    tableCardSelected: { borderColor: COLORS.grassGreen, background: darkMode ? 'rgba(131, 177, 109, 0.1)' : COLORS.grassGreenLight },
+    tableName: { fontWeight: 600, color: T.text, fontSize: '0.85rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+    tableMeta: { fontSize: '0.7rem', color: T.textDim, marginTop: '0.25rem' },
+    columnGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.25rem', maxHeight: '140px', overflowY: 'auto', padding: '0.5rem', background: T.panelLight, borderRadius: '8px' },
+    columnBtn: { display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.4rem', border: 'none', borderRadius: '4px', background: 'transparent', color: T.textDim, fontSize: '0.7rem', cursor: 'pointer', textAlign: 'left', overflow: 'hidden' },
+    columnBtnSelected: { background: darkMode ? 'rgba(131, 177, 109, 0.15)' : COLORS.grassGreenLight, color: COLORS.grassGreen, fontWeight: 500 },
+    checkbox: (checked) => ({ width: '12px', height: '12px', borderRadius: '3px', border: `2px solid ${checked ? COLORS.grassGreen : T.border}`, background: checked ? COLORS.grassGreen : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }),
+    filterRow: { display: 'flex', gap: '0.4rem', alignItems: 'center', marginBottom: '0.4rem', padding: '0.5rem', background: T.panelLight, borderRadius: '6px', flexWrap: 'wrap' },
+    select: { flex: 1, minWidth: '80px', padding: '0.4rem', border: `1px solid ${T.border}`, borderRadius: '4px', background: T.bgCard, color: T.text, fontSize: '0.75rem' },
+    input: { flex: 1, minWidth: '60px', padding: '0.4rem', border: `1px solid ${T.border}`, borderRadius: '4px', background: T.bgCard, color: T.text, fontSize: '0.75rem' },
+    runBtn: { width: '100%', padding: '0.875rem', border: 'none', borderRadius: '10px', background: COLORS.grassGreen, color: 'white', fontSize: '0.9rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' },
+    sqlPreview: { background: '#1e293b', color: '#4ade80', padding: '1rem', fontFamily: 'monospace', fontSize: '0.8rem', whiteSpace: 'pre-wrap', borderBottom: `1px solid ${T.border}`, maxHeight: '150px', overflowY: 'auto' },
+    resultsHeader: { padding: '1rem', borderBottom: `1px solid ${T.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' },
+    table: { width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' },
+    th: { textAlign: 'left', padding: '0.6rem 0.75rem', background: T.panelLight, borderBottom: `1px solid ${T.border}`, fontWeight: 600, color: T.text, fontSize: '0.75rem' },
+    td: { padding: '0.6rem 0.75rem', borderBottom: `1px solid ${T.border}`, color: T.textDim, fontSize: '0.75rem' },
+    emptyState: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '3rem 2rem', textAlign: 'center' },
+    chartContainer: { height: '300px', padding: '1rem' },
   }
 
   // ===========================================
@@ -615,15 +487,13 @@ export default function QueryBuilderPage() {
         
         <div style={styles.headerActions}>
           <button style={styles.btn} onClick={resetAll}>
-            <RefreshCw size={16} />
-            Reset
+            <RefreshCw size={16} /> Reset
           </button>
           <button 
             style={{ ...styles.btn, ...(showSQL ? styles.btnActive : {}) }} 
             onClick={() => setShowSQL(!showSQL)}
           >
-            <Code2 size={16} />
-            SQL
+            <Code2 size={16} /> SQL
           </button>
         </div>
       </div>
@@ -642,9 +512,13 @@ export default function QueryBuilderPage() {
               </div>
               
               {isLoadingSchema ? (
-                <div style={{ textAlign: 'center', padding: '2rem', color: T.textDim }}>
-                  <Loader2 size={24} style={{ animation: 'spin 1s linear infinite' }} />
-                  <p style={{ marginTop: '0.5rem' }}>Loading schema...</p>
+                <div style={{ textAlign: 'center', padding: '1.5rem', color: T.textDim }}>
+                  <Loader2 size={20} style={{ animation: 'spin 1s linear infinite' }} />
+                  <p style={{ marginTop: '0.5rem', fontSize: '0.85rem' }}>Loading...</p>
+                </div>
+              ) : tables.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '1.5rem', color: T.textDim, fontSize: '0.85rem' }}>
+                  No tables found. Upload data first.
                 </div>
               ) : (
                 tables.map(table => {
@@ -656,41 +530,39 @@ export default function QueryBuilderPage() {
                       <div 
                         style={{ ...styles.tableCard, ...(isSelected ? styles.tableCardSelected : {}) }}
                         onClick={() => selectTable(table)}
+                        title={table.name}
                       >
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <div>
-                            <div style={{ fontWeight: 600, color: T.text, marginBottom: '0.25rem' }}>
-                              {table.displayName}
-                            </div>
-                            <div style={{ fontSize: '0.8rem', color: T.textDim }}>
-                              {table.rows.toLocaleString()} rows • {table.columns.length} columns
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={styles.tableName}>{table.displayName}</div>
+                            <div style={styles.tableMeta}>
+                              {table.rows.toLocaleString()} rows • {table.columns.length} cols
                             </div>
                           </div>
-                          {isSelected && <Check size={18} color={COLORS.grassGreen} />}
+                          {isSelected && <Check size={16} color={COLORS.grassGreen} />}
                         </div>
                       </div>
                       
-                      {/* Related tables for smart joins */}
+                      {/* Related tables */}
                       {related.length > 0 && (
-                        <div style={{ marginLeft: '1rem', marginBottom: '0.5rem' }}>
-                          <div style={{ fontSize: '0.75rem', color: T.textDim, marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                            <Link2 size={12} /> Auto-join available:
+                        <div style={{ marginLeft: '0.75rem', marginBottom: '0.5rem' }}>
+                          <div style={{ fontSize: '0.65rem', color: T.textDim, marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                            <Link2 size={10} /> Auto-join:
                           </div>
-                          {related.map(r => (
+                          {related.slice(0, 3).map(r => (
                             <button
                               key={r.table.name}
                               onClick={() => selectTable(r.table)}
                               style={{ 
-                                display: 'flex', alignItems: 'center', gap: '0.5rem',
-                                padding: '0.5rem 0.75rem', marginBottom: '0.25rem',
-                                border: `1px dashed ${T.border}`, borderRadius: '8px',
+                                display: 'flex', alignItems: 'center', gap: '0.4rem',
+                                padding: '0.4rem 0.6rem', marginBottom: '0.25rem',
+                                border: `1px dashed ${T.border}`, borderRadius: '6px',
                                 background: 'transparent', color: T.textDim,
-                                fontSize: '0.8rem', cursor: 'pointer', width: '100%',
+                                fontSize: '0.7rem', cursor: 'pointer', width: '100%',
                               }}
                             >
-                              <Plus size={14} color={COLORS.grassGreen} />
-                              {r.table.displayName}
-                              <span style={{ fontSize: '0.7rem', color: T.textDim }}>via {r.joinOn.from}</span>
+                              <Plus size={12} color={COLORS.grassGreen} />
+                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.table.displayName}</span>
                             </button>
                           ))}
                         </div>
@@ -712,12 +584,12 @@ export default function QueryBuilderPage() {
                 </div>
                 
                 {selectedTables.map(table => (
-                  <div key={table.name} style={{ marginBottom: '1rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                      <span style={{ fontSize: '0.85rem', fontWeight: 500, color: T.text }}>{table.displayName}</span>
-                      <div style={{ display: 'flex', gap: '0.5rem' }}>
-                        <button onClick={() => selectAllColumns(table.name)} style={{ fontSize: '0.75rem', color: COLORS.grassGreen, background: 'none', border: 'none', cursor: 'pointer' }}>All</button>
-                        <button onClick={() => clearTableColumns(table.name)} style={{ fontSize: '0.75rem', color: T.textDim, background: 'none', border: 'none', cursor: 'pointer' }}>Clear</button>
+                  <div key={table.name} style={{ marginBottom: '0.75rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 500, color: T.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{table.displayName}</span>
+                      <div style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}>
+                        <button onClick={() => selectAllColumns(table.name)} style={{ fontSize: '0.65rem', color: COLORS.grassGreen, background: 'none', border: 'none', cursor: 'pointer' }}>All</button>
+                        <button onClick={() => clearTableColumns(table.name)} style={{ fontSize: '0.65rem', color: T.textDim, background: 'none', border: 'none', cursor: 'pointer' }}>Clear</button>
                       </div>
                     </div>
                     <div style={styles.columnGrid}>
@@ -728,9 +600,10 @@ export default function QueryBuilderPage() {
                             key={col}
                             onClick={() => toggleColumn(table.name, col)}
                             style={{ ...styles.columnBtn, ...(isSelected ? styles.columnBtnSelected : {}) }}
+                            title={col}
                           >
                             <div style={styles.checkbox(isSelected)}>
-                              {isSelected && <Check size={10} color="white" />}
+                              {isSelected && <Check size={8} color="white" />}
                             </div>
                             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{col}</span>
                           </button>
@@ -746,40 +619,37 @@ export default function QueryBuilderPage() {
             {selectedTables.length > 0 && (
               <div style={styles.section}>
                 <div style={{ ...styles.sectionHeader, justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <div style={styles.stepNumber}>3</div>
                     <span style={styles.sectionTitle}>Filters</span>
                   </div>
-                  <button 
-                    onClick={addFilter}
-                    style={{ ...styles.btn, padding: '0.25rem 0.75rem', fontSize: '0.8rem' }}
-                  >
-                    <Plus size={14} /> Add
+                  <button onClick={addFilter} style={{ ...styles.btn, padding: '0.2rem 0.5rem', fontSize: '0.7rem' }}>
+                    <Plus size={12} /> Add
                   </button>
                 </div>
                 
                 {filters.length === 0 ? (
-                  <div style={{ padding: '1rem', textAlign: 'center', color: T.textDim, fontSize: '0.85rem', background: T.panelLight, borderRadius: '8px' }}>
-                    No filters — showing all rows
+                  <div style={{ padding: '0.75rem', textAlign: 'center', color: T.textDim, fontSize: '0.75rem', background: T.panelLight, borderRadius: '6px' }}>
+                    No filters
                   </div>
                 ) : (
                   filters.map(filter => (
                     <div key={filter.id} style={styles.filterRow}>
                       <select
                         style={styles.select}
-                        value={`${filter.table}.${filter.column}`}
+                        value={`${filter.table}|||${filter.column}`}
                         onChange={(e) => {
-                          const [table, column] = e.target.value.split('.')
+                          const [table, column] = e.target.value.split('|||')
                           updateFilter(filter.id, 'table', table)
                           updateFilter(filter.id, 'column', column)
                         }}
                       >
                         {getAllColumns().map(c => (
-                          <option key={c.display} value={`${c.table}.${c.column}`}>{c.display}</option>
+                          <option key={`${c.table}|||${c.column}`} value={`${c.table}|||${c.column}`}>{c.column}</option>
                         ))}
                       </select>
                       <select
-                        style={{ ...styles.select, width: '100px', flex: 'none' }}
+                        style={{ ...styles.select, width: '70px', flex: 'none' }}
                         value={filter.operator}
                         onChange={(e) => updateFilter(filter.id, 'operator', e.target.value)}
                       >
@@ -787,9 +657,9 @@ export default function QueryBuilderPage() {
                         <option value="!=">≠</option>
                         <option value=">">{">"}</option>
                         <option value="<">{"<"}</option>
-                        <option value="LIKE">contains</option>
-                        <option value="IS NULL">empty</option>
-                        <option value="IS NOT NULL">not empty</option>
+                        <option value="LIKE">~</option>
+                        <option value="IS NULL">∅</option>
+                        <option value="IS NOT NULL">≠∅</option>
                       </select>
                       {!['IS NULL', 'IS NOT NULL'].includes(filter.operator) && (
                         <input
@@ -799,8 +669,8 @@ export default function QueryBuilderPage() {
                           placeholder="value"
                         />
                       )}
-                      <button onClick={() => removeFilter(filter.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.textDim }}>
-                        <X size={16} />
+                      <button onClick={() => removeFilter(filter.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.textDim, padding: '0.2rem' }}>
+                        <X size={14} />
                       </button>
                     </div>
                   ))
@@ -816,27 +686,27 @@ export default function QueryBuilderPage() {
                   <span style={styles.sectionTitle}>Sort & Limit</span>
                 </div>
                 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem', marginBottom: '0.5rem' }}>
                   <select style={styles.select} value={orderBy.column} onChange={(e) => setOrderBy(p => ({ ...p, column: e.target.value }))}>
                     <option value="">Sort by...</option>
-                    {getAllColumns().map(c => <option key={c.display} value={c.display}>{c.display}</option>)}
+                    {getAllColumns().map(c => <option key={c.column} value={c.column}>{c.column}</option>)}
                   </select>
                   <select style={styles.select} value={orderBy.direction} onChange={(e) => setOrderBy(p => ({ ...p, direction: e.target.value }))}>
-                    <option value="ASC">↑ Ascending</option>
-                    <option value="DESC">↓ Descending</option>
+                    <option value="ASC">↑ Asc</option>
+                    <option value="DESC">↓ Desc</option>
                   </select>
                 </div>
                 
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', gap: '0.4rem' }}>
                   {[50, 100, 500, 1000].map(n => (
                     <button
                       key={n}
                       onClick={() => setLimit(n)}
                       style={{
-                        flex: 1, padding: '0.5rem', border: 'none', borderRadius: '6px',
+                        flex: 1, padding: '0.4rem', border: 'none', borderRadius: '4px',
                         background: limit === n ? COLORS.grassGreen : T.panelLight,
                         color: limit === n ? 'white' : T.textDim,
-                        fontWeight: 500, cursor: 'pointer', fontSize: '0.85rem',
+                        fontWeight: 500, cursor: 'pointer', fontSize: '0.75rem',
                       }}
                     >
                       {n}
@@ -849,7 +719,7 @@ export default function QueryBuilderPage() {
             {/* Run Button */}
             {selectedTables.length > 0 && (
               <button style={styles.runBtn} onClick={runQuery} disabled={isLoading}>
-                {isLoading ? <Loader2 size={20} style={{ animation: 'spin 1s linear infinite' }} /> : <Play size={20} />}
+                {isLoading ? <Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} /> : <Play size={18} />}
                 {isLoading ? 'Running...' : 'Run Query'}
               </button>
             )}
@@ -861,9 +731,9 @@ export default function QueryBuilderPage() {
             {showSQL && (
               <div style={styles.sqlPreview}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                  <span style={{ color: '#94a3b8', fontSize: '0.75rem' }}>Generated SQL</span>
-                  <button onClick={copySQL} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                    {copied ? <CheckCheck size={14} /> : <Copy size={14} />}
+                  <span style={{ color: '#94a3b8', fontSize: '0.7rem' }}>Generated SQL</span>
+                  <button onClick={copySQL} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    {copied ? <CheckCheck size={12} /> : <Copy size={12} />}
                     {copied ? 'Copied!' : 'Copy'}
                   </button>
                 </div>
@@ -873,9 +743,9 @@ export default function QueryBuilderPage() {
             
             {/* Error */}
             {error && (
-              <div style={{ margin: '1rem', padding: '1rem', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <AlertCircle size={20} color="#ef4444" />
-                <span style={{ color: '#dc2626' }}>{error}</span>
+              <div style={{ margin: '1rem', padding: '0.75rem', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <AlertCircle size={18} color="#ef4444" />
+                <span style={{ color: '#dc2626', fontSize: '0.85rem' }}>{error}</span>
               </div>
             )}
             
@@ -883,21 +753,103 @@ export default function QueryBuilderPage() {
             {results ? (
               <>
                 <div style={styles.resultsHeader}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                    <Activity size={20} color={COLORS.grassGreen} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <Activity size={18} color={COLORS.grassGreen} />
                     <div>
-                      <div style={{ fontWeight: 600, color: T.text }}>Results</div>
-                      <div style={{ fontSize: '0.8rem', color: T.textDim }}>
+                      <div style={{ fontWeight: 600, color: T.text, fontSize: '0.9rem' }}>Results</div>
+                      <div style={{ fontSize: '0.75rem', color: T.textDim }}>
                         {results.rowCount} rows • {results.executionTime}ms
                       </div>
                     </div>
                   </div>
-                  <button style={styles.btn}>
-                    <Download size={16} /> Export
-                  </button>
+                  
+                  <div style={{ display: 'flex', gap: '0.4rem' }}>
+                    <button 
+                      style={{ ...styles.btn, padding: '0.4rem 0.75rem', fontSize: '0.75rem', ...(showChart ? styles.btnActive : {}) }}
+                      onClick={() => setShowChart(!showChart)}
+                    >
+                      <BarChart3 size={14} /> Chart
+                    </button>
+                    <button style={{ ...styles.btn, padding: '0.4rem 0.75rem', fontSize: '0.75rem' }}>
+                      <Download size={14} /> Export
+                    </button>
+                  </div>
                 </div>
                 
-                <div style={{ flex: 1, overflow: 'auto', padding: '1rem' }}>
+                {/* Chart */}
+                {showChart && results.data.length > 0 && (
+                  <div style={{ borderBottom: `1px solid ${T.border}`, padding: '1rem' }}>
+                    <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <select 
+                        style={{ ...styles.select, width: 'auto' }}
+                        value={chartType}
+                        onChange={(e) => setChartType(e.target.value)}
+                      >
+                        <option value="bar">Bar</option>
+                        <option value="pie">Pie</option>
+                        <option value="line">Line</option>
+                      </select>
+                      <span style={{ fontSize: '0.7rem', color: T.textDim }}>X:</span>
+                      <select 
+                        style={{ ...styles.select, width: 'auto' }}
+                        value={chartConfig.xAxis}
+                        onChange={(e) => setChartConfig(p => ({ ...p, xAxis: e.target.value }))}
+                      >
+                        {results.columns.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                      <span style={{ fontSize: '0.7rem', color: T.textDim }}>Y:</span>
+                      <select 
+                        style={{ ...styles.select, width: 'auto' }}
+                        value={chartConfig.yAxis}
+                        onChange={(e) => setChartConfig(p => ({ ...p, yAxis: e.target.value }))}
+                      >
+                        {results.columns.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                    
+                    <div style={{ height: '250px' }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        {chartType === 'bar' ? (
+                          <BarChart data={getChartData()}>
+                            <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
+                            <XAxis dataKey="name" tick={{ fontSize: 10, fill: T.textDim }} />
+                            <YAxis tick={{ fontSize: 10, fill: T.textDim }} />
+                            <Tooltip />
+                            <Bar dataKey="value" fill={COLORS.grassGreen} radius={[4, 4, 0, 0]} />
+                          </BarChart>
+                        ) : chartType === 'pie' ? (
+                          <RePieChart>
+                            <Pie
+                              data={getChartData()}
+                              dataKey="value"
+                              nameKey="name"
+                              cx="50%"
+                              cy="50%"
+                              outerRadius={80}
+                              label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                              labelLine={false}
+                            >
+                              {getChartData().map((_, i) => (
+                                <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                              ))}
+                            </Pie>
+                            <Tooltip />
+                          </RePieChart>
+                        ) : (
+                          <LineChart data={getChartData()}>
+                            <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
+                            <XAxis dataKey="name" tick={{ fontSize: 10, fill: T.textDim }} />
+                            <YAxis tick={{ fontSize: 10, fill: T.textDim }} />
+                            <Tooltip />
+                            <Line type="monotone" dataKey="value" stroke={COLORS.grassGreen} strokeWidth={2} dot={{ fill: COLORS.grassGreen }} />
+                          </LineChart>
+                        )}
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                )}
+                
+                <div style={{ flex: 1, overflow: 'auto', padding: '0.75rem' }}>
                   <table style={styles.table}>
                     <thead>
                       <tr>
@@ -905,15 +857,13 @@ export default function QueryBuilderPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {results.data.map((row, i) => (
+                      {results.data.slice(0, 100).map((row, i) => (
                         <tr key={i}>
                           {results.columns.map(col => (
                             <td key={col} style={styles.td}>
-                              {col.includes('salary') || col.includes('amount') 
-                                ? `$${Number(row[col]).toLocaleString()}`
-                                : col.includes('status')
-                                  ? <span style={{ padding: '0.25rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', background: row[col] === 'A' ? '#d1fae5' : '#f3f4f6', color: row[col] === 'A' ? '#059669' : '#6b7280' }}>{row[col] === 'A' ? 'Active' : 'Termed'}</span>
-                                  : row[col]
+                              {typeof row[col] === 'number' && (col.toLowerCase().includes('salary') || col.toLowerCase().includes('amount') || col.toLowerCase().includes('pay'))
+                                ? `$${row[col].toLocaleString()}`
+                                : row[col] ?? '-'
                               }
                             </td>
                           ))}
@@ -921,13 +871,18 @@ export default function QueryBuilderPage() {
                       ))}
                     </tbody>
                   </table>
+                  {results.data.length > 100 && (
+                    <div style={{ textAlign: 'center', padding: '1rem', color: T.textDim, fontSize: '0.8rem' }}>
+                      Showing 100 of {results.data.length} rows
+                    </div>
+                  )}
                 </div>
               </>
             ) : (
               <div style={styles.emptyState}>
-                <Sparkles size={48} color={T.textDim} style={{ marginBottom: '1rem' }} />
-                <h3 style={{ color: T.text, marginBottom: '0.5rem' }}>Build Your Query</h3>
-                <p style={{ color: T.textDim, maxWidth: '300px' }}>
+                <Sparkles size={40} color={T.textDim} style={{ marginBottom: '1rem' }} />
+                <h3 style={{ color: T.text, marginBottom: '0.5rem', fontSize: '1.1rem' }}>Build Your Query</h3>
+                <p style={{ color: T.textDim, maxWidth: '280px', fontSize: '0.85rem' }}>
                   Select tables, choose columns, add filters, and click Run Query.
                   <br /><br />
                   <span style={{ color: COLORS.grassGreen }}>Smart joins are automatic!</span>
