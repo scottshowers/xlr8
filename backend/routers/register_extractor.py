@@ -1026,6 +1026,7 @@ Return ONLY a valid JSON array. No markdown, no explanation."""
     
     def _get_vendor_prompt(self, vendor_type: str) -> str:
         """Load vendor-specific prompt from database, with fallback to default."""
+        base_prompt = None
         supabase = get_supabase()
         
         if supabase:
@@ -1033,7 +1034,7 @@ Return ONLY a valid JSON array. No markdown, no explanation."""
                 response = supabase.table('vendor_prompts').select('prompt_template').eq('vendor_type', vendor_type).eq('is_active', True).execute()
                 if response.data:
                     logger.warning(f"[REGISTER] Loaded Supabase prompt for vendor: {vendor_type} ({len(response.data[0]['prompt_template'])} chars)")
-                    return response.data[0]['prompt_template']
+                    base_prompt = response.data[0]['prompt_template']
                 else:
                     logger.warning(f"[REGISTER] No Supabase prompt found for vendor: {vendor_type}")
             except Exception as e:
@@ -1041,8 +1042,48 @@ Return ONLY a valid JSON array. No markdown, no explanation."""
         else:
             logger.warning(f"[REGISTER] Supabase not available, using default prompt")
         
-        logger.warning(f"[REGISTER] Using DEFAULT prompt for vendor: {vendor_type}")
-        return self._get_default_prompt()
+        if not base_prompt:
+            logger.warning(f"[REGISTER] Using DEFAULT prompt for vendor: {vendor_type}")
+            base_prompt = self._get_default_prompt()
+        
+        # ALWAYS append critical extraction hints - these work across all vendors
+        critical_hints = self._get_critical_extraction_hints()
+        return f"{base_prompt}\n\n{critical_hints}"
+    
+    def _get_critical_extraction_hints(self) -> str:
+        """Critical extraction hints that should ALWAYS be included."""
+        return """
+=== CRITICAL FIELD EXTRACTION RULES ===
+
+EMPLOYEE ID - MUST EXTRACT:
+- Look for "Code: XXXX" pattern (e.g., "Code: A30H") - this IS the employee_id
+- Also look for: "ID:", "Emp #:", "Employee #:", "Badge:", "EE ID:", "Emp ID:"
+- The ID is usually a short alphanumeric code like "A30H", "A3JC", "12345", "EE001"
+- Extract the CODE VALUE, not the label
+
+DEPARTMENT - MUST EXTRACT:
+- Departments appear as SECTION HEADERS above groups of employees
+- Format examples: "2025 - RN No Benefit or Diff", "2099 - MED TECH", "DEPT 100 - ACCOUNTING"
+- The number prefix (2025, 2099, 100) is often the department code
+- Apply the department header to ALL employees listed below it until the next department header appears
+
+TAX PROFILE:
+- Look for "Tax Profile: X - XX/XX/XX" pattern (e.g., "Tax Profile: 1 - MD/MD/MD")
+- Extract the full string including the number and state codes
+
+EXAMPLE EXTRACTION:
+If you see:
+  2025 - RN No Benefit or Diff
+  METZ, TILLIE
+  Code: A30H
+  Tax Profile: 1 - MD/MD/MD
+
+Then extract:
+  name: "METZ, TILLIE"
+  employee_id: "A30H"
+  department: "2025 - RN No Benefit or Diff"
+  tax_profile: "1 - MD/MD/MD"
+"""
     
     def _get_default_prompt(self) -> str:
         """Default prompt template - works for most register formats."""
