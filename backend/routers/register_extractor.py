@@ -1054,6 +1054,21 @@ STRICT RULES:
 1. Return ONLY a valid JSON array - no markdown, no explanation
 2. Each employee object must have these EXACT keys:
    company_name, client_code, period_ending, check_date, name, employee_id, department, tax_profile, gross_pay, net_pay, total_taxes, total_deductions, earnings, taxes, deductions, check_number, pay_method
+
+EMPLOYEE ID EXTRACTION - CRITICAL:
+- Look for "Code: XXXX" below the employee name - this IS the employee_id
+- Also look for "ID:", "Emp #:", "Employee #:", "Badge:", "EE ID:" patterns
+- The employee_id is usually a short alphanumeric code like "A30H", "A3JC", "12345"
+
+DEPARTMENT EXTRACTION - CRITICAL:
+- Departments often appear as HEADER ROWS above groups of employees
+- Format like "2025 - RN No Benefit or Diff" or "2099 - MED TECH"
+- The number prefix (2025, 2099) is the department code
+- Apply this department to ALL employees listed below that header until the next department header
+
+TAX PROFILE:
+- Look for "Tax Profile: X - XX/XX/XX" pattern (e.g., "1 - MD/MD/MD")
+
 3. earnings array: objects with type, description, amount, hours, rate, amount_ytd, hours_ytd
 4. taxes array: objects with type, description, amount, taxable_wages, amount_ytd, is_employer (true if employer-paid)
 5. deductions array: objects with type, description, amount, amount_ytd, category (pre_tax, post_tax, or memo)
