@@ -1766,30 +1766,42 @@ async def unified_chat(request: UnifiedChatRequest):
         if not response["needs_clarification"] and answer.answer:
             
             # Check for simple answer (count, sum, etc.)
-            simple_answer = _try_simple_answer(answer, data_model)
+            # USE THE ENGINE'S CONSULTATIVE ANSWER DIRECTLY
+            # The intelligence_engine._generate_consultative_response() already
+            # builds the Three Truths response - don't override it with simple_answer
+            engine_answer = answer.answer if answer.answer else None
             
-            if simple_answer:
+            if engine_answer and len(engine_answer) > 50:
+                # Engine gave us a proper consultative response
                 if auto_applied_note:
-                    simple_answer = auto_applied_note + "\n\n" + simple_answer
-                response["answer"] = simple_answer
-            else:
-                # Complex query - use Claude
-                synthesized = await generate_synthesized_answer(
-                    question=message,
-                    context=answer.answer,
-                    persona=request.persona,
-                    insights=answer.insights,
-                    conflicts=answer.conflicts,
-                    citations=citation_builder,
-                    quality_alerts=quality_service,
-                    follow_ups=[],
-                    redactor=redactor
-                )
-                
-                if auto_applied_note and synthesized:
-                    response["answer"] = auto_applied_note + "\n\n" + synthesized
+                    response["answer"] = auto_applied_note + "\n\n" + engine_answer
                 else:
-                    response["answer"] = synthesized
+                    response["answer"] = engine_answer
+            else:
+                # Fallback for edge cases - try simple extraction
+                simple_answer = _try_simple_answer(answer, data_model)
+                if simple_answer:
+                    if auto_applied_note:
+                        simple_answer = auto_applied_note + "\n\n" + simple_answer
+                    response["answer"] = simple_answer
+                else:
+                    # Last resort - use Claude synthesis
+                    synthesized = await generate_synthesized_answer(
+                        question=message,
+                        context=answer.answer or "",
+                        persona=request.persona,
+                        insights=answer.insights,
+                        conflicts=answer.conflicts,
+                        citations=citation_builder,
+                        quality_alerts=quality_service,
+                        follow_ups=[],
+                        redactor=redactor
+                    )
+                    
+                    if auto_applied_note and synthesized:
+                        response["answer"] = auto_applied_note + "\n\n" + synthesized
+                    else:
+                        response["answer"] = synthesized
             
             # Add citations
             if request.include_citations and answer.from_reality:
