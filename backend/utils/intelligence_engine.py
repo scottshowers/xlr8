@@ -1274,7 +1274,7 @@ class IntelligenceEngine:
     
     def _can_inject_filter(self, sql: str, filter_instructions: str, all_columns: set) -> bool:
         """
-        Check if the filter column exists in the tables being queried.
+        Check if the filter column exists in the TABLE BEING QUERIED (FROM clause).
         
         This prevents errors like "employment_status_code not found" when
         the LLM selects a table that doesn't have that column.
@@ -1291,41 +1291,43 @@ class IntelligenceEngine:
         
         filter_col = col_match.group(1).lower()
         
-        # Check if this column is in the available columns
-        if filter_col in all_columns:
-            logger.warning(f"[SQL-GEN] Filter column '{filter_col}' found in schema")
+        # Extract table name from FROM clause - this is the ACTUAL table being queried
+        from_match = re.search(r'FROM\s+"?([^"\s]+)"?\s+AS\s+(\w+)', sql, re.IGNORECASE)
+        if not from_match:
+            from_match = re.search(r'FROM\s+"?([^"\s]+)"?', sql, re.IGNORECASE)
+        
+        if not from_match:
+            logger.warning(f"[SQL-GEN] Could not find FROM table, allowing injection")
             return True
         
-        # Also check the SQL itself for the table and its columns
-        # Extract table name from FROM clause
-        from_match = re.search(r'FROM\s+["\']?(\w+)["\']?\s+AS\s+(\w+)', sql, re.IGNORECASE)
-        if not from_match:
-            from_match = re.search(r'FROM\s+["\']?([^"\'\s]+)["\']?', sql, re.IGNORECASE)
+        from_table = from_match.group(1).strip('"').lower()
+        logger.warning(f"[SQL-GEN] FROM table: {from_table[-50:]}")
         
-        if from_match:
-            table_name = from_match.group(1)
-            # Look up this table's columns from schema
-            if self.schema:
-                for table in self.schema.get('tables', []):
-                    t_name = table.get('table_name', '')
-                    if t_name.lower() == table_name.lower() or table_name.lower() in t_name.lower():
-                        cols = table.get('columns', [])
-                        col_names = []
-                        for c in cols:
-                            if isinstance(c, dict):
-                                col_names.append(c.get('name', '').lower())
-                            else:
-                                col_names.append(str(c).lower())
-                        
-                        if filter_col in col_names:
-                            logger.warning(f"[SQL-GEN] Filter column '{filter_col}' found in table {t_name[-40:]}")
-                            return True
+        # Look up this specific table's columns from schema
+        if self.schema:
+            for table in self.schema.get('tables', []):
+                t_name = table.get('table_name', '').lower()
+                
+                # Match the table name
+                if t_name == from_table or from_table in t_name or t_name in from_table:
+                    cols = table.get('columns', [])
+                    col_names = []
+                    for c in cols:
+                        if isinstance(c, dict):
+                            col_names.append(c.get('name', '').lower())
                         else:
-                            logger.warning(f"[SQL-GEN] Filter column '{filter_col}' NOT in table {t_name[-40:]} (has: {col_names[:5]}...)")
-                            return False
+                            col_names.append(str(c).lower())
+                    
+                    if filter_col in col_names:
+                        logger.warning(f"[SQL-GEN] Filter column '{filter_col}' FOUND in FROM table")
+                        return True
+                    else:
+                        logger.warning(f"[SQL-GEN] Filter column '{filter_col}' NOT in FROM table (has: {col_names[:5]}...)")
+                        return False
         
-        logger.warning(f"[SQL-GEN] Could not verify filter column '{filter_col}', allowing injection")
-        return True
+        # Couldn't verify - don't inject to be safe
+        logger.warning(f"[SQL-GEN] Could not verify table schema, skipping injection to be safe")
+        return False
     
     def _inject_where_clause(self, sql: str, filter_clause: str) -> str:
         """
