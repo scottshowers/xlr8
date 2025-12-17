@@ -3374,7 +3374,13 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       
     } catch (err) {
       console.error('Refresh and analyze failed:', err);
-      alert('Failed to refresh structure. Check that Year-End Checklist is in Reference Library.');
+      
+      // Check if we at least got the structure refresh
+      if (err.message?.includes('timeout') || err.code === 'ECONNABORTED') {
+        alert('Structure refresh may have succeeded, but the analysis timed out. Try refreshing the page.');
+      } else {
+        alert('Failed to refresh structure. Check that Year-End Checklist is in Reference Library.');
+      }
     } finally {
       setAnalyzing(false);
       setScanProgress(null);
