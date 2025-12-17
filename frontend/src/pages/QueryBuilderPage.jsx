@@ -71,7 +71,7 @@ export default function QueryBuilderPage() {
   const loadSchema = async () => {
     setIsLoadingSchema(true)
     try {
-      const response = await api.get(`/intelligence/${projectName}/schema`)
+      const response = await api.get(`/bi/schema/${projectName}`)
       const schema = response.data
       
       const tableList = (schema.tables || []).map(t => ({
@@ -606,7 +606,7 @@ export default function QueryBuilderPage() {
       {/* Header */}
       <div style={styles.header}>
         <div>
-          <h1 style={styles.title}>Query Builder</h1>
+          <h1 style={styles.title}>Smart Analytics</h1>
           <p style={styles.subtitle}>
             Build queries visually • <strong>{projectName}</strong>
             {!isLoadingSchema && ` • ${tables.length} tables`}
