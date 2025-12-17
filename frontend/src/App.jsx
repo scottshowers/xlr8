@@ -47,7 +47,7 @@ import AdminPage from './pages/AdminPage';
 import AdminDashboard from './pages/AdminDashboard';
 import DataModelPage from './pages/DataModelPage';
 import ReferenceLibraryPage from './pages/ReferenceLibraryPage';
-import BIBuilderPage from './pages/QueryBuilderPage';
+import QueryBuilderPage from './pages/QueryBuilderPage';
 
 // CSS
 import './index.css';
@@ -112,9 +112,9 @@ function AppRoutes() {
           <ProtectedRoute><Layout><WorkspacePage /></Layout></ProtectedRoute>
         } />
         
-        {/* Analytics (BI Builder) */}
+        {/* Analytics (Query Builder) */}
         <Route path="/analytics" element={
-          <ProtectedRoute><Layout><BIBuilderPage /></Layout></ProtectedRoute>
+          <ProtectedRoute><Layout><QueryBuilderPage /></Layout></ProtectedRoute>
         } />
         
         {/* ====== ADMIN NAV ====== */}
