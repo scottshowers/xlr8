@@ -937,12 +937,24 @@ Return ONLY a valid JSON array. No markdown, no explanation."""
             
             # ALWAYS calculate totals from line items - NO EXCEPTIONS
             calc_taxes = sum(float(t.get('amount', 0) or 0) for t in emp.get('taxes', []))
-            calc_deductions = sum(float(d.get('amount', 0) or 0) for d in emp.get('deductions', []))
+            
+            # Filter out payment methods from deductions - they are NOT deductions
+            payment_methods = ['direct deposit', 'net check', 'check', 'payment']
+            real_deductions = [
+                d for d in emp.get('deductions', [])
+                if not any(pm in str(d.get('description', '')).lower() for pm in payment_methods)
+                and not any(pm in str(d.get('type', '')).lower() for pm in payment_methods)
+            ]
+            calc_deductions = sum(float(d.get('amount', 0) or 0) for d in real_deductions)
+            
             calc_earnings = sum(float(e.get('amount', 0) or 0) for e in emp.get('earnings', []))
             
             # Overwrite totals with calculated values
             emp['total_taxes'] = calc_taxes
             emp['total_deductions'] = calc_deductions
+            
+            # Also clean up the deductions array itself
+            emp['deductions'] = real_deductions
             
             # If gross is 0 but we have earnings, use earnings sum
             if not emp.get('gross_pay') and calc_earnings > 0:
@@ -1126,6 +1138,20 @@ DEPARTMENT - MUST EXTRACT:
 TAX PROFILE:
 - Look for "Tax Profile: X - XX/XX/XX" pattern (e.g., "Tax Profile: 1 - MD/MD/MD")
 - Extract the full string including the number and state codes
+
+=== CRITICAL: WHAT IS NOT A DEDUCTION ===
+DO NOT include these in the deductions array - they are PAYMENT METHODS, not deductions:
+- "Direct Deposit" - this is HOW the net pay is delivered, NOT a deduction
+- "Net Check" - payment method
+- "Payment:" lines - these describe payment method
+- Any line showing how money is PAID OUT is not a deduction
+
+DEDUCTIONS are things SUBTRACTED from gross pay like:
+- 401K contributions
+- Health/Dental/Vision insurance premiums
+- Life insurance
+- Garnishments
+- Union dues
 
 EXAMPLE EXTRACTION:
 If you see:
@@ -1357,9 +1383,18 @@ Return the JSON array now:"""
         total_taxes = float(emp.get('total_taxes', 0) or 0)
         total_deductions = float(emp.get('total_deductions', 0) or 0)
         
-        # Calculate from line items
+        # Calculate from line items, excluding payment methods
         calc_taxes = sum(float(t.get('amount', 0) or 0) for t in emp.get('taxes', []) if not t.get('is_employer', False))
-        calc_deductions = sum(float(d.get('amount', 0) or 0) for d in emp.get('deductions', []) if not d.get('is_employer', False) and d.get('category') != 'memo')
+        
+        payment_methods = ['direct deposit', 'net check', 'check', 'payment']
+        real_deductions = [
+            d for d in emp.get('deductions', [])
+            if not any(pm in str(d.get('description', '')).lower() for pm in payment_methods)
+            and not any(pm in str(d.get('type', '')).lower() for pm in payment_methods)
+            and not d.get('is_employer', False)
+            and d.get('category') != 'memo'
+        ]
+        calc_deductions = sum(float(d.get('amount', 0) or 0) for d in real_deductions)
         
         # Use totals if provided, otherwise use calculated
         use_taxes = total_taxes if total_taxes > 0 else calc_taxes
@@ -1373,15 +1408,7 @@ Return the JSON array now:"""
             tolerance = max(1.00, gross * 0.01)
             
             if diff > tolerance:
-                # Try alternative: maybe total_deductions already includes taxes?
-                alt_calc = gross - total_deductions if total_deductions > use_taxes else calculated_net
-                alt_diff = abs(alt_calc - net)
-                
-                if alt_diff <= tolerance:
-                    # Alternative calculation worked
-                    pass
-                else:
-                    errors.append(f"Net mismatch: gross({gross:.2f}) - taxes({use_taxes:.2f}) - ded({use_deductions:.2f}) = {calculated_net:.2f}, expected {net:.2f}")
+                errors.append(f"Net mismatch: gross({gross:.2f}) - taxes({use_taxes:.2f}) - ded({use_deductions:.2f}) = {calculated_net:.2f}, expected {net:.2f}")
         
         return errors
     
