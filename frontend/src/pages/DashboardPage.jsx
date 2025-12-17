@@ -447,26 +447,102 @@ export default function DashboardPage() {
   const { darkMode, T } = useTheme();
   const { selectProject, activeProject, projects: realProjects } = useProject();
   const [time, setTime] = useState(new Date());
+  
+  // Real stats from backend
+  const [dashboardStats, setDashboardStats] = useState({
+    playbooksRunning: 0,
+    pendingFindings: 0,
+    complianceScore: 0,
+    projectStats: {} // projectId -> {health, findings, playbooks}
+  });
+  const [statsLoading, setStatsLoading] = useState(true);
 
   useEffect(() => {
     const interval = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(interval);
   }, []);
 
-  // Stats - use real project count
+  // Fetch real stats from backend
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        // Get playbook count
+        const playbooksRes = await fetch('/api/playbook-builder/configs').then(r => r.json()).catch(() => ({ total: 0 }));
+        const playbooksRunning = playbooksRes.total || playbooksRes.configs?.length || 0;
+        
+        // Get findings/stats for each project
+        const projectStats = {};
+        let totalFindings = 0;
+        let totalCritical = 0;
+        let totalTasks = 0;
+        let totalComplete = 0;
+        
+        for (const project of (realProjects || [])) {
+          try {
+            const summaryRes = await fetch(`/api/intelligence/${project.id}/summary`).then(r => r.json()).catch(() => null);
+            
+            if (summaryRes && summaryRes.analyzed) {
+              const findings = summaryRes.findings || {};
+              const tasks = summaryRes.tasks || {};
+              
+              // Calculate health: 100 - (critical*10 + warning*3 + pending_tasks*2), min 0
+              const health = Math.max(0, Math.min(100, 
+                100 - (findings.critical || 0) * 10 - (findings.warning || 0) * 3 - (tasks.pending || 0) * 2
+              ));
+              
+              projectStats[project.id] = {
+                health,
+                pendingFindings: (findings.critical || 0) + (findings.warning || 0),
+                activePlaybooks: 0 // Would need per-project playbook tracking
+              };
+              
+              totalFindings += (findings.critical || 0) + (findings.warning || 0);
+              totalCritical += findings.critical || 0;
+              totalTasks += tasks.total || 0;
+              totalComplete += tasks.complete || 0;
+            } else {
+              projectStats[project.id] = { health: 100, pendingFindings: 0, activePlaybooks: 0 };
+            }
+          } catch (e) {
+            projectStats[project.id] = { health: 100, pendingFindings: 0, activePlaybooks: 0 };
+          }
+        }
+        
+        // Calculate compliance score: (complete tasks / total tasks) * 100, or 100 if no tasks
+        const complianceScore = totalTasks > 0 ? Math.round((totalComplete / totalTasks) * 100) : 100;
+        
+        setDashboardStats({
+          playbooksRunning,
+          pendingFindings: totalFindings,
+          complianceScore,
+          projectStats
+        });
+      } catch (e) {
+        console.error('Failed to fetch dashboard stats:', e);
+      } finally {
+        setStatsLoading(false);
+      }
+    };
+    
+    fetchStats();
+    const interval = setInterval(fetchStats, 30000); // Refresh every 30s
+    return () => clearInterval(interval);
+  }, [realProjects]);
+
+  // Stats - use real data
   const stats = [
-    { label: 'Active Projects', value: realProjects?.length || 0, icon: FolderOpen, color: BRAND.grassGreen, trend: 12, sparkData: [2, 3, 3, 4, 3, 4, 4] },
-    { label: 'Playbooks Running', value: 6, icon: PlayCircle, color: STATUS.blue, trend: 8, sparkData: [4, 5, 6, 5, 7, 6, 6] },
-    { label: 'Pending Findings', value: 44, icon: AlertTriangle, color: STATUS.amber, trend: -15, sparkData: [60, 55, 52, 48, 45, 44, 44] },
-    { label: 'Compliance Score', value: '73%', icon: Shield, color: STATUS.green, trend: 5, sparkData: [65, 68, 70, 69, 72, 73, 73] },
+    { label: 'Active Projects', value: realProjects?.length || 0, icon: FolderOpen, color: BRAND.grassGreen },
+    { label: 'Playbooks', value: statsLoading ? '...' : dashboardStats.playbooksRunning, icon: PlayCircle, color: STATUS.blue },
+    { label: 'Pending Findings', value: statsLoading ? '...' : dashboardStats.pendingFindings, icon: AlertTriangle, color: STATUS.amber },
+    { label: 'Compliance', value: statsLoading ? '...' : `${dashboardStats.complianceScore}%`, icon: Shield, color: dashboardStats.complianceScore >= 80 ? STATUS.green : dashboardStats.complianceScore >= 60 ? STATUS.amber : STATUS.red },
   ];
 
-  // Use real projects, add mock health/playbooks/findings for display
-  const displayProjects = (realProjects || []).slice(0, 4).map((p, i) => ({
+  // Use real projects with real stats
+  const displayProjects = (realProjects || []).slice(0, 4).map((p) => ({
     ...p,
-    health: [92, 67, 45, 88][i] || 75,
-    activePlaybooks: [2, 1, 0, 3][i] || 0,
-    pendingFindings: [3, 12, 28, 1][i] || 0,
+    health: dashboardStats.projectStats[p.id]?.health ?? 100,
+    activePlaybooks: dashboardStats.projectStats[p.id]?.activePlaybooks ?? 0,
+    pendingFindings: dashboardStats.projectStats[p.id]?.pendingFindings ?? 0,
   }));
 
   // If no real projects, show empty state
