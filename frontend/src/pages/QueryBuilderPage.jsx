@@ -37,80 +37,43 @@ const COLORS = {
 const CHART_COLORS = ['#83b16d', '#93abd9', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#14b8a6']
 
 // =============================================================================
-// SMART TABLE NAME PARSER
+// SMART TABLE NAME PARSER - SIMPLE: Show last 4 segments
 // =============================================================================
 
 function parseSmartTableName(fullName, file, sheet) {
-  // The LAST segment is what makes each table unique - show that!
-  // TEA1000_EMPLOYEE_CONVERSION_TESTING_MEYER_COMPANY_MEYER_CORP → "Meyer Corp"
-  // TEA1000_EMPLOYEE_CONVERSION_TESTING_MEYER_COMPANY_MEYER_COR → "Meyer Cor"
-  
-  if (!fullName) return { display: 'Unknown', customer: '', subtitle: '' }
+  if (!fullName) return { display: 'Unknown', subtitle: '' }
   
   // Use sheet name if meaningful
   if (sheet && !['Sheet1', 'Sheet 1', 'Data', 'Sheet'].includes(sheet)) {
-    const firstPart = fullName.split(/__|_/)[0]?.toUpperCase() || ''
-    return {
-      display: sheet.substring(0, 35),
-      customer: firstPart,
-      subtitle: ''
-    }
+    return { display: sheet, subtitle: '' }
   }
   
-  // Handle double-underscore format: project__category__source
+  // Handle double-underscore format
   if (fullName.includes('__')) {
     const parts = fullName.split('__')
-    const customer = parts[0]?.toUpperCase() || ''
     let lastPart = parts[parts.length - 1] || ''
-    // Remove timestamp
     lastPart = lastPart.replace(/_\d{8}_\d{6}$/, '')
     return {
-      display: formatSegment(lastPart),
-      customer: customer,
-      subtitle: parts.length > 2 ? formatSegment(parts[1]) : ''
-    }
-  }
-  
-  // Single underscore format - take last 2 meaningful segments
-  const segments = fullName.split('_').filter(s => s.length > 0)
-  
-  if (segments.length <= 2) {
-    return {
-      display: formatSegment(fullName),
-      customer: '',
+      display: lastPart.replace(/_/g, ' ').substring(0, 40),
       subtitle: ''
     }
   }
   
-  // First segment is usually customer code
-  const customer = segments[0].toUpperCase()
+  // Single underscore: take LAST 4 segments - that's where the uniqueness is
+  const segments = fullName.split('_').filter(s => s.length > 0)
   
-  // Last 2 segments are usually the unique identifier
-  const last2 = segments.slice(-2).join('_')
-  const last1 = segments[segments.length - 1]
+  // Remove timestamp segments if present (8 digits or 6 digits)
+  const filtered = segments.filter(s => !/^\d{6,8}$/.test(s))
   
-  // Check if last 2 make sense together (like MEYER_CORP)
-  const display = formatSegment(last2)
-  
-  // Middle segments give context
-  const middle = segments.slice(1, -2)
-  const subtitle = middle.length > 0 ? formatSegment(middle.slice(0, 2).join('_')) : ''
+  // Take last 4 segments (or all if fewer)
+  const uniquePart = filtered.slice(-4).join(' ')
   
   return {
-    display: display,
-    customer: customer,
-    subtitle: subtitle
+    display: uniquePart.split(' ').map(w => 
+      w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
+    ).join(' '),
+    subtitle: ''
   }
-}
-
-function formatSegment(segment) {
-  if (!segment) return ''
-  return segment
-    .replace(/_/g, ' ')
-    .split(' ')
-    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-    .join(' ')
-    .substring(0, 35)
 }
 
 // =============================================================================
@@ -174,10 +137,8 @@ export default function QueryBuilderPage() {
       const tableList = (schema.tables || []).map(t => {
         const parsed = parseSmartTableName(t.full_name || t.name, t.file, t.sheet)
         return {
-          sqlName: t.full_name || t.name, // ALWAYS use for SQL queries
+          sqlName: t.full_name || t.name,
           displayName: parsed.display,
-          subtitle: parsed.subtitle,
-          customerCode: parsed.customer,
           rows: t.row_count || t.rows || 0,
           columns: t.columns || [],
           file: t.file,
@@ -586,19 +547,14 @@ export default function QueryBuilderPage() {
                         onClick={() => selectTable(table)}
                         title={table.sqlName}
                       >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={styles.tableName}>{table.displayName}</div>
-                            {table.subtitle && (
-                              <div style={{ fontSize: '0.7rem', color: T.textDim, marginTop: '0.15rem' }}>
-                                {table.subtitle}
-                              </div>
-                            )}
                             <div style={styles.tableMeta}>
                               {table.rows.toLocaleString()} rows • {table.columns.length} cols
                             </div>
                           </div>
-                          {isSelected && <Check size={16} color={COLORS.grassGreen} style={{ marginTop: '0.25rem' }} />}
+                          {isSelected && <Check size={16} color={COLORS.grassGreen} />}
                         </div>
                       </div>
                       
