@@ -2509,30 +2509,46 @@ SQL:"""
         # TRUTH 1: REALITY (Data Results)
         # =================================================================
         if query_type == 'count' and result_value is not None:
-            count = result_value
-            
-            if status_filter == 'active':
-                parts.append(f"📊 **Reality:** You have **{count:,} active employees** in your current workforce.")
-            elif status_filter == 'termed':
-                parts.append(f"📊 **Reality:** Your data shows **{count:,} terminated employees**.")
-            elif status_filter == 'all':
-                parts.append(f"📊 **Reality:** Your data contains **{count:,} total employee records** across all statuses.")
+            # Ensure count is an integer for formatting
+            try:
+                count = int(result_value)
+            except (ValueError, TypeError):
+                count = result_value
+                # Can't use :, format on non-integers
+                if status_filter == 'active':
+                    parts.append(f"📊 **Reality:** You have **{count}** active employees in your current workforce.")
+                elif status_filter == 'termed':
+                    parts.append(f"📊 **Reality:** Your data shows **{count}** terminated employees.")
+                else:
+                    parts.append(f"📊 **Reality:** Found **{count}** employees matching your criteria.")
             else:
-                parts.append(f"📊 **Reality:** Found **{count:,}** employees matching your criteria.")
-                
-            # Add percentage context if we have distribution data
-            if self.filter_candidates.get('status'):
-                for cand in self.filter_candidates['status']:
-                    dist = cand.get('value_distribution', {})
-                    if dist:
-                        total = sum(dist.values())
-                        if total > 0 and count != total:
-                            pct = (count / total) * 100
-                            parts.append(f"\n*({pct:.1f}% of {total:,} total records)*")
-                        break
+                # count is an integer, use comma formatting
+                if status_filter == 'active':
+                    parts.append(f"📊 **Reality:** You have **{count:,} active employees** in your current workforce.")
+                elif status_filter == 'termed':
+                    parts.append(f"📊 **Reality:** Your data shows **{count:,} terminated employees**.")
+                elif status_filter == 'all':
+                    parts.append(f"📊 **Reality:** Your data contains **{count:,} total employee records** across all statuses.")
+                else:
+                    parts.append(f"📊 **Reality:** Found **{count:,}** employees matching your criteria.")
+                    
+                # Add percentage context if we have distribution data
+                if self.filter_candidates.get('status'):
+                    for cand in self.filter_candidates['status']:
+                        dist = cand.get('value_distribution', {})
+                        if dist:
+                            total = sum(dist.values())
+                            if total > 0 and count != total:
+                                pct = (count / total) * 100
+                                parts.append(f"\n*({pct:.1f}% of {total:,} total records)*")
+                            break
                         
         elif query_type in ['sum', 'average'] and result_value is not None:
-            parts.append(f"📊 **Reality:** {query_type.title()} = **{result_value:,}**")
+            try:
+                val = float(result_value)
+                parts.append(f"📊 **Reality:** {query_type.title()} = **{val:,.2f}**")
+            except (ValueError, TypeError):
+                parts.append(f"📊 **Reality:** {query_type.title()} = **{result_value}**")
             
         elif result_rows:
             row_count = len(result_rows)
