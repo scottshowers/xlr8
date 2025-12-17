@@ -718,7 +718,7 @@ class RegisterExtractor:
                 progress = 80 + int((page_idx / len(pages_text)) * 15)
                 update_job(job_id, message=f'Extracting page {page_num}/{len(pages_text)}...', progress=progress)
             
-            logger.info(f"[REGISTER] Processing page {page_num}/{len(pages_text)}...")
+            logger.warning(f"[REGISTER] Processing page {page_num}/{len(pages_text)} ({len(page_text)} chars)...")
             
             page_prompt = f"""{prompt_template}
 
@@ -748,13 +748,18 @@ Return ONLY a valid JSON array. No markdown, no explanation."""
                 if response.status_code == 200:
                     result = response.json()
                     content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    logger.warning(f"[REGISTER] Page {page_num} raw response length: {len(content)}")
+                    
                     page_employees = self._parse_json_response(content)
                     
                     if page_employees:
-                        logger.info(f"[REGISTER] Page {page_num}: {len(page_employees)} employees")
+                        logger.warning(f"[REGISTER] Page {page_num}: {len(page_employees)} employees extracted")
+                        for emp in page_employees:
+                            logger.warning(f"[REGISTER]   - {emp.get('name', 'NO NAME')} (ID: {emp.get('employee_id', 'NO ID')})")
                         all_employees.extend(page_employees)
                     else:
-                        logger.warning(f"[REGISTER] Page {page_num}: no employees found")
+                        logger.warning(f"[REGISTER] Page {page_num}: NO employees parsed from response")
+                        logger.warning(f"[REGISTER] Page {page_num} response preview: {content[:500]}...")
                 else:
                     logger.warning(f"[REGISTER] Page {page_num} Groq error: {response.status_code} - {response.text[:200]}")
                     
@@ -780,6 +785,8 @@ Return ONLY a valid JSON array. No markdown, no explanation."""
         Merge employee records by employee_id.
         Handles employees split across pages.
         """
+        logger.warning(f"[REGISTER] Starting merge of {len(employees)} raw employee records...")
+        
         merged = {}
         
         for emp in employees:
@@ -787,13 +794,17 @@ Return ONLY a valid JSON array. No markdown, no explanation."""
             
             if not emp_id:
                 # No ID, can't merge - keep as separate
-                merged[f"_unknown_{len(merged)}"] = emp
+                key = f"_unknown_{len(merged)}"
+                merged[key] = emp
+                logger.warning(f"[REGISTER] No ID for employee, keeping as {key}")
                 continue
             
             if emp_id not in merged:
                 merged[emp_id] = emp
+                logger.warning(f"[REGISTER] New employee: {emp_id}")
             else:
                 # Merge: combine arrays, prefer non-zero values
+                logger.warning(f"[REGISTER] Merging duplicate: {emp_id}")
                 existing = merged[emp_id]
                 
                 # Merge earnings, taxes, deductions arrays
@@ -818,6 +829,7 @@ Return ONLY a valid JSON array. No markdown, no explanation."""
                     if not existing.get(field) and emp.get(field):
                         existing[field] = emp[field]
         
+        logger.warning(f"[REGISTER] Merge complete: {len(employees)} raw -> {len(merged)} unique employees")
         return list(merged.values())
     
     def _parse_with_claude_direct(self, pages_text: List[str], vendor_type: str = "unknown", job_id: str = None) -> List[Dict]:
@@ -955,11 +967,16 @@ Return ONLY a valid JSON array. No markdown, no explanation."""
             try:
                 response = supabase.table('vendor_prompts').select('prompt_template').eq('vendor_type', vendor_type).eq('is_active', True).execute()
                 if response.data:
-                    logger.info(f"Loaded prompt for vendor: {vendor_type}")
+                    logger.warning(f"[REGISTER] Loaded Supabase prompt for vendor: {vendor_type} ({len(response.data[0]['prompt_template'])} chars)")
                     return response.data[0]['prompt_template']
+                else:
+                    logger.warning(f"[REGISTER] No Supabase prompt found for vendor: {vendor_type}")
             except Exception as e:
-                logger.warning(f"Failed to load vendor prompt: {e}")
+                logger.warning(f"[REGISTER] Failed to load vendor prompt: {e}")
+        else:
+            logger.warning(f"[REGISTER] Supabase not available, using default prompt")
         
+        logger.warning(f"[REGISTER] Using DEFAULT prompt for vendor: {vendor_type}")
         return self._get_default_prompt()
     
     def _get_default_prompt(self) -> str:
