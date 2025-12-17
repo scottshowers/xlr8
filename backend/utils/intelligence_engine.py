@@ -1,10 +1,12 @@
 """
-XLR8 INTELLIGENCE ENGINE v5.11
-==============================
+XLR8 INTELLIGENCE ENGINE v5.11.1
+================================
 
 Deploy to: backend/utils/intelligence_engine.py
 
 UPDATES:
+- v5.11.1: ORDER BY REGEX FIX - was capturing "FROM" as alias due to broken regex
+           Changed from `(?:AS\s+)?(\w+)?` to `(?:\s+AS\s+(\w+))?`
 - v5.11: LOCATION + GROUP BY FIX
         - Fixed table selection: "location" keyword now boosts tables with location columns
         - Fixed GROUP BY query handling: Now displays as table, not single count value
@@ -49,7 +51,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.11 LOCATION + GROUP BY FIX ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.11.1 ORDER BY REGEX FIX ======")
 
 
 # =============================================================================
@@ -1566,7 +1568,7 @@ class IntelligenceEngine:
     
     def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
         """Generate SQL query using LLMOrchestrator with SMART table selection."""
-        logger.warning(f"[SQL-GEN] v5.11 - Starting SQL generation")
+        logger.warning(f"[SQL-GEN] v5.11.1 - Starting SQL generation")
         logger.warning(f"[SQL-GEN] confirmed_facts: {self.confirmed_facts}")
         
         if not self.structured_handler or not self.schema:
@@ -2060,7 +2062,8 @@ SQL:"""
                         logger.warning(f"[SQL-GEN] Auto-added: ORDER BY {month_match.group(1)} ASC (chronological)")
                 else:
                     # For other groupings, order by count descending
-                    count_match = re.search(r'COUNT\s*\([^)]*\)\s*(?:AS\s+)?(\w+)?', sql, re.IGNORECASE)
+                    # Only capture alias if AS keyword is present, otherwise use COUNT(*)
+                    count_match = re.search(r'COUNT\s*\([^)]*\)(?:\s+AS\s+(\w+))?', sql, re.IGNORECASE)
                     if count_match:
                         count_alias = count_match.group(1) if count_match.group(1) else 'COUNT(*)'
                         sql = sql.rstrip(';') + f' ORDER BY {count_alias} DESC'
