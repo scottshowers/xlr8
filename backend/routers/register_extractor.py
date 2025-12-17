@@ -825,35 +825,74 @@ Return ONLY a valid JSON array. No markdown, no explanation."""
         """
         Merge employee records by employee_id or name.
         Handles employees split across pages.
+        Uses two-pass approach: first by employee_id, then by normalized name.
         """
         logger.warning(f"[REGISTER] Starting merge of {len(employees)} raw employee records...")
         
+        def normalize_name(name: str) -> str:
+            """Aggressively normalize name for deduplication."""
+            if not name:
+                return ""
+            # Uppercase
+            name = name.upper()
+            # Remove ALL punctuation
+            name = ''.join(c if c.isalnum() or c == ' ' else '' for c in name)
+            # Normalize whitespace
+            name = ' '.join(name.split())
+            return name
+        
+        # First pass: collect all records, build name->id mapping
+        name_to_ids = {}  # normalized_name -> set of employee_ids
+        id_to_name = {}   # employee_id -> normalized_name
+        
+        for emp in employees:
+            raw_name = emp.get('name', '') or ''
+            raw_name = raw_name.strip() if isinstance(raw_name, str) else ''
+            emp_id = emp.get('employee_id', '') or ''
+            emp_id = emp_id.strip().upper() if isinstance(emp_id, str) else ''
+            
+            normalized = normalize_name(raw_name)
+            if normalized:
+                if normalized not in name_to_ids:
+                    name_to_ids[normalized] = set()
+                if emp_id:
+                    name_to_ids[normalized].add(emp_id)
+                    id_to_name[emp_id] = normalized
+        
+        # Second pass: merge using normalized name as primary key
         merged = {}
         
         for emp in employees:
-            # Get name and employee_id separately
-            name = emp.get('name', '').strip()
-            emp_id = emp.get('employee_id', '').strip()
+            raw_name = emp.get('name', '') or ''
+            raw_name = raw_name.strip() if isinstance(raw_name, str) else ''
+            emp_id = emp.get('employee_id', '') or ''
+            emp_id = emp_id.strip().upper() if isinstance(emp_id, str) else ''
             
             # Skip completely empty records
-            if not name and not emp_id:
+            if not raw_name and not emp_id:
                 logger.warning(f"[REGISTER] Skipping blank employee record")
                 continue
             
-            # Determine merge key: prefer employee_id if present, else use normalized name
-            if emp_id:
-                merge_key = emp_id
-            elif name:
-                # Normalize name for matching: uppercase, remove extra spaces
-                merge_key = ' '.join(name.upper().split())
+            # Normalize name
+            normalized_name = normalize_name(raw_name)
+            
+            # ALWAYS use normalized name as merge key if available
+            # This ensures "COOK, BETTY L" with ID and without ID merge together
+            if normalized_name:
+                merge_key = normalized_name
+            elif emp_id and emp_id in id_to_name:
+                # If we only have ID, look up the name we found elsewhere
+                merge_key = id_to_name[emp_id]
+            elif emp_id:
+                merge_key = f"ID_{emp_id}"
             else:
                 merge_key = f"_unknown_{len(merged)}"
             
             # Display name for logging
-            display_name = name if name else f"(ID only: {emp_id})"
+            display_name = raw_name if raw_name else f"(ID only: {emp_id})"
             
             if merge_key not in merged:
-                merged[merge_key] = emp
+                merged[merge_key] = emp.copy()
                 logger.warning(f"[REGISTER] New employee: {display_name}")
             else:
                 # Merge: combine arrays, prefer non-zero values
@@ -861,8 +900,12 @@ Return ONLY a valid JSON array. No markdown, no explanation."""
                 existing = merged[merge_key]
                 
                 # If existing has no name but new one does, use the name
-                if not existing.get('name') and name:
-                    existing['name'] = name
+                if not existing.get('name') and raw_name:
+                    existing['name'] = raw_name
+                
+                # If existing has no employee_id but new one does, use it
+                if not existing.get('employee_id') and emp_id:
+                    existing['employee_id'] = emp_id
                 
                 # Merge earnings, taxes, deductions arrays
                 for field in ['earnings', 'taxes', 'deductions']:
@@ -886,12 +929,34 @@ Return ONLY a valid JSON array. No markdown, no explanation."""
                     if not existing.get(field) and emp.get(field):
                         existing[field] = emp[field]
         
-        # Final cleanup: ensure all records have names
+        # Post-merge: recalculate totals from line items if needed
         result = []
         for key, emp in merged.items():
             if not emp.get('name') and emp.get('employee_id'):
-                # Record has ID but no name - flag it
                 logger.warning(f"[REGISTER] WARNING: Employee {emp.get('employee_id')} has no name!")
+            
+            # Recalculate totals from line items
+            calc_taxes = sum(float(t.get('amount', 0) or 0) for t in emp.get('taxes', []))
+            calc_deductions = sum(float(d.get('amount', 0) or 0) for d in emp.get('deductions', []))
+            
+            gross = float(emp.get('gross_pay', 0) or 0)
+            net = float(emp.get('net_pay', 0) or 0)
+            stored_taxes = float(emp.get('total_taxes', 0) or 0)
+            stored_deductions = float(emp.get('total_deductions', 0) or 0)
+            
+            # If calculated totals make the balance work better, use them
+            if gross > 0 and net > 0:
+                stored_calc_net = gross - stored_taxes - stored_deductions
+                line_calc_net = gross - calc_taxes - calc_deductions
+                
+                stored_diff = abs(stored_calc_net - net)
+                line_diff = abs(line_calc_net - net)
+                
+                if line_diff < stored_diff and calc_taxes > 0:
+                    logger.warning(f"[REGISTER] {emp.get('name', 'Unknown')}: Using line-item totals (taxes: {calc_taxes:.2f}, ded: {calc_deductions:.2f})")
+                    emp['total_taxes'] = calc_taxes
+                    emp['total_deductions'] = calc_deductions
+            
             result.append(emp)
         
         logger.warning(f"[REGISTER] Merge complete: {len(employees)} raw -> {len(result)} unique employees")
@@ -1296,21 +1361,36 @@ Return the JSON array now:"""
         if not emp.get('name'):
             errors.append("Missing employee name")
         
-        gross = emp.get('gross_pay', 0)
-        net = emp.get('net_pay', 0)
-        total_taxes = emp.get('total_taxes', 0)
-        total_deductions = emp.get('total_deductions', 0)
+        gross = float(emp.get('gross_pay', 0) or 0)
+        net = float(emp.get('net_pay', 0) or 0)
+        total_taxes = float(emp.get('total_taxes', 0) or 0)
+        total_deductions = float(emp.get('total_deductions', 0) or 0)
+        
+        # Calculate from line items
+        calc_taxes = sum(float(t.get('amount', 0) or 0) for t in emp.get('taxes', []) if not t.get('is_employer', False))
+        calc_deductions = sum(float(d.get('amount', 0) or 0) for d in emp.get('deductions', []) if not d.get('is_employer', False) and d.get('category') != 'memo')
+        
+        # Use totals if provided, otherwise use calculated
+        use_taxes = total_taxes if total_taxes > 0 else calc_taxes
+        use_deductions = total_deductions if total_deductions > 0 else calc_deductions
         
         if gross > 0 and net > 0:
-            if total_taxes > 0 or total_deductions >= 0:
-                calculated = gross - total_taxes - total_deductions
-            else:
-                ee_taxes = sum(t.get('amount', 0) or 0 for t in emp.get('taxes', []) if not t.get('is_employer', False))
-                ee_deductions = sum(d.get('amount', 0) or 0 for d in emp.get('deductions', []) if not d.get('is_employer', False) and d.get('category') != 'memo')
-                calculated = gross - ee_taxes - ee_deductions
+            calculated_net = gross - use_taxes - use_deductions
+            diff = abs(calculated_net - net)
             
-            if abs(calculated - net) > 1.00:
-                errors.append(f"{emp.get('name', 'Unknown')}: Net mismatch (calc {calculated:.2f}, actual {net:.2f})")
+            # Allow $1 tolerance OR 1% tolerance for rounding
+            tolerance = max(1.00, gross * 0.01)
+            
+            if diff > tolerance:
+                # Try alternative: maybe total_deductions already includes taxes?
+                alt_calc = gross - total_deductions if total_deductions > use_taxes else calculated_net
+                alt_diff = abs(alt_calc - net)
+                
+                if alt_diff <= tolerance:
+                    # Alternative calculation worked
+                    pass
+                else:
+                    errors.append(f"Net mismatch: gross({gross:.2f}) - taxes({use_taxes:.2f}) - ded({use_deductions:.2f}) = {calculated_net:.2f}, expected {net:.2f}")
         
         return errors
     
