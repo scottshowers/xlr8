@@ -266,7 +266,48 @@ def get_extraction_by_id(extract_id: str) -> Optional[Dict]:
             try:
                 handler = get_structured_handler()
                 employees_df = handler.conn.execute(f"SELECT * FROM {duckdb_table}").fetchdf()
-                job['employees'] = employees_df.to_dict('records')
+                raw_employees = employees_df.to_dict('records')
+                
+                # Transform to match frontend expectations
+                employees = []
+                for emp in raw_employees:
+                    transformed = {
+                        'name': emp.get('employee_name', ''),
+                        'employee_id': emp.get('employee_id', ''),
+                        'department': emp.get('department', ''),
+                        'tax_profile': emp.get('tax_profile', ''),
+                        'company_name': emp.get('company_name', ''),
+                        'check_date': emp.get('check_date', ''),
+                        'period_ending': emp.get('period_ending', ''),
+                        'gross_pay': float(emp.get('gross_pay', 0) or 0),
+                        'net_pay': float(emp.get('net_pay', 0) or 0),
+                        'total_taxes': float(emp.get('total_taxes', 0) or 0),
+                        'total_deductions': float(emp.get('total_deductions', 0) or 0),
+                        'check_number': emp.get('check_number', ''),
+                        'pay_method': emp.get('pay_method', ''),
+                        'is_valid': emp.get('is_valid', True),
+                        'validation_errors': [],
+                    }
+                    
+                    # Parse JSON arrays
+                    try:
+                        transformed['earnings'] = json.loads(emp.get('earnings_json', '[]') or '[]')
+                    except:
+                        transformed['earnings'] = []
+                    
+                    try:
+                        transformed['taxes'] = json.loads(emp.get('taxes_json', '[]') or '[]')
+                    except:
+                        transformed['taxes'] = []
+                    
+                    try:
+                        transformed['deductions'] = json.loads(emp.get('deductions_json', '[]') or '[]')
+                    except:
+                        transformed['deductions'] = []
+                    
+                    employees.append(transformed)
+                
+                job['employees'] = employees
             except Exception as e:
                 logger.warning(f"Could not fetch from DuckDB: {e}")
                 job['employees'] = []
