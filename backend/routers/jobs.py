@@ -15,8 +15,10 @@ router = APIRouter()
 @router.get("/jobs")
 async def get_jobs(limit: int = 50):
     """Get recent processing jobs from database"""
+    logger.info(f"[JOBS] GET /jobs called with limit={limit}")
     try:
         jobs = ProcessingJobModel.get_all(limit=limit)
+        logger.info(f"[JOBS] Got {len(jobs)} jobs from database")
         
         # Format for frontend
         formatted_jobs = []
@@ -37,9 +39,8 @@ async def get_jobs(limit: int = 50):
                 except:
                     input_data = {}
             
-            # Debug log for first few jobs
-            if len(formatted_jobs) < 3:
-                logger.warning(f"[JOBS] Raw job: id={job.get('id')[:8] if job.get('id') else 'none'}, input_data type={type(input_data).__name__}, input_data={input_data}")
+            # Debug log for ALL jobs
+            logger.info(f"[JOBS] Job {job.get('id')[:8] if job.get('id') else 'none'}: input_data={input_data}")
             
             # Get filename from multiple possible locations
             filename = None
