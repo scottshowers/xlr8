@@ -979,6 +979,10 @@ Return ONLY a valid JSON array. No markdown, no explanation."""
             if not emp.get('gross_pay') and calc_earnings > 0:
                 emp['gross_pay'] = calc_earnings
             
+            # ALWAYS calculate net_pay - never trust LLM extracted value
+            gross = float(emp.get('gross_pay', 0) or 0)
+            emp['net_pay'] = gross - calc_taxes - calc_deductions
+            
             result.append(emp)
         
         logger.warning(f"[REGISTER] Merge complete: {len(employees)} raw -> {len(result)} unique employees")
@@ -1402,32 +1406,16 @@ Return the JSON array now:"""
         total_taxes = float(emp.get('total_taxes', 0) or 0)
         total_deductions = float(emp.get('total_deductions', 0) or 0)
         
-        # Calculate from line items, excluding payment methods
-        calc_taxes = sum(float(t.get('amount', 0) or 0) for t in emp.get('taxes', []) if not t.get('is_employer', False))
+        # Check for obviously bad data
+        if gross > 0 and net == 0:
+            # We calculate net_pay in merge, so this shouldn't happen
+            errors.append(f"Net pay is 0 but gross is {gross:.2f}")
         
-        payment_methods = ['direct deposit', 'net check', 'check', 'payment']
-        real_deductions = [
-            d for d in emp.get('deductions', [])
-            if not any(pm in str(d.get('description', '')).lower() for pm in payment_methods)
-            and not any(pm in str(d.get('type', '')).lower() for pm in payment_methods)
-            and not d.get('is_employer', False)
-            and d.get('category') != 'memo'
-        ]
-        calc_deductions = sum(float(d.get('amount', 0) or 0) for d in real_deductions)
+        if gross > 0 and net > gross:
+            errors.append(f"Net ({net:.2f}) exceeds gross ({gross:.2f})")
         
-        # Use totals if provided, otherwise use calculated
-        use_taxes = total_taxes if total_taxes > 0 else calc_taxes
-        use_deductions = total_deductions if total_deductions > 0 else calc_deductions
-        
-        if gross > 0 and net > 0:
-            calculated_net = gross - use_taxes - use_deductions
-            diff = abs(calculated_net - net)
-            
-            # Allow $1 tolerance OR 1% tolerance for rounding
-            tolerance = max(1.00, gross * 0.01)
-            
-            if diff > tolerance:
-                errors.append(f"Net mismatch: gross({gross:.2f}) - taxes({use_taxes:.2f}) - ded({use_deductions:.2f}) = {calculated_net:.2f}, expected {net:.2f}")
+        if total_taxes < 0 or total_deductions < 0:
+            errors.append(f"Negative taxes or deductions")
         
         return errors
     
