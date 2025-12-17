@@ -352,7 +352,7 @@ export default function Landing() {
             {[
               { icon: <MessageSquare style={{ width: 18, height: 18 }} />, title: 'Intelligent Chat', desc: 'Query across all data' },
               { icon: <FileText style={{ width: 18, height: 18 }} />, title: 'Smart Upload', desc: 'Auto-route by file type' },
-              { icon: <Database style={{ width: 18, height: 18 }} />, title: 'Vacuum Extractor', desc: 'Tables from any PDF' },
+              { icon: <Database style={{ width: 18, height: 18 }} />, title: 'Register Extractor', desc: 'Extract pay data from any PDF' },
               { icon: <BookOpen style={{ width: 18, height: 18 }} />, title: 'Guided Playbooks', desc: 'Compliance workflows' },
               { icon: <BarChart3 style={{ width: 18, height: 18 }} />, title: 'Ops Center', desc: 'Live system topology' },
               { icon: <DollarSign style={{ width: 18, height: 18 }} />, title: 'Cost Tracking', desc: 'Usage & subscriptions' }
