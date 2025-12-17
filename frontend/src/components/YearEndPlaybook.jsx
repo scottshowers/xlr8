@@ -3294,7 +3294,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   };
   
   const handleRefreshStructure = async () => {
-    if (!window.confirm('Refresh playbook structure from Global Library and re-analyze all documents? This may take 1-2 minutes.')) {
+    if (!window.confirm('Refresh playbook structure from Reference Library and re-analyze all documents? This may take 1-2 minutes.')) {
       return;
     }
     
@@ -3374,7 +3374,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       
     } catch (err) {
       console.error('Refresh and analyze failed:', err);
-      alert('Failed to refresh structure. Check that Year-End Checklist is in Global Library.');
+      alert('Failed to refresh structure. Check that Year-End Checklist is in Reference Library.');
     } finally {
       setAnalyzing(false);
       setScanProgress(null);
@@ -3574,7 +3574,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
               style={styles.refreshStructureBtn} 
               onClick={handleRefreshStructure}
               disabled={analyzing}
-              title="Refresh playbook structure from Global Library and re-analyze all documents"
+              title="Refresh playbook structure from Reference Library and re-analyze all documents"
             >
               {analyzing 
                 ? (scanProgress 
