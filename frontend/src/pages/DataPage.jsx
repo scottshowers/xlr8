@@ -38,7 +38,7 @@ const COLORS = {
 
 const TABS = [
   { id: 'upload', label: 'Upload', icon: UploadIcon },
-  { id: 'vacuum', label: 'Vacuum', icon: Sparkles },
+  { id: 'vacuum', label: 'Register Extractor', icon: Sparkles },
   { id: 'files', label: 'Files', icon: Database },
   { id: 'model', label: 'Data Model', icon: Database },
 ];
@@ -152,23 +152,23 @@ function VacuumTab() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '2rem' }}>
       <Sparkles size={48} style={{ color: COLORS.grassGreen, marginBottom: '1rem' }} />
-      <h2 style={{ margin: '0 0 0.5rem', color: COLORS.text }}>Vacuum Extract</h2>
+      <h2 style={{ margin: '0 0 0.5rem', color: COLORS.text }}>Register Extractor</h2>
       <p style={{ color: COLORS.textLight, maxWidth: '500px', margin: '0 auto 1.5rem', lineHeight: 1.6, textAlign: 'center' }}>
-        Deep extraction for complex documents. Intelligent table detection, multi-sheet processing, and semantic column mapping.
+        Deep extraction for payroll registers and complex documents. Intelligent employee detection, earnings/deductions parsing, and validation.
       </p>
       <Link to="/vacuum" style={{
         display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.875rem 1.75rem',
         background: COLORS.grassGreen, border: 'none', borderRadius: '10px', color: 'white',
         fontSize: '1rem', fontWeight: 600, textDecoration: 'none', boxShadow: '0 2px 8px rgba(131, 177, 109, 0.3)',
       }}>
-        <Sparkles size={18} />Open Vacuum
+        <Sparkles size={18} />Open Register Extractor
       </Link>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', maxWidth: '600px', margin: '2rem auto 0', textAlign: 'left' }}>
         {[
-          { icon: '📊', text: 'Smart table detection from PDFs' },
-          { icon: '🔍', text: 'Multi-sheet Excel processing' },
-          { icon: '🏷️', text: 'Automatic column classification' },
-          { icon: '✨', text: 'Data quality profiling' },
+          { icon: '📊', text: 'Smart employee detection from PDFs' },
+          { icon: '💰', text: 'Earnings & deductions parsing' },
+          { icon: '✅', text: 'Automatic balance validation' },
+          { icon: '📋', text: 'Multi-vendor support (Paycom, ADP, etc.)' },
         ].map((f, i) => (
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '1rem', background: '#f8fafc', borderRadius: '8px' }}>
             <span style={{ fontSize: '1.25rem' }}>{f.icon}</span>
