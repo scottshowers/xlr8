@@ -923,10 +923,10 @@ function EmployeeTable({ employees }) {
                   <td className="p-2 text-gray-600">{emp.employee_id || '-'}</td>
                   <td className="p-2 text-gray-600">{emp.department || '-'}</td>
                   <td className="p-2 text-gray-600">{emp.tax_profile || '-'}</td>
-                  <td className="p-2 text-right font-medium">${(emp.gross_pay || 0).toFixed(2)}</td>
-                  <td className="p-2 text-right text-red-600">${(emp.total_taxes || 0).toFixed(2)}</td>
-                  <td className="p-2 text-right text-orange-600">${(emp.total_deductions || 0).toFixed(2)}</td>
-                  <td className="p-2 text-right font-medium text-green-600">${(emp.net_pay || 0).toFixed(2)}</td>
+                  <td className="p-2 text-right font-medium">${parseFloat(emp.gross_pay || 0).toFixed(2)}</td>
+                  <td className="p-2 text-right text-red-600">${parseFloat(emp.total_taxes || 0).toFixed(2)}</td>
+                  <td className="p-2 text-right text-orange-600">${parseFloat(emp.total_deductions || 0).toFixed(2)}</td>
+                  <td className="p-2 text-right font-medium text-green-600">${parseFloat(emp.net_pay || 0).toFixed(2)}</td>
                   <td className="p-2 text-center">
                     {emp.is_valid ? (
                       <CheckCircle className="w-4 h-4 text-green-500 inline" />
@@ -939,7 +939,7 @@ function EmployeeTable({ employees }) {
                 {/* Expanded Details */}
                 {isExpanded && (
                   <tr className="bg-gray-50">
-                    <td colSpan={9} className="p-4">
+                    <td colSpan={10} className="p-4">
                       <div className="grid md:grid-cols-3 gap-4">
                         {/* Earnings */}
                         <div>
@@ -949,7 +949,7 @@ function EmployeeTable({ employees }) {
                               {emp.earnings.map((e, i) => (
                                 <li key={i} className="flex justify-between text-xs">
                                   <span>{e.description || e.type || 'Earning'}</span>
-                                  <span className="font-medium">${(e.amount || 0).toFixed(2)}</span>
+                                  <span className="font-medium">${parseFloat(e.amount || 0).toFixed(2)}</span>
                                 </li>
                               ))}
                             </ul>
@@ -966,7 +966,7 @@ function EmployeeTable({ employees }) {
                               {emp.taxes.map((t, i) => (
                                 <li key={i} className="flex justify-between text-xs">
                                   <span>{t.description || t.type || 'Tax'}</span>
-                                  <span className="font-medium">${(t.amount || 0).toFixed(2)}</span>
+                                  <span className="font-medium">${parseFloat(t.amount || 0).toFixed(2)}</span>
                                 </li>
                               ))}
                             </ul>
@@ -983,7 +983,7 @@ function EmployeeTable({ employees }) {
                               {emp.deductions.map((d, i) => (
                                 <li key={i} className="flex justify-between text-xs">
                                   <span>{d.description || d.type || 'Deduction'}</span>
-                                  <span className="font-medium">${(d.amount || 0).toFixed(2)}</span>
+                                  <span className="font-medium">${parseFloat(d.amount || 0).toFixed(2)}</span>
                                 </li>
                               ))}
                             </ul>
