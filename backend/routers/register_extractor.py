@@ -929,33 +929,24 @@ Return ONLY a valid JSON array. No markdown, no explanation."""
                     if not existing.get(field) and emp.get(field):
                         existing[field] = emp[field]
         
-        # Post-merge: recalculate totals from line items if needed
+        # Post-merge: ALWAYS calculate totals from line items - they are the source of truth
         result = []
         for key, emp in merged.items():
             if not emp.get('name') and emp.get('employee_id'):
                 logger.warning(f"[REGISTER] WARNING: Employee {emp.get('employee_id')} has no name!")
             
-            # Recalculate totals from line items
+            # ALWAYS calculate totals from line items - NO EXCEPTIONS
             calc_taxes = sum(float(t.get('amount', 0) or 0) for t in emp.get('taxes', []))
             calc_deductions = sum(float(d.get('amount', 0) or 0) for d in emp.get('deductions', []))
+            calc_earnings = sum(float(e.get('amount', 0) or 0) for e in emp.get('earnings', []))
             
-            gross = float(emp.get('gross_pay', 0) or 0)
-            net = float(emp.get('net_pay', 0) or 0)
-            stored_taxes = float(emp.get('total_taxes', 0) or 0)
-            stored_deductions = float(emp.get('total_deductions', 0) or 0)
+            # Overwrite totals with calculated values
+            emp['total_taxes'] = calc_taxes
+            emp['total_deductions'] = calc_deductions
             
-            # If calculated totals make the balance work better, use them
-            if gross > 0 and net > 0:
-                stored_calc_net = gross - stored_taxes - stored_deductions
-                line_calc_net = gross - calc_taxes - calc_deductions
-                
-                stored_diff = abs(stored_calc_net - net)
-                line_diff = abs(line_calc_net - net)
-                
-                if line_diff < stored_diff and calc_taxes > 0:
-                    logger.warning(f"[REGISTER] {emp.get('name', 'Unknown')}: Using line-item totals (taxes: {calc_taxes:.2f}, ded: {calc_deductions:.2f})")
-                    emp['total_taxes'] = calc_taxes
-                    emp['total_deductions'] = calc_deductions
+            # If gross is 0 but we have earnings, use earnings sum
+            if not emp.get('gross_pay') and calc_earnings > 0:
+                emp['gross_pay'] = calc_earnings
             
             result.append(emp)
         
