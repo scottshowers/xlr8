@@ -15,10 +15,10 @@ router = APIRouter()
 @router.get("/jobs")
 async def get_jobs(limit: int = 50):
     """Get recent processing jobs from database"""
-    logger.info(f"[JOBS] GET /jobs called with limit={limit}")
+    print(f"[JOBS] GET /jobs called with limit={limit}")
     try:
         jobs = ProcessingJobModel.get_all(limit=limit)
-        logger.info(f"[JOBS] Got {len(jobs)} jobs from database")
+        print(f"[JOBS] Got {len(jobs)} jobs from database")
         
         # Format for frontend
         formatted_jobs = []
@@ -39,19 +39,26 @@ async def get_jobs(limit: int = 50):
                 except:
                     input_data = {}
             
-            # Debug log for ALL jobs
-            logger.info(f"[JOBS] Job {job.get('id')[:8] if job.get('id') else 'none'}: input_data={input_data}")
+            # Debug - print raw and parsed
+            print(f"[JOBS] Job {job.get('id')[:8] if job.get('id') else 'none'}")
+            print(f"[JOBS]   raw input_data type: {type(job.get('input_data'))}")
+            print(f"[JOBS]   raw input_data: {job.get('input_data')}")
+            print(f"[JOBS]   parsed input_data: {input_data}")
             
             # Get filename from multiple possible locations
             filename = None
             if input_data.get('filename') and input_data.get('filename') != 'Unknown':
                 filename = input_data.get('filename')
+                print(f"[JOBS]   filename from input_data: {filename}")
             elif result_data.get('filename') and result_data.get('filename') != 'Unknown':
                 filename = result_data.get('filename')
+                print(f"[JOBS]   filename from result_data: {filename}")
             elif input_data.get('project_name'):
                 filename = input_data.get('project_name')
+                print(f"[JOBS]   filename from project_name: {filename}")
             elif job.get('filename'):
                 filename = job.get('filename')
+                print(f"[JOBS]   filename from job.filename: {filename}")
             
             # Build a useful result message
             result_msg = None
@@ -74,6 +81,9 @@ async def get_jobs(limit: int = 50):
                     filename = 'Data extraction'
                 else:
                     filename = f"{job_type.title()} job"
+                print(f"[JOBS]   FALLBACK filename: {filename}")
+            
+            print(f"[JOBS]   FINAL filename: {filename}")
             
             formatted_jobs.append({
                 'id': job['id'],
