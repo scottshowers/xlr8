@@ -17,7 +17,7 @@ Version: 4.0.0 - Framework Integration
 Date: December 2025
 """
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
@@ -26,6 +26,8 @@ import json
 import io
 import os
 import re
+import uuid
+import asyncio
 from datetime import datetime
 from pathlib import Path
 
@@ -37,6 +39,9 @@ from openpyxl.utils import get_column_letter
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/playbooks", tags=["playbooks"])
+
+# Job tracking for scan-all background tasks
+SCAN_JOBS: Dict[str, Dict[str, Any]] = {}
 
 
 # =============================================================================
@@ -224,15 +229,14 @@ async def refresh_playbook_structure():
                 "error": "Year-End Checklist not found in Reference Library"
             }
         
-        # Count actions
-        total_actions = 0
-        source_file = "Unknown"
+        # Structure has 'steps' array and 'total_actions' directly
+        total_actions = structure.get('total_actions', 0)
+        source_file = structure.get('source_file', 'Year-End Checklist')
         
-        for phase_key, phase_data in structure.items():
-            if isinstance(phase_data, dict) and 'actions' in phase_data:
-                total_actions += len(phase_data['actions'])
-                if not source_file or source_file == "Unknown":
-                    source_file = phase_data.get('source_file', 'Year-End Checklist')
+        # If total_actions not in structure, count from steps
+        if total_actions == 0 and 'steps' in structure:
+            for step in structure['steps']:
+                total_actions += len(step.get('actions', []))
         
         logger.info(f"[PLAYBOOK] Refreshed structure: {total_actions} actions from {source_file}")
         
@@ -1087,36 +1091,100 @@ async def get_learning_stats():
 # =============================================================================
 
 @router.post("/year-end/scan-all/{project_id}")
-async def scan_all_actions(project_id: str):
-    """Scan all actions for a project (non-blocking)."""
+async def scan_all_actions(project_id: str, background_tasks: BackgroundTasks):
+    """Scan all actions for a project (background job)."""
     try:
         structure = await get_year_end_structure()
         
-        results = {}
+        # Count total actions
+        total_actions = 0
         for step in structure.get('steps', []):
-            for action in step.get('actions', []):
-                action_id = action['action_id']
-                try:
-                    result = await scan_for_action(project_id, action_id)
-                    results[action_id] = {
-                        "success": True,
-                        "status": result.get('suggested_status', 'not_started')
-                    }
-                except Exception as e:
-                    results[action_id] = {
-                        "success": False,
-                        "error": str(e)
-                    }
+            total_actions += len(step.get('actions', []))
+        
+        # Create job ID
+        job_id = str(uuid.uuid4())
+        
+        # Initialize job status
+        SCAN_JOBS[job_id] = {
+            "status": "running",
+            "project_id": project_id,
+            "total": total_actions,
+            "completed": 0,
+            "successful": 0,
+            "failed": 0,
+            "current_action": "Starting...",
+            "results": {},
+            "started_at": datetime.now().isoformat()
+        }
+        
+        # Run scan in background
+        background_tasks.add_task(run_scan_all_background, job_id, project_id, structure)
+        
+        logger.info(f"[SCAN-ALL] Started background job {job_id} for {project_id} with {total_actions} actions")
         
         return {
+            "job_id": job_id,
             "project_id": project_id,
-            "results": results,
-            "scanned": len(results)
+            "total_actions": total_actions,
+            "status": "started"
         }
         
     except Exception as e:
         logger.exception(f"Scan all failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def run_scan_all_background(job_id: str, project_id: str, structure: Dict):
+    """Background task to scan all actions."""
+    try:
+        for step in structure.get('steps', []):
+            for action in step.get('actions', []):
+                action_id = action['action_id']
+                action_title = action.get('title', action_id)[:50]
+                
+                # Update current action
+                SCAN_JOBS[job_id]["current_action"] = f"Scanning {action_id}: {action_title}..."
+                
+                try:
+                    result = await scan_for_action(project_id, action_id)
+                    SCAN_JOBS[job_id]["results"][action_id] = {
+                        "success": True,
+                        "status": result.get('suggested_status', 'not_started')
+                    }
+                    SCAN_JOBS[job_id]["successful"] += 1
+                except Exception as e:
+                    logger.warning(f"[SCAN-ALL] Action {action_id} failed: {e}")
+                    SCAN_JOBS[job_id]["results"][action_id] = {
+                        "success": False,
+                        "error": str(e)
+                    }
+                    SCAN_JOBS[job_id]["failed"] += 1
+                
+                SCAN_JOBS[job_id]["completed"] += 1
+                
+                # Small delay to prevent overwhelming the system
+                await asyncio.sleep(0.1)
+        
+        # Mark complete
+        SCAN_JOBS[job_id]["status"] = "completed"
+        SCAN_JOBS[job_id]["current_action"] = "Complete"
+        SCAN_JOBS[job_id]["finished_at"] = datetime.now().isoformat()
+        
+        logger.info(f"[SCAN-ALL] Job {job_id} completed: {SCAN_JOBS[job_id]['successful']} successful, {SCAN_JOBS[job_id]['failed']} failed")
+        
+    except Exception as e:
+        logger.exception(f"[SCAN-ALL] Background job {job_id} failed: {e}")
+        SCAN_JOBS[job_id]["status"] = "failed"
+        SCAN_JOBS[job_id]["error"] = str(e)
+
+
+@router.get("/year-end/scan-all/status/{job_id}")
+async def get_scan_all_status(job_id: str):
+    """Get status of a scan-all background job."""
+    if job_id not in SCAN_JOBS:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    
+    return SCAN_JOBS[job_id]
 
 
 # =============================================================================
