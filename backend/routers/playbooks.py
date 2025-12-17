@@ -127,13 +127,18 @@ def get_supabase():
 # STRUCTURE PARSING - Load playbook from uploaded document
 # =============================================================================
 
-async def get_year_end_structure() -> Dict[str, Any]:
+async def get_year_end_structure(force_refresh: bool = False) -> Dict[str, Any]:
     """
     Get Year-End playbook structure.
     
     Parses from uploaded Year-End Checklist document.
     """
     cache_key = "year-end-2025"
+    
+    # Clear cache if force refresh
+    if force_refresh and cache_key in PLAYBOOK_CACHE:
+        del PLAYBOOK_CACHE[cache_key]
+        logger.info("[STRUCTURE] Force refresh - cache cleared")
     
     if cache_key in PLAYBOOK_CACHE:
         return PLAYBOOK_CACHE[cache_key]
@@ -202,6 +207,47 @@ async def get_playbook_structure():
     except Exception as e:
         logger.exception(f"Failed to get structure: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/year-end/refresh-structure")
+async def refresh_playbook_structure():
+    """Refresh Year-End playbook structure from Reference Library."""
+    try:
+        logger.info("[PLAYBOOK] Refreshing structure from Reference Library...")
+        
+        # Force re-parse from DuckDB
+        structure = await get_year_end_structure(force_refresh=True)
+        
+        if not structure:
+            return {
+                "success": False,
+                "error": "Year-End Checklist not found in Reference Library"
+            }
+        
+        # Count actions
+        total_actions = 0
+        source_file = "Unknown"
+        
+        for phase_key, phase_data in structure.items():
+            if isinstance(phase_data, dict) and 'actions' in phase_data:
+                total_actions += len(phase_data['actions'])
+                if not source_file or source_file == "Unknown":
+                    source_file = phase_data.get('source_file', 'Year-End Checklist')
+        
+        logger.info(f"[PLAYBOOK] Refreshed structure: {total_actions} actions from {source_file}")
+        
+        return {
+            "success": True,
+            "total_actions": total_actions,
+            "source_file": source_file,
+            "structure": structure
+        }
+    except Exception as e:
+        logger.exception(f"Failed to refresh structure: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 
 @router.get("/year-end/progress/{project_id}")
@@ -547,7 +593,7 @@ async def get_document_checklist(project_id: str):
                     project_name = doc_project_name
             
             # Include GLOBAL files OR project-specific files
-            is_global = doc_project_name and doc_project_name.lower() in ('global', '__global__', 'global/universal')
+            is_global = doc_project_name and doc_project_name.lower() in ('global', '__global__', 'global/universal', 'reference library', 'reference_library', '__standards__')
             is_this_project = (
                 (doc_project_id and (doc_project_id == project_id or doc_project_id.startswith(project_id[:8]) or project_id.startswith(doc_project_id))) or
                 (project_name and doc_project_name and doc_project_name.lower() == project_name.lower())
@@ -577,7 +623,7 @@ async def get_document_checklist(project_id: str):
             
             for row in result:
                 source_file, proj = row
-                is_global = proj and proj.lower() in ('global', '__global__', 'global/universal')
+                is_global = proj and proj.lower() in ('global', '__global__', 'global/universal', 'reference library', 'reference_library', '__standards__')
                 is_this_project = proj and (
                     proj.lower() in project_id.lower() or
                     project_id[:8].lower() in proj.lower() or
@@ -614,7 +660,7 @@ async def get_document_checklist(project_id: str):
                 
                 for row in result:
                     source_file, proj, pid = row
-                    is_global = proj and proj.lower() in ('global', '__global__', 'global/universal')
+                    is_global = proj and proj.lower() in ('global', '__global__', 'global/universal', 'reference library', 'reference_library', '__standards__')
                     is_this_project = (
                         (pid and (pid == project_id or pid.startswith(project_id[:8]))) or
                         (proj and project_id[:8].lower() in proj.lower()) or
