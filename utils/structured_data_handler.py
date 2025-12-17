@@ -509,159 +509,89 @@ class StructuredDataHandler:
     def _split_horizontal_tables(self, file_path: str, sheet_name: str) -> List[Tuple[str, pd.DataFrame]]:
         """
         Detect and split horizontally arranged tables within a single sheet.
-        Tables are separated by blank columns.
         
-        v4.9 IMPROVED blank detection:
-        - Skips header rows (first 3 rows) when checking for blank columns
-        - Uses 90% blank threshold instead of 100% (handles sparse data)
-        - Logs detection details for debugging
-        
-        Smart header detection:
-        - Detects title rows (sparse, mostly empty with just a title)
-        - Finds actual header row (row with most populated cells)
-        - Handles multi-row headers (title + column names)
-        
-        Returns: List of (sub_table_name, dataframe) tuples
+        ONLY splits when there are CLEAR blank column separators (2+ consecutive blank cols).
+        Returns empty list for normal single-table sheets.
         """
         try:
-            # Read raw sheet without header to detect structure
             raw_df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
             
-            if raw_df.empty:
+            if raw_df.empty or raw_df.shape[1] < 4:
                 return []
             
-            logger.info(f"[HORIZONTAL-DETECT] Sheet '{sheet_name}': {raw_df.shape[0]} rows x {raw_df.shape[1]} cols")
+            # Find COMPLETELY blank columns (all NaN or empty in data rows)
+            # Skip first 2 rows which might be titles
+            data_rows = raw_df.iloc[2:] if len(raw_df) > 2 else raw_df
             
-            # Find blank columns - IMPROVED DETECTION
-            # Skip header rows (first 3 rows) when checking for blank columns
-            # Use 90% blank threshold instead of 100%
             blank_cols = []
-            HEADER_ROWS_TO_SKIP = 3
-            BLANK_THRESHOLD = 0.90  # 90% blank = separator column
-            
-            data_rows = raw_df.iloc[HEADER_ROWS_TO_SKIP:] if len(raw_df) > HEADER_ROWS_TO_SKIP else raw_df
-            
-            for col_idx in range(len(raw_df.columns)):
-                col_data = data_rows.iloc[:, col_idx] if len(data_rows) > 0 else raw_df.iloc[:, col_idx]
-                total_cells = len(col_data)
-                
-                if total_cells == 0:
-                    blank_cols.append(col_idx)
-                    continue
-                
-                # Count blank cells (NaN or empty string)
-                blank_count = sum(1 for v in col_data if pd.isna(v) or str(v).strip() == '' or str(v).lower() == 'nan')
-                blank_ratio = blank_count / total_cells
-                
-                # Column is a separator if mostly blank (90%+)
-                is_blank = blank_ratio >= BLANK_THRESHOLD
-                
+            for col_idx in range(raw_df.shape[1]):
+                col_data = data_rows.iloc[:, col_idx]
+                is_blank = col_data.isna().all() or (col_data.astype(str).str.strip().replace('', pd.NA).isna().all())
                 if is_blank:
                     blank_cols.append(col_idx)
-                    logger.debug(f"[HORIZONTAL-DETECT] Col {col_idx}: BLANK (ratio={blank_ratio:.2f})")
             
-            logger.info(f"[HORIZONTAL-DETECT] Sheet '{sheet_name}': Found {len(blank_cols)} blank separator columns: {blank_cols[:10]}{'...' if len(blank_cols) > 10 else ''}")
-            
-            # If no blank columns or less than 2 column groups, no split needed
-            if not blank_cols:
-                logger.info(f"[HORIZONTAL-DETECT] Sheet '{sheet_name}': No blank columns found, no horizontal split")
-                return []
-            
-            # Find column groups (consecutive non-blank columns)
-            all_cols = set(range(len(raw_df.columns)))
-            non_blank_cols = sorted(all_cols - set(blank_cols))
-            
-            if not non_blank_cols:
-                return []
-            
-            # Group consecutive columns
-            groups = []
-            current_group = [non_blank_cols[0]]
-            
-            for col_idx in non_blank_cols[1:]:
-                if col_idx == current_group[-1] + 1:
-                    current_group.append(col_idx)
+            # Need at least 2 consecutive blank columns to be a real separator
+            separators = []
+            i = 0
+            while i < len(blank_cols):
+                start = blank_cols[i]
+                count = 1
+                while i + count < len(blank_cols) and blank_cols[i + count] == start + count:
+                    count += 1
+                if count >= 2:  # At least 2 blank columns in a row = real separator
+                    separators.append(start)
+                    i += count
                 else:
-                    if len(current_group) >= 2:  # Need at least 2 columns for a valid table
-                        groups.append(current_group)
-                    current_group = [col_idx]
+                    i += 1
             
-            if len(current_group) >= 2:
-                groups.append(current_group)
+            if not separators:
+                return []  # No clear separators = single table sheet
             
-            # If only one group, no horizontal split needed
-            if len(groups) <= 1:
-                return []
+            logger.info(f"[HORIZONTAL-DETECT] Sheet '{sheet_name}': Found {len(separators)} separator(s) at columns {separators}")
             
-            logger.info(f"Sheet '{sheet_name}': Found {len(groups)} horizontal tables")
+            # Split into regions based on separators
+            regions = []
+            prev_end = 0
+            for sep_start in separators:
+                if sep_start > prev_end:
+                    regions.append((prev_end, sep_start))
+                prev_end = sep_start + 2  # Skip past the blank separator
+            # Add final region
+            if prev_end < raw_df.shape[1]:
+                regions.append((prev_end, raw_df.shape[1]))
             
-            # Extract each table group
+            # Filter out tiny regions (less than 2 columns of data)
+            regions = [(s, e) for s, e in regions if e - s >= 2]
+            
+            if len(regions) < 2:
+                return []  # Need at least 2 real regions to split
+            
+            logger.info(f"[HORIZONTAL-DETECT] Sheet '{sheet_name}': Splitting into {len(regions)} tables")
+            
             result = []
-            for group_cols in groups:
-                try:
-                    # Extract columns for this group
-                    sub_df = raw_df.iloc[:, group_cols].copy()
-                    
-                    # SMART HEADER DETECTION
-                    # Find the header row - the row with the most non-empty cells
-                    # (usually row 0 is title, row 1 is headers)
-                    header_row_idx = 0
-                    title_row_idx = None
-                    max_populated = 0
-                    
-                    for row_idx in range(min(5, len(sub_df))):  # Check first 5 rows
-                        row = sub_df.iloc[row_idx]
-                        populated = sum(1 for v in row if pd.notna(v) and str(v).strip() != '')
-                        
-                        # If this row has significantly more populated cells, it's likely the header
-                        if populated > max_populated:
-                            # If previous best was sparse (title row), remember it
-                            if max_populated > 0 and max_populated <= 2 and title_row_idx is None:
-                                title_row_idx = header_row_idx
-                            max_populated = populated
-                            header_row_idx = row_idx
-                    
-                    # Get table name from title row or first header cell
-                    sub_table_name = None
-                    if title_row_idx is not None:
-                        # Use the title row's first non-empty cell
-                        title_row = sub_df.iloc[title_row_idx]
-                        for v in title_row:
-                            if pd.notna(v) and str(v).strip():
-                                sub_table_name = str(v).strip().split('\n')[0][:50]
-                                break
-                    
-                    if not sub_table_name:
-                        # Fall back to first header cell
-                        first_header = str(sub_df.iloc[header_row_idx, 0]).strip()
-                        if first_header and first_header.lower() not in ['unnamed', '', 'nan']:
-                            sub_table_name = first_header.split('\n')[0][:50]
-                        else:
-                            sub_table_name = f"section_{len(result) + 1}"
-                    
-                    # Set column names from header row
-                    header_row = sub_df.iloc[header_row_idx]
-                    sub_df.columns = [str(v).strip() if pd.notna(v) and str(v).strip() else f'col_{i}' 
-                                      for i, v in enumerate(header_row)]
-                    
-                    # Remove rows up to and including header row
-                    sub_df = sub_df.iloc[header_row_idx + 1:]
-                    
-                    # Drop empty rows
-                    sub_df = sub_df.dropna(how='all')
-                    
-                    # Reset index
-                    sub_df = sub_df.reset_index(drop=True)
-                    
-                    if sub_df.empty or len(sub_df.columns) < 2:
-                        continue
-                    
-                    result.append((sub_table_name, sub_df))
-                    logger.info(f"  - Extracted: '{sub_table_name}' ({len(sub_df)} rows, {len(sub_df.columns)} cols, header_row={header_row_idx})")
-                    
-                except Exception as e:
-                    logger.warning(f"Failed to extract column group: {e}")
-                    continue
+            for idx, (start_col, end_col) in enumerate(regions):
+                sub_df = raw_df.iloc[:, start_col:end_col].copy()
+                
+                # Find header row (first row with multiple non-empty values)
+                header_row = 0
+                for row_idx in range(min(5, len(sub_df))):
+                    non_empty = sub_df.iloc[row_idx].notna().sum()
+                    if non_empty >= 2:
+                        header_row = row_idx
+                        break
+                
+                # Set headers and remove header rows
+                sub_df.columns = [str(c).strip() for c in sub_df.iloc[header_row]]
+                sub_df = sub_df.iloc[header_row + 1:].reset_index(drop=True)
+                
+                # Remove empty rows
+                sub_df = sub_df.dropna(how='all')
+                
+                if len(sub_df) > 0 and len(sub_df.columns) > 0:
+                    # Use first column header as table name, or position
+                    table_name = str(sub_df.columns[0]).strip()[:40] or f"table_{idx + 1}"
+                    result.append((table_name, sub_df))
+                    logger.info(f"[HORIZONTAL-DETECT]   Region {idx + 1}: '{table_name}' ({len(sub_df)} rows, {len(sub_df.columns)} cols)")
             
             return result
             
@@ -670,13 +600,13 @@ class StructuredDataHandler:
             return []
     
     def _generate_table_name(self, project: str, file_name: str, sheet_name: str) -> str:
-        """Generate unique table name"""
-        clean_project = self._sanitize_name(project)
-        clean_file = self._sanitize_name(file_name.split('.')[0])
-        clean_sheet = self._sanitize_name(sheet_name)
+        """Generate unique table name - preserves sheet name as it's the unique identifier"""
+        clean_project = self._sanitize_name(project)[:20]  # Limit project
+        clean_file = self._sanitize_name(file_name.split('.')[0])[:40]  # Limit file
+        clean_sheet = self._sanitize_name(sheet_name)  # Keep full sheet name - it's what makes tables unique!
         
-        # DuckDB table names can be long, but let's keep it reasonable
-        table_name = f"{clean_project}_{clean_file}_{clean_sheet}"[:60]
+        # DuckDB handles long names fine - don't truncate the sheet name
+        table_name = f"{clean_project}_{clean_file}_{clean_sheet}"
         return table_name
     
     def _detect_key_columns(self, df: pd.DataFrame) -> List[str]:
