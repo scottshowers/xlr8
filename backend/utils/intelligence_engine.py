@@ -1,29 +1,25 @@
 """
-XLR8 INTELLIGENCE ENGINE v5.8
+XLR8 INTELLIGENCE ENGINE v5.9
 ==============================
 
 Deploy to: backend/utils/intelligence_engine.py
 
 UPDATES:
+- v5.9: FIXED "All employees (3 total)" - was showing distinct status values count,
+        now shows actual employee count from distribution sum.
+        Removed Claude synthesis to avoid API costs - uses cleaner fallback formatting.
 - v5.8: FIXED table selection - deprioritizes lookup tables (ethnic_co, org_level_, etc.)
         Prioritizes main data tables with many columns and rows.
-        Fixed LLM synthesis method call (process_query not generate).
 - v5.7: CONSULTATIVE SYNTHESIS - Uses LLM to generate natural, helpful responses
         instead of raw data dumps. Adds context, insights, professional tone.
 - v5.6: FIXED table alias collision - now uses sheet_name from metadata
-        instead of keyword matching that caused personal→personal_ethnic_co bug
 - v5.5: FIXED table alias extraction for long/truncated table names
-        Now extracts meaningful short names (personal, deductions, etc.)
-        instead of using full 60-char truncated names that LLM mangles
-- v5.4: Location column validation (rejects routing/bank columns)
-        Schema fallback for state/province columns
-        SQL fix uses common location column patterns (not just filter_candidates)
-- v5.3: Added US state name→code fallback (universal knowledge)
-        Data-driven approach first, state mapping as fallback
+- v5.4: Location column validation
+- v5.3: US state name→code fallback
 - v5.2: FULLY DATA-DRIVEN filters
-- v5.1: Filter override logic, location column validation
-- v5.0: Fixed state detection, LLM location filter stripping
-- v4.9: ARE bug fix (common English word blocklist)
+- v5.1: Filter override logic
+- v5.0: Fixed state detection
+- v4.9: ARE bug fix
 
 SIMPLIFIED:
 - Only asks ONE clarification: active/terminated/all employees
@@ -46,7 +42,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.8 LOOKUP TABLE DEPRIORITIZATION ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.9 ALL-EMPLOYEES FIX + NO CLAUDE ======")
 
 
 # =============================================================================
@@ -836,7 +832,9 @@ class IntelligenceEngine:
         # Handle categorical status column (A/T codes)
         values = best_candidate.get('distinct_values', best_candidate.get('values', []))
         distribution = best_candidate.get('value_distribution', best_candidate.get('distribution', {}))
-        total = best_candidate.get('distinct_count', best_candidate.get('total_count', 0))
+        
+        # FIXED: Use sum of distribution (employee count) not distinct_count (number of status codes)
+        total = sum(distribution.values()) if distribution else best_candidate.get('total_count', 0)
         
         # Map codes to active/termed
         active_codes = ['A', 'ACTIVE', 'ACT']
@@ -1494,7 +1492,7 @@ class IntelligenceEngine:
     
     def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
         """Generate SQL query using LLMOrchestrator with SMART table selection."""
-        logger.warning(f"[SQL-GEN] v5.6 - Starting SQL generation")
+        logger.warning(f"[SQL-GEN] v5.9 - Starting SQL generation")
         logger.warning(f"[SQL-GEN] confirmed_facts: {self.confirmed_facts}")
         
         if not self.structured_handler or not self.schema:
@@ -2427,75 +2425,23 @@ SQL:"""
         filters_applied: List[str],
         insights: List[Insight]
     ) -> str:
-        """Generate a natural, consultative response using LLM."""
+        """Generate a natural, consultative response.
         
-        # Try to use LLM for consultative synthesis
-        try:
-            try:
-                from utils.llm_orchestrator import LLMOrchestrator
-            except ImportError:
-                from backend.utils.llm_orchestrator import LLMOrchestrator
-            
-            orchestrator = LLMOrchestrator()
-            
-            # Build context for LLM
-            context_parts = [f"Question: {question}"]
-            
-            if filters_applied:
-                context_parts.append(f"Filters applied: {', '.join(filters_applied)}")
-            
-            if query_type == 'count' and result_value is not None:
-                context_parts.append(f"Query result: COUNT = {result_value}")
-            elif query_type in ['sum', 'average'] and result_value is not None:
-                context_parts.append(f"Query result: {query_type.upper()} = {result_value}")
-            elif result_rows:
-                context_parts.append(f"Query result: {len(result_rows)} rows")
-                context_parts.append(f"Columns: {', '.join(result_columns[:10])}")
-                # Include sample
-                for row in result_rows[:3]:
-                    row_preview = {k: v for k, v in list(row.items())[:5]}
-                    context_parts.append(f"Sample: {row_preview}")
-            
-            if doc_context:
-                context_parts.append("\nRelevant documentation:")
-                context_parts.extend(doc_context[:2])
-            
-            if insights:
-                context_parts.append("\nData insights:")
-                for insight in insights[:3]:
-                    context_parts.append(f"- {insight.title}: {insight.description}")
-            
-            prompt = f"""You are a helpful data consultant. Based on the query results below, provide a brief, 
-consultative response that:
-1. Directly answers the question with the key finding
-2. Adds 1-2 sentences of context or insight if relevant
-3. Notes any data quality observations if present
-4. Is conversational but professional
-
-{chr(10).join(context_parts)}
-
-Respond in 2-4 sentences. Start with the answer, then add brief context. Do not repeat the SQL or technical details."""
-
-            response = orchestrator.process_query(
-                query=prompt,
-                chunks=[]  # No chunks needed for synthesis
-            )
-            
-            if response and response.get('response') and len(response.get('response', '')) > 20:
-                return response['response'].strip()
-                
-        except Exception as e:
-            logger.warning(f"[SYNTHESIS] LLM synthesis failed: {e}, using fallback")
+        NOTE: Skipping LLM synthesis to avoid Claude API costs.
+        The fallback formatting is sufficient for demo.
+        """
         
-        # FALLBACK: Build a decent response without LLM
+        # BUILD a decent response without LLM
         parts = []
         
         if query_type == 'count' and result_value is not None:
-            parts.append(f"**{result_value:,}** employees match your criteria.")
+            parts.append(f"There are **{result_value:,}** employees matching your criteria.")
             if filters_applied:
-                parts.append(f"(Filtered by: {', '.join(filters_applied)})")
+                parts.append(f"\n\n*Filters: {', '.join(filters_applied)}*")
         elif query_type in ['sum', 'average'] and result_value is not None:
             parts.append(f"**{query_type.title()}: {result_value:,}**")
+            if filters_applied:
+                parts.append(f"\n\n*Filters: {', '.join(filters_applied)}*")
         elif result_rows:
             parts.append(f"Found **{len(result_rows):,}** results:")
             # Format as simple table preview
@@ -2504,18 +2450,18 @@ Respond in 2-4 sentences. Start with the answer, then add brief context. Do not 
                 parts.append(f"\n| {header} |")
                 parts.append("|" + "---|" * min(6, len(result_columns)))
                 for row in result_rows[:10]:
-                    vals = [str(row.get(c, ''))[:20] for c in result_columns[:6]]
+                    vals = [str(row.get(c, ''))[:25] for c in result_columns[:6]]
                     parts.append(f"| {' | '.join(vals)} |")
                 if len(result_rows) > 10:
-                    parts.append(f"\n*Showing first 10 of {len(result_rows)} results*")
+                    parts.append(f"\n*Showing first 10 of {len(result_rows):,} results*")
         else:
             parts.append("No results found matching your criteria.")
         
         if insights:
-            parts.append("\n**Insights:**")
+            parts.append("\n\n**Insights:**")
             for insight in insights[:2]:
                 icon = '🔴' if insight.severity == 'high' else '🟡'
-                parts.append(f"{icon} {insight.title}: {insight.description}")
+                parts.append(f"\n{icon} {insight.title}: {insight.description}")
         
         return "\n".join(parts)
     
