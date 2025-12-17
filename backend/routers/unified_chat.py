@@ -1,2524 +1,2657 @@
 """
-XLR8 INTELLIGENCE ENGINE v5.8
-==============================
+UNIFIED CHAT ROUTER - THE REVOLUTIONARY HEART OF XLR8
+======================================================
 
-Deploy to: backend/utils/intelligence_engine.py
+This is it. The single, unified chat system that transforms XLR8 from 
+"a tool that queries data" into "a world-class consultant in a box."
 
-UPDATES:
-- v5.8: FIXED table selection - deprioritizes lookup tables (ethnic_co, org_level_, etc.)
-        Prioritizes main data tables with many columns and rows.
-        Fixed LLM synthesis method call (process_query not generate).
-- v5.7: CONSULTATIVE SYNTHESIS - Uses LLM to generate natural, helpful responses
-        instead of raw data dumps. Adds context, insights, professional tone.
-- v5.6: FIXED table alias collision - now uses sheet_name from metadata
-        instead of keyword matching that caused personal→personal_ethnic_co bug
-- v5.5: FIXED table alias extraction for long/truncated table names
-        Now extracts meaningful short names (personal, deductions, etc.)
-        instead of using full 60-char truncated names that LLM mangles
-- v5.4: Location column validation (rejects routing/bank columns)
-        Schema fallback for state/province columns
-        SQL fix uses common location column patterns (not just filter_candidates)
-- v5.3: Added US state name→code fallback (universal knowledge)
-        Data-driven approach first, state mapping as fallback
-- v5.2: FULLY DATA-DRIVEN filters
-- v5.1: Filter override logic, location column validation
-- v5.0: Fixed state detection, LLM location filter stripping
-- v4.9: ARE bug fix (common English word blocklist)
+REVOLUTIONARY FEATURES:
+-----------------------
+1. DATA MODEL INTELLIGENCE
+   - Auto-detect reference tables (location codes, dept codes, pay groups)
+   - Build lookup dictionaries on upload
+   - Transform "LOC001" → "Houston, TX (LOC001)" automatically
+   
+2. PROACTIVE DATA QUALITY ALERTS
+   - Don't just answer - NOTICE things
+   - Terminated employees with active status? Flag it.
+   - Missing hire dates? Surface it.
+   - Duplicate SSNs? Alert immediately.
+   
+3. SUGGESTED FOLLOW-UPS
+   - Guide the conversation like a real consultant
+   - "Break this down by department"
+   - "Show me the trend over time"
+   - "Compare to benchmarks"
+   
+4. CITATION & AUDIT TRAIL
+   - Every claim backed by data
+   - Full SQL transparency
+   - Source table attribution
+   - Defensible findings
 
-SIMPLIFIED:
-- Only asks ONE clarification: active/terminated/all employees
-- Only when the question is about employees
-- Everything else: just query the data
-- LLM used for SQL generation only (where it adds value)
+ARCHITECTURE:
+-------------
+┌─────────────────────────────────────────────────────────────┐
+│                    POST /api/chat/unified                    │
+└─────────────────────────────┬───────────────────────────────┘
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        ▼                     ▼                     ▼
+┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+│ DataModel    │    │ Intelligence │    │ DataQuality  │
+│ Service      │    │ Engine       │    │ Service      │
+│ (Lookups)    │    │ (Core Logic) │    │ (Alerts)     │
+└──────────────┘    └──────────────┘    └──────────────┘
+        │                     │                     │
+        └─────────────────────┼─────────────────────┘
+                              ▼
+                    ┌──────────────────┐
+                    │ Citation Builder │
+                    │ + Follow-up Gen  │
+                    └──────────────────┘
+                              │
+                              ▼
+                    ┌──────────────────┐
+                    │ PII Redaction    │
+                    │ (if Claude call) │
+                    └──────────────────┘
+                              │
+                              ▼
+                    ┌──────────────────┐
+                    │ RESPONSE         │
+                    │ Revolutionary.   │
+                    └──────────────────┘
+
+DEPLOYMENT:
+-----------
+1. Copy to backend/routers/unified_chat.py
+2. Add to main.py:
+   from routers import unified_chat
+   app.include_router(unified_chat.router, prefix="/api")
+3. Update frontend to call /api/chat/unified
+
+Author: XLR8 Team
+Version: 1.1.0 - Phase 3.5 Intelligence Consumer
+Date: December 2025
 """
 
-import os
-import re
-import json
-import logging
-import requests
-from requests.auth import HTTPBasicAuth
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, field
-from enum import Enum
-from datetime import datetime
+import logging
+import uuid
+import json
+import re
+import time
+import io
+import traceback
 
 logger = logging.getLogger(__name__)
 
-# LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.8 LOOKUP TABLE DEPRIORITIZATION ======")
+router = APIRouter(tags=["unified-chat"])
 
 
 # =============================================================================
-# COMMON ENGLISH WORDS BLOCKLIST (ARE BUG FIX)
-# Language-level filtering - these words should NEVER be treated as data codes
-# even if they match values in the data (e.g., "ARE" is UAE but also "are")
+# IMPORTS - Graceful degradation for all dependencies
 # =============================================================================
-COMMON_ENGLISH_BLOCKLIST = {
-    # Common verbs
-    'are', 'was', 'were', 'been', 'being', 'have', 'has', 'had', 'having',
-    'can', 'could', 'may', 'might', 'must', 'shall', 'should', 'will', 'would',
-    'get', 'got', 'let', 'put', 'say', 'see', 'use', 'try', 'ask', 'run',
-    'set', 'add', 'end', 'own', 'pay', 'cut', 'win', 'hit', 'buy', 'sit',
-    'do', 'did', 'does', 'done', 'go', 'goes', 'went', 'gone', 'come', 'came',
-    
-    # Common nouns/adjectives
-    'the', 'and', 'for', 'not', 'all', 'one', 'two', 'new', 'now', 'old',
-    'any', 'day', 'way', 'man', 'men', 'our', 'out', 'her', 'him', 'his',
-    'who', 'how', 'its', 'job', 'few', 'top', 'low', 'big', 'lot', 'per',
-    'each', 'every', 'both', 'many', 'much', 'more', 'most', 'some',
-    
-    # Question words
-    'what', 'when', 'where', 'why', 'which',
-    
-    # Pronouns  
-    'you', 'your', 'they', 'them', 'their', 'she', 'hers', 'we', 'us',
-    
-    # Prepositions
-    'from', 'with', 'into', 'over', 'under', 'after', 'before', 'by', 'at', 'in', 'on', 'to',
-    
-    # Articles and conjunctions
-    'but', 'yet', 'nor', 'so', 'or',
-    
-    # Common query words
-    'total', 'count', 'list', 'show', 'find', 'give', 'tell', 'need',
-    'only', 'just', 'also', 'even', 'still', 'again', 'then', 'than',
-    'first', 'last', 'next', 'this', 'that', 'these', 'those',
-}
+
+# Intelligence Engine
+try:
+    from utils.intelligence_engine import IntelligenceEngine, IntelligenceMode
+    INTELLIGENCE_AVAILABLE = True
+except ImportError:
+    try:
+        from backend.utils.intelligence_engine import IntelligenceEngine, IntelligenceMode
+        INTELLIGENCE_AVAILABLE = True
+    except ImportError:
+        INTELLIGENCE_AVAILABLE = False
+        logger.warning("[UNIFIED] Intelligence engine not available")
+
+# Learning Module
+try:
+    from utils.learning import get_learning_module
+    LEARNING_AVAILABLE = True
+except ImportError:
+    try:
+        from backend.utils.learning import get_learning_module
+        LEARNING_AVAILABLE = True
+    except ImportError:
+        LEARNING_AVAILABLE = False
+        logger.warning("[UNIFIED] Learning module not available")
+
+# Structured Data Handler
+try:
+    from utils.structured_data_handler import get_structured_handler
+    STRUCTURED_AVAILABLE = True
+except ImportError:
+    try:
+        from backend.utils.structured_data_handler import get_structured_handler
+        STRUCTURED_AVAILABLE = True
+    except ImportError:
+        STRUCTURED_AVAILABLE = False
+        logger.warning("[UNIFIED] Structured data handler not available")
+
+# RAG Handler
+try:
+    from utils.rag_handler import RAGHandler
+    RAG_AVAILABLE = True
+except ImportError:
+    try:
+        from backend.utils.rag_handler import RAGHandler
+        RAG_AVAILABLE = True
+    except ImportError:
+        RAG_AVAILABLE = False
+        logger.warning("[UNIFIED] RAG handler not available")
+
+# LLM Orchestrator
+try:
+    from utils.llm_orchestrator import LLMOrchestrator
+    LLM_AVAILABLE = True
+except ImportError:
+    try:
+        from backend.utils.llm_orchestrator import LLMOrchestrator
+        LLM_AVAILABLE = True
+    except ImportError:
+        LLM_AVAILABLE = False
+        logger.warning("[UNIFIED] LLM orchestrator not available")
+
+# Persona Manager
+try:
+    from utils.persona_manager import get_persona_manager
+    PERSONAS_AVAILABLE = True
+except ImportError:
+    try:
+        from backend.utils.persona_manager import get_persona_manager
+        PERSONAS_AVAILABLE = True
+    except ImportError:
+        PERSONAS_AVAILABLE = False
+        logger.warning("[UNIFIED] Persona manager not available")
+
+# Supabase
+try:
+    from utils.database.supabase_client import get_supabase
+    SUPABASE_AVAILABLE = True
+except ImportError:
+    try:
+        from backend.utils.database.supabase_client import get_supabase
+        SUPABASE_AVAILABLE = True
+    except ImportError:
+        SUPABASE_AVAILABLE = False
+        logger.warning("[UNIFIED] Supabase not available")
+
+# Project Intelligence Service (Phase 3)
+try:
+    from backend.utils.project_intelligence import ProjectIntelligenceService, get_project_intelligence
+    PROJECT_INTELLIGENCE_AVAILABLE = True
+    logger.warning("[UNIFIED] Project intelligence imported successfully")
+except ImportError:
+    try:
+        from utils.project_intelligence import ProjectIntelligenceService, get_project_intelligence
+        PROJECT_INTELLIGENCE_AVAILABLE = True
+        logger.warning("[UNIFIED] Project intelligence imported successfully (alt path)")
+    except ImportError:
+        PROJECT_INTELLIGENCE_AVAILABLE = False
+        logger.warning("[UNIFIED] Project intelligence not available - using fallback services")
 
 
-def _is_word_boundary_match(text: str, word: str) -> bool:
+# =============================================================================
+# REQUEST/RESPONSE MODELS
+# =============================================================================
+
+class UnifiedChatRequest(BaseModel):
     """
-    Check if word appears in text with word boundaries (not as substring).
-    Prevents "are" matching in "compare", etc.
+    Unified chat request - supports all chat modes.
+    
+    Attributes:
+        message: The user's question or command
+        project: Project identifier (e.g., "TEA1000")
+        persona: Persona to use for response style (default: "bessie")
+        scope: Data scope - "project", "global", or "all"
+        mode: Force specific intelligence mode (optional)
+        clarifications: Answers to clarification questions
+        session_id: Session ID for conversation continuity
+        include_quality_alerts: Whether to run data quality checks
+        include_follow_ups: Whether to suggest follow-up questions
+        include_citations: Whether to include full audit trail
     """
-    pattern = r'\b' + re.escape(word) + r'\b'
-    return bool(re.search(pattern, text, re.IGNORECASE))
-
-
-def _is_blocklisted(word: str) -> bool:
-    """Check if word is in the common English blocklist."""
-    return word.lower() in COMMON_ENGLISH_BLOCKLIST
-
-
-# =============================================================================
-# DATA CLASSES
-# =============================================================================
-
-@dataclass
-class Truth:
-    """A piece of information from one source of truth."""
-    source_type: str
-    source_name: str
-    content: Any
-    confidence: float
-    location: str
-
-
-@dataclass  
-class Conflict:
-    """A detected conflict between sources of truth."""
-    description: str
-    reality: Optional[Truth] = None
-    intent: Optional[Truth] = None
-    best_practice: Optional[Truth] = None
-    severity: str = "medium"
-    recommendation: str = ""
-
-
-@dataclass
-class Insight:
-    """A proactive insight discovered while processing."""
-    type: str
-    title: str
-    description: str
-    data: Any
-    severity: str
-    action_required: bool = False
-
-
-@dataclass
-class SynthesizedAnswer:
-    """A complete answer synthesized from all sources."""
-    question: str
-    answer: str
-    confidence: float
-    from_reality: List[Truth] = field(default_factory=list)
-    from_intent: List[Truth] = field(default_factory=list)
-    from_best_practice: List[Truth] = field(default_factory=list)
-    conflicts: List[Conflict] = field(default_factory=list)
-    insights: List[Insight] = field(default_factory=list)
-    structured_output: Optional[Dict] = None
-    reasoning: List[str] = field(default_factory=list)
-    executed_sql: Optional[str] = None
-
-
-class IntelligenceMode(Enum):
-    SEARCH = "search"
-    ANALYZE = "analyze"
-    COMPARE = "compare"
-    VALIDATE = "validate"
-    CONFIGURE = "configure"
-    INTERVIEW = "interview"
-    WORKFLOW = "workflow"
-    POPULATE = "populate"
-    REPORT = "report"
-
-
-# =============================================================================
-# SEMANTIC PATTERNS (for column matching only)
-# =============================================================================
-
-SEMANTIC_TYPES = {
-    'employee_id': [
-        r'^emp.*id', r'^ee.*num', r'^employee.*number', r'^worker.*id',
-        r'^person.*id', r'^emp.*num', r'^emp.*no$', r'^ee.*id',
-        r'^employee.*id', r'^staff.*id', r'^associate.*id', r'^emp.*key',
-    ],
-    'company_code': [
-        r'^comp.*code', r'^co.*code', r'^company.*id', r'^org.*code',
-        r'^entity.*code', r'^legal.*entity', r'^business.*unit',
-        r'^company$', r'^comp$',
-    ],
-}
-
-
-# =============================================================================
-# INTELLIGENCE ENGINE
-# =============================================================================
-
-class IntelligenceEngine:
-    """The brain of XLR8."""
+    message: str
+    project: Optional[str] = None
+    persona: Optional[str] = 'bessie'
+    scope: Optional[str] = 'project'
+    mode: Optional[str] = None
+    clarifications: Optional[Dict[str, Any]] = None
+    session_id: Optional[str] = None
     
-    def __init__(self, project_name: str):
-        self.project = project_name
-        self.structured_handler = None
-        self.rag_handler = None
-        self.schema = {}
-        self.relationships = []
-        self.conversation_history = []
-        self.confirmed_facts = {}
-        self.pending_questions = []
-        self.conversation_context = {}
-        self.last_executed_sql = None
-        self.filter_candidates = {}  # Detected filter dimensions
+    # Revolutionary feature flags
+    include_quality_alerts: Optional[bool] = True
+    include_follow_ups: Optional[bool] = True
+    include_citations: Optional[bool] = True
+
+
+class ClarificationAnswer(BaseModel):
+    """User's answers to clarification questions."""
+    session_id: str
+    original_question: str
+    answers: Dict[str, Any]
+
+
+class FeedbackRequest(BaseModel):
+    """Feedback on chat response."""
+    job_id: Optional[str] = None
+    session_id: Optional[str] = None
+    feedback: str  # 'up' or 'down'
+    message: Optional[str] = None
+    response: Optional[str] = None
+    correction: Optional[str] = None
+
+
+class ResetPreferencesRequest(BaseModel):
+    """Request to reset user preferences."""
+    session_id: Optional[str] = None
+    project: Optional[str] = None
+    reset_type: str = "session"  # "session" or "learned"
+
+
+class ExportRequest(BaseModel):
+    """Request to export data to Excel."""
+    query: str
+    project: Optional[str] = None
+    tables: Optional[List[str]] = None
+    include_summary: Optional[bool] = True
+    include_quality_report: Optional[bool] = True
+
+
+# =============================================================================
+# CORE SERVICE: REVERSIBLE PII REDACTION
+# =============================================================================
+
+class ReversibleRedactor:
+    """
+    Reversible PII redaction - PII NEVER goes to Claude.
     
-    def load_context(
-        self, 
-        structured_handler=None, 
-        rag_handler=None,
-        schema: Dict = None,
-        relationships: List[Dict] = None
-    ):
-        """Load data context for this project."""
-        self.structured_handler = structured_handler
-        self.rag_handler = rag_handler
-        self.schema = schema or {}
-        self.relationships = relationships or []
-        
-        # Extract filter candidates for intelligent clarification
-        self.filter_candidates = self.schema.get('filter_candidates', {})
-        if self.filter_candidates:
-            logger.warning(f"[INTELLIGENCE] Filter candidates loaded: {list(self.filter_candidates.keys())}")
+    We redact before sending to any external LLM, then restore after.
+    This allows us to work with sensitive data without compromising privacy.
     
-    def ask(
-        self, 
-        question: str,
-        mode: IntelligenceMode = None,
-        context: Dict = None
-    ) -> SynthesizedAnswer:
-        """Main entry point - ask the engine a question."""
-        logger.warning(f"[INTELLIGENCE] Question: {question[:100]}...")
-        logger.warning(f"[INTELLIGENCE] Current confirmed_facts: {self.confirmed_facts}")
-        logger.warning(f"[INTELLIGENCE] Available filter categories: {list(self.filter_candidates.keys())}")
+    Supported PII types:
+    - SSN (Social Security Numbers)
+    - Bank account/routing numbers
+    - Salary/compensation values
+    - Phone numbers
+    - Email addresses
+    """
+    
+    def __init__(self):
+        self.mappings: Dict[str, str] = {}  # {placeholder: original_value}
+        self.counters = {
+            'ssn': 0, 
+            'salary': 0, 
+            'phone': 0, 
+            'email': 0, 
+            'name': 0, 
+            'account': 0,
+            'dob': 0
+        }
+    
+    def _get_placeholder(self, pii_type: str) -> str:
+        """Generate unique placeholder for PII type."""
+        self.counters[pii_type] += 1
+        return f"[{pii_type.upper()}_{self.counters[pii_type]:03d}]"
+    
+    def redact(self, text: str) -> str:
+        """
+        Redact PII with reversible placeholders.
         
-        q_lower = question.lower()
-        
-        # Simple analysis
-        mode = mode or self._detect_mode(q_lower)
-        is_employee_question = self._is_employee_question(q_lower)
-        logger.warning(f"[INTELLIGENCE] is_employee_question: {is_employee_question}")
-        
-        # INTELLIGENT CLARIFICATION
-        # For employee questions, determine which filters need clarification
-        if is_employee_question:
-            needed_clarifications = self._get_needed_clarifications(q_lower)
-            logger.warning(f"[INTELLIGENCE] Needed clarifications: {needed_clarifications}")
+        Args:
+            text: Text potentially containing PII
             
-            if needed_clarifications:
-                # Build clarification question for first needed filter
-                first_filter = needed_clarifications[0]
-                return self._request_filter_clarification(question, first_filter)
-        
-        logger.warning(f"[INTELLIGENCE] Proceeding with facts: {self.confirmed_facts}")
-        
-        # Gather the three truths
-        analysis = {'domains': self._detect_domains(q_lower), 'mode': mode}
-        
-        reality = self._gather_reality(question, analysis)
-        logger.info(f"[INTELLIGENCE] Reality gathered: {len(reality)} truths")
-        
-        intent = self._gather_intent(question, analysis)
-        best_practice = self._gather_best_practice(question, analysis)
-        
-        conflicts = self._detect_conflicts(reality, intent, best_practice)
-        insights = self._run_proactive_checks(analysis)
-        
-        answer = self._synthesize_answer(
-            question=question,
-            mode=mode,
-            reality=reality,
-            intent=intent,
-            best_practice=best_practice,
-            conflicts=conflicts,
-            insights=insights,
-            context=context
-        )
-        
-        self.conversation_history.append({
-            'question': question,
-            'answer_preview': answer.answer[:200] if answer.answer else '',
-            'mode': mode.value if mode else 'search',
-            'timestamp': datetime.now().isoformat()
-        })
-        
-        return answer
-    
-    def _is_employee_question(self, q_lower: str) -> bool:
-        """Check if question is about employees/people."""
-        employee_words = [
-            'employee', 'employees', 'worker', 'workers', 'staff', 
-            'people', 'person', 'who ', 'how many', 'count',
-            'headcount', 'roster', 'census'
-        ]
-        return any(w in q_lower for w in employee_words)
-    
-    def _detect_status_in_question(self, q_lower: str) -> Optional[str]:
+        Returns:
+            Text with PII replaced by placeholders
         """
-        Check if user specified employee status in their question.
-        Returns the detected status ('active', 'termed', 'all') or None.
+        if not text:
+            return text
+        
+        result = text
+        
+        # SSN: 123-45-6789
+        for match in re.finditer(r'\b(\d{3}-\d{2}-\d{4})\b', result):
+            original = match.group(1)
+            if original not in self.mappings.values():
+                placeholder = self._get_placeholder('ssn')
+                self.mappings[placeholder] = original
+                result = result.replace(original, placeholder)
+        
+        # Bank account / routing numbers (8-17 digits)
+        for match in re.finditer(r'\b(\d{8,17})\b', result):
+            original = match.group(1)
+            # Skip if already mapped or looks like a year/date
+            if original not in self.mappings.values() and not original.startswith('20'):
+                placeholder = self._get_placeholder('account')
+                self.mappings[placeholder] = original
+                result = result.replace(original, placeholder)
+        
+        # Salary: $75,000 or $75,000.00
+        for match in re.finditer(r'(\$\s*\d{1,3}(?:,\d{3})*(?:\.\d{2})?)', result):
+            original = match.group(1)
+            if original not in self.mappings.values():
+                placeholder = self._get_placeholder('salary')
+                self.mappings[placeholder] = original
+                result = result.replace(original, placeholder)
+        
+        # Phone: (123) 456-7890 or 123-456-7890
+        for match in re.finditer(r'(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})\b', result):
+            original = match.group(1)
+            # Skip if it looks like SSN
+            if original.count('-') == 2 and len(original.replace('-', '')) == 9:
+                continue
+            if original not in self.mappings.values():
+                placeholder = self._get_placeholder('phone')
+                self.mappings[placeholder] = original
+                result = result.replace(original, placeholder)
+        
+        # Email
+        for match in re.finditer(r'\b([\w\.-]+@[\w\.-]+\.\w{2,})\b', result):
+            original = match.group(1)
+            if original not in self.mappings.values():
+                placeholder = self._get_placeholder('email')
+                self.mappings[placeholder] = original
+                result = result.replace(original, placeholder)
+        
+        # Date of birth patterns: MM/DD/YYYY, YYYY-MM-DD
+        for match in re.finditer(r'\b(\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{2}-\d{2})\b', result):
+            original = match.group(1)
+            if original not in self.mappings.values():
+                placeholder = self._get_placeholder('dob')
+                self.mappings[placeholder] = original
+                result = result.replace(original, placeholder)
+        
+        return result
+    
+    def restore(self, text: str) -> str:
         """
-        # Active patterns
-        if any(p in q_lower for p in ['active only', 'active employees', 'only active', 'current employees']):
-            return 'active'
+        Restore original PII values from placeholders.
         
-        # Terminated patterns
-        if any(p in q_lower for p in ['terminated', 'termed', 'inactive', 'former employees']):
-            return 'termed'
+        Args:
+            text: Text with placeholders
+            
+        Returns:
+            Text with original PII restored
+        """
+        if not text or not self.mappings:
+            return text
         
-        # All patterns
-        if any(p in q_lower for p in ['all employees', 'everyone', 'all staff', 'all workers', 'total employees']):
-            return 'all'
+        result = text
+        for placeholder, original in self.mappings.items():
+            result = result.replace(placeholder, original)
+        
+        return result
+    
+    def has_pii(self) -> bool:
+        """Check if any PII was redacted."""
+        return len(self.mappings) > 0
+    
+    def get_stats(self) -> Dict[str, int]:
+        """Get redaction statistics."""
+        return {
+            'total_redacted': len(self.mappings),
+            **{k: v for k, v in self.counters.items() if v > 0}
+        }
+
+
+# =============================================================================
+# CORE SERVICE: DATA MODEL INTELLIGENCE
+# =============================================================================
+
+class DataModelService:
+    """
+    Data Model Intelligence Service - Transform codes into human-readable values.
+    
+    This service:
+    1. Auto-detects reference/lookup tables
+    2. Builds code → description dictionaries
+    3. Enriches query results with human-readable values
+    
+    Example:
+        Input:  "847 employees have location_code = 'LOC001'"
+        Output: "847 employees in Houston, TX (LOC001)"
+    """
+    
+    # Patterns that indicate a reference/lookup table
+    REFERENCE_TABLE_PATTERNS = [
+        r'.*_codes?$',           # location_codes, pay_codes
+        r'.*_types?$',           # employee_types, deduction_types
+        r'.*_lookup$',           # department_lookup
+        r'.*_ref$',              # status_ref
+        r'.*_master$',           # Only if small row count
+        r'^ref_.*',              # ref_locations
+        r'^lkp_.*',              # lkp_departments
+        r'^code_.*',             # code_earnings
+    ]
+    
+    # Common code → description column mappings
+    CODE_DESCRIPTION_PATTERNS = [
+        ('code', 'description'),
+        ('code', 'name'),
+        ('id', 'description'),
+        ('id', 'name'),
+        ('key', 'value'),
+        ('abbreviation', 'full_name'),
+        ('short_name', 'long_name'),
+        ('location_code', 'location_name'),
+        ('dept_code', 'dept_name'),
+        ('company_code', 'company_name'),
+    ]
+    
+    def __init__(self, project: str):
+        self.project = project
+        self.lookups: Dict[str, Dict[str, str]] = {}  # table_name -> {code: description}
+        self.code_columns: Dict[str, str] = {}  # column_name -> lookup_table
+        self._loaded = False
+    
+    def load_lookups(self, handler) -> None:
+        """
+        Load lookup dictionaries - tries intelligence service first, falls back to scanning.
+        
+        Phase 3.5: Consumes pre-computed lookups from ProjectIntelligenceService
+        when available, avoiding redundant table scanning.
+        
+        Args:
+            handler: DuckDB structured data handler
+        """
+        logger.warning(f"[DATA_MODEL] load_lookups called for {self.project}, _loaded={self._loaded}")
+        
+        if self._loaded:
+            return
+        
+        # PHASE 3.5: Try intelligence service first (pre-computed on upload)
+        if PROJECT_INTELLIGENCE_AVAILABLE and handler:
+            try:
+                logger.warning(f"[DATA_MODEL] Attempting to load from intelligence service for {self.project}")
+                intelligence = get_project_intelligence(self.project, handler)
+                if intelligence and intelligence.lookups:
+                    logger.warning(f"[DATA_MODEL] Found {len(intelligence.lookups)} lookups in intelligence")
+                    # Pull from pre-computed lookups
+                    for lookup in intelligence.lookups:
+                        table_name = lookup.table_name
+                        code_col = lookup.code_column
+                        desc_col = lookup.description_column
+                        mappings = lookup.lookup_data  # Note: attribute is lookup_data, not mappings
+                        
+                        if mappings:
+                            self.lookups[table_name] = mappings
+                            self.code_columns[code_col] = table_name
+                    
+                    self._loaded = True
+                    logger.warning(f"[DATA_MODEL] Loaded {len(self.lookups)} lookup tables from intelligence service")
+                    return
+                else:
+                    logger.warning(f"[DATA_MODEL] No lookups found in intelligence, falling back to scan")
+            except Exception as e:
+                logger.warning(f"[DATA_MODEL] Intelligence service unavailable, falling back: {e}")
+        
+        # FALLBACK: Scan tables directly (original behavior)
+        if not handler or not handler.conn:
+            return
+        
+        try:
+            # Get all tables for project
+            all_tables = handler.conn.execute("SHOW TABLES").fetchall()
+            project_prefix = (self.project or '').lower().replace(' ', '_').replace('-', '_')
+            
+            for (table_name,) in all_tables:
+                # Skip system tables
+                if table_name.startswith('_'):
+                    continue
+                
+                # Check if matches project
+                if project_prefix and not table_name.lower().startswith(project_prefix.lower()):
+                    continue
+                
+                # Check if looks like a reference table
+                table_lower = table_name.lower()
+                is_reference = any(re.match(pattern, table_lower) for pattern in self.REFERENCE_TABLE_PATTERNS)
+                
+                if not is_reference:
+                    # Also check row count - reference tables are usually small
+                    try:
+                        count = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
+                        if count <= 500:  # Small table might be a lookup
+                            is_reference = True
+                    except:
+                        pass
+                
+                if is_reference:
+                    self._load_lookup_table(handler, table_name)
+            
+            self._loaded = True
+            logger.info(f"[DATA_MODEL] Loaded {len(self.lookups)} lookup tables for {self.project}")
+            
+        except Exception as e:
+            logger.warning(f"[DATA_MODEL] Failed to load lookups: {e}")
+    
+    def _load_lookup_table(self, handler, table_name: str) -> None:
+        """Load a single lookup table into memory."""
+        try:
+            # Get columns
+            cols = handler.conn.execute(f'DESCRIBE "{table_name}"').fetchall()
+            col_names = [c[0].lower() for c in cols]
+            
+            # Find code and description columns
+            code_col = None
+            desc_col = None
+            
+            for code_pattern, desc_pattern in self.CODE_DESCRIPTION_PATTERNS:
+                for col in col_names:
+                    if code_pattern in col and not code_col:
+                        code_col = col
+                    if desc_pattern in col and not desc_col:
+                        desc_col = col
+                
+                if code_col and desc_col:
+                    break
+            
+            # Fallback: first column is code, second is description
+            if not code_col and len(col_names) >= 2:
+                code_col = col_names[0]
+                desc_col = col_names[1]
+            
+            if code_col and desc_col:
+                # Load the lookup data
+                rows = handler.conn.execute(f'''
+                    SELECT "{code_col}", "{desc_col}" 
+                    FROM "{table_name}" 
+                    WHERE "{code_col}" IS NOT NULL
+                    LIMIT 1000
+                ''').fetchall()
+                
+                lookup = {str(row[0]): str(row[1]) for row in rows if row[0] and row[1]}
+                
+                if lookup:
+                    self.lookups[table_name] = lookup
+                    # Also map the code column to this lookup
+                    self.code_columns[code_col] = table_name
+                    logger.debug(f"[DATA_MODEL] Loaded {len(lookup)} values from {table_name}")
+                    
+        except Exception as e:
+            logger.warning(f"[DATA_MODEL] Could not load {table_name}: {e}")
+    
+    def enrich_value(self, column: str, value: str) -> str:
+        """
+        Enrich a code value with its description.
+        
+        Args:
+            column: Column name (e.g., "location_code")
+            value: Code value (e.g., "LOC001")
+            
+        Returns:
+            Enriched value (e.g., "Houston, TX (LOC001)")
+        """
+        if not value:
+            return value
+        
+        col_lower = column.lower()
+        
+        # Check if we have a lookup for this column
+        for code_col, table_name in self.code_columns.items():
+            if code_col in col_lower:
+                lookup = self.lookups.get(table_name, {})
+                description = lookup.get(str(value))
+                if description:
+                    return f"{description} ({value})"
+        
+        return value
+    
+    def enrich_results(self, rows: List[Dict], columns: List[str]) -> List[Dict]:
+        """
+        Enrich all values in a result set.
+        
+        Args:
+            rows: List of result dictionaries
+            columns: Column names
+            
+        Returns:
+            Rows with enriched values
+        """
+        if not rows or not self.lookups:
+            return rows
+        
+        enriched = []
+        for row in rows:
+            enriched_row = {}
+            for col, val in row.items():
+                enriched_row[col] = self.enrich_value(col, str(val) if val else '')
+            enriched.append(enriched_row)
+        
+        return enriched
+    
+    def get_description(self, table: str, code: str) -> Optional[str]:
+        """Get description for a specific code from a specific table."""
+        lookup = self.lookups.get(table, {})
+        return lookup.get(str(code))
+
+
+# =============================================================================
+# CORE SERVICE: DATA QUALITY ALERTS
+# =============================================================================
+
+class DataQualityService:
+    """
+    Proactive Data Quality Alerts - Don't just answer, NOTICE things.
+    
+    A world-class consultant doesn't just answer the question asked.
+    They notice data quality issues and surface them proactively.
+    
+    Alert Categories:
+    - INTEGRITY: Data consistency issues (status mismatches, orphan records)
+    - COMPLETENESS: Missing data (null hire dates, empty required fields)
+    - DUPLICATES: Duplicate key values (SSN, employee ID)
+    - ANOMALIES: Statistical outliers (negative salaries, future dates)
+    """
+    
+    # Quality checks to run
+    QUALITY_CHECKS = [
+        {
+            'id': 'status_mismatch',
+            'name': 'Status/Date Mismatch',
+            'description': 'Employees with termination date but active status',
+            'category': 'INTEGRITY',
+            'severity': 'warning',
+            'sql_template': '''
+                SELECT COUNT(*) as count
+                FROM "{table}"
+                WHERE {status_col} = 'A' 
+                AND {term_date_col} IS NOT NULL 
+                AND {term_date_col} != ''
+            ''',
+            'required_columns': ['status', 'termination_date']
+        },
+        {
+            'id': 'missing_hire_date',
+            'name': 'Missing Hire Dates',
+            'description': 'Records missing hire date',
+            'category': 'COMPLETENESS',
+            'severity': 'info',
+            'sql_template': '''
+                SELECT COUNT(*) as count,
+                       ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM "{table}"), 1) as pct
+                FROM "{table}"
+                WHERE {hire_date_col} IS NULL OR {hire_date_col} = ''
+            ''',
+            'required_columns': ['hire_date']
+        },
+        {
+            'id': 'duplicate_ssn',
+            'name': 'Duplicate SSN',
+            'description': 'Multiple records with same SSN',
+            'category': 'DUPLICATES',
+            'severity': 'critical',
+            'sql_template': '''
+                SELECT COUNT(*) as count
+                FROM (
+                    SELECT {ssn_col}, COUNT(*) as cnt
+                    FROM "{table}"
+                    WHERE {ssn_col} IS NOT NULL AND {ssn_col} != ''
+                    GROUP BY {ssn_col}
+                    HAVING COUNT(*) > 1
+                )
+            ''',
+            'required_columns': ['ssn']
+        },
+        {
+            'id': 'duplicate_employee_id',
+            'name': 'Duplicate Employee ID',
+            'description': 'Multiple records with same Employee ID',
+            'category': 'DUPLICATES',
+            'severity': 'critical',
+            'sql_template': '''
+                SELECT COUNT(*) as count
+                FROM (
+                    SELECT {emp_id_col}, COUNT(*) as cnt
+                    FROM "{table}"
+                    WHERE {emp_id_col} IS NOT NULL AND {emp_id_col} != ''
+                    GROUP BY {emp_id_col}
+                    HAVING COUNT(*) > 1
+                )
+            ''',
+            'required_columns': ['employee_id']
+        },
+        {
+            'id': 'future_hire_date',
+            'name': 'Future Hire Dates',
+            'description': 'Hire dates in the future',
+            'category': 'ANOMALIES',
+            'severity': 'warning',
+            'sql_template': '''
+                SELECT COUNT(*) as count
+                FROM "{table}"
+                WHERE TRY_CAST({hire_date_col} AS DATE) > CURRENT_DATE
+            ''',
+            'required_columns': ['hire_date']
+        },
+        {
+            'id': 'negative_pay',
+            'name': 'Negative Pay Rates',
+            'description': 'Negative hourly or salary values',
+            'category': 'ANOMALIES',
+            'severity': 'critical',
+            'sql_template': '''
+                SELECT COUNT(*) as count
+                FROM "{table}"
+                WHERE TRY_CAST({pay_col} AS DOUBLE) < 0
+            ''',
+            'required_columns': ['pay_rate']
+        }
+    ]
+    
+    # Column name mappings (what we look for → what it might be called)
+    COLUMN_MAPPINGS = {
+        'status': ['employment_status', 'emp_status', 'status', 'employee_status', 'active_flag'],
+        'termination_date': ['termination_date', 'term_date', 'termdate', 'end_date', 'separation_date'],
+        'hire_date': ['hire_date', 'hiredate', 'start_date', 'original_hire_date', 'employment_date'],
+        'ssn': ['ssn', 'social_security', 'social_security_number', 'ss_number'],
+        'employee_id': ['employee_id', 'emp_id', 'empid', 'employee_number', 'ee_id', 'emplid'],
+        'pay_rate': ['hourly_rate', 'pay_rate', 'salary', 'annual_salary', 'hourly_pay_rate', 'compensation']
+    }
+    
+    def __init__(self, project: str):
+        self.project = project
+        self.alerts: List[Dict] = []
+    
+    def _find_column(self, columns: List[str], column_type: str) -> Optional[str]:
+        """Find matching column name for a column type."""
+        patterns = self.COLUMN_MAPPINGS.get(column_type, [])
+        columns_lower = [c.lower() for c in columns]
+        
+        for pattern in patterns:
+            for i, col_lower in enumerate(columns_lower):
+                if pattern in col_lower:
+                    return columns[i]  # Return original case
         
         return None
     
-    def _get_needed_clarifications(self, q_lower: str) -> List[str]:
+    def run_checks(self, handler, tables: List[Dict]) -> List[Dict]:
         """
-        Determine which filter categories need clarification for this question.
+        Get quality alerts - tries intelligence service first, falls back to SQL checks.
         
-        Returns list of filter category names that need clarification.
+        Phase 3.5: Consumes pre-computed findings from ProjectIntelligenceService
+        when available, avoiding redundant SQL execution.
+        
+        Args:
+            handler: DuckDB handler
+            tables: List of table info dicts with 'table_name' and 'columns'
+            
+        Returns:
+            List of alert dicts
         """
-        needed = []
+        self.alerts = []
         
-        logger.warning(f"[CLARIFICATION] Checking needed. confirmed_facts={self.confirmed_facts}, filter_candidates={list(self.filter_candidates.keys())}")
-        
-        # Check each available filter category
-        for category in self.filter_candidates.keys():
-            # ALWAYS detect first - user may be overriding a previous value
-            detected = self._detect_filter_in_question(category, q_lower)
-            
-            if detected:
-                # User specified in THIS question - set/override it
-                if category in self.confirmed_facts and self.confirmed_facts[category] != detected:
-                    logger.warning(f"[INTELLIGENCE] Overriding {category}: {self.confirmed_facts[category]} → {detected}")
-                else:
-                    logger.warning(f"[INTELLIGENCE] Detected {category} in question: {detected}")
-                self.confirmed_facts[category] = detected
-                continue
-            
-            # Not detected in question - check if already confirmed
-            if category in self.confirmed_facts:
-                logger.warning(f"[CLARIFICATION] Skipping {category} - already confirmed as {self.confirmed_facts[category]}")
-                continue
-            
-            # Check if this filter is relevant to the question
-            if self._is_filter_relevant(category, q_lower):
-                needed.append(category)
-        
-        # Sort by priority (status first, then company, etc.)
-        priority_order = ['status', 'company', 'organization', 'location', 'employee_type', 'pay_type', 'job']
-        needed.sort(key=lambda x: priority_order.index(x) if x in priority_order else 99)
-        
-        logger.warning(f"[CLARIFICATION] Needed clarifications: {needed}")
-        return needed
-    
-    def _detect_filter_in_question(self, category: str, q_lower: str) -> Optional[str]:
-        """
-        Check if user specified a filter value in their question.
-        Returns the detected value or None.
-        
-        This is the SMART DETECTION that auto-applies filters without asking.
-        """
-        if category == 'status':
-            return self._detect_status_in_question(q_lower)
-        
-        # Get filter candidates for this category
-        candidates = self.filter_candidates.get(category, [])
-        if not candidates:
-            return None
-        
-        # LOCATION DETECTION - Fully data-driven from lookups and profile values
-        if category == 'location':
-            # STEP 1: Try to find location from lookups (DATA-DRIVEN)
-            lookup_match = self._find_value_in_lookups(q_lower, 'location')
-            if lookup_match:
-                logger.warning(f"[FILTER-DETECT] Found location '{lookup_match}' from lookup")
-                return lookup_match
-            
-            # STEP 2: Check actual values in data from filter_candidates
-            for candidate in candidates:
-                values = candidate.get('values', [])
-                for value in values:
-                    value_str = str(value).strip()
-                    value_lower = value_str.lower()
+        # PHASE 3.5: Try intelligence service first (pre-computed on upload)
+        if PROJECT_INTELLIGENCE_AVAILABLE and handler:
+            try:
+                logger.warning(f"[DATA_QUALITY] Attempting to load from intelligence service for {self.project}")
+                intelligence = get_project_intelligence(self.project, handler)
+                if intelligence and intelligence.findings:
+                    logger.warning(f"[DATA_QUALITY] Found {len(intelligence.findings)} findings in intelligence")
+                    # Convert intelligence findings to alert format
+                    for finding in intelligence.findings:
+                        alert = {
+                            'id': finding.finding_type,
+                            'name': finding.title,
+                            'category': finding.category,
+                            'severity': finding.severity,
+                            'table': finding.table_name.split('__')[-1] if finding.table_name else '',
+                            'count': finding.affected_count,
+                            'percentage': finding.affected_percentage,
+                            'description': finding.description,
+                            'details': f"{finding.affected_count:,} records affected" if finding.affected_count else finding.description,
+                            'evidence_sql': finding.evidence_sql
+                        }
+                        self.alerts.append(alert)
                     
-                    # Skip very short values and blocklisted common words
-                    if len(value_str) < 2 or _is_blocklisted(value_lower):
+                    # Sort by severity
+                    severity_order = {'critical': 0, 'warning': 1, 'info': 2}
+                    self.alerts.sort(key=lambda x: severity_order.get(x.get('severity', 'info'), 3))
+                    
+                    logger.warning(f"[DATA_QUALITY] Loaded {len(self.alerts)} alerts from intelligence service")
+                    return self.alerts
+                else:
+                    logger.warning(f"[DATA_QUALITY] No findings in intelligence, falling back to SQL checks")
+            except Exception as e:
+                logger.warning(f"[DATA_QUALITY] Intelligence service unavailable, falling back: {e}")
+        
+        # FALLBACK: Run SQL checks directly (original behavior)
+        if not handler or not handler.conn:
+            return self.alerts
+        
+        for table_info in tables:
+            table_name = table_info.get('table_name', '')
+            columns = table_info.get('columns', [])
+            
+            if not columns:
+                continue
+            
+            for check in self.QUALITY_CHECKS:
+                self._run_check(handler, table_name, columns, check)
+        
+        # Sort by severity
+        severity_order = {'critical': 0, 'warning': 1, 'info': 2}
+        self.alerts.sort(key=lambda x: severity_order.get(x.get('severity', 'info'), 3))
+        
+        return self.alerts
+    
+    def _run_check(self, handler, table_name: str, columns: List[str], check: Dict) -> None:
+        """Run a single quality check."""
+        try:
+            # Find required columns
+            col_mappings = {}
+            for required_col in check['required_columns']:
+                found_col = self._find_column(columns, required_col)
+                if not found_col:
+                    return  # Skip if required column not found
+                col_mappings[f'{required_col}_col'] = found_col
+            
+            # Build SQL
+            sql = check['sql_template'].format(
+                table=table_name,
+                **col_mappings
+            )
+            
+            # Execute
+            result = handler.conn.execute(sql).fetchone()
+            
+            if result and result[0]:
+                count = result[0]
+                pct = result[1] if len(result) > 1 else None
+                
+                if count > 0:
+                    alert = {
+                        'id': check['id'],
+                        'name': check['name'],
+                        'category': check['category'],
+                        'severity': check['severity'],
+                        'table': table_name.split('__')[-1],  # Remove project prefix
+                        'count': count,
+                        'percentage': pct,
+                        'description': check['description'],
+                        'details': f"{count:,} records affected" + (f" ({pct}%)" if pct else "")
+                    }
+                    self.alerts.append(alert)
+                    
+        except Exception as e:
+            logger.debug(f"[DATA_QUALITY] Check {check['id']} failed on {table_name}: {e}")
+    
+    def get_summary(self) -> Dict:
+        """Get summary of all alerts."""
+        if not self.alerts:
+            return {'status': 'clean', 'message': '✅ No data quality issues detected'}
+        
+        critical = len([a for a in self.alerts if a['severity'] == 'critical'])
+        warning = len([a for a in self.alerts if a['severity'] == 'warning'])
+        info = len([a for a in self.alerts if a['severity'] == 'info'])
+        
+        if critical > 0:
+            status = 'critical'
+            emoji = '🚨'
+        elif warning > 0:
+            status = 'warning'
+            emoji = '⚠️'
+        else:
+            status = 'info'
+            emoji = 'ℹ️'
+        
+        return {
+            'status': status,
+            'message': f"{emoji} {len(self.alerts)} data quality issue(s) detected",
+            'critical': critical,
+            'warning': warning,
+            'info': info,
+            'alerts': self.alerts
+        }
+
+
+# =============================================================================
+# CORE SERVICE: SUGGESTED FOLLOW-UPS
+# =============================================================================
+
+class FollowUpGenerator:
+    """
+    Suggested Follow-Up Generator - Guide the conversation like a consultant.
+    
+    After answering a question, suggest relevant follow-up questions
+    to help the user dig deeper into their data.
+    """
+    
+    # Follow-up templates based on query type
+    FOLLOW_UP_TEMPLATES = {
+        'count': [
+            "Break this down by {dimension}",
+            "How has this changed over the last {time_period}?",
+            "Which {entity} has the most?",
+            "Compare this to {benchmark}",
+        ],
+        'list': [
+            "Filter this to show only {filter_value}",
+            "Sort by {sort_column}",
+            "Show me more details about {entity}",
+            "Export this to Excel",
+        ],
+        'sum': [
+            "What's the average instead?",
+            "Break this down by {dimension}",
+            "Show the top 10 contributors",
+            "How does this compare to budget?",
+        ],
+        'analysis': [
+            "What's driving this trend?",
+            "Are there any outliers?",
+            "How does this compare to industry benchmarks?",
+            "What actions should we take based on this?",
+        ],
+        'general': [
+            "Tell me more about {entity}",
+            "What else should I know about this?",
+            "Are there any related issues?",
+            "Show me the underlying data",
+        ]
+    }
+    
+    # Common dimensions for breakdowns
+    COMMON_DIMENSIONS = [
+        'department', 'location', 'company', 'pay_group', 
+        'job_title', 'employment_type', 'hire_year'
+    ]
+    
+    def __init__(self, schema: Dict = None):
+        self.schema = schema or {}
+        self.available_columns = self._extract_columns()
+    
+    def _extract_columns(self) -> List[str]:
+        """Extract all available column names from schema."""
+        columns = []
+        for table in self.schema.get('tables', []):
+            columns.extend(table.get('columns', []))
+        return list(set(columns))
+    
+    def generate(
+        self, 
+        query_type: str, 
+        question: str, 
+        result: Dict,
+        context: Dict = None
+    ) -> List[str]:
+        """
+        Generate suggested follow-up questions.
+        
+        Args:
+            query_type: Type of query (count, list, sum, analysis, general)
+            question: Original question asked
+            result: Query result
+            context: Additional context
+            
+        Returns:
+            List of suggested follow-up questions
+        """
+        suggestions = []
+        context = context or {}
+        
+        # Get templates for this query type
+        templates = self.FOLLOW_UP_TEMPLATES.get(query_type, self.FOLLOW_UP_TEMPLATES['general'])
+        
+        # Find relevant dimensions from schema
+        available_dimensions = []
+        for dim in self.COMMON_DIMENSIONS:
+            if any(dim in col.lower() for col in self.available_columns):
+                available_dimensions.append(dim.replace('_', ' ').title())
+        
+        # Generate suggestions
+        for template in templates[:4]:  # Max 4 suggestions
+            suggestion = template
+            
+            # Fill in placeholders
+            if '{dimension}' in suggestion and available_dimensions:
+                suggestion = suggestion.replace('{dimension}', available_dimensions[0])
+            elif '{dimension}' in suggestion:
+                suggestion = suggestion.replace('{dimension}', 'department')
+            
+            if '{time_period}' in suggestion:
+                suggestion = suggestion.replace('{time_period}', '12 months')
+            
+            if '{entity}' in suggestion:
+                # Try to extract entity from question
+                entity = self._extract_entity(question)
+                suggestion = suggestion.replace('{entity}', entity)
+            
+            if '{filter_value}' in suggestion:
+                suggestion = suggestion.replace('{filter_value}', 'active employees')
+            
+            if '{sort_column}' in suggestion:
+                suggestion = suggestion.replace('{sort_column}', 'hire date')
+            
+            if '{benchmark}' in suggestion:
+                suggestion = suggestion.replace('{benchmark}', 'last year')
+            
+            suggestions.append(suggestion)
+        
+        # Add context-specific suggestions
+        if query_type == 'count' and result.get('count', 0) > 100:
+            suggestions.append("Show me the top 10 by count")
+        
+        if 'employee' in question.lower():
+            if 'terminated' not in question.lower():
+                suggestions.append("Include terminated employees")
+            if 'active' not in question.lower():
+                suggestions.append("Filter to active employees only")
+        
+        return suggestions[:5]  # Return max 5 suggestions
+    
+    def _extract_entity(self, question: str) -> str:
+        """Extract the main entity from a question."""
+        # Simple extraction - look for common nouns
+        entities = ['employees', 'departments', 'locations', 'companies', 'earnings', 'deductions']
+        
+        question_lower = question.lower()
+        for entity in entities:
+            if entity in question_lower:
+                return entity
+        
+        return 'this'
+
+
+# =============================================================================
+# CORE SERVICE: CITATION BUILDER
+# =============================================================================
+
+class CitationBuilder:
+    """
+    Citation & Audit Trail Builder - Every claim backed by data.
+    
+    Consultants need to defend their findings. This makes every
+    answer bulletproof with full source attribution and SQL transparency.
+    """
+    
+    def __init__(self):
+        self.citations: List[Dict] = []
+        self.sql_executed: List[str] = []
+    
+    def add_citation(
+        self,
+        claim: str,
+        source_table: str,
+        source_column: Optional[str] = None,
+        sql: Optional[str] = None,
+        row_count: Optional[int] = None,
+        confidence: float = 1.0
+    ) -> None:
+        """
+        Add a citation for a claim.
+        
+        Args:
+            claim: The claim being made
+            source_table: Source table name
+            source_column: Relevant column(s)
+            sql: SQL query executed
+            row_count: Number of rows supporting claim
+            confidence: Confidence level (0-1)
+        """
+        citation = {
+            'claim': claim,
+            'source_table': source_table.split('__')[-1] if '__' in source_table else source_table,
+            'full_table': source_table,
+            'source_column': source_column,
+            'sql': sql,
+            'row_count': row_count,
+            'confidence': confidence,
+            'timestamp': time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+        self.citations.append(citation)
+        
+        if sql and sql not in self.sql_executed:
+            self.sql_executed.append(sql)
+    
+    def build_audit_trail(self) -> Dict:
+        """Build complete audit trail."""
+        return {
+            'citations': self.citations,
+            'sql_queries': self.sql_executed,
+            'total_sources': len(set(c['full_table'] for c in self.citations)),
+            'generated_at': time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+    
+    def format_for_display(self) -> str:
+        """Format citations for display in response."""
+        if not self.citations:
+            return ""
+        
+        lines = ["\n---", "📍 **Sources & Audit Trail**"]
+        
+        for i, citation in enumerate(self.citations, 1):
+            source_info = f"• {citation['source_table']}"
+            if citation['source_column']:
+                source_info += f" → {citation['source_column']}"
+            if citation['row_count']:
+                source_info += f" ({citation['row_count']:,} rows)"
+            lines.append(source_info)
+        
+        if self.sql_executed:
+            lines.append("\n*SQL Executed:*")
+            for sql in self.sql_executed[:3]:  # Show max 3
+                # Truncate long SQL
+                sql_display = sql[:200] + '...' if len(sql) > 200 else sql
+                lines.append(f"```sql\n{sql_display}\n```")
+        
+        return "\n".join(lines)
+
+
+# =============================================================================
+# SESSION MANAGEMENT
+# =============================================================================
+
+# In-memory session storage (in production, use Redis)
+unified_sessions: Dict[str, Dict] = {}
+
+
+def get_or_create_session(session_id: str, project: str) -> Tuple[str, Dict]:
+    """Get existing session or create new one."""
+    if not session_id:
+        session_id = f"session_{uuid.uuid4().hex[:8]}"
+    
+    if session_id not in unified_sessions:
+        unified_sessions[session_id] = {
+            'engine': None,
+            'project': project,
+            'created_at': time.time(),
+            'last_sql': None,
+            'last_result': None,
+            'last_question': None,
+            'skip_learning': False,
+            'data_model': None,
+            'conversation_history': [],
+            'interaction_count': 0  # Track interactions for learning control
+        }
+    
+    return session_id, unified_sessions[session_id]
+
+
+def cleanup_old_sessions(max_sessions: int = 100) -> None:
+    """Remove oldest sessions if over limit."""
+    if len(unified_sessions) > max_sessions:
+        # Sort by created_at and remove oldest
+        sorted_sessions = sorted(
+            unified_sessions.items(),
+            key=lambda x: x[1].get('created_at', 0)
+        )
+        for session_id, _ in sorted_sessions[:len(sorted_sessions) - max_sessions]:
+            del unified_sessions[session_id]
+
+
+# =============================================================================
+# SCHEMA RETRIEVAL
+# =============================================================================
+
+async def get_project_schema(project: str, scope: str, handler) -> Dict:
+    """
+    Get comprehensive schema for project including column profiles.
+    
+    v2.0 FIX (2025-12-17): Now uses handler.get_tables() which queries 
+    _schema_metadata with exact project match, instead of unreliable 
+    prefix guessing from SHOW TABLES.
+    
+    This is the foundation for intelligent clarification - we need to know
+    what's in the data before we can ask smart questions.
+    """
+    tables = []
+    filter_candidates = {}
+    
+    if not handler or not handler.conn:
+        logger.error("[SCHEMA] No handler connection")
+        return {'tables': [], 'filter_candidates': {}}
+    
+    try:
+        # ================================================================
+        # FIX: Use get_tables() which queries _schema_metadata correctly
+        # This ensures we find tables by EXACT project match, not prefix
+        # ================================================================
+        metadata_tables = handler.get_tables(project)
+        
+        logger.warning(f"[SCHEMA] get_tables('{project}') returned {len(metadata_tables)} tables")
+        
+        # If no tables found via metadata, try fallback to SHOW TABLES
+        # This handles edge cases where metadata might be missing
+        if not metadata_tables:
+            logger.warning(f"[SCHEMA] No tables in _schema_metadata for '{project}', trying SHOW TABLES fallback")
+            
+            # Fallback: Get all tables from DuckDB directly
+            all_tables = handler.conn.execute("SHOW TABLES").fetchall()
+            logger.warning(f"[SCHEMA] DuckDB SHOW TABLES returned {len(all_tables)} total tables")
+            
+            # Build project prefix for filtering (fallback only)
+            project_clean = (project or '').strip()
+            # Sanitize the same way as _generate_table_name does
+            sanitized_project = re.sub(r'[^\w\s]', '', project_clean)
+            sanitized_project = re.sub(r'\s+', '_', sanitized_project.strip()).lower()
+            
+            project_prefixes = [
+                sanitized_project,  # Primary: sanitized version
+                project_clean.lower(),
+                project_clean.lower().replace(' ', '_'),
+                project_clean.lower().replace(' ', '_').replace('-', '_'),
+            ]
+            # Remove empty and duplicate prefixes
+            project_prefixes = list(dict.fromkeys([p for p in project_prefixes if p]))
+            
+            logger.warning(f"[SCHEMA] Fallback prefixes: {project_prefixes}")
+            
+            matched_tables = []
+            all_valid_tables = []
+            
+            for (table_name,) in all_tables:
+                if table_name.startswith('_'):
+                    continue
+                
+                all_valid_tables.append(table_name)
+                
+                table_lower = table_name.lower()
+                matches_project = any(
+                    table_lower.startswith(prefix) 
+                    for prefix in project_prefixes
+                )
+                
+                if matches_project:
+                    matched_tables.append(table_name)
+                    logger.info(f"[SCHEMA] Matched table: {table_name}")
+            
+            if matched_tables:
+                logger.warning(f"[SCHEMA] Fallback found {len(matched_tables)} matching tables")
+            else:
+                logger.warning(f"[SCHEMA] No tables match project '{project}', using all {len(all_valid_tables)} tables")
+            
+            tables_to_process = matched_tables if matched_tables else all_valid_tables
+            
+            # Build table info from fallback
+            for table_name in tables_to_process:
+                try:
+                    # Get columns
+                    columns = []
+                    try:
+                        col_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
+                        columns = [row[1] for row in col_result]
+                    except:
+                        try:
+                            col_result = handler.conn.execute(f'DESCRIBE "{table_name}"').fetchall()
+                            columns = [row[0] for row in col_result]
+                        except:
+                            result = handler.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 0')
+                            columns = [desc[0] for desc in result.description]
+                    
+                    if not columns:
                         continue
                     
-                    # Check if value appears in question with word boundary
-                    if _is_word_boundary_match(q_lower, value_lower):
-                        logger.warning(f"[FILTER-DETECT] Found location value '{value_str}' in question")
-                        return value_str
+                    # Get row count
+                    try:
+                        count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
+                        row_count = count_result[0] if count_result else 0
+                    except:
+                        row_count = 0
                     
-                    # Also check for the code's description from lookups
-                    description = self._get_lookup_description('location', value_str)
-                    if description and _is_word_boundary_match(q_lower, description.lower()):
-                        logger.warning(f"[FILTER-DETECT] Found location '{description}' → code '{value_str}'")
-                        return value_str
-            
-            # STEP 3: US State name→code mapping (universal knowledge fallback)
-            # This is acceptable because US state abbreviations are standardized
-            state_code = self._detect_us_state_in_question(q_lower)
-            if state_code:
-                logger.warning(f"[FILTER-DETECT] Found US state → '{state_code}' via standard mapping")
-                return state_code
-            
-            return None
-        
-        # COMPANY DETECTION - Data-driven from lookups and profile values
-        if category == 'company':
-            # Try lookups first
-            lookup_match = self._find_value_in_lookups(q_lower, 'company')
-            if lookup_match:
-                logger.warning(f"[FILTER-DETECT] Found company '{lookup_match}' from lookup")
-                return lookup_match
-            
-            # Fall back to actual values in data
-            for candidate in candidates:
-                values = candidate.get('values', [])
-                for value in values:
-                    value_str = str(value).strip()
-                    value_lower = value_str.lower()
-                    if len(value_str) >= 3 and not _is_blocklisted(value_lower):
-                        if _is_word_boundary_match(q_lower, value_lower):
-                            logger.warning(f"[FILTER-DETECT] Found company '{value_str}' in question")
-                            return value_str
-                        # Check description from lookups
-                        description = self._get_lookup_description('company', value_str)
-                        if description and _is_word_boundary_match(q_lower, description.lower()):
-                            logger.warning(f"[FILTER-DETECT] Found company '{description}' → code '{value_str}'")
-                            return value_str
-        
-        # PAY TYPE DETECTION - Data-driven from lookups and profile values
-        if category == 'pay_type':
-            # Try lookups first
-            lookup_match = self._find_value_in_lookups(q_lower, 'pay_type')
-            if lookup_match:
-                logger.warning(f"[FILTER-DETECT] Found pay_type '{lookup_match}' from lookup")
-                return lookup_match
-            
-            # Fall back to actual values in data
-            for candidate in candidates:
-                values = candidate.get('values', [])
-                for value in values:
-                    value_str = str(value).strip()
-                    value_lower = value_str.lower()
-                    if len(value_str) >= 1 and not _is_blocklisted(value_lower):
-                        if _is_word_boundary_match(q_lower, value_lower):
-                            logger.warning(f"[FILTER-DETECT] Found pay_type '{value_str}' in question")
-                            return value_str
-                        # Check description from lookups
-                        description = self._get_lookup_description('pay_type', value_str)
-                        if description and _is_word_boundary_match(q_lower, description.lower()):
-                            logger.warning(f"[FILTER-DETECT] Found pay_type '{description}' → code '{value_str}'")
-                            return value_str
-        
-        # EMPLOYEE TYPE DETECTION - Data-driven from lookups and profile values
-        if category == 'employee_type':
-            # Try lookups first
-            lookup_match = self._find_value_in_lookups(q_lower, 'employee_type')
-            if lookup_match:
-                logger.warning(f"[FILTER-DETECT] Found employee_type '{lookup_match}' from lookup")
-                return lookup_match
-            
-            # Fall back to actual values in data
-            for candidate in candidates:
-                values = candidate.get('values', [])
-                for value in values:
-                    value_str = str(value).strip()
-                    value_lower = value_str.lower()
-                    if len(value_str) >= 1 and not _is_blocklisted(value_lower):
-                        if _is_word_boundary_match(q_lower, value_lower):
-                            logger.warning(f"[FILTER-DETECT] Found employee_type '{value_str}' in question")
-                            return value_str
-                        # Check description from lookups
-                        description = self._get_lookup_description('employee_type', value_str)
-                        if description and _is_word_boundary_match(q_lower, description.lower()):
-                            logger.warning(f"[FILTER-DETECT] Found employee_type '{description}' → code '{value_str}'")
-                            return value_str
-        
-        # GENERIC: Check any category against lookups and actual values
-        # Try lookups first
-        lookup_match = self._find_value_in_lookups(q_lower, category)
-        if lookup_match:
-            logger.warning(f"[FILTER-DETECT] Found {category} '{lookup_match}' from lookup")
-            return lookup_match
-        
-        # Fall back to actual values in data
-        for candidate in candidates:
-            values = candidate.get('values', [])
-            for value in values:
-                value_str = str(value).strip()
-                value_lower = value_str.lower()
-                if len(value_str) > 2 and not _is_blocklisted(value_lower):
-                    if _is_word_boundary_match(q_lower, value_lower):
-                        logger.warning(f"[FILTER-DETECT] Found {category} value '{value_str}' in question")
-                        return value_str
-        
-        return None
-    
-    def _is_filter_relevant(self, category: str, q_lower: str) -> bool:
-        """
-        Determine if a filter category is relevant to this question.
-        Returns True if we should ASK about this filter (not auto-detected).
-        
-        Smart logic:
-        - Status: Always relevant for employee questions (unless "all")
-        - Company: Ask if "by company" or multiple companies exist and asking totals
-        - Location: Ask if "by location/state" mentioned
-        - Others: Only if explicitly requested with "by X"
-        """
-        # Status is almost always relevant for employee questions
-        if category == 'status':
-            # Skip if user said "all employees" or similar
-            if any(p in q_lower for p in ['all employees', 'all staff', 'everyone', 'all workers']):
-                self.confirmed_facts['status'] = 'all'
-                return False
-            return True
-        
-        # Check for "by X" patterns that trigger clarification
-        by_patterns = {
-            'company': ['by company', 'per company', 'each company', 'by entity', 'by legal entity'],
-            'location': ['by location', 'by state', 'per state', 'by site', 'each location', 'by region'],
-            'organization': ['by department', 'by org', 'by cost center', 'per department', 'by division'],
-            'pay_type': ['by pay type', 'hourly vs salary', 'hourly and salary'],
-            'employee_type': ['by employee type', 'by worker type', 'regular vs temp']
-        }
-        
-        patterns = by_patterns.get(category, [])
-        if any(p in q_lower for p in patterns):
-            # Check if we have multiple values to ask about
-            candidates = self.filter_candidates.get(category, [])
-            if candidates:
-                distinct_count = candidates[0].get('distinct_count', 0)
-                if distinct_count > 1:
-                    logger.warning(f"[FILTER-RELEVANT] {category} relevant due to 'by X' pattern, {distinct_count} values")
-                    return True
-        
-        return False
-    
-    def _find_value_in_lookups(self, q_lower: str, lookup_type: str) -> Optional[str]:
-        """
-        Search lookups for a value mentioned in the question.
-        Returns the code if found, None otherwise.
-        
-        DATA-DRIVEN: Uses lookups from _intelligence_lookups table.
-        """
-        if not self.structured_handler or not hasattr(self.structured_handler, 'conn'):
-            return None
-        
-        try:
-            # Load lookups for this type
-            lookups = self.structured_handler.conn.execute("""
-                SELECT code_column, lookup_data_json
-                FROM _intelligence_lookups
-                WHERE project_name = ? AND lookup_type = ?
-            """, [self.project, lookup_type]).fetchall()
-            
-            for code_col, lookup_json in lookups:
-                if not lookup_json:
-                    continue
+                    tables.append({
+                        'table_name': table_name,
+                        'project': project or 'unknown',
+                        'columns': columns,
+                        'row_count': row_count,
+                        'column_profiles': {},
+                        'categorical_columns': []
+                    })
                     
-                lookup_data = json.loads(lookup_json)
-                
-                # Check each code→description pair
-                for code, description in lookup_data.items():
-                    code_lower = str(code).lower()
-                    desc_lower = str(description).lower() if description else ''
-                    
-                    # Check if description appears in question
-                    if desc_lower and len(desc_lower) > 2:
-                        if _is_word_boundary_match(q_lower, desc_lower):
-                            return code
-                    
-                    # Check if code appears in question (for longer codes)
-                    if len(code_lower) > 2 and not _is_blocklisted(code_lower):
-                        if _is_word_boundary_match(q_lower, code_lower):
-                            return code
-            
-            return None
-            
-        except Exception as e:
-            logger.debug(f"[LOOKUP] Failed to search lookups: {e}")
-            return None
-    
-    def _get_lookup_description(self, lookup_type: str, code: str) -> Optional[str]:
-        """
-        Get the description for a code from lookups.
-        
-        DATA-DRIVEN: Uses lookups from _intelligence_lookups table.
-        """
-        if not self.structured_handler or not hasattr(self.structured_handler, 'conn') or not code:
-            return None
-        
-        try:
-            lookups = self.structured_handler.conn.execute("""
-                SELECT lookup_data_json
-                FROM _intelligence_lookups
-                WHERE project_name = ? AND lookup_type = ?
-            """, [self.project, lookup_type]).fetchall()
-            
-            code_upper = str(code).upper().strip()
-            
-            for (lookup_json,) in lookups:
-                if not lookup_json:
-                    continue
-                    
-                lookup_data = json.loads(lookup_json)
-                
-                # Try exact match first
-                if code_upper in lookup_data:
-                    return lookup_data[code_upper]
-                
-                # Try case-insensitive
-                for k, v in lookup_data.items():
-                    if str(k).upper().strip() == code_upper:
-                        return v
-            
-            return None
-            
-        except Exception as e:
-            logger.debug(f"[LOOKUP] Failed to get description: {e}")
-            return None
-    
-    def _detect_us_state_in_question(self, q_lower: str) -> Optional[str]:
-        """
-        Detect US state names in question and return state code.
-        
-        This is UNIVERSAL KNOWLEDGE fallback - US state abbreviations are standardized.
-        Used only when data-driven lookups don't find a match.
-        """
-        # US States - full name to code mapping
-        us_states = {
-            'alabama': 'AL', 'alaska': 'AK', 'arizona': 'AZ', 'arkansas': 'AR',
-            'california': 'CA', 'colorado': 'CO', 'connecticut': 'CT', 'delaware': 'DE',
-            'florida': 'FL', 'georgia': 'GA', 'hawaii': 'HI', 'idaho': 'ID',
-            'illinois': 'IL', 'indiana': 'IN', 'iowa': 'IA', 'kansas': 'KS',
-            'kentucky': 'KY', 'louisiana': 'LA', 'maine': 'ME', 'maryland': 'MD',
-            'massachusetts': 'MA', 'michigan': 'MI', 'minnesota': 'MN', 'mississippi': 'MS',
-            'missouri': 'MO', 'montana': 'MT', 'nebraska': 'NE', 'nevada': 'NV',
-            'new hampshire': 'NH', 'new jersey': 'NJ', 'new mexico': 'NM', 'new york': 'NY',
-            'north carolina': 'NC', 'north dakota': 'ND', 'ohio': 'OH', 'oklahoma': 'OK',
-            'oregon': 'OR', 'pennsylvania': 'PA', 'rhode island': 'RI', 'south carolina': 'SC',
-            'south dakota': 'SD', 'tennessee': 'TN', 'texas': 'TX', 'utah': 'UT',
-            'vermont': 'VT', 'virginia': 'VA', 'washington': 'WA', 'west virginia': 'WV',
-            'wisconsin': 'WI', 'wyoming': 'WY'
-        }
-        
-        for state_name, state_code in us_states.items():
-            if _is_word_boundary_match(q_lower, state_name):
-                return state_code
-        
-        return None
-
-    def _request_filter_clarification(self, question: str, category: str) -> SynthesizedAnswer:
-        """
-        Build a clarification question for a specific filter category.
-        Uses actual values from profile data.
-        """
-        # Get candidates for this category
-        candidates = self.filter_candidates.get(category, [])
-        
-        if category == 'status':
-            return self._request_employee_status_clarification(question)
-        
-        # Build options from profile data
-        options = self._build_filter_options(category, candidates)
-        
-        if not options:
-            # Skip this category if we can't build options
-            return self._continue_without_filter(question, category)
-        
-        # Category-specific question text
-        question_text = {
-            'company': "Which company should I include?",
-            'organization': "Which department/organization?",
-            'location': "Which location(s)?",
-            'pay_type': "Which pay type?",
-            'employee_type': "Which employee type?",
-            'job': "Which job family/code?"
-        }.get(category, f"Which {category}?")
-        
-        return SynthesizedAnswer(
-            question=question,
-            answer="",
-            confidence=0.0,
-            structured_output={
-                'type': 'clarification_needed',
-                'filter_category': category,
-                'questions': [{
-                    'id': category,
-                    'text': question_text,
-                    'type': 'single_select',
-                    'options': options
-                }],
-                'detected_domains': ['employees']
-            },
-            reasoning=f"Need to clarify {category} filter"
-        )
-    
-    def _build_filter_options(self, category: str, candidates: List[Dict]) -> List[Dict]:
-        """Build filter options from profile data."""
-        if not candidates:
-            return []
-        
-        # Use first candidate (highest priority)
-        candidate = candidates[0]
-        values = candidate.get('values', [])
-        distribution = candidate.get('distribution', {})
-        total_count = candidate.get('total_count', 0)
-        
-        if not values:
-            return []
-        
-        options = []
-        for value in values[:10]:  # Limit to 10 options
-            count = distribution.get(str(value), 0)
-            label = f"{value} ({count:,})" if count else str(value)
-            options.append({
-                'id': str(value).lower().replace(' ', '_'),
-                'label': label,
-                'value': value
-            })
-        
-        # Add "All" option
-        options.append({
-            'id': 'all',
-            'label': f'All ({total_count:,} total)'
-        })
-        
-        return options
-    
-    def _continue_without_filter(self, question: str, category: str) -> SynthesizedAnswer:
-        """Continue processing without this filter (skip clarification)."""
-        self.confirmed_facts[category] = 'all'
-        return self.ask(question)  # Recursive call to continue
-    
-    def _request_employee_status_clarification(self, question: str) -> SynthesizedAnswer:
-        """Ask for employee status clarification using ACTUAL values from filter_candidates."""
-        
-        # Get status options from filter_candidates (smarter selection)
-        status_options = self._get_status_options_from_filter_candidates()
-        
-        if not status_options:
-            # Fallback to generic options if no profile data
-            status_options = [
-                {'id': 'active', 'label': 'Active only', 'default': True},
-                {'id': 'termed', 'label': 'Terminated only'},
-                {'id': 'all', 'label': 'All employees'}
-            ]
-        
-        return SynthesizedAnswer(
-            question=question,
-            answer="",
-            confidence=0.0,
-            structured_output={
-                'type': 'clarification_needed',
-                'questions': [{
-                    'id': 'status',  # Use 'status' consistently (was 'employee_status')
-                    'question': 'Which employees should I include?',
-                    'type': 'radio',
-                    'options': status_options
-                }],
-                'original_question': question,
-                'detected_mode': 'search',
-                'detected_domains': ['employees']
-            },
-            reasoning=['Need to know which employees to include']
-        )
-    
-    def _get_status_options_from_filter_candidates(self) -> List[Dict]:
-        """
-        Get employee status options from filter_candidates.
-        Prioritizes columns from employee-level tables (lower row counts).
-        """
-        status_candidates = self.filter_candidates.get('status', [])
-        
-        if not status_candidates:
-            return []
-        
-        # Find the BEST status column:
-        # 1. Prefer employment_status_code/employment_status over others
-        # 2. Prefer tables with ~14k rows (employee-level) over 60k+ (transaction-level)
-        best_candidate = None
-        
-        for candidate in status_candidates:
-            col_name = candidate.get('column_name', candidate.get('column', '')).lower()
-            total_count = candidate.get('distinct_count', candidate.get('total_count', 0))
-            col_type = candidate.get('inferred_type', candidate.get('type', ''))
-            
-            # Skip transaction tables (too many rows per employee)
-            if total_count > 20000:
-                continue
-            
-            # Prefer employment_status columns
-            if 'employment_status' in col_name:
-                best_candidate = candidate
-                break
-            
-            # termination_date is good but harder to show counts
-            if col_type == 'date' and 'termination' in col_name:
-                if not best_candidate:
-                    best_candidate = candidate
-                continue
-            
-            # Any categorical status column from employee-level table
-            if not best_candidate and col_type == 'categorical':
-                best_candidate = candidate
-        
-        if not best_candidate:
-            # Fallback to first candidate
-            best_candidate = status_candidates[0] if status_candidates else None
-        
-        if not best_candidate:
-            return []
-        
-        col_name = best_candidate.get('column_name', best_candidate.get('column'))
-        table_name = best_candidate.get('table_name', best_candidate.get('table', ''))
-        logger.warning(f"[CLARIFICATION] Using status column: {col_name} from {table_name.split('__')[-1]}")
-        
-        col_type = best_candidate.get('inferred_type', best_candidate.get('type', ''))
-        
-        # Handle termination_date (date type)
-        if col_type == 'date':
-            total = best_candidate.get('distinct_count', best_candidate.get('total_count', 0))
-            null_count = best_candidate.get('null_count', 0)
-            active_count = null_count  # null termination_date = active
-            termed_count = total - null_count
-            
-            return [
-                {'id': 'active', 'label': f'Active only ({active_count:,} employees)', 'default': True},
-                {'id': 'termed', 'label': f'Terminated only ({termed_count:,} employees)'},
-                {'id': 'all', 'label': f'All employees ({total:,} total)'}
-            ]
-        
-        # Handle categorical status column (A/T codes)
-        values = best_candidate.get('distinct_values', best_candidate.get('values', []))
-        distribution = best_candidate.get('value_distribution', best_candidate.get('distribution', {}))
-        total = best_candidate.get('distinct_count', best_candidate.get('total_count', 0))
-        
-        # Map codes to active/termed
-        active_codes = ['A', 'ACTIVE', 'ACT']
-        termed_codes = ['T', 'TERMINATED', 'TERM', 'I', 'INACTIVE']
-        leave_codes = ['L', 'LEAVE', 'LOA']
-        
-        active_count = sum(distribution.get(v, 0) for v in values if str(v).upper() in active_codes)
-        termed_count = sum(distribution.get(v, 0) for v in values if str(v).upper() in termed_codes)
-        leave_count = sum(distribution.get(v, 0) for v in values if str(v).upper() in leave_codes)
-        
-        options = []
-        if active_count > 0:
-            options.append({'id': 'active', 'label': f'Active only ({active_count:,} employees)', 'default': True})
-        if termed_count > 0:
-            options.append({'id': 'termed', 'label': f'Terminated only ({termed_count:,} employees)'})
-        if leave_count > 0:
-            options.append({'id': 'leave', 'label': f'On Leave ({leave_count:,} employees)'})
-        options.append({'id': 'all', 'label': f'All employees ({total:,} total)'})
-        
-        return options
-    
-    def _get_status_options_from_profiles(self) -> List[Dict]:
-        """
-        Get employee status options from actual profile data.
-        This is the key Phase 2 feature - data-driven clarification.
-        """
-        if not self.schema:
-            return []
-        
-        tables = self.schema.get('tables', [])
-        
-        # Look for status-related columns in the profiles
-        status_patterns = ['status', 'employment_status', 'emp_status', 'employee_status', 
-                          'employment_status_code', 'termination_date', 'term_date']
-        
-        for table in tables:
-            categorical_cols = table.get('categorical_columns', [])
-            column_profiles = table.get('column_profiles', {})
-            
-            # Check categorical columns for status-like values
-            for cat_col in categorical_cols:
-                col_name = cat_col.get('column', '').lower()
-                
-                # Is this a status column?
-                if any(pattern in col_name for pattern in status_patterns):
-                    values = cat_col.get('values', [])
-                    distribution = cat_col.get('distribution', {})
-                    
-                    if values:
-                        return self._build_status_options(values, distribution, col_name)
-            
-            # Also check column_profiles directly
-            for col_name, profile in column_profiles.items():
-                col_lower = col_name.lower()
-                if any(pattern in col_lower for pattern in status_patterns):
-                    if profile.get('is_categorical') and profile.get('distinct_values'):
-                        values = profile['distinct_values']
-                        distribution = profile.get('value_distribution', {})
-                        return self._build_status_options(values, distribution, col_name)
-        
-        return []
-    
-    def _build_status_options(self, values: List[str], distribution: Dict, col_name: str) -> List[Dict]:
-        """Build clarification options from actual data values."""
-        options = []
-        
-        # Common status code mappings
-        status_labels = {
-            'A': 'Active', 'T': 'Terminated', 'L': 'Leave', 'I': 'Inactive',
-            'ACTIVE': 'Active', 'TERMED': 'Terminated', 'TERM': 'Terminated',
-            'LOA': 'Leave of Absence', 'LEAVE': 'Leave', 'INACTIVE': 'Inactive',
-            'REG': 'Regular', 'TEMP': 'Temporary', 'PART': 'Part-time',
-            'FT': 'Full-time', 'PT': 'Part-time'
-        }
-        
-        # Build options with counts
-        active_values = []
-        termed_values = []
-        other_values = []
-        
-        for val in values:
-            val_upper = str(val).upper().strip()
-            count = distribution.get(val, distribution.get(str(val), 0))
-            
-            # Categorize
-            if val_upper in ['A', 'ACTIVE', 'ACT']:
-                active_values.append((val, count))
-            elif val_upper in ['T', 'TERMINATED', 'TERM', 'TERMED', 'I', 'INACTIVE']:
-                termed_values.append((val, count))
-            else:
-                other_values.append((val, count))
-        
-        # Build options with actual counts
-        if active_values:
-            active_count = sum(c for _, c in active_values)
-            active_codes = ', '.join(v for v, _ in active_values)
-            options.append({
-                'id': 'active',
-                'label': f'Active only ({active_count:,} employees)',
-                'codes': active_codes,
-                'default': True
-            })
-        
-        if termed_values:
-            termed_count = sum(c for _, c in termed_values)
-            termed_codes = ', '.join(v for v, _ in termed_values)
-            options.append({
-                'id': 'termed',
-                'label': f'Terminated only ({termed_count:,} employees)',
-                'codes': termed_codes
-            })
-        
-        # Add "All" option with total
-        total_count = sum(distribution.values()) if distribution else 0
-        options.append({
-            'id': 'all',
-            'label': f'All employees ({total_count:,} total)'
-        })
-        
-        # If we couldn't categorize well, show raw values
-        if not active_values and not termed_values and other_values:
-            options = []
-            for val, count in sorted(other_values, key=lambda x: -x[1])[:5]:
-                label = status_labels.get(str(val).upper(), str(val))
-                options.append({
-                    'id': str(val).lower(),
-                    'label': f'{label} ({count:,})',
-                    'code': val
-                })
-            options.append({'id': 'all', 'label': f'All ({total_count:,} total)'})
-        
-        logger.info(f"[CLARIFICATION] Built {len(options)} options from {col_name}: {[o['id'] for o in options]}")
-        return options
-    
-    def _get_status_column_and_codes(self, status_filter: str) -> Tuple[Optional[str], List[str]]:
-        """
-        Get the actual column name and codes to use for filtering.
-        Returns (column_name, [list of codes])
-        """
-        if not self.schema:
-            return None, []
-        
-        tables = self.schema.get('tables', [])
-        status_patterns = ['status', 'employment_status', 'emp_status', 'employee_status', 'employment_status_code']
-        
-        for table in tables:
-            categorical_cols = table.get('categorical_columns', [])
-            column_profiles = table.get('column_profiles', {})
-            
-            for cat_col in categorical_cols:
-                col_name = cat_col.get('column', '')
-                col_lower = col_name.lower()
-                
-                if any(pattern in col_lower for pattern in status_patterns):
-                    values = cat_col.get('values', [])
-                    
-                    # Find matching codes based on status_filter
-                    if status_filter == 'active':
-                        codes = [v for v in values if str(v).upper() in ['A', 'ACTIVE', 'ACT']]
-                    elif status_filter == 'termed':
-                        codes = [v for v in values if str(v).upper() in ['T', 'TERMINATED', 'TERM', 'TERMED', 'I', 'INACTIVE']]
-                    else:
-                        # Check if filter matches a specific code
-                        codes = [v for v in values if str(v).lower() == status_filter.lower()]
-                    
-                    if codes:
-                        return col_name, codes
-            
-            # Also check column_profiles
-            for col_name, profile in column_profiles.items():
-                col_lower = col_name.lower()
-                if any(pattern in col_lower for pattern in status_patterns):
-                    values = profile.get('distinct_values', [])
-                    
-                    if status_filter == 'active':
-                        codes = [v for v in values if str(v).upper() in ['A', 'ACTIVE', 'ACT']]
-                    elif status_filter == 'termed':
-                        codes = [v for v in values if str(v).upper() in ['T', 'TERMINATED', 'TERM', 'TERMED', 'I', 'INACTIVE']]
-                    else:
-                        codes = [v for v in values if str(v).lower() == status_filter.lower()]
-                    
-                    if codes:
-                        return col_name, codes
-        
-        return None, []
-    
-    def _build_filter_instructions(self, relevant_tables: List[Dict]) -> str:
-        """
-        Build SQL filter instructions from confirmed_facts and filter_candidates.
-        Uses profile data to generate accurate WHERE clauses.
-        """
-        filters = []
-        
-        # STATUS FILTER
-        status_filter = self.confirmed_facts.get('status')
-        logger.warning(f"[SQL-GEN] Building filters. status={status_filter}, all_facts={self.confirmed_facts}")
-        
-        if status_filter and status_filter != 'all':
-            # Use SAME logic as _get_status_options_from_filter_candidates to pick column
-            status_candidates = self.filter_candidates.get('status', [])
-            best_candidate = None
-            
-            for candidate in status_candidates:
-                col_name = candidate.get('column_name', candidate.get('column', '')).lower()
-                total_count = candidate.get('distinct_count', candidate.get('total_count', 0))
-                col_type = candidate.get('inferred_type', candidate.get('type', ''))
-                
-                # Skip transaction tables (too many rows per employee)
-                if total_count > 20000:
-                    continue
-                
-                # Prefer employment_status columns (categorical with A/T codes)
-                if 'employment_status' in col_name:
-                    best_candidate = candidate
-                    break
-                
-                # termination_date is fallback
-                if col_type == 'date' and 'termination' in col_name:
-                    if not best_candidate:
-                        best_candidate = candidate
-                    continue
-                
-                # Any categorical status column from employee-level table
-                if not best_candidate and col_type == 'categorical':
-                    best_candidate = candidate
-            
-            if not best_candidate and status_candidates:
-                best_candidate = status_candidates[0]
-            
-            if best_candidate:
-                col_name = best_candidate.get('column_name', best_candidate.get('column'))
-                col_type = best_candidate.get('inferred_type', best_candidate.get('type'))
-                values = best_candidate.get('distinct_values', best_candidate.get('values', []))
-                
-                logger.warning(f"[SQL-GEN] Status candidate: col={col_name}, type={col_type}")
-                
-                if col_type == 'date':  # termination_date
-                    if status_filter == 'active':
-                        filters.append(f"({col_name} IS NULL OR {col_name} = '' OR CAST({col_name} AS VARCHAR) = '')")
-                    elif status_filter == 'termed':
-                        filters.append(f"({col_name} IS NOT NULL AND {col_name} != '' AND CAST({col_name} AS VARCHAR) != '')")
-                else:  # categorical status code
-                    # Find matching codes
-                    if status_filter == 'active':
-                        codes = [v for v in values if str(v).upper() in ['A', 'ACTIVE', 'ACT']]
-                    elif status_filter == 'termed':
-                        codes = [v for v in values if str(v).upper() in ['T', 'TERMINATED', 'TERM', 'TERMED', 'I', 'INACTIVE']]
-                    elif status_filter == 'leave':
-                        codes = [v for v in values if str(v).upper() in ['L', 'LEAVE', 'LOA']]
-                    else:
-                        codes = [v for v in values if str(v).lower() == status_filter.lower()]
-                    
-                    if codes:
-                        codes_str = ', '.join(f"'{c}'" for c in codes)
-                        filters.append(f"{col_name} IN ({codes_str})")
-                    else:
-                        logger.warning(f"[SQL-GEN] No matching codes for status={status_filter} in values={values}")
-            else:
-                # Last resort fallback: look for termination_date in tables
-                for table in relevant_tables:
-                    columns = table.get('columns', [])
-                    for col in columns:
-                        col_name = col.get('name', str(col)) if isinstance(col, dict) else str(col)
-                        if 'termination_date' in col_name.lower():
-                            if status_filter == 'active':
-                                filters.append(f"({col_name} IS NULL OR {col_name} = '')")
-                            elif status_filter == 'termed':
-                                filters.append(f"({col_name} IS NOT NULL AND {col_name} != '')")
-                            break
-        
-        # COMPANY FILTER
-        company_filter = self.confirmed_facts.get('company')
-        if company_filter and company_filter != 'all':
-            company_candidates = self.filter_candidates.get('company', [])
-            if company_candidates:
-                col_name = company_candidates[0].get('column_name', company_candidates[0].get('column'))
-                filters.append(f"{col_name} = '{company_filter}'")
-        
-        # LOCATION FILTER
-        location_filter = self.confirmed_facts.get('location')
-        if location_filter and location_filter != 'all':
-            location_candidates = self.filter_candidates.get('location', [])
-            
-            # Find a VALID location column (reject routing numbers, bank fields, etc.)
-            # This is a safety net for cached profiles from before the profiler fix
-            location_positive = ['state', 'province', 'stateprovince', 'location', 'region', 'city', 'county', 'country', 'site', 'geo']
-            location_negative = ['routing', 'bank', 'account', 'aba', 'swift', 'transit', 'branch_number', 'bsb']
-            
-            valid_col = None
-            valid_table = None
-            
-            # First try filter_candidates
-            for candidate in location_candidates:
-                col_name = candidate.get('column_name', candidate.get('column', ''))
-                col_lower = col_name.lower()
-                
-                # Skip if column name contains invalid patterns
-                if any(neg in col_lower for neg in location_negative):
-                    logger.warning(f"[SQL-GEN] Skipping invalid location column: {col_name}")
-                    continue
-                
-                # Prefer columns with location-related names
-                if any(pos in col_lower for pos in location_positive):
-                    valid_col = col_name
-                    valid_table = candidate.get('table_name', candidate.get('table'))
-                    break
-                
-                # Accept as fallback if no obvious red flags
-                if not valid_col:
-                    valid_col = col_name
-                    valid_table = candidate.get('table_name', candidate.get('table'))
-            
-            # Fallback: search schema for state/province columns if no valid candidate
-            if not valid_col and self.schema:
-                for table_name, table_info in self.schema.items():
-                    columns = table_info.get('columns', [])
-                    for col in columns:
-                        col_lower = col.lower() if isinstance(col, str) else str(col).lower()
-                        if any(pos in col_lower for pos in ['state', 'province', 'stateprovince']):
-                            valid_col = col
-                            valid_table = table_name
-                            logger.warning(f"[SQL-GEN] Found location column from schema: {table_name}.{col}")
-                            break
-                    if valid_col:
-                        break
-            
-            if valid_col:
-                filters.append(f"{valid_col} = '{location_filter}'")
-                logger.warning(f"[SQL-GEN] Location filter: {valid_col} = '{location_filter}'")
-            else:
-                logger.warning(f"[SQL-GEN] No valid location column found, skipping location filter")
-        
-        # PAY TYPE FILTER
-        pay_type_filter = self.confirmed_facts.get('pay_type')
-        if pay_type_filter and pay_type_filter != 'all':
-            pay_candidates = self.filter_candidates.get('pay_type', [])
-            if pay_candidates:
-                col_name = pay_candidates[0].get('column_name', pay_candidates[0].get('column'))
-                values = pay_candidates[0].get('distinct_values', pay_candidates[0].get('values', []))
-                # Map common terms to actual codes
-                if pay_type_filter in ['hourly', 'h']:
-                    codes = [v for v in values if str(v).upper() in ['H', 'HOURLY']]
-                elif pay_type_filter in ['salary', 'salaried', 's']:
-                    codes = [v for v in values if str(v).upper() in ['S', 'SALARY', 'SALARIED']]
-                else:
-                    codes = [pay_type_filter]
-                if codes:
-                    codes_str = ', '.join(f"'{c}'" for c in codes)
-                    filters.append(f"{col_name} IN ({codes_str})")
-        
-        # EMPLOYEE TYPE FILTER
-        emp_type_filter = self.confirmed_facts.get('employee_type')
-        if emp_type_filter and emp_type_filter != 'all':
-            emp_candidates = self.filter_candidates.get('employee_type', [])
-            if emp_candidates:
-                col_name = emp_candidates[0].get('column_name', emp_candidates[0].get('column'))
-                values = emp_candidates[0].get('distinct_values', emp_candidates[0].get('values', []))
-                # Map common terms
-                if emp_type_filter in ['regular', 'reg']:
-                    codes = [v for v in values if str(v).upper() in ['REG', 'REGULAR']]
-                elif emp_type_filter in ['temp', 'temporary']:
-                    codes = [v for v in values if str(v).upper() in ['TMP', 'TEMP', 'TEMPORARY']]
-                elif emp_type_filter in ['contractor', 'contract']:
-                    codes = [v for v in values if str(v).upper() in ['CON', 'CTR', 'CONTRACTOR']]
-                else:
-                    codes = [emp_type_filter]
-                if codes:
-                    codes_str = ', '.join(f"'{c}'" for c in codes)
-                    filters.append(f"{col_name} IN ({codes_str})")
-        
-        # Build final filter string
-        if filters:
-            return "WHERE " + " AND ".join(filters)
-        
-        return ""
-    
-    def _fix_state_names_in_sql(self, sql: str) -> str:
-        """
-        Strip location/state filters from LLM-generated SQL.
-        
-        We handle location filters via data-driven injection from confirmed_facts.
-        The LLM sometimes adds its own (wrong) location filters like ILIKE '%Texas%'.
-        We strip these and let our filter injection handle it properly.
-        """
-        # Only strip if we have a confirmed location filter (we'll inject the right one)
-        location_filter = self.confirmed_facts.get('location')
-        if not location_filter or location_filter == 'all':
-            return sql
-        
-        # Common location column patterns to strip (LLM might use any of these)
-        location_col_patterns = [
-            'stateprovince', 'state_province', 'state', 'province', 
-            'work_state', 'home_state', 'location', 'work_location'
-        ]
-        
-        modified = sql
-        
-        for col_name in location_col_patterns:
-            # Strip patterns like: column ILIKE '%anything%'
-            # This removes the LLM's location filter so our injection can add the correct one
-            
-            # Pattern 0: WHERE col ILIKE '...' AND ... → WHERE ...
-            pattern0 = rf"WHERE\s+{re.escape(col_name)}\s+ILIKE\s+'%?[^']+%?'\s*AND\s*"
-            modified = re.sub(pattern0, 'WHERE ', modified, flags=re.IGNORECASE)
-            
-            # Pattern 1: ... AND col ILIKE '...' AND ... → ... AND ...
-            pattern1 = rf"{re.escape(col_name)}\s+ILIKE\s+'%?[^']+%?'\s*AND\s*"
-            modified = re.sub(pattern1, '', modified, flags=re.IGNORECASE)
-            
-            # Pattern 2: ... AND col ILIKE '...' (at end) → ...
-            pattern2 = rf"\s*AND\s+{re.escape(col_name)}\s+ILIKE\s+'%?[^']+%?'"
-            modified = re.sub(pattern2, '', modified, flags=re.IGNORECASE)
-            
-            # Pattern 3: WHERE col = 'StateName' AND ... → WHERE ...
-            pattern3 = rf"WHERE\s+{re.escape(col_name)}\s*=\s*'[A-Za-z\s]+'\s*AND\s*"
-            modified = re.sub(pattern3, 'WHERE ', modified, flags=re.IGNORECASE)
-            
-            # Pattern 4: ... AND col = 'StateName' (at end) → ...  
-            pattern4 = rf"\s*AND\s+{re.escape(col_name)}\s*=\s*'[A-Za-z\s]+'"
-            modified = re.sub(pattern4, '', modified, flags=re.IGNORECASE)
-            
-            # Pattern 5: WHERE col ILIKE '...' (standalone, no AND) → WHERE 1=1
-            pattern5 = rf"WHERE\s+{re.escape(col_name)}\s+ILIKE\s+'%?[^']+%?'\s*$"
-            modified = re.sub(pattern5, 'WHERE 1=1 ', modified, flags=re.IGNORECASE)
-        
-        if modified != sql:
-            logger.warning(f"[SQL-FIX] Stripped LLM location filter, will use confirmed_facts['location']={location_filter}")
-        
-        if modified != sql:
-            logger.warning(f"[SQL-FIX] Before: {sql[:150]}")
-            logger.warning(f"[SQL-FIX] After: {modified[:150]}")
-        
-        return modified
-    
-    def _inject_where_clause(self, sql: str, filter_clause: str) -> str:
-        """
-        Inject a WHERE clause into SQL that may or may not already have one.
-        
-        This is the data-driven approach: LLM generates structure, we inject filters.
-        """
-        # Clean up filter_clause - remove leading WHERE if present
-        conditions = filter_clause.strip()
-        if conditions.upper().startswith('WHERE '):
-            conditions = conditions[6:].strip()
-        
-        if not conditions:
-            logger.warning(f"[FILTER-INJECT] No conditions to inject")
-            return sql
-        
-        logger.warning(f"[FILTER-INJECT] Injecting: {conditions}")
-        logger.warning(f"[FILTER-INJECT] SQL length before: {len(sql)}")
-        
-        sql_upper = sql.upper()
-        
-        # Check if SQL already has WHERE
-        where_match = re.search(r'\bWHERE\b', sql, re.IGNORECASE)
-        
-        if where_match:
-            # Has WHERE - add with AND after existing conditions
-            logger.warning(f"[FILTER-INJECT] Found existing WHERE at position {where_match.start()}")
-            where_pos = where_match.end()
-            
-            # Find the end of existing WHERE conditions
-            end_keywords = ['GROUP BY', 'ORDER BY', 'LIMIT', 'HAVING', ';']
-            end_pos = len(sql)
-            
-            for keyword in end_keywords:
-                kw_match = re.search(rf'\b{keyword}\b', sql[where_pos:], re.IGNORECASE)
-                if kw_match:
-                    candidate_pos = where_pos + kw_match.start()
-                    if candidate_pos < end_pos:
-                        end_pos = candidate_pos
-            
-            # Insert AND + conditions before end_pos
-            sql = sql[:end_pos].rstrip() + f" AND {conditions} " + sql[end_pos:]
+                except Exception as col_e:
+                    logger.warning(f"[SCHEMA] Error processing {table_name}: {col_e}")
         
         else:
-            # No WHERE - find where to insert
-            logger.warning(f"[FILTER-INJECT] No existing WHERE found")
-            
-            # Insert before GROUP BY, ORDER BY, LIMIT, or at end
-            insert_keywords = ['GROUP BY', 'ORDER BY', 'LIMIT', 'HAVING']
-            insert_pos = len(sql.rstrip().rstrip(';'))
-            
-            for keyword in insert_keywords:
-                kw_match = re.search(rf'\b{keyword}\b', sql, re.IGNORECASE)
-                if kw_match and kw_match.start() < insert_pos:
-                    insert_pos = kw_match.start()
-                    logger.warning(f"[FILTER-INJECT] Found {keyword} at {insert_pos}")
-            
-            logger.warning(f"[FILTER-INJECT] Insert position: {insert_pos}")
-            
-            # Insert WHERE clause
-            before = sql[:insert_pos].rstrip()
-            after = sql[insert_pos:].lstrip()
-            
-            logger.warning(f"[FILTER-INJECT] Before part ends with: ...{before[-50:] if len(before) > 50 else before}")
-            logger.warning(f"[FILTER-INJECT] After part: {after[:50] if after else 'EMPTY'}")
-            
-            if after:
-                sql = f"{before} WHERE {conditions} {after}"
-            else:
-                sql = f"{before} WHERE {conditions}"
-        
-        logger.warning(f"[FILTER-INJECT] SQL length after: {len(sql)}")
-        return sql.strip()
-    
-    def _detect_mode(self, q_lower: str) -> IntelligenceMode:
-        """Detect the appropriate intelligence mode."""
-        if any(w in q_lower for w in ['validate', 'check', 'verify', 'issues', 'problems']):
-            return IntelligenceMode.VALIDATE
-        if any(w in q_lower for w in ['configure', 'set up', 'setup']):
-            return IntelligenceMode.CONFIGURE
-        if any(w in q_lower for w in ['compare', 'versus', 'vs', 'difference']):
-            return IntelligenceMode.COMPARE
-        if any(w in q_lower for w in ['report', 'summary', 'overview']):
-            return IntelligenceMode.REPORT
-        if any(w in q_lower for w in ['analyze', 'trend', 'pattern']):
-            return IntelligenceMode.ANALYZE
-        return IntelligenceMode.SEARCH
-    
-    def _detect_domains(self, q_lower: str) -> List[str]:
-        """Detect which data domains are relevant."""
-        domains = []
-        
-        if any(w in q_lower for w in ['employee', 'worker', 'staff', 'people', 'who', 'how many', 'count']):
-            domains.append('employees')
-        if any(w in q_lower for w in ['earn', 'pay', 'salary', 'wage', 'rate', 'hour', '$', 'compensation']):
-            domains.append('earnings')
-        if any(w in q_lower for w in ['deduction', 'benefit', '401k', 'insurance', 'health']):
-            domains.append('deductions')
-        if any(w in q_lower for w in ['tax', 'withhold', 'federal', 'state']):
-            domains.append('taxes')
-        if any(w in q_lower for w in ['job', 'position', 'title', 'department']):
-            domains.append('jobs')
-        
-        return domains if domains else ['general']
-    
-    def _select_relevant_tables(self, tables: List[Dict], q_lower: str) -> List[Dict]:
-        """
-        Select only tables relevant to the question.
-        This keeps the SQL prompt small and focused.
-        
-        IMPORTANT: Always includes tables containing filter_candidate columns
-        so the LLM can build proper JOINs for compound queries.
-        
-        PRIORITY: Main data tables over lookup/reference tables.
-        """
-        if not tables:
-            return []
-        
-        # First, identify tables that contain filter_candidate columns
-        # These MUST be included for compound queries to work
-        filter_candidate_tables = set()
-        if self.filter_candidates:
-            for category, candidates in self.filter_candidates.items():
-                for cand in candidates:
-                    table_name = cand.get('table_name', cand.get('table', ''))
-                    if table_name:
-                        filter_candidate_tables.add(table_name.lower())
-        
-        logger.info(f"[SQL-GEN] Filter candidate tables: {filter_candidate_tables}")
-        
-        # Lookup/reference table indicators (should be deprioritized)
-        LOOKUP_INDICATORS = [
-            '_codes', '_lookup', '_ref', '_types', '_ethnic', 
-            '_status', '_category', '_mapping', 'ethnic_co',
-            'org_level_', 'scheduled_', 'supervisor'
-        ]
-        
-        # Priority keywords for table selection
-        table_keywords = {
-            'personal': ['employee', 'employees', 'person', 'people', 'who', 'name', 'ssn', 'birth', 'hire', 'termination', 'termed', 'terminated', 'active'],
-            'company': ['company', 'organization', 'org', 'entity', 'status', 'location', 'job'],
-            'job': ['job', 'position', 'title', 'department', 'dept'],
-            'earnings': ['earn', 'earning', 'pay', 'salary', 'wage', 'compensation', 'rate'],
-            'deductions': ['deduction', 'benefit', '401k', 'insurance', 'health'],
-            'taxes': ['tax', 'withhold', 'federal', 'state'],
-            'time': ['time', 'hours', 'attendance', 'schedule'],
-            'address': ['address', 'location', 'city', 'state', 'zip'],
-        }
-        
-        # Score each table
-        scored_tables = []
-        for table in tables:
-            table_name = table.get('table_name', '').lower()
-            columns = table.get('columns', [])
-            row_count = table.get('row_count', 0)
-            
-            score = 0
-            
-            # DEPRIORITIZE lookup/reference tables
-            is_lookup = any(indicator in table_name for indicator in LOOKUP_INDICATORS)
-            if is_lookup:
-                score -= 30  # Significant penalty for lookup tables
-                logger.info(f"[SQL-GEN] Deprioritizing lookup table: {table_name[-40:]}")
-            
-            # DEPRIORITIZE tables with very few columns (likely lookups)
-            if len(columns) <= 3:
-                score -= 20
-            
-            # CRITICAL: Boost tables that have filter_candidate columns
-            if table_name in filter_candidate_tables:
-                score += 50  # Very high score to ensure inclusion
-                logger.info(f"[SQL-GEN] Boosting table {table_name[-40:]} (has filter candidates)")
-            
-            # Check if table name matches any keyword patterns
-            for pattern, keywords in table_keywords.items():
-                if pattern in table_name:
-                    # Check if any keyword is in the question
-                    if any(kw in q_lower for kw in keywords):
-                        score += 10
-                    else:
-                        score += 1  # Table exists but question doesn't directly ask about it
-            
-            # Boost "personal" table for general employee questions - but NOT lookup variants
-            if 'personal' in table_name and not is_lookup:
-                if any(kw in q_lower for kw in ['employee', 'how many', 'count', 'who']):
-                    score += 25
-            
-            # Boost tables with high row counts (they're likely the main tables)
-            if row_count > 1000:
-                score += 10
-            elif row_count > 100:
-                score += 5
-            elif row_count < 50:
-                score -= 5  # Likely a lookup table
-            
-            # Boost tables with many columns (main data tables)
-            if len(columns) > 15:
-                score += 10
-            elif len(columns) > 8:
-                score += 5
-            
-            scored_tables.append((score, table))
-            logger.debug(f"[SQL-GEN] Table {table_name[-30:]} score={score} (rows={row_count}, cols={len(columns)}, lookup={is_lookup})")
-        
-        # Sort by score descending
-        scored_tables.sort(key=lambda x: -x[0])
-        
-        # Log top tables for debugging
-        for score, t in scored_tables[:5]:
-            logger.warning(f"[SQL-GEN] Candidate: {t.get('table_name', '')[-40:]} score={score}")
-        
-        # Take top 5 tables (increased from 3 to handle compound queries)
-        relevant = [t for score, t in scored_tables[:5] if score > 0]
-        
-        # If no relevant tables found, just use first table
-        if not relevant:
-            relevant = [tables[0]]
-        
-        logger.info(f"[SQL-GEN] Selected {len(relevant)} relevant tables")
-        
-        return relevant
-    
-    def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
-        """Generate SQL query using LLMOrchestrator with SMART table selection."""
-        logger.warning(f"[SQL-GEN] v5.6 - Starting SQL generation")
-        logger.warning(f"[SQL-GEN] confirmed_facts: {self.confirmed_facts}")
-        
-        if not self.structured_handler or not self.schema:
-            return None
-        
-        tables = self.schema.get('tables', [])
-        if not tables:
-            return None
-        
-        # Get LLMOrchestrator
-        try:
-            try:
-                from utils.llm_orchestrator import LLMOrchestrator
-            except ImportError:
-                from backend.utils.llm_orchestrator import LLMOrchestrator
-            
-            orchestrator = LLMOrchestrator()
-        except Exception as e:
-            logger.error(f"[SQL-GEN] Could not load LLMOrchestrator: {e}")
-            return None
-        
-        # SMART TABLE SELECTION - only include relevant tables
-        q_lower = question.lower()
-        relevant_tables = self._select_relevant_tables(tables, q_lower)
-        
-        # Build COMPACT schema with SHORT ALIASES
-        tables_info = []
-        all_columns = set()
-        primary_table = None
-        table_aliases = {}  # Map short alias to full name
-        used_aliases = set()  # Track used aliases to avoid duplicates
-        
-        def extract_short_alias(table_info: dict, used: set) -> str:
-            """Extract a meaningful short alias from table info.
-            
-            Priority:
-            1. Use sheet_name from metadata (most reliable)
-            2. Extract from table_name as fallback
-            """
-            full_table_name = table_info.get('table_name', '')
-            
-            # BEST: Use sheet_name from metadata if available
-            sheet_name = table_info.get('sheet_name', '')
-            if sheet_name:
-                # Clean up sheet name for SQL alias
-                clean_sheet = re.sub(r'[^\w]', '_', sheet_name.lower()).strip('_')
-                clean_sheet = re.sub(r'_+', '_', clean_sheet)  # Remove double underscores
-                if clean_sheet and len(clean_sheet) <= 30:
-                    if clean_sheet not in used:
-                        return clean_sheet
-                    # If duplicate, append a number
-                    for suffix in range(2, 10):
-                        candidate = f"{clean_sheet}{suffix}"
-                        if candidate not in used:
-                            return candidate
-            
-            # FALLBACK: Check for __ delimiter (old format)
-            if '__' in full_table_name:
-                candidate = full_table_name.split('__')[-1]
-                if candidate and candidate not in used:
-                    return candidate
-            
-            # FALLBACK: Use last meaningful segment after splitting
-            parts = full_table_name.split('_')
-            if len(parts) >= 2:
-                # Try last 2-3 parts for uniqueness
-                for i in range(2, min(5, len(parts))):
-                    candidate = '_'.join(parts[-i:])
-                    if len(candidate) <= 25 and candidate not in used:
-                        return candidate
-            
-            # Last resort: truncated name with index
-            base = full_table_name[:15]
-            if base not in used:
-                return base
-            for suffix in range(2, 100):
-                candidate = f"{base}_{suffix}"
-                if candidate not in used:
-                    return candidate
-            
-            return full_table_name  # Give up, use full name
-        
-        for i, table in enumerate(relevant_tables):
-            table_name = table.get('table_name', '')
-            columns = table.get('columns', [])
-            if columns and isinstance(columns[0], dict):
-                col_names = [c.get('name', str(c)) for c in columns]
-            else:
-                col_names = [str(c) for c in columns] if columns else []
-            row_count = table.get('row_count', 0)
-            
-            all_columns.update(col_names)
-            
-            # Create SHORT alias - use sheet_name from metadata when available
-            short_name = extract_short_alias(table, used_aliases)
-            used_aliases.add(short_name)
-            table_aliases[short_name] = table_name
-            
-            logger.warning(f"[SQL-GEN] Table alias: {short_name} → {table_name}")
-            
-            # First relevant table is "primary"
-            if i == 0:
-                primary_table = short_name
-            
-            # Only include sample for primary table
-            sample_str = ""
-            if i == 0:
-                try:
-                    rows = self.structured_handler.query(f'SELECT * FROM "{table_name}" LIMIT 2')
-                    cols = list(rows[0].keys()) if rows else []
-                    if rows and cols:
-                        samples = []
-                        for col in cols[:4]:  # Limit to 4 columns
-                            vals = set(str(row.get(col, ''))[:15] for row in rows if row.get(col))
-                            if vals:
-                                samples.append(f"    {col}: {', '.join(list(vals)[:2])}")
-                        sample_str = "\n  Sample:\n" + "\n".join(samples[:4]) if samples else ""
-                except:
-                    pass
-            
-            # Compact column list
-            col_str = ', '.join(col_names[:15])
-            if len(col_names) > 15:
-                col_str += f" (+{len(col_names) - 15} more)"
-            
-            # Use SHORT name in schema
-            tables_info.append(f"Table: {short_name}\n  Columns: {col_str}\n  Rows: {row_count}{sample_str}")
-        
-        # Store aliases for SQL post-processing
-        self._table_aliases = table_aliases
-        
-        schema_text = '\n\n'.join(tables_info)
-        
-        # SIMPLIFIED relationships - only between relevant tables
-        relationships_text = ""
-        if self.relationships and len(relevant_tables) > 1:
-            relevant_table_names = {t.get('table_name', '') for t in relevant_tables}
-            rel_lines = []
-            for rel in self.relationships[:10]:
-                src_table = rel.get('source_table', '')
-                tgt_table = rel.get('target_table', '')
-                if src_table in relevant_table_names and tgt_table in relevant_table_names:
-                    src = f"{src_table.split('__')[-1]}.{rel.get('source_column')}"
-                    tgt = f"{tgt_table.split('__')[-1]}.{rel.get('target_column')}"
-                    rel_lines.append(f"  {src} → {tgt}")
-            if rel_lines:
-                relationships_text = "\n\nJOIN ON:\n" + "\n".join(rel_lines[:5])
-        
-        # BUILD FILTER INSTRUCTIONS FROM CONFIRMED FACTS (for post-injection)
-        filter_instructions = self._build_filter_instructions(relevant_tables)
-        logger.warning(f"[SQL-GEN] filter_instructions: {filter_instructions if filter_instructions else 'NONE'}")
-        
-        # BUILD SEMANTIC HINTS from filter_candidates
-        # This tells the LLM which columns to use for specific purposes
-        # For simple queries, only include columns from the primary table
-        semantic_hints = []
-        
-        # Get primary table name for filtering
-        primary_table_full = relevant_tables[0].get('table_name', '') if relevant_tables else ''
-        primary_table_short = primary_table_full.split('__')[-1] if '__' in primary_table_full else primary_table_full
-        
-        # Check if this is a simple "by X" query (should avoid JOINs)
-        is_simple_query = bool(re.search(r'\bshow\s+\w+.*\bby\s+\w+', q_lower)) or bool(re.search(r'\bhow many\b', q_lower))
-        
-        if self.filter_candidates:
-            for category, candidates in self.filter_candidates.items():
-                if not candidates:
+            # ================================================================
+            # PRIMARY PATH: Use metadata_tables from get_tables()
+            # ================================================================
+            for table_info in metadata_tables:
+                table_name = table_info.get('table_name', '')
+                if not table_name:
                     continue
+                
+                # Get columns - use metadata columns or query
+                columns = table_info.get('columns', [])
+                if columns and isinstance(columns[0], dict):
+                    columns = [c.get('name', str(c)) for c in columns]
+                
+                if not columns:
+                    try:
+                        col_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
+                        columns = [row[1] for row in col_result]
+                    except:
+                        try:
+                            result = handler.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 0')
+                            columns = [desc[0] for desc in result.description]
+                        except:
+                            columns = []
+                
+                row_count = table_info.get('row_count', 0)
+                
+                # Get column profiles (Phase 2: Data-driven clarification)
+                categorical_columns = []
+                column_profiles = {}
+                
+                try:
+                    profile_result = handler.conn.execute("""
+                        SELECT column_name, inferred_type, distinct_count, 
+                               distinct_values, value_distribution, is_categorical,
+                               min_value, max_value, filter_category
+                        FROM _column_profiles 
+                        WHERE table_name = ?
+                    """, [table_name]).fetchall()
                     
-                if category == 'status':
-                    # Status can have multiple useful columns - list them all
-                    date_cols = []
-                    code_cols = []
-                    for cand in candidates:
-                        col_name = cand.get('column_name', cand.get('column', ''))
-                        col_type = cand.get('inferred_type', cand.get('type', ''))
-                        table_name = cand.get('table_name', cand.get('table', ''))
-                        short_table = table_name.split('__')[-1] if '__' in table_name else table_name
-                        col_lower = col_name.lower()
-                        logger.warning(f"[SQL-GEN] Status candidate column: {col_name} in {short_table} (type={col_type})")
-                        # Check if this is a termination date column
-                        is_term_date = (
-                            col_type == 'date' or
-                            'termination' in col_lower or 
-                            'term_date' in col_lower or
-                            'term_dt' in col_lower or
-                            'termdate' in col_lower or
-                            col_lower == 'term_date' or
-                            col_lower.endswith('_term_date')
-                        )
-                        if is_term_date:
-                            date_cols.append((f"{short_table}.{col_name}", col_lower))
-                        else:
-                            # Prioritize employment_status columns
-                            priority = 0
-                            if 'employment_status' in col_lower:
-                                priority = 100
-                            elif 'emp_status' in col_lower:
-                                priority = 90
-                            elif col_lower == 'status' or col_lower.endswith('_status'):
-                                priority = 50
-                            code_cols.append((f"{short_table}.{col_name}", priority))
-                    
-                    if date_cols:
-                        semantic_hints.append(f"- For termination dates/timing: use {date_cols[0][0]}")
-                    if code_cols:
-                        # Sort by priority descending, pick best
-                        code_cols.sort(key=lambda x: -x[1])
-                        semantic_hints.append(f"- For employee status (active/termed): use {code_cols[0][0]}")
-                else:
-                    # Other categories - find column in primary table if possible
-                    best = candidates[0]
-                    col_name = best.get('column_name', best.get('column', ''))
-                    table_name = best.get('table_name', best.get('table', ''))
-                    short_table = table_name.split('__')[-1] if '__' in table_name else table_name
-                    
-                    # For simple queries, prefer columns in the primary table
-                    if is_simple_query and short_table and short_table != primary_table_short:
-                        # Try to find same column in primary table
-                        found_in_primary = False
-                        for cand in candidates:
-                            cand_table = cand.get('table_name', cand.get('table', ''))
-                            cand_short = cand_table.split('__')[-1] if '__' in cand_table else cand_table
-                            if cand_short == primary_table_short:
-                                col_name = cand.get('column_name', cand.get('column', ''))
-                                short_table = cand_short
-                                found_in_primary = True
-                                break
+                    for prow in profile_result:
+                        col_name = prow[0]
+                        profile = {
+                            'inferred_type': prow[1],
+                            'distinct_count': prow[2],
+                            'is_categorical': prow[5],
+                            'filter_category': prow[8]
+                        }
                         
-                        if not found_in_primary:
-                            logger.warning(f"[SQL-GEN] Skipping hint for {category} - column not in primary table {primary_table_short}")
-                            continue
-                    
-                    full_col = f"{short_table}.{col_name}" if short_table else col_name
-                    
-                    if category == 'location':
-                        semantic_hints.append(f"- For location/state: use {full_col}")
-                    elif category == 'company':
-                        semantic_hints.append(f"- For company: use {full_col}")
-                    elif category == 'organization':
-                        semantic_hints.append(f"- For org/department: use {full_col}")
-                    elif category == 'pay_type':
-                        semantic_hints.append(f"- For pay type (hourly/salary): use {full_col}")
-                    elif category == 'employee_type':
-                        semantic_hints.append(f"- For employee type (regular/temp): use {full_col}")
-                    elif category == 'job':
-                        semantic_hints.append(f"- For job/position: use {full_col}")
+                        if prow[3]:  # distinct_values
+                            try:
+                                profile['distinct_values'] = json.loads(prow[3])
+                            except:
+                                pass
+                        
+                        if prow[4]:  # value_distribution
+                            try:
+                                profile['value_distribution'] = json.loads(prow[4])
+                            except:
+                                pass
+                        
+                        if prow[1] == 'numeric':
+                            profile['min_value'] = prow[6]
+                            profile['max_value'] = prow[7]
+                        
+                        column_profiles[col_name] = profile
+                        
+                        if prow[5] and prow[2] and prow[2] <= 20:  # is_categorical and small distinct count
+                            categorical_columns.append({
+                                'column': col_name,
+                                'values': profile.get('distinct_values', []),
+                                'distribution': profile.get('value_distribution', {}),
+                                'filter_category': prow[8]
+                            })
+                            
+                except Exception as profile_e:
+                    logger.debug(f"[SCHEMA] No profiles for {table_name}: {profile_e}")
+                
+                tables.append({
+                    'table_name': table_name,
+                    'project': project or 'unknown',
+                    'columns': columns,
+                    'row_count': row_count,
+                    'column_profiles': column_profiles,
+                    'categorical_columns': categorical_columns
+                })
         
-        semantic_text = ""
-        if semantic_hints:
-            # Add note about automatic status filtering
-            semantic_hints.insert(0, "NOTE: Status filtering (active/termed) is applied automatically - do not add WHERE clauses for it")
-            semantic_text = "\n\nCOLUMN USAGE:\n" + "\n".join(semantic_hints)
-            logger.warning(f"[SQL-GEN] Semantic hints: {len(semantic_hints)} column mappings added")
-            for hint in semantic_hints:
-                logger.warning(f"[SQL-GEN] Hint: {hint}")
+        # Get filter candidates
+        try:
+            filter_candidates = handler.get_filter_candidates(project)
+        except:
+            pass
         
-        # Build query hints based on question patterns
-        query_hints = []
+        logger.warning(f"[SCHEMA] Returning {len(tables)} tables for project '{project}'")
         
-        # "Show X by Y" pattern - simple aggregation, no JOINs needed
-        if re.search(r'\bshow\s+\w+\s+\w*\s*by\s+\w+', q_lower) or re.search(r'\bby\s+(job|state|location|company|month|year)\b', q_lower):
-            query_hints.append(f"Use simple aggregation: SELECT column, COUNT(*) FROM {primary_table} GROUP BY column")
-            query_hints.append("Do NOT use JOINs for simple counts")
-            
-            # Add ORDER BY hints
-            if 'month' in q_lower or 'year' in q_lower or 'date' in q_lower:
-                query_hints.append("ORDER BY the date/month column ASC for chronological order")
-            else:
-                query_hints.append("ORDER BY COUNT(*) DESC to show highest counts first")
-        
-        # COUNT hint
-        if 'how many' in q_lower or 'count' in q_lower:
-            query_hints.append(f"For COUNT, use: SELECT COUNT(*) FROM \"{primary_table}\"")
-        
-        # GROUP BY hint - detect "by X" patterns
-        group_by_patterns = [
-            (r'\bby\s+month\b', 'GROUP BY month - use strftime(\'%Y-%m\', TRY_CAST(date_column AS DATE)) to get YYYY-MM format'),
-            (r'\bby\s+year\b', 'GROUP BY year - use EXTRACT(YEAR FROM date_column)'),
-            (r'\bby\s+(state|location)\b', 'GROUP BY location/state column'),
-            (r'\bby\s+(company|org)\b', 'GROUP BY company/organization column'),
-            (r'\bby\s+(department|dept)\b', 'GROUP BY department/org column'),
-        ]
-        
-        for pattern, hint in group_by_patterns:
-            if re.search(pattern, q_lower):
-                query_hints.append(hint)
-                logger.warning(f"[SQL-GEN] Detected GROUP BY pattern: {pattern}")
-        
-        # Format all hints
-        query_hint = ""
-        if query_hints:
-            query_hint = "\n\nHINTS:\n" + "\n".join(f"- {h}" for h in query_hints)
-        
-        prompt = f"""SCHEMA:
-{schema_text}{relationships_text}{semantic_text}
-{query_hint}
+    except Exception as e:
+        logger.error(f"[SCHEMA] Failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+    
+    return {'tables': tables, 'filter_candidates': filter_candidates}
 
-QUESTION: {question}
 
-RULES:
-1. Use ONLY columns from SCHEMA - never invent columns
-2. DO NOT add WHERE for status/active/termed - filters injected automatically
-3. For "show X by Y" queries: SELECT Y, COUNT(*) FROM table GROUP BY Y
-4. Keep queries SIMPLE - avoid JOINs unless absolutely needed
-5. ILIKE for text matching
+# =============================================================================
+# ANSWER GENERATION
+# =============================================================================
 
-SQL:"""
+async def generate_synthesized_answer(
+    question: str,
+    context: str,
+    persona: str,
+    insights: List,
+    conflicts: List,
+    citations: CitationBuilder,
+    quality_alerts: DataQualityService,
+    follow_ups: List[str],
+    redactor: ReversibleRedactor
+) -> str:
+    """
+    Generate the final synthesized answer using Claude.
+    
+    This is where all the pieces come together - data, quality alerts,
+    citations, and follow-ups into one cohesive response.
+    """
+    try:
+        if not LLM_AVAILABLE:
+            logger.warning("[UNIFIED] LLM not available, returning raw context")
+            return context[:3000]
         
-        logger.warning(f"[SQL-GEN] Calling orchestrator ({len(prompt)} chars, {len(relevant_tables)} tables)")
+        orchestrator = LLMOrchestrator()
         
-        result = orchestrator.generate_sql(prompt, all_columns)
+        if not orchestrator.claude_api_key:
+            logger.warning("[UNIFIED] No Claude API key")
+            return context[:3000]
         
-        if result.get('success') and result.get('sql'):
-            sql = result['sql'].strip()
-            
-            # Clean markdown
-            if '```' in sql:
-                sql = re.sub(r'```sql\s*', '', sql, flags=re.IGNORECASE)
-                sql = re.sub(r'```\s*$', '', sql)
-                sql = sql.replace('```', '').strip()
-            
-            logger.warning(f"[SQL-GEN] LLM raw output: {sql[:200]}")
-            
-            # EXPAND short aliases to full table names WITH alias preservation
-            # (?!\.) prevents matching table.column references like personal.termination_date
-            if hasattr(self, '_table_aliases') and self._table_aliases:
-                for short_name, full_name in self._table_aliases.items():
-                    # Replace FROM short_name → FROM "full_name" AS short_name
-                    sql = re.sub(
-                        rf'\bFROM\s+{re.escape(short_name)}\b(?!\.)(?!\s+AS)',
-                        f'FROM "{full_name}" AS {short_name}',
-                        sql,
-                        flags=re.IGNORECASE
-                    )
-                    sql = re.sub(
-                        rf'\bFROM\s+"{re.escape(short_name)}"(?!\.)(?!\s+AS)',
-                        f'FROM "{full_name}" AS {short_name}',
-                        sql,
-                        flags=re.IGNORECASE
-                    )
-                    # Replace JOIN short_name → JOIN "full_name" AS short_name
-                    sql = re.sub(
-                        rf'\bJOIN\s+{re.escape(short_name)}\b(?!\.)(?!\s+AS)',
-                        f'JOIN "{full_name}" AS {short_name}',
-                        sql,
-                        flags=re.IGNORECASE
-                    )
-                    sql = re.sub(
-                        rf'\bJOIN\s+"{re.escape(short_name)}"(?!\.)(?!\s+AS)',
-                        f'JOIN "{full_name}" AS {short_name}',
-                        sql,
-                        flags=re.IGNORECASE
-                    )
-                logger.warning(f"[SQL-GEN] After alias expansion: {sql[:200]}")
-            
-            # STRIP LLM-generated status filters (we inject the correct one ourselves)
-            # The LLM often ignores our "don't add status WHERE" instruction
-            status_filter_patterns = [
-                r"\bWHERE\s+\w*\.?employment_status_code\s*=\s*'[^']*'\s*",  # WHERE x.employment_status_code = 'TERM'
-                r"\bAND\s+\w*\.?employment_status_code\s*=\s*'[^']*'\s*",    # AND x.employment_status_code = 'TERM'
-                r"\bWHERE\s+\w*\.?employment_status\s*=\s*'[^']*'\s*",       # WHERE employment_status = 'X'
-                r"\bAND\s+\w*\.?employment_status\s*=\s*'[^']*'\s*",
-            ]
-            for pattern in status_filter_patterns:
-                if re.search(pattern, sql, re.IGNORECASE):
-                    logger.warning(f"[SQL-GEN] Stripping LLM-generated status filter")
-                    # If it was the only WHERE clause, remove it entirely
-                    sql = re.sub(pattern, 'WHERE ', sql, count=1, flags=re.IGNORECASE)
-                    # Clean up "WHERE AND" or "WHERE WHERE" that might result
-                    sql = re.sub(r'\bWHERE\s+WHERE\b', 'WHERE', sql, flags=re.IGNORECASE)
-                    sql = re.sub(r'\bWHERE\s+AND\b', 'WHERE', sql, flags=re.IGNORECASE)
-                    sql = re.sub(r'\bWHERE\s+GROUP\b', 'GROUP', sql, flags=re.IGNORECASE)
-                    sql = re.sub(r'\bWHERE\s+ORDER\b', 'ORDER', sql, flags=re.IGNORECASE)
-                    sql = re.sub(r'\bWHERE\s*$', '', sql, flags=re.IGNORECASE)
-            
-            # INJECT FILTER CLAUSE (data-driven, not LLM-generated)
-            logger.warning(f"[SQL-GEN] About to inject, filter_instructions={filter_instructions}")
-            if filter_instructions:
-                sql = self._inject_where_clause(sql, filter_instructions)
-                logger.warning(f"[SQL-GEN] After filter injection: {sql[:200]}")
-            
-            # FIX STATE NAME PATTERNS - convert "Texas" to "TX" etc in ILIKE clauses
-            sql = self._fix_state_names_in_sql(sql)
-            
-            # FIX DuckDB syntax: MONTH(x) → EXTRACT(MONTH FROM x)
-            sql = re.sub(r'\bMONTH\s*\(\s*([^)]+)\s*\)', r'EXTRACT(MONTH FROM \1)', sql, flags=re.IGNORECASE)
-            sql = re.sub(r'\bYEAR\s*\(\s*([^)]+)\s*\)', r'EXTRACT(YEAR FROM \1)', sql, flags=re.IGNORECASE)
-            sql = re.sub(r'\bDAY\s*\(\s*([^)]+)\s*\)', r'EXTRACT(DAY FROM \1)', sql, flags=re.IGNORECASE)
-            
-            # FIX: Wrap columns with "date" in name in TRY_CAST for DATE_TRUNC and EXTRACT
-            # This handles VARCHAR date columns that DuckDB can't process directly
-            # Match any column name containing 'date' (case insensitive)
-            # DATE_TRUNC('month', xxx_date) → DATE_TRUNC('month', TRY_CAST(xxx_date AS DATE))
-            sql = re.sub(
-                r"DATE_TRUNC\s*\(\s*'(\w+)'\s*,\s*(\w*date\w*)\s*\)",
-                r"DATE_TRUNC('\1', TRY_CAST(\2 AS DATE))",
-                sql, flags=re.IGNORECASE
-            )
-            # Also handle table.column format: DATE_TRUNC('month', personal.termination_date)
-            sql = re.sub(
-                r"DATE_TRUNC\s*\(\s*'(\w+)'\s*,\s*(\w+\.\w*date\w*)\s*\)",
-                r"DATE_TRUNC('\1', TRY_CAST(\2 AS DATE))",
-                sql, flags=re.IGNORECASE
-            )
-            
-            # Wrap strftime on date columns in TRY_CAST (in case LLM used strftime directly)
-            # strftime('%Y-%m', termination_date) → strftime('%Y-%m', TRY_CAST(termination_date AS DATE))
-            sql = re.sub(
-                r"strftime\s*\(\s*'([^']+)'\s*,\s*(\w*date\w*)\s*\)",
-                r"strftime('\1', TRY_CAST(\2 AS DATE))",
-                sql, flags=re.IGNORECASE
-            )
-            sql = re.sub(
-                r"strftime\s*\(\s*'([^']+)'\s*,\s*(\w+\.\w*date\w*)\s*\)",
-                r"strftime('\1', TRY_CAST(\2 AS DATE))",
-                sql, flags=re.IGNORECASE
-            )
-            
-            # EXTRACT(MONTH FROM xxx_date) → EXTRACT(MONTH FROM TRY_CAST(xxx_date AS DATE))
-            sql = re.sub(
-                r"EXTRACT\s*\(\s*(\w+)\s+FROM\s+(\w*date\w*)\s*\)",
-                r"EXTRACT(\1 FROM TRY_CAST(\2 AS DATE))",
-                sql, flags=re.IGNORECASE
-            )
-            # Also handle table.column format
-            sql = re.sub(
-                r"EXTRACT\s*\(\s*(\w+)\s+FROM\s+(\w+\.\w*date\w*)\s*\)",
-                r"EXTRACT(\1 FROM TRY_CAST(\2 AS DATE))",
-                sql, flags=re.IGNORECASE
-            )
-            
-            # UPGRADE: Convert EXTRACT(MONTH FROM x) to strftime('%Y-%m', x) for year-month grouping
-            # This gives us "2024-01" instead of just "1" which is much more useful
-            if 'by month' in q_lower or 'per month' in q_lower:
-                # Replace EXTRACT(MONTH FROM TRY_CAST(x AS DATE)) with strftime('%Y-%m', TRY_CAST(x AS DATE))
-                sql = re.sub(
-                    r"EXTRACT\s*\(\s*MONTH\s+FROM\s+TRY_CAST\s*\(\s*([^)]+)\s+AS\s+DATE\s*\)\s*\)",
-                    r"strftime('%Y-%m', TRY_CAST(\1 AS DATE))",
-                    sql, flags=re.IGNORECASE
-                )
-                # Also convert DATE_TRUNC('month', x) to strftime('%Y-%m', x)
-                sql = re.sub(
-                    r"DATE_TRUNC\s*\(\s*'month'\s*,\s*TRY_CAST\s*\(\s*([^)]+)\s+AS\s+DATE\s*\)\s*\)",
-                    r"strftime('%Y-%m', TRY_CAST(\1 AS DATE))",
-                    sql, flags=re.IGNORECASE
-                )
-                logger.warning("[SQL-GEN] Upgraded to strftime('%Y-%m') for year-month grouping")
-            
-            logger.warning(f"[SQL-GEN] Generated: {sql[:150]}")
-            
-            # AUTO-FIX: If question asks "by X" but SQL has no GROUP BY, add it
-            sql_upper = sql.upper()
-            if 'GROUP BY' not in sql_upper:
-                # Check if question expects grouping
-                group_match = re.search(r'\bby\s+(month|year|state|location|company|department)\b', q_lower)
-                if group_match:
-                    group_type = group_match.group(1)
-                    logger.warning(f"[SQL-GEN] Question expects GROUP BY {group_type} but SQL has none - checking for aggregation")
-                    
-                    # Find if there's an alias we can GROUP BY
-                    # Look for "AS month" or "AS termination_month" etc.
-                    alias_match = re.search(rf'\bAS\s+(\w*{group_type}\w*)', sql, re.IGNORECASE)
-                    if alias_match:
-                        alias = alias_match.group(1)
-                        # Add GROUP BY before ORDER BY or at end
-                        if 'ORDER BY' in sql_upper:
-                            sql = re.sub(r'\bORDER BY\b', f'GROUP BY {alias} ORDER BY', sql, flags=re.IGNORECASE)
-                        else:
-                            sql = sql.rstrip(';') + f' GROUP BY {alias}'
-                        logger.warning(f"[SQL-GEN] Auto-added: GROUP BY {alias}")
-            
-            # AUTO-FIX: Add ORDER BY if missing for aggregate queries
-            sql_upper = sql.upper()
-            logger.warning(f"[SQL-GEN] ORDER BY check: GROUP BY={('GROUP BY' in sql_upper)}, ORDER BY missing={('ORDER BY' not in sql_upper)}")
-            if 'GROUP BY' in sql_upper and 'ORDER BY' not in sql_upper:
-                # For month/year queries, order chronologically
-                logger.warning(f"[SQL-GEN] Checking month/year: month={('month' in q_lower)}, year={('year' in q_lower)}")
-                if 'month' in q_lower or 'year' in q_lower:
-                    # Find the month/date alias or column
-                    month_match = re.search(r'\bAS\s+(\w*month\w*)', sql, re.IGNORECASE)
-                    logger.warning(f"[SQL-GEN] Month alias match: {month_match.group(1) if month_match else 'None'}")
-                    if month_match:
-                        sql = sql.rstrip(';') + f' ORDER BY {month_match.group(1)} ASC'
-                        logger.warning(f"[SQL-GEN] Auto-added: ORDER BY {month_match.group(1)} ASC (chronological)")
-                else:
-                    # For other groupings, order by count descending
-                    count_match = re.search(r'COUNT\s*\([^)]*\)\s*(?:AS\s+)?(\w+)?', sql, re.IGNORECASE)
-                    if count_match:
-                        count_alias = count_match.group(1) if count_match.group(1) else 'COUNT(*)'
-                        sql = sql.rstrip(';') + f' ORDER BY {count_alias} DESC'
-                        logger.warning(f"[SQL-GEN] Auto-added: ORDER BY {count_alias} DESC (highest first)")
-            
-            logger.warning(f"[SQL-GEN] Final SQL: {sql[-100:]}")
-            
-            # Detect query type
-            sql_upper = sql.upper()
-            if 'COUNT(' in sql_upper:
-                query_type = 'count'
-            elif 'SUM(' in sql_upper:
-                query_type = 'sum'
-            elif 'AVG(' in sql_upper:
-                query_type = 'average'
-            else:
-                query_type = 'list'
-            
-            table_match = re.search(r'FROM\s+"?([^"\s]+)"?', sql, re.IGNORECASE)
-            table_name = table_match.group(1) if table_match else 'unknown'
-            
+        import anthropic
+        client = anthropic.Anthropic(api_key=orchestrator.claude_api_key)
+        
+        # Redact PII before sending to Claude
+        redacted_context = redactor.redact(context)
+        
+        # Build system prompt
+        system_prompt = """You are an expert UKG implementation consultant helping another consultant analyze customer data and configuration.
+
+Your responses should be:
+- Direct and actionable
+- Backed by the data provided
+- Clear about confidence levels
+- Professional but conversational
+
+When presenting findings:
+- Lead with the key number/insight
+- Provide context for what it means
+- Note any caveats or limitations
+- Be specific about data sources"""
+
+        # Build user prompt with all context
+        user_prompt = f"""Question: {question}
+
+Data Context:
+{redacted_context[:8000]}
+
+Please provide a clear, direct answer to the question based on the data above.
+Focus on the key insight first, then provide supporting details."""
+
+        # Call Claude
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=2000,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}]
+        )
+        
+        answer = response.content[0].text
+        
+        # Restore any PII in the response
+        answer = redactor.restore(answer)
+        
+        return answer
+        
+    except Exception as e:
+        logger.error(f"[UNIFIED] Claude synthesis failed: {e}")
+        return context[:2000]
+
+
+# =============================================================================
+# MAIN ENDPOINT
+# =============================================================================
+
+@router.post("/chat/unified")
+async def unified_chat(request: UnifiedChatRequest):
+    """
+    UNIFIED CHAT ENDPOINT - The Revolutionary Heart of XLR8
+    
+    This endpoint combines:
+    - Intelligent clarification (from Phase 2)
+    - Data model intelligence (reference lookups)
+    - Proactive data quality alerts
+    - Suggested follow-ups
+    - Full citation/audit trail
+    - PII protection
+    
+    Returns a comprehensive response suitable for rich frontend display.
+    """
+    project = request.project
+    message = request.message
+    session_id, session = get_or_create_session(request.session_id, project)
+    
+    logger.warning(f"[UNIFIED] ===== NEW REQUEST =====")
+    logger.warning(f"[UNIFIED] Message: {message[:100]}...")
+    logger.warning(f"[UNIFIED] Project: {project}, Session: {session_id}")
+    
+    # Initialize services
+    redactor = ReversibleRedactor()
+    citation_builder = CitationBuilder()
+    
+    try:
+        # Get or create intelligence engine
+        if session['engine']:
+            engine = session['engine']
+        elif INTELLIGENCE_AVAILABLE:
+            engine = IntelligenceEngine(project or 'default')
+            session['engine'] = engine
+        else:
             return {
-                'sql': sql,
-                'table': table_name,
-                'query_type': query_type,
-                'all_columns': all_columns
+                "session_id": session_id,
+                "answer": "Intelligence engine not available. Please check deployment.",
+                "needs_clarification": False,
+                "confidence": 0.0,
+                "success": False
             }
         
-        return None
-    
-    def _try_fix_sql_from_error(self, sql: str, error_msg: str, all_columns: set) -> Optional[str]:
-        """Try to fix SQL based on error message."""
-        from difflib import SequenceMatcher
+        # Load structured data handler and schema
+        handler = None
+        schema = {'tables': [], 'filter_candidates': {}}
+        data_model = None
+        quality_service = None
         
-        # Fix 1: VARCHAR column used with date functions - add TRY_CAST
-        if 'date_part' in error_msg.lower() and 'VARCHAR' in error_msg:
-            # Find EXTRACT(... FROM column_name) patterns and wrap in TRY_CAST
-            pattern = r"EXTRACT\s*\(\s*(\w+)\s+FROM\s+(\w+)\s*\)"
-            match = re.search(pattern, sql, re.IGNORECASE)
-            if match:
-                part = match.group(1)  # MONTH, YEAR, etc.
-                col = match.group(2)   # column name
-                fixed_sql = re.sub(
-                    pattern,
-                    f"EXTRACT({part} FROM TRY_CAST({col} AS DATE))",
-                    sql,
-                    flags=re.IGNORECASE
-                )
-                logger.info(f"[SQL-FIX] Added TRY_CAST for date extraction on {col}")
-                return fixed_sql
-        
-        # Fix 2: Column not found errors
-        patterns = [
-            r'does not have a column named "([^"]+)"',
-            r'Referenced column "([^"]+)" not found',
-            r'column "([^"]+)" not found',
-        ]
-        
-        bad_col = None
-        for pattern in patterns:
-            match = re.search(pattern, error_msg, re.IGNORECASE)
-            if match:
-                bad_col = match.group(1)
-                break
-        
-        if not bad_col:
-            return None
-        
-        valid_cols_lower = {c.lower() for c in all_columns}
-        
-        known_fixes = {
-            'rate': 'hourly_pay_rate',
-            'hourly_rate': 'hourly_pay_rate',
-            'pay_rate': 'hourly_pay_rate',
-            'employee_id': 'employee_number',
-            'emp_id': 'employee_number',
-        }
-        
-        fix = known_fixes.get(bad_col.lower())
-        if fix and fix.lower() in valid_cols_lower:
-            logger.info(f"[SQL-FIX] {bad_col} → {fix}")
-            return re.sub(r'\b' + re.escape(bad_col) + r'\b', f'"{fix}"', sql, flags=re.IGNORECASE)
-        
-        # Fuzzy match
-        if '_' in bad_col:
-            best_score = 0.6
-            for col in all_columns:
-                score = SequenceMatcher(None, bad_col.lower(), col.lower()).ratio()
-                if score > best_score:
-                    best_score = score
-                    fix = col
-            if fix:
-                logger.info(f"[SQL-FIX] Fuzzy: {bad_col} → {fix}")
-                return re.sub(r'\b' + re.escape(bad_col) + r'\b', f'"{fix}"', sql, flags=re.IGNORECASE)
-        
-        return None
-    
-    def _gather_reality(self, question: str, analysis: Dict) -> List[Truth]:
-        """Gather REALITY - what the customer's DATA shows."""
-        if not self.structured_handler or not self.schema:
-            return []
-        
-        truths = []
-        domains = analysis.get('domains', ['general'])
-        
-        # Pattern cache
-        pattern_cache = None
-        try:
-            from utils.sql_pattern_cache import initialize_patterns
-            if self.project:
-                pattern_cache = initialize_patterns(self.project, self.schema)
-        except:
+        if STRUCTURED_AVAILABLE:
             try:
-                from backend.utils.sql_pattern_cache import initialize_patterns
-                if self.project:
-                    pattern_cache = initialize_patterns(self.project, self.schema)
+                handler = get_structured_handler()
+                if handler and handler.conn:
+                    schema = await get_project_schema(project, request.scope, handler)
+                    
+                    if schema['tables']:
+                        engine.load_context(structured_handler=handler, schema=schema)
+                        logger.info(f"[UNIFIED] Loaded {len(schema['tables'])} tables")
+                        
+                        # Initialize Data Model Service
+                        data_model = DataModelService(project)
+                        data_model.load_lookups(handler)
+                        session['data_model'] = data_model
+                        
+                        # Initialize Quality Service
+                        quality_service = DataQualityService(project)
+                        
+            except Exception as e:
+                logger.error(f"[UNIFIED] Structured handler error: {e}")
+        
+        # Load RAG handler
+        if RAG_AVAILABLE:
+            try:
+                rag = RAGHandler()
+                engine.rag_handler = rag
+            except Exception as e:
+                logger.warning(f"[UNIFIED] RAG handler error: {e}")
+        
+        # Load relationships
+        if SUPABASE_AVAILABLE:
+            try:
+                supabase = get_supabase()
+                result = supabase.table('project_relationships').select('*').eq(
+                    'project_name', project
+                ).in_('status', ['confirmed', 'auto_confirmed']).execute()
+                
+                if result.data:
+                    engine.relationships = result.data
+            except Exception as e:
+                logger.warning(f"[UNIFIED] Relationships error: {e}")
+        
+        # Apply clarifications if provided
+        if request.clarifications:
+            logger.info(f"[UNIFIED] Applying clarifications: {request.clarifications}")
+            engine.confirmed_facts.update(request.clarifications)
+            session['skip_learning'] = False
+            
+            # Record to learning module
+            if LEARNING_AVAILABLE:
+                try:
+                    learning = get_learning_module()
+                    for q_id, choice in request.clarifications.items():
+                        if not q_id.startswith('_'):
+                            learning.record_clarification_choice(
+                                question_id=q_id,
+                                chosen_option=str(choice),
+                                project=project
+                            )
+                except Exception as e:
+                    logger.warning(f"[UNIFIED] Learning record error: {e}")
+        
+        # Pass conversation context to engine
+        if session.get('last_sql') or session.get('last_result'):
+            engine.conversation_context = {
+                'last_sql': session.get('last_sql'),
+                'last_result': session.get('last_result'),
+                'last_question': session.get('last_question')
+            }
+        
+        # Determine mode
+        mode = None
+        if request.mode:
+            try:
+                mode = IntelligenceMode(request.mode)
             except:
                 pass
         
-        try:
-            sql = None
-            sql_source = None
-            sql_info = None
-            
-            # Check cache
-            if pattern_cache:
-                cached = pattern_cache.find_matching_pattern(question)
-                if cached and cached.get('sql'):
-                    sql = cached['sql']
-                    sql_source = 'cache'
-                    logger.warning("[SQL] Cache hit!")
-            
-            # Generate if no cache
-            if not sql:
-                sql_info = self._generate_sql_for_question(question, analysis)
-                if sql_info:
-                    sql = sql_info['sql']
-                    sql_source = 'llm'
-            
-            # Execute
-            if sql:
-                for attempt in range(3):
-                    try:
-                        rows = self.structured_handler.query(sql)
-                        cols = list(rows[0].keys()) if rows else []
-                        self.last_executed_sql = sql
-                        
-                        if rows:
-                            table_name = sql_info.get('table', 'query') if sql_info else 'query'
-                            
-                            truths.append(Truth(
-                                source_type='reality',
-                                source_name=f"SQL: {table_name}",
-                                content={
-                                    'sql': sql,
-                                    'columns': cols,
-                                    'rows': rows,
-                                    'total': len(rows),
-                                    'query_type': sql_info.get('query_type', 'list') if sql_info else 'list',
-                                    'table': table_name,
-                                    'is_targeted_query': True
-                                },
-                                confidence=0.98,
-                                location=f"Query: {sql}"
-                            ))
-                            
-                            if pattern_cache and sql_source == 'llm':
-                                pattern_cache.learn_pattern(question, sql, success=True)
-                            
-                            return truths
-                        break
-                        
-                    except Exception as e:
-                        error_msg = str(e)
-                        logger.warning(f"[SQL] Failed attempt {attempt + 1}: {error_msg}")
-                        
-                        if sql_info and attempt < 2:
-                            fixed = self._try_fix_sql_from_error(sql, error_msg, sql_info.get('all_columns', set()))
-                            if fixed and fixed != sql:
-                                sql = fixed
-                                continue
-                        break
+        # Check learning for similar queries
+        learned_sql = None
+        auto_applied_facts = {}
         
-        except Exception as e:
-            logger.error(f"Error gathering reality: {e}")
-        
-        return truths
-    
-    def _gather_intent(self, question: str, analysis: Dict) -> List[Truth]:
-        """Gather INTENT - what customer's DOCUMENTS say."""
-        if not self.rag_handler:
-            return []
-        
-        truths = []
-        
-        try:
-            collection_name = self._get_document_collection_name()
-            if not collection_name:
-                return []
-            
-            results = self.rag_handler.search(
-                collection_name=collection_name,
-                query=question,
-                n_results=10,
-                project_id=self.project if self.project else None
-            )
-            
-            for result in results:
-                metadata = result.get('metadata', {})
-                distance = result.get('distance', 1.0)
-                doc = result.get('document', '')
+        if LEARNING_AVAILABLE and not request.clarifications and not session.get('skip_learning'):
+            try:
+                learning = get_learning_module()
                 
-                project_id = metadata.get('project_id', '').lower()
-                if project_id in ['global', '__global__', 'global/universal']:
-                    continue
+                # Check for learned SQL patterns
+                similar = learning.find_similar_query(
+                    question=message,
+                    intent=mode.value if mode else None,
+                    project=project
+                )
+                if similar and similar.get('successful_sql'):
+                    learned_sql = similar['successful_sql']
+                    logger.info(f"[UNIFIED] Found learned SQL pattern")
+                    
+            except Exception as e:
+                logger.warning(f"[UNIFIED] Learning check error: {e}")
+        
+        # ASK THE INTELLIGENCE ENGINE
+        answer = engine.ask(message, mode=mode, context={'learned_sql': learned_sql} if learned_sql else None)
+        
+        # Check if we can skip clarification using learning
+        # BUT only after the first interaction in a session (let users see clarification first)
+        if answer.structured_output and answer.structured_output.get('type') == 'clarification_needed':
+            session_interactions = session.get('interaction_count', 0)
+            
+            # Only auto-apply learning if user has already interacted this session
+            # First question should show clarification so user knows the system asks
+            if LEARNING_AVAILABLE and not session.get('skip_learning') and session_interactions > 0:
+                try:
+                    learning = get_learning_module()
+                    questions = answer.structured_output.get('questions', [])
+                    detected_domain = answer.structured_output.get('detected_domains', ['general'])[0]
+                    
+                    can_skip, learned_answers = learning.should_skip_clarification(
+                        questions=questions,
+                        domain=detected_domain,
+                        project=project
+                    )
+                    
+                    if can_skip and learned_answers:
+                        logger.info(f"[UNIFIED] Auto-applying learned answers: {learned_answers}")
+                        engine.confirmed_facts.update(learned_answers)
+                        auto_applied_facts = learned_answers.copy()
+                        answer = engine.ask(message, mode=mode)
+                        
+                except Exception as e:
+                    logger.warning(f"[UNIFIED] Skip clarification error: {e}")
+        
+        # Build auto-applied note
+        auto_applied_note = ""
+        if auto_applied_facts:
+            notes = []
+            for key, value in auto_applied_facts.items():
+                if key in ['employee_status', 'status']:
+                    if value == 'active':
+                        notes.append("Active employees only")
+                    elif value == 'termed':
+                        notes.append("Terminated employees only")
+                    else:
+                        notes.append(f"Status: {value}")
+                else:
+                    notes.append(f"{key}: {value}")
+            if notes:
+                auto_applied_note = "📌 *Remembered: " + ", ".join(notes) + "*"
+        
+        # Build response
+        response = {
+            "session_id": session_id,
+            "question": answer.question,
+            "confidence": answer.confidence,
+            "reasoning": answer.reasoning,
+            
+            # Auto-applied preferences
+            "auto_applied_note": auto_applied_note,
+            "auto_applied_facts": auto_applied_facts,
+            "can_reset_preferences": bool(auto_applied_facts),
+            
+            # Clarification
+            "needs_clarification": (
+                answer.structured_output and 
+                answer.structured_output.get('type') == 'clarification_needed'
+            ),
+            "clarification_questions": (
+                answer.structured_output.get('questions', []) 
+                if answer.structured_output else []
+            ),
+            
+            # Three Truths
+            "from_reality": [],
+            "from_intent": [],
+            "from_best_practice": [],
+            
+            # Core results
+            "conflicts": [],
+            "insights": [],
+            "structured_output": answer.structured_output,
+            
+            # Revolutionary features
+            "quality_alerts": None,
+            "follow_up_suggestions": [],
+            "citations": None,
+            
+            # Learning
+            "used_learning": learned_sql is not None,
+            
+            # The answer
+            "answer": None,
+            "success": True
+        }
+        
+        # Serialize truths
+        for truth in answer.from_reality:
+            response["from_reality"].append(_serialize_truth(truth, data_model))
+        for truth in answer.from_intent:
+            response["from_intent"].append(_serialize_truth(truth, data_model))
+        for truth in answer.from_best_practice:
+            response["from_best_practice"].append(_serialize_truth(truth, data_model))
+        
+        # Serialize conflicts
+        for conflict in answer.conflicts:
+            response["conflicts"].append({
+                "description": conflict.description,
+                "severity": conflict.severity,
+                "recommendation": conflict.recommendation
+            })
+        
+        # Serialize insights
+        for insight in answer.insights:
+            response["insights"].append({
+                "type": insight.type,
+                "title": insight.title,
+                "description": insight.description,
+                "severity": insight.severity,
+                "action_required": insight.action_required
+            })
+        
+        # Generate answer if not clarification
+        if not response["needs_clarification"] and answer.answer:
+            
+            # Check for simple answer (count, sum, etc.)
+            simple_answer = _try_simple_answer(answer, data_model)
+            
+            if simple_answer:
+                if auto_applied_note:
+                    simple_answer = auto_applied_note + "\n\n" + simple_answer
+                response["answer"] = simple_answer
+            else:
+                # Complex query - use Claude
+                synthesized = await generate_synthesized_answer(
+                    question=message,
+                    context=answer.answer,
+                    persona=request.persona,
+                    insights=answer.insights,
+                    conflicts=answer.conflicts,
+                    citations=citation_builder,
+                    quality_alerts=quality_service,
+                    follow_ups=[],
+                    redactor=redactor
+                )
                 
-                truths.append(Truth(
-                    source_type='intent',
-                    source_name=metadata.get('filename', 'Document'),
-                    content=doc,
-                    confidence=max(0.3, 1.0 - distance) if distance else 0.7,
-                    location=f"Page {metadata.get('page', '?')}"
-                ))
+                if auto_applied_note and synthesized:
+                    response["answer"] = auto_applied_note + "\n\n" + synthesized
+                else:
+                    response["answer"] = synthesized
+            
+            # Add citations
+            if request.include_citations and answer.from_reality:
+                for truth in answer.from_reality:
+                    if isinstance(truth.content, dict):
+                        citation_builder.add_citation(
+                            claim=str(truth.content.get('rows', [])[:1]),
+                            source_table=truth.source_name,
+                            sql=truth.content.get('sql'),
+                            row_count=len(truth.content.get('rows', []))
+                        )
+                response["citations"] = citation_builder.build_audit_trail()
+            
+            # Run quality checks
+            if request.include_quality_alerts and quality_service and schema['tables']:
+                quality_service.run_checks(handler, schema['tables'][:5])
+                response["quality_alerts"] = quality_service.get_summary()
+            
+            # Generate follow-ups
+            if request.include_follow_ups:
+                follow_up_gen = FollowUpGenerator(schema)
+                query_type = _detect_query_type(message, answer)
+                response["follow_up_suggestions"] = follow_up_gen.generate(
+                    query_type=query_type,
+                    question=message,
+                    result={'answer': response["answer"]}
+                )
         
-        except Exception as e:
-            logger.error(f"Error gathering intent: {e}")
+        # Handle no answer case
+        if response["answer"] is None and not response["needs_clarification"]:
+            if answer.from_reality or answer.from_intent or answer.from_best_practice:
+                response["answer"] = "I found some related information but couldn't generate a complete answer. Please try rephrasing your question."
+            else:
+                response["answer"] = "I couldn't find any data matching your query. Please check that data has been uploaded for this project."
+            response["confidence"] = 0.3
         
-        return truths
+        # Clarification message
+        if response["needs_clarification"]:
+            questions = response.get("clarification_questions", [])
+            if questions:
+                q_text = questions[0].get('question', 'I need more information')
+                response["answer"] = f"Before I can answer, {q_text.lower()}"
+        
+        # Update session
+        actual_sql = getattr(answer, 'executed_sql', None) or learned_sql
+        session['last_sql'] = actual_sql
+        session['last_result'] = response["answer"][:1000] if response.get("answer") else None
+        session['last_question'] = message
+        session['interaction_count'] = session.get('interaction_count', 0) + 1
+        
+        # Cleanup old sessions
+        cleanup_old_sessions()
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"[UNIFIED] Error: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(500, f"Chat error: {str(e)}")
+
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+def _serialize_truth(truth, data_model: Optional[DataModelService] = None) -> Dict:
+    """Serialize a Truth object for JSON response."""
+    content = truth.content
     
-    def _get_document_collection_name(self) -> Optional[str]:
-        """Find the document collection name."""
-        if not self.rag_handler:
-            return None
+    # Handle data content (rows from DuckDB)
+    if isinstance(content, dict) and 'rows' in content:
+        rows = content.get('rows', [])
         
-        if hasattr(self, '_doc_collection_name'):
-            return self._doc_collection_name
+        # Enrich with data model if available
+        if data_model and rows:
+            columns = content.get('columns', [])
+            rows = data_model.enrich_results(rows, columns)
         
-        try:
-            collections = self.rag_handler.list_collections()
-            for name in ['hcmpact_docs', 'documents', 'hcm_docs', 'xlr8_docs']:
-                if name in collections:
-                    self._doc_collection_name = name
-                    return name
-            
-            for name in collections:
-                if 'doc' in name.lower():
-                    self._doc_collection_name = name
-                    return name
-            
-            if collections:
-                self._doc_collection_name = collections[0]
-                return collections[0]
-        except:
-            pass
-        
+        content = {
+            'columns': content.get('columns', []),
+            'rows': rows[:20],  # Limit to 20 rows
+            'total': content.get('total', len(rows)),
+            'sql': content.get('sql'),
+            'query_type': content.get('query_type')
+        }
+    elif not isinstance(content, (dict, list, str, int, float, bool, type(None))):
+        content = str(content)[:2000]
+    
+    return {
+        "source_type": truth.source_type,
+        "source_name": truth.source_name,
+        "content": content,
+        "confidence": truth.confidence,
+        "location": truth.location
+    }
+
+
+def _try_simple_answer(answer, data_model: Optional[DataModelService] = None) -> Optional[str]:
+    """Try to generate a simple direct answer without Claude."""
+    if not answer.from_reality:
         return None
     
-    def _gather_best_practice(self, question: str, analysis: Dict) -> List[Truth]:
-        """Gather BEST PRACTICE - what UKG docs say."""
-        if not self.rag_handler:
-            return []
+    for truth in answer.from_reality:
+        if not isinstance(truth.content, dict):
+            continue
         
-        truths = []
+        query_type = truth.content.get('query_type', '')
+        rows = truth.content.get('rows', [])
+        sql = truth.content.get('sql', '')
+        cols = truth.content.get('columns', [])
         
+        if query_type == 'count' and rows:
+            count_val = list(rows[0].values())[0] if rows[0] else 0
+            simple_answer = f"**{count_val:,}** employees match your criteria."
+            if sql:
+                simple_answer += f"\n\n*Query executed:* `{sql[:300]}`"
+            return simple_answer
+        
+        elif query_type in ['sum', 'average'] and rows:
+            result_val = list(rows[0].values())[0] if rows[0] else 0
+            label = "Total" if query_type == 'sum' else "Average"
+            simple_answer = f"**{label}: {result_val:,.2f}**"
+            if sql:
+                simple_answer += f"\n\n*Query executed:* `{sql[:300]}`"
+            return simple_answer
+        
+        elif query_type == 'list' and rows and cols:
+            # Enrich rows if data model available
+            if data_model:
+                rows = data_model.enrich_results(rows, cols)
+            
+            # Format as markdown table
+            table_lines = []
+            display_cols = cols[:6]
+            table_lines.append("| " + " | ".join(display_cols) + " |")
+            table_lines.append("|" + "|".join(["---"] * len(display_cols)) + "|")
+            
+            for row in rows[:20]:
+                vals = [str(row.get(c, ''))[:30] for c in display_cols]
+                table_lines.append("| " + " | ".join(vals) + " |")
+            
+            simple_answer = f"**Found {len(rows)} results:**\n\n" + "\n".join(table_lines)
+            
+            if len(rows) > 20:
+                simple_answer += f"\n\n*Showing first 20 of {len(rows)} results*"
+            if sql:
+                simple_answer += f"\n\n*Query:* `{sql[:200]}`"
+            
+            return simple_answer
+    
+    return None
+
+
+def _detect_query_type(question: str, answer) -> str:
+    """Detect the type of query for follow-up generation."""
+    question_lower = question.lower()
+    
+    if any(word in question_lower for word in ['how many', 'count', 'total number']):
+        return 'count'
+    elif any(word in question_lower for word in ['list', 'show me', 'who are', 'which']):
+        return 'list'
+    elif any(word in question_lower for word in ['sum', 'total', 'add up']):
+        return 'sum'
+    elif any(word in question_lower for word in ['analyze', 'compare', 'trend', 'pattern']):
+        return 'analysis'
+    else:
+        return 'general'
+
+
+def _decrypt_results(rows: List[Dict], handler) -> List[Dict]:
+    """Decrypt encrypted fields in query results."""
+    if not rows:
+        return rows
+    
+    try:
+        encryptor = getattr(handler, 'encryptor', None)
+        if not encryptor:
+            return rows
+        
+        decrypted_rows = []
+        for row in rows:
+            decrypted_row = {}
+            for key, value in row.items():
+                if isinstance(value, str) and (value.startswith('ENC:') or value.startswith('ENC256:')):
+                    try:
+                        decrypted_row[key] = encryptor.decrypt(value)
+                    except:
+                        decrypted_row[key] = '[encrypted]'
+                else:
+                    decrypted_row[key] = value
+            decrypted_rows.append(decrypted_row)
+        
+        return decrypted_rows
+        
+    except Exception as e:
+        logger.warning(f"[DECRYPT] Error: {e}")
+        return rows
+
+
+# =============================================================================
+# SESSION ENDPOINTS
+# =============================================================================
+
+@router.get("/chat/unified/session/{session_id}")
+async def get_session(session_id: str):
+    """Get current state of a unified chat session."""
+    if session_id not in unified_sessions:
+        raise HTTPException(404, "Session not found")
+    
+    session = unified_sessions[session_id]
+    engine = session.get('engine')
+    
+    return {
+        "session_id": session_id,
+        "project": session.get('project'),
+        "confirmed_facts": dict(engine.confirmed_facts) if engine else {},
+        "conversation_length": len(session.get('conversation_history', [])),
+        "last_question": session.get('last_question'),
+        "created_at": session.get('created_at')
+    }
+
+
+@router.delete("/chat/unified/session/{session_id}")
+async def end_session(session_id: str):
+    """End a unified chat session."""
+    if session_id in unified_sessions:
+        del unified_sessions[session_id]
+    return {"success": True}
+
+
+@router.post("/chat/unified/clarify")
+async def submit_clarification(request: ClarificationAnswer):
+    """Submit answers to clarification questions."""
+    if request.session_id not in unified_sessions:
+        raise HTTPException(404, "Session not found")
+    
+    session = unified_sessions[request.session_id]
+    engine = session.get('engine')
+    
+    if not engine:
+        raise HTTPException(400, "Session has no active engine")
+    
+    # Store confirmed facts
+    engine.confirmed_facts.update(request.answers)
+    
+    # Re-ask the original question
+    answer = engine.ask(request.original_question)
+    
+    return {
+        "session_id": request.session_id,
+        "question": answer.question,
+        "confidence": answer.confidence,
+        "answer": answer.answer,
+        "needs_clarification": False
+    }
+
+
+# =============================================================================
+# PREFERENCES ENDPOINTS
+# =============================================================================
+
+@router.post("/chat/unified/reset-preferences")
+async def reset_preferences(request: ResetPreferencesRequest):
+    """Reset user preferences/filters."""
+    result = {
+        "success": False,
+        "reset_type": request.reset_type,
+        "message": ""
+    }
+    
+    try:
+        if request.reset_type == "session":
+            if request.session_id and request.session_id in unified_sessions:
+                session = unified_sessions[request.session_id]
+                engine = session.get('engine')
+                if engine:
+                    old_facts = dict(engine.confirmed_facts)
+                    engine.confirmed_facts.clear()
+                    session['skip_learning'] = True
+                    result["success"] = True
+                    result["message"] = f"Cleared session facts: {old_facts}"
+                    result["cleared_facts"] = old_facts
+                else:
+                    result["message"] = "Session found but no engine"
+            else:
+                result["message"] = "Session not found"
+        
+        elif request.reset_type == "learned":
+            if LEARNING_AVAILABLE and SUPABASE_AVAILABLE:
+                try:
+                    supabase = get_supabase()
+                    supabase.table('clarification_choices').delete().eq(
+                        'project', request.project
+                    ).execute()
+                    result["success"] = True
+                    result["message"] = "Cleared learned preferences"
+                except Exception as e:
+                    result["message"] = f"Database error: {e}"
+            else:
+                result["message"] = "Learning/Supabase not available"
+        
+        else:
+            result["message"] = f"Unknown reset_type: {request.reset_type}"
+            
+    except Exception as e:
+        result["message"] = f"Error: {e}"
+        logger.error(f"[RESET] Error: {e}")
+    
+    return result
+
+
+@router.get("/chat/unified/preferences")
+async def get_preferences(session_id: str = None, project: str = None):
+    """Get current preferences for debugging."""
+    result = {
+        "session_facts": {},
+        "learned_preferences": {},
+        "session_exists": False
+    }
+    
+    if session_id and session_id in unified_sessions:
+        session = unified_sessions[session_id]
+        engine = session.get('engine')
+        if engine:
+            result["session_facts"] = dict(engine.confirmed_facts)
+            result["session_exists"] = True
+    
+    if LEARNING_AVAILABLE and SUPABASE_AVAILABLE and project:
         try:
-            collection_name = self._get_document_collection_name()
-            if not collection_name:
-                return []
+            supabase = get_supabase()
+            choices = supabase.table('clarification_choices').select('*').eq(
+                'project', project
+            ).order('created_at', desc=True).limit(20).execute()
             
-            results = self.rag_handler.search(
-                collection_name=collection_name,
-                query=question,
-                n_results=10,
-                project_id="Global/Universal"
-            )
-            
-            for result in results:
-                metadata = result.get('metadata', {})
-                distance = result.get('distance', 1.0)
-                doc = result.get('document', '')
-                
-                truths.append(Truth(
-                    source_type='best_practice',
-                    source_name=metadata.get('filename', 'UKG Documentation'),
-                    content=doc,
-                    confidence=max(0.3, 1.0 - distance) if distance else 0.7,
-                    location=f"Page {metadata.get('page', '?')}"
-                ))
-        
+            if choices.data:
+                result["learned_preferences"] = {
+                    c['question_id']: c['chosen_option']
+                    for c in choices.data
+                }
         except Exception as e:
-            logger.error(f"Error gathering best practice: {e}")
-        
-        return truths
+            result["learning_error"] = str(e)
     
-    def _detect_conflicts(self, reality, intent, best_practice) -> List[Conflict]:
-        return []
+    return result
+
+
+# =============================================================================
+# FEEDBACK ENDPOINT
+# =============================================================================
+
+@router.post("/chat/unified/feedback")
+async def submit_feedback(request: FeedbackRequest):
+    """Submit feedback for learning."""
+    try:
+        if not LEARNING_AVAILABLE:
+            return {"success": False, "error": "Learning not available"}
+        
+        learning = get_learning_module()
+        
+        # Record feedback
+        if hasattr(learning, 'record_feedback'):
+            learning.record_feedback(
+                question=request.message,
+                response=request.response,
+                feedback=request.feedback,
+                correction=request.correction
+            )
+        
+        return {"success": True, "feedback": request.feedback}
+        
+    except Exception as e:
+        logger.error(f"[FEEDBACK] Error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+# =============================================================================
+# PERSONA ENDPOINTS
+# =============================================================================
+
+@router.get("/chat/unified/personas")
+async def list_personas():
+    """List all available personas."""
+    if not PERSONAS_AVAILABLE:
+        return {"personas": [], "default": "bessie"}
     
-    def _run_proactive_checks(self, analysis: Dict) -> List[Insight]:
-        insights = []
+    try:
+        pm = get_persona_manager()
+        return {"personas": pm.list_personas(), "default": "bessie"}
+    except Exception as e:
+        logger.error(f"[PERSONAS] List error: {e}")
+        return {"personas": [], "default": "bessie", "error": str(e)}
+
+
+@router.get("/chat/unified/personas/{name}")
+async def get_persona(name: str):
+    """Get specific persona."""
+    if not PERSONAS_AVAILABLE:
+        raise HTTPException(503, "Personas not available")
+    
+    try:
+        pm = get_persona_manager()
+        persona = pm.get_persona(name)
+        if persona:
+            return persona.to_dict()
+        raise HTTPException(404, f"Persona '{name}' not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.post("/chat/unified/personas")
+async def create_persona(request: Request):
+    """Create a new persona."""
+    if not PERSONAS_AVAILABLE:
+        raise HTTPException(503, "Personas not available")
+    
+    try:
+        data = await request.json()
+        pm = get_persona_manager()
+        persona = pm.create_persona(
+            name=data['name'],
+            icon=data.get('icon', '🤖'),
+            description=data.get('description', ''),
+            system_prompt=data.get('system_prompt', ''),
+            expertise=data.get('expertise', []),
+            tone=data.get('tone', 'Professional')
+        )
+        return {"success": True, "persona": persona.to_dict()}
+    except Exception as e:
+        logger.error(f"[PERSONAS] Create error: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.put("/chat/unified/personas/{name}")
+async def update_persona(name: str, request: Request):
+    """Update an existing persona."""
+    if not PERSONAS_AVAILABLE:
+        raise HTTPException(503, "Personas not available")
+    
+    try:
+        data = await request.json()
+        pm = get_persona_manager()
+        persona = pm.update_persona(name, **data)
+        if persona:
+            return {"success": True, "persona": persona.to_dict()}
+        raise HTTPException(404, f"Persona '{name}' not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.delete("/chat/unified/personas/{name}")
+async def delete_persona(name: str):
+    """Delete a persona."""
+    if not PERSONAS_AVAILABLE:
+        raise HTTPException(503, "Personas not available")
+    
+    try:
+        pm = get_persona_manager()
+        success = pm.delete_persona(name)
+        if success:
+            return {"success": True}
+        raise HTTPException(404, f"Persona '{name}' not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# =============================================================================
+# EXCEL EXPORT ENDPOINT
+# =============================================================================
+
+@router.post("/chat/unified/export-excel")
+async def export_to_excel(request: ExportRequest):
+    """Export query results to Excel with quality report."""
+    if not STRUCTURED_AVAILABLE:
+        raise HTTPException(503, "Structured queries not available")
+    
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
         
-        if not self.structured_handler:
-            return insights
+        handler = get_structured_handler()
+        project = request.project
         
-        try:
-            tables = self.schema.get('tables', [])
-            domains = analysis.get('domains', ['general'])
+        # Get tables for project
+        tables_list = handler.get_tables(project) if project else []
+        
+        if not tables_list:
+            raise HTTPException(404, "No tables found for this project")
+        
+        # Select tables to export
+        tables_to_query = []
+        if request.tables:
+            for t in tables_list:
+                if t.get('table_name') in request.tables:
+                    tables_to_query.append(t)
+        else:
+            # Use first 3 tables
+            tables_to_query = tables_list[:3]
+        
+        # Create workbook
+        wb = Workbook()
+        
+        # Styling
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        thin_border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+        
+        # Summary tab (if requested)
+        if request.include_summary:
+            ws_summary = wb.active
+            ws_summary.title = "Summary"
             
-            if 'employees' in domains or domains == ['general']:
-                for table in tables:
-                    table_name = table.get('table_name', '')
-                    if any(c in table_name.lower() for c in ['personal', 'employee']):
-                        try:
-                            sql = f'SELECT COUNT(*) as cnt FROM "{table_name}" WHERE ssn IS NULL OR ssn = \'\''
-                            result = self.structured_handler.conn.execute(sql).fetchone()
-                            if result and result[0] > 0:
-                                insights.append(Insight(
-                                    type='anomaly',
-                                    title='Missing SSN',
-                                    description=f'{result[0]} employees missing SSN',
-                                    data={'count': result[0]},
-                                    severity='high',
-                                    action_required=True
-                                ))
-                        except:
-                            pass
-                        break
+            ws_summary.cell(row=1, column=1, value="XLR8 Data Export").font = Font(bold=True, size=14)
+            ws_summary.cell(row=2, column=1, value=f"Project: {project or 'All'}")
+            ws_summary.cell(row=3, column=1, value=f"Query: {request.query}")
+            ws_summary.cell(row=4, column=1, value=f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+            ws_summary.cell(row=6, column=1, value="Tables Included:").font = Font(bold=True)
+            
+            for i, t in enumerate(tables_to_query, 1):
+                ws_summary.cell(row=6+i, column=1, value=f"• {t.get('table_name', '')}")
+        else:
+            wb.remove(wb.active)
+        
+        # Data tabs
+        sources_info = []
+        for table_info in tables_to_query[:5]:
+            table_name = table_info.get('table_name', '')
+            sheet_name = table_info.get('sheet', table_name)[:31]  # Excel limit
+            
+            try:
+                sql = f'SELECT * FROM "{table_name}"'
+                rows = handler.query(sql)
+                cols = list(rows[0].keys()) if rows else []
+                
+                if not rows:
+                    continue
+                
+                decrypted = _decrypt_results(rows, handler)
+                
+                ws = wb.create_sheet(title=sheet_name)
+                
+                # Headers
+                for col_idx, col_name in enumerate(cols, 1):
+                    cell = ws.cell(row=1, column=col_idx, value=col_name)
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.border = thin_border
+                
+                # Data
+                for row_idx, row_data in enumerate(decrypted[:5000], 2):
+                    for col_idx, col_name in enumerate(cols, 1):
+                        cell = ws.cell(row=row_idx, column=col_idx, value=row_data.get(col_name, ''))
+                        cell.border = thin_border
+                
+                # Auto-width
+                for col_idx in range(1, min(len(cols) + 1, 20)):
+                    ws.column_dimensions[get_column_letter(col_idx)].width = 15
+                
+                sources_info.append({
+                    'table': table_name,
+                    'rows': len(decrypted),
+                    'columns': len(cols)
+                })
+                
+            except Exception as e:
+                logger.error(f"[EXPORT] Error on {table_name}: {e}")
+        
+        # Quality report tab (if requested)
+        if request.include_quality_report and project:
+            try:
+                quality_service = DataQualityService(project)
+                quality_service.run_checks(handler, tables_to_query)
+                alerts = quality_service.alerts
+                
+                if alerts:
+                    ws_quality = wb.create_sheet(title="Quality Report")
+                    
+                    headers = ["Severity", "Issue", "Table", "Count", "Description"]
+                    for col_idx, header in enumerate(headers, 1):
+                        cell = ws_quality.cell(row=1, column=col_idx, value=header)
+                        cell.font = header_font
+                        cell.fill = header_fill
+                    
+                    for row_idx, alert in enumerate(alerts, 2):
+                        ws_quality.cell(row=row_idx, column=1, value=alert['severity'].upper())
+                        ws_quality.cell(row=row_idx, column=2, value=alert['name'])
+                        ws_quality.cell(row=row_idx, column=3, value=alert['table'])
+                        ws_quality.cell(row=row_idx, column=4, value=alert['count'])
+                        ws_quality.cell(row=row_idx, column=5, value=alert['description'])
+                        
+            except Exception as qe:
+                logger.warning(f"[EXPORT] Quality report error: {qe}")
+        
+        # Save to buffer
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        
+        # Generate filename
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        safe_query = re.sub(r'[^\w\s]', '', request.query[:20]).strip().replace(' ', '_')
+        filename = f"xlr8_export_{safe_query}_{timestamp}.xlsx"
+        
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[EXPORT] Error: {e}")
+        raise HTTPException(500, f"Export failed: {str(e)}")
+
+
+# =============================================================================
+# DATA INSPECTION ENDPOINTS
+# =============================================================================
+
+@router.get("/chat/unified/data/{project}")
+async def get_project_data_summary(project: str):
+    """Get summary of available data for a project."""
+    if not STRUCTURED_AVAILABLE:
+        raise HTTPException(503, "Structured queries not available")
+    
+    try:
+        handler = get_structured_handler()
+        tables = handler.get_tables(project)
+        
+        return {
+            "project": project,
+            "tables": len(tables),
+            "summary": [
+                {
+                    "file": t.get('file'),
+                    "sheet": t.get('sheet_name'),
+                    "rows": t.get('row_count'),
+                    "columns": len(t.get('columns', []))
+                }
+                for t in tables
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.get("/chat/unified/data/{project}/{file_name}/versions")
+async def get_file_versions(project: str, file_name: str):
+    """Get version history for a file."""
+    if not STRUCTURED_AVAILABLE:
+        raise HTTPException(503, "Not available")
+    
+    try:
+        handler = get_structured_handler()
+        return {"versions": handler.get_file_versions(project, file_name)}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+class CompareRequest(BaseModel):
+    sheet_name: str
+    key_column: str
+    version1: Optional[int] = None
+    version2: Optional[int] = None
+
+
+@router.post("/chat/unified/data/{project}/{file_name}/compare")
+async def compare_versions(project: str, file_name: str, request: CompareRequest):
+    """Compare two versions of a file."""
+    if not STRUCTURED_AVAILABLE:
+        raise HTTPException(503, "Not available")
+    
+    try:
+        handler = get_structured_handler()
+        result = handler.compare_versions(
+            project=project,
+            file_name=file_name,
+            sheet_name=request.sheet_name,
+            key_column=request.key_column,
+            version1=request.version1,
+            version2=request.version2
+        )
+        if 'error' in result:
+            raise HTTPException(400, result['error'])
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# =============================================================================
+# DIAGNOSTICS ENDPOINTS
+# =============================================================================
+
+@router.get("/chat/unified/diagnostics")
+async def get_diagnostics(project: str = None):
+    """Get diagnostic information about the chat system."""
+    result = {
+        "intelligence_available": INTELLIGENCE_AVAILABLE,
+        "learning_available": LEARNING_AVAILABLE,
+        "structured_available": STRUCTURED_AVAILABLE,
+        "rag_available": RAG_AVAILABLE,
+        "llm_available": LLM_AVAILABLE,
+        "personas_available": PERSONAS_AVAILABLE,
+        "active_sessions": len(unified_sessions),
+        "profile_status": None,
+        "sample_profiles": []
+    }
+    
+    if STRUCTURED_AVAILABLE:
+        try:
+            handler = get_structured_handler()
+            
+            # Check for _column_profiles table
+            try:
+                count = handler.conn.execute("SELECT COUNT(*) FROM _column_profiles").fetchone()[0]
+                result["profile_status"] = f"✅ {count} column profiles"
+            except:
+                result["profile_status"] = "❌ No column profiles - run backfill"
+            
+            # Sample profiles
+            if project:
+                try:
+                    samples = handler.conn.execute("""
+                        SELECT table_name, column_name, inferred_type, distinct_count, is_categorical, filter_category
+                        FROM _column_profiles 
+                        WHERE table_name LIKE ?
+                        LIMIT 15
+                    """, [f"{project}%"]).fetchall()
+                    
+                    result["sample_profiles"] = [
+                        {
+                            "table": s[0].split('__')[-1],
+                            "column": s[1],
+                            "type": s[2],
+                            "distinct_count": s[3],
+                            "is_categorical": s[4],
+                            "filter_category": s[5]
+                        }
+                        for s in samples
+                    ]
+                except:
+                    pass
+                    
+        except Exception as e:
+            result["diagnostics_error"] = str(e)
+    
+    return result
+
+
+@router.post("/chat/unified/diagnostics/backfill")
+async def run_backfill(project: str = None):
+    """Run profile backfill for existing tables."""
+    if not STRUCTURED_AVAILABLE:
+        raise HTTPException(503, "Structured queries not available")
+    
+    try:
+        handler = get_structured_handler()
+        
+        if not hasattr(handler, 'backfill_profiles'):
+            return {"error": "backfill_profiles method not found - deploy latest structured_data_handler.py"}
+        
+        result = handler.backfill_profiles(project)
+        return result
+        
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# =============================================================================
+# HEALTH & STATS
+# =============================================================================
+
+@router.get("/chat/unified/health")
+async def health_check():
+    """Health check endpoint."""
+    return {
+        "status": "healthy",
+        "version": "1.1.0",  # Phase 3.5
+        "intelligence": INTELLIGENCE_AVAILABLE,
+        "project_intelligence": PROJECT_INTELLIGENCE_AVAILABLE,
+        "learning": LEARNING_AVAILABLE,
+        "structured": STRUCTURED_AVAILABLE,
+        "rag": RAG_AVAILABLE,
+        "sessions": len(unified_sessions)
+    }
+
+
+@router.get("/chat/unified/stats")
+async def get_stats():
+    """Get chat system statistics."""
+    stats = {
+        "active_sessions": len(unified_sessions),
+        "intelligence_available": INTELLIGENCE_AVAILABLE,
+        "project_intelligence_available": PROJECT_INTELLIGENCE_AVAILABLE,
+        "learning_available": LEARNING_AVAILABLE,
+        "structured_available": STRUCTURED_AVAILABLE,
+        "rag_available": RAG_AVAILABLE
+    }
+    
+    if LEARNING_AVAILABLE:
+        try:
+            learning = get_learning_module()
+            if hasattr(learning, 'get_stats'):
+                stats["learning_stats"] = learning.get_stats()
         except:
             pass
-        
-        return insights
     
-    def _synthesize_answer(
-        self,
-        question: str,
-        mode: IntelligenceMode,
-        reality: List[Truth],
-        intent: List[Truth],
-        best_practice: List[Truth],
-        conflicts: List[Conflict],
-        insights: List[Insight],
-        context: Dict = None
-    ) -> SynthesizedAnswer:
-        """Synthesize a CONSULTATIVE answer from all sources using LLM."""
-        reasoning = []
-        
-        # Gather data context
-        data_context = []
-        query_type = 'list'
-        result_value = None
-        result_rows = []
-        result_columns = []
-        executed_sql = None
-        
-        if reality:
-            for truth in reality[:3]:
-                if isinstance(truth.content, dict) and 'rows' in truth.content:
-                    rows = truth.content['rows']
-                    cols = truth.content['columns']
-                    query_type = truth.content.get('query_type', 'list')
-                    executed_sql = truth.content.get('sql', '')
-                    
-                    if query_type == 'count' and rows:
-                        result_value = list(rows[0].values())[0] if rows[0] else 0
-                        data_context.append(f"COUNT RESULT: {result_value}")
-                    elif query_type in ['sum', 'average'] and rows:
-                        result_value = list(rows[0].values())[0] if rows[0] else 0
-                        data_context.append(f"{query_type.upper()} RESULT: {result_value}")
-                    else:
-                        result_rows = rows[:20]
-                        result_columns = cols
-                        data_context.append(f"Found {len(rows)} rows with columns: {', '.join(cols[:8])}")
-                        # Add sample data
-                        for row in rows[:5]:
-                            row_str = " | ".join(f"{k}: {v}" for k, v in list(row.items())[:5])
-                            data_context.append(f"  {row_str}")
-            reasoning.append(f"Found {len(reality)} data results")
-        
-        # Gather document context
-        doc_context = []
-        if intent:
-            for truth in intent[:2]:
-                doc_context.append(f"Customer doc ({truth.source_name}): {str(truth.content)[:200]}")
-            reasoning.append(f"Found {len(intent)} customer documents")
-        
-        if best_practice:
-            for truth in best_practice[:2]:
-                doc_context.append(f"Best practice ({truth.source_name}): {str(truth.content)[:200]}")
-            reasoning.append(f"Found {len(best_practice)} best practice docs")
-        
-        # Build filters context
-        filters_applied = []
-        if self.confirmed_facts:
-            for key, val in self.confirmed_facts.items():
-                if val and val != 'all':
-                    filters_applied.append(f"{key}={val}")
-        
-        # Generate CONSULTATIVE response using LLM
-        answer_text = self._generate_consultative_response(
-            question=question,
-            query_type=query_type,
-            result_value=result_value,
-            result_rows=result_rows,
-            result_columns=result_columns,
-            data_context=data_context,
-            doc_context=doc_context,
-            filters_applied=filters_applied,
-            insights=insights
-        )
-        
-        # Calculate confidence
-        confidence = 0.5
-        if reality:
-            confidence += 0.3
-        if intent:
-            confidence += 0.1
-        if best_practice:
-            confidence += 0.05
-        
-        return SynthesizedAnswer(
-            question=question,
-            answer=answer_text,
-            confidence=min(confidence, 0.95),
-            from_reality=reality,
-            from_intent=intent,
-            from_best_practice=best_practice,
-            conflicts=conflicts,
-            insights=insights,
-            structured_output=None,
-            reasoning=reasoning,
-            executed_sql=executed_sql or self.last_executed_sql
-        )
+    return stats
+
+
+@router.get("/chat/intelligent/learning/stats")
+async def get_learning_stats():
+    """
+    Get learning system statistics.
     
-    def _generate_consultative_response(
-        self,
-        question: str,
-        query_type: str,
-        result_value: Any,
-        result_rows: List[Dict],
-        result_columns: List[str],
-        data_context: List[str],
-        doc_context: List[str],
-        filters_applied: List[str],
-        insights: List[Insight]
-    ) -> str:
-        """Generate a natural, consultative response using LLM."""
-        
-        # Try to use LLM for consultative synthesis
-        try:
-            try:
-                from utils.llm_orchestrator import LLMOrchestrator
-            except ImportError:
-                from backend.utils.llm_orchestrator import LLMOrchestrator
-            
-            orchestrator = LLMOrchestrator()
-            
-            # Build context for LLM
-            context_parts = [f"Question: {question}"]
-            
-            if filters_applied:
-                context_parts.append(f"Filters applied: {', '.join(filters_applied)}")
-            
-            if query_type == 'count' and result_value is not None:
-                context_parts.append(f"Query result: COUNT = {result_value}")
-            elif query_type in ['sum', 'average'] and result_value is not None:
-                context_parts.append(f"Query result: {query_type.upper()} = {result_value}")
-            elif result_rows:
-                context_parts.append(f"Query result: {len(result_rows)} rows")
-                context_parts.append(f"Columns: {', '.join(result_columns[:10])}")
-                # Include sample
-                for row in result_rows[:3]:
-                    row_preview = {k: v for k, v in list(row.items())[:5]}
-                    context_parts.append(f"Sample: {row_preview}")
-            
-            if doc_context:
-                context_parts.append("\nRelevant documentation:")
-                context_parts.extend(doc_context[:2])
-            
-            if insights:
-                context_parts.append("\nData insights:")
-                for insight in insights[:3]:
-                    context_parts.append(f"- {insight.title}: {insight.description}")
-            
-            prompt = f"""You are a helpful data consultant. Based on the query results below, provide a brief, 
-consultative response that:
-1. Directly answers the question with the key finding
-2. Adds 1-2 sentences of context or insight if relevant
-3. Notes any data quality observations if present
-4. Is conversational but professional
-
-{chr(10).join(context_parts)}
-
-Respond in 2-4 sentences. Start with the answer, then add brief context. Do not repeat the SQL or technical details."""
-
-            response = orchestrator.process_query(
-                query=prompt,
-                chunks=[]  # No chunks needed for synthesis
-            )
-            
-            if response and response.get('response') and len(response.get('response', '')) > 20:
-                return response['response'].strip()
-                
-        except Exception as e:
-            logger.warning(f"[SYNTHESIS] LLM synthesis failed: {e}, using fallback")
-        
-        # FALLBACK: Build a decent response without LLM
-        parts = []
-        
-        if query_type == 'count' and result_value is not None:
-            parts.append(f"**{result_value:,}** employees match your criteria.")
-            if filters_applied:
-                parts.append(f"(Filtered by: {', '.join(filters_applied)})")
-        elif query_type in ['sum', 'average'] and result_value is not None:
-            parts.append(f"**{query_type.title()}: {result_value:,}**")
-        elif result_rows:
-            parts.append(f"Found **{len(result_rows):,}** results:")
-            # Format as simple table preview
-            if result_columns:
-                header = " | ".join(result_columns[:6])
-                parts.append(f"\n| {header} |")
-                parts.append("|" + "---|" * min(6, len(result_columns)))
-                for row in result_rows[:10]:
-                    vals = [str(row.get(c, ''))[:20] for c in result_columns[:6]]
-                    parts.append(f"| {' | '.join(vals)} |")
-                if len(result_rows) > 10:
-                    parts.append(f"\n*Showing first 10 of {len(result_rows)} results*")
-        else:
-            parts.append("No results found matching your criteria.")
-        
-        if insights:
-            parts.append("\n**Insights:**")
-            for insight in insights[:2]:
-                icon = '🔴' if insight.severity == 'high' else '🟡'
-                parts.append(f"{icon} {insight.title}: {insight.description}")
-        
-        return "\n".join(parts)
+    This endpoint is called by the Admin UI Learning page.
+    Provides counts for learned queries, feedback, preferences, and patterns.
+    """
+    if not LEARNING_AVAILABLE:
+        return {
+            'available': False,
+            'learned_queries': 0,
+            'feedback_records': 0,
+            'user_preferences': 0,
+            'clarification_patterns': 0
+        }
     
-    def clear_clarifications(self):
-        """Clear confirmed facts."""
-        self.confirmed_facts = {}
+    try:
+        learning = get_learning_module()
+        return learning.get_learning_stats()
+    except Exception as e:
+        logger.error(f"[LEARNING] Stats error: {e}")
+        return {
+            'available': False,
+            'error': str(e)
+        }
+
+
+# =============================================================================
+# BACKWARD COMPATIBILITY REDIRECTS
+# =============================================================================
+
+@router.post("/chat/intelligent")
+async def intelligent_chat_redirect(request: UnifiedChatRequest):
+    """Redirect old /chat/intelligent to unified endpoint."""
+    logger.info("[REDIRECT] /chat/intelligent → /chat/unified")
+    return await unified_chat(request)
+
+
+# =============================================================================
+# END OF UNIFIED CHAT ROUTER
+# =============================================================================
