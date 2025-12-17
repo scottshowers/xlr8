@@ -15,10 +15,10 @@ import { useProject } from '../context/ProjectContext'
 import { useTheme } from '../context/ThemeContext'
 import api from '../services/api'
 import { 
-  Database, Table2, Play, Download, 
+  Database, Play, Download, 
   Plus, X, Check, AlertCircle, Sparkles,
   RefreshCw, Code2, Copy, CheckCheck, Link2,
-  Loader2, Activity, BarChart3, PieChart, TrendingUp
+  Loader2, Activity, BarChart3
 } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart as RePieChart, Pie, Cell, LineChart, Line } from 'recharts'
 
@@ -40,35 +40,71 @@ const CHART_COLORS = ['#83b16d', '#93abd9', '#f59e0b', '#ef4444', '#8b5cf6', '#0
 // SMART TABLE NAME PARSER
 // =============================================================================
 
-function parseTableDisplayName(fullName, shortName, file, sheet) {
-  // Priority: sheet name > file name > short name
-  if (sheet && sheet !== 'Sheet1' && sheet !== 'Sheet 1') {
-    // Clean up sheet name
-    return cleanName(sheet)
-  }
-  if (file) {
-    // Extract filename without extension
-    const fileName = file.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ')
-    return cleanName(fileName)
-  }
-  if (shortName) {
-    return cleanName(shortName)
-  }
-  // Fallback: parse full name
+function parseSmartTableName(fullName, file, sheet) {
+  // Pattern: project__category__source_timestamp
+  // Example: tea1000__payroll__paycom_register_20251217_154008
+  
+  if (!fullName) return { display: 'Unknown', customer: '' }
+  
   const parts = fullName.split('__')
-  return cleanName(parts[parts.length - 1])
-}
-
-function cleanName(name) {
-  if (!name) return 'Unknown'
-  return name
-    .replace(/[-_]/g, ' ')
-    .replace(/([a-z])([A-Z])/g, '$1 $2') // camelCase to spaces
-    .split(' ')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(' ')
-    .trim()
-    .substring(0, 30) // Max 30 chars
+  
+  // Extract customer/project code (first part)
+  const customerCode = parts[0]?.toUpperCase() || ''
+  
+  // Extract source name (last part, before timestamp)
+  let sourceName = parts[parts.length - 1] || fullName
+  
+  // Remove timestamp suffix (like _20251217_154008)
+  sourceName = sourceName.replace(/_\d{8}_\d{6}$/, '')
+  
+  // Clean up common patterns
+  const nameMap = {
+    'paycom_register': 'Paycom Register',
+    'employee_master': 'Employee Master',
+    'earnings': 'Earnings',
+    'deductions': 'Deductions',
+    'taxes': 'Taxes',
+    'benefits': 'Benefits',
+    'companies': 'Companies',
+    'departments': 'Departments',
+    'jobs': 'Jobs',
+    'locations': 'Locations',
+    'pay_codes': 'Pay Codes',
+    'employee': 'Employees',
+    'emp_': 'Employee ',
+    'cor': 'Master Data',
+    'corp': 'Companies',
+  }
+  
+  // Try to match known patterns
+  let displayName = sourceName
+  for (const [pattern, replacement] of Object.entries(nameMap)) {
+    if (sourceName.toLowerCase().includes(pattern)) {
+      displayName = replacement
+      break
+    }
+  }
+  
+  // If no match, clean up the name
+  if (displayName === sourceName) {
+    displayName = sourceName
+      .replace(/_/g, ' ')
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .split(' ')
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(' ')
+      .substring(0, 25)
+  }
+  
+  // Use sheet name if available and meaningful
+  if (sheet && !['Sheet1', 'Sheet 1', 'Data'].includes(sheet)) {
+    displayName = sheet.substring(0, 25)
+  }
+  
+  return {
+    display: displayName,
+    customer: customerCode
+  }
 }
 
 // =============================================================================
@@ -76,7 +112,7 @@ function cleanName(name) {
 // =============================================================================
 
 export default function QueryBuilderPage() {
-  const { projectName } = useProject()
+  const { projectName, activeProject } = useProject()
   const { darkMode, T } = useTheme()
   
   // Schema state
@@ -110,29 +146,44 @@ export default function QueryBuilderPage() {
   useEffect(() => {
     if (projectName) {
       loadSchema()
+      // Clear selection when project changes
+      setSelectedTables([])
+      setSelectedColumns([])
+      setFilters([])
+      setResults(null)
+      setError(null)
     }
   }, [projectName])
   
   const loadSchema = async () => {
     setIsLoadingSchema(true)
     try {
+      console.log('[Smart Analytics] Loading schema for:', projectName)
       const response = await api.get(`/bi/schema/${projectName}`)
       const schema = response.data
+      console.log('[Smart Analytics] Schema response:', schema)
       
-      const tableList = (schema.tables || []).map(t => ({
-        name: t.full_name || t.name, // Use full_name for SQL!
-        shortName: t.name,
-        displayName: parseTableDisplayName(t.full_name || t.name, t.name, t.file, t.sheet),
-        rows: t.row_count || t.rows || 0,
-        columns: t.columns || [],
-        file: t.file,
-        sheet: t.sheet,
-        keyColumns: (t.columns || []).filter(c => 
-          c.toLowerCase().endsWith('_id') || 
-          c.toLowerCase().endsWith('_code') ||
-          c.toLowerCase() === 'id'
-        )
-      }))
+      const customerName = activeProject?.customer || projectName
+      
+      const tableList = (schema.tables || []).map(t => {
+        const parsed = parseSmartTableName(t.full_name || t.name, t.file, t.sheet)
+        return {
+          sqlName: t.full_name || t.name, // ALWAYS use for SQL queries
+          displayName: parsed.display,
+          customerCode: parsed.customer,
+          rows: t.row_count || t.rows || 0,
+          columns: t.columns || [],
+          file: t.file,
+          sheet: t.sheet,
+          keyColumns: (t.columns || []).filter(c => 
+            c.toLowerCase().endsWith('_id') || 
+            c.toLowerCase().endsWith('_code') ||
+            c.toLowerCase() === 'id'
+          )
+        }
+      })
+      
+      console.log('[Smart Analytics] Parsed tables:', tableList.map(t => ({ sql: t.sqlName, display: t.displayName })))
       
       setTables(tableList)
       setRelationships(detectRelationships(tableList))
@@ -155,8 +206,8 @@ export default function QueryBuilderPage() {
                 (k1.replace('_id', '_code') === k2) ||
                 (k1.replace('_code', '_id') === k2)) {
               rels.push({
-                from: { table: t1.name, column: k1 },
-                to: { table: t2.name, column: k2 }
+                from: { table: t1.sqlName, column: k1 },
+                to: { table: t2.sqlName, column: k2 }
               })
             }
           })
@@ -171,25 +222,25 @@ export default function QueryBuilderPage() {
   // ===========================================
   
   const selectTable = (table) => {
-    if (selectedTables.find(t => t.name === table.name)) {
-      setSelectedTables(prev => prev.filter(t => t.name !== table.name))
-      setSelectedColumns(prev => prev.filter(c => c.table !== table.name))
+    if (selectedTables.find(t => t.sqlName === table.sqlName)) {
+      setSelectedTables(prev => prev.filter(t => t.sqlName !== table.sqlName))
+      setSelectedColumns(prev => prev.filter(c => c.table !== table.sqlName))
     } else {
       setSelectedTables(prev => [...prev, { ...table }])
     }
   }
   
-  const getRelatedTables = (tableName) => {
+  const getRelatedTables = (sqlName) => {
     const related = []
     relationships.forEach(rel => {
-      if (rel.from.table === tableName) {
-        const t = tables.find(t => t.name === rel.to.table)
-        if (t && !selectedTables.find(st => st.name === t.name)) {
+      if (rel.from.table === sqlName) {
+        const t = tables.find(t => t.sqlName === rel.to.table)
+        if (t && !selectedTables.find(st => st.sqlName === t.sqlName)) {
           related.push({ table: t, joinOn: { from: rel.from.column, to: rel.to.column } })
         }
-      } else if (rel.to.table === tableName) {
-        const t = tables.find(t => t.name === rel.from.table)
-        if (t && !selectedTables.find(st => st.name === t.name)) {
+      } else if (rel.to.table === sqlName) {
+        const t = tables.find(t => t.sqlName === rel.from.table)
+        if (t && !selectedTables.find(st => st.sqlName === t.sqlName)) {
           related.push({ table: t, joinOn: { from: rel.to.column, to: rel.from.column } })
         }
       }
@@ -197,26 +248,26 @@ export default function QueryBuilderPage() {
     return related
   }
   
-  const toggleColumn = (tableName, columnName) => {
-    const exists = selectedColumns.find(c => c.table === tableName && c.column === columnName)
+  const toggleColumn = (sqlName, columnName) => {
+    const exists = selectedColumns.find(c => c.table === sqlName && c.column === columnName)
     if (exists) {
-      setSelectedColumns(prev => prev.filter(c => !(c.table === tableName && c.column === columnName)))
+      setSelectedColumns(prev => prev.filter(c => !(c.table === sqlName && c.column === columnName)))
     } else {
-      setSelectedColumns(prev => [...prev, { table: tableName, column: columnName }])
+      setSelectedColumns(prev => [...prev, { table: sqlName, column: columnName }])
     }
   }
   
-  const selectAllColumns = (tableName) => {
-    const table = tables.find(t => t.name === tableName)
+  const selectAllColumns = (sqlName) => {
+    const table = tables.find(t => t.sqlName === sqlName)
     if (!table) return
     const newCols = table.columns
-      .filter(col => !selectedColumns.find(c => c.table === tableName && c.column === col))
-      .map(col => ({ table: tableName, column: col }))
+      .filter(col => !selectedColumns.find(c => c.table === sqlName && c.column === col))
+      .map(col => ({ table: sqlName, column: col }))
     setSelectedColumns(prev => [...prev, ...newCols])
   }
   
-  const clearTableColumns = (tableName) => {
-    setSelectedColumns(prev => prev.filter(c => c.table !== tableName))
+  const clearTableColumns = (sqlName) => {
+    setSelectedColumns(prev => prev.filter(c => c.table !== sqlName))
   }
 
   // ===========================================
@@ -228,7 +279,7 @@ export default function QueryBuilderPage() {
     const firstColumn = firstTable?.columns?.[0] || ''
     setFilters(prev => [...prev, {
       id: Date.now(),
-      table: firstTable?.name || '',
+      table: firstTable?.sqlName || '',
       column: firstColumn,
       operator: '=',
       value: ''
@@ -248,7 +299,7 @@ export default function QueryBuilderPage() {
     selectedTables.forEach(table => {
       table.columns.forEach(col => {
         cols.push({ 
-          table: table.name, 
+          table: table.sqlName, 
           column: col, 
           display: selectedTables.length > 1 ? `${table.displayName}.${col}` : col 
         })
@@ -258,7 +309,7 @@ export default function QueryBuilderPage() {
   }
 
   // ===========================================
-  // SQL GENERATION - Use full table names!
+  // SQL GENERATION - Use sqlName for actual queries!
   // ===========================================
   
   const generateSQL = () => {
@@ -266,29 +317,30 @@ export default function QueryBuilderPage() {
     
     const primaryTable = selectedTables[0]
     
-    // Quote table name if it contains special chars
-    const quoteName = (name) => name.includes('__') || name.includes('-') ? `"${name}"` : name
+    // Quote table name for DuckDB
+    const quoteName = (name) => `"${name}"`
     
     const cols = selectedColumns.length > 0
       ? selectedColumns.map(c => {
-          const colName = selectedTables.length > 1 ? `${quoteName(c.table)}.${c.column}` : c.column
-          return colName
+          return selectedTables.length > 1 
+            ? `${quoteName(c.table)}.${c.column}` 
+            : c.column
         }).join(', ')
       : '*'
     
-    let sql = `SELECT ${cols}\nFROM ${quoteName(primaryTable.name)}`
+    let sql = `SELECT ${cols}\nFROM ${quoteName(primaryTable.sqlName)}`
     
     if (selectedTables.length > 1) {
       selectedTables.slice(1).forEach(table => {
         const rel = relationships.find(r => 
-          (r.from.table === primaryTable.name && r.to.table === table.name) ||
-          (r.to.table === primaryTable.name && r.from.table === table.name)
+          (r.from.table === primaryTable.sqlName && r.to.table === table.sqlName) ||
+          (r.to.table === primaryTable.sqlName && r.from.table === table.sqlName)
         )
         if (rel) {
-          const isFromPrimary = rel.from.table === primaryTable.name
+          const isFromPrimary = rel.from.table === primaryTable.sqlName
           const joinCol1 = isFromPrimary ? rel.from.column : rel.to.column
           const joinCol2 = isFromPrimary ? rel.to.column : rel.from.column
-          sql += `\nLEFT JOIN ${quoteName(table.name)} ON ${quoteName(primaryTable.name)}.${joinCol1} = ${quoteName(table.name)}.${joinCol2}`
+          sql += `\nLEFT JOIN ${quoteName(table.sqlName)} ON ${quoteName(primaryTable.sqlName)}.${joinCol1} = ${quoteName(table.sqlName)}.${joinCol2}`
         }
       })
     }
@@ -368,7 +420,6 @@ export default function QueryBuilderPage() {
   const autoDetectChartConfig = (columns, data) => {
     if (!data || data.length === 0) return
     
-    // Find first string column (for X axis) and first numeric column (for Y axis)
     let xCol = ''
     let yCol = ''
     
@@ -379,7 +430,6 @@ export default function QueryBuilderPage() {
       if (!yCol && typeof val === 'number') yCol = col
     }
     
-    // Fallback
     if (!xCol && columns.length > 0) xCol = columns[0]
     if (!yCol && columns.length > 1) yCol = columns[1]
     
@@ -389,17 +439,16 @@ export default function QueryBuilderPage() {
   const getChartData = () => {
     if (!results?.data || !chartConfig.xAxis || !chartConfig.yAxis) return []
     
-    // Aggregate if needed (group by xAxis, sum yAxis)
     const grouped = {}
     results.data.forEach(row => {
-      const key = String(row[chartConfig.xAxis] || 'Unknown')
+      const key = String(row[chartConfig.xAxis] || 'Unknown').substring(0, 20)
       const val = Number(row[chartConfig.yAxis]) || 0
       grouped[key] = (grouped[key] || 0) + val
     })
     
     return Object.entries(grouped)
       .map(([name, value]) => ({ name, value }))
-      .slice(0, 20) // Max 20 items for chart
+      .slice(0, 15)
   }
 
   const resetAll = () => {
@@ -425,7 +474,7 @@ export default function QueryBuilderPage() {
     btn: { display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem', border: `1px solid ${T.border}`, borderRadius: '8px', background: T.bgCard, color: T.textDim, fontSize: '0.875rem', fontWeight: 500, cursor: 'pointer' },
     btnActive: { background: COLORS.grassGreenLight, borderColor: COLORS.grassGreen, color: COLORS.grassGreen },
     mainCard: { background: T.bgCard, borderRadius: '16px', boxShadow: '0 1px 3px rgba(42, 52, 65, 0.08)', overflow: 'hidden' },
-    grid: { display: 'grid', gridTemplateColumns: '340px 1fr', minHeight: '600px' },
+    grid: { display: 'grid', gridTemplateColumns: '320px 1fr', minHeight: '600px' },
     leftPanel: { borderRight: `1px solid ${T.border}`, padding: '1rem', overflowY: 'auto', maxHeight: '75vh' },
     rightPanel: { display: 'flex', flexDirection: 'column', overflow: 'hidden' },
     section: { marginBottom: '1.25rem' },
@@ -434,7 +483,7 @@ export default function QueryBuilderPage() {
     sectionTitle: { fontWeight: 600, color: T.text, fontSize: '0.875rem' },
     tableCard: { padding: '0.75rem', border: `2px solid ${T.border}`, borderRadius: '10px', cursor: 'pointer', marginBottom: '0.5rem', transition: 'all 0.15s ease' },
     tableCardSelected: { borderColor: COLORS.grassGreen, background: darkMode ? 'rgba(131, 177, 109, 0.1)' : COLORS.grassGreenLight },
-    tableName: { fontWeight: 600, color: T.text, fontSize: '0.85rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+    tableName: { fontWeight: 600, color: T.text, fontSize: '0.85rem' },
     tableMeta: { fontSize: '0.7rem', color: T.textDim, marginTop: '0.25rem' },
     columnGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.25rem', maxHeight: '140px', overflowY: 'auto', padding: '0.5rem', background: T.panelLight, borderRadius: '8px' },
     columnBtn: { display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.4rem', border: 'none', borderRadius: '4px', background: 'transparent', color: T.textDim, fontSize: '0.7rem', cursor: 'pointer', textAlign: 'left', overflow: 'hidden' },
@@ -444,13 +493,12 @@ export default function QueryBuilderPage() {
     select: { flex: 1, minWidth: '80px', padding: '0.4rem', border: `1px solid ${T.border}`, borderRadius: '4px', background: T.bgCard, color: T.text, fontSize: '0.75rem' },
     input: { flex: 1, minWidth: '60px', padding: '0.4rem', border: `1px solid ${T.border}`, borderRadius: '4px', background: T.bgCard, color: T.text, fontSize: '0.75rem' },
     runBtn: { width: '100%', padding: '0.875rem', border: 'none', borderRadius: '10px', background: COLORS.grassGreen, color: 'white', fontSize: '0.9rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' },
-    sqlPreview: { background: '#1e293b', color: '#4ade80', padding: '1rem', fontFamily: 'monospace', fontSize: '0.8rem', whiteSpace: 'pre-wrap', borderBottom: `1px solid ${T.border}`, maxHeight: '150px', overflowY: 'auto' },
+    sqlPreview: { background: '#1e293b', color: '#4ade80', padding: '1rem', fontFamily: 'monospace', fontSize: '0.75rem', whiteSpace: 'pre-wrap', borderBottom: `1px solid ${T.border}`, maxHeight: '120px', overflowY: 'auto' },
     resultsHeader: { padding: '1rem', borderBottom: `1px solid ${T.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' },
     table: { width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' },
     th: { textAlign: 'left', padding: '0.6rem 0.75rem', background: T.panelLight, borderBottom: `1px solid ${T.border}`, fontWeight: 600, color: T.text, fontSize: '0.75rem' },
     td: { padding: '0.6rem 0.75rem', borderBottom: `1px solid ${T.border}`, color: T.textDim, fontSize: '0.75rem' },
     emptyState: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '3rem 2rem', textAlign: 'center' },
-    chartContainer: { height: '300px', padding: '1rem' },
   }
 
   // ===========================================
@@ -480,8 +528,7 @@ export default function QueryBuilderPage() {
         <div>
           <h1 style={styles.title}>Smart Analytics</h1>
           <p style={styles.subtitle}>
-            Build queries visually • <strong>{projectName}</strong>
-            {!isLoadingSchema && ` • ${tables.length} tables`}
+            {activeProject?.customer || projectName} • {tables.length} tables available
           </p>
         </div>
         
@@ -522,21 +569,22 @@ export default function QueryBuilderPage() {
                 </div>
               ) : (
                 tables.map(table => {
-                  const isSelected = selectedTables.find(t => t.name === table.name)
-                  const related = isSelected ? getRelatedTables(table.name) : []
+                  const isSelected = selectedTables.find(t => t.sqlName === table.sqlName)
+                  const related = isSelected ? getRelatedTables(table.sqlName) : []
                   
                   return (
-                    <div key={table.name}>
+                    <div key={table.sqlName}>
                       <div 
                         style={{ ...styles.tableCard, ...(isSelected ? styles.tableCardSelected : {}) }}
                         onClick={() => selectTable(table)}
-                        title={table.name}
+                        title={table.sqlName}
                       >
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={styles.tableName}>{table.displayName}</div>
                             <div style={styles.tableMeta}>
                               {table.rows.toLocaleString()} rows • {table.columns.length} cols
+                              {table.customerCode && ` • ${table.customerCode}`}
                             </div>
                           </div>
                           {isSelected && <Check size={16} color={COLORS.grassGreen} />}
@@ -551,7 +599,7 @@ export default function QueryBuilderPage() {
                           </div>
                           {related.slice(0, 3).map(r => (
                             <button
-                              key={r.table.name}
+                              key={r.table.sqlName}
                               onClick={() => selectTable(r.table)}
                               style={{ 
                                 display: 'flex', alignItems: 'center', gap: '0.4rem',
@@ -584,21 +632,21 @@ export default function QueryBuilderPage() {
                 </div>
                 
                 {selectedTables.map(table => (
-                  <div key={table.name} style={{ marginBottom: '0.75rem' }}>
+                  <div key={table.sqlName} style={{ marginBottom: '0.75rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
-                      <span style={{ fontSize: '0.75rem', fontWeight: 500, color: T.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{table.displayName}</span>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 500, color: T.text }}>{table.displayName}</span>
                       <div style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}>
-                        <button onClick={() => selectAllColumns(table.name)} style={{ fontSize: '0.65rem', color: COLORS.grassGreen, background: 'none', border: 'none', cursor: 'pointer' }}>All</button>
-                        <button onClick={() => clearTableColumns(table.name)} style={{ fontSize: '0.65rem', color: T.textDim, background: 'none', border: 'none', cursor: 'pointer' }}>Clear</button>
+                        <button onClick={() => selectAllColumns(table.sqlName)} style={{ fontSize: '0.65rem', color: COLORS.grassGreen, background: 'none', border: 'none', cursor: 'pointer' }}>All</button>
+                        <button onClick={() => clearTableColumns(table.sqlName)} style={{ fontSize: '0.65rem', color: T.textDim, background: 'none', border: 'none', cursor: 'pointer' }}>Clear</button>
                       </div>
                     </div>
                     <div style={styles.columnGrid}>
                       {table.columns.map(col => {
-                        const isSelected = selectedColumns.find(c => c.table === table.name && c.column === col)
+                        const isSelected = selectedColumns.find(c => c.table === table.sqlName && c.column === col)
                         return (
                           <button
                             key={col}
-                            onClick={() => toggleColumn(table.name, col)}
+                            onClick={() => toggleColumn(table.sqlName, col)}
                             style={{ ...styles.columnBtn, ...(isSelected ? styles.columnBtnSelected : {}) }}
                             title={col}
                           >
@@ -807,7 +855,7 @@ export default function QueryBuilderPage() {
                       </select>
                     </div>
                     
-                    <div style={{ height: '250px' }}>
+                    <div style={{ height: '220px' }}>
                       <ResponsiveContainer width="100%" height="100%">
                         {chartType === 'bar' ? (
                           <BarChart data={getChartData()}>
@@ -825,7 +873,7 @@ export default function QueryBuilderPage() {
                               nameKey="name"
                               cx="50%"
                               cy="50%"
-                              outerRadius={80}
+                              outerRadius={70}
                               label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
                               labelLine={false}
                             >
@@ -861,8 +909,8 @@ export default function QueryBuilderPage() {
                         <tr key={i}>
                           {results.columns.map(col => (
                             <td key={col} style={styles.td}>
-                              {typeof row[col] === 'number' && (col.toLowerCase().includes('salary') || col.toLowerCase().includes('amount') || col.toLowerCase().includes('pay'))
-                                ? `$${row[col].toLocaleString()}`
+                              {typeof row[col] === 'number' && (col.toLowerCase().includes('salary') || col.toLowerCase().includes('amount') || col.toLowerCase().includes('pay') || col.toLowerCase().includes('gross') || col.toLowerCase().includes('net'))
+                                ? `$${row[col].toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`
                                 : row[col] ?? '-'
                               }
                             </td>
@@ -884,8 +932,6 @@ export default function QueryBuilderPage() {
                 <h3 style={{ color: T.text, marginBottom: '0.5rem', fontSize: '1.1rem' }}>Build Your Query</h3>
                 <p style={{ color: T.textDim, maxWidth: '280px', fontSize: '0.85rem' }}>
                   Select tables, choose columns, add filters, and click Run Query.
-                  <br /><br />
-                  <span style={{ color: COLORS.grassGreen }}>Smart joins are automatic!</span>
                 </p>
               </div>
             )}
