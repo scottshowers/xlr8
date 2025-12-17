@@ -41,70 +41,100 @@ const CHART_COLORS = ['#83b16d', '#93abd9', '#f59e0b', '#ef4444', '#8b5cf6', '#0
 // =============================================================================
 
 function parseSmartTableName(fullName, file, sheet) {
-  // Pattern: project__category__source_timestamp
-  // Example: tea1000__payroll__paycom_register_20251217_154008
+  // Handle various naming patterns:
+  // - tea1000__payroll__paycom_register_20251217_154008 (double underscore)
+  // - TEA1000_EMPLOYEE_CONVERSION_TESTING_MEYER_COMPANY_MEYER_CORP (single underscore)
   
   if (!fullName) return { display: 'Unknown', customer: '' }
   
-  const parts = fullName.split('__')
+  // First check for double-underscore format
+  if (fullName.includes('__')) {
+    const parts = fullName.split('__')
+    const customerCode = parts[0]?.toUpperCase() || ''
+    let sourceName = parts[parts.length - 1] || fullName
+    sourceName = sourceName.replace(/_\d{8}_\d{6}$/, '')
+    
+    return {
+      display: cleanSourceName(sourceName, sheet),
+      customer: customerCode
+    }
+  }
   
-  // Extract customer/project code (first part)
-  const customerCode = parts[0]?.toUpperCase() || ''
+  // Single underscore format - try to parse intelligently
+  const upper = fullName.toUpperCase()
   
-  // Extract source name (last part, before timestamp)
-  let sourceName = parts[parts.length - 1] || fullName
+  // Extract customer code (first part before known keywords)
+  const keywords = ['EMPLOYEE', 'PAYROLL', 'DEDUCTION', 'EARNING', 'TAX', 'BENEFIT', 'COMPANY', 'DEPARTMENT', 'JOB', 'LOCATION', 'PAY_CODE', 'MASTER', 'CORP', 'COR']
   
-  // Remove timestamp suffix (like _20251217_154008)
-  sourceName = sourceName.replace(/_\d{8}_\d{6}$/, '')
+  let customerCode = ''
+  let remainder = fullName
+  
+  for (const kw of keywords) {
+    const idx = upper.indexOf(kw)
+    if (idx > 0) {
+      // Customer code is everything before this keyword
+      customerCode = fullName.substring(0, idx).replace(/_+$/, '').toUpperCase()
+      remainder = fullName.substring(idx)
+      break
+    }
+  }
+  
+  // If no keyword found, use first segment as customer
+  if (!customerCode) {
+    const firstUnderscore = fullName.indexOf('_')
+    if (firstUnderscore > 0 && firstUnderscore < 15) {
+      customerCode = fullName.substring(0, firstUnderscore).toUpperCase()
+      remainder = fullName.substring(firstUnderscore + 1)
+    }
+  }
+  
+  return {
+    display: cleanSourceName(remainder, sheet),
+    customer: customerCode
+  }
+}
+
+function cleanSourceName(sourceName, sheet) {
+  // Use sheet name if meaningful
+  if (sheet && !['Sheet1', 'Sheet 1', 'Data'].includes(sheet)) {
+    return sheet.substring(0, 30)
+  }
   
   // Clean up common patterns
   const nameMap = {
     'paycom_register': 'Paycom Register',
     'employee_master': 'Employee Master',
+    'employee_conversion': 'Employee Conversion',
     'earnings': 'Earnings',
     'deductions': 'Deductions',
     'taxes': 'Taxes',
     'benefits': 'Benefits',
     'companies': 'Companies',
+    'company': 'Companies',
     'departments': 'Departments',
     'jobs': 'Jobs',
     'locations': 'Locations',
     'pay_codes': 'Pay Codes',
     'employee': 'Employees',
-    'emp_': 'Employee ',
-    'cor': 'Master Data',
-    'corp': 'Companies',
+    'meyer_corp': 'Meyer Corp',
+    'meyer_cor': 'Meyer Master',
   }
   
-  // Try to match known patterns
-  let displayName = sourceName
+  const lower = sourceName.toLowerCase()
   for (const [pattern, replacement] of Object.entries(nameMap)) {
-    if (sourceName.toLowerCase().includes(pattern)) {
-      displayName = replacement
-      break
+    if (lower.includes(pattern)) {
+      return replacement
     }
   }
   
-  // If no match, clean up the name
-  if (displayName === sourceName) {
-    displayName = sourceName
-      .replace(/_/g, ' ')
-      .replace(/([a-z])([A-Z])/g, '$1 $2')
-      .split(' ')
-      .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-      .join(' ')
-      .substring(0, 25)
-  }
-  
-  // Use sheet name if available and meaningful
-  if (sheet && !['Sheet1', 'Sheet 1', 'Data'].includes(sheet)) {
-    displayName = sheet.substring(0, 25)
-  }
-  
-  return {
-    display: displayName,
-    customer: customerCode
-  }
+  // Generic cleanup
+  return sourceName
+    .replace(/_/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .split(' ')
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ')
+    .substring(0, 30)
 }
 
 // =============================================================================
@@ -483,8 +513,8 @@ export default function QueryBuilderPage() {
     sectionTitle: { fontWeight: 600, color: T.text, fontSize: '0.875rem' },
     tableCard: { padding: '0.75rem', border: `2px solid ${T.border}`, borderRadius: '10px', cursor: 'pointer', marginBottom: '0.5rem', transition: 'all 0.15s ease' },
     tableCardSelected: { borderColor: COLORS.grassGreen, background: darkMode ? 'rgba(131, 177, 109, 0.1)' : COLORS.grassGreenLight },
-    tableName: { fontWeight: 600, color: T.text, fontSize: '0.85rem' },
-    tableMeta: { fontSize: '0.7rem', color: T.textDim, marginTop: '0.25rem' },
+    tableName: { fontWeight: 600, color: T.text, fontSize: '0.85rem', wordBreak: 'break-word' },
+    tableMeta: { fontSize: '0.7rem', color: T.textDim, marginTop: '0.25rem', wordBreak: 'break-word' },
     columnGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.25rem', maxHeight: '140px', overflowY: 'auto', padding: '0.5rem', background: T.panelLight, borderRadius: '8px' },
     columnBtn: { display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.4rem', border: 'none', borderRadius: '4px', background: 'transparent', color: T.textDim, fontSize: '0.7rem', cursor: 'pointer', textAlign: 'left', overflow: 'hidden' },
     columnBtnSelected: { background: darkMode ? 'rgba(131, 177, 109, 0.15)' : COLORS.grassGreenLight, color: COLORS.grassGreen, fontWeight: 500 },
