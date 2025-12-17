@@ -1250,8 +1250,14 @@ Return the JSON array now:"""
         logger.info(f"Description fixes made: {fixes_made}")
         return employees
     
-    def _find_full_description(self, type_code: str, short_desc: str, amount: float, lines: List[str]) -> Optional[str]:
+    def _find_full_description(self, type_code: str, short_desc: str, amount, lines: List[str]) -> Optional[str]:
         """Find the full description from raw text."""
+        # Convert amount to float if it's a string
+        try:
+            amount = float(amount) if amount else 0
+        except (ValueError, TypeError):
+            amount = 0
+            
         if not amount or amount == 0:
             return None
         
