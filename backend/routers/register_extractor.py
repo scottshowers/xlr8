@@ -907,7 +907,8 @@ Return ONLY a valid JSON array. No markdown, no explanation."""
                 if not existing.get('employee_id') and emp_id:
                     existing['employee_id'] = emp_id
                 
-                # Merge earnings, taxes, deductions arrays - dedupe by normalized type+description
+                # Merge earnings, taxes, deductions arrays - dedupe by TYPE only
+                # Each earning code (Regular, Shift Diff C2, etc) should appear only ONCE per employee
                 for field in ['earnings', 'taxes', 'deductions']:
                     existing_items = existing.get(field, [])
                     new_items = emp.get(field, [])
@@ -916,14 +917,25 @@ Return ONLY a valid JSON array. No markdown, no explanation."""
                     def norm(s):
                         return ' '.join(str(s or '').lower().split())
                     
-                    # Build seen set from existing items
-                    seen = {(norm(item.get('type', '')), norm(item.get('description', ''))) for item in existing_items}
+                    # Build seen set from existing items - BY TYPE ONLY
+                    seen_types = {norm(item.get('type', '')) for item in existing_items if item.get('type')}
+                    seen_descs = {norm(item.get('description', '')) for item in existing_items if item.get('description')}
                     
                     for item in new_items:
-                        key = (norm(item.get('type', '')), norm(item.get('description', '')))
-                        if key not in seen:
-                            existing_items.append(item)
-                            seen.add(key)
+                        item_type = norm(item.get('type', ''))
+                        item_desc = norm(item.get('description', ''))
+                        
+                        # Skip if we've seen this type OR this description
+                        if item_type and item_type in seen_types:
+                            continue
+                        if item_desc and item_desc in seen_descs:
+                            continue
+                        
+                        existing_items.append(item)
+                        if item_type:
+                            seen_types.add(item_type)
+                        if item_desc:
+                            seen_descs.add(item_desc)
                     
                     existing[field] = existing_items
                 
