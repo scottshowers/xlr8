@@ -1,10 +1,13 @@
 """
-XLR8 INTELLIGENCE ENGINE v5.7
+XLR8 INTELLIGENCE ENGINE v5.8
 ==============================
 
 Deploy to: backend/utils/intelligence_engine.py
 
 UPDATES:
+- v5.8: FIXED table selection - deprioritizes lookup tables (ethnic_co, org_level_, etc.)
+        Prioritizes main data tables with many columns and rows.
+        Fixed LLM synthesis method call (process_query not generate).
 - v5.7: CONSULTATIVE SYNTHESIS - Uses LLM to generate natural, helpful responses
         instead of raw data dumps. Adds context, insights, professional tone.
 - v5.6: FIXED table alias collision - now uses sheet_name from metadata
@@ -18,10 +21,6 @@ UPDATES:
 - v5.3: Added US state name→code fallback (universal knowledge)
         Data-driven approach first, state mapping as fallback
 - v5.2: FULLY DATA-DRIVEN filters
-        - Removed all hardcoded state/value mappings
-        - Location detection uses lookups from _intelligence_lookups
-        - Falls back to actual values in filter_candidates
-        - Profiler now handles column classification via lookup matching
 - v5.1: Filter override logic, location column validation
 - v5.0: Fixed state detection, LLM location filter stripping
 - v4.9: ARE bug fix (common English word blocklist)
@@ -47,7 +46,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.7 CONSULTATIVE SYNTHESIS ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.8 LOOKUP TABLE DEPRIORITIZATION ======")
 
 
 # =============================================================================
@@ -1383,6 +1382,8 @@ class IntelligenceEngine:
         
         IMPORTANT: Always includes tables containing filter_candidate columns
         so the LLM can build proper JOINs for compound queries.
+        
+        PRIORITY: Main data tables over lookup/reference tables.
         """
         if not tables:
             return []
@@ -1399,10 +1400,17 @@ class IntelligenceEngine:
         
         logger.info(f"[SQL-GEN] Filter candidate tables: {filter_candidate_tables}")
         
+        # Lookup/reference table indicators (should be deprioritized)
+        LOOKUP_INDICATORS = [
+            '_codes', '_lookup', '_ref', '_types', '_ethnic', 
+            '_status', '_category', '_mapping', 'ethnic_co',
+            'org_level_', 'scheduled_', 'supervisor'
+        ]
+        
         # Priority keywords for table selection
         table_keywords = {
             'personal': ['employee', 'employees', 'person', 'people', 'who', 'name', 'ssn', 'birth', 'hire', 'termination', 'termed', 'terminated', 'active'],
-            'company': ['company', 'organization', 'org', 'entity', 'status'],
+            'company': ['company', 'organization', 'org', 'entity', 'status', 'location', 'job'],
             'job': ['job', 'position', 'title', 'department', 'dept'],
             'earnings': ['earn', 'earning', 'pay', 'salary', 'wage', 'compensation', 'rate'],
             'deductions': ['deduction', 'benefit', '401k', 'insurance', 'health'],
@@ -1415,39 +1423,63 @@ class IntelligenceEngine:
         scored_tables = []
         for table in tables:
             table_name = table.get('table_name', '').lower()
-            short_name = table_name.split('__')[-1] if '__' in table_name else table_name
+            columns = table.get('columns', [])
+            row_count = table.get('row_count', 0)
             
             score = 0
+            
+            # DEPRIORITIZE lookup/reference tables
+            is_lookup = any(indicator in table_name for indicator in LOOKUP_INDICATORS)
+            if is_lookup:
+                score -= 30  # Significant penalty for lookup tables
+                logger.info(f"[SQL-GEN] Deprioritizing lookup table: {table_name[-40:]}")
+            
+            # DEPRIORITIZE tables with very few columns (likely lookups)
+            if len(columns) <= 3:
+                score -= 20
             
             # CRITICAL: Boost tables that have filter_candidate columns
             if table_name in filter_candidate_tables:
                 score += 50  # Very high score to ensure inclusion
-                logger.info(f"[SQL-GEN] Boosting table {short_name} (has filter candidates)")
+                logger.info(f"[SQL-GEN] Boosting table {table_name[-40:]} (has filter candidates)")
             
             # Check if table name matches any keyword patterns
             for pattern, keywords in table_keywords.items():
-                if pattern in short_name:
+                if pattern in table_name:
                     # Check if any keyword is in the question
                     if any(kw in q_lower for kw in keywords):
                         score += 10
                     else:
                         score += 1  # Table exists but question doesn't directly ask about it
             
-            # Boost "personal" table for general employee questions
-            if 'personal' in short_name and any(kw in q_lower for kw in ['employee', 'how many', 'count', 'who']):
-                score += 20
+            # Boost "personal" table for general employee questions - but NOT lookup variants
+            if 'personal' in table_name and not is_lookup:
+                if any(kw in q_lower for kw in ['employee', 'how many', 'count', 'who']):
+                    score += 25
             
             # Boost tables with high row counts (they're likely the main tables)
-            row_count = table.get('row_count', 0)
             if row_count > 1000:
-                score += 5
+                score += 10
             elif row_count > 100:
-                score += 2
+                score += 5
+            elif row_count < 50:
+                score -= 5  # Likely a lookup table
+            
+            # Boost tables with many columns (main data tables)
+            if len(columns) > 15:
+                score += 10
+            elif len(columns) > 8:
+                score += 5
             
             scored_tables.append((score, table))
+            logger.debug(f"[SQL-GEN] Table {table_name[-30:]} score={score} (rows={row_count}, cols={len(columns)}, lookup={is_lookup})")
         
         # Sort by score descending
         scored_tables.sort(key=lambda x: -x[0])
+        
+        # Log top tables for debugging
+        for score, t in scored_tables[:5]:
+            logger.warning(f"[SQL-GEN] Candidate: {t.get('table_name', '')[-40:]} score={score}")
         
         # Take top 5 tables (increased from 3 to handle compound queries)
         relevant = [t for score, t in scored_tables[:5] if score > 0]
@@ -1456,7 +1488,7 @@ class IntelligenceEngine:
         if not relevant:
             relevant = [tables[0]]
         
-        logger.info(f"[SQL-GEN] Selected {len(relevant)} relevant tables: {[t.get('table_name', '').split('__')[-1] for t in relevant]}")
+        logger.info(f"[SQL-GEN] Selected {len(relevant)} relevant tables")
         
         return relevant
     
@@ -2444,14 +2476,13 @@ consultative response that:
 
 Respond in 2-4 sentences. Start with the answer, then add brief context. Do not repeat the SQL or technical details."""
 
-            response = orchestrator.generate(
-                prompt=prompt,
-                task_type="synthesis",
-                max_tokens=300
+            response = orchestrator.process_query(
+                query=prompt,
+                chunks=[]  # No chunks needed for synthesis
             )
             
-            if response and len(response) > 20:
-                return response.strip()
+            if response and response.get('response') and len(response.get('response', '')) > 20:
+                return response['response'].strip()
                 
         except Exception as e:
             logger.warning(f"[SYNTHESIS] LLM synthesis failed: {e}, using fallback")
