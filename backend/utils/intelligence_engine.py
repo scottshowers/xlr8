@@ -1,10 +1,13 @@
 """
-XLR8 INTELLIGENCE ENGINE v5.9
+XLR8 INTELLIGENCE ENGINE v5.10
 ==============================
 
 Deploy to: backend/utils/intelligence_engine.py
 
 UPDATES:
+- v5.10: SMART FILTER INJECTION - checks if filter column exists in selected table
+         before injecting. Prevents "column not found" errors when LLM picks
+         wrong table for GROUP BY queries.
 - v5.9: FIXED "All employees (3 total)" - was showing distinct status values count,
         now shows actual employee count from distribution sum.
         Removed Claude synthesis to avoid API costs - uses cleaner fallback formatting.
@@ -42,7 +45,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.9 ALL-EMPLOYEES FIX + NO CLAUDE ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.10 SMART FILTER INJECTION ======")
 
 
 # =============================================================================
@@ -1269,6 +1272,61 @@ class IntelligenceEngine:
         
         return modified
     
+    def _can_inject_filter(self, sql: str, filter_instructions: str, all_columns: set) -> bool:
+        """
+        Check if the filter column exists in the tables being queried.
+        
+        This prevents errors like "employment_status_code not found" when
+        the LLM selects a table that doesn't have that column.
+        """
+        # Extract column name from filter instructions
+        # e.g., "WHERE employment_status_code IN ('A')" → "employment_status_code"
+        col_match = re.search(r'(\w+)\s+IN\s+\(', filter_instructions, re.IGNORECASE)
+        if not col_match:
+            col_match = re.search(r'(\w+)\s*=\s*', filter_instructions, re.IGNORECASE)
+        
+        if not col_match:
+            # Can't determine column, allow injection (will fail gracefully if wrong)
+            return True
+        
+        filter_col = col_match.group(1).lower()
+        
+        # Check if this column is in the available columns
+        if filter_col in all_columns:
+            logger.warning(f"[SQL-GEN] Filter column '{filter_col}' found in schema")
+            return True
+        
+        # Also check the SQL itself for the table and its columns
+        # Extract table name from FROM clause
+        from_match = re.search(r'FROM\s+["\']?(\w+)["\']?\s+AS\s+(\w+)', sql, re.IGNORECASE)
+        if not from_match:
+            from_match = re.search(r'FROM\s+["\']?([^"\'\s]+)["\']?', sql, re.IGNORECASE)
+        
+        if from_match:
+            table_name = from_match.group(1)
+            # Look up this table's columns from schema
+            if self.schema:
+                for table in self.schema.get('tables', []):
+                    t_name = table.get('table_name', '')
+                    if t_name.lower() == table_name.lower() or table_name.lower() in t_name.lower():
+                        cols = table.get('columns', [])
+                        col_names = []
+                        for c in cols:
+                            if isinstance(c, dict):
+                                col_names.append(c.get('name', '').lower())
+                            else:
+                                col_names.append(str(c).lower())
+                        
+                        if filter_col in col_names:
+                            logger.warning(f"[SQL-GEN] Filter column '{filter_col}' found in table {t_name[-40:]}")
+                            return True
+                        else:
+                            logger.warning(f"[SQL-GEN] Filter column '{filter_col}' NOT in table {t_name[-40:]} (has: {col_names[:5]}...)")
+                            return False
+        
+        logger.warning(f"[SQL-GEN] Could not verify filter column '{filter_col}', allowing injection")
+        return True
+    
     def _inject_where_clause(self, sql: str, filter_clause: str) -> str:
         """
         Inject a WHERE clause into SQL that may or may not already have one.
@@ -1492,7 +1550,7 @@ class IntelligenceEngine:
     
     def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
         """Generate SQL query using LLMOrchestrator with SMART table selection."""
-        logger.warning(f"[SQL-GEN] v5.9 - Starting SQL generation")
+        logger.warning(f"[SQL-GEN] v5.10 - Starting SQL generation")
         logger.warning(f"[SQL-GEN] confirmed_facts: {self.confirmed_facts}")
         
         if not self.structured_handler or not self.schema:
@@ -1870,10 +1928,16 @@ SQL:"""
                     sql = re.sub(r'\bWHERE\s*$', '', sql, flags=re.IGNORECASE)
             
             # INJECT FILTER CLAUSE (data-driven, not LLM-generated)
+            # BUT ONLY if the filter column exists in the selected table
             logger.warning(f"[SQL-GEN] About to inject, filter_instructions={filter_instructions}")
             if filter_instructions:
-                sql = self._inject_where_clause(sql, filter_instructions)
-                logger.warning(f"[SQL-GEN] After filter injection: {sql[:200]}")
+                # Check if the filter column exists in the SQL's FROM table
+                can_inject = self._can_inject_filter(sql, filter_instructions, all_columns)
+                if can_inject:
+                    sql = self._inject_where_clause(sql, filter_instructions)
+                    logger.warning(f"[SQL-GEN] After filter injection: {sql[:200]}")
+                else:
+                    logger.warning(f"[SQL-GEN] Skipping filter injection - column not in selected table")
             
             # FIX STATE NAME PATTERNS - convert "Texas" to "TX" etc in ILIKE clauses
             sql = self._fix_state_names_in_sql(sql)
