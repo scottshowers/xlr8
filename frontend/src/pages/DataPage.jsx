@@ -339,7 +339,7 @@ function FilesTab() {
     if (!confirm('Clear all processing history?')) return;
     setDeleting(true);
     try {
-      await api.delete('/jobs/clear-all');
+      await api.post('/jobs/clear-all');
       loadData();
     } catch (err) {
       alert('Error: ' + (err.response?.data?.detail || err.message));
