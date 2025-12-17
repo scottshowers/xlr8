@@ -75,70 +75,92 @@ def get_llm_config() -> Dict[str, str]:
 
 
 def call_llm(prompt: str, max_tokens: int = 4000, operation: str = "pdf_parse", project_id: str = None) -> Optional[str]:
-    """Call LLM for text generation with cost tracking."""
+    """Call LLM for text generation with cost tracking. Uses Groq as fallback."""
     config = get_llm_config()
     
-    if not config['url']:
-        logger.error("[LLM] No LLM URL configured (set LLM_ENDPOINT, LLM_INFERENCE_URL, OLLAMA_URL, or RUNPOD_URL)")
-        return None
-    
-    url = f"{config['url'].rstrip('/')}/api/generate"
-    
-    payload = {
-        "model": config['model'],
-        "prompt": prompt,
-        "stream": False,
-        "options": {
-            "num_predict": max_tokens,
-            "temperature": 0.1  # Low temp for structured output
+    # Try Ollama-compatible endpoint first
+    if config['url']:
+        url = f"{config['url'].rstrip('/')}/api/generate"
+        
+        payload = {
+            "model": config['model'],
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "num_predict": max_tokens,
+                "temperature": 0.1
+            }
         }
-    }
-    
-    import time
-    start_time = time.time()
-    
-    try:
-        auth = None
-        if config['username'] and config['password']:
-            auth = HTTPBasicAuth(config['username'], config['password'])
         
-        logger.warning(f"[LLM] Calling {url} with model {config['model']}")
-        response = requests.post(
-            url,
-            json=payload,
-            auth=auth,
-            timeout=180  # 3 minutes for large parses
-        )
-        response.raise_for_status()
+        import time
+        start_time = time.time()
         
-        result = response.json()
-        llm_response = result.get('response', '')
-        
-        # Track cost (RunPod bills by time)
-        duration_ms = int((time.time() - start_time) * 1000)
         try:
-            from backend.utils.cost_tracker import log_cost, CostService
-            log_cost(
-                service=CostService.RUNPOD,
-                operation=operation,
-                duration_ms=duration_ms,
-                project_id=project_id,
-                metadata={"model": config['model'], "prompt_len": len(prompt), "response_len": len(llm_response)}
+            auth = None
+            if config['username'] and config['password']:
+                auth = HTTPBasicAuth(config['username'], config['password'])
+            
+            logger.warning(f"[LLM] Calling {url} with model {config['model']}")
+            response = requests.post(url, json=payload, auth=auth, timeout=180)
+            response.raise_for_status()
+            
+            result = response.json()
+            llm_response = result.get('response', '')
+            
+            # Track cost
+            duration_ms = int((time.time() - start_time) * 1000)
+            try:
+                from backend.utils.cost_tracker import log_cost, CostService
+                log_cost(CostService.LOCAL_LLM, operation, duration_ms=duration_ms, project_id=project_id)
+            except:
+                pass
+            
+            return llm_response
+            
+        except Exception as e:
+            logger.warning(f"[LLM] Ollama request failed: {e}, trying Groq fallback")
+    
+    # Fallback to Groq
+    groq_key = os.getenv('GROQ_API_KEY', '')
+    if groq_key:
+        logger.warning("[LLM] Using Groq fallback")
+        import time
+        start_time = time.time()
+        
+        try:
+            response = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {groq_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "llama-3.1-70b-versatile",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": max_tokens,
+                    "temperature": 0.1
+                },
+                timeout=120
             )
-        except Exception as cost_err:
-            logger.debug(f"Cost tracking failed: {cost_err}")
-        
-        return llm_response
-        
-    except requests.Timeout:
-        logger.error(f"[LLM] Timeout calling {url}")
-        return None
-    except requests.RequestException as e:
-        logger.error(f"[LLM] Request failed: {e}")
-        return None
-    except Exception as e:
-        logger.error(f"[LLM] Unexpected error: {e}")
-        return None
+            response.raise_for_status()
+            result = response.json()
+            llm_response = result.get('choices', [{}])[0].get('message', {}).get('content', '')
+            
+            duration_ms = int((time.time() - start_time) * 1000)
+            try:
+                from backend.utils.cost_tracker import log_cost, CostService
+                log_cost(CostService.GROQ, operation, duration_ms=duration_ms, project_id=project_id)
+            except:
+                pass
+            
+            return llm_response
+            
+        except Exception as e:
+            logger.error(f"[LLM] Groq fallback also failed: {e}")
+            return None
+    
+    logger.error("[LLM] No LLM available (Ollama failed, no GROQ_API_KEY)")
+    return None
 
 
 # =============================================================================
