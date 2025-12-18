@@ -64,7 +64,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.14.0 CONFIG VALIDATION IMPROVEMENTS ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.14.1 DATA QUALITY CHECKS ======")
 
 
 # =============================================================================
@@ -1775,6 +1775,39 @@ class IntelligenceEngine:
         # Get column names
         columns = list(rows[0].keys()) if rows else []
         col_lower_map = {c.lower(): c for c in columns}
+        
+        # DATA QUALITY CHECK: Detect corrupted/garbage column names
+        # If columns are "nan", "nan_1", "nan_2"... the header parsing failed
+        nan_cols = [c for c in columns if c.lower().startswith('nan') or c.lower() == 'nan']
+        unnamed_cols = [c for c in columns if 'unnamed' in c.lower()]
+        
+        if len(nan_cols) > 3 or len(unnamed_cols) > 3:
+            findings.append({
+                'type': 'error',
+                'severity': 'high',
+                'title': '⚠️ Data Quality Issue: Column Headers Missing',
+                'message': f"Found {len(nan_cols)} columns named 'nan' - header row was not parsed correctly during upload",
+                'action': 'Re-upload the source file. Check for merged cells, multiple header rows, or non-standard formatting.',
+                'details': [{'entity': 'Sample columns', 'issue': 'Invalid names', 'value': ', '.join(columns[:5])}]
+            })
+            # Still try to validate what we can, but flag the issue prominently
+        
+        # DATA QUALITY CHECK: Row count sanity
+        expected_min_rows = domain_config.get('expected_min_rows', 50)  # Most config tables have 50+ rows
+        if len(rows) < expected_min_rows and len(rows) < 30:
+            # Check if first row looks like headers (common parsing issue)
+            first_row_values = list(rows[0].values()) if rows else []
+            looks_like_header = any(isinstance(v, str) and len(v) > 10 and ' ' in v for v in first_row_values[:5])
+            
+            if looks_like_header:
+                findings.append({
+                    'type': 'warning',
+                    'severity': 'medium',
+                    'title': 'Possible Data Truncation',
+                    'message': f"Only {len(rows)} rows found. First row may contain actual headers that weren't detected.",
+                    'action': 'Verify source file has correct header row format',
+                    'details': [{'entity': 'First row sample', 'issue': 'May be headers', 'value': str(first_row_values[:3])[:100]}]
+                })
         
         # Find key columns
         code_col = None
