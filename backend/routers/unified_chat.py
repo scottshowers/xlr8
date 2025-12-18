@@ -1900,34 +1900,60 @@ async def unified_chat(request: UnifiedChatRequest):
             # builds the Three Truths response - don't override it with simple_answer
             engine_answer = answer.answer if answer.answer else None
             
-            # Detect "no data" placeholder messages - these should trigger expert context
+            # Check if this is an analytical question that REQUIRES expert interpretation
+            analytical_keywords = ['correct', 'valid', 'issue', 'problem', 'check', 'verify', 
+                                   'audit', 'review', 'configure', 'setup', 'missing', 'wrong',
+                                   'should', 'compliance', 'accurate', 'quality', 'rate', 'rates',
+                                   'properly', 'right', 'okay', 'ok', 'good', 'bad', 'error']
+            is_analytical = any(kw in message.lower() for kw in analytical_keywords)
+            
+            # Detect garbage SQL responses (just literals, no real data)
+            garbage_indicators = [
+                'configured correctly',  # LLM returned fake confirmation
+                'no issues found',
+                'everything looks',
+                'appears to be',
+            ]
+            is_garbage_response = engine_answer and any(
+                indicator in engine_answer.lower() for indicator in garbage_indicators
+            )
+            
+            # Detect "no data" placeholder messages
             no_data_indicators = ['no data found', 'no matching', 'couldn\'t find', 'no results']
             is_no_data_placeholder = engine_answer and any(
                 indicator in engine_answer.lower() for indicator in no_data_indicators
             )
             
-            # Check if this is an analytical question that deserves expert guidance
-            analytical_keywords = ['correct', 'valid', 'issue', 'problem', 'check', 'verify', 
-                                   'audit', 'review', 'configure', 'setup', 'missing', 'wrong',
-                                   'should', 'compliance', 'accurate', 'quality', 'rate', 'rates']
-            is_analytical = any(kw in message.lower() for kw in analytical_keywords)
-            
-            if is_no_data_placeholder and is_analytical and EXPERT_CONTEXT_AVAILABLE:
-                # Don't accept "no data" as answer for analytical questions
-                # Use expert context to provide guidance instead
-                logger.info(f"[UNIFIED] Overriding no-data response with expert context for analytical question")
+            # For analytical questions, ALWAYS use expert context
+            # The expert interprets whatever data we found (or guides on finding it)
+            if is_analytical and EXPERT_CONTEXT_AVAILABLE:
+                logger.info(f"[UNIFIED] Analytical question detected - using expert context")
                 try:
                     project_id, project_domains = _get_project_domains(project, handler)
                     
-                    # Build context from what we know
-                    context_parts = [
-                        f"Question: {message}",
-                        "The SQL query to find this data did not return results.",
-                        "This could mean: (1) the data doesn't exist yet, (2) it's in a different table, or (3) different column names are used.",
-                    ]
+                    # Build context from what we have
+                    context_parts = [f"User Question: {message}", ""]
+                    
+                    # Include any real data we found
+                    if answer.from_reality and not is_garbage_response and not is_no_data_placeholder:
+                        for truth in answer.from_reality:
+                            if isinstance(truth.content, dict):
+                                rows = truth.content.get('rows', [])
+                                if rows:
+                                    context_parts.append(f"Data found in {truth.source_name}:")
+                                    # Format first 10 rows as context
+                                    for row in rows[:10]:
+                                        context_parts.append(f"  {row}")
+                                    if len(rows) > 10:
+                                        context_parts.append(f"  ... and {len(rows) - 10} more rows")
+                    else:
+                        context_parts.append("No relevant data was found in the available tables.")
+                        context_parts.append("This could mean: the data hasn't been uploaded yet, or it's stored with different column names.")
+                    
+                    # Add table context
                     if schema.get('tables'):
-                        table_names = [t.get('table_name', '').split('__')[-1][:30] for t in schema['tables'][:15]]
-                        context_parts.append(f"Available tables include: {', '.join(table_names)}")
+                        table_names = [t.get('table_name', '').split('__')[-1][:40] for t in schema['tables'][:20]]
+                        context_parts.append(f"\nAvailable tables: {', '.join(table_names)}")
                     
                     context = "\n".join(context_parts)
                     
@@ -1946,18 +1972,30 @@ async def unified_chat(request: UnifiedChatRequest):
                     )
                     
                     if synthesized and len(synthesized) > 50:
-                        response["answer"] = synthesized
+                        if auto_applied_note:
+                            response["answer"] = auto_applied_note + "\n\n" + synthesized
+                        else:
+                            response["answer"] = synthesized
                         session['last_expert_context'] = expert_context_used
                         if expert_context_used:
                             response["expert_context_id"] = expert_context_used
-                        logger.info(f"[UNIFIED] Expert context provided guidance: {expert_context_used}")
+                        logger.info(f"[UNIFIED] Expert context: {expert_context_used}")
                     else:
-                        # Expert context failed, use original
-                        response["answer"] = engine_answer
+                        # Expert context failed, fall through to normal flow
+                        logger.warning(f"[UNIFIED] Expert synthesis too short, using engine answer")
+                        if auto_applied_note:
+                            response["answer"] = auto_applied_note + "\n\n" + engine_answer
+                        else:
+                            response["answer"] = engine_answer
                 except Exception as e:
-                    logger.warning(f"[UNIFIED] Expert context override failed: {e}")
-                    response["answer"] = engine_answer
-                    
+                    logger.warning(f"[UNIFIED] Expert context failed: {e}")
+                    import traceback
+                    logger.warning(traceback.format_exc())
+                    if auto_applied_note:
+                        response["answer"] = auto_applied_note + "\n\n" + engine_answer
+                    else:
+                        response["answer"] = engine_answer
+                        
             elif engine_answer and len(engine_answer) > 50:
                 # Engine gave us a proper consultative response
                 if auto_applied_note:
