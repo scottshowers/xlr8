@@ -1876,6 +1876,95 @@ async def unified_chat(request: UnifiedChatRequest):
         # Generate answer if not clarification
         if not response["needs_clarification"] and answer.answer:
             
+            # Check for export request first
+            if answer.structured_output and answer.structured_output.get('type') == 'export_ready':
+                logger.warning(f"[UNIFIED] Export request - generating Excel file")
+                export_data = answer.structured_output.get('export_data', {})
+                
+                try:
+                    from openpyxl import Workbook
+                    from openpyxl.styles import Font, PatternFill, Border, Side
+                    import io
+                    import base64
+                    
+                    wb = Workbook()
+                    ws = wb.active
+                    ws.title = "Validation Results"
+                    
+                    # Styling
+                    header_font = Font(bold=True, color="FFFFFF")
+                    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+                    error_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+                    warning_fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
+                    
+                    rows = export_data.get('rows', [])
+                    columns = export_data.get('columns', [])
+                    findings = export_data.get('findings', [])
+                    
+                    if rows and columns:
+                        # Headers
+                        for col_idx, col_name in enumerate(columns, 1):
+                            cell = ws.cell(row=1, column=col_idx, value=col_name)
+                            cell.font = header_font
+                            cell.fill = header_fill
+                        
+                        # Data
+                        for row_idx, row in enumerate(rows, 2):
+                            for col_idx, col_name in enumerate(columns, 1):
+                                ws.cell(row=row_idx, column=col_idx, value=row.get(col_name, ''))
+                        
+                        # Auto-width columns
+                        for col_idx, col_name in enumerate(columns, 1):
+                            ws.column_dimensions[chr(64 + col_idx) if col_idx <= 26 else 'A'].width = max(12, len(col_name) + 2)
+                    
+                    # Findings sheet
+                    if findings:
+                        ws_findings = wb.create_sheet(title="Findings")
+                        ws_findings.cell(row=1, column=1, value="Finding").font = header_font
+                        ws_findings.cell(row=1, column=1).fill = header_fill
+                        ws_findings.cell(row=1, column=2, value="Severity").font = header_font
+                        ws_findings.cell(row=1, column=2).fill = header_fill
+                        ws_findings.cell(row=1, column=3, value="Message").font = header_font
+                        ws_findings.cell(row=1, column=3).fill = header_fill
+                        ws_findings.cell(row=1, column=4, value="Action").font = header_font
+                        ws_findings.cell(row=1, column=4).fill = header_fill
+                        
+                        for f_idx, finding in enumerate(findings, 2):
+                            ws_findings.cell(row=f_idx, column=1, value=finding.get('title', ''))
+                            ws_findings.cell(row=f_idx, column=2, value=finding.get('severity', ''))
+                            ws_findings.cell(row=f_idx, column=3, value=finding.get('message', ''))
+                            ws_findings.cell(row=f_idx, column=4, value=finding.get('action', ''))
+                            
+                            # Color by severity
+                            if finding.get('severity') == 'high':
+                                for col in range(1, 5):
+                                    ws_findings.cell(row=f_idx, column=col).fill = error_fill
+                            elif finding.get('severity') == 'medium':
+                                for col in range(1, 5):
+                                    ws_findings.cell(row=f_idx, column=col).fill = warning_fill
+                    
+                    # Save to bytes
+                    excel_buffer = io.BytesIO()
+                    wb.save(excel_buffer)
+                    excel_buffer.seek(0)
+                    excel_base64 = base64.b64encode(excel_buffer.read()).decode('utf-8')
+                    
+                    filename = answer.structured_output.get('filename_suggestion', 'validation_export.xlsx')
+                    
+                    response["answer"] = f"📥 **Export Ready**\n\nI've prepared {export_data.get('total_records', 0)} records with {len(findings)} findings for download."
+                    response["export"] = {
+                        "filename": filename,
+                        "data": excel_base64,
+                        "mime_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    }
+                    logger.warning(f"[UNIFIED] Export generated: {filename}")
+                    
+                except Exception as e:
+                    logger.error(f"[UNIFIED] Export failed: {e}")
+                    response["answer"] = f"Export generation failed: {str(e)}"
+                
+                return response
+            
             # Check for simple answer (count, sum, etc.)
             # USE THE ENGINE'S CONSULTATIVE ANSWER DIRECTLY
             # The intelligence_engine._generate_consultative_response() already
