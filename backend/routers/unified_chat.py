@@ -1515,12 +1515,12 @@ async def generate_synthesized_answer(
     project_domains: List[Dict] = None,
 ) -> Tuple[str, Optional[str]]:
     """
-    Generate the final synthesized answer using Claude.
+    Generate the final synthesized answer using LOCAL LLMs FIRST.
     
-    NOW WITH INTELLIGENT CONTEXT SELECTION:
-    1. Tries to match question + project domains to expert context
-    2. Falls back to persona if available
-    3. Falls back to default prompt
+    Flow:
+    1. Select expert context based on question + domains
+    2. Try Mistral via Ollama for synthesis
+    3. Fall back to Claude ONLY if Mistral fails
     
     Returns:
         (answer_text, expert_context_id_used)
@@ -1534,20 +1534,13 @@ async def generate_synthesized_answer(
         
         orchestrator = LLMOrchestrator()
         
-        if not orchestrator.claude_api_key:
-            logger.warning("[UNIFIED] No Claude API key")
-            return context[:3000], None
-        
-        import anthropic
-        client = anthropic.Anthropic(api_key=orchestrator.claude_api_key)
-        
-        # Redact PII before sending to Claude
+        # Redact PII before sending to any LLM
         redacted_context = redactor.redact(context)
         
         # ===================================================================
         # INTELLIGENT CONTEXT SELECTION
         # ===================================================================
-        system_prompt = None
+        expert_prompt = None
         
         # STEP 1: Try expert context auto-selection
         if EXPERT_CONTEXT_AVAILABLE:
@@ -1556,7 +1549,7 @@ async def generate_synthesized_answer(
                 matches = selector.select(question, project_domains, top_k=1)
                 
                 if matches and matches[0].match_score > 0.35:
-                    system_prompt = matches[0].context.prompt_template
+                    expert_prompt = matches[0].context.prompt_template
                     expert_context_id = matches[0].context.id
                     logger.info(f"[UNIFIED] Using expert context: {matches[0].context.name} "
                                f"(score={matches[0].match_score:.2f})")
@@ -1564,59 +1557,48 @@ async def generate_synthesized_answer(
                 logger.warning(f"[UNIFIED] Expert context selection failed: {e}")
         
         # STEP 2: Fall back to persona if no expert match
-        if not system_prompt and PERSONAS_AVAILABLE and persona:
+        if not expert_prompt and PERSONAS_AVAILABLE and persona:
             try:
                 pm = get_persona_manager()
                 persona_obj = pm.get_persona(persona)
                 if persona_obj and persona_obj.system_prompt:
-                    system_prompt = persona_obj.system_prompt
+                    expert_prompt = persona_obj.system_prompt
                     logger.info(f"[UNIFIED] Using persona: {persona_obj.name}")
             except Exception as e:
                 logger.warning(f"[UNIFIED] Persona load failed: {e}")
         
-        # STEP 3: Fall back to default prompt
-        if not system_prompt:
-            system_prompt = """You are an expert implementation consultant helping analyze customer data and configuration.
-
-Your responses should be:
-- Direct and actionable
-- Backed by the data provided
-- Clear about confidence levels
-- Professional but conversational
-
-When presenting findings:
-- Lead with the key number/insight
-- Provide context for what it means
-- Note any caveats or limitations
-- Be specific about data sources"""
+        # STEP 3: No expert prompt - orchestrator will use default
+        if not expert_prompt:
             logger.info("[UNIFIED] Using default prompt (no expert match or persona)")
         
-        # Build user prompt with all context
-        user_prompt = f"""Question: {question}
-
-Data Context:
-{redacted_context[:8000]}
-
-Please provide a clear, direct answer to the question based on the data above.
-Focus on the key insight first, then provide supporting details."""
-
-        # Call Claude
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=2000,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}]
+        # ===================================================================
+        # SYNTHESIS VIA ORCHESTRATOR - Mistral first, Claude fallback
+        # ===================================================================
+        result = orchestrator.synthesize_answer(
+            question=question,
+            context=redacted_context,
+            expert_prompt=expert_prompt,
+            use_claude_fallback=True  # Only if Mistral fails
         )
         
-        answer = response.content[0].text
-        
-        # Restore any PII in the response
-        answer = redactor.restore(answer)
-        
-        return answer, expert_context_id
+        if result.get('success'):
+            answer = result.get('response', '')
+            model_used = result.get('model_used', 'unknown')
+            logger.info(f"[UNIFIED] Synthesis complete via {model_used}")
+            
+            # Restore any PII in the response
+            answer = redactor.restore(answer)
+            
+            return answer, expert_context_id
+        else:
+            error = result.get('error', 'Unknown error')
+            logger.warning(f"[UNIFIED] Synthesis failed: {error}")
+            return context[:2000], None
         
     except Exception as e:
-        logger.error(f"[UNIFIED] Claude synthesis failed: {e}")
+        logger.error(f"[UNIFIED] Synthesis error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return context[:2000], None
 
 
