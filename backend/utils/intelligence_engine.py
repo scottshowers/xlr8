@@ -361,6 +361,22 @@ class IntelligenceEngine:
         is_employee_question = self._is_employee_question(q_lower)
         logger.warning(f"[INTELLIGENCE] is_employee_question: {is_employee_question}")
         
+        # Check if this is a VALIDATION question about config (not employee data)
+        # These should NOT ask about employee status - they're about rates/setup
+        validation_keywords = ['correct', 'valid', 'right', 'properly', 'configured', 
+                              'issue', 'problem', 'check', 'verify', 'audit', 'review',
+                              'accurate', 'wrong', 'error', 'mistake']
+        config_domains = ['workers comp', 'work comp', 'sui ', 'suta', 'futa', 'tax rate', 
+                         'withholding', 'wc rate', 'workers compensation']
+        
+        is_validation_question = any(kw in q_lower for kw in validation_keywords)
+        is_config_domain = any(cd in q_lower for cd in config_domains)
+        
+        # Override employee detection for config/validation questions
+        if is_validation_question and is_config_domain:
+            is_employee_question = False
+            logger.warning(f"[INTELLIGENCE] Overriding is_employee_question=False for config validation question")
+        
         # INTELLIGENT CLARIFICATION
         # For employee questions, determine which filters need clarification
         if is_employee_question:
