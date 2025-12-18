@@ -1472,15 +1472,19 @@ class IntelligenceEngine:
         ]
         
         # Priority keywords for table selection
+        # KEY: table name pattern -> question keywords that should boost it
         table_keywords = {
             'personal': ['employee', 'employees', 'person', 'people', 'who', 'name', 'ssn', 'birth', 'hire', 'termination', 'termed', 'terminated', 'active', 'location', 'state', 'city', 'address'],
-            'company': ['company', 'organization', 'org', 'entity'],
+            'company': ['company', 'organization', 'org', 'entity', 'legal'],
             'job': ['job', 'position', 'title', 'department', 'dept'],
-            'earnings': ['earn', 'earning', 'pay', 'salary', 'wage', 'compensation', 'rate'],
+            'earnings': ['earn', 'earning', 'pay', 'salary', 'wage', 'compensation'],
             'deductions': ['deduction', 'benefit', '401k', 'insurance', 'health'],
-            'taxes': ['tax', 'withhold', 'federal', 'state tax'],
+            'tax': ['tax', 'sui', 'suta', 'futa', 'fein', 'ein', 'withhold', 'federal', 'state tax', 'fica', 'w2', 'w-2', '941', '940'],
             'time': ['time', 'hours', 'attendance', 'schedule'],
             'address': ['address', 'zip', 'postal'],
+            'rate': ['rate', 'rates', 'percentage', 'percent'],
+            'config': ['config', 'configuration', 'setup', 'setting', 'correct', 'valid', 'validation'],
+            'master': ['master', 'setup', 'configuration'],
         }
         
         # Columns that indicate location data (boost tables with these)
@@ -1518,6 +1522,20 @@ class IntelligenceEngine:
                         score += 10
                     else:
                         score += 1  # Table exists but question doesn't directly ask about it
+            
+            # STRONG BOOST: Tax-specific questions should strongly prefer tax tables
+            tax_question_terms = ['sui', 'suta', 'futa', 'fein', 'ein', 'tax rate', 'withholding', 'w2', 'w-2', '941', '940']
+            if any(term in q_lower for term in tax_question_terms):
+                if 'tax' in table_name:
+                    score += 60  # Very strong boost
+                    logger.warning(f"[SQL-GEN] Strong tax boost for: {table_name[-40:]}")
+            
+            # STRONG BOOST: Configuration/validation questions should prefer config tables
+            config_question_terms = ['correct', 'configured', 'valid', 'setup', 'setting', 'configuration']
+            if any(term in q_lower for term in config_question_terms):
+                if any(cfg in table_name for cfg in ['config', 'validation', 'master', 'setting']):
+                    score += 50  # Strong boost for config tables
+                    logger.warning(f"[SQL-GEN] Config boost for: {table_name[-40:]}")
             
             # Boost "personal" table for general employee questions - but NOT lookup variants
             if 'personal' in table_name and not is_lookup:
