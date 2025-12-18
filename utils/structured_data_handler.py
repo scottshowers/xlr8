@@ -1715,52 +1715,46 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                             logger.warning(f"Color detection failed for '{sheet_name}': {e}")
                     
                     # If no colored header found, try text-based detection
+                    # OPTIMIZED: Read once with no header, then find header row in memory
                     if best_header_row == 0:
-                        min_bad_cols = float('inf')
-                        best_good_cols = 0
-                        for header_row in range(11):  # Try rows 0-10
-                            try:
-                                test_df = pd.read_excel(
-                                    file_path, 
-                                    sheet_name=sheet_name, 
-                                    header=header_row,
-                                    nrows=5
-                                )
-                                
-                                # Count BAD columns (unnamed, numeric, nan)
-                                # These indicate header detection failed
-                                bad_count = 0
+                        try:
+                            # Single read with no header - much faster than 11 separate reads
+                            raw_df = pd.read_excel(file_path, sheet_name=sheet_name, header=None, nrows=15)
+                            
+                            # Find row with best header characteristics
+                            best_score = -1
+                            for row_idx in range(min(10, len(raw_df))):
+                                row_vals = raw_df.iloc[row_idx]
                                 good_count = 0
-                                for c in test_df.columns:
-                                    col_str = str(c).lower().strip()
-                                    # Bad: Unnamed:X, numeric, nan, empty
+                                bad_count = 0
+                                
+                                for val in row_vals:
+                                    val_str = str(val).lower().strip() if pd.notna(val) else ''
+                                    # Bad: empty, nan, numeric only
                                     is_bad = (
-                                        col_str.startswith('unnamed') or
-                                        col_str in ['nan', 'none', ''] or
-                                        col_str.replace('.', '').replace('-', '').isdigit() or
-                                        (len(col_str) <= 2 and col_str.isdigit())
+                                        val_str in ['nan', 'none', '', 'nat'] or
+                                        val_str.replace('.', '').replace('-', '').isdigit()
                                     )
+                                    # Good: text with reasonable length
+                                    is_good = not is_bad and len(val_str) >= 2
+                                    
                                     if is_bad:
                                         bad_count += 1
-                                    else:
+                                    elif is_good:
                                         good_count += 1
                                 
-                                # We want max good columns and min bad columns
-                                if good_count < 2:
-                                    continue
-                                
-                                # Score: prioritize more good columns, then fewer bad columns
-                                if good_count > best_good_cols or (good_count == best_good_cols and bad_count < min_bad_cols):
-                                    min_bad_cols = bad_count
-                                    best_good_cols = good_count
-                                    best_header_row = header_row
-                                    logger.info(f"Sheet '{sheet_name}': Row {header_row} has {good_count} good cols, {bad_count} bad cols")
+                                # Score: good columns minus penalty for bad
+                                score = good_count - (bad_count * 0.5)
+                                if score > best_score and good_count >= 2:
+                                    best_score = score
+                                    best_header_row = row_idx
                                     
+                                # Perfect header found
                                 if bad_count == 0 and good_count >= 3:
                                     break
                                     
-                            except:
-                                continue
+                        except Exception as e:
+                            logger.warning(f"Header detection failed for '{sheet_name}': {e}")
                     
                     # Read with detected header row
                     try:
