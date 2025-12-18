@@ -17,7 +17,8 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Upload, FileText, Users, DollarSign, CheckCircle, XCircle, 
   Loader2, Trash2, Eye, AlertTriangle, ChevronDown, ChevronRight,
-  Shield, Cloud, Lock, Download, BarChart3, Wand2, HelpCircle
+  Shield, Cloud, Lock, Download, BarChart3, Wand2, HelpCircle,
+  Maximize2, Minimize2
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import ConsultantAssist from './ConsultantAssist';
@@ -40,6 +41,8 @@ export default function VacuumUploadPage() {
   const [useTextract, setUseTextract] = useState(false); // PyMuPDF is default
   const [vendorType, setVendorType] = useState('unknown'); // auto-detect by default
   const [activeTab, setActiveTab] = useState('employees'); // 'employees' or 'summary'
+  const [historyTab, setHistoryTab] = useState('employees'); // for Extract Details panel
+  const [expandedDetails, setExpandedDetails] = useState(false); // full-width mode for details
   const [showAssist, setShowAssist] = useState(false); // Consultant Assist modal
   
   // Job polling state
@@ -745,88 +748,160 @@ export default function VacuumUploadPage() {
         )}
         
         {/* History Section */}
-        <div className="grid md:grid-cols-2 gap-6">
-          {/* Extraction History */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold mb-4">Extraction History</h2>
-            
-            {extracts.length === 0 ? (
-              <p className="text-gray-500 text-center py-8">No extractions yet</p>
-            ) : (
-              <div className="space-y-2 max-h-96 overflow-y-auto">
-                {extracts.map(ext => (
-                  <div 
-                    key={ext.id}
-                    className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm truncate">{ext.source_file}</div>
-                      <div className="text-xs text-gray-500">
-                        {ext.employee_count} employees • {ext.pages_processed} pages 
-                        • {ext.extraction_method === 'pymupdf' ? '🔒 Local' : '☁️ AWS'}
-                        • {new Date(ext.created_at).toLocaleDateString()}
+        <div className={expandedDetails ? "" : "grid md:grid-cols-2 gap-6"}>
+          {/* Extraction History - hidden when expanded */}
+          {!expandedDetails && (
+            <div className="bg-white rounded-lg shadow p-6">
+              <h2 className="text-lg font-semibold mb-4">Extraction History</h2>
+              
+              {extracts.length === 0 ? (
+                <p className="text-gray-500 text-center py-8">No extractions yet</p>
+              ) : (
+                <div className="space-y-2 max-h-96 overflow-y-auto">
+                  {extracts.map(ext => (
+                    <div 
+                      key={ext.id}
+                      className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-sm truncate">{ext.source_file}</div>
+                        <div className="text-xs text-gray-500">
+                          {ext.employee_count} employees • {ext.pages_processed} pages 
+                          • {ext.extraction_method === 'pymupdf' ? '🔒 Local' : '☁️ AWS'}
+                          • {new Date(ext.created_at).toLocaleDateString()}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-0.5 rounded text-xs ${
+                          ext.confidence >= 0.8 
+                            ? 'bg-green-100 text-green-800' 
+                            : 'bg-yellow-100 text-yellow-800'
+                        }`}>
+                          {(ext.confidence * 100).toFixed(0)}%
+                        </span>
+                        <button
+                          onClick={() => viewExtract(ext.id)}
+                          className="p-1.5 text-[#83b16d] hover:bg-[#f0fdf4] rounded"
+                          title="View Details"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => deleteExtract(ext.id)}
+                          className="p-1.5 text-red-600 hover:bg-red-50 rounded"
+                          title="Delete"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className={`px-2 py-0.5 rounded text-xs ${
-                        ext.confidence >= 0.8 
-                          ? 'bg-green-100 text-green-800' 
-                          : 'bg-yellow-100 text-yellow-800'
-                      }`}>
-                        {(ext.confidence * 100).toFixed(0)}%
-                      </span>
-                      <button
-                        onClick={() => viewExtract(ext.id)}
-                        className="p-1.5 text-[#83b16d] hover:bg-[#f0fdf4] rounded"
-                        title="View Details"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => deleteExtract(ext.id)}
-                        className="p-1.5 text-red-600 hover:bg-red-50 rounded"
-                        title="Delete"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           
           {/* Selected Extract Details */}
           <div className="bg-white rounded-lg shadow p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold">Extract Details</h2>
-              
-              {/* Export XLSX Button - shows when extract is selected */}
-              {selectedExtract && selectedExtract.employees?.length > 0 && (
+              {selectedExtract && (
                 <button
-                  onClick={() => exportToXLSX(
-                    selectedExtract.employees, 
-                    selectedExtract.source_file?.replace('.pdf', '') || 'pay_extract'
-                  )}
-                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                  onClick={() => setExpandedDetails(!expandedDetails)}
+                  className="p-1.5 text-gray-500 hover:bg-gray-100 rounded"
+                  title={expandedDetails ? "Collapse" : "Expand"}
                 >
-                  <Download className="w-4 h-4" />
-                  Export XLSX
+                  {expandedDetails ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
                 </button>
               )}
             </div>
             
             {selectedExtract ? (
               <div>
-                <div className="mb-4">
-                  <h3 className="font-medium">{selectedExtract.source_file}</h3>
-                  <p className="text-sm text-gray-500">
-                    {selectedExtract.employee_count} employees extracted on{' '}
-                    {new Date(selectedExtract.created_at).toLocaleString()}
-                  </p>
+                {/* Header with file info and status */}
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="font-medium">{selectedExtract.source_file}</h3>
+                    <p className="text-sm text-gray-500">
+                      {selectedExtract.employee_count || selectedExtract.employees?.length || 0} employees extracted on{' '}
+                      {new Date(selectedExtract.created_at).toLocaleString()}
+                    </p>
+                  </div>
+                  <span className="px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+                    Success
+                  </span>
                 </div>
                 
-                <EmployeeTable employees={selectedExtract.employees || []} />
+                {/* Summary Stats */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                  <StatCard 
+                    icon={<Users className="w-5 h-5 text-[#83b16d]" />}
+                    label="Employees"
+                    value={selectedExtract.employee_count || selectedExtract.employees?.length || 0}
+                  />
+                  <StatCard 
+                    icon={<FileText className="w-5 h-5 text-[#83b16d]" />}
+                    label="Pages"
+                    value={selectedExtract.pages_processed || '-'}
+                  />
+                  <StatCard 
+                    icon={<CheckCircle className="w-5 h-5 text-green-600" />}
+                    label="Confidence"
+                    value={selectedExtract.confidence ? `${(selectedExtract.confidence * 100).toFixed(0)}%` : '100%'}
+                  />
+                  <StatCard 
+                    icon={<DollarSign className="w-5 h-5 text-amber-600" />}
+                    label="Cost"
+                    value={`$${(selectedExtract.cost_usd || 0).toFixed(3)}`}
+                  />
+                </div>
+                
+                {/* Tabs + Export */}
+                <div className="flex items-center justify-between mb-4 border-b">
+                  <div className="flex">
+                    <button
+                      onClick={() => setHistoryTab('employees')}
+                      className={`px-4 py-2 font-medium text-sm border-b-2 -mb-px ${
+                        historyTab === 'employees' 
+                          ? 'border-[#83b16d] text-[#83b16d]' 
+                          : 'border-transparent text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      <Users className="w-4 h-4 inline mr-1" />
+                      Employees ({selectedExtract.employees?.length || 0})
+                    </button>
+                    <button
+                      onClick={() => setHistoryTab('summary')}
+                      className={`px-4 py-2 font-medium text-sm border-b-2 -mb-px ${
+                        historyTab === 'summary' 
+                          ? 'border-[#83b16d] text-[#83b16d]' 
+                          : 'border-transparent text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      <BarChart3 className="w-4 h-4 inline mr-1" />
+                      Summary
+                    </button>
+                  </div>
+                  
+                  <button
+                    onClick={() => exportToXLSX(
+                      selectedExtract.employees, 
+                      selectedExtract.source_file?.replace('.pdf', '') || 'pay_extract'
+                    )}
+                    disabled={!selectedExtract.employees?.length}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 text-sm disabled:opacity-50"
+                  >
+                    <Download className="w-4 h-4" />
+                    Export XLSX
+                  </button>
+                </div>
+                
+                {/* Tab Content */}
+                {historyTab === 'employees' ? (
+                  <EmployeeTable employees={selectedExtract.employees || []} />
+                ) : (
+                  <SummaryView employees={selectedExtract.employees || []} calculateSummary={calculateSummary} />
+                )}
               </div>
             ) : (
               <p className="text-gray-500 text-center py-8">
