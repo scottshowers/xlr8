@@ -1607,8 +1607,16 @@ class IntelligenceEngine:
             Priority:
             1. Use sheet_name from metadata (most reliable)
             2. Extract from table_name as fallback
+            
+            IMPORTANT: SQL aliases cannot start with a number!
             """
             full_table_name = table_info.get('table_name', '')
+            
+            def ensure_valid_alias(alias: str) -> str:
+                """Ensure alias doesn't start with a number (invalid SQL)."""
+                if alias and alias[0].isdigit():
+                    return 't_' + alias  # Prefix with 't_' if starts with number
+                return alias
             
             # BEST: Use sheet_name from metadata if available
             sheet_name = table_info.get('sheet_name', '')
@@ -1616,6 +1624,7 @@ class IntelligenceEngine:
                 # Clean up sheet name for SQL alias
                 clean_sheet = re.sub(r'[^\w]', '_', sheet_name.lower()).strip('_')
                 clean_sheet = re.sub(r'_+', '_', clean_sheet)  # Remove double underscores
+                clean_sheet = ensure_valid_alias(clean_sheet)
                 if clean_sheet and len(clean_sheet) <= 30:
                     if clean_sheet not in used:
                         return clean_sheet
@@ -1628,6 +1637,7 @@ class IntelligenceEngine:
             # FALLBACK: Check for __ delimiter (old format)
             if '__' in full_table_name:
                 candidate = full_table_name.split('__')[-1]
+                candidate = ensure_valid_alias(candidate)
                 if candidate and candidate not in used:
                     return candidate
             
@@ -1637,11 +1647,13 @@ class IntelligenceEngine:
                 # Try last 2-3 parts for uniqueness
                 for i in range(2, min(5, len(parts))):
                     candidate = '_'.join(parts[-i:])
+                    candidate = ensure_valid_alias(candidate)
                     if len(candidate) <= 25 and candidate not in used:
                         return candidate
             
             # Last resort: truncated name with index
             base = full_table_name[:15]
+            base = ensure_valid_alias(base)
             if base not in used:
                 return base
             for suffix in range(2, 100):
@@ -1649,7 +1661,7 @@ class IntelligenceEngine:
                 if candidate not in used:
                     return candidate
             
-            return full_table_name  # Give up, use full name
+            return ensure_valid_alias(full_table_name)  # Give up, use full name
         
         for i, table in enumerate(relevant_tables):
             table_name = table.get('table_name', '')
