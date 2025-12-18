@@ -1023,6 +1023,8 @@ class IntelligenceEngine:
         scope_confirm = self.confirmed_facts.get('validation_scope_confirm')
         scope_company = self.confirmed_facts.get('validation_scope_company')
         
+        logger.warning(f"[ANALYTICAL] Checking scope - confirm={scope_confirm}, company={scope_company}")
+        
         if scope_confirm == 'yes':
             # User confirmed single-company focus - get the stored context
             if hasattr(self, '_validation_scope_context'):
@@ -1041,11 +1043,17 @@ class IntelligenceEngine:
             return result
         elif scope_company and scope_company != '__all__':
             # User selected a specific company from multi-company list
+            col = getattr(self, '_validation_company_col', 'component_company_code')
             result['scope_filter'] = {
-                'column': getattr(self, '_validation_company_col', 'component_company_code'),
+                'column': col,
                 'value': scope_company
             }
-            logger.warning(f"[ANALYTICAL] User selected company: {scope_company}")
+            result['smart_assumption'] = f"Reviewing SUI rates for selected company"
+            logger.warning(f"[ANALYTICAL] User selected company: {scope_company}, filter col: {col}")
+            return result
+        elif scope_company == '__all__':
+            result['smart_assumption'] = "Reviewing SUI rates for **all companies**"
+            logger.warning(f"[ANALYTICAL] User selected all companies")
             return result
         
         # Determine what we're validating
@@ -2549,6 +2557,7 @@ class IntelligenceEngine:
                             sql = f'SELECT {select_cols} FROM "{primary_full}" WHERE ({" OR ".join(tax_filters)}) AND ({" AND ".join(scope_filters)})'
                 
                 logger.warning(f"[SQL-GEN] Validation SQL: {sql[:200]}...")
+                logger.warning(f"[SQL-GEN] Returning validation result with query_type=validation")
                 
                 return {
                     'sql': sql,
@@ -2957,6 +2966,8 @@ SQL:"""
                         
                         if rows:
                             table_name = sql_info.get('table', 'query') if sql_info else 'query'
+                            q_type = sql_info.get('query_type', 'list') if sql_info else 'list'
+                            logger.warning(f"[GATHER-REALITY] Creating Truth with query_type={q_type}, rows={len(rows)}")
                             
                             truths.append(Truth(
                                 source_type='reality',
@@ -2966,7 +2977,7 @@ SQL:"""
                                     'columns': cols,
                                     'rows': rows,
                                     'total': len(rows),
-                                    'query_type': sql_info.get('query_type', 'list') if sql_info else 'list',
+                                    'query_type': q_type,
                                     'table': table_name,
                                     'is_targeted_query': True
                                 },
@@ -3169,6 +3180,8 @@ SQL:"""
                     query_type = truth.content.get('query_type', 'list')
                     executed_sql = truth.content.get('sql', '')
                     
+                    logger.warning(f"[SYNTHESIZE] Processing reality with query_type={query_type}, rows={len(rows)}")
+                    
                     if query_type == 'count' and rows:
                         result_value = list(rows[0].values())[0] if rows[0] else 0
                         data_context.append(f"COUNT RESULT: {result_value}")
@@ -3344,7 +3357,7 @@ SQL:"""
         elif query_type == 'validation' and result_rows:
             # VALIDATION QUERY - Run smart consultant analysis
             row_count = len(result_rows)
-            logger.warning(f"[CONSULTATIVE] Validation response for {row_count} rows")
+            logger.warning(f"[CONSULTATIVE] VALIDATION PATH TRIGGERED for {row_count} rows")
             
             # Determine what we're validating based on question
             q_lower = question.lower()
