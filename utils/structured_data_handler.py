@@ -1,19 +1,26 @@
 """
-Structured Data Handler - DuckDB Storage for Excel/CSV v5.2
+Structured Data Handler - DuckDB Storage for Excel/CSV v5.4
 ===========================================================
 
 Deploy to: utils/structured_data_handler.py
 
+v5.4 CHANGES (Universal Header Detection):
+- NEW: _find_header_row() - Universal function based on ratios, not heuristics
+  - fill_ratio: non-empty cells / total cells (filters sparse title rows)
+  - text_ratio: text cells / non-empty cells (identifies headers vs data)
+  - Score = (text_ratio * 2) + fill_ratio
+- Removed merged cell detection from normal sheet processing (kept in vertical split only)
+- Single function used by: normal processing, horizontal split, vertical split
+- Works on ANY Excel file, not just UKG-specific formats
+
+v5.3 CHANGES (Smart Header & Vertical Table Detection):
+- Added _split_vertical_tables() for stacked tables on same sheet
+- Horizontal split now accepts single blank column separators
+- Uses row 0 title for table names when available
+
 v5.2 CHANGES (Thread Safety):
 - Added threading lock (_db_lock) to prevent concurrent DuckDB access
-- Prevents segmentation faults during concurrent profiling/querying
 - Lock applied to query(), query_to_dataframe(), profile_columns_fast()
-
-v5.1 CHANGES (Header Detection Improvements):
-- Fixed header detection to catch 'nan', numeric, and empty column names
-- Added post-read validation to recover headers from first data row
-- Improved _sanitize_name() to handle nan/None values properly
-- Better logging during header detection process
 
 v5.0 CHANGES (Performance Optimization):
 - Added progress_callback parameter to store_excel() and store_csv()
@@ -533,6 +540,68 @@ class StructuredDataHandler:
             sanitized = 'col_' + sanitized
         return sanitized or 'unnamed'
     
+    def _find_header_row(self, df: pd.DataFrame, max_rows: int = 15) -> int:
+        """
+        Universal header row detection based on simple ratios.
+        
+        A header row has:
+        - High text ratio (mostly strings, not numbers)
+        - Good fill ratio (most cells have values)
+        
+        A title/separator row has:
+        - Low fill ratio (0-2 values)
+        
+        A data row has:
+        - Mixed types (some text, some numbers, some blanks)
+        
+        Returns: 0-indexed row number of the best header candidate
+        """
+        if df.empty:
+            return 0
+        
+        best_row = 0
+        best_score = -1
+        
+        for row_idx in range(min(max_rows, len(df))):
+            row = df.iloc[row_idx]
+            total_cells = len(row)
+            
+            # Count cell types
+            non_empty = 0
+            text_cells = 0
+            
+            for val in row:
+                if pd.notna(val):
+                    val_str = str(val).strip()
+                    if val_str and val_str.lower() not in ['nan', 'none', 'nat']:
+                        non_empty += 1
+                        # Is it text (not purely numeric)?
+                        if isinstance(val, str) and not val_str.replace('.', '').replace('-', '').isdigit():
+                            text_cells += 1
+            
+            if non_empty == 0:
+                continue  # Skip empty rows
+            
+            # Calculate ratios
+            fill_ratio = non_empty / total_cells
+            text_ratio = text_cells / non_empty if non_empty > 0 else 0
+            
+            # Score: reward high text ratio AND good fill
+            # Header: high text (>0.6), decent fill (>0.3)
+            # Title row: might have high text but very low fill (<0.1)
+            # Data row: lower text ratio (mixed with numbers)
+            
+            if fill_ratio < 0.1:
+                continue  # Skip sparse rows (titles/separators)
+            
+            score = (text_ratio * 2) + fill_ratio  # Weight text ratio more
+            
+            if score > best_score:
+                best_score = score
+                best_row = row_idx
+        
+        return best_row
+    
     def _split_horizontal_tables(self, file_path: str, sheet_name: str) -> List[Tuple[str, pd.DataFrame]]:
         """
         Detect and split horizontally arranged tables within a single sheet.
@@ -557,32 +626,23 @@ class StructuredDataHandler:
                 if is_blank:
                     blank_cols.append(col_idx)
             
-            # Need at least 2 consecutive blank columns to be a real separator
-            separators = []
-            i = 0
-            while i < len(blank_cols):
-                start = blank_cols[i]
-                count = 1
-                while i + count < len(blank_cols) and blank_cols[i + count] == start + count:
-                    count += 1
-                if count >= 2:  # At least 2 blank columns in a row = real separator
-                    separators.append(start)
-                    i += count
-                else:
-                    i += 1
+            # Find blank columns as separators
+            # Only trigger horizontal split if there are multiple separators
+            # (single blank column could be accidental, multiple = intentional layout)
+            separators = blank_cols.copy()
             
-            if not separators:
-                return []  # No clear separators = single table sheet
+            if len(separators) < 2:
+                return []  # Need multiple separators to confirm multi-table layout
             
             logger.info(f"[HORIZONTAL-DETECT] Sheet '{sheet_name}': Found {len(separators)} separator(s) at columns {separators}")
             
             # Split into regions based on separators
             regions = []
             prev_end = 0
-            for sep_start in separators:
-                if sep_start > prev_end:
-                    regions.append((prev_end, sep_start))
-                prev_end = sep_start + 2  # Skip past the blank separator
+            for sep_col in separators:
+                if sep_col > prev_end:
+                    regions.append((prev_end, sep_col))
+                prev_end = sep_col + 1  # Skip the blank column
             # Add final region
             if prev_end < raw_df.shape[1]:
                 regions.append((prev_end, raw_df.shape[1]))
@@ -599,13 +659,12 @@ class StructuredDataHandler:
             for idx, (start_col, end_col) in enumerate(regions):
                 sub_df = raw_df.iloc[:, start_col:end_col].copy()
                 
-                # Find header row (first row with multiple non-empty values)
-                header_row = 0
-                for row_idx in range(min(5, len(sub_df))):
-                    non_empty = sub_df.iloc[row_idx].notna().sum()
-                    if non_empty >= 2:
-                        header_row = row_idx
-                        break
+                # Check if row 0 has a title (single value that could be table name)
+                row0_vals = [v for v in sub_df.iloc[0] if pd.notna(v) and str(v).strip()]
+                title_from_row0 = row0_vals[0] if len(row0_vals) == 1 else None
+                
+                # Find header row using universal detection
+                header_row = self._find_header_row(sub_df)
                 
                 # Set headers and remove header rows
                 sub_df.columns = [str(c).strip() for c in sub_df.iloc[header_row]]
@@ -615,8 +674,11 @@ class StructuredDataHandler:
                 sub_df = sub_df.dropna(how='all')
                 
                 if len(sub_df) > 0 and len(sub_df.columns) > 0:
-                    # Use first column header as table name, or position
-                    table_name = str(sub_df.columns[0]).strip()[:40] or f"table_{idx + 1}"
+                    # Use title from row 0 if available, otherwise first column header
+                    if title_from_row0:
+                        table_name = str(title_from_row0).strip()[:40]
+                    else:
+                        table_name = str(sub_df.columns[0]).strip()[:40] or f"table_{idx + 1}"
                     result.append((table_name, sub_df))
                     logger.info(f"[HORIZONTAL-DETECT]   Region {idx + 1}: '{table_name}' ({len(sub_df)} rows, {len(sub_df.columns)} cols)")
             
@@ -624,6 +686,130 @@ class StructuredDataHandler:
             
         except Exception as e:
             logger.warning(f"Horizontal table detection failed for '{sheet_name}': {e}")
+            return []
+    
+    def _split_vertical_tables(self, file_path: str, sheet_name: str) -> List[Tuple[str, pd.DataFrame]]:
+        """
+        Detect and split vertically stacked tables within a single sheet.
+        
+        Looks for merged title rows that separate distinct tables.
+        Common in config reports where org definitions and org values are on same sheet.
+        
+        Returns list of (table_name, dataframe) tuples, or empty list for single-table sheets.
+        """
+        try:
+            # First, find merged rows using openpyxl (can't use read_only for merged_cells)
+            merged_rows = set()
+            
+            if OPENPYXL_AVAILABLE:
+                try:
+                    wb = load_workbook(file_path, data_only=True)
+                    if sheet_name in wb.sheetnames:
+                        ws = wb[sheet_name]
+                        
+                        for merged_range in ws.merged_cells.ranges:
+                            # If merge spans 5+ columns, it's a title/separator row
+                            if merged_range.max_col - merged_range.min_col >= 4:
+                                for row in range(merged_range.min_row, merged_range.max_row + 1):
+                                    merged_rows.add(row - 1)  # 0-indexed
+                        wb.close()
+                except Exception as e:
+                    logger.warning(f"Merged cell detection failed for vertical split: {e}")
+                    return []
+            
+            if not merged_rows:
+                return []  # No merged rows = probably single table
+            
+            # Read full sheet
+            raw_df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
+            
+            if len(raw_df) < 3:
+                return []
+            
+            # Find table boundaries
+            # A header row is: not merged, has 2+ unique text values
+            tables = []
+            current_header = None
+            current_start = None
+            
+            for row_idx in range(len(raw_df)):
+                is_separator = row_idx in merged_rows or raw_df.iloc[row_idx].isna().all()
+                
+                if is_separator:
+                    # End current table if exists
+                    if current_header is not None and current_start is not None:
+                        if current_start < row_idx:  # Has at least some data rows
+                            tables.append((current_header, current_start, row_idx))
+                        current_header = None
+                        current_start = None
+                else:
+                    # Check if this could be a header row (first non-separator after separator)
+                    if current_header is None:
+                        text_values = set()
+                        for val in raw_df.iloc[row_idx]:
+                            if pd.notna(val) and isinstance(val, str) and len(str(val).strip()) >= 2:
+                                text_values.add(str(val).strip())
+                        
+                        if len(text_values) >= 2:
+                            current_header = row_idx
+                            current_start = row_idx + 1
+            
+            # Don't forget last table
+            if current_header is not None and current_start is not None:
+                tables.append((current_header, current_start, len(raw_df)))
+            
+            # Only return if we found multiple tables
+            if len(tables) < 2:
+                return []
+            
+            logger.info(f"[VERTICAL-DETECT] Sheet '{sheet_name}': Found {len(tables)} stacked tables")
+            
+            result = []
+            prev_table_end = -1  # Track where previous table ended
+            
+            for idx, (header_row, data_start, data_end) in enumerate(tables):
+                # Extract this table's data
+                header_vals = raw_df.iloc[header_row].tolist()
+                data_df = raw_df.iloc[data_start:data_end].copy()
+                
+                # Set column names from header row
+                data_df.columns = [str(v).strip() if pd.notna(v) else f'col_{i}' for i, v in enumerate(header_vals)]
+                data_df = data_df.reset_index(drop=True)
+                
+                # Remove completely empty rows
+                data_df = data_df.dropna(how='all')
+                
+                if len(data_df) > 0:
+                    # Look for title in preceding merged rows (but stop at previous table's boundary)
+                    table_title = None
+                    search_start = max(prev_table_end, 0)  # Don't search into previous table
+                    
+                    for prev_row in range(header_row - 1, search_start - 1, -1):
+                        if prev_row in merged_rows:
+                            # Get first non-empty value from this row
+                            for val in raw_df.iloc[prev_row]:
+                                if pd.notna(val) and str(val).strip():
+                                    table_title = str(val).strip()
+                                    break
+                            if table_title:
+                                break
+                    
+                    # Use title if found, otherwise first header value
+                    if table_title:
+                        table_name = table_title[:40]
+                    else:
+                        first_header = str(header_vals[0]).strip() if pd.notna(header_vals[0]) else f"table_{idx + 1}"
+                        table_name = first_header[:40]
+                    
+                    result.append((table_name, data_df))
+                    logger.info(f"[VERTICAL-DETECT]   Table {idx + 1}: '{table_name}' - header row {header_row}, {len(data_df)} data rows")
+                
+                prev_table_end = data_end  # Update boundary for next iteration
+            
+            return result
+            
+        except Exception as e:
+            logger.warning(f"Vertical table detection failed for '{sheet_name}': {e}")
             return []
     
     def _generate_table_name(self, project: str, file_name: str, sheet_name: str) -> str:
@@ -1686,87 +1872,93 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                         continue
                     
                     # =====================================================
-                    # NORMAL SHEET PROCESSING (no horizontal split)
+                    # CHECK FOR VERTICAL TABLES (tables stacked on top of each other)
                     # =====================================================
-                    # Read sheet - SMART HEADER DETECTION
-                    # Strategy: Look for colored (blue) header rows first, then fall back to text analysis
+                    vertical_tables = self._split_vertical_tables(file_path, sheet_name)
+                    
+                    if vertical_tables:
+                        # Process each vertical sub-table separately
+                        for sub_table_name, sub_df in vertical_tables:
+                            try:
+                                # Sanitize column names
+                                sub_df.columns = [self._sanitize_name(str(c)) for c in sub_df.columns]
+                                
+                                # Handle duplicate column names
+                                seen = {}
+                                new_cols = []
+                                for col in sub_df.columns:
+                                    if col in seen:
+                                        seen[col] += 1
+                                        new_cols.append(f"{col}_{seen[col]}")
+                                    else:
+                                        seen[col] = 0
+                                        new_cols.append(col)
+                                sub_df.columns = new_cols
+                                
+                                # Force all columns to string
+                                for col in sub_df.columns:
+                                    sub_df[col] = sub_df[col].fillna('').astype(str)
+                                    sub_df[col] = sub_df[col].replace({'nan': '', 'None': '', 'NaT': ''})
+                                
+                                # Generate combined sheet name: "Organization - Level"
+                                combined_sheet = f"{sheet_name} - {sub_table_name}"
+                                
+                                # Encrypt PII if needed
+                                encrypted_cols = []
+                                if encrypt_pii and self.encryptor.fernet:
+                                    sub_df, encrypted_cols = self.encryptor.encrypt_dataframe(sub_df)
+                                    all_encrypted_cols.extend(encrypted_cols)
+                                
+                                # Generate table name
+                                table_name = self._generate_table_name(project, file_name, combined_sheet)
+                                
+                                # Drop existing and create table
+                                self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+                                self.conn.register('temp_df', sub_df)
+                                self.conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM temp_df")
+                                self.conn.unregister('temp_df')
+                                
+                                # Store metadata
+                                columns_info = [
+                                    {'name': col, 'type': 'VARCHAR', 'encrypted': col in encrypted_cols}
+                                    for col in sub_df.columns
+                                ]
+                                
+                                self.conn.execute("""
+                                    INSERT INTO _schema_metadata 
+                                    (id, project, file_name, sheet_name, table_name, columns, row_count, encrypted_columns)
+                                    VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?)
+                                """, [
+                                    project, file_name, combined_sheet, table_name,
+                                    json.dumps(columns_info), len(sub_df), json.dumps(encrypted_cols)
+                                ])
+                                
+                                results['tables_created'].append(table_name)
+                                
+                                logger.info(f"Created vertical sub-table: {table_name} ({len(sub_df)} rows)")
+                                
+                            except Exception as sub_e:
+                                logger.error(f"Failed to process vertical sub-table '{sub_table_name}': {sub_e}")
+                        
+                        # Skip normal processing for this sheet - we handled it vertically
+                        continue
+                    
+                    # =====================================================
+                    # NORMAL SHEET PROCESSING (no horizontal or vertical split)
+                    # =====================================================
                     df = None
-                    best_header_row = 0
                     
-                    # Try to detect colored header row using openpyxl
-                    if OPENPYXL_AVAILABLE:
-                        try:
-                            wb = load_workbook(file_path, read_only=True, data_only=True)
-                            if sheet_name in wb.sheetnames:
-                                ws = wb[sheet_name]
-                                
-                                # Check first 15 rows for colored cells (headers are usually colored)
-                                for row_idx in range(1, 16):
-                                    colored_cells = 0
-                                    total_cells = 0
-                                    
-                                    try:
-                                        for cell in ws[row_idx]:
-                                            if cell.value is not None:
-                                                total_cells += 1
-                                                if cell.fill and cell.fill.fgColor and cell.fill.fgColor.rgb:
-                                                    rgb = cell.fill.fgColor.rgb
-                                                    if rgb not in ['00000000', 'FFFFFFFF', '00FFFFFF', None]:
-                                                        colored_cells += 1
-                                    except:
-                                        continue
-                                    
-                                    # If most cells in this row are colored, it's likely the header
-                                    if total_cells >= 3 and colored_cells >= total_cells * 0.5:
-                                        best_header_row = row_idx - 1  # pandas uses 0-based indexing
-                                        logger.info(f"Sheet '{sheet_name}': Detected colored header at row {row_idx}")
-                                        break
-                                
-                                wb.close()
-                        except Exception as e:
-                            logger.warning(f"Color detection failed for '{sheet_name}': {e}")
-                    
-                    # If no colored header found, try text-based detection
-                    # OPTIMIZED: Read once with no header, then find header row in memory
-                    if best_header_row == 0:
-                        try:
-                            # Single read with no header - much faster than 11 separate reads
-                            raw_df = pd.read_excel(file_path, sheet_name=sheet_name, header=None, nrows=15)
-                            
-                            # Find row with best header characteristics
-                            best_score = -1
-                            for row_idx in range(min(10, len(raw_df))):
-                                row_vals = raw_df.iloc[row_idx]
-                                good_count = 0
-                                bad_count = 0
-                                
-                                for val in row_vals:
-                                    val_str = str(val).lower().strip() if pd.notna(val) else ''
-                                    # Bad: empty, nan, numeric only
-                                    is_bad = (
-                                        val_str in ['nan', 'none', '', 'nat'] or
-                                        val_str.replace('.', '').replace('-', '').isdigit()
-                                    )
-                                    # Good: text with reasonable length
-                                    is_good = not is_bad and len(val_str) >= 2
-                                    
-                                    if is_bad:
-                                        bad_count += 1
-                                    elif is_good:
-                                        good_count += 1
-                                
-                                # Score: good columns minus penalty for bad
-                                score = good_count - (bad_count * 0.5)
-                                if score > best_score and good_count >= 2:
-                                    best_score = score
-                                    best_header_row = row_idx
-                                    
-                                # Perfect header found
-                                if bad_count == 0 and good_count >= 3:
-                                    break
-                                    
-                        except Exception as e:
-                            logger.warning(f"Header detection failed for '{sheet_name}': {e}")
+                    try:
+                        # Read first 15 rows to detect header
+                        raw_df = pd.read_excel(file_path, sheet_name=sheet_name, header=None, nrows=15)
+                        
+                        # Use universal header detection
+                        best_header_row = self._find_header_row(raw_df)
+                        logger.info(f"Sheet '{sheet_name}': Header detected at row {best_header_row}")
+                        
+                    except Exception as e:
+                        logger.warning(f"Header detection failed for '{sheet_name}': {e}, using row 0")
+                        best_header_row = 0
                     
                     # Read with detected header row
                     try:
@@ -1775,7 +1967,6 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                             sheet_name=sheet_name, 
                             header=best_header_row
                         )
-                        logger.info(f"Sheet '{sheet_name}': Using header row {best_header_row}")
                         
                         # POST-READ VALIDATION: Check if columns still look bad
                         bad_cols = sum(1 for c in df.columns if str(c).lower() in ['nan', 'none', ''] or 
