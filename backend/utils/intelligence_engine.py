@@ -3139,9 +3139,9 @@ class IntelligenceEngine:
                 
                 matching_tables = []
                 if validation_type == 'config' and domain_key in config_multi_table_domains:
-                    # Find all tables that match this domain
+                    # Find all tables that match this domain from the full table list
                     table_patterns = domain_config.get('table_patterns', [])
-                    for score, table in scored_tables:
+                    for table in tables:  # Use 'tables' (all available tables), not 'scored_tables'
                         tname = table.get('table_name', '').lower()
                         if any(p in tname for p in table_patterns):
                             matching_tables.append(table)
