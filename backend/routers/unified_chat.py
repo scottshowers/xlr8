@@ -1910,6 +1910,9 @@ async def unified_chat(request: UnifiedChatRequest):
             # The expert interprets whatever data we found (or guides on finding it)
             if is_analytical and EXPERT_CONTEXT_AVAILABLE:
                 logger.info(f"[UNIFIED] Analytical question detected - using expert context")
+                logger.info(f"[UNIFIED] from_reality count: {len(answer.from_reality) if answer.from_reality else 0}")
+                logger.info(f"[UNIFIED] is_garbage: {is_garbage_response}, is_no_data: {is_no_data_placeholder}")
+                
                 try:
                     project_id, project_domains = _get_project_domains(project, handler)
                     
@@ -1917,20 +1920,29 @@ async def unified_chat(request: UnifiedChatRequest):
                     context_parts = [f"User Question: {message}", ""]
                     
                     # Include any real data we found
-                    if answer.from_reality and not is_garbage_response and not is_no_data_placeholder:
+                    has_real_data = False
+                    if answer.from_reality:
                         for truth in answer.from_reality:
                             if isinstance(truth.content, dict):
                                 rows = truth.content.get('rows', [])
                                 if rows:
+                                    has_real_data = True
                                     context_parts.append(f"Data found in {truth.source_name}:")
-                                    # Format first 10 rows as context
-                                    for row in rows[:10]:
+                                    context_parts.append(f"Columns: {truth.content.get('columns', [])}")
+                                    context_parts.append(f"Total rows: {len(rows)}")
+                                    context_parts.append("")
+                                    # Format rows as context - show all if < 100, else sample
+                                    rows_to_show = rows if len(rows) < 100 else rows[:50]
+                                    for row in rows_to_show:
                                         context_parts.append(f"  {row}")
-                                    if len(rows) > 10:
-                                        context_parts.append(f"  ... and {len(rows) - 10} more rows")
-                    else:
+                                    if len(rows) > len(rows_to_show):
+                                        context_parts.append(f"  ... and {len(rows) - len(rows_to_show)} more rows")
+                                    logger.info(f"[UNIFIED] Added {len(rows)} rows from {truth.source_name}")
+                    
+                    if not has_real_data:
                         context_parts.append("No relevant data was found in the available tables.")
                         context_parts.append("This could mean: the data hasn't been uploaded yet, or it's stored with different column names.")
+                        logger.warning(f"[UNIFIED] No real data found for analytical question")
                     
                     # Add table context
                     if schema.get('tables'):
