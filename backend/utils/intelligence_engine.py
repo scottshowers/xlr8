@@ -61,7 +61,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.13.1 REGION CLARIFICATION ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.13.2 REGION CLARIFICATION FIX ======")
 
 
 # =============================================================================
@@ -3719,6 +3719,10 @@ SQL:"""
                 if sql_info:
                     # Check if this is a clarification request
                     if sql_info.get('query_type') == 'validation_clarification':
+                        # Store the clarification so ask() can return it
+                        if sql_info.get('clarification'):
+                            self._pending_validation_clarification = sql_info['clarification']
+                            logger.warning(f"[SQL] Stored region clarification for ask() to return")
                         # Return empty truths - the clarification will be handled by ask()
                         logger.warning(f"[SQL] Validation needs clarification, returning for ask() to handle")
                         return truths
