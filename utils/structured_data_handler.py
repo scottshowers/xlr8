@@ -1,8 +1,13 @@
 """
-Structured Data Handler - DuckDB Storage for Excel/CSV v5.1
+Structured Data Handler - DuckDB Storage for Excel/CSV v5.2
 ===========================================================
 
 Deploy to: utils/structured_data_handler.py
+
+v5.2 CHANGES (Thread Safety):
+- Added threading lock (_db_lock) to prevent concurrent DuckDB access
+- Prevents segmentation faults during concurrent profiling/querying
+- Lock applied to query(), query_to_dataframe(), profile_columns_fast()
 
 v5.1 CHANGES (Header Detection Improvements):
 - Fixed header detection to catch 'nan', numeric, and empty column names
@@ -41,6 +46,7 @@ import os
 import re
 import json
 import logging
+import threading
 import pandas as pd
 import duckdb
 from typing import Dict, List, Any, Optional, Tuple, Callable
@@ -303,7 +309,13 @@ class FieldEncryptor:
 class StructuredDataHandler:
     """
     DuckDB-based storage for structured data with encryption, versioning, and profiling.
+    
+    Thread-safe: Uses a lock to prevent concurrent DuckDB operations which can cause
+    segmentation faults.
     """
+    
+    # Class-level lock for DuckDB operations
+    _db_lock = threading.RLock()
     
     def __init__(self, db_path: str = DUCKDB_PATH):
         self.db_path = db_path
@@ -2105,11 +2117,15 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
         }
         
         try:
+            # Acquire lock for DuckDB access
+            self._db_lock.acquire()
+            
             # Get row count first
             row_count = self.conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
             
             if row_count == 0:
                 logger.warning(f"[PROFILING-FAST] Table {table_name} is empty")
+                self._db_lock.release()
                 return result
             
             # Get column names
@@ -2165,11 +2181,16 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                        f"{len(result['categorical_columns'])} categorical, "
                        f"{len(result['numeric_columns'])} numeric")
             
+            self._db_lock.release()
             return result
             
         except Exception as e:
             logger.error(f"[PROFILING-FAST] Failed for {table_name}: {e}")
             result['error'] = str(e)
+            try:
+                self._db_lock.release()
+            except:
+                pass  # Lock may not have been acquired
             return result
     
     def _profile_column_sql(
@@ -2954,22 +2975,24 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
     
     def query(self, sql: str) -> List[Dict]:
         """Execute SQL query and return results as list of dicts"""
-        try:
-            result = self.conn.execute(sql)
-            columns = [desc[0] for desc in result.description]
-            rows = result.fetchall()
-            return [dict(zip(columns, row)) for row in rows]
-        except Exception as e:
-            logger.error(f"Query error: {e}")
-            raise
+        with self._db_lock:
+            try:
+                result = self.conn.execute(sql)
+                columns = [desc[0] for desc in result.description]
+                rows = result.fetchall()
+                return [dict(zip(columns, row)) for row in rows]
+            except Exception as e:
+                logger.error(f"Query error: {e}")
+                raise
     
     def query_to_dataframe(self, sql: str) -> pd.DataFrame:
         """Execute SQL query and return as DataFrame"""
-        try:
-            return self.conn.execute(sql).fetchdf()
-        except Exception as e:
-            logger.error(f"Query error: {e}")
-            raise
+        with self._db_lock:
+            try:
+                return self.conn.execute(sql).fetchdf()
+            except Exception as e:
+                logger.error(f"Query error: {e}")
+                raise
     
     def get_schema(self, project: str = None) -> Dict[str, Any]:
         """Get schema information for all or specific project"""
