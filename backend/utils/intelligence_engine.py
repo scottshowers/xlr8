@@ -1928,9 +1928,9 @@ class IntelligenceEngine:
                                'accurate', 'wrong', 'error', 'mistake']
         is_validation_question = any(kw in q_lower for kw in validation_keywords)
         
-        if is_validation_question:
+        if is_validation_question and relevant_tables:
             # For validation questions, bypass LLM entirely - just get the data
-            primary_full = relevant_tables[0].get('table_name', '') if relevant_tables else ''
+            primary_full = relevant_tables[0].get('table_name', '')
             if primary_full:
                 logger.warning(f"[SQL-GEN] VALIDATION QUESTION - bypassing LLM, using SELECT *")
                 
@@ -1943,16 +1943,16 @@ class IntelligenceEngine:
                     select_cols = '*'
                 
                 sql = f'SELECT {select_cols} FROM "{primary_full}"'
-                logger.warning(f"[SQL-GEN] Validation SQL: {sql[:100]}...")
+                logger.warning(f"[SQL-GEN] Validation SQL: {sql[:150]}...")
                 
-                # Execute directly
-                try:
-                    rows = self.structured_handler.query(sql)
-                    if rows:
-                        return sql, rows
-                except Exception as ve:
-                    logger.warning(f"[SQL-GEN] Validation query failed: {ve}")
-                    # Fall through to normal LLM path
+                # Return in correct format - caller will execute
+                return {
+                    'sql': sql,
+                    'table': primary_full.split('__')[-1] if '__' in primary_full else primary_full,
+                    'query_type': 'validation',
+                    'all_columns': all_columns,
+                    'validation_bypass': True
+                }
         
         # Format all hints
         query_hint = ""
