@@ -650,21 +650,34 @@ function FilesTab() {
                 No processing history
               </div>
             ) : (
-              recentJobs.map((job) => (
-                <div key={job.id} style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  {getStatusIcon(job.status)}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '0.8rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: COLORS.text }}>
-                      {job.filename || 'Processing job'}
-                    </div>
-                    <div style={{ fontSize: '0.7rem', color: COLORS.textLight }}>
-                      {job.result && <span style={{ color: COLORS.grassGreen }}>{job.result} • </span>}
-                      {getProjectName(job.project)} • {formatDate(job.created_at)}
-                      {job.error && <span style={{ color: '#ef4444' }}> • {job.error}</span>}
+              recentJobs.map((job) => {
+                // Extract filename from nested structure
+                const filename = job.input_data?.filename || job.result_data?.filename || job.filename || 'Processing job';
+                // Build result message from result_data
+                const resultMsg = job.result_data?.chunks_created 
+                  ? `${job.result_data.chunks_created} chunks`
+                  : job.result_data?.tables_created
+                    ? `${job.result_data.tables_created} table(s), ${(job.result_data.total_rows || 0).toLocaleString()} rows`
+                    : null;
+                // Get project from nested structure
+                const projectName = job.input_data?.project_name || job.project_id || job.project;
+                
+                return (
+                  <div key={job.id} style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    {getStatusIcon(job.status)}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '0.8rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: COLORS.text }}>
+                        {filename}
+                      </div>
+                      <div style={{ fontSize: '0.7rem', color: COLORS.textLight }}>
+                        {resultMsg && <span style={{ color: COLORS.grassGreen }}>{resultMsg} • </span>}
+                        {getProjectName(projectName)} • {formatDate(job.created_at)}
+                        {job.error_message && <span style={{ color: '#ef4444' }}> • {job.error_message}</span>}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))
+                );
+              }))
             )}
           </div>
         )}
