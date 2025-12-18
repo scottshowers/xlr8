@@ -1250,3 +1250,64 @@ async def update_fixed_cost(name: str, cost_per_unit: float = None, quantity: in
     except Exception as e:
         logger.error(f"Update fixed cost failed: {e}")
         raise HTTPException(500, str(e))
+
+
+@router.get("/status/table-profile/{table_name}")
+async def get_table_profile(table_name: str):
+    """Get column statistics for a specific table"""
+    if not STRUCTURED_AVAILABLE:
+        return {"error": "Structured data not available", "columns": []}
+    
+    try:
+        handler = get_structured_handler()
+        
+        # Get row count
+        row_count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
+        total_rows = row_count_result[0] if row_count_result else 0
+        
+        # Get column names
+        columns_result = handler.conn.execute(f"""
+            SELECT column_name FROM information_schema.columns 
+            WHERE table_name = '{table_name}'
+        """).fetchall()
+        
+        column_stats = []
+        for (col_name,) in columns_result:
+            try:
+                # Get distinct count and null count for each column
+                stats = handler.conn.execute(f'''
+                    SELECT 
+                        COUNT(DISTINCT "{col_name}") as distinct_count,
+                        SUM(CASE WHEN "{col_name}" IS NULL OR TRIM(CAST("{col_name}" AS VARCHAR)) = '' THEN 1 ELSE 0 END) as null_count
+                    FROM "{table_name}"
+                ''').fetchone()
+                
+                distinct_count = stats[0] if stats else 0
+                null_count = stats[1] if stats else 0
+                fill_rate = round((total_rows - null_count) / total_rows * 100, 1) if total_rows > 0 else 0
+                
+                column_stats.append({
+                    "name": col_name,
+                    "distinct_values": distinct_count,
+                    "null_count": null_count,
+                    "fill_rate": fill_rate
+                })
+            except Exception as col_e:
+                logger.warning(f"Failed to profile column {col_name}: {col_e}")
+                column_stats.append({
+                    "name": col_name,
+                    "distinct_values": None,
+                    "null_count": None,
+                    "fill_rate": None,
+                    "error": str(col_e)
+                })
+        
+        return {
+            "table_name": table_name,
+            "total_rows": total_rows,
+            "columns": column_stats
+        }
+        
+    except Exception as e:
+        logger.error(f"Table profile failed for {table_name}: {e}")
+        return {"error": str(e), "columns": []}
