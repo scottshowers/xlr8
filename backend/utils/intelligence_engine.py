@@ -263,6 +263,13 @@ class IntelligenceEngine:
         reality = self._gather_reality(question, analysis)
         logger.info(f"[INTELLIGENCE] Reality gathered: {len(reality)} truths")
         
+        # Check if we have a pending validation clarification
+        if hasattr(self, '_pending_validation_clarification') and self._pending_validation_clarification:
+            clarification = self._pending_validation_clarification
+            self._pending_validation_clarification = None  # Clear it
+            logger.warning(f"[INTELLIGENCE] Returning validation clarification")
+            return clarification
+        
         intent = self._gather_intent(question, analysis)
         best_practice = self._gather_best_practice(question, analysis)
         
@@ -977,6 +984,556 @@ class IntelligenceEngine:
         
         logger.info(f"[CLARIFICATION] Built {len(options)} options from {col_name}: {[o['id'] for o in options]}")
         return options
+    
+    # =========================================================================
+    # ANALYTICAL CLARIFICATION SYSTEM
+    # Smart validation: analyze data first, ask intelligent questions
+    # =========================================================================
+    
+    def _analyze_validation_scope(
+        self, 
+        question: str, 
+        validation_table: str,
+        validation_columns: List[str]
+    ) -> Dict:
+        """
+        Analyze validation data to understand scope BEFORE asking questions.
+        
+        A real consultant looks at the data first, then asks smart questions.
+        
+        Returns:
+            {
+                'needs_clarification': bool,
+                'clarification': SynthesizedAnswer or None,
+                'analysis': dict with findings,
+                'smart_assumption': str or None,
+                'scope_filter': dict or None
+            }
+        """
+        q_lower = question.lower()
+        result = {
+            'needs_clarification': False,
+            'clarification': None,
+            'analysis': {},
+            'smart_assumption': None,
+            'scope_filter': None
+        }
+        
+        # Check if we already have a confirmed validation scope
+        scope_confirm = self.confirmed_facts.get('validation_scope_confirm')
+        scope_company = self.confirmed_facts.get('validation_scope_company')
+        
+        if scope_confirm == 'yes':
+            # User confirmed single-company focus - get the stored context
+            if hasattr(self, '_validation_scope_context'):
+                ctx = self._validation_scope_context
+                result['scope_filter'] = {
+                    'column': ctx.get('company_col'),
+                    'value': ctx.get('primary_code')
+                }
+                result['smart_assumption'] = f"Reviewing SUI rates for **{ctx.get('primary_name', ctx.get('primary_code'))}**"
+                logger.warning(f"[ANALYTICAL] Applying confirmed scope filter: {result['scope_filter']}")
+            return result
+        elif scope_confirm == 'no_all':
+            # User wants to review all companies
+            result['smart_assumption'] = "Reviewing SUI rates for **all companies** (some may need SUI setup)"
+            logger.warning(f"[ANALYTICAL] User requested all companies review")
+            return result
+        elif scope_company and scope_company != '__all__':
+            # User selected a specific company from multi-company list
+            result['scope_filter'] = {
+                'column': getattr(self, '_validation_company_col', 'component_company_code'),
+                'value': scope_company
+            }
+            logger.warning(f"[ANALYTICAL] User selected company: {scope_company}")
+            return result
+        
+        # Determine what we're validating
+        is_sui = any(kw in q_lower for kw in ['sui', 'suta', 'state unemployment'])
+        is_futa = 'futa' in q_lower
+        is_tax = any(kw in q_lower for kw in ['tax', 'rate', 'fein', 'ein'])
+        
+        if not (is_sui or is_futa or is_tax):
+            return result
+        
+        # Analyze the data to understand the scope
+        try:
+            # Find company/FEIN column
+            company_cols = [c for c in validation_columns if any(
+                x in c.lower() for x in ['company_code', 'company_name', 'fein', 'ein', 'id_number']
+            )]
+            
+            # Find tax code column (for SUI filtering)
+            tax_code_cols = [c for c in validation_columns if any(
+                x in c.lower() for x in ['tax_code', 'tax_desc', 'type_of_tax']
+            )]
+            
+            # Find rate column
+            rate_cols = [c for c in validation_columns if any(
+                x in c.lower() for x in ['rate', 'contribution', 'percent']
+            )]
+            
+            # Analyze by company/FEIN
+            if company_cols:
+                company_col = company_cols[0]
+                name_col = next((c for c in company_cols if 'name' in c.lower()), company_col)
+                
+                # Get breakdown by company
+                sql = f'''
+                    SELECT "{company_col}" as code, 
+                           "{name_col}" as name,
+                           COUNT(*) as total_records,
+                           COUNT(CASE WHEN UPPER("{tax_code_cols[0]}") LIKE '%SUI%' OR UPPER("{tax_code_cols[0]}") LIKE '%SUTA%' THEN 1 END) as sui_records
+                    FROM "{validation_table}"
+                    GROUP BY "{company_col}", "{name_col}"
+                    ORDER BY sui_records DESC
+                ''' if tax_code_cols else f'''
+                    SELECT "{company_col}" as code,
+                           "{name_col}" as name, 
+                           COUNT(*) as total_records
+                    FROM "{validation_table}"
+                    GROUP BY "{company_col}", "{name_col}"
+                '''
+                
+                rows = self.structured_handler.query(sql)
+                
+                if rows:
+                    result['analysis']['companies'] = rows
+                    
+                    # Smart analysis
+                    if is_sui and tax_code_cols:
+                        companies_with_sui = [r for r in rows if r.get('sui_records', 0) > 0]
+                        companies_without_sui = [r for r in rows if r.get('sui_records', 0) == 0]
+                        
+                        if len(companies_with_sui) == 1 and len(companies_without_sui) > 0:
+                            # Only one company has SUI - ASK if that's the right scope
+                            main_company = companies_with_sui[0]
+                            fein = main_company.get('code', '')
+                            name = main_company.get('name', fein)
+                            sui_count = main_company.get('sui_records', 0)
+                            
+                            # Format FEIN nicely if it looks like one
+                            fein_display = fein
+                            if fein and len(str(fein).replace('-', '')) == 9:
+                                fein_clean = str(fein).replace('-', '')
+                                fein_display = f"{fein_clean[:2]}-{fein_clean[2:]}"
+                            
+                            result['needs_clarification'] = True
+                            
+                            # Store context for when user confirms
+                            self._validation_scope_context = {
+                                'company_col': company_col,
+                                'primary_code': fein,
+                                'primary_name': name,
+                                'sui_count': sui_count
+                            }
+                            self._validation_company_col = company_col
+                            
+                            result['clarification'] = SynthesizedAnswer(
+                                question=question,
+                                answer="",
+                                confidence=0.0,
+                                structured_output={
+                                    'type': 'clarification_needed',
+                                    'questions': [{
+                                        'id': 'validation_scope_confirm',
+                                        'question': (
+                                            f"I found **{name}** (FEIN {fein_display}) has {sui_count} SUI rates configured, "
+                                            f"while {len(companies_without_sui)} other company/companies have no SUI rates. "
+                                            f"Is it safe to assume this is the only FEIN needing a SUI rate review?"
+                                        ),
+                                        'type': 'radio',
+                                        'options': [
+                                            {'id': 'yes', 'label': f'Yes, just review {name}', 'default': True},
+                                            {'id': 'no_all', 'label': f'No, review all companies (some may be missing SUI setup)'},
+                                            {'id': 'no_other', 'label': 'No, let me specify which company'}
+                                        ]
+                                    }],
+                                    'original_question': question,
+                                    'detected_mode': 'validate',
+                                    'context': {
+                                        'primary_company': {'code': fein, 'name': name, 'sui_count': sui_count},
+                                        'companies_without_sui': [{'code': c.get('code'), 'name': c.get('name')} for c in companies_without_sui]
+                                    }
+                                },
+                                reasoning=[f"Found {len(companies_with_sui)} company with SUI rates, {len(companies_without_sui)} without"]
+                            )
+                            
+                        elif len(companies_with_sui) > 1:
+                            # Multiple companies with SUI - need clarification but be smart about it
+                            result['needs_clarification'] = True
+                            
+                            # Store context for when user selects
+                            self._validation_company_col = company_col
+                            
+                            options = []
+                            for comp in companies_with_sui:
+                                options.append({
+                                    'id': str(comp.get('code')),
+                                    'label': f"{comp.get('name', comp.get('code'))} ({comp.get('sui_records')} SUI rates)"
+                                })
+                            options.append({
+                                'id': '__all__',
+                                'label': f"Review all {len(companies_with_sui)} companies"
+                            })
+                            
+                            summary = ", ".join(
+                                f"{c.get('name', c.get('code'))} ({c.get('sui_records')} rates)"
+                                for c in companies_with_sui[:3]
+                            )
+                            if len(companies_with_sui) > 3:
+                                summary += f" and {len(companies_with_sui) - 3} more"
+                            
+                            result['clarification'] = SynthesizedAnswer(
+                                question=question,
+                                answer="",
+                                confidence=0.0,
+                                structured_output={
+                                    'type': 'clarification_needed',
+                                    'questions': [{
+                                        'id': 'validation_scope_company',
+                                        'question': f"I found SUI rates for multiple companies: {summary}. Which would you like me to review?",
+                                        'type': 'radio',
+                                        'options': options
+                                    }],
+                                    'original_question': question,
+                                    'detected_mode': 'validate'
+                                },
+                                reasoning=[f"Multiple companies have SUI rates configured"]
+                            )
+                        
+                        elif len(companies_with_sui) == 0 and len(companies_without_sui) > 0:
+                            # No SUI rates found at all - that's the finding!
+                            result['analysis']['finding'] = 'no_sui_rates'
+                            result['smart_assumption'] = (
+                                f"⚠️ **No SUI rates found** for any of the {len(companies_without_sui)} companies. "
+                                f"This is likely a configuration issue - SUI rates should be set up for each state where you have employees."
+                            )
+            
+            # Analyze rate values if we have them
+            if rate_cols and not result.get('needs_clarification'):
+                rate_col = rate_cols[0]
+                
+                # Get rate statistics
+                sql = f'''
+                    SELECT 
+                        COUNT(*) as total,
+                        COUNT(CASE WHEN "{rate_col}" IS NULL OR "{rate_col}" = '' OR "{rate_col}" = 0 THEN 1 END) as zero_or_null,
+                        MIN(CAST("{rate_col}" AS DOUBLE)) as min_rate,
+                        MAX(CAST("{rate_col}" AS DOUBLE)) as max_rate,
+                        AVG(CAST("{rate_col}" AS DOUBLE)) as avg_rate
+                    FROM "{validation_table}"
+                    WHERE UPPER("{tax_code_cols[0] if tax_code_cols else rate_col}") LIKE '%SUI%' 
+                       OR UPPER("{tax_code_cols[0] if tax_code_cols else rate_col}") LIKE '%SUTA%'
+                '''
+                try:
+                    stats = self.structured_handler.query(sql)
+                    if stats:
+                        result['analysis']['rate_stats'] = stats[0]
+                except:
+                    pass
+                    
+        except Exception as e:
+            logger.warning(f"[ANALYTICAL] Scope analysis failed: {e}")
+        
+        return result
+    
+    def _analyze_temporal_context(
+        self, 
+        rows: List[Dict], 
+        golive_date: Optional[str] = None
+    ) -> List[Dict]:
+        """
+        Analyze data for temporal issues - stale rates, missing updates, etc.
+        
+        Returns list of temporal findings.
+        """
+        findings = []
+        
+        if not rows:
+            return findings
+        
+        # Look for date columns
+        date_cols = []
+        for key in rows[0].keys():
+            key_lower = key.lower()
+            if any(d in key_lower for d in ['date', 'effective', 'changed', 'updated', 'created']):
+                date_cols.append(key)
+        
+        if not date_cols:
+            return findings
+        
+        from datetime import datetime, timedelta
+        
+        # Analyze effective dates
+        effective_col = next((c for c in date_cols if 'effective' in c.lower()), date_cols[0])
+        
+        # Find entity column for grouping
+        entity_col = None
+        for key in rows[0].keys():
+            key_lower = key.lower()
+            if any(e in key_lower for e in ['state', 'jurisdiction', 'tax_code', 'desc']):
+                entity_col = key
+                break
+        
+        # Analyze dates
+        now = datetime.now()
+        current_year = now.year
+        
+        stale_entities = []  # Not updated this year
+        old_entities = []    # 2+ years old
+        recent_entities = [] # Updated this year
+        
+        for row in rows:
+            eff_date_str = row.get(effective_col)
+            entity = row.get(entity_col, 'Unknown') if entity_col else 'Record'
+            
+            if not eff_date_str:
+                continue
+            
+            try:
+                # Parse date
+                if isinstance(eff_date_str, str):
+                    eff_date = None
+                    for fmt in ['%Y-%m-%d', '%m/%d/%Y', '%Y-%m-%dT%H:%M:%S']:
+                        try:
+                            eff_date = datetime.strptime(eff_date_str[:10], fmt[:10])
+                            break
+                        except:
+                            continue
+                    if not eff_date:
+                        continue
+                else:
+                    eff_date = eff_date_str
+                
+                year_diff = current_year - eff_date.year
+                
+                if year_diff >= 2:
+                    old_entities.append({'entity': entity, 'date': eff_date_str, 'years_old': year_diff})
+                elif year_diff == 1:
+                    stale_entities.append({'entity': entity, 'date': eff_date_str})
+                else:
+                    recent_entities.append({'entity': entity, 'date': eff_date_str})
+                    
+            except Exception as e:
+                continue
+        
+        # Generate findings
+        if old_entities:
+            findings.append({
+                'type': 'error',
+                'severity': 'high',
+                'title': f'{len(old_entities)} Rates Over 2 Years Old',
+                'message': f"SUI rates change annually. These haven't been updated in 2+ years.",
+                'entities': old_entities[:5],
+                'action': 'Update immediately with current state unemployment rate notices'
+            })
+        
+        if stale_entities:
+            findings.append({
+                'type': 'warning', 
+                'severity': 'medium',
+                'title': f'{len(stale_entities)} Rates From Last Year',
+                'message': f"These rates may need {current_year} updates.",
+                'entities': stale_entities[:5],
+                'action': f'Verify against {current_year} state unemployment rate notices'
+            })
+        
+        if recent_entities:
+            findings.append({
+                'type': 'success',
+                'severity': 'low', 
+                'title': f'{len(recent_entities)} Rates Updated This Year',
+                'message': f"Recently updated - verify they match your rate notices.",
+                'entities': recent_entities[:3]
+            })
+        
+        return findings
+    
+    def _validate_rate_values(self, rows: List[Dict], rate_type: str = 'sui') -> List[Dict]:
+        """
+        Validate actual rate values against known valid ranges.
+        """
+        findings = []
+        
+        if not rows:
+            return findings
+        
+        # Find rate column
+        rate_col = None
+        for key in rows[0].keys():
+            key_lower = key.lower()
+            if any(r in key_lower for r in ['rate', 'contribution', 'percent']):
+                rate_col = key
+                break
+        
+        if not rate_col:
+            return findings
+        
+        # Find entity column
+        entity_col = None
+        for key in rows[0].keys():
+            key_lower = key.lower()
+            if any(e in key_lower for e in ['state', 'jurisdiction', 'tax_code', 'desc']):
+                entity_col = key
+                break
+        
+        # Valid ranges - SUI is typically stored as decimal (0.025 = 2.5%)
+        # But could also be stored as percentage (2.5 = 2.5%)
+        
+        issues = []
+        valid_rates = []
+        zero_rates = []
+        
+        for row in rows:
+            rate_val = row.get(rate_col)
+            entity = row.get(entity_col, 'Unknown') if entity_col else 'Record'
+            
+            if rate_val is None or rate_val == '':
+                issues.append({'entity': entity, 'issue': 'Missing rate', 'value': 'blank'})
+                continue
+            
+            try:
+                rate = float(rate_val)
+                
+                # Determine if stored as decimal or percentage
+                # SUI rates are typically 0.1% to 12%
+                # As decimal: 0.001 to 0.12
+                # As percentage: 0.1 to 12
+                
+                if rate == 0:
+                    zero_rates.append({'entity': entity, 'value': '0%'})
+                elif rate > 1:
+                    # Stored as percentage (e.g., 2.5 = 2.5%)
+                    if rate > 15:
+                        issues.append({'entity': entity, 'issue': 'Rate too high', 'value': f'{rate}%'})
+                    else:
+                        valid_rates.append({'entity': entity, 'value': f'{rate}%', 'raw': rate})
+                else:
+                    # Stored as decimal (e.g., 0.025 = 2.5%)
+                    pct = rate * 100
+                    if rate > 0.15:
+                        issues.append({'entity': entity, 'issue': 'Rate too high', 'value': f'{pct:.2f}%'})
+                    elif rate < 0.0001:
+                        issues.append({'entity': entity, 'issue': 'Rate suspiciously low', 'value': f'{pct:.4f}%'})
+                    else:
+                        valid_rates.append({'entity': entity, 'value': f'{pct:.2f}%', 'raw': rate})
+                    
+            except (ValueError, TypeError):
+                issues.append({'entity': entity, 'issue': 'Invalid format', 'value': str(rate_val)})
+        
+        # Generate findings
+        if issues:
+            findings.append({
+                'type': 'error',
+                'severity': 'high',
+                'title': f'{len(issues)} Rate Issues',
+                'message': 'Found rates that need correction',
+                'details': issues[:10],
+                'action': 'Review and correct before processing payroll'
+            })
+        
+        if zero_rates:
+            findings.append({
+                'type': 'warning',
+                'severity': 'high',
+                'title': f'{len(zero_rates)} Zero Rates',
+                'message': 'Zero SUI rates are unusual - most states require unemployment tax',
+                'details': zero_rates[:5],
+                'action': 'Verify if 0% is intentional or if rates need entry'
+            })
+        
+        if valid_rates:
+            rates = [r['raw'] for r in valid_rates]
+            # Normalize to percentage for display
+            if max(rates) < 1:
+                min_pct, max_pct = min(rates) * 100, max(rates) * 100
+            else:
+                min_pct, max_pct = min(rates), max(rates)
+            
+            findings.append({
+                'type': 'success',
+                'severity': 'info',
+                'title': f'{len(valid_rates)} Rates Valid',
+                'message': f'Rates range from {min_pct:.2f}% to {max_pct:.2f}%',
+                'action': 'Verify against your state rate notices'
+            })
+        
+        return findings
+    
+    def _format_consultant_response(
+        self, 
+        question: str,
+        rows: List[Dict],
+        temporal_findings: List[Dict],
+        rate_findings: List[Dict],
+        smart_assumption: Optional[str],
+        table_name: str
+    ) -> str:
+        """
+        Format findings like a real consultant - lead with the answer.
+        """
+        parts = []
+        
+        # Smart assumption first if we made one
+        if smart_assumption:
+            parts.append(smart_assumption)
+            parts.append("")
+        
+        total_records = len(rows)
+        all_findings = temporal_findings + rate_findings
+        
+        errors = [f for f in all_findings if f.get('severity') == 'high']
+        warnings = [f for f in all_findings if f.get('severity') == 'medium']
+        good = [f for f in all_findings if f.get('severity') in ['low', 'info']]
+        
+        # Lead with the verdict
+        if errors:
+            parts.append(f"🔴 **{len(errors)} issues found that need attention**")
+        elif warnings:
+            parts.append(f"🟡 **Rates look okay but {len(warnings)} items should be verified**")
+        elif good:
+            parts.append(f"✅ **Rates appear correctly configured** ({total_records} checked)")
+        else:
+            parts.append(f"ℹ️ **{total_records} rate records reviewed**")
+        
+        parts.append("")
+        
+        # Errors first
+        for finding in errors:
+            parts.append(f"**{finding['title']}**")
+            parts.append(f"{finding['message']}")
+            if finding.get('details'):
+                for detail in finding['details'][:5]:
+                    parts.append(f"  • {detail.get('entity')}: {detail.get('issue')} ({detail.get('value')})")
+            if finding.get('action'):
+                parts.append(f"  → *{finding['action']}*")
+            parts.append("")
+        
+        # Then warnings
+        for finding in warnings:
+            parts.append(f"**{finding['title']}**")
+            parts.append(f"{finding['message']}")
+            if finding.get('entities'):
+                entities = finding['entities'][:3]
+                entity_list = ", ".join(e.get('entity', str(e)) if isinstance(e, dict) else str(e) for e in entities)
+                if len(finding['entities']) > 3:
+                    entity_list += f" (+{len(finding['entities']) - 3} more)"
+                parts.append(f"  • Affected: {entity_list}")
+            if finding.get('action'):
+                parts.append(f"  → *{finding['action']}*")
+            parts.append("")
+        
+        # Good news brief
+        if good and not errors:
+            for finding in good:
+                parts.append(f"✓ {finding['title']}: {finding['message']}")
+        
+        # Offer the data
+        parts.append("")
+        parts.append(f"📊 *{total_records} records available for detailed review*")
+        
+        return "\n".join(parts)
     
     def _get_status_column_and_codes(self, status_filter: str) -> Tuple[Optional[str], List[str]]:
         """
@@ -1921,8 +2478,8 @@ class IntelligenceEngine:
                 query_hints.append(hint)
                 logger.warning(f"[SQL-GEN] Detected GROUP BY pattern: {pattern}")
         
-        # VALIDATION/CORRECTNESS QUESTIONS - Don't let LLM filter, just show data
-        # Questions like "are the rates correct?" need to SEE the data, not COUNT it
+        # VALIDATION/CORRECTNESS QUESTIONS - Smart consultant analysis
+        # Questions like "are the rates correct?" need intelligent analysis, not just data dump
         validation_keywords = ['correct', 'valid', 'right', 'properly', 'configured', 
                                'issue', 'problem', 'check', 'verify', 'audit', 'review',
                                'accurate', 'wrong', 'error', 'mistake']
@@ -1930,51 +2487,77 @@ class IntelligenceEngine:
         logger.warning(f"[SQL-GEN] Validation check: is_validation={is_validation_question}, q='{q_lower[:50]}', tables={len(relevant_tables) if relevant_tables else 0}")
         
         if is_validation_question and relevant_tables:
-            # For validation questions, bypass LLM entirely - just get the data
+            # For validation questions, be a smart consultant
             primary_full = relevant_tables[0].get('table_name', '')
             if primary_full:
-                logger.warning(f"[SQL-GEN] VALIDATION QUESTION - bypassing LLM, using SELECT *")
+                logger.warning(f"[SQL-GEN] VALIDATION QUESTION - smart consultant analysis")
                 
-                # Get columns to show (first 15)
+                # Get all columns for analysis
                 primary_cols = relevant_tables[0].get('columns', [])
-                if primary_cols:
-                    col_names = [c.get('name', str(c)) if isinstance(c, dict) else str(c) for c in primary_cols[:15]]
-                    select_cols = ', '.join(f'"{c}"' for c in col_names)
-                else:
-                    select_cols = '*'
+                col_names = [c.get('name', str(c)) if isinstance(c, dict) else str(c) for c in primary_cols]
                 
-                # Try to filter to relevant rows based on question keywords
-                # For "are the SUI rates correct?" we want only SUI-related rows
-                filter_terms = []
-                question_keywords = ['sui', 'suta', 'futa', 'fit', 'fica', 'soc', 'med', 'w2', '401k', 'fein']
-                for kw in question_keywords:
-                    if kw in q_lower:
-                        filter_terms.append(kw.upper())
+                # Run smart scope analysis - look at the data before asking questions
+                scope_analysis = self._analyze_validation_scope(
+                    question=question,
+                    validation_table=primary_full,
+                    validation_columns=col_names
+                )
                 
+                # If we need clarification (multiple companies with data), ask smart question
+                if scope_analysis.get('needs_clarification') and scope_analysis.get('clarification'):
+                    logger.warning(f"[SQL-GEN] Smart clarification needed")
+                    # Store for return - the ask() method will handle this
+                    self._pending_validation_clarification = scope_analysis['clarification']
+                    return {
+                        'sql': None,
+                        'table': primary_full,
+                        'query_type': 'validation_clarification',
+                        'clarification': scope_analysis['clarification'],
+                        'all_columns': all_columns
+                    }
+                
+                # Build query with smart scope
+                select_cols = ', '.join(f'"{c}"' for c in col_names[:20])  # Include more columns for analysis
                 sql = f'SELECT {select_cols} FROM "{primary_full}"'
                 
-                # Add WHERE clause if we found specific terms to filter
+                # Apply scope filter if we made a smart assumption
+                scope_filter = scope_analysis.get('scope_filter')
+                
+                # Also filter to relevant tax type
+                filter_parts = []
+                question_keywords = ['sui', 'suta', 'futa', 'fit', 'fica', 'soc', 'med', 'w2', '401k', 'fein']
+                filter_terms = [kw.upper() for kw in question_keywords if kw in q_lower]
+                
                 if filter_terms:
-                    # Look for columns that might contain these codes
-                    code_cols = [c for c in col_names if any(x in c.lower() for x in ['code', 'type', 'name', 'description', 'tax'])]
+                    code_cols = [c for c in col_names if any(x in c.lower() for x in ['code', 'type', 'desc', 'tax'])]
                     if code_cols:
-                        where_parts = []
                         for term in filter_terms:
-                            for col in code_cols[:3]:  # Check first 3 code-like columns
-                                where_parts.append(f'UPPER("{col}") LIKE \'%{term}%\'')
-                        if where_parts:
-                            sql += f" WHERE ({' OR '.join(where_parts)})"
-                            logger.warning(f"[SQL-GEN] Validation filtered to: {filter_terms}")
+                            for col in code_cols[:2]:
+                                filter_parts.append(f'UPPER("{col}") LIKE \'%{term}%\'')
+                
+                if scope_filter:
+                    filter_parts.append(f'"{scope_filter["column"]}" = \'{scope_filter["value"]}\'')
+                    logger.warning(f"[SQL-GEN] Applied scope filter: {scope_filter}")
+                
+                if filter_parts:
+                    sql += f" WHERE ({' OR '.join(filter_parts[:6])})"  # Combine with OR for tax codes
+                    if scope_filter:
+                        # If we have both tax filter AND scope, use AND for scope
+                        tax_filters = [f for f in filter_parts if 'LIKE' in f]
+                        scope_filters = [f for f in filter_parts if 'LIKE' not in f]
+                        if tax_filters and scope_filters:
+                            sql = f'SELECT {select_cols} FROM "{primary_full}" WHERE ({" OR ".join(tax_filters)}) AND ({" AND ".join(scope_filters)})'
                 
                 logger.warning(f"[SQL-GEN] Validation SQL: {sql[:200]}...")
                 
-                # Return in correct format - caller will execute
                 return {
                     'sql': sql,
                     'table': primary_full.split('__')[-1] if '__' in primary_full else primary_full,
                     'query_type': 'validation',
                     'all_columns': all_columns,
-                    'validation_bypass': True
+                    'validation_bypass': True,
+                    'smart_assumption': scope_analysis.get('smart_assumption'),
+                    'scope_analysis': scope_analysis.get('analysis', {})
                 }
         
         # Format all hints
@@ -2350,8 +2933,19 @@ SQL:"""
             if not sql:
                 sql_info = self._generate_sql_for_question(question, analysis)
                 if sql_info:
+                    # Check if this is a clarification request
+                    if sql_info.get('query_type') == 'validation_clarification':
+                        # Return empty truths - the clarification will be handled by ask()
+                        logger.warning(f"[SQL] Validation needs clarification, returning for ask() to handle")
+                        return truths
+                    
                     sql = sql_info['sql']
                     sql_source = 'llm'
+                    
+                    # Store smart assumption for validation questions
+                    if sql_info.get('smart_assumption'):
+                        self._last_smart_assumption = sql_info['smart_assumption']
+                        logger.warning(f"[SQL] Stored smart assumption: {self._last_smart_assumption[:50]}...")
             
             # Execute
             if sql:
@@ -2746,6 +3340,44 @@ SQL:"""
                     
                 if row_count > 15:
                     parts.append(f"\n*Showing top 15 of {row_count:,} groups*")
+        
+        elif query_type == 'validation' and result_rows:
+            # VALIDATION QUERY - Run smart consultant analysis
+            row_count = len(result_rows)
+            logger.warning(f"[CONSULTATIVE] Validation response for {row_count} rows")
+            
+            # Determine what we're validating based on question
+            q_lower = question.lower()
+            rate_type = 'sui' if 'sui' in q_lower or 'suta' in q_lower else 'futa' if 'futa' in q_lower else 'tax'
+            
+            # Run temporal analysis (date/freshness checks)
+            temporal_findings = self._analyze_temporal_context(result_rows)
+            
+            # Run rate value validation
+            rate_findings = self._validate_rate_values(result_rows, rate_type)
+            
+            # Get smart assumption if we made one
+            smart_assumption = getattr(self, '_last_smart_assumption', None)
+            
+            # Find table name from SQL
+            table_name = 'tax configuration'
+            if hasattr(self, 'last_executed_sql') and self.last_executed_sql:
+                import re
+                match = re.search(r'FROM\s+"?([^"\s]+)"?', self.last_executed_sql, re.IGNORECASE)
+                if match:
+                    table_name = match.group(1).split('_')[-1] if '_' in match.group(1) else match.group(1)
+            
+            # Format as consultant response
+            consultant_response = self._format_consultant_response(
+                question=question,
+                rows=result_rows,
+                temporal_findings=temporal_findings,
+                rate_findings=rate_findings,
+                smart_assumption=smart_assumption,
+                table_name=table_name
+            )
+            
+            parts.append(consultant_response)
             
         elif result_rows:
             row_count = len(result_rows)
