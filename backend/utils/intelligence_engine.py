@@ -239,6 +239,26 @@ class IntelligenceEngine:
         
         q_lower = question.lower()
         
+        # Check for export request
+        export_keywords = ['export', 'download', 'excel', 'csv', 'spreadsheet', 'get the data', 'full data']
+        is_export_request = any(kw in q_lower for kw in export_keywords)
+        
+        if is_export_request and hasattr(self, '_last_validation_export') and self._last_validation_export:
+            logger.warning(f"[INTELLIGENCE] Export request detected - returning export data")
+            export_data = self._last_validation_export
+            
+            return SynthesizedAnswer(
+                question=question,
+                answer=f"📥 **Export Ready**\n\nI've prepared {export_data['total_records']} records for download.",
+                confidence=0.95,
+                structured_output={
+                    'type': 'export_ready',
+                    'export_data': export_data,
+                    'filename_suggestion': f"sui_rate_validation_{self.project or 'export'}.xlsx"
+                },
+                reasoning=['Export requested for validation data']
+            )
+        
         # Simple analysis
         mode = mode or self._detect_mode(q_lower)
         is_employee_question = self._is_employee_question(q_lower)
@@ -1361,6 +1381,12 @@ class IntelligenceEngine:
     def _validate_rate_values(self, rows: List[Dict], rate_type: str = 'sui') -> List[Dict]:
         """
         Validate actual rate values against known valid ranges.
+        
+        SUI rates vary significantly by state:
+        - Most states: 0.1% to 12%
+        - High-rate states (MA, PA, RI): can exceed 12%, up to ~18%
+        - Some states allow 0% for excellent experience ratings
+        - New employer rates typically 2-5%
         """
         findings = []
         
@@ -1378,7 +1404,7 @@ class IntelligenceEngine:
         if not rate_col:
             return findings
         
-        # Find entity column
+        # Find entity column (state/tax code)
         entity_col = None
         for key in rows[0].keys():
             key_lower = key.lower()
@@ -1386,8 +1412,8 @@ class IntelligenceEngine:
                 entity_col = key
                 break
         
-        # Valid ranges - SUI is typically stored as decimal (0.025 = 2.5%)
-        # But could also be stored as percentage (2.5 = 2.5%)
+        # States with higher max rates (can exceed 12%)
+        high_rate_states = ['MA', 'PA', 'RI', 'CT', 'MN', 'NJ', 'WV', 'AK', 'MI']
         
         issues = []
         valid_rates = []
@@ -1405,24 +1431,32 @@ class IntelligenceEngine:
                 rate = float(rate_val)
                 
                 # Determine if stored as decimal or percentage
-                # SUI rates are typically 0.1% to 12%
-                # As decimal: 0.001 to 0.12
-                # As percentage: 0.1 to 12
+                # SUI rates are typically 0.1% to 18%
+                # As decimal: 0.001 to 0.18
+                # As percentage: 0.1 to 18
+                
+                # Check if this is a high-rate state
+                is_high_rate_state = any(st in str(entity).upper() for st in high_rate_states)
+                max_threshold = 0.20 if is_high_rate_state else 0.15  # 20% or 15% as decimal
                 
                 if rate == 0:
+                    # 0% is unusual but valid in some cases - flag for review
                     zero_rates.append({'entity': entity, 'value': '0%'})
                 elif rate > 1:
                     # Stored as percentage (e.g., 2.5 = 2.5%)
-                    if rate > 15:
-                        issues.append({'entity': entity, 'issue': 'Rate too high', 'value': f'{rate}%'})
+                    pct_max = max_threshold * 100
+                    if rate > pct_max:
+                        issues.append({'entity': entity, 'issue': 'Rate unusually high', 'value': f'{rate}%'})
+                    elif rate > 18:
+                        issues.append({'entity': entity, 'issue': 'Rate exceeds all state maximums', 'value': f'{rate}%'})
                     else:
                         valid_rates.append({'entity': entity, 'value': f'{rate}%', 'raw': rate})
                 else:
                     # Stored as decimal (e.g., 0.025 = 2.5%)
                     pct = rate * 100
-                    if rate > 0.15:
-                        issues.append({'entity': entity, 'issue': 'Rate too high', 'value': f'{pct:.2f}%'})
-                    elif rate < 0.0001:
+                    if rate > max_threshold:
+                        issues.append({'entity': entity, 'issue': 'Rate unusually high', 'value': f'{pct:.2f}%'})
+                    elif rate < 0.0001 and rate > 0:
                         issues.append({'entity': entity, 'issue': 'Rate suspiciously low', 'value': f'{pct:.4f}%'})
                     else:
                         valid_rates.append({'entity': entity, 'value': f'{pct:.2f}%', 'raw': rate})
@@ -1436,19 +1470,19 @@ class IntelligenceEngine:
                 'type': 'error',
                 'severity': 'high',
                 'title': f'{len(issues)} Rate Issues',
-                'message': 'Found rates that need correction',
+                'message': 'Found rates that need review',
                 'details': issues[:10],
-                'action': 'Review and correct before processing payroll'
+                'action': 'Verify against your state rate notices'
             })
         
         if zero_rates:
             findings.append({
                 'type': 'warning',
-                'severity': 'high',
+                'severity': 'medium',  # Changed from high - 0% can be valid
                 'title': f'{len(zero_rates)} Zero Rates',
-                'message': 'Zero SUI rates are unusual - most states require unemployment tax',
+                'message': 'Zero SUI rates - verify this is intentional (excellent experience rating)',
                 'details': zero_rates[:5],
-                'action': 'Verify if 0% is intentional or if rates need entry'
+                'action': 'Confirm 0% is correct or enter actual rate from state notice'
             })
         
         if valid_rates:
@@ -1480,6 +1514,7 @@ class IntelligenceEngine:
     ) -> str:
         """
         Format findings like a real consultant - lead with the answer.
+        Also stores export data for download capability.
         """
         parts = []
         
@@ -1537,9 +1572,19 @@ class IntelligenceEngine:
             for finding in good:
                 parts.append(f"✓ {finding['title']}: {finding['message']}")
         
-        # Offer the data
+        # Store export data for later retrieval
+        self._last_validation_export = {
+            'rows': rows,
+            'columns': list(rows[0].keys()) if rows else [],
+            'findings': all_findings,
+            'table_name': table_name,
+            'sql': getattr(self, 'last_executed_sql', None),
+            'total_records': total_records
+        }
+        
+        # Offer the data with export hint
         parts.append("")
-        parts.append(f"📊 *{total_records} records available for detailed review*")
+        parts.append(f"📊 **{total_records} records available** - say \"export\" or \"download\" to get the full data")
         
         return "\n".join(parts)
     
