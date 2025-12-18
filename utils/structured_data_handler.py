@@ -1,8 +1,14 @@
 """
-Structured Data Handler - DuckDB Storage for Excel/CSV v5.0
+Structured Data Handler - DuckDB Storage for Excel/CSV v5.1
 ===========================================================
 
-Deploy to: backend/utils/structured_data_handler.py
+Deploy to: utils/structured_data_handler.py
+
+v5.1 CHANGES (Header Detection Improvements):
+- Fixed header detection to catch 'nan', numeric, and empty column names
+- Added post-read validation to recover headers from first data row
+- Improved _sanitize_name() to handle nan/None values properly
+- Better logging during header detection process
 
 v5.0 CHANGES (Performance Optimization):
 - Added progress_callback parameter to store_excel() and store_csv()
@@ -497,8 +503,17 @@ class StructuredDataHandler:
     
     def _sanitize_name(self, name: str) -> str:
         """Sanitize table/column names for SQL"""
+        # Handle nan/None values that come from pandas
+        name_str = str(name).strip()
+        if name_str.lower() in ['nan', 'none', 'nat', ''] or pd.isna(name):
+            return 'unnamed'
+        
+        # Handle numeric column names (0, 1, 2, etc.) 
+        if name_str.replace('.', '').replace('-', '').isdigit():
+            return f'col_{name_str}'
+        
         # Remove special chars, replace spaces with underscores
-        sanitized = re.sub(r'[^\w\s]', '', str(name))
+        sanitized = re.sub(r'[^\w\s]', '', name_str)
         sanitized = re.sub(r'\s+', '_', sanitized.strip())
         sanitized = sanitized.lower()
         # Ensure it doesn't start with a number
@@ -1701,7 +1716,8 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                     
                     # If no colored header found, try text-based detection
                     if best_header_row == 0:
-                        min_unnamed = float('inf')
+                        min_bad_cols = float('inf')
+                        best_good_cols = 0
                         for header_row in range(11):  # Try rows 0-10
                             try:
                                 test_df = pd.read_excel(
@@ -1711,18 +1727,36 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                                     nrows=5
                                 )
                                 
-                                # Count unnamed columns
-                                unnamed_count = sum(1 for c in test_df.columns if str(c).startswith('Unnamed'))
-                                total_cols = len([c for c in test_df.columns if not str(c).startswith('Unnamed')])
+                                # Count BAD columns (unnamed, numeric, nan)
+                                # These indicate header detection failed
+                                bad_count = 0
+                                good_count = 0
+                                for c in test_df.columns:
+                                    col_str = str(c).lower().strip()
+                                    # Bad: Unnamed:X, numeric, nan, empty
+                                    is_bad = (
+                                        col_str.startswith('unnamed') or
+                                        col_str in ['nan', 'none', ''] or
+                                        col_str.replace('.', '').replace('-', '').isdigit() or
+                                        (len(col_str) <= 2 and col_str.isdigit())
+                                    )
+                                    if is_bad:
+                                        bad_count += 1
+                                    else:
+                                        good_count += 1
                                 
-                                if total_cols < 2:
+                                # We want max good columns and min bad columns
+                                if good_count < 2:
                                     continue
                                 
-                                if unnamed_count < min_unnamed:
-                                    min_unnamed = unnamed_count
+                                # Score: prioritize more good columns, then fewer bad columns
+                                if good_count > best_good_cols or (good_count == best_good_cols and bad_count < min_bad_cols):
+                                    min_bad_cols = bad_count
+                                    best_good_cols = good_count
                                     best_header_row = header_row
+                                    logger.info(f"Sheet '{sheet_name}': Row {header_row} has {good_count} good cols, {bad_count} bad cols")
                                     
-                                if unnamed_count == 0:
+                                if bad_count == 0 and good_count >= 3:
                                     break
                                     
                             except:
@@ -1736,6 +1770,25 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                             header=best_header_row
                         )
                         logger.info(f"Sheet '{sheet_name}': Using header row {best_header_row}")
+                        
+                        # POST-READ VALIDATION: Check if columns still look bad
+                        bad_cols = sum(1 for c in df.columns if str(c).lower() in ['nan', 'none', ''] or 
+                                       str(c).replace('.', '').isdigit())
+                        total_cols = len(df.columns)
+                        
+                        # If more than 50% columns are bad, try using first data row as headers
+                        if total_cols > 0 and bad_cols / total_cols > 0.5:
+                            logger.warning(f"Sheet '{sheet_name}': {bad_cols}/{total_cols} bad columns detected, trying first row as headers")
+                            # The first data row might actually be the headers
+                            if len(df) > 0:
+                                new_headers = df.iloc[0].tolist()
+                                # Check if first row looks like headers (mostly strings, not numbers)
+                                string_count = sum(1 for h in new_headers if isinstance(h, str) and len(str(h)) > 1)
+                                if string_count > len(new_headers) * 0.5:
+                                    df.columns = new_headers
+                                    df = df.iloc[1:]  # Remove the header row from data
+                                    logger.info(f"Sheet '{sheet_name}': Recovered headers from first data row")
+                        
                     except Exception as e:
                         logger.error(f"Failed to read sheet '{sheet_name}': {e}")
                         continue
