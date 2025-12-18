@@ -1,10 +1,14 @@
 """
-XLR8 INTELLIGENCE ENGINE v5.11.1
+XLR8 INTELLIGENCE ENGINE v5.12.0
 ================================
 
 Deploy to: backend/utils/intelligence_engine.py
 
 UPDATES:
+- v5.12.0: DOMAIN-AGNOSTIC VALIDATION - VALIDATION_CONFIG registry for all tax domains
+           (SUI, FUTA, Workers Comp, State Withholding, Local Tax). Single codebase,
+           parameterized validation ranges and rules per domain. Smart consultant analysis
+           detects domain from question keywords.
 - v5.11.1: ORDER BY REGEX FIX - was capturing "FROM" as alias due to broken regex
            Changed from `(?:AS\s+)?(\w+)?` to `(?:\s+AS\s+(\w+))?`
 - v5.11: LOCATION + GROUP BY FIX
@@ -51,7 +55,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.11.3 COLUMN FIX FROM HINTS ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.12.0 DOMAIN-AGNOSTIC VALIDATION ======")
 
 
 # =============================================================================
@@ -104,6 +108,99 @@ def _is_word_boundary_match(text: str, word: str) -> bool:
 def _is_blocklisted(word: str) -> bool:
     """Check if word is in the common English blocklist."""
     return word.lower() in COMMON_ENGLISH_BLOCKLIST
+
+
+# =============================================================================
+# VALIDATION CONFIGURATION REGISTRY
+# Domain-agnostic validation rules for tax rates, deductions, etc.
+# =============================================================================
+VALIDATION_CONFIG = {
+    'sui': {
+        'name': 'SUI/SUTA Rates',
+        'keywords': ['sui', 'suta', 'state unemployment'],
+        'table_patterns': ['tax_information', 'tax_groups', 'sui', 'suta'],
+        'rate_range': (0.001, 0.20),  # 0.1% to 20% as decimal
+        'rate_range_pct': (0.1, 20),  # Same as percentage
+        'scope_cols': ['company', 'fein', 'state'],
+        'high_rate_entities': ['MA', 'PA', 'RI', 'CT', 'MN', 'NJ', 'WV', 'AK', 'MI'],
+        'high_rate_max': 0.22,  # 22% for high-rate states
+        'zero_severity': 'medium',  # 0% can be valid (excellent experience)
+        'temporal_check': True,
+        'annual_update': True,
+        'description': 'State Unemployment Insurance rates',
+    },
+    'futa': {
+        'name': 'FUTA Rates',
+        'keywords': ['futa', 'federal unemployment'],
+        'table_patterns': ['tax_information', 'tax_groups', 'futa'],
+        'rate_range': (0.006, 0.06),  # 0.6% to 6% as decimal
+        'rate_range_pct': (0.6, 6.0),
+        'scope_cols': ['company', 'fein'],
+        'high_rate_entities': [],
+        'high_rate_max': 0.06,
+        'zero_severity': 'high',  # 0% FUTA is almost always wrong
+        'temporal_check': True,
+        'annual_update': True,
+        'description': 'Federal Unemployment Tax rates',
+    },
+    'workers_comp': {
+        'name': 'Workers Compensation',
+        'keywords': ['workers comp', 'work comp', 'wc', 'wcb', 'workers compensation'],
+        'table_patterns': ['workers_comp', 'wc_', 'comp_rate'],
+        'rate_range': (0.001, 0.35),  # 0.1% to 35% - wide range due to hazardous classes
+        'rate_range_pct': (0.1, 35.0),
+        'scope_cols': ['company', 'state', 'class_code', 'wc_code'],
+        'high_rate_entities': [],  # All states can have high rates for hazardous jobs
+        'high_rate_max': 0.50,  # 50% max for extreme hazard classes
+        'zero_severity': 'high',  # 0% WC is usually wrong
+        'temporal_check': True,
+        'annual_update': True,
+        'description': 'Workers Compensation insurance rates',
+    },
+    'state_withholding': {
+        'name': 'State Withholding',
+        'keywords': ['state withholding', 'sit', 'state income tax', 'state tax rate'],
+        'table_patterns': ['tax_information', 'withholding', 'sit'],
+        'rate_range': (0.0, 0.15),  # 0% to 15% (some states have no income tax)
+        'rate_range_pct': (0.0, 15.0),
+        'scope_cols': ['company', 'state'],
+        'high_rate_entities': ['CA', 'NY', 'NJ', 'OR', 'MN', 'HI'],
+        'high_rate_max': 0.15,
+        'zero_severity': 'low',  # 0% valid for no-income-tax states
+        'temporal_check': False,  # Tax tables, not employer-specific
+        'annual_update': False,
+        'description': 'State income tax withholding rates',
+    },
+    'local_tax': {
+        'name': 'Local Tax',
+        'keywords': ['local tax', 'city tax', 'county tax', 'municipal tax', 'lit'],
+        'table_patterns': ['local_tax', 'city_tax', 'municipal'],
+        'rate_range': (0.0, 0.05),  # 0% to 5%
+        'rate_range_pct': (0.0, 5.0),
+        'scope_cols': ['company', 'state', 'locality', 'jurisdiction'],
+        'high_rate_entities': [],
+        'high_rate_max': 0.05,
+        'zero_severity': 'low',  # Many localities have no local tax
+        'temporal_check': False,
+        'annual_update': False,
+        'description': 'Local/municipal tax rates',
+    },
+}
+
+def _detect_validation_domain(question: str) -> Optional[Dict]:
+    """
+    Detect which validation domain applies to the question.
+    Returns the config dict or None if not a validation question.
+    """
+    q_lower = question.lower()
+    
+    for domain_key, config in VALIDATION_CONFIG.items():
+        for keyword in config['keywords']:
+            if keyword in q_lower:
+                logger.info(f"[VALIDATION] Detected domain: {domain_key} (keyword: {keyword})")
+                return {'key': domain_key, **config}
+    
+    return None
 
 
 # =============================================================================
@@ -1039,6 +1136,10 @@ class IntelligenceEngine:
             'scope_filter': None
         }
         
+        # Detect validation domain
+        domain_config = _detect_validation_domain(question)
+        domain_name = domain_config.get('name', 'rates') if domain_config else 'rates'
+        
         # Check if we already have a confirmed validation scope
         scope_confirm = self.confirmed_facts.get('validation_scope_confirm')
         scope_company = self.confirmed_facts.get('validation_scope_company')
@@ -1053,12 +1154,12 @@ class IntelligenceEngine:
                     'column': ctx.get('company_col'),
                     'value': ctx.get('primary_code')
                 }
-                result['smart_assumption'] = f"Reviewing SUI rates for **{ctx.get('primary_name', ctx.get('primary_code'))}**"
+                result['smart_assumption'] = f"Reviewing {domain_name} for **{ctx.get('primary_name', ctx.get('primary_code'))}**"
                 logger.warning(f"[ANALYTICAL] Applying confirmed scope filter: {result['scope_filter']}")
             return result
         elif scope_confirm == 'no_all':
             # User wants to review all companies
-            result['smart_assumption'] = "Reviewing SUI rates for **all companies** (some may need SUI setup)"
+            result['smart_assumption'] = f"Reviewing {domain_name} for **all companies**"
             logger.warning(f"[ANALYTICAL] User requested all companies review")
             return result
         elif scope_company and scope_company != '__all__':
@@ -1068,21 +1169,23 @@ class IntelligenceEngine:
                 'column': col,
                 'value': scope_company
             }
-            result['smart_assumption'] = f"Reviewing SUI rates for selected company"
+            result['smart_assumption'] = f"Reviewing {domain_name} for selected company"
             logger.warning(f"[ANALYTICAL] User selected company: {scope_company}, filter col: {col}")
             return result
         elif scope_company == '__all__':
-            result['smart_assumption'] = "Reviewing SUI rates for **all companies**"
+            result['smart_assumption'] = f"Reviewing {domain_name} for **all companies**"
             logger.warning(f"[ANALYTICAL] User selected all companies")
             return result
         
-        # Determine what we're validating
-        is_sui = any(kw in q_lower for kw in ['sui', 'suta', 'state unemployment'])
-        is_futa = 'futa' in q_lower
-        is_tax = any(kw in q_lower for kw in ['tax', 'rate', 'fein', 'ein'])
+        # Check if this is a validation-worthy question using the domain config
+        if not domain_config:
+            # Also check for generic tax/rate validation
+            is_tax = any(kw in q_lower for kw in ['tax', 'rate', 'fein', 'ein', 'correct', 'valid'])
+            if not is_tax:
+                return result
         
-        if not (is_sui or is_futa or is_tax):
-            return result
+        # Get keywords to filter for this domain
+        domain_keywords = domain_config.get('keywords', ['sui', 'suta']) if domain_config else ['sui', 'suta']
         
         # Analyze the data to understand the scope
         try:
@@ -1091,7 +1194,7 @@ class IntelligenceEngine:
                 x in c.lower() for x in ['company_code', 'company_name', 'fein', 'ein', 'id_number']
             )]
             
-            # Find tax code column (for SUI filtering)
+            # Find tax code column (for filtering)
             tax_code_cols = [c for c in validation_columns if any(
                 x in c.lower() for x in ['tax_code', 'tax_desc', 'type_of_tax']
             )]
@@ -1101,44 +1204,51 @@ class IntelligenceEngine:
                 x in c.lower() for x in ['rate', 'contribution', 'percent']
             )]
             
+            # Build keyword filter for SQL
+            keyword_patterns = [kw.upper() for kw in domain_keywords]
+            
             # Analyze by company/FEIN
             if company_cols:
                 company_col = company_cols[0]
                 name_col = next((c for c in company_cols if 'name' in c.lower()), company_col)
                 
-                # Get breakdown by company
-                sql = f'''
-                    SELECT "{company_col}" as code, 
-                           "{name_col}" as name,
-                           COUNT(*) as total_records,
-                           COUNT(CASE WHEN UPPER("{tax_code_cols[0]}") LIKE '%SUI%' OR UPPER("{tax_code_cols[0]}") LIKE '%SUTA%' THEN 1 END) as sui_records
-                    FROM "{validation_table}"
-                    GROUP BY "{company_col}", "{name_col}"
-                    ORDER BY sui_records DESC
-                ''' if tax_code_cols else f'''
-                    SELECT "{company_col}" as code,
-                           "{name_col}" as name, 
-                           COUNT(*) as total_records
-                    FROM "{validation_table}"
-                    GROUP BY "{company_col}", "{name_col}"
-                '''
+                # Get breakdown by company with domain-specific record count
+                if tax_code_cols and keyword_patterns:
+                    like_clauses = ' OR '.join(f'UPPER("{tax_code_cols[0]}") LIKE \'%{kw}%\'' for kw in keyword_patterns)
+                    sql = f'''
+                        SELECT "{company_col}" as code, 
+                               "{name_col}" as name,
+                               COUNT(*) as total_records,
+                               COUNT(CASE WHEN {like_clauses} THEN 1 END) as domain_records
+                        FROM "{validation_table}"
+                        GROUP BY "{company_col}", "{name_col}"
+                        ORDER BY domain_records DESC
+                    '''
+                else:
+                    sql = f'''
+                        SELECT "{company_col}" as code,
+                               "{name_col}" as name, 
+                               COUNT(*) as total_records
+                        FROM "{validation_table}"
+                        GROUP BY "{company_col}", "{name_col}"
+                    '''
                 
                 rows = self.structured_handler.query(sql)
                 
                 if rows:
                     result['analysis']['companies'] = rows
                     
-                    # Smart analysis
-                    if is_sui and tax_code_cols:
-                        companies_with_sui = [r for r in rows if r.get('sui_records', 0) > 0]
-                        companies_without_sui = [r for r in rows if r.get('sui_records', 0) == 0]
+                    # Smart analysis - now domain-agnostic
+                    if tax_code_cols:
+                        companies_with_records = [r for r in rows if r.get('domain_records', 0) > 0]
+                        companies_without_records = [r for r in rows if r.get('domain_records', 0) == 0]
                         
-                        if len(companies_with_sui) == 1 and len(companies_without_sui) > 0:
-                            # Only one company has SUI - ASK if that's the right scope
-                            main_company = companies_with_sui[0]
+                        if len(companies_with_records) == 1 and len(companies_without_records) > 0:
+                            # Only one company has records - ASK if that's the right scope
+                            main_company = companies_with_records[0]
                             fein = main_company.get('code', '')
                             name = main_company.get('name', fein)
-                            sui_count = main_company.get('sui_records', 0)
+                            record_count = main_company.get('domain_records', 0)
                             
                             # Format FEIN nicely if it looks like one
                             fein_display = fein
@@ -1153,7 +1263,7 @@ class IntelligenceEngine:
                                 'company_col': company_col,
                                 'primary_code': fein,
                                 'primary_name': name,
-                                'sui_count': sui_count
+                                'record_count': record_count
                             }
                             self._validation_company_col = company_col
                             
@@ -1166,51 +1276,51 @@ class IntelligenceEngine:
                                     'questions': [{
                                         'id': 'validation_scope_confirm',
                                         'question': (
-                                            f"I found **{name}** (FEIN {fein_display}) has {sui_count} SUI rates configured, "
-                                            f"while {len(companies_without_sui)} other company/companies have no SUI rates. "
-                                            f"Is it safe to assume this is the only FEIN needing a SUI rate review?"
+                                            f"I found **{name}** (FEIN {fein_display}) has {record_count} {domain_name} configured, "
+                                            f"while {len(companies_without_records)} other company/companies have none. "
+                                            f"Is it safe to assume this is the only FEIN needing review?"
                                         ),
                                         'type': 'radio',
                                         'options': [
                                             {'id': 'yes', 'label': f'Yes, just review {name}', 'default': True},
-                                            {'id': 'no_all', 'label': f'No, review all companies (some may be missing SUI setup)'},
+                                            {'id': 'no_all', 'label': f'No, review all companies (some may need setup)'},
                                             {'id': 'no_other', 'label': 'No, let me specify which company'}
                                         ]
                                     }],
                                     'original_question': question,
                                     'detected_mode': 'validate',
                                     'context': {
-                                        'primary_company': {'code': fein, 'name': name, 'sui_count': sui_count},
-                                        'companies_without_sui': [{'code': c.get('code'), 'name': c.get('name')} for c in companies_without_sui]
+                                        'primary_company': {'code': fein, 'name': name, 'record_count': record_count},
+                                        'companies_without_records': [{'code': c.get('code'), 'name': c.get('name')} for c in companies_without_records]
                                     }
                                 },
-                                reasoning=[f"Found {len(companies_with_sui)} company with SUI rates, {len(companies_without_sui)} without"]
+                                reasoning=[f"Found {len(companies_with_records)} company with {domain_name}, {len(companies_without_records)} without"]
                             )
                             
-                        elif len(companies_with_sui) > 1:
-                            # Multiple companies with SUI - need clarification but be smart about it
+                        elif len(companies_with_records) > 1:
+                            # Multiple companies with records - need clarification but be smart about it
                             result['needs_clarification'] = True
                             
                             # Store context for when user selects
                             self._validation_company_col = company_col
                             
                             options = []
-                            for comp in companies_with_sui:
+                            for comp in companies_with_records:
                                 options.append({
                                     'id': str(comp.get('code')),
-                                    'label': f"{comp.get('name', comp.get('code'))} ({comp.get('sui_records')} SUI rates)"
+                                    'label': f"{comp.get('name', comp.get('code'))} ({comp.get('domain_records')} {domain_name})"
                                 })
                             options.append({
                                 'id': '__all__',
-                                'label': f"Review all {len(companies_with_sui)} companies"
+                                'label': f"Review all {len(companies_with_records)} companies"
                             })
                             
                             summary = ", ".join(
-                                f"{c.get('name', c.get('code'))} ({c.get('sui_records')} rates)"
-                                for c in companies_with_sui[:3]
+                                f"{c.get('name', c.get('code'))} ({c.get('domain_records')} rates)"
+                                for c in companies_with_records[:3]
                             )
-                            if len(companies_with_sui) > 3:
-                                summary += f" and {len(companies_with_sui) - 3} more"
+                            if len(companies_with_records) > 3:
+                                summary += f" and {len(companies_with_records) - 3} more"
                             
                             result['clarification'] = SynthesizedAnswer(
                                 question=question,
@@ -1220,27 +1330,34 @@ class IntelligenceEngine:
                                     'type': 'clarification_needed',
                                     'questions': [{
                                         'id': 'validation_scope_company',
-                                        'question': f"I found SUI rates for multiple companies: {summary}. Which would you like me to review?",
+                                        'question': f"I found {domain_name} for multiple companies: {summary}. Which would you like me to review?",
                                         'type': 'radio',
                                         'options': options
                                     }],
                                     'original_question': question,
                                     'detected_mode': 'validate'
                                 },
-                                reasoning=[f"Multiple companies have SUI rates configured"]
+                                reasoning=[f"Multiple companies have {domain_name} configured"]
                             )
                         
-                        elif len(companies_with_sui) == 0 and len(companies_without_sui) > 0:
-                            # No SUI rates found at all - that's the finding!
-                            result['analysis']['finding'] = 'no_sui_rates'
+                        elif len(companies_with_records) == 0 and len(companies_without_records) > 0:
+                            # No records found at all - that's the finding!
+                            result['analysis']['finding'] = 'no_records'
                             result['smart_assumption'] = (
-                                f"⚠️ **No SUI rates found** for any of the {len(companies_without_sui)} companies. "
-                                f"This is likely a configuration issue - SUI rates should be set up for each state where you have employees."
+                                f"⚠️ **No {domain_name} found** for any of the {len(companies_without_records)} companies. "
+                                f"This may be a configuration issue."
                             )
             
             # Analyze rate values if we have them
             if rate_cols and not result.get('needs_clarification'):
                 rate_col = rate_cols[0]
+                
+                # Build keyword filter for rate stats query
+                if tax_code_cols and keyword_patterns:
+                    like_clauses = ' OR '.join(f'UPPER("{tax_code_cols[0]}") LIKE \'%{kw}%\'' for kw in keyword_patterns)
+                    where_clause = f"WHERE {like_clauses}"
+                else:
+                    where_clause = ""
                 
                 # Get rate statistics
                 sql = f'''
@@ -1251,8 +1368,7 @@ class IntelligenceEngine:
                         MAX(CAST("{rate_col}" AS DOUBLE)) as max_rate,
                         AVG(CAST("{rate_col}" AS DOUBLE)) as avg_rate
                     FROM "{validation_table}"
-                    WHERE UPPER("{tax_code_cols[0] if tax_code_cols else rate_col}") LIKE '%SUI%' 
-                       OR UPPER("{tax_code_cols[0] if tax_code_cols else rate_col}") LIKE '%SUTA%'
+                    {where_clause}
                 '''
                 try:
                     stats = self.structured_handler.query(sql)
@@ -1378,20 +1494,32 @@ class IntelligenceEngine:
         
         return findings
     
-    def _validate_rate_values(self, rows: List[Dict], rate_type: str = 'sui') -> List[Dict]:
+    def _validate_rate_values(self, rows: List[Dict], domain_config: Dict = None) -> List[Dict]:
         """
-        Validate actual rate values against known valid ranges.
+        Validate rate values against domain-specific ranges.
         
-        SUI rates vary significantly by state:
-        - Most states: 0.1% to 12%
-        - High-rate states (MA, PA, RI): can exceed 12%, up to ~18%
-        - Some states allow 0% for excellent experience ratings
-        - New employer rates typically 2-5%
+        Uses VALIDATION_CONFIG to determine valid ranges for each domain.
+        Works for SUI, FUTA, Workers Comp, and any other rate-based validation.
+        
+        Args:
+            rows: Data rows to validate
+            domain_config: Config dict from VALIDATION_CONFIG (or uses SUI defaults)
         """
         findings = []
         
         if not rows:
             return findings
+        
+        # Default to SUI config if not specified
+        if not domain_config:
+            domain_config = VALIDATION_CONFIG.get('sui', {})
+        
+        domain_name = domain_config.get('name', 'Rate')
+        domain_key = domain_config.get('key', 'sui')
+        rate_min, rate_max = domain_config.get('rate_range', (0.001, 0.20))
+        high_rate_entities = domain_config.get('high_rate_entities', [])
+        high_rate_max = domain_config.get('high_rate_max', rate_max * 1.1)
+        zero_severity = domain_config.get('zero_severity', 'medium')
         
         # Find rate column
         rate_col = None
@@ -1404,16 +1532,13 @@ class IntelligenceEngine:
         if not rate_col:
             return findings
         
-        # Find entity column (state/tax code)
+        # Find entity column (state/tax code/class)
         entity_col = None
         for key in rows[0].keys():
             key_lower = key.lower()
-            if any(e in key_lower for e in ['state', 'jurisdiction', 'tax_code', 'desc']):
+            if any(e in key_lower for e in ['state', 'jurisdiction', 'tax_code', 'desc', 'class', 'code']):
                 entity_col = key
                 break
-        
-        # States with higher max rates (can exceed 12%)
-        high_rate_states = ['MA', 'PA', 'RI', 'CT', 'MN', 'NJ', 'WV', 'AK', 'MI']
         
         issues = []
         valid_rates = []
@@ -1430,25 +1555,17 @@ class IntelligenceEngine:
             try:
                 rate = float(rate_val)
                 
-                # Determine if stored as decimal or percentage
-                # SUI rates are typically 0.1% to 18%
-                # As decimal: 0.001 to 0.18
-                # As percentage: 0.1 to 18
-                
-                # Check if this is a high-rate state
-                is_high_rate_state = any(st in str(entity).upper() for st in high_rate_states)
-                max_threshold = 0.20 if is_high_rate_state else 0.15  # 20% or 15% as decimal
+                # Check if this is a high-rate entity (state/class)
+                is_high_rate = any(st in str(entity).upper() for st in high_rate_entities) if high_rate_entities else False
+                max_threshold = high_rate_max if is_high_rate else rate_max
                 
                 if rate == 0:
-                    # 0% is unusual but valid in some cases - flag for review
                     zero_rates.append({'entity': entity, 'value': '0%'})
                 elif rate > 1:
                     # Stored as percentage (e.g., 2.5 = 2.5%)
                     pct_max = max_threshold * 100
                     if rate > pct_max:
                         issues.append({'entity': entity, 'issue': 'Rate unusually high', 'value': f'{rate}%'})
-                    elif rate > 18:
-                        issues.append({'entity': entity, 'issue': 'Rate exceeds all state maximums', 'value': f'{rate}%'})
                     else:
                         valid_rates.append({'entity': entity, 'value': f'{rate}%', 'raw': rate})
                 else:
@@ -1464,30 +1581,38 @@ class IntelligenceEngine:
             except (ValueError, TypeError):
                 issues.append({'entity': entity, 'issue': 'Invalid format', 'value': str(rate_val)})
         
-        # Generate findings
+        # Generate findings with domain-specific messaging
         if issues:
             findings.append({
                 'type': 'error',
                 'severity': 'high',
-                'title': f'{len(issues)} Rate Issues',
+                'title': f'{len(issues)} {domain_name} Issues',
                 'message': 'Found rates that need review',
                 'details': issues[:10],
-                'action': 'Verify against your state rate notices'
+                'action': f'Verify against your {domain_name.lower()} notices'
             })
         
         if zero_rates:
+            zero_messages = {
+                'sui': 'Zero SUI rates - verify this is intentional (excellent experience rating)',
+                'futa': 'Zero FUTA rates are almost always incorrect',
+                'workers_comp': 'Zero WC rates - verify exemption status',
+                'state_withholding': 'Zero state withholding - may be valid for no-income-tax states',
+                'local_tax': 'Zero local tax - may be valid if no local tax applies',
+            }
+            zero_message = zero_messages.get(domain_key, f'Zero {domain_name} rates found')
+            
             findings.append({
-                'type': 'warning',
-                'severity': 'medium',  # Changed from high - 0% can be valid
+                'type': 'warning' if zero_severity in ['medium', 'low'] else 'error',
+                'severity': zero_severity,
                 'title': f'{len(zero_rates)} Zero Rates',
-                'message': 'Zero SUI rates - verify this is intentional (excellent experience rating)',
+                'message': zero_message,
                 'details': zero_rates[:5],
-                'action': 'Confirm 0% is correct or enter actual rate from state notice'
+                'action': 'Confirm 0% is correct or enter actual rate'
             })
         
         if valid_rates:
             rates = [r['raw'] for r in valid_rates]
-            # Normalize to percentage for display
             if max(rates) < 1:
                 min_pct, max_pct = min(rates) * 100, max(rates) * 100
             else:
@@ -1498,7 +1623,7 @@ class IntelligenceEngine:
                 'severity': 'info',
                 'title': f'{len(valid_rates)} Rates Valid',
                 'message': f'Rates range from {min_pct:.2f}% to {max_pct:.2f}%',
-                'action': 'Verify against your state rate notices'
+                'action': f'Verify against your {domain_name.lower()} notices'
             })
         
         return findings
@@ -3404,15 +3529,21 @@ SQL:"""
             row_count = len(result_rows)
             logger.warning(f"[CONSULTATIVE] VALIDATION PATH TRIGGERED for {row_count} rows")
             
-            # Determine what we're validating based on question
-            q_lower = question.lower()
-            rate_type = 'sui' if 'sui' in q_lower or 'suta' in q_lower else 'futa' if 'futa' in q_lower else 'tax'
+            # Detect validation domain from question
+            domain_config = _detect_validation_domain(question)
+            if not domain_config:
+                # Fallback to SUI if no specific domain detected
+                domain_config = {'key': 'sui', **VALIDATION_CONFIG.get('sui', {})}
             
-            # Run temporal analysis (date/freshness checks)
-            temporal_findings = self._analyze_temporal_context(result_rows)
+            logger.warning(f"[CONSULTATIVE] Using validation domain: {domain_config.get('name', 'Unknown')}")
             
-            # Run rate value validation
-            rate_findings = self._validate_rate_values(result_rows, rate_type)
+            # Run temporal analysis (date/freshness checks) if enabled for this domain
+            temporal_findings = []
+            if domain_config.get('temporal_check', True):
+                temporal_findings = self._analyze_temporal_context(result_rows)
+            
+            # Run rate value validation with domain config
+            rate_findings = self._validate_rate_values(result_rows, domain_config)
             
             # Get smart assumption if we made one
             smart_assumption = getattr(self, '_last_smart_assumption', None)
