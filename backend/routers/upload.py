@@ -616,6 +616,23 @@ def process_file_background(
                 if intelligence_summary:
                     result['intelligence'] = intelligence_summary
                 
+                # =====================================================
+                # DOMAIN INFERENCE - Phase 4
+                # Detect what type of data this is for intelligent context
+                # =====================================================
+                try:
+                    from utils.domain_inference_engine import infer_project_domains
+                    ProcessingJobModel.update_progress(job_id, 79, "Analyzing data domains...")
+                    domains = infer_project_domains(project, project_id, handler)
+                    if domains:
+                        result['detected_domains'] = domains
+                        primary = domains.get('primary_domain')
+                        logger.info(f"[BACKGROUND] Domain inference: primary={primary}")
+                except ImportError:
+                    logger.debug("[BACKGROUND] Domain inference not available")
+                except Exception as di_e:
+                    logger.warning(f"[BACKGROUND] Domain inference failed: {di_e}")
+                
                 # Store schema summary in documents table for reference
                 if project_id:
                     try:
