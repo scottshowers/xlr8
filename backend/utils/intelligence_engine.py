@@ -1921,6 +1921,39 @@ class IntelligenceEngine:
                 query_hints.append(hint)
                 logger.warning(f"[SQL-GEN] Detected GROUP BY pattern: {pattern}")
         
+        # VALIDATION/CORRECTNESS QUESTIONS - Don't let LLM filter, just show data
+        # Questions like "are the rates correct?" need to SEE the data, not COUNT it
+        validation_keywords = ['correct', 'valid', 'right', 'properly', 'configured', 
+                               'issue', 'problem', 'check', 'verify', 'audit', 'review',
+                               'accurate', 'wrong', 'error', 'mistake']
+        is_validation_question = any(kw in q_lower for kw in validation_keywords)
+        
+        if is_validation_question:
+            # For validation questions, bypass LLM entirely - just get the data
+            primary_full = relevant_tables[0].get('table_name', '') if relevant_tables else ''
+            if primary_full:
+                logger.warning(f"[SQL-GEN] VALIDATION QUESTION - bypassing LLM, using SELECT *")
+                
+                # Get columns to show (first 15)
+                primary_cols = relevant_tables[0].get('columns', [])
+                if primary_cols:
+                    col_names = [c.get('name', str(c)) if isinstance(c, dict) else str(c) for c in primary_cols[:15]]
+                    select_cols = ', '.join(f'"{c}"' for c in col_names)
+                else:
+                    select_cols = '*'
+                
+                sql = f'SELECT {select_cols} FROM "{primary_full}"'
+                logger.warning(f"[SQL-GEN] Validation SQL: {sql[:100]}...")
+                
+                # Execute directly
+                try:
+                    rows = self.structured_handler.query(sql)
+                    if rows:
+                        return sql, rows
+                except Exception as ve:
+                    logger.warning(f"[SQL-GEN] Validation query failed: {ve}")
+                    # Fall through to normal LLM path
+        
         # Format all hints
         query_hint = ""
         if query_hints:
