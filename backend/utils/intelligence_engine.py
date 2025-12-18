@@ -1,33 +1,25 @@
 """
-XLR8 INTELLIGENCE ENGINE v5.14.2
+XLR8 INTELLIGENCE ENGINE v5.15.1
 ================================
 
 Deploy to: backend/utils/intelligence_engine.py
 
 UPDATES:
+- v5.15.1: GROUPINGS IN INTELLIGENCE - Critical groupings now used throughout:
+           - SQL hints include KEY GROUPING DIMENSIONS for LLM
+           - Expanded by_patterns for filter detection (pay_group, union, FLSA, etc.)
+           - Customer org terminology matching (e.g., "by division" → org_level_1)
+           - Expanded clarification questions for all grouping types
+- v5.15.0: CRITICAL GROUPINGS - Registry of core workforce dimensions:
+           Country, Company/FEIN, Org Levels (1-4), Pay Groups, Earning Groups,
+           Deduction Groups, Tax Groups, Union (National/Local), FLSA, 
+           Hourly/Salary, FT/PT. Used for dashboards, filtering, SQL hints.
+           Added get_resolved_groupings() and get_dashboard_groupings() methods.
 - v5.14.2: ORG MAPPING - Loads customer org structure from Organization config table
-           - Maps org_level_X → customer terminology (e.g., org_level_2 = "Department")
-           - Injects into SQL hints for better query generation
-           - Foundation for customer dashboards with org-aware metrics
 - v5.14.1: DATA QUALITY CHECKS - Detects corrupted column headers (nan/unnamed)
-           - Warns when header parsing failed during upload
-           - Detects possible data truncation
-           - Fixed region deduplication in clarification options
 - v5.14.0: CONFIG VALIDATION IMPROVEMENTS
-           - Table exclude patterns to filter non-config tables
-           - Domain-aware export filenames (earnings_validation vs sui_rate_validation)
-           - "Review all data sets" instead of "Review all regions"
-           - Typo tolerance for "earnigs", "earings" etc.
-- v5.13.0: CONFIG VALIDATION FRAMEWORK - Extended validation to non-rate domains:
-           Earnings (duplicates, missing taxability, W-2 mapping)
-           Deductions (missing vendor, limits, arrears, eligibility)
-           GL Mapping (unmapped items, account format consistency)
-           Tax Jurisdictions (missing states, registration, tax IDs)
-           validation_type='config' vs 'rate' in VALIDATION_CONFIG registry.
+- v5.13.0: CONFIG VALIDATION FRAMEWORK - Extended validation to non-rate domains
 - v5.12.0: DOMAIN-AGNOSTIC VALIDATION - VALIDATION_CONFIG registry for all tax domains
-           (SUI, FUTA, Workers Comp, State Withholding, Local Tax). Single codebase,
-           parameterized validation ranges and rules per domain. Smart consultant analysis
-           detects domain from question keywords.
 - v5.11: LOCATION + GROUP BY FIX
         - Fixed table selection: "location" keyword now boosts tables with location columns
         - Fixed GROUP BY query handling: Now displays as table, not single count value
@@ -72,7 +64,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.14.2 ORG MAPPING ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.15.1 GROUPINGS IN SQL HINTS ======")
 
 
 # =============================================================================
@@ -278,6 +270,184 @@ VALIDATION_CONFIG = {
     },
 }
 
+
+# =============================================================================
+# CRITICAL GROUPINGS - Core dimensions for dashboards, filtering, and analysis
+# These are the key ways customers segment their workforce data
+# =============================================================================
+CRITICAL_GROUPINGS = {
+    # Geographic
+    'country': {
+        'name': 'Country',
+        'category': 'geographic',
+        'column_patterns': ['country', 'country_code', 'country_name'],
+        'config_table_patterns': ['country'],
+        'dashboard_priority': 1,  # Higher = more important for default dashboard
+        'description': 'Geographic country segmentation',
+    },
+    
+    # Legal Entity
+    'company': {
+        'name': 'Company',
+        'category': 'legal_entity',
+        'column_patterns': ['company', 'company_code', 'home_company', 'fein', 'legal_entity'],
+        'config_table_patterns': ['company', 'legal_entity'],
+        'dashboard_priority': 2,
+        'aliases': ['company code', 'FEIN', 'legal entity'],
+        'description': 'Legal entity / employer identification',
+    },
+    
+    # Organizational Hierarchy (dynamic - loaded from org_mapping)
+    'org_level_1': {
+        'name': 'Org Level 1',  # Will be overridden by customer terminology
+        'category': 'organization',
+        'column_patterns': ['org_level_1', 'org_level1', 'division'],
+        'config_table_patterns': ['organization'],
+        'dashboard_priority': 3,
+        'dynamic_name': True,  # Name comes from org_mapping
+        'description': 'Top-level organization unit',
+    },
+    'org_level_2': {
+        'name': 'Org Level 2',
+        'category': 'organization',
+        'column_patterns': ['org_level_2', 'org_level2', 'department'],
+        'config_table_patterns': ['organization'],
+        'dashboard_priority': 4,
+        'dynamic_name': True,
+        'description': 'Second-level organization unit',
+    },
+    'org_level_3': {
+        'name': 'Org Level 3',
+        'category': 'organization',
+        'column_patterns': ['org_level_3', 'org_level3', 'cost_center'],
+        'config_table_patterns': ['organization'],
+        'dashboard_priority': 5,
+        'dynamic_name': True,
+        'description': 'Third-level organization unit',
+    },
+    'org_level_4': {
+        'name': 'Org Level 4',
+        'category': 'organization',
+        'column_patterns': ['org_level_4', 'org_level4'],
+        'config_table_patterns': ['organization'],
+        'dashboard_priority': 6,
+        'dynamic_name': True,
+        'description': 'Fourth-level organization unit',
+    },
+    
+    # Payroll Processing
+    'pay_group': {
+        'name': 'Pay Group',
+        'category': 'payroll',
+        'column_patterns': ['pay_group', 'paygroup', 'pay_group_code'],
+        'config_table_patterns': ['pay_group', 'paygroup'],
+        'dashboard_priority': 7,
+        'description': 'Payroll processing group',
+    },
+    
+    # Compensation Groups
+    'earning_group': {
+        'name': 'Earning Group',
+        'category': 'compensation',
+        'column_patterns': ['earning_group', 'earnings_group', 'earn_group'],
+        'config_table_patterns': ['earnings_groups', 'earning_group'],
+        'dashboard_priority': 10,
+        'description': 'Earnings code grouping for reporting',
+    },
+    'deduction_group': {
+        'name': 'Deduction Group',
+        'category': 'compensation',
+        'column_patterns': ['deduction_group', 'ded_group', 'benefit_group'],
+        'config_table_patterns': ['deduction_group', 'benefit_group'],
+        'dashboard_priority': 11,
+        'description': 'Deduction/benefit grouping for reporting',
+    },
+    
+    # Tax
+    'tax_group': {
+        'name': 'Tax Group',
+        'category': 'tax',
+        'column_patterns': ['tax_group', 'tax_group_code'],
+        'config_table_patterns': ['tax_group'],
+        'dashboard_priority': 12,
+        'description': 'Tax processing group',
+    },
+    
+    # Labor Relations
+    'union_national': {
+        'name': 'National Union',
+        'category': 'labor',
+        'column_patterns': ['national_union', 'union_code', 'union_national'],
+        'config_table_patterns': ['union', 'labor'],
+        'dashboard_priority': 13,
+        'description': 'National union affiliation',
+    },
+    'union_local': {
+        'name': 'Local Union',
+        'category': 'labor',
+        'column_patterns': ['local_union', 'union_local', 'local_code'],
+        'config_table_patterns': ['union', 'labor'],
+        'dashboard_priority': 14,
+        'description': 'Local union affiliation',
+    },
+    
+    # Regulatory / Classification
+    'flsa': {
+        'name': 'FLSA Status',
+        'category': 'regulatory',
+        'column_patterns': ['flsa', 'flsa_status', 'exempt', 'exempt_status', 'flsa_code'],
+        'config_table_patterns': ['flsa'],
+        'dashboard_priority': 8,
+        'valid_values': ['Exempt', 'Non-Exempt', 'E', 'N'],
+        'description': 'Fair Labor Standards Act classification',
+    },
+    'pay_type': {
+        'name': 'Hourly/Salary',
+        'category': 'classification',
+        'column_patterns': ['pay_type', 'hourly_salary', 'salary_type', 'compensation_type'],
+        'config_table_patterns': [],
+        'dashboard_priority': 9,
+        'valid_values': ['Hourly', 'Salary', 'H', 'S'],
+        'aliases': ['hourly/salary', 'hourly vs salary'],
+        'description': 'Compensation basis (hourly or salaried)',
+    },
+    'ft_pt': {
+        'name': 'Full-Time/Part-Time',
+        'category': 'classification',
+        'column_patterns': ['ft_pt', 'full_part', 'employee_type', 'work_schedule_type', 'fte_status'],
+        'config_table_patterns': [],
+        'dashboard_priority': 9,
+        'valid_values': ['Full-Time', 'Part-Time', 'FT', 'PT', 'F', 'P'],
+        'aliases': ['FT/PT', 'full-time/part-time'],
+        'description': 'Full-time or part-time status',
+    },
+}
+
+
+def _get_grouping_column(grouping_key: str, available_columns: List[str]) -> Optional[str]:
+    """
+    Find the actual column name for a grouping dimension.
+    Returns the first matching column from available_columns.
+    """
+    config = CRITICAL_GROUPINGS.get(grouping_key)
+    if not config:
+        return None
+    
+    col_lower_map = {c.lower(): c for c in available_columns}
+    
+    for pattern in config.get('column_patterns', []):
+        pattern_lower = pattern.lower()
+        # Exact match
+        if pattern_lower in col_lower_map:
+            return col_lower_map[pattern_lower]
+        # Partial match
+        for col_lower, col_orig in col_lower_map.items():
+            if pattern_lower in col_lower:
+                return col_orig
+    
+    return None
+
+
 def _detect_validation_domain(question: str) -> Optional[Dict]:
     """
     Detect which validation domain applies to the question.
@@ -417,6 +587,13 @@ class IntelligenceEngine:
         # Load customer org structure mapping (org_level_X → customer terminology)
         self.org_mapping = {}
         self._load_org_mapping()
+        
+        # Log available dashboard groupings
+        if self.schema:
+            dashboard_groups = self.get_dashboard_groupings()
+            if dashboard_groups:
+                group_names = [g['name'] for g in dashboard_groups[:8]]  # Top 8
+                logger.warning(f"[INTELLIGENCE] Dashboard groupings available: {group_names}")
     
     def _load_org_mapping(self):
         """
@@ -497,6 +674,78 @@ class IntelligenceEngine:
                 
         except Exception as e:
             logger.warning(f"[ORG-MAPPING] Error loading org mapping: {e}")
+    
+    def get_resolved_groupings(self) -> Dict[str, Dict]:
+        """
+        Get all critical groupings resolved with customer terminology.
+        
+        Returns dict with grouping key → resolved config including:
+        - Actual column names found in data
+        - Customer-specific names (from org_mapping)
+        - Dashboard priority
+        
+        Used for:
+        - Building customer dashboards
+        - Natural language → SQL translation
+        - Filter dropdowns
+        - GROUP BY hints
+        """
+        resolved = {}
+        
+        # Get available columns from schema
+        available_columns = []
+        for table in self.schema.get('tables', []):
+            for col in table.get('columns', []):
+                col_name = col.get('name') if isinstance(col, dict) else str(col)
+                available_columns.append(col_name)
+        
+        for grouping_key, config in CRITICAL_GROUPINGS.items():
+            resolved_config = config.copy()
+            
+            # Find actual column in data
+            actual_col = _get_grouping_column(grouping_key, available_columns)
+            resolved_config['actual_column'] = actual_col
+            resolved_config['available'] = actual_col is not None
+            
+            # Override name with customer terminology if available
+            if config.get('dynamic_name') and hasattr(self, 'org_mapping'):
+                customer_name = self.org_mapping.get(grouping_key)
+                if customer_name:
+                    resolved_config['customer_name'] = customer_name
+                    resolved_config['name'] = customer_name  # Override default
+            
+            resolved[grouping_key] = resolved_config
+        
+        return resolved
+    
+    def get_dashboard_groupings(self) -> List[Dict]:
+        """
+        Get groupings available for dashboard display, sorted by priority.
+        Only returns groupings that have actual columns in the data.
+        
+        Returns list of dicts with:
+        - key: grouping key
+        - name: display name (customer terminology if available)
+        - column: actual column name
+        - category: grouping category
+        """
+        resolved = self.get_resolved_groupings()
+        
+        dashboard_groupings = []
+        for key, config in resolved.items():
+            if config.get('available'):
+                dashboard_groupings.append({
+                    'key': key,
+                    'name': config.get('customer_name', config.get('name')),
+                    'column': config.get('actual_column'),
+                    'category': config.get('category'),
+                    'priority': config.get('dashboard_priority', 99),
+                })
+        
+        # Sort by priority (lower = higher priority)
+        dashboard_groupings.sort(key=lambda x: x['priority'])
+        
+        return dashboard_groupings
     
     def ask(
         self, 
@@ -849,12 +1098,32 @@ class IntelligenceEngine:
             return True
         
         # Check for "by X" patterns that trigger clarification
+        # These align with CRITICAL_GROUPINGS - the key workforce dimensions
         by_patterns = {
-            'company': ['by company', 'per company', 'each company', 'by entity', 'by legal entity'],
-            'location': ['by location', 'by state', 'per state', 'by site', 'each location', 'by region'],
-            'organization': ['by department', 'by org', 'by cost center', 'per department', 'by division'],
-            'pay_type': ['by pay type', 'hourly vs salary', 'hourly and salary'],
-            'employee_type': ['by employee type', 'by worker type', 'regular vs temp']
+            # Geographic / Legal Entity
+            'company': ['by company', 'per company', 'each company', 'by entity', 'by legal entity', 'by fein'],
+            'location': ['by location', 'by state', 'per state', 'by site', 'each location', 'by region', 'by country'],
+            
+            # Organization (dynamic - may use customer terminology)
+            'organization': ['by department', 'by org', 'by cost center', 'per department', 'by division', 
+                           'by org level', 'by business unit'],
+            
+            # Classification
+            'pay_type': ['by pay type', 'hourly vs salary', 'hourly and salary', 'hourly or salary'],
+            'employee_type': ['by employee type', 'by worker type', 'regular vs temp', 'by ft/pt', 
+                            'full-time vs part-time', 'full time or part time'],
+            
+            # Payroll / Compensation Groups
+            'pay_group': ['by pay group', 'per pay group', 'by paygroup'],
+            'earning': ['by earning group', 'by earnings group', 'by earn group'],
+            'deduction': ['by deduction group', 'by benefit group', 'by ded group'],
+            
+            # Tax / Labor
+            'tax_group': ['by tax group', 'per tax group'],
+            'union': ['by union', 'by local union', 'by national union', 'union vs non-union'],
+            
+            # Regulatory
+            'flsa': ['by flsa', 'exempt vs non-exempt', 'by exempt status'],
         }
         
         patterns = by_patterns.get(category, [])
@@ -865,6 +1134,15 @@ class IntelligenceEngine:
                 distinct_count = candidates[0].get('distinct_count', 0)
                 if distinct_count > 1:
                     logger.warning(f"[FILTER-RELEVANT] {category} relevant due to 'by X' pattern, {distinct_count} values")
+                    return True
+        
+        # Also check customer-specific org terminology from org_mapping
+        # e.g., if user says "by division" and org_level_1 = "Division"
+        if category == 'organization' and hasattr(self, 'org_mapping') and self.org_mapping:
+            for level_col, customer_name in self.org_mapping.items():
+                customer_pattern = f"by {customer_name.lower()}"
+                if customer_pattern in q_lower:
+                    logger.warning(f"[FILTER-RELEVANT] Matched customer org term '{customer_name}' ({level_col})")
                     return True
         
         return False
@@ -1001,14 +1279,31 @@ class IntelligenceEngine:
             # Skip this category if we can't build options
             return self._continue_without_filter(question, category)
         
-        # Category-specific question text
+        # Category-specific question text - aligned with CRITICAL_GROUPINGS
         question_text = {
+            # Geographic / Legal Entity
             'company': "Which company should I include?",
-            'organization': "Which department/organization?",
             'location': "Which location(s)?",
+            
+            # Organization
+            'organization': "Which department/organization?",
+            
+            # Classification
             'pay_type': "Which pay type?",
             'employee_type': "Which employee type?",
-            'job': "Which job family/code?"
+            'job': "Which job family/code?",
+            
+            # Payroll / Compensation Groups
+            'pay_group': "Which pay group?",
+            'earning': "Which earning group?",
+            'deduction': "Which deduction/benefit group?",
+            
+            # Tax / Labor
+            'tax_group': "Which tax group?",
+            'union': "Which union?",
+            
+            # Regulatory
+            'flsa': "Which FLSA status (Exempt/Non-Exempt)?",
         }.get(category, f"Which {category}?")
         
         return SynthesizedAnswer(
@@ -3193,6 +3488,34 @@ class IntelligenceEngine:
                 semantic_hints.extend(org_hints)
                 logger.warning(f"[SQL-GEN] Added {len(org_hints)} customer org mappings")
         
+        # Add CRITICAL GROUPINGS - key dimensions for analysis
+        # These are the meaningful ways to slice workforce data
+        grouping_hints = []
+        resolved_groupings = self.get_resolved_groupings() if hasattr(self, 'get_resolved_groupings') else {}
+        
+        for key, config in resolved_groupings.items():
+            if config.get('available') and config.get('actual_column'):
+                col = config['actual_column']
+                name = config.get('customer_name', config.get('name', key))
+                category = config.get('category', '')
+                
+                # Build contextual hint
+                if category == 'organization':
+                    grouping_hints.append(f"- GROUP BY '{name}': use {col}")
+                elif category == 'classification':
+                    valid_vals = config.get('valid_values', [])
+                    if valid_vals:
+                        grouping_hints.append(f"- '{name}' ({col}): valid values {valid_vals[:4]}")
+                    else:
+                        grouping_hints.append(f"- GROUP BY '{name}': use {col}")
+                elif category in ['geographic', 'legal_entity', 'payroll', 'tax']:
+                    grouping_hints.append(f"- GROUP BY '{name}': use {col}")
+        
+        if grouping_hints:
+            semantic_hints.append("KEY GROUPING DIMENSIONS (for GROUP BY, breakdowns, dashboards):")
+            semantic_hints.extend(grouping_hints[:12])  # Limit to avoid prompt bloat
+            logger.warning(f"[SQL-GEN] Added {len(grouping_hints)} critical grouping hints")
+        
         semantic_text = ""
         column_mappings = {}  # Generic term → actual column for post-processing
         if semantic_hints:
@@ -3542,8 +3865,9 @@ RULES:
 1. Use ONLY columns from SCHEMA - never invent columns
 2. DO NOT add WHERE for status/active/termed - filters injected automatically
 3. For "show X by Y" queries: SELECT Y, COUNT(*) FROM table GROUP BY Y
-4. Keep queries SIMPLE - avoid JOINs unless absolutely needed
-5. ILIKE for text matching
+4. For breakdowns/groupings, prefer KEY GROUPING DIMENSIONS listed above
+5. Keep queries SIMPLE - avoid JOINs unless absolutely needed
+6. ILIKE for text matching
 
 SQL:"""
         
