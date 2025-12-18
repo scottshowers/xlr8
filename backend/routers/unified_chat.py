@@ -169,6 +169,52 @@ except ImportError:
         PERSONAS_AVAILABLE = False
         logger.warning("[UNIFIED] Persona manager not available")
 
+# Expert Context & Domain Inference (Phase 4: Intelligent Context Selection)
+EXPERT_CONTEXT_AVAILABLE = False
+DOMAIN_INFERENCE_AVAILABLE = False
+
+try:
+    from utils.expert_context_registry import (
+        select_expert_context,
+        record_expert_feedback,
+        get_expert_selector,
+        get_expert_registry,
+    )
+    EXPERT_CONTEXT_AVAILABLE = True
+    logger.info("[UNIFIED] Expert context system loaded")
+except ImportError:
+    try:
+        from backend.utils.expert_context_registry import (
+            select_expert_context,
+            record_expert_feedback,
+            get_expert_selector,
+            get_expert_registry,
+        )
+        EXPERT_CONTEXT_AVAILABLE = True
+        logger.info("[UNIFIED] Expert context system loaded (alt path)")
+    except ImportError:
+        logger.warning("[UNIFIED] Expert context system not available")
+
+try:
+    from utils.domain_inference_engine import (
+        get_domain_engine,
+        infer_project_domains,
+        get_primary_domain,
+    )
+    DOMAIN_INFERENCE_AVAILABLE = True
+    logger.info("[UNIFIED] Domain inference engine loaded")
+except ImportError:
+    try:
+        from backend.utils.domain_inference_engine import (
+            get_domain_engine,
+            infer_project_domains,
+            get_primary_domain,
+        )
+        DOMAIN_INFERENCE_AVAILABLE = True
+        logger.info("[UNIFIED] Domain inference engine loaded (alt path)")
+    except ImportError:
+        logger.warning("[UNIFIED] Domain inference engine not available")
+
 # Supabase
 try:
     from utils.database.supabase_client import get_supabase
@@ -1410,8 +1456,50 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
 
 
 # =============================================================================
-# ANSWER GENERATION
+# ANSWER GENERATION WITH INTELLIGENT CONTEXT SELECTION
 # =============================================================================
+
+def _get_project_domains(project: str, handler=None) -> Tuple[Optional[str], List[Dict]]:
+    """
+    Get detected domains for a project.
+    
+    Returns:
+        (project_id, domains_list)
+    """
+    if not DOMAIN_INFERENCE_AVAILABLE:
+        return None, []
+    
+    try:
+        # First try to get project_id and cached domains
+        project_id = None
+        if SUPABASE_AVAILABLE:
+            try:
+                supabase = get_supabase()
+                result = supabase.table('projects').select('id, metadata').eq('name', project).execute()
+                if result.data:
+                    project_id = result.data[0].get('id')
+                    # Check if domains already computed
+                    metadata = result.data[0].get('metadata', {}) or {}
+                    detected = metadata.get('detected_domains', {})
+                    if detected and detected.get('domains'):
+                        logger.info(f"[UNIFIED] Using cached domains for {project}")
+                        return project_id, detected.get('domains', [])
+            except Exception as e:
+                logger.warning(f"[UNIFIED] Project lookup error: {e}")
+        
+        # If no cached domains, infer them now
+        engine = get_domain_engine(handler)
+        result = engine.infer_domains(project, project_id)
+        if result:
+            logger.info(f"[UNIFIED] Inferred domains for {project}: primary={result.primary_domain}")
+            return project_id, [d.to_dict() for d in result.domains]
+        
+        return project_id, []
+        
+    except Exception as e:
+        logger.warning(f"[UNIFIED] Domain inference error: {e}")
+        return None, []
+
 
 async def generate_synthesized_answer(
     question: str,
@@ -1422,24 +1510,33 @@ async def generate_synthesized_answer(
     citations: CitationBuilder,
     quality_alerts: DataQualityService,
     follow_ups: List[str],
-    redactor: ReversibleRedactor
-) -> str:
+    redactor: ReversibleRedactor,
+    project: str = None,
+    project_domains: List[Dict] = None,
+) -> Tuple[str, Optional[str]]:
     """
     Generate the final synthesized answer using Claude.
     
-    This is where all the pieces come together - data, quality alerts,
-    citations, and follow-ups into one cohesive response.
+    NOW WITH INTELLIGENT CONTEXT SELECTION:
+    1. Tries to match question + project domains to expert context
+    2. Falls back to persona if available
+    3. Falls back to default prompt
+    
+    Returns:
+        (answer_text, expert_context_id_used)
     """
+    expert_context_id = None
+    
     try:
         if not LLM_AVAILABLE:
             logger.warning("[UNIFIED] LLM not available, returning raw context")
-            return context[:3000]
+            return context[:3000], None
         
         orchestrator = LLMOrchestrator()
         
         if not orchestrator.claude_api_key:
             logger.warning("[UNIFIED] No Claude API key")
-            return context[:3000]
+            return context[:3000], None
         
         import anthropic
         client = anthropic.Anthropic(api_key=orchestrator.claude_api_key)
@@ -1447,8 +1544,39 @@ async def generate_synthesized_answer(
         # Redact PII before sending to Claude
         redacted_context = redactor.redact(context)
         
-        # Build system prompt
-        system_prompt = """You are an expert UKG implementation consultant helping another consultant analyze customer data and configuration.
+        # ===================================================================
+        # INTELLIGENT CONTEXT SELECTION
+        # ===================================================================
+        system_prompt = None
+        
+        # STEP 1: Try expert context auto-selection
+        if EXPERT_CONTEXT_AVAILABLE:
+            try:
+                selector = get_expert_selector()
+                matches = selector.select(question, project_domains, top_k=1)
+                
+                if matches and matches[0].match_score > 0.35:
+                    system_prompt = matches[0].context.prompt_template
+                    expert_context_id = matches[0].context.id
+                    logger.info(f"[UNIFIED] Using expert context: {matches[0].context.name} "
+                               f"(score={matches[0].match_score:.2f})")
+            except Exception as e:
+                logger.warning(f"[UNIFIED] Expert context selection failed: {e}")
+        
+        # STEP 2: Fall back to persona if no expert match
+        if not system_prompt and PERSONAS_AVAILABLE and persona:
+            try:
+                pm = get_persona_manager()
+                persona_obj = pm.get_persona(persona)
+                if persona_obj and persona_obj.system_prompt:
+                    system_prompt = persona_obj.system_prompt
+                    logger.info(f"[UNIFIED] Using persona: {persona_obj.name}")
+            except Exception as e:
+                logger.warning(f"[UNIFIED] Persona load failed: {e}")
+        
+        # STEP 3: Fall back to default prompt
+        if not system_prompt:
+            system_prompt = """You are an expert implementation consultant helping analyze customer data and configuration.
 
 Your responses should be:
 - Direct and actionable
@@ -1461,7 +1589,8 @@ When presenting findings:
 - Provide context for what it means
 - Note any caveats or limitations
 - Be specific about data sources"""
-
+            logger.info("[UNIFIED] Using default prompt (no expert match or persona)")
+        
         # Build user prompt with all context
         user_prompt = f"""Question: {question}
 
@@ -1484,11 +1613,11 @@ Focus on the key insight first, then provide supporting details."""
         # Restore any PII in the response
         answer = redactor.restore(answer)
         
-        return answer
+        return answer, expert_context_id
         
     except Exception as e:
         logger.error(f"[UNIFIED] Claude synthesis failed: {e}")
-        return context[:2000]
+        return context[:2000], None
 
 
 # =============================================================================
@@ -1785,8 +1914,11 @@ async def unified_chat(request: UnifiedChatRequest):
                         simple_answer = auto_applied_note + "\n\n" + simple_answer
                     response["answer"] = simple_answer
                 else:
-                    # Last resort - use Claude synthesis
-                    synthesized = await generate_synthesized_answer(
+                    # Last resort - use Claude synthesis WITH INTELLIGENT CONTEXT
+                    # Get project domains for intelligent context selection
+                    project_id, project_domains = _get_project_domains(project, handler)
+                    
+                    synthesized, expert_context_used = await generate_synthesized_answer(
                         question=message,
                         context=answer.answer or "",
                         persona=request.persona,
@@ -1795,8 +1927,15 @@ async def unified_chat(request: UnifiedChatRequest):
                         citations=citation_builder,
                         quality_alerts=quality_service,
                         follow_ups=[],
-                        redactor=redactor
+                        redactor=redactor,
+                        project=project,
+                        project_domains=project_domains,
                     )
+                    
+                    # Track expert context for feedback loop
+                    session['last_expert_context'] = expert_context_used
+                    if expert_context_used:
+                        response["expert_context_id"] = expert_context_used
                     
                     if auto_applied_note and synthesized:
                         response["answer"] = auto_applied_note + "\n\n" + synthesized
@@ -2176,6 +2315,61 @@ async def submit_feedback(request: FeedbackRequest):
         return {"success": False, "error": str(e)}
 
 
+@router.post("/chat/unified/expert-feedback")
+async def submit_expert_feedback(request: Request):
+    """
+    Submit feedback on expert context selection.
+    
+    This closes the learning loop - good/bad selections improve future matching.
+    Call this when user indicates the response quality (thumbs up/down).
+    """
+    if not EXPERT_CONTEXT_AVAILABLE:
+        return {"success": False, "error": "Expert context system not available"}
+    
+    try:
+        data = await request.json()
+        context_id = data.get('context_id')
+        feedback = data.get('feedback')  # 'positive' or 'negative'
+        
+        if not context_id:
+            return {"success": False, "error": "context_id required"}
+        
+        if feedback not in ['positive', 'negative']:
+            return {"success": False, "error": "feedback must be 'positive' or 'negative'"}
+        
+        record_expert_feedback(context_id, feedback)
+        
+        logger.info(f"[UNIFIED] Expert feedback recorded: {context_id} = {feedback}")
+        return {"success": True, "context_id": context_id, "feedback": feedback}
+        
+    except Exception as e:
+        logger.error(f"[UNIFIED] Expert feedback error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/chat/unified/expert-contexts")
+async def list_expert_contexts():
+    """
+    List all available expert contexts.
+    
+    Useful for debugging and understanding what contexts are available.
+    """
+    if not EXPERT_CONTEXT_AVAILABLE:
+        return {"contexts": [], "available": False}
+    
+    try:
+        registry = get_expert_registry()
+        contexts = registry.get_all()
+        return {
+            "contexts": [c.to_dict() for c in contexts],
+            "available": True,
+            "count": len(contexts)
+        }
+    except Exception as e:
+        logger.error(f"[UNIFIED] List expert contexts error: {e}")
+        return {"contexts": [], "available": True, "error": str(e)}
+
+
 # =============================================================================
 # PERSONA ENDPOINTS
 # =============================================================================
@@ -2518,9 +2712,12 @@ async def get_diagnostics(project: str = None):
         "rag_available": RAG_AVAILABLE,
         "llm_available": LLM_AVAILABLE,
         "personas_available": PERSONAS_AVAILABLE,
+        "expert_context_available": EXPERT_CONTEXT_AVAILABLE,
+        "domain_inference_available": DOMAIN_INFERENCE_AVAILABLE,
         "active_sessions": len(unified_sessions),
         "profile_status": None,
-        "sample_profiles": []
+        "sample_profiles": [],
+        "detected_domains": None
     }
     
     if STRUCTURED_AVAILABLE:
@@ -2557,6 +2754,19 @@ async def get_diagnostics(project: str = None):
                     ]
                 except:
                     pass
+                
+                # Get detected domains for project
+                if project and DOMAIN_INFERENCE_AVAILABLE:
+                    try:
+                        project_id, domains = _get_project_domains(project, handler)
+                        if domains:
+                            result["detected_domains"] = {
+                                "project_id": project_id,
+                                "domains": domains[:5],  # Top 5
+                                "primary": domains[0].get('domain') if domains else None
+                            }
+                    except Exception as de:
+                        result["domain_error"] = str(de)
                     
         except Exception as e:
             result["diagnostics_error"] = str(e)
