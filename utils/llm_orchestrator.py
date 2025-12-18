@@ -841,3 +841,148 @@ SELECT"""
                     invalid.append(col)
         
         return list(set(invalid))  # dedupe
+    
+    def synthesize_answer(
+        self, 
+        question: str, 
+        context: str, 
+        expert_prompt: str = None,
+        use_claude_fallback: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Synthesize an expert answer using local LLMs first.
+        
+        Flow:
+        1. Try Mistral (best for synthesis/reasoning)
+        2. Try other Ollama models if available
+        3. Fall back to Claude ONLY if local fails and use_claude_fallback=True
+        
+        Args:
+            question: User's question
+            context: Data/context to analyze
+            expert_prompt: Optional expert system prompt (from expert_context_registry)
+            use_claude_fallback: Whether to fall back to Claude if local fails
+            
+        Returns:
+            Dict with: response, model_used, success, error
+        """
+        result = {
+            "response": "",
+            "model_used": None,
+            "success": False,
+            "error": None
+        }
+        
+        # Build system prompt
+        if expert_prompt:
+            system_prompt = expert_prompt
+        else:
+            system_prompt = """You are an expert implementation consultant analyzing data.
+
+Your responses should be:
+- Direct and actionable
+- Backed by the data provided
+- Clear about confidence levels
+- Professional but conversational
+
+When presenting findings:
+- Lead with the key number/insight
+- Provide context for what it means
+- Note any caveats or limitations
+- Be specific about data sources"""
+        
+        # Build user prompt
+        user_prompt = f"""Question: {question}
+
+Data Context:
+{context[:12000]}
+
+Analyze the data and provide a clear, direct answer. Focus on the key insight first, then supporting details."""
+        
+        # ==============================================================
+        # STEP 1: Try Mistral first (best for synthesis)
+        # ==============================================================
+        if self.ollama_url:
+            models_to_try = [
+                'mistral:7b',
+                'mistral:latest',
+                'llama2:7b',
+                'llama2:latest',
+            ]
+            
+            for model in models_to_try:
+                logger.info(f"[SYNTHESIS] Trying {model}...")
+                response, success = self._call_ollama(model, user_prompt, system_prompt)
+                
+                if success and response and len(response.strip()) > 50:
+                    # Validate response isn't garbage
+                    if not self._is_garbage_synthesis(response):
+                        result["response"] = response
+                        result["model_used"] = model
+                        result["success"] = True
+                        logger.info(f"[SYNTHESIS] {model} succeeded ({len(response)} chars)")
+                        return result
+                    else:
+                        logger.warning(f"[SYNTHESIS] {model} returned garbage, trying next")
+                else:
+                    logger.warning(f"[SYNTHESIS] {model} failed or empty response")
+        else:
+            logger.warning("[SYNTHESIS] Ollama not configured, skipping local models")
+        
+        # ==============================================================
+        # STEP 2: Fall back to Claude ONLY if enabled and local failed
+        # ==============================================================
+        if use_claude_fallback and self.claude_api_key:
+            logger.warning("[SYNTHESIS] Local models failed, falling back to Claude")
+            response, success = self._call_claude(user_prompt, system_prompt)
+            
+            if success:
+                result["response"] = response
+                result["model_used"] = "claude-sonnet-4-fallback"
+                result["success"] = True
+                logger.info(f"[SYNTHESIS] Claude fallback succeeded ({len(response)} chars)")
+                return result
+            else:
+                result["error"] = response
+                logger.error(f"[SYNTHESIS] Claude fallback also failed: {response}")
+        else:
+            if not use_claude_fallback:
+                result["error"] = "Local models failed and Claude fallback disabled"
+            else:
+                result["error"] = "Local models failed and no Claude API key"
+        
+        return result
+    
+    def _is_garbage_synthesis(self, response: str) -> bool:
+        """
+        Detect if synthesis response is garbage (hallucinated, nonsensical, etc.)
+        """
+        response_lower = response.lower().strip()
+        
+        # Too short
+        if len(response.strip()) < 50:
+            return True
+        
+        # Refusal patterns
+        refusal_patterns = [
+            "i cannot",
+            "i can't",
+            "i don't have",
+            "i'm not able",
+            "as an ai",
+            "i apologize",
+            "sorry, but",
+            "i need more",
+            "please provide",
+            "could you clarify",
+        ]
+        
+        if any(pattern in response_lower for pattern in refusal_patterns):
+            return True
+        
+        # Mostly punctuation or repeated characters
+        alpha_ratio = sum(c.isalpha() for c in response) / max(len(response), 1)
+        if alpha_ratio < 0.5:
+            return True
+        
+        return False
