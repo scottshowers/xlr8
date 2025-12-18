@@ -1889,6 +1889,9 @@ async def unified_chat(request: UnifiedChatRequest):
                                    'properly', 'right', 'okay', 'ok', 'good', 'bad', 'error']
             is_analytical = any(kw in message.lower() for kw in analytical_keywords)
             
+            # DEBUG - always log this to see what's happening
+            logger.warning(f"[UNIFIED] EXPERT CHECK: is_analytical={is_analytical}, EXPERT_AVAILABLE={EXPERT_CONTEXT_AVAILABLE}, msg='{message[:50]}'")
+            
             # Detect garbage SQL responses (just literals, no real data)
             garbage_indicators = [
                 'configured correctly',  # LLM returned fake confirmation
