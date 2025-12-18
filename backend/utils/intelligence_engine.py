@@ -1927,6 +1927,7 @@ class IntelligenceEngine:
                                'issue', 'problem', 'check', 'verify', 'audit', 'review',
                                'accurate', 'wrong', 'error', 'mistake']
         is_validation_question = any(kw in q_lower for kw in validation_keywords)
+        logger.warning(f"[SQL-GEN] Validation check: is_validation={is_validation_question}, q='{q_lower[:50]}', tables={len(relevant_tables) if relevant_tables else 0}")
         
         if is_validation_question and relevant_tables:
             # For validation questions, bypass LLM entirely - just get the data
@@ -1942,8 +1943,30 @@ class IntelligenceEngine:
                 else:
                     select_cols = '*'
                 
+                # Try to filter to relevant rows based on question keywords
+                # For "are the SUI rates correct?" we want only SUI-related rows
+                filter_terms = []
+                question_keywords = ['sui', 'suta', 'futa', 'fit', 'fica', 'soc', 'med', 'w2', '401k', 'fein']
+                for kw in question_keywords:
+                    if kw in q_lower:
+                        filter_terms.append(kw.upper())
+                
                 sql = f'SELECT {select_cols} FROM "{primary_full}"'
-                logger.warning(f"[SQL-GEN] Validation SQL: {sql[:150]}...")
+                
+                # Add WHERE clause if we found specific terms to filter
+                if filter_terms:
+                    # Look for columns that might contain these codes
+                    code_cols = [c for c in col_names if any(x in c.lower() for x in ['code', 'type', 'name', 'description', 'tax'])]
+                    if code_cols:
+                        where_parts = []
+                        for term in filter_terms:
+                            for col in code_cols[:3]:  # Check first 3 code-like columns
+                                where_parts.append(f'UPPER("{col}") LIKE \'%{term}%\'')
+                        if where_parts:
+                            sql += f" WHERE ({' OR '.join(where_parts)})"
+                            logger.warning(f"[SQL-GEN] Validation filtered to: {filter_terms}")
+                
+                logger.warning(f"[SQL-GEN] Validation SQL: {sql[:200]}...")
                 
                 # Return in correct format - caller will execute
                 return {
