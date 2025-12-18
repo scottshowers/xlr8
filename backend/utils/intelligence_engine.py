@@ -1186,6 +1186,10 @@ class IntelligenceEngine:
         
         # Get keywords to filter for this domain
         domain_keywords = domain_config.get('keywords', ['sui', 'suta']) if domain_config else ['sui', 'suta']
+        domain_key = domain_config.get('key', '') if domain_config else ''
+        
+        # For workers comp, the whole table IS WC - don't filter by keywords
+        is_non_tax_domain = domain_key in ['workers_comp', 'state_withholding', 'local_tax']
         
         # Analyze the data to understand the scope
         try:
@@ -1194,18 +1198,20 @@ class IntelligenceEngine:
                 x in c.lower() for x in ['company_code', 'company_name', 'fein', 'ein', 'id_number']
             )]
             
-            # Find tax code column (for filtering)
-            tax_code_cols = [c for c in validation_columns if any(
-                x in c.lower() for x in ['tax_code', 'tax_desc', 'type_of_tax']
-            )]
+            # Find tax code column (for filtering) - but not for WC domains
+            tax_code_cols = []
+            if not is_non_tax_domain:
+                tax_code_cols = [c for c in validation_columns if any(
+                    x in c.lower() for x in ['tax_code', 'tax_desc', 'type_of_tax']
+                )]
             
             # Find rate column
             rate_cols = [c for c in validation_columns if any(
                 x in c.lower() for x in ['rate', 'contribution', 'percent']
             )]
             
-            # Build keyword filter for SQL
-            keyword_patterns = [kw.upper() for kw in domain_keywords]
+            # Build keyword filter for SQL (only for tax domains)
+            keyword_patterns = [kw.upper() for kw in domain_keywords] if not is_non_tax_domain else []
             
             # Analyze by company/FEIN
             if company_cols:
@@ -1225,12 +1231,15 @@ class IntelligenceEngine:
                         ORDER BY domain_records DESC
                     '''
                 else:
+                    # For non-tax domains (workers comp, etc.), all records ARE domain records
                     sql = f'''
                         SELECT "{company_col}" as code,
                                "{name_col}" as name, 
-                               COUNT(*) as total_records
+                               COUNT(*) as total_records,
+                               COUNT(*) as domain_records
                         FROM "{validation_table}"
                         GROUP BY "{company_col}", "{name_col}"
+                        ORDER BY total_records DESC
                     '''
                 
                 rows = self.structured_handler.query(sql)
@@ -1238,115 +1247,114 @@ class IntelligenceEngine:
                 if rows:
                     result['analysis']['companies'] = rows
                     
-                    # Smart analysis - now domain-agnostic
-                    if tax_code_cols:
-                        companies_with_records = [r for r in rows if r.get('domain_records', 0) > 0]
-                        companies_without_records = [r for r in rows if r.get('domain_records', 0) == 0]
+                    # Smart analysis - domain-agnostic
+                    companies_with_records = [r for r in rows if r.get('domain_records', 0) > 0]
+                    companies_without_records = [r for r in rows if r.get('domain_records', 0) == 0]
+                    
+                    if len(companies_with_records) == 1 and len(companies_without_records) > 0:
+                        # Only one company has records - ASK if that's the right scope
+                        main_company = companies_with_records[0]
+                        fein = main_company.get('code', '')
+                        name = main_company.get('name', fein)
+                        record_count = main_company.get('domain_records', 0)
                         
-                        if len(companies_with_records) == 1 and len(companies_without_records) > 0:
-                            # Only one company has records - ASK if that's the right scope
-                            main_company = companies_with_records[0]
-                            fein = main_company.get('code', '')
-                            name = main_company.get('name', fein)
-                            record_count = main_company.get('domain_records', 0)
-                            
-                            # Format FEIN nicely if it looks like one
-                            fein_display = fein
-                            if fein and len(str(fein).replace('-', '')) == 9:
-                                fein_clean = str(fein).replace('-', '')
-                                fein_display = f"{fein_clean[:2]}-{fein_clean[2:]}"
-                            
-                            result['needs_clarification'] = True
-                            
-                            # Store context for when user confirms
-                            self._validation_scope_context = {
-                                'company_col': company_col,
-                                'primary_code': fein,
-                                'primary_name': name,
-                                'record_count': record_count
-                            }
-                            self._validation_company_col = company_col
-                            
-                            result['clarification'] = SynthesizedAnswer(
-                                question=question,
-                                answer="",
-                                confidence=0.0,
-                                structured_output={
-                                    'type': 'clarification_needed',
-                                    'questions': [{
-                                        'id': 'validation_scope_confirm',
-                                        'question': (
-                                            f"I found **{name}** (FEIN {fein_display}) has {record_count} {domain_name} configured, "
-                                            f"while {len(companies_without_records)} other company/companies have none. "
-                                            f"Is it safe to assume this is the only FEIN needing review?"
-                                        ),
-                                        'type': 'radio',
-                                        'options': [
-                                            {'id': 'yes', 'label': f'Yes, just review {name}', 'default': True},
-                                            {'id': 'no_all', 'label': f'No, review all companies (some may need setup)'},
-                                            {'id': 'no_other', 'label': 'No, let me specify which company'}
-                                        ]
-                                    }],
-                                    'original_question': question,
-                                    'detected_mode': 'validate',
-                                    'context': {
-                                        'primary_company': {'code': fein, 'name': name, 'record_count': record_count},
-                                        'companies_without_records': [{'code': c.get('code'), 'name': c.get('name')} for c in companies_without_records]
-                                    }
-                                },
-                                reasoning=[f"Found {len(companies_with_records)} company with {domain_name}, {len(companies_without_records)} without"]
-                            )
-                            
-                        elif len(companies_with_records) > 1:
-                            # Multiple companies with records - need clarification but be smart about it
-                            result['needs_clarification'] = True
-                            
-                            # Store context for when user selects
-                            self._validation_company_col = company_col
-                            
-                            options = []
-                            for comp in companies_with_records:
-                                options.append({
-                                    'id': str(comp.get('code')),
-                                    'label': f"{comp.get('name', comp.get('code'))} ({comp.get('domain_records')} {domain_name})"
-                                })
+                        # Format FEIN nicely if it looks like one
+                        fein_display = fein
+                        if fein and len(str(fein).replace('-', '')) == 9:
+                            fein_clean = str(fein).replace('-', '')
+                            fein_display = f"{fein_clean[:2]}-{fein_clean[2:]}"
+                        
+                        result['needs_clarification'] = True
+                        
+                        # Store context for when user confirms
+                        self._validation_scope_context = {
+                            'company_col': company_col,
+                            'primary_code': fein,
+                            'primary_name': name,
+                            'record_count': record_count
+                        }
+                        self._validation_company_col = company_col
+                        
+                        result['clarification'] = SynthesizedAnswer(
+                            question=question,
+                            answer="",
+                            confidence=0.0,
+                            structured_output={
+                                'type': 'clarification_needed',
+                                'questions': [{
+                                    'id': 'validation_scope_confirm',
+                                    'question': (
+                                        f"I found **{name}** (FEIN {fein_display}) has {record_count} {domain_name} configured, "
+                                        f"while {len(companies_without_records)} other company/companies have none. "
+                                        f"Is it safe to assume this is the only FEIN needing review?"
+                                    ),
+                                    'type': 'radio',
+                                    'options': [
+                                        {'id': 'yes', 'label': f'Yes, just review {name}', 'default': True},
+                                        {'id': 'no_all', 'label': f'No, review all companies (some may need setup)'},
+                                        {'id': 'no_other', 'label': 'No, let me specify which company'}
+                                    ]
+                                }],
+                                'original_question': question,
+                                'detected_mode': 'validate',
+                                'context': {
+                                    'primary_company': {'code': fein, 'name': name, 'record_count': record_count},
+                                    'companies_without_records': [{'code': c.get('code'), 'name': c.get('name')} for c in companies_without_records]
+                                }
+                            },
+                            reasoning=[f"Found {len(companies_with_records)} company with {domain_name}, {len(companies_without_records)} without"]
+                        )
+                        
+                    elif len(companies_with_records) > 1:
+                        # Multiple companies with records - need clarification but be smart about it
+                        result['needs_clarification'] = True
+                        
+                        # Store context for when user selects
+                        self._validation_company_col = company_col
+                        
+                        options = []
+                        for comp in companies_with_records:
                             options.append({
-                                'id': '__all__',
-                                'label': f"Review all {len(companies_with_records)} companies"
+                                'id': str(comp.get('code')),
+                                'label': f"{comp.get('name', comp.get('code'))} ({comp.get('domain_records')} {domain_name})"
                             })
-                            
-                            summary = ", ".join(
-                                f"{c.get('name', c.get('code'))} ({c.get('domain_records')} rates)"
-                                for c in companies_with_records[:3]
-                            )
-                            if len(companies_with_records) > 3:
-                                summary += f" and {len(companies_with_records) - 3} more"
-                            
-                            result['clarification'] = SynthesizedAnswer(
-                                question=question,
-                                answer="",
-                                confidence=0.0,
-                                structured_output={
-                                    'type': 'clarification_needed',
-                                    'questions': [{
-                                        'id': 'validation_scope_company',
-                                        'question': f"I found {domain_name} for multiple companies: {summary}. Which would you like me to review?",
-                                        'type': 'radio',
-                                        'options': options
-                                    }],
-                                    'original_question': question,
-                                    'detected_mode': 'validate'
-                                },
-                                reasoning=[f"Multiple companies have {domain_name} configured"]
-                            )
+                        options.append({
+                            'id': '__all__',
+                            'label': f"Review all {len(companies_with_records)} companies"
+                        })
                         
-                        elif len(companies_with_records) == 0 and len(companies_without_records) > 0:
-                            # No records found at all - that's the finding!
-                            result['analysis']['finding'] = 'no_records'
-                            result['smart_assumption'] = (
-                                f"⚠️ **No {domain_name} found** for any of the {len(companies_without_records)} companies. "
-                                f"This may be a configuration issue."
-                            )
+                        summary = ", ".join(
+                            f"{c.get('name', c.get('code'))} ({c.get('domain_records')} rates)"
+                            for c in companies_with_records[:3]
+                        )
+                        if len(companies_with_records) > 3:
+                            summary += f" and {len(companies_with_records) - 3} more"
+                        
+                        result['clarification'] = SynthesizedAnswer(
+                            question=question,
+                            answer="",
+                            confidence=0.0,
+                            structured_output={
+                                'type': 'clarification_needed',
+                                'questions': [{
+                                    'id': 'validation_scope_company',
+                                    'question': f"I found {domain_name} for multiple companies: {summary}. Which would you like me to review?",
+                                    'type': 'radio',
+                                    'options': options
+                                }],
+                                'original_question': question,
+                                'detected_mode': 'validate'
+                            },
+                            reasoning=[f"Multiple companies have {domain_name} configured"]
+                        )
+                    
+                    elif len(companies_with_records) == 0 and len(companies_without_records) > 0:
+                        # No records found at all - that's the finding!
+                        result['analysis']['finding'] = 'no_records'
+                        result['smart_assumption'] = (
+                            f"⚠️ **No {domain_name} found** for any of the {len(companies_without_records)} companies. "
+                            f"This may be a configuration issue."
+                        )
             
             # Analyze rate values if we have them
             if rate_cols and not result.get('needs_clarification'):
@@ -2215,6 +2223,7 @@ class IntelligenceEngine:
             'earnings': ['earn', 'earning', 'pay', 'salary', 'wage', 'compensation'],
             'deductions': ['deduction', 'benefit', '401k', 'insurance', 'health'],
             'tax': ['tax', 'sui', 'suta', 'futa', 'fein', 'ein', 'withhold', 'federal', 'state tax', 'fica', 'w2', 'w-2', '941', '940'],
+            'workers_comp': ['workers comp', 'work comp', 'wc', 'workers compensation', 'wcb', 'class code', 'experience mod'],
             'time': ['time', 'hours', 'attendance', 'schedule'],
             'address': ['address', 'zip', 'postal'],
             'rate': ['rate', 'rates', 'percentage', 'percent'],
@@ -2264,6 +2273,13 @@ class IntelligenceEngine:
                 if 'tax' in table_name:
                     score += 60  # Very strong boost
                     logger.warning(f"[SQL-GEN] Strong tax boost for: {table_name[-40:]}")
+            
+            # STRONG BOOST: Workers Comp questions should prefer workers_comp tables
+            wc_question_terms = ['workers comp', 'work comp', 'wc rate', 'workers compensation', 'wcb']
+            if any(term in q_lower for term in wc_question_terms):
+                if any(wc in table_name for wc in ['workers_comp', 'work_comp', 'wc_']):
+                    score += 70  # Very strong boost for WC tables
+                    logger.warning(f"[SQL-GEN] Strong WC boost for: {table_name[-40:]}")
             
             # STRONG BOOST: Configuration/validation questions should prefer config tables
             config_question_terms = ['correct', 'configured', 'valid', 'setup', 'setting', 'configuration']
@@ -2701,17 +2717,28 @@ class IntelligenceEngine:
                 # Apply scope filter if we made a smart assumption
                 scope_filter = scope_analysis.get('scope_filter')
                 
-                # Also filter to relevant tax type
+                # Also filter to relevant domain type
                 filter_parts = []
-                question_keywords = ['sui', 'suta', 'futa', 'fit', 'fica', 'soc', 'med', 'w2', '401k', 'fein']
-                filter_terms = [kw.upper() for kw in question_keywords if kw in q_lower]
                 
-                if filter_terms:
-                    code_cols = [c for c in col_names if any(x in c.lower() for x in ['code', 'type', 'desc', 'tax'])]
-                    if code_cols:
-                        for term in filter_terms:
-                            for col in code_cols[:2]:
-                                filter_parts.append(f'UPPER("{col}") LIKE \'%{term}%\'')
+                # Detect if this is a workers comp question (different filtering needed)
+                is_wc_question = any(wc in q_lower for wc in ['workers comp', 'work comp', 'wc', 'workers compensation'])
+                
+                if is_wc_question:
+                    # Workers comp doesn't need tax_code filtering - the whole table is WC
+                    # Just apply scope filter if any
+                    logger.warning(f"[SQL-GEN] Workers Comp validation - no tax code filter needed")
+                else:
+                    # Tax-based validation - filter by tax type
+                    question_keywords = ['sui', 'suta', 'futa', 'fit', 'fica', 'soc', 'med', 'w2', '401k', 'fein', 
+                                        'sit', 'local', 'city', 'county', 'municipal']
+                    filter_terms = [kw.upper() for kw in question_keywords if kw in q_lower]
+                    
+                    if filter_terms:
+                        code_cols = [c for c in col_names if any(x in c.lower() for x in ['code', 'type', 'desc', 'tax'])]
+                        if code_cols:
+                            for term in filter_terms:
+                                for col in code_cols[:2]:
+                                    filter_parts.append(f'UPPER("{col}") LIKE \'%{term}%\'')
                 
                 if scope_filter:
                     filter_parts.append(f'"{scope_filter["column"]}" = \'{scope_filter["value"]}\'')
