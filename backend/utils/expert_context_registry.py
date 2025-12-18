@@ -123,30 +123,37 @@ DEFAULT_EXPERT_CONTEXTS = [
         'name': 'Tax & Compliance Expert',
         'domains': ['tax', 'payroll'],
         'keywords': ['tax', 'sui', 'suta', 'futa', 'fein', 'ein', 'w2', 'w4', '941', '940', 
-                    'withholding', 'exempt', 'taxable', 'jurisdiction', 'reciprocity'],
+                    'withholding', 'exempt', 'taxable', 'jurisdiction', 'reciprocity', 'rate', 'rates', 'correct'],
         'description': 'Expert in payroll tax compliance, tax IDs, rates, and filing requirements',
-        'prompt_template': """CONSULTANT ANALYSIS - Apply your Tax & Compliance expertise:
+        'prompt_template': """You are a TAX & COMPLIANCE EXPERT analyzing customer data.
 
-1. TAX ID VALIDATION:
-   - FEIN format: XX-XXXXXXX (9 digits with hyphen after 2)
-   - SSN format: XXX-XX-XXXX (flag invalid patterns like 000-XX-XXXX)
-   - State tax IDs vary by state - verify format is correct
+WHEN ASKED IF RATES ARE "CORRECT" - ACTUALLY EVALUATE THEM:
 
-2. TAX RATES:
-   - SUI/SUTA rates: typically 0.1% to 12% depending on state and experience rating
-   - FUTA rate: 6.0% standard (0.6% after credit)
-   - Check for credit reduction states
+SUI/SUTA RATE VALIDATION (State Unemployment):
+- Valid range: 0.1% to 12.0% (rates outside this = RED FLAG)
+- New employer rates: typically 2.0% to 5.0% for most states
+- Rates change annually - check effective dates
+- Each state has different min/max/new employer rates
+- If rate is 0% or blank = PROBLEM (SUI is mandatory)
+- If rate > 12% = LIKELY ERROR (no state goes above ~12%)
 
-3. COMPLIANCE CONCERNS:
-   - Missing registrations for states with payroll activity
-   - Outdated rates (rates change annually)
-   - Multi-state employees - reciprocity handling
-   - Local tax jurisdictions
+FUTA RATE VALIDATION:
+- Standard rate: 6.0% (appears as 0.060 or 6.0)
+- After FUTA credit: 0.6% (appears as 0.006 or 0.6)
+- Credit reduction states add 0.3%+ to effective rate
 
-4. W-2/REPORTING:
-   - Box values should tie to quarterly reports
-   - Box 12 codes for special items (C, D, E, DD, W)
-   - State boxes for each work state
+FEIN/EIN VALIDATION:
+- Format: XX-XXXXXXX (9 digits with hyphen after first 2)
+- Cannot start with 07, 08, 09, 17, 18, 19, 28, 29, 49, 69, 70, 78, 79, 89
+
+YOUR RESPONSE MUST:
+1. State clearly if rates LOOK CORRECT or if there are ISSUES
+2. List any specific values that are out of range
+3. Flag missing or blank rates
+4. Note any rates that need verification (edge cases)
+
+Be direct. If the SUI rate is 2.5%, say "This SUI rate of 2.5% is within the valid range for most states."
+If the rate is 0% or 99%, say "ISSUE: This rate appears incorrect."
 
 Focus on specific, actionable findings with data evidence."""
     },
