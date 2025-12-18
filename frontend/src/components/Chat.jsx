@@ -188,6 +188,18 @@ export default function Chat({ functionalAreas = [] }) {
 
       const data = response.data
 
+      // Check for export data and trigger download
+      if (data.export) {
+        const { filename, data: base64Data, mime_type } = data.export
+        const link = document.createElement('a')
+        link.href = `data:${mime_type};base64,${base64Data}`
+        link.download = filename
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        console.log('Export downloaded:', filename)
+      }
+
       // Check if clarification needed
       if (data.needs_clarification) {
         setPendingClarification({
@@ -225,6 +237,8 @@ export default function Chat({ functionalAreas = [] }) {
           quality_alerts: data.quality_alerts || null,
           follow_up_suggestions: data.follow_up_suggestions || [],
           citations: data.citations || null,
+          // Export data for re-download
+          export: data.export || null,
           timestamp: new Date().toISOString()
         }])
       }
@@ -891,6 +905,27 @@ function IntelligentResponse({ message, index, onFeedback, onResetPreferences })
         <div className="prose prose-sm max-w-none whitespace-pre-wrap">
           {message.content}
         </div>
+        
+        {/* Export Download Button */}
+        {message.export && (
+          <div className="mt-3 pt-3 border-t border-gray-100">
+            <button
+              onClick={() => {
+                const { filename, data, mime_type } = message.export
+                const link = document.createElement('a')
+                link.href = `data:${mime_type};base64,${data}`
+                link.download = filename
+                document.body.appendChild(link)
+                link.click()
+                document.body.removeChild(link)
+              }}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all bg-green-50 text-green-700 hover:bg-green-100 border border-green-200"
+            >
+              <Download size={16} />
+              Download {message.export.filename}
+            </button>
+          </div>
+        )}
       </div>
       
       {/* Proactive Insights */}
