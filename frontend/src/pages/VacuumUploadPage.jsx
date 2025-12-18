@@ -21,7 +21,7 @@ import {
   Maximize2, Minimize2
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import ConsultantAssist from './components/ConsultantAssist';
+import ConsultantAssist from '../components/ConsultantAssist';
 import { useProject } from '../context/ProjectContext';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
