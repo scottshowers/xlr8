@@ -1892,6 +1892,11 @@ async def unified_chat(request: UnifiedChatRequest):
             # DEBUG - always log this to see what's happening
             logger.warning(f"[UNIFIED] EXPERT CHECK: is_analytical={is_analytical}, EXPERT_AVAILABLE={EXPERT_CONTEXT_AVAILABLE}, msg='{message[:50]}'")
             
+            # Check if engine already produced a validation analysis (has our consultant formatting)
+            is_validation_response = engine_answer and any(
+                indicator in engine_answer for indicator in ['🔴', '🟡', '✅', 'Rates Valid', 'Rate Issues', 'Zero Rates', 'Years Old']
+            )
+            
             # Detect garbage SQL responses (just literals, no real data)
             garbage_indicators = [
                 'configured correctly',  # LLM returned fake confirmation
@@ -1909,9 +1914,14 @@ async def unified_chat(request: UnifiedChatRequest):
                 indicator in engine_answer.lower() for indicator in no_data_indicators
             )
             
-            # For analytical questions, ALWAYS use expert context
-            # The expert interprets whatever data we found (or guides on finding it)
-            if is_analytical and EXPERT_CONTEXT_AVAILABLE:
+            if is_validation_response:
+                # Engine already did the consultant analysis - use it directly
+                logger.warning(f"[UNIFIED] Using engine's validation analysis directly (has consultant formatting)")
+                if auto_applied_note:
+                    response["answer"] = auto_applied_note + "\n\n" + engine_answer
+                else:
+                    response["answer"] = engine_answer
+            elif is_analytical and EXPERT_CONTEXT_AVAILABLE:
                 logger.info(f"[UNIFIED] Analytical question detected - using expert context")
                 logger.info(f"[UNIFIED] from_reality count: {len(answer.from_reality) if answer.from_reality else 0}")
                 logger.info(f"[UNIFIED] is_garbage: {is_garbage_response}, is_no_data: {is_no_data_placeholder}")
