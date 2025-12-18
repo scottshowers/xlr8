@@ -1971,11 +1971,58 @@ async def unified_chat(request: UnifiedChatRequest):
         
         # Handle no answer case
         if response["answer"] is None and not response["needs_clarification"]:
-            if answer.from_reality or answer.from_intent or answer.from_best_practice:
-                response["answer"] = "I found some related information but couldn't generate a complete answer. Please try rephrasing your question."
-            else:
-                response["answer"] = "I couldn't find any data matching your query. Please check that data has been uploaded for this project."
-            response["confidence"] = 0.3
+            # Check if this is an analytical question that deserves expert guidance
+            analytical_keywords = ['correct', 'valid', 'issue', 'problem', 'check', 'verify', 
+                                   'audit', 'review', 'configure', 'setup', 'missing', 'wrong',
+                                   'should', 'compliance', 'accurate', 'quality']
+            is_analytical = any(kw in message.lower() for kw in analytical_keywords)
+            
+            if is_analytical and EXPERT_CONTEXT_AVAILABLE:
+                # Even without data, try to provide expert guidance
+                try:
+                    project_id, project_domains = _get_project_domains(project, handler)
+                    
+                    # Build context from what we know
+                    context_parts = []
+                    if answer.from_reality:
+                        context_parts.append("Available data tables were searched but no matching records found.")
+                    if schema.get('tables'):
+                        table_names = [t.get('table_name', '').split('__')[-1] for t in schema['tables'][:10]]
+                        context_parts.append(f"Available tables include: {', '.join(table_names)}")
+                    
+                    context = "\n".join(context_parts) if context_parts else "No relevant data found in the project."
+                    
+                    synthesized, expert_context_used = await generate_synthesized_answer(
+                        question=message,
+                        context=context,
+                        persona=request.persona,
+                        insights=answer.insights if answer else [],
+                        conflicts=answer.conflicts if answer else [],
+                        citations=citation_builder,
+                        quality_alerts=quality_service,
+                        follow_ups=[],
+                        redactor=redactor,
+                        project=project,
+                        project_domains=project_domains,
+                    )
+                    
+                    if synthesized and len(synthesized) > 50:
+                        response["answer"] = synthesized
+                        response["confidence"] = 0.5
+                        if expert_context_used:
+                            response["expert_context_id"] = expert_context_used
+                        session['last_expert_context'] = expert_context_used
+                        logger.info(f"[UNIFIED] Used expert context for no-data analytical question")
+                except Exception as e:
+                    logger.warning(f"[UNIFIED] Expert guidance failed: {e}")
+            
+            # Fallback if expert guidance didn't work
+            if response["answer"] is None:
+                if answer and (answer.from_reality or answer.from_intent or answer.from_best_practice):
+                    response["answer"] = "I found some related information but couldn't generate a complete answer. Please try rephrasing your question."
+                else:
+                    response["answer"] = "I couldn't find any data matching your query. Please check that data has been uploaded for this project."
+                response["confidence"] = 0.3
         
         # Clarification message
         if response["needs_clarification"]:
