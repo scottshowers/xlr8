@@ -1,10 +1,18 @@
 """
-XLR8 INTELLIGENCE ENGINE v5.14.0
+XLR8 INTELLIGENCE ENGINE v5.14.2
 ================================
 
 Deploy to: backend/utils/intelligence_engine.py
 
 UPDATES:
+- v5.14.2: ORG MAPPING - Loads customer org structure from Organization config table
+           - Maps org_level_X → customer terminology (e.g., org_level_2 = "Department")
+           - Injects into SQL hints for better query generation
+           - Foundation for customer dashboards with org-aware metrics
+- v5.14.1: DATA QUALITY CHECKS - Detects corrupted column headers (nan/unnamed)
+           - Warns when header parsing failed during upload
+           - Detects possible data truncation
+           - Fixed region deduplication in clarification options
 - v5.14.0: CONFIG VALIDATION IMPROVEMENTS
            - Table exclude patterns to filter non-config tables
            - Domain-aware export filenames (earnings_validation vs sui_rate_validation)
@@ -64,7 +72,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.14.1 DATA QUALITY CHECKS ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.14.2 ORG MAPPING ======")
 
 
 # =============================================================================
@@ -207,8 +215,8 @@ VALIDATION_CONFIG = {
         'validation_type': 'config',
         'keywords': ['earnings', 'earning code', 'pay code', 'earning setup', 'earnings configured',
                      'earnigs', 'earings', 'earning'],  # Common typos
-        'table_patterns': ['earnings_nan', 'earnings_can', 'earnings_info'],  # Specific config tables
-        'table_exclude_patterns': ['country_code', 'block_tax', 'employee', 'testing', 'groups'],  # Not config tables
+        'table_patterns': ['earnings_nan', 'earnings_can', 'earnings_info_can', 'earnings_info_nan'],  # Specific config tables only
+        'table_exclude_patterns': ['country_code', 'block_tax', 'employee', 'testing', 'groups', 'local'],  # Not config tables
         'scope_cols': ['company'],
         'checks': [
             {'name': 'duplicates', 'description': 'Duplicate earning codes with different settings'},
@@ -405,6 +413,90 @@ class IntelligenceEngine:
         self.filter_candidates = self.schema.get('filter_candidates', {})
         if self.filter_candidates:
             logger.warning(f"[INTELLIGENCE] Filter candidates loaded: {list(self.filter_candidates.keys())}")
+        
+        # Load customer org structure mapping (org_level_X → customer terminology)
+        self.org_mapping = {}
+        self._load_org_mapping()
+    
+    def _load_org_mapping(self):
+        """
+        Load customer-specific org level definitions.
+        
+        The Organization tab in UKG config reports has 2 vertical tables:
+        1. Top table: Maps org_level_1 → "Division", org_level_2 → "Department", etc.
+        2. Bottom table: Valid values for each org level
+        
+        This mapping allows us to:
+        - Use customer's terminology in responses ("by Department" not "by org_level_2")
+        - Generate correct SQL with meaningful column references
+        - Build dashboards using customer's org structure
+        """
+        if not self.structured_handler:
+            return
+        
+        try:
+            # Find organization table
+            tables = self.schema.get('tables', [])
+            org_table = None
+            for t in tables:
+                tname = t.get('table_name', '').lower()
+                if 'organization' in tname and 'validation' in tname:
+                    org_table = t.get('table_name')
+                    break
+            
+            if not org_table:
+                logger.info("[ORG-MAPPING] No organization config table found")
+                return
+            
+            # Query for org level definitions (typically in first few rows)
+            # Look for patterns like: org_level_1, Division, org_level_2, Department
+            try:
+                rows = self.structured_handler.query(f'''
+                    SELECT * FROM "{org_table}" LIMIT 20
+                ''')
+                
+                if not rows:
+                    return
+                
+                # Parse org level mappings from the data
+                # Common patterns:
+                # - Column named "org_level" or "level" with values like "org_level_1"
+                # - Adjacent column with the customer name like "Division"
+                # - Or horizontal: org_level_1_name = "Division" in columns
+                
+                for row in rows:
+                    for key, value in row.items():
+                        key_lower = str(key).lower()
+                        value_str = str(value).strip() if value else ''
+                        
+                        # Pattern 1: org_level_X in value, look for name in adjacent columns
+                        if value_str.lower().startswith('org_level_'):
+                            level_num = value_str.lower().replace('org_level_', '')
+                            # Find the name in other columns
+                            for k2, v2 in row.items():
+                                if k2 != key and v2 and isinstance(v2, str) and len(v2) > 1:
+                                    v2_clean = v2.strip()
+                                    if v2_clean and not v2_clean.lower().startswith('org_level'):
+                                        self.org_mapping[f'org_level_{level_num}'] = v2_clean
+                                        break
+                        
+                        # Pattern 2: Column name contains org_level, value is the customer name
+                        if 'org_level' in key_lower and value_str and not value_str.lower().startswith('org_level'):
+                            level_match = re.search(r'org_level_?(\d+)', key_lower)
+                            if level_match:
+                                level_num = level_match.group(1)
+                                self.org_mapping[f'org_level_{level_num}'] = value_str
+                
+                if self.org_mapping:
+                    logger.warning(f"[ORG-MAPPING] Loaded customer org structure: {self.org_mapping}")
+                else:
+                    logger.info("[ORG-MAPPING] Could not parse org level mappings from organization table")
+                    
+            except Exception as e:
+                logger.warning(f"[ORG-MAPPING] Error querying organization table: {e}")
+                
+        except Exception as e:
+            logger.warning(f"[ORG-MAPPING] Error loading org mapping: {e}")
     
     def ask(
         self, 
@@ -1777,16 +1869,18 @@ class IntelligenceEngine:
         col_lower_map = {c.lower(): c for c in columns}
         
         # DATA QUALITY CHECK: Detect corrupted/garbage column names
-        # If columns are "nan", "nan_1", "nan_2"... the header parsing failed
+        # If columns are "nan", "nan_1", "nan_2"... or "unnamed", "unnamed_1" the header parsing failed
         nan_cols = [c for c in columns if c.lower().startswith('nan') or c.lower() == 'nan']
         unnamed_cols = [c for c in columns if 'unnamed' in c.lower()]
+        bad_cols = nan_cols + unnamed_cols
         
-        if len(nan_cols) > 3 or len(unnamed_cols) > 3:
+        if len(bad_cols) > 3:
+            col_type = 'nan' if len(nan_cols) > len(unnamed_cols) else 'unnamed'
             findings.append({
                 'type': 'error',
                 'severity': 'high',
                 'title': '⚠️ Data Quality Issue: Column Headers Missing',
-                'message': f"Found {len(nan_cols)} columns named 'nan' - header row was not parsed correctly during upload",
+                'message': f"Found {len(bad_cols)} columns with invalid names ('{col_type}') - header row was not parsed correctly during upload",
                 'action': 'Re-upload the source file. Check for merged cells, multiple header rows, or non-standard formatting.',
                 'details': [{'entity': 'Sample columns', 'issue': 'Invalid names', 'value': ', '.join(columns[:5])}]
             })
@@ -3089,6 +3183,16 @@ class IntelligenceEngine:
                     elif category == 'job':
                         semantic_hints.append(f"- For job/position: use {full_col}")
         
+        # Add customer-specific org level mappings if available
+        if hasattr(self, 'org_mapping') and self.org_mapping:
+            org_hints = []
+            for level_col, customer_name in self.org_mapping.items():
+                org_hints.append(f"- '{customer_name}' = {level_col} (customer terminology)")
+            if org_hints:
+                semantic_hints.append("CUSTOMER ORG STRUCTURE:")
+                semantic_hints.extend(org_hints)
+                logger.warning(f"[SQL-GEN] Added {len(org_hints)} customer org mappings")
+        
         semantic_text = ""
         column_mappings = {}  # Generic term → actual column for post-processing
         if semantic_hints:
@@ -3194,14 +3298,27 @@ class IntelligenceEngine:
                     for table in tables:
                         tname = table.get('table_name', '').lower()
                         # Must match at least one include pattern
-                        if any(p in tname for p in table_patterns):
+                        matched_pattern = None
+                        for p in table_patterns:
+                            if p in tname:
+                                matched_pattern = p
+                                break
+                        
+                        if matched_pattern:
                             # Must NOT match any exclude pattern
-                            if not any(ex in tname for ex in exclude_patterns):
-                                matching_tables.append(table)
+                            excluded_by = None
+                            for ex in exclude_patterns:
+                                if ex in tname:
+                                    excluded_by = ex
+                                    break
+                            
+                            if excluded_by:
+                                logger.info(f"[SQL-GEN] Excluded table {tname[-50:]} (matched '{excluded_by}')")
                             else:
-                                logger.info(f"[SQL-GEN] Excluded table {tname[-40:]} (matched exclude pattern)")
+                                matching_tables.append(table)
+                                logger.info(f"[SQL-GEN] Matched table {tname[-50:]} (pattern '{matched_pattern}')")
                     
-                    logger.warning(f"[SQL-GEN] Config domain '{domain_key}' - found {len(matching_tables)} matching tables (after exclusions)")
+                    logger.warning(f"[SQL-GEN] Config domain '{domain_key}' - found {len(matching_tables)} matching tables")
                 
                 if not matching_tables:
                     matching_tables = [relevant_tables[0]]
@@ -3258,7 +3375,6 @@ class IntelligenceEngine:
                     else:
                         # Need to ask user which region to review
                         # Extract region identifiers from table names
-                        region_options = []
                         region_labels = {
                             'nan': 'US Only',
                             'can': 'Canada Only', 
@@ -3267,23 +3383,34 @@ class IntelligenceEngine:
                             'ca': 'Canada Only',
                             'uk': 'UK Only',
                             'mex': 'Mexico Only',
+                            'info': 'Config Info',
                         }
                         
-                        table_regions = []
+                        # Dedupe by suffix - combine tables with same region
+                        region_tables = {}  # suffix -> list of tables
                         for table in matching_tables:
                             tname = table.get('table_name', '').lower()
                             suffix = tname.split('_')[-1] if '_' in tname else ''
                             
-                            # Try to get a nice label
+                            if suffix not in region_tables:
+                                region_tables[suffix] = []
+                            region_tables[suffix].append(table)
+                        
+                        # Build options from deduplicated regions
+                        table_regions = []
+                        for suffix, tables in region_tables.items():
+                            # Sum row counts for all tables with this suffix
+                            total_rows = sum(t.get('row_count', 0) for t in tables)
+                            
+                            # Get nice label
                             label = region_labels.get(suffix, suffix.upper() if suffix else 'Unknown')
                             
-                            # Count records to show scope
-                            row_count = table.get('row_count', 0)
-                            
+                            # Use first table as representative
                             table_regions.append({
                                 'id': suffix,
-                                'label': f"{label} ({row_count:,} records)" if row_count else label,
-                                'table': table.get('table_name', '')
+                                'label': f"{label} ({total_rows:,} records)" if total_rows else label,
+                                'table': tables[0].get('table_name', ''),
+                                'all_tables': [t.get('table_name', '') for t in tables]
                             })
                         
                         # Build options
