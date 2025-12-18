@@ -61,7 +61,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.13.2 REGION CLARIFICATION FIX ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.13.3 TYPO TOLERANCE ======")
 
 
 # =============================================================================
@@ -202,7 +202,8 @@ VALIDATION_CONFIG = {
     'earnings': {
         'name': 'Earnings Codes',
         'validation_type': 'config',
-        'keywords': ['earnings', 'earning code', 'pay code', 'earning setup', 'earnings configured'],
+        'keywords': ['earnings', 'earning code', 'pay code', 'earning setup', 'earnings configured',
+                     'earnigs', 'earings', 'earning'],  # Common typos
         'table_patterns': ['earnings', 'earning', 'pay_code'],
         'scope_cols': ['company'],
         'checks': [
@@ -449,9 +450,9 @@ class IntelligenceEngine:
             # Rate-based domains
             'workers comp', 'work comp', 'sui ', 'suta', 'futa', 'tax rate', 
             'withholding', 'wc rate', 'workers compensation', 'local tax',
-            # Config-based domains  
-            'earnings', 'earning code', 'pay code', 'earning setup',
-            'deduction', 'benefit plan', 'deduction setup',
+            # Config-based domains (with common typos)
+            'earnings', 'earning code', 'pay code', 'earning setup', 'earnigs', 'earings', 'earning',
+            'deduction', 'benefit plan', 'deduction setup', 'deductions',
             'gl', 'general ledger', 'gl mapping', 'account mapping',
             'tax jurisdiction', 'jurisdiction setup', 'state setup',
         ]
@@ -2639,7 +2640,7 @@ class IntelligenceEngine:
             'personal': ['employee', 'employees', 'person', 'people', 'who', 'name', 'ssn', 'birth', 'hire', 'termination', 'termed', 'terminated', 'active', 'location', 'state', 'city', 'address'],
             'company': ['company', 'organization', 'org', 'entity', 'legal'],
             'job': ['job', 'position', 'title', 'department', 'dept'],
-            'earnings': ['earn', 'earning', 'pay code', 'salary', 'wage', 'compensation', 'earning code', 'earnings setup', 'earnings configured'],
+            'earnings': ['earn', 'earning', 'pay code', 'salary', 'wage', 'compensation', 'earning code', 'earnings setup', 'earnings configured', 'earnigs', 'earings'],
             'deductions': ['deduction', 'benefit', '401k', 'insurance', 'health', 'benefit plan', 'deduction code', 'deduction setup'],
             'tax': ['tax', 'sui', 'suta', 'futa', 'fein', 'ein', 'withhold', 'federal', 'state tax', 'fica', 'w2', 'w-2', '941', '940'],
             'workers_comp': ['workers comp', 'work comp', 'wc', 'workers compensation', 'wcb', 'class code', 'experience mod'],
@@ -2704,7 +2705,8 @@ class IntelligenceEngine:
                     logger.warning(f"[SQL-GEN] Strong WC boost for: {table_name[-40:]}")
             
             # STRONG BOOST: Earnings questions should prefer earnings tables
-            earnings_question_terms = ['earnings', 'earning code', 'pay code', 'earning setup', 'earnings configured']
+            earnings_question_terms = ['earnings', 'earning code', 'pay code', 'earning setup', 'earnings configured',
+                                       'earnigs', 'earings', 'earning']  # Common typos
             if any(term in q_lower for term in earnings_question_terms):
                 if any(e in table_name for e in ['earnings', 'earning', 'pay_code']):
                     score += 70  # Very strong boost
