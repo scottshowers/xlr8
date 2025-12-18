@@ -1,10 +1,15 @@
 """
-XLR8 INTELLIGENCE ENGINE v5.13.0
+XLR8 INTELLIGENCE ENGINE v5.14.0
 ================================
 
 Deploy to: backend/utils/intelligence_engine.py
 
 UPDATES:
+- v5.14.0: CONFIG VALIDATION IMPROVEMENTS
+           - Table exclude patterns to filter non-config tables
+           - Domain-aware export filenames (earnings_validation vs sui_rate_validation)
+           - "Review all data sets" instead of "Review all regions"
+           - Typo tolerance for "earnigs", "earings" etc.
 - v5.13.0: CONFIG VALIDATION FRAMEWORK - Extended validation to non-rate domains:
            Earnings (duplicates, missing taxability, W-2 mapping)
            Deductions (missing vendor, limits, arrears, eligibility)
@@ -15,8 +20,6 @@ UPDATES:
            (SUI, FUTA, Workers Comp, State Withholding, Local Tax). Single codebase,
            parameterized validation ranges and rules per domain. Smart consultant analysis
            detects domain from question keywords.
-- v5.11.1: ORDER BY REGEX FIX - was capturing "FROM" as alias due to broken regex
-           Changed from `(?:AS\s+)?(\w+)?` to `(?:\s+AS\s+(\w+))?`
 - v5.11: LOCATION + GROUP BY FIX
         - Fixed table selection: "location" keyword now boosts tables with location columns
         - Fixed GROUP BY query handling: Now displays as table, not single count value
@@ -61,7 +64,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.13.3 TYPO TOLERANCE ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.14.0 CONFIG VALIDATION IMPROVEMENTS ======")
 
 
 # =============================================================================
@@ -204,7 +207,8 @@ VALIDATION_CONFIG = {
         'validation_type': 'config',
         'keywords': ['earnings', 'earning code', 'pay code', 'earning setup', 'earnings configured',
                      'earnigs', 'earings', 'earning'],  # Common typos
-        'table_patterns': ['earnings', 'earning', 'pay_code'],
+        'table_patterns': ['earnings_nan', 'earnings_can', 'earnings_info'],  # Specific config tables
+        'table_exclude_patterns': ['country_code', 'block_tax', 'employee', 'testing', 'groups'],  # Not config tables
         'scope_cols': ['company'],
         'checks': [
             {'name': 'duplicates', 'description': 'Duplicate earning codes with different settings'},
@@ -220,7 +224,8 @@ VALIDATION_CONFIG = {
         'name': 'Deduction Plans',
         'validation_type': 'config',
         'keywords': ['deduction', 'deduction code', 'benefit plan', 'deduction setup', 'deductions configured'],
-        'table_patterns': ['deduction', 'benefit_plan', 'ded_'],
+        'table_patterns': ['deduction_benefit', 'deductions_nan', 'deductions_can', 'benefit_plan'],
+        'table_exclude_patterns': ['employee', 'testing', 'groups'],  # Not config tables
         'scope_cols': ['company'],
         'checks': [
             {'name': 'missing_vendor', 'description': 'Deductions without vendor/payee setup'},
@@ -421,6 +426,7 @@ class IntelligenceEngine:
         if is_export_request and hasattr(self, '_last_validation_export') and self._last_validation_export:
             logger.warning(f"[INTELLIGENCE] Export request detected - returning export data")
             export_data = self._last_validation_export
+            domain_key = export_data.get('domain_key', 'validation')
             
             return SynthesizedAnswer(
                 question=question,
@@ -429,7 +435,7 @@ class IntelligenceEngine:
                 structured_output={
                     'type': 'export_ready',
                     'export_data': export_data,
-                    'filename_suggestion': f"sui_rate_validation_{self.project or 'export'}.xlsx"
+                    'filename_suggestion': f"{domain_key}_validation_{self.project or 'export'}.xlsx"
                 },
                 reasoning=['Export requested for validation data']
             )
@@ -2063,13 +2069,18 @@ class IntelligenceEngine:
         temporal_findings: List[Dict],
         rate_findings: List[Dict],
         smart_assumption: Optional[str],
-        table_name: str
+        table_name: str,
+        domain_config: Dict = None
     ) -> str:
         """
         Format findings like a real consultant - lead with the answer.
         Also stores export data for download capability.
         """
         parts = []
+        
+        # Get domain name for export
+        domain_name = domain_config.get('name', 'Validation') if domain_config else 'Validation'
+        domain_key = domain_config.get('key', 'validation') if domain_config else 'validation'
         
         # Smart assumption first if we made one
         if smart_assumption:
@@ -2132,7 +2143,9 @@ class IntelligenceEngine:
             'findings': all_findings,
             'table_name': table_name,
             'sql': getattr(self, 'last_executed_sql', None),
-            'total_records': total_records
+            'total_records': total_records,
+            'domain_name': domain_name,
+            'domain_key': domain_key
         }
         
         # Offer the data with export hint
@@ -3143,11 +3156,19 @@ class IntelligenceEngine:
                 if validation_type == 'config' and domain_key in config_multi_table_domains:
                     # Find all tables that match this domain from the full table list
                     table_patterns = domain_config.get('table_patterns', [])
-                    for table in tables:  # Use 'tables' (all available tables), not 'scored_tables'
+                    exclude_patterns = domain_config.get('table_exclude_patterns', [])
+                    
+                    for table in tables:
                         tname = table.get('table_name', '').lower()
+                        # Must match at least one include pattern
                         if any(p in tname for p in table_patterns):
-                            matching_tables.append(table)
-                    logger.warning(f"[SQL-GEN] Config domain '{domain_key}' - found {len(matching_tables)} matching tables")
+                            # Must NOT match any exclude pattern
+                            if not any(ex in tname for ex in exclude_patterns):
+                                matching_tables.append(table)
+                            else:
+                                logger.info(f"[SQL-GEN] Excluded table {tname[-40:]} (matched exclude pattern)")
+                    
+                    logger.warning(f"[SQL-GEN] Config domain '{domain_key}' - found {len(matching_tables)} matching tables (after exclusions)")
                 
                 if not matching_tables:
                     matching_tables = [relevant_tables[0]]
@@ -3234,7 +3255,7 @@ class IntelligenceEngine:
                         
                         # Build options
                         options = [{'id': r['id'], 'label': r['label']} for r in table_regions]
-                        options.append({'id': '__all__', 'label': f'Review all regions ({len(matching_tables)} tables combined)'})
+                        options.append({'id': '__all__', 'label': f'Review all data sets ({len(matching_tables)} tables combined)'})
                         
                         region_summary = ', '.join(r['label'].split(' (')[0] for r in table_regions)
                         
@@ -4180,7 +4201,8 @@ SQL:"""
                 temporal_findings=temporal_findings,
                 rate_findings=validation_findings,  # Works for both rate and config findings
                 smart_assumption=smart_assumption,
-                table_name=table_name
+                table_name=table_name,
+                domain_config=domain_config
             )
             
             parts.append(consultant_response)
