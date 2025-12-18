@@ -61,7 +61,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.13.0 CONFIG VALIDATION FRAMEWORK ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.13.1 REGION CLARIFICATION ======")
 
 
 # =============================================================================
@@ -3129,9 +3129,144 @@ class IntelligenceEngine:
             if primary_full:
                 logger.warning(f"[SQL-GEN] VALIDATION QUESTION - smart consultant analysis")
                 
-                # Get all columns for analysis
-                primary_cols = relevant_tables[0].get('columns', [])
+                # Detect domain to check if we need multiple tables
+                domain_config = _detect_validation_domain(question)
+                validation_type = domain_config.get('validation_type', 'rate') if domain_config else 'rate'
+                
+                # For CONFIG domains (earnings, deductions, GL), find ALL matching tables
+                config_multi_table_domains = ['earnings', 'deductions', 'gl_mapping']
+                domain_key = domain_config.get('key', '') if domain_config else ''
+                
+                matching_tables = []
+                if validation_type == 'config' and domain_key in config_multi_table_domains:
+                    # Find all tables that match this domain
+                    table_patterns = domain_config.get('table_patterns', [])
+                    for score, table in scored_tables:
+                        tname = table.get('table_name', '').lower()
+                        if any(p in tname for p in table_patterns):
+                            matching_tables.append(table)
+                    logger.warning(f"[SQL-GEN] Config domain '{domain_key}' - found {len(matching_tables)} matching tables")
+                
+                if not matching_tables:
+                    matching_tables = [relevant_tables[0]]
+                
+                # Get columns from first table (assume similar structure)
+                primary_cols = matching_tables[0].get('columns', [])
                 col_names = [c.get('name', str(c)) if isinstance(c, dict) else str(c) for c in primary_cols]
+                
+                # For multiple tables, ask which region to analyze
+                if len(matching_tables) > 1:
+                    # Check if user already confirmed a region scope
+                    region_scope = self.confirmed_facts.get('validation_region_scope')
+                    
+                    if region_scope:
+                        # User already selected - filter to that table
+                        if region_scope == '__all__':
+                            # User wants all - build UNION query
+                            common_cols = set(col_names)
+                            for table in matching_tables[1:]:
+                                table_cols = [c.get('name', str(c)) if isinstance(c, dict) else str(c) for c in table.get('columns', [])]
+                                common_cols &= set(table_cols)
+                            
+                            if common_cols:
+                                col_names = list(common_cols)[:20]
+                                select_cols = ', '.join(f'"{c}"' for c in col_names)
+                                
+                                union_parts = []
+                                for table in matching_tables:
+                                    tname = table.get('table_name', '')
+                                    source_label = tname.split('_')[-1] if '_' in tname else tname[-10:]
+                                    union_parts.append(f'SELECT {select_cols}, \'{source_label}\' as _source FROM "{tname}"')
+                                
+                                sql = ' UNION ALL '.join(union_parts)
+                                logger.warning(f"[SQL-GEN] Built UNION query for {len(matching_tables)} tables (user confirmed all)")
+                                
+                                return {
+                                    'sql': sql,
+                                    'table': f"{len(matching_tables)} {domain_key} tables",
+                                    'query_type': 'validation',
+                                    'all_columns': col_names + ['_source'],
+                                    'validation_bypass': True,
+                                    'smart_assumption': f"Reviewing {domain_config.get('name', domain_key)} across all regions"
+                                }
+                        else:
+                            # User selected specific region - find that table
+                            for table in matching_tables:
+                                tname = table.get('table_name', '')
+                                if region_scope in tname.lower():
+                                    matching_tables = [table]
+                                    primary_cols = table.get('columns', [])
+                                    col_names = [c.get('name', str(c)) if isinstance(c, dict) else str(c) for c in primary_cols]
+                                    logger.warning(f"[SQL-GEN] User selected region '{region_scope}' - using table {tname}")
+                                    break
+                    else:
+                        # Need to ask user which region to review
+                        # Extract region identifiers from table names
+                        region_options = []
+                        region_labels = {
+                            'nan': 'US Only',
+                            'can': 'Canada Only', 
+                            'usa': 'US Only',
+                            'us': 'US Only',
+                            'ca': 'Canada Only',
+                            'uk': 'UK Only',
+                            'mex': 'Mexico Only',
+                        }
+                        
+                        table_regions = []
+                        for table in matching_tables:
+                            tname = table.get('table_name', '').lower()
+                            suffix = tname.split('_')[-1] if '_' in tname else ''
+                            
+                            # Try to get a nice label
+                            label = region_labels.get(suffix, suffix.upper() if suffix else 'Unknown')
+                            
+                            # Count records to show scope
+                            row_count = table.get('row_count', 0)
+                            
+                            table_regions.append({
+                                'id': suffix,
+                                'label': f"{label} ({row_count:,} records)" if row_count else label,
+                                'table': table.get('table_name', '')
+                            })
+                        
+                        # Build options
+                        options = [{'id': r['id'], 'label': r['label']} for r in table_regions]
+                        options.append({'id': '__all__', 'label': f'Review all regions ({len(matching_tables)} tables combined)'})
+                        
+                        region_summary = ', '.join(r['label'].split(' (')[0] for r in table_regions)
+                        
+                        logger.warning(f"[SQL-GEN] Multiple region tables found - asking for clarification")
+                        
+                        # Store table info for when user responds
+                        self._validation_region_tables = {r['id']: r['table'] for r in table_regions}
+                        
+                        return {
+                            'sql': None,
+                            'table': None,
+                            'query_type': 'validation_clarification',
+                            'clarification': SynthesizedAnswer(
+                                question=question,
+                                answer="",
+                                confidence=0.0,
+                                structured_output={
+                                    'type': 'clarification_needed',
+                                    'questions': [{
+                                        'id': 'validation_region_scope',
+                                        'question': f"I found {domain_config.get('name', domain_key)} data for multiple regions: {region_summary}. Which would you like me to review?",
+                                        'type': 'radio',
+                                        'options': options
+                                    }],
+                                    'original_question': question,
+                                    'detected_mode': 'validate'
+                                },
+                                reasoning=[f"Found {len(matching_tables)} region-specific tables for {domain_key}"]
+                            ),
+                            'all_columns': col_names
+                        }
+                
+                # Single table path (original logic)
+                primary_full = matching_tables[0].get('table_name', '')
                 
                 # Run smart scope analysis - look at the data before asking questions
                 scope_analysis = self._analyze_validation_scope(
