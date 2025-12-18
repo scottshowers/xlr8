@@ -1,10 +1,16 @@
 """
-XLR8 INTELLIGENCE ENGINE v5.12.0
+XLR8 INTELLIGENCE ENGINE v5.13.0
 ================================
 
 Deploy to: backend/utils/intelligence_engine.py
 
 UPDATES:
+- v5.13.0: CONFIG VALIDATION FRAMEWORK - Extended validation to non-rate domains:
+           Earnings (duplicates, missing taxability, W-2 mapping)
+           Deductions (missing vendor, limits, arrears, eligibility)
+           GL Mapping (unmapped items, account format consistency)
+           Tax Jurisdictions (missing states, registration, tax IDs)
+           validation_type='config' vs 'rate' in VALIDATION_CONFIG registry.
 - v5.12.0: DOMAIN-AGNOSTIC VALIDATION - VALIDATION_CONFIG registry for all tax domains
            (SUI, FUTA, Workers Comp, State Withholding, Local Tax). Single codebase,
            parameterized validation ranges and rules per domain. Smart consultant analysis
@@ -55,7 +61,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.12.0 DOMAIN-AGNOSTIC VALIDATION ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.13.0 CONFIG VALIDATION FRAMEWORK ======")
 
 
 # =============================================================================
@@ -115,8 +121,10 @@ def _is_blocklisted(word: str) -> bool:
 # Domain-agnostic validation rules for tax rates, deductions, etc.
 # =============================================================================
 VALIDATION_CONFIG = {
+    # =========== RATE-BASED VALIDATIONS ===========
     'sui': {
         'name': 'SUI/SUTA Rates',
+        'validation_type': 'rate',
         'keywords': ['sui', 'suta', 'state unemployment'],
         'table_patterns': ['tax_information', 'tax_groups', 'sui', 'suta'],
         'rate_range': (0.001, 0.20),  # 0.1% to 20% as decimal
@@ -131,6 +139,7 @@ VALIDATION_CONFIG = {
     },
     'futa': {
         'name': 'FUTA Rates',
+        'validation_type': 'rate',
         'keywords': ['futa', 'federal unemployment'],
         'table_patterns': ['tax_information', 'tax_groups', 'futa'],
         'rate_range': (0.006, 0.06),  # 0.6% to 6% as decimal
@@ -145,6 +154,7 @@ VALIDATION_CONFIG = {
     },
     'workers_comp': {
         'name': 'Workers Compensation',
+        'validation_type': 'rate',
         'keywords': ['workers comp', 'work comp', 'wc', 'wcb', 'workers compensation'],
         'table_patterns': ['workers_comp', 'wc_', 'comp_rate'],
         'rate_range': (0.001, 0.35),  # 0.1% to 35% - wide range due to hazardous classes
@@ -159,6 +169,7 @@ VALIDATION_CONFIG = {
     },
     'state_withholding': {
         'name': 'State Withholding',
+        'validation_type': 'rate',
         'keywords': ['state withholding', 'sit', 'state income tax', 'state tax rate'],
         'table_patterns': ['tax_information', 'withholding', 'sit'],
         'rate_range': (0.0, 0.15),  # 0% to 15% (some states have no income tax)
@@ -173,6 +184,7 @@ VALIDATION_CONFIG = {
     },
     'local_tax': {
         'name': 'Local Tax',
+        'validation_type': 'rate',
         'keywords': ['local tax', 'city tax', 'county tax', 'municipal tax', 'lit'],
         'table_patterns': ['local_tax', 'city_tax', 'municipal'],
         'rate_range': (0.0, 0.05),  # 0% to 5%
@@ -184,6 +196,71 @@ VALIDATION_CONFIG = {
         'temporal_check': False,
         'annual_update': False,
         'description': 'Local/municipal tax rates',
+    },
+    
+    # =========== CONFIGURATION VALIDATIONS (Non-Rate) ===========
+    'earnings': {
+        'name': 'Earnings Codes',
+        'validation_type': 'config',
+        'keywords': ['earnings', 'earning code', 'pay code', 'earning setup', 'earnings configured'],
+        'table_patterns': ['earnings', 'earning', 'pay_code'],
+        'scope_cols': ['company'],
+        'checks': [
+            {'name': 'duplicates', 'description': 'Duplicate earning codes with different settings'},
+            {'name': 'missing_taxability', 'description': 'Earnings without tax treatment defined'},
+            {'name': 'missing_w2', 'description': 'Taxable earnings without W-2 box mapping'},
+            {'name': 'inactive_in_use', 'description': 'Inactive codes still assigned to employees'},
+            {'name': 'missing_gl', 'description': 'Earnings without GL account mapping'},
+        ],
+        'required_columns': ['code', 'description', 'status'],
+        'description': 'Earning code configuration and setup',
+    },
+    'deductions': {
+        'name': 'Deduction Plans',
+        'validation_type': 'config',
+        'keywords': ['deduction', 'deduction code', 'benefit plan', 'deduction setup', 'deductions configured'],
+        'table_patterns': ['deduction', 'benefit_plan', 'ded_'],
+        'scope_cols': ['company'],
+        'checks': [
+            {'name': 'missing_vendor', 'description': 'Deductions without vendor/payee setup'},
+            {'name': 'missing_limits', 'description': 'Pre-tax deductions without annual limits'},
+            {'name': 'arrears_not_set', 'description': 'Deductions without arrears handling configured'},
+            {'name': 'missing_eligibility', 'description': 'Benefits without eligibility rules'},
+            {'name': 'inactive_enrolled', 'description': 'Inactive plans with enrolled employees'},
+        ],
+        'required_columns': ['code', 'description', 'status'],
+        'description': 'Deduction and benefit plan configuration',
+    },
+    'gl_mapping': {
+        'name': 'GL Mapping',
+        'validation_type': 'config',
+        'keywords': ['gl', 'general ledger', 'gl mapping', 'account mapping', 'gl configured', 'chart of accounts'],
+        'table_patterns': ['general_ledger', 'gl_', 'account_map', 'gl_rules'],
+        'scope_cols': ['company'],
+        'checks': [
+            {'name': 'unmapped_earnings', 'description': 'Earnings without GL account assigned'},
+            {'name': 'unmapped_deductions', 'description': 'Deductions without GL account assigned'},
+            {'name': 'unmapped_taxes', 'description': 'Taxes without GL account assigned'},
+            {'name': 'invalid_accounts', 'description': 'Mappings to non-existent accounts'},
+            {'name': 'missing_segments', 'description': 'Account strings missing required segments'},
+        ],
+        'required_columns': ['account', 'type'],
+        'description': 'General Ledger account mapping',
+    },
+    'tax_jurisdictions': {
+        'name': 'Tax Jurisdictions',
+        'validation_type': 'config',
+        'keywords': ['tax jurisdiction', 'jurisdiction setup', 'state setup', 'tax setup', 'jurisdiction configured'],
+        'table_patterns': ['tax_', 'jurisdiction', 'state_tax'],
+        'scope_cols': ['company', 'state'],
+        'checks': [
+            {'name': 'missing_states', 'description': 'States with employees but no tax setup'},
+            {'name': 'missing_local', 'description': 'Localities requiring tax not configured'},
+            {'name': 'missing_tax_id', 'description': 'Jurisdictions without employer tax ID'},
+            {'name': 'expired_registration', 'description': 'Tax registrations that may need renewal'},
+        ],
+        'required_columns': ['state', 'tax_type'],
+        'description': 'Tax jurisdiction setup and registration',
     },
 }
 
@@ -365,9 +442,19 @@ class IntelligenceEngine:
         # These should NOT ask about employee status - they're about rates/setup
         validation_keywords = ['correct', 'valid', 'right', 'properly', 'configured', 
                               'issue', 'problem', 'check', 'verify', 'audit', 'review',
-                              'accurate', 'wrong', 'error', 'mistake']
-        config_domains = ['workers comp', 'work comp', 'sui ', 'suta', 'futa', 'tax rate', 
-                         'withholding', 'wc rate', 'workers compensation']
+                              'accurate', 'wrong', 'error', 'mistake', 'setup', 'setting']
+        
+        # All config domains that should bypass employee status clarification
+        config_domains = [
+            # Rate-based domains
+            'workers comp', 'work comp', 'sui ', 'suta', 'futa', 'tax rate', 
+            'withholding', 'wc rate', 'workers compensation', 'local tax',
+            # Config-based domains  
+            'earnings', 'earning code', 'pay code', 'earning setup',
+            'deduction', 'benefit plan', 'deduction setup',
+            'gl', 'general ledger', 'gl mapping', 'account mapping',
+            'tax jurisdiction', 'jurisdiction setup', 'state setup',
+        ]
         
         is_validation_question = any(kw in q_lower for kw in validation_keywords)
         is_config_domain = any(cd in q_lower for cd in config_domains)
@@ -1652,6 +1739,322 @@ class IntelligenceEngine:
         
         return findings
     
+    def _validate_config(self, rows: List[Dict], domain_config: Dict) -> List[Dict]:
+        """
+        Validate configuration data (earnings, deductions, GL, etc.) - non-rate validation.
+        
+        Checks for completeness, consistency, and common setup issues.
+        
+        Args:
+            rows: Data rows to validate
+            domain_config: Config dict from VALIDATION_CONFIG
+        """
+        findings = []
+        
+        if not rows:
+            findings.append({
+                'type': 'warning',
+                'severity': 'high',
+                'title': 'No Records Found',
+                'message': f"No {domain_config.get('name', 'configuration')} data found",
+                'action': 'Verify data has been uploaded or configured'
+            })
+            return findings
+        
+        domain_key = domain_config.get('key', '')
+        domain_name = domain_config.get('name', 'Configuration')
+        checks = domain_config.get('checks', [])
+        
+        # Get column names
+        columns = list(rows[0].keys()) if rows else []
+        col_lower_map = {c.lower(): c for c in columns}
+        
+        # Find key columns
+        code_col = None
+        desc_col = None
+        status_col = None
+        
+        for col in columns:
+            c_lower = col.lower()
+            if 'code' in c_lower and not code_col:
+                code_col = col
+            if any(d in c_lower for d in ['desc', 'name', 'title']) and not desc_col:
+                desc_col = col
+            if 'status' in c_lower or 'active' in c_lower:
+                status_col = col
+        
+        # Run domain-specific checks
+        if domain_key == 'earnings':
+            findings.extend(self._validate_earnings(rows, columns, code_col, desc_col, status_col))
+        elif domain_key == 'deductions':
+            findings.extend(self._validate_deductions(rows, columns, code_col, desc_col, status_col))
+        elif domain_key == 'gl_mapping':
+            findings.extend(self._validate_gl_mapping(rows, columns))
+        elif domain_key == 'tax_jurisdictions':
+            findings.extend(self._validate_tax_jurisdictions(rows, columns))
+        else:
+            # Generic config validation
+            findings.extend(self._validate_generic_config(rows, columns, code_col, desc_col, status_col, domain_name))
+        
+        # Add summary if no issues found
+        if not findings or all(f.get('type') == 'success' for f in findings):
+            findings.append({
+                'type': 'success',
+                'severity': 'info',
+                'title': f'{len(rows)} Records Validated',
+                'message': f'{domain_name} appears correctly configured',
+                'action': 'Review detailed data to confirm'
+            })
+        
+        return findings
+    
+    def _validate_earnings(self, rows: List[Dict], columns: List[str], code_col: str, desc_col: str, status_col: str) -> List[Dict]:
+        """Validate earnings code configuration."""
+        findings = []
+        
+        # Check for duplicates
+        if code_col:
+            codes = [r.get(code_col) for r in rows if r.get(code_col)]
+            duplicates = [c for c in set(codes) if codes.count(c) > 1]
+            if duplicates:
+                findings.append({
+                    'type': 'warning',
+                    'severity': 'medium',
+                    'title': f'{len(duplicates)} Duplicate Codes',
+                    'message': 'Same code appears multiple times - may be intentional (by company) or error',
+                    'details': [{'entity': d, 'issue': 'Duplicate code', 'value': f'{codes.count(d)} occurrences'} for d in duplicates[:5]],
+                    'action': 'Verify duplicates are intentional (e.g., different companies)'
+                })
+        
+        # Check for missing descriptions
+        if desc_col:
+            missing_desc = [r for r in rows if not r.get(desc_col)]
+            if missing_desc:
+                findings.append({
+                    'type': 'warning',
+                    'severity': 'low',
+                    'title': f'{len(missing_desc)} Missing Descriptions',
+                    'message': 'Earnings without descriptions are harder to identify',
+                    'details': [{'entity': r.get(code_col, 'Unknown'), 'issue': 'No description', 'value': ''} for r in missing_desc[:5]],
+                    'action': 'Add descriptions for clarity'
+                })
+        
+        # Check for taxability columns
+        tax_cols = [c for c in columns if any(t in c.lower() for t in ['tax', 'subject', 'exempt', 'fit', 'sit', 'fica'])]
+        if not tax_cols:
+            findings.append({
+                'type': 'warning',
+                'severity': 'medium',
+                'title': 'Taxability Not Visible',
+                'message': 'Tax treatment columns not found in this view',
+                'action': 'Verify tax settings in earnings configuration'
+            })
+        
+        # Check for inactive codes (if status column exists)
+        if status_col:
+            inactive = [r for r in rows if str(r.get(status_col, '')).lower() in ['inactive', 'i', 'n', 'no', '0', 'false']]
+            active = [r for r in rows if r not in inactive]
+            findings.append({
+                'type': 'info',
+                'severity': 'info',
+                'title': f'{len(active)} Active, {len(inactive)} Inactive',
+                'message': f'Earnings code status breakdown',
+            })
+        
+        return findings
+    
+    def _validate_deductions(self, rows: List[Dict], columns: List[str], code_col: str, desc_col: str, status_col: str) -> List[Dict]:
+        """Validate deduction/benefit plan configuration."""
+        findings = []
+        
+        # Check for vendor/payee columns
+        vendor_cols = [c for c in columns if any(v in c.lower() for v in ['vendor', 'payee', 'carrier', 'provider'])]
+        if vendor_cols:
+            vendor_col = vendor_cols[0]
+            missing_vendor = [r for r in rows if not r.get(vendor_col)]
+            if missing_vendor:
+                findings.append({
+                    'type': 'warning',
+                    'severity': 'medium',
+                    'title': f'{len(missing_vendor)} Missing Vendors',
+                    'message': 'Deductions without vendor may not remit correctly',
+                    'details': [{'entity': r.get(code_col, 'Unknown'), 'issue': 'No vendor', 'value': ''} for r in missing_vendor[:5]],
+                    'action': 'Add vendor/payee for proper remittance'
+                })
+        
+        # Check for limit columns
+        limit_cols = [c for c in columns if any(l in c.lower() for l in ['limit', 'max', 'annual', 'goal'])]
+        if limit_cols:
+            limit_col = limit_cols[0]
+            no_limit = [r for r in rows if not r.get(limit_col) or r.get(limit_col) == 0]
+            # Pre-tax deductions typically need limits
+            pretax_cols = [c for c in columns if 'pretax' in c.lower() or 'pre_tax' in c.lower()]
+            if pretax_cols and no_limit:
+                findings.append({
+                    'type': 'info',
+                    'severity': 'low',
+                    'title': f'{len(no_limit)} Without Limits',
+                    'message': 'Some deductions have no annual limit set',
+                    'action': 'Verify pre-tax deductions have appropriate IRS limits'
+                })
+        
+        # Check for duplicates
+        if code_col:
+            codes = [r.get(code_col) for r in rows if r.get(code_col)]
+            duplicates = [c for c in set(codes) if codes.count(c) > 1]
+            if duplicates:
+                findings.append({
+                    'type': 'warning',
+                    'severity': 'medium',
+                    'title': f'{len(duplicates)} Duplicate Codes',
+                    'message': 'Same deduction code appears multiple times',
+                    'details': [{'entity': d, 'issue': 'Duplicate', 'value': f'{codes.count(d)}x'} for d in duplicates[:5]],
+                    'action': 'Verify duplicates are for different companies'
+                })
+        
+        return findings
+    
+    def _validate_gl_mapping(self, rows: List[Dict], columns: List[str]) -> List[Dict]:
+        """Validate GL mapping configuration."""
+        findings = []
+        
+        # Find account column
+        acct_cols = [c for c in columns if any(a in c.lower() for a in ['account', 'acct', 'gl_', 'ledger'])]
+        
+        if not acct_cols:
+            findings.append({
+                'type': 'warning',
+                'severity': 'medium',
+                'title': 'Account Column Not Found',
+                'message': 'Could not identify GL account column',
+                'action': 'Verify GL mapping data structure'
+            })
+            return findings
+        
+        acct_col = acct_cols[0]
+        
+        # Check for blank accounts
+        blank_accounts = [r for r in rows if not r.get(acct_col) or str(r.get(acct_col)).strip() == '']
+        if blank_accounts:
+            # Try to find what's unmapped
+            type_col = next((c for c in columns if 'type' in c.lower() or 'code' in c.lower()), None)
+            findings.append({
+                'type': 'error',
+                'severity': 'high',
+                'title': f'{len(blank_accounts)} Unmapped Items',
+                'message': 'Items without GL accounts will not post to ledger',
+                'details': [{'entity': r.get(type_col, f'Row {i}'), 'issue': 'No GL account', 'value': ''} for i, r in enumerate(blank_accounts[:5])],
+                'action': 'Assign GL accounts to all payroll items'
+            })
+        
+        # Check account format consistency
+        accounts = [str(r.get(acct_col, '')) for r in rows if r.get(acct_col)]
+        if accounts:
+            # Check if all accounts have similar structure
+            separators = ['-', '.', '_', ' ']
+            sep_counts = {s: sum(1 for a in accounts if s in a) for s in separators}
+            main_sep = max(sep_counts, key=sep_counts.get) if any(sep_counts.values()) else None
+            
+            if main_sep and sep_counts[main_sep] > 0:
+                segment_counts = [len(a.split(main_sep)) for a in accounts if main_sep in a]
+                if segment_counts and len(set(segment_counts)) > 1:
+                    findings.append({
+                        'type': 'warning',
+                        'severity': 'medium',
+                        'title': 'Inconsistent Account Format',
+                        'message': f'Account segment counts vary ({min(segment_counts)} to {max(segment_counts)} segments)',
+                        'action': 'Verify account string structure is consistent'
+                    })
+        
+        # Count mapped records
+        mapped = len(rows) - len(blank_accounts)
+        if mapped > 0:
+            findings.append({
+                'type': 'success',
+                'severity': 'info',
+                'title': f'{mapped} Items Mapped',
+                'message': 'GL accounts assigned',
+            })
+        
+        return findings
+    
+    def _validate_tax_jurisdictions(self, rows: List[Dict], columns: List[str]) -> List[Dict]:
+        """Validate tax jurisdiction setup."""
+        findings = []
+        
+        # Find state column
+        state_cols = [c for c in columns if any(s in c.lower() for s in ['state', 'jurisdiction', 'province'])]
+        
+        if not state_cols:
+            findings.append({
+                'type': 'warning',
+                'severity': 'medium',
+                'title': 'State Column Not Found',
+                'message': 'Could not identify jurisdiction column',
+            })
+            return findings
+        
+        state_col = state_cols[0]
+        states = set(r.get(state_col) for r in rows if r.get(state_col))
+        
+        # Find tax ID columns
+        id_cols = [c for c in columns if any(i in c.lower() for i in ['id', 'ein', 'fein', 'account', 'registration'])]
+        
+        if id_cols:
+            id_col = id_cols[0]
+            missing_id = [r for r in rows if r.get(state_col) and not r.get(id_col)]
+            if missing_id:
+                findings.append({
+                    'type': 'warning',
+                    'severity': 'medium',
+                    'title': f'{len(missing_id)} Missing Tax IDs',
+                    'message': 'Jurisdictions without employer tax ID',
+                    'details': [{'entity': r.get(state_col), 'issue': 'No tax ID', 'value': ''} for r in missing_id[:5]],
+                    'action': 'Add employer tax registration numbers'
+                })
+        
+        findings.append({
+            'type': 'info',
+            'severity': 'info',
+            'title': f'{len(states)} Jurisdictions Configured',
+            'message': f'Tax setup found for: {", ".join(sorted(list(states)[:10]))}{"..." if len(states) > 10 else ""}',
+        })
+        
+        return findings
+    
+    def _validate_generic_config(self, rows: List[Dict], columns: List[str], code_col: str, desc_col: str, status_col: str, domain_name: str) -> List[Dict]:
+        """Generic configuration validation for unknown domain types."""
+        findings = []
+        
+        # Basic completeness check
+        if code_col:
+            blank_codes = [r for r in rows if not r.get(code_col)]
+            if blank_codes:
+                findings.append({
+                    'type': 'warning',
+                    'severity': 'medium',
+                    'title': f'{len(blank_codes)} Records Without Code',
+                    'message': 'Some records missing identifier',
+                    'action': 'Review records without codes'
+                })
+        
+        # Status breakdown if available
+        if status_col:
+            status_values = {}
+            for r in rows:
+                status = str(r.get(status_col, 'Unknown'))
+                status_values[status] = status_values.get(status, 0) + 1
+            
+            status_summary = ', '.join(f'{v}: {c}' for v, c in sorted(status_values.items(), key=lambda x: -x[1])[:5])
+            findings.append({
+                'type': 'info',
+                'severity': 'info',
+                'title': 'Status Breakdown',
+                'message': status_summary,
+            })
+        
+        return findings
+    
     def _format_consultant_response(
         self, 
         question: str,
@@ -2236,15 +2639,18 @@ class IntelligenceEngine:
             'personal': ['employee', 'employees', 'person', 'people', 'who', 'name', 'ssn', 'birth', 'hire', 'termination', 'termed', 'terminated', 'active', 'location', 'state', 'city', 'address'],
             'company': ['company', 'organization', 'org', 'entity', 'legal'],
             'job': ['job', 'position', 'title', 'department', 'dept'],
-            'earnings': ['earn', 'earning', 'pay', 'salary', 'wage', 'compensation'],
-            'deductions': ['deduction', 'benefit', '401k', 'insurance', 'health'],
+            'earnings': ['earn', 'earning', 'pay code', 'salary', 'wage', 'compensation', 'earning code', 'earnings setup', 'earnings configured'],
+            'deductions': ['deduction', 'benefit', '401k', 'insurance', 'health', 'benefit plan', 'deduction code', 'deduction setup'],
             'tax': ['tax', 'sui', 'suta', 'futa', 'fein', 'ein', 'withhold', 'federal', 'state tax', 'fica', 'w2', 'w-2', '941', '940'],
             'workers_comp': ['workers comp', 'work comp', 'wc', 'workers compensation', 'wcb', 'class code', 'experience mod'],
+            'general_ledger': ['gl', 'general ledger', 'ledger', 'account mapping', 'gl mapping', 'chart of accounts', 'gl rules'],
+            'gl_': ['gl', 'general ledger', 'account', 'ledger mapping'],
             'time': ['time', 'hours', 'attendance', 'schedule'],
             'address': ['address', 'zip', 'postal'],
             'rate': ['rate', 'rates', 'percentage', 'percent'],
             'config': ['config', 'configuration', 'setup', 'setting', 'correct', 'valid', 'validation'],
             'master': ['master', 'setup', 'configuration'],
+            'jurisdiction': ['jurisdiction', 'tax jurisdiction', 'state setup', 'registration'],
         }
         
         # Columns that indicate location data (boost tables with these)
@@ -2296,6 +2702,27 @@ class IntelligenceEngine:
                 if any(wc in table_name for wc in ['workers_comp', 'work_comp', 'wc_']):
                     score += 70  # Very strong boost for WC tables
                     logger.warning(f"[SQL-GEN] Strong WC boost for: {table_name[-40:]}")
+            
+            # STRONG BOOST: Earnings questions should prefer earnings tables
+            earnings_question_terms = ['earnings', 'earning code', 'pay code', 'earning setup', 'earnings configured']
+            if any(term in q_lower for term in earnings_question_terms):
+                if any(e in table_name for e in ['earnings', 'earning', 'pay_code']):
+                    score += 70  # Very strong boost
+                    logger.warning(f"[SQL-GEN] Strong earnings boost for: {table_name[-40:]}")
+            
+            # STRONG BOOST: Deduction questions should prefer deduction tables
+            deduction_question_terms = ['deduction', 'benefit plan', 'deduction setup', 'deductions configured']
+            if any(term in q_lower for term in deduction_question_terms):
+                if any(d in table_name for d in ['deduction', 'benefit', 'ded_']):
+                    score += 70  # Very strong boost
+                    logger.warning(f"[SQL-GEN] Strong deduction boost for: {table_name[-40:]}")
+            
+            # STRONG BOOST: GL questions should prefer GL tables
+            gl_question_terms = ['gl', 'general ledger', 'gl mapping', 'account mapping', 'chart of accounts']
+            if any(term in q_lower for term in gl_question_terms):
+                if any(g in table_name for g in ['general_ledger', 'gl_', 'account_map', 'ledger']):
+                    score += 70  # Very strong boost
+                    logger.warning(f"[SQL-GEN] Strong GL boost for: {table_name[-40:]}")
             
             # STRONG BOOST: Configuration/validation questions should prefer config tables
             config_question_terms = ['correct', 'configured', 'valid', 'setup', 'setting', 'configuration']
@@ -3578,21 +4005,27 @@ SQL:"""
                 # Fallback to SUI if no specific domain detected
                 domain_config = {'key': 'sui', **VALIDATION_CONFIG.get('sui', {})}
             
-            logger.warning(f"[CONSULTATIVE] Using validation domain: {domain_config.get('name', 'Unknown')}")
+            validation_type = domain_config.get('validation_type', 'rate')
+            logger.warning(f"[CONSULTATIVE] Using validation domain: {domain_config.get('name', 'Unknown')} (type: {validation_type})")
             
-            # Run temporal analysis (date/freshness checks) if enabled for this domain
+            # Run appropriate validation based on type
             temporal_findings = []
-            if domain_config.get('temporal_check', True):
-                temporal_findings = self._analyze_temporal_context(result_rows)
+            validation_findings = []
             
-            # Run rate value validation with domain config
-            rate_findings = self._validate_rate_values(result_rows, domain_config)
+            if validation_type == 'rate':
+                # Rate-based validation (SUI, FUTA, WC, etc.)
+                if domain_config.get('temporal_check', True):
+                    temporal_findings = self._analyze_temporal_context(result_rows)
+                validation_findings = self._validate_rate_values(result_rows, domain_config)
+            else:
+                # Config-based validation (Earnings, Deductions, GL, etc.)
+                validation_findings = self._validate_config(result_rows, domain_config)
             
             # Get smart assumption if we made one
             smart_assumption = getattr(self, '_last_smart_assumption', None)
             
             # Find table name from SQL
-            table_name = 'tax configuration'
+            table_name = domain_config.get('name', 'configuration')
             if hasattr(self, 'last_executed_sql') and self.last_executed_sql:
                 import re
                 match = re.search(r'FROM\s+"?([^"\s]+)"?', self.last_executed_sql, re.IGNORECASE)
@@ -3604,7 +4037,7 @@ SQL:"""
                 question=question,
                 rows=result_rows,
                 temporal_findings=temporal_findings,
-                rate_findings=rate_findings,
+                rate_findings=validation_findings,  # Works for both rate and config findings
                 smart_assumption=smart_assumption,
                 table_name=table_name
             )
