@@ -677,7 +677,7 @@ function FilesTab() {
                     </div>
                   </div>
                 );
-              }))
+              })
             )}
           </div>
         )}
