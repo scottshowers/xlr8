@@ -876,7 +876,9 @@ SELECT"""
         # Build system prompt
         if expert_prompt:
             system_prompt = expert_prompt
+            logger.warning(f"[SYNTHESIS] Using expert prompt ({len(expert_prompt)} chars)")
         else:
+            logger.warning(f"[SYNTHESIS] Using default prompt (no expert)")
             system_prompt = """You are an expert implementation consultant analyzing data.
 
 Your responses should be:
