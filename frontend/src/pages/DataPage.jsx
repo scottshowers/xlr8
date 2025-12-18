@@ -213,6 +213,37 @@ function FilesTab() {
   // Multi-select state
   const [selectedStructured, setSelectedStructured] = useState(new Set());
   const [selectedDocs, setSelectedDocs] = useState(new Set());
+  
+  // Expansion state for table inspection
+  const [expandedFiles, setExpandedFiles] = useState(new Set());
+  const [tableProfiles, setTableProfiles] = useState({}); // Cache for table profiles
+  const [loadingProfiles, setLoadingProfiles] = useState(new Set());
+  
+  const toggleFileExpand = (key) => {
+    const newSet = new Set(expandedFiles);
+    if (newSet.has(key)) newSet.delete(key);
+    else newSet.add(key);
+    setExpandedFiles(newSet);
+  };
+  
+  const loadTableProfile = async (tableName) => {
+    if (tableProfiles[tableName] || loadingProfiles.has(tableName)) return;
+    
+    setLoadingProfiles(prev => new Set([...prev, tableName]));
+    try {
+      const res = await api.get(`/status/table-profile/${encodeURIComponent(tableName)}`);
+      setTableProfiles(prev => ({ ...prev, [tableName]: res.data }));
+    } catch (err) {
+      console.error(`Failed to load profile for ${tableName}:`, err);
+      setTableProfiles(prev => ({ ...prev, [tableName]: { error: err.message } }));
+    } finally {
+      setLoadingProfiles(prev => {
+        const next = new Set(prev);
+        next.delete(tableName);
+        return next;
+      });
+    }
+  };
 
   useEffect(() => {
     loadData();
@@ -504,29 +535,169 @@ function FilesTab() {
                     </div>
                     <div></div>
                   </div>
-                  {/* Show tables/sheets loaded */}
+                  {/* Show tables/sheets loaded - EXPANDABLE */}
                   {sheets.length > 0 && (
                     <div style={{ marginLeft: '2.5rem', marginRight: '1rem', paddingBottom: '0.75rem' }}>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-                        {sheets.slice(0, 8).map((sheet, si) => (
-                          <div key={si} style={{ 
-                            fontSize: '0.65rem', 
-                            padding: '0.2rem 0.4rem', 
-                            background: '#f0f9ff', 
-                            borderRadius: '4px',
-                            color: '#0369a1',
-                            border: '1px solid #bae6fd'
-                          }}>
-                            <strong>{sheet.sheet_name || sheet.table_name?.split('_').pop() || `Table ${si + 1}`}</strong>
-                            <span style={{ opacity: 0.7 }}> ({(sheet.row_count || 0).toLocaleString()})</span>
-                          </div>
-                        ))}
-                        {sheets.length > 8 && (
-                          <div style={{ fontSize: '0.65rem', padding: '0.2rem 0.4rem', color: COLORS.textLight }}>
-                            +{sheets.length - 8} more
-                          </div>
-                        )}
-                      </div>
+                      {/* Expand/Collapse toggle */}
+                      <button 
+                        onClick={() => toggleFileExpand(key)}
+                        style={{ 
+                          background: 'none', border: 'none', cursor: 'pointer', 
+                          display: 'flex', alignItems: 'center', gap: '0.25rem',
+                          color: COLORS.textLight, fontSize: '0.7rem', marginBottom: '0.5rem',
+                          padding: 0
+                        }}
+                      >
+                        {expandedFiles.has(key) ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                        {expandedFiles.has(key) ? 'Collapse tables' : `View ${sheets.length} table${sheets.length !== 1 ? 's' : ''} with columns`}
+                      </button>
+                      
+                      {!expandedFiles.has(key) ? (
+                        /* Collapsed: show pills */
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                          {sheets.slice(0, 8).map((sheet, si) => (
+                            <div key={si} style={{ 
+                              fontSize: '0.65rem', 
+                              padding: '0.2rem 0.4rem', 
+                              background: '#f0f9ff', 
+                              borderRadius: '4px',
+                              color: '#0369a1',
+                              border: '1px solid #bae6fd'
+                            }}>
+                              <strong>{sheet.sheet_name || sheet.table_name?.split('_').pop() || `Table ${si + 1}`}</strong>
+                              <span style={{ opacity: 0.7 }}> ({(sheet.row_count || 0).toLocaleString()})</span>
+                            </div>
+                          ))}
+                          {sheets.length > 8 && (
+                            <div style={{ fontSize: '0.65rem', padding: '0.2rem 0.4rem', color: COLORS.textLight }}>
+                              +{sheets.length - 8} more
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        /* Expanded: show tables with columns */
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                          {sheets.map((sheet, si) => {
+                            const tableName = sheet.table_name;
+                            const profile = tableProfiles[tableName];
+                            const isLoadingProfile = loadingProfiles.has(tableName);
+                            
+                            return (
+                            <div key={si} style={{ 
+                              background: '#fafbfc', 
+                              border: '1px solid #e1e8ed', 
+                              borderRadius: '8px',
+                              overflow: 'hidden'
+                            }}>
+                              {/* Table header */}
+                              <div style={{ 
+                                padding: '0.5rem 0.75rem', 
+                                background: '#f0f9ff',
+                                borderBottom: '1px solid #e1e8ed',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center'
+                              }}>
+                                <span style={{ fontWeight: 600, fontSize: '0.75rem', color: '#0369a1' }}>
+                                  {sheet.sheet_name || sheet.table_name?.split('_').pop() || `Table ${si + 1}`}
+                                </span>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                  <span style={{ fontSize: '0.7rem', color: COLORS.textLight }}>
+                                    {(sheet.row_count || 0).toLocaleString()} rows • {(sheet.columns || []).length} cols
+                                  </span>
+                                  {!profile && tableName && (
+                                    <button
+                                      onClick={() => loadTableProfile(tableName)}
+                                      disabled={isLoadingProfile}
+                                      style={{
+                                        fontSize: '0.65rem',
+                                        padding: '0.15rem 0.4rem',
+                                        background: isLoadingProfile ? '#f3f4f6' : '#dbeafe',
+                                        border: '1px solid #93c5fd',
+                                        borderRadius: '4px',
+                                        color: '#1d4ed8',
+                                        cursor: isLoadingProfile ? 'wait' : 'pointer'
+                                      }}
+                                    >
+                                      {isLoadingProfile ? 'Loading...' : 'Load Stats'}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                              
+                              {/* Columns grid */}
+                              <div style={{ padding: '0.5rem 0.75rem' }}>
+                                {profile?.columns ? (
+                                  /* Show profiled columns with stats */
+                                  <div style={{ 
+                                    display: 'grid', 
+                                    gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', 
+                                    gap: '0.35rem' 
+                                  }}>
+                                    {profile.columns.map((col, ci) => (
+                                      <div key={ci} style={{ 
+                                        fontSize: '0.65rem', 
+                                        padding: '0.25rem 0.4rem',
+                                        background: 'white',
+                                        border: `1px solid ${col.fill_rate >= 90 ? '#86efac' : col.fill_rate >= 50 ? '#fde68a' : '#fecaca'}`,
+                                        borderRadius: '4px',
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center'
+                                      }}>
+                                        <span style={{ 
+                                          color: COLORS.text, 
+                                          overflow: 'hidden', 
+                                          textOverflow: 'ellipsis', 
+                                          whiteSpace: 'nowrap',
+                                          maxWidth: '100px'
+                                        }} title={col.name}>
+                                          {col.name}
+                                        </span>
+                                        <span style={{ 
+                                          color: COLORS.textLight, 
+                                          fontSize: '0.6rem',
+                                          whiteSpace: 'nowrap',
+                                          marginLeft: '0.25rem'
+                                        }}>
+                                          {col.distinct_values?.toLocaleString() || '?'} vals • {col.fill_rate ?? '?'}%
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (sheet.columns || []).length === 0 ? (
+                                  <span style={{ fontSize: '0.7rem', color: COLORS.textLight, fontStyle: 'italic' }}>
+                                    No column metadata available
+                                  </span>
+                                ) : (
+                                  /* Show basic column names */
+                                  <div style={{ 
+                                    display: 'grid', 
+                                    gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', 
+                                    gap: '0.25rem' 
+                                  }}>
+                                    {(sheet.columns || []).map((col, ci) => (
+                                      <div key={ci} style={{ 
+                                        fontSize: '0.65rem', 
+                                        padding: '0.15rem 0.35rem',
+                                        background: 'white',
+                                        border: '1px solid #e5e7eb',
+                                        borderRadius: '3px',
+                                        color: COLORS.text,
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        whiteSpace: 'nowrap'
+                                      }}>
+                                        {typeof col === 'object' ? col.name : col}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );})}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
