@@ -1341,24 +1341,20 @@ async def get_table_profile(table_name: str):
 @router.get("/status/data-integrity")
 async def check_data_integrity(project: Optional[str] = None):
     """
-    DIAGNOSTIC: Check data quality across all tables.
-    
-    Flags:
-    - Tables with bad column names (nan, unnamed, numeric)
-    - Tables with very low fill rates
-    - Potential header detection failures
+    Check data quality across all tables for a project.
+    Returns table list with health metrics for frontend display.
     """
     if not STRUCTURED_AVAILABLE:
-        return {"error": "Structured data not available"}
+        return {"error": "Structured data not available", "tables": [], "total_rows": 0, "health_score": 0, "issues_count": 0}
     
     try:
         handler = get_structured_handler()
         
-        issues = []
-        tables_checked = 0
-        tables_with_issues = 0
+        all_tables = []
+        total_rows = 0
+        total_issues = 0
         
-        # Get all tables - either from metadata or information_schema
+        # Get tables to check - either from metadata or information_schema
         tables_to_check = []
         
         # Try to get tables from metadata first (respects project)
@@ -1411,15 +1407,14 @@ async def check_data_integrity(project: Optional[str] = None):
         
         # Expanded patterns for bad column detection
         bad_column_patterns = [
-            'nan', 'unnamed', 'none', 'null',  # Common pandas/Excel defaults
-            'col_0', 'col_1', 'col_2', 'col_3', 'col_4', 'col_5',  # Generic column names
-            'column0', 'column1', 'column2', 'column_0', 'column_1',  # More generic
-            'field0', 'field1', 'field_0', 'field_1',  # Field patterns
-            'var0', 'var1', 'var_0', 'var_1',  # Variable patterns
+            'nan', 'unnamed', 'none', 'null',
+            'col_0', 'col_1', 'col_2', 'col_3', 'col_4', 'col_5',
+            'column0', 'column1', 'column2', 'column_0', 'column_1',
+            'field0', 'field1', 'field_0', 'field_1',
+            'var0', 'var1', 'var_0', 'var_1',
         ]
         
         for table_name in tables_to_check:
-            tables_checked += 1
             table_issues = []
             
             # Get columns for this table
@@ -1434,21 +1429,24 @@ async def check_data_integrity(project: Optional[str] = None):
             
             column_names = [c[0] for c in cols_result]
             
+            # Get row count
+            try:
+                row_count = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
+            except:
+                row_count = 0
+            
+            total_rows += row_count
+            
             # Check for bad column names
             bad_cols = []
             for col in column_names:
                 col_lower = col.lower().strip()
-                
-                # Check against known bad patterns
                 if any(pattern in col_lower for pattern in bad_column_patterns):
                     bad_cols.append(col)
-                # Check if column name is purely numeric (e.g., "0", "1", "12345")
                 elif col_lower.replace('.', '').replace('_', '').replace('-', '').isdigit():
                     bad_cols.append(col)
-                # Check for very short generic names like "a", "b", "c" or single digits
                 elif len(col_lower) == 1 and (col_lower.isdigit() or col_lower in 'abcdefghij'):
                     bad_cols.append(col)
-                # Check for patterns like "0_0", "1_2", etc.
                 elif col_lower.replace('_', '').isdigit() and '_' in col:
                     bad_cols.append(col)
             
@@ -1456,8 +1454,7 @@ async def check_data_integrity(project: Optional[str] = None):
                 table_issues.append({
                     "type": "bad_column_names",
                     "severity": "high",
-                    "details": f"Suspicious columns: {bad_cols[:5]}{'...' if len(bad_cols) > 5 else ''}",
-                    "count": len(bad_cols)
+                    "message": f"Suspicious columns: {', '.join(bad_cols[:5])}{'...' if len(bad_cols) > 5 else ''}"
                 })
             
             # Check first few column names for header detection issues
@@ -1466,40 +1463,53 @@ async def check_data_integrity(project: Optional[str] = None):
                 numeric_count = sum(1 for c in first_three if c.lower().replace('_', '').replace('.', '').replace('-', '').isdigit())
                 if numeric_count >= 2:
                     table_issues.append({
-                        "type": "likely_header_failure",
+                        "type": "header_detection",
                         "severity": "high",
-                        "details": f"First columns are numeric: {first_three}"
+                        "message": "Possible header row issue - first columns look numeric"
                     })
             
-            if table_issues:
-                tables_with_issues += 1
-                issues.append({
-                    "table": table_name,
-                    "column_count": len(column_names),
-                    "issues": table_issues
-                })
+            # Calculate fill rate
+            fill_rate = 100
+            if row_count > 0 and column_names:
+                try:
+                    first_col = column_names[0]
+                    null_count = handler.conn.execute(f'''
+                        SELECT COUNT(*) FROM "{table_name}" WHERE "{first_col}" IS NULL
+                    ''').fetchone()[0]
+                    fill_rate = round(((row_count - null_count) / row_count) * 100)
+                except:
+                    pass
+            
+            total_issues += len(table_issues)
+            
+            all_tables.append({
+                "table_name": table_name,
+                "column_count": len(column_names),
+                "row_count": row_count,
+                "fill_rate": fill_rate,
+                "issues": table_issues,
+                "status": "unhealthy" if table_issues else "healthy"
+            })
         
-        # Log for debugging
-        logger.info(f"[INTEGRITY] Checked {tables_checked} tables, {tables_with_issues} have issues")
-        
-        # Summary - be more aggressive about flagging issues
-        if tables_with_issues == 0:
-            health_status = "healthy"
-        elif tables_with_issues == 1:
-            health_status = "warning"
-        elif tables_with_issues < tables_checked * 0.3:
-            health_status = "warning"
+        # Calculate health score
+        if all_tables:
+            healthy_tables = sum(1 for t in all_tables if t["status"] == "healthy")
+            health_score = round((healthy_tables / len(all_tables)) * 100)
         else:
-            health_status = "critical"
+            health_score = 100
+        
+        overall_status = "healthy" if health_score >= 80 else ("degraded" if health_score >= 50 else "unhealthy")
+        
+        logger.info(f"[INTEGRITY] Checked {len(all_tables)} tables, health_score={health_score}%, total_rows={total_rows}")
         
         return {
-            "status": health_status,
-            "tables_checked": tables_checked,
-            "tables_with_issues": tables_with_issues,
-            "issues": issues[:50],  # Limit response size
-            "recommendation": "Re-upload files after deploying header detection fix" if tables_with_issues > 0 else "Data looks clean"
+            "status": overall_status,
+            "tables": all_tables,
+            "total_rows": total_rows,
+            "health_score": health_score,
+            "issues_count": total_issues
         }
         
     except Exception as e:
         logger.error(f"Data integrity check failed: {e}")
-        return {"error": str(e)}
+        return {"error": str(e), "tables": [], "total_rows": 0, "health_score": 0, "issues_count": 0}
