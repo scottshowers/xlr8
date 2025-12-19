@@ -603,6 +603,21 @@ def process_file_background(
                     tables_created = len(result.get('tables_created', []))
                     total_rows = result.get('total_rows', 0)
                 
+                # =====================================================
+                # UPLOAD VALIDATION CHECK
+                # Warn if data quality issues detected
+                # =====================================================
+                validation = result.get('validation', {})
+                if validation.get('status') in ['warning', 'critical']:
+                    issues_count = validation.get('tables_with_issues', 0)
+                    issue_tables = [i.get('table', '') for i in validation.get('issues', [])[:3]]
+                    warning_msg = f"⚠️ Data quality issues in {issues_count} table(s): {', '.join(issue_tables)}"
+                    if issues_count > 3:
+                        warning_msg += f" and {issues_count - 3} more"
+                    ProcessingJobModel.update_progress(job_id, 68, warning_msg)
+                    result['upload_warnings'] = [warning_msg]
+                    logger.warning(f"[UPLOAD] Validation issues: {validation}")
+                
                 ProcessingJobModel.update_progress(
                     job_id, 70, 
                     f"Created {tables_created} table(s) with {total_rows:,} rows"
@@ -718,6 +733,12 @@ def process_file_background(
                 # Add intelligence summary to completion
                 if intelligence_summary:
                     completion_result['intelligence'] = intelligence_summary
+                
+                # Add validation warnings if any
+                validation = result.get('validation', {})
+                if validation.get('issues'):
+                    completion_result['validation'] = validation
+                    completion_result['has_data_quality_issues'] = True
                 
                 # Complete!
                 ProcessingJobModel.complete(job_id, completion_result)
