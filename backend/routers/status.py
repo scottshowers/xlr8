@@ -1429,11 +1429,17 @@ async def check_data_integrity(project: Optional[str] = None):
             
             column_names = [c[0] for c in cols_result]
             
+            # Skip if table doesn't actually exist (stale metadata)
+            if not column_names:
+                logger.warning(f"Skipping {table_name} - no columns found (stale metadata?)")
+                continue
+            
             # Get row count
             try:
                 row_count = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
-            except:
-                row_count = 0
+            except Exception as count_e:
+                logger.warning(f"Skipping {table_name} - table doesn't exist: {count_e}")
+                continue
             
             total_rows += row_count
             
