@@ -76,11 +76,18 @@ export function AuthProvider({ children }) {
     try {
       console.log('[Auth] Fetching profile for:', supabaseUser.email);
       
-      const { data: profile, error } = await supabase
+      // Add timeout to prevent hanging forever (RLS issues can cause silent hangs)
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Profile fetch timeout')), 5000)
+      );
+      
+      const queryPromise = supabase
         .from('profiles')
         .select('*')
         .eq('id', supabaseUser.id)
         .single();
+      
+      const { data: profile, error } = await Promise.race([queryPromise, timeoutPromise]);
 
       if (error) {
         console.error('[Auth] Profile fetch error:', error);
