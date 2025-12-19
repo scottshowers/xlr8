@@ -1360,6 +1360,8 @@ async def check_data_integrity(project: Optional[str] = None):
         # Try to get tables from metadata first (respects project)
         try:
             if project:
+                project_lower = project.lower()
+                
                 # Get tables for specific project from metadata
                 meta_result = handler.conn.execute("""
                     SELECT DISTINCT table_name, project
@@ -1368,7 +1370,8 @@ async def check_data_integrity(project: Optional[str] = None):
                 """).fetchall()
                 
                 for table_name, proj in meta_result:
-                    if proj and project.lower() in proj.lower():
+                    # Match by project name OR by table name prefix (tables start with project code)
+                    if (proj and project_lower in proj.lower()) or table_name.lower().startswith(project_lower + '__'):
                         tables_to_check.append(table_name)
                 
                 # Also check PDF tables
@@ -1378,11 +1381,27 @@ async def check_data_integrity(project: Optional[str] = None):
                         FROM _pdf_tables
                     """).fetchall()
                     for table_name, proj, proj_id in pdf_result:
-                        if (proj and project.lower() in proj.lower()) or (proj_id and project.lower() in proj_id.lower()):
+                        # Match by project name, project_id, or table name prefix
+                        if ((proj and project_lower in proj.lower()) or 
+                            (proj_id and project_lower in proj_id.lower()) or
+                            table_name.lower().startswith(project_lower + '__')):
                             if table_name not in tables_to_check:
                                 tables_to_check.append(table_name)
                 except:
                     pass
+                
+                # If still no tables, try filtering from information_schema by table prefix
+                if not tables_to_check:
+                    logger.info(f"[INTEGRITY] No metadata matches, trying table prefix filter for {project}")
+                    tables_result = handler.conn.execute("""
+                        SELECT DISTINCT table_name 
+                        FROM information_schema.columns 
+                        WHERE table_schema = 'main'
+                        AND table_name NOT LIKE '_%'
+                    """).fetchall()
+                    for (table_name,) in tables_result:
+                        if table_name.lower().startswith(project_lower + '__') or table_name.lower().startswith(project_lower.replace('-', '') + '__'):
+                            tables_to_check.append(table_name)
                     
                 logger.info(f"[INTEGRITY] Project filter: {project}, found {len(tables_to_check)} tables")
             else:
