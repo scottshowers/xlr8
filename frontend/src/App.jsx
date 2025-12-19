@@ -12,7 +12,7 @@
  * - UploadProvider (background uploads)
  * - OnboardingProvider (Joyride tours)
  * 
- * Updated: December 15, 2025 - Added WorkAdvisor (replaces PlaybookBuilderPage)
+ * Updated: December 19, 2025 - Renamed Data Model → Data Health
  */
 
 import React from 'react';
@@ -45,7 +45,7 @@ import PlaybooksPage from './pages/PlaybooksPage';
 import WorkAdvisor from './pages/WorkAdvisor';  // Replaces PlaybookBuilderPage
 import AdminPage from './pages/AdminPage';
 import AdminDashboard from './pages/AdminDashboard';
-import DataModelPage from './pages/DataModelPage';
+import DataHealthPage from './pages/DataHealthPage';  // Renamed from DataModelPage
 import ReferenceLibraryPage from './pages/ReferenceLibraryPage';
 import QueryBuilderPage from './pages/QueryBuilderPage';
 
@@ -131,13 +131,14 @@ function AppRoutes() {
         
         {/* ====== UTILITY ROUTES ====== */}
         
-        {/* Data Model */}
-        <Route path="/data-model" element={
-          <ProtectedRoute><Layout><DataModelPage /></Layout></ProtectedRoute>
+        {/* Data Health (renamed from Data Model) */}
+        <Route path="/data-health" element={
+          <ProtectedRoute><Layout><DataHealthPage /></Layout></ProtectedRoute>
         } />
         
         {/* ====== LEGACY REDIRECTS ====== */}
         
+        <Route path="/data-model" element={<Navigate to="/data-health" replace />} />
         <Route path="/standards" element={<Navigate to="/reference-library" replace />} />
         <Route path="/chat" element={<Navigate to="/workspace" replace />} />
         <Route path="/upload" element={<Navigate to="/data" replace />} />
