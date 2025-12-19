@@ -14,6 +14,7 @@ import * as XLSX from 'xlsx';
 import ConsultantAssist from '../components/ConsultantAssist';
 import { useProject } from '../context/ProjectContext';
 import { useTheme } from '../context/ThemeContext';
+import { getCustomerColorPalette } from '../utils/customerColors';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -308,11 +309,16 @@ export default function VacuumUploadPage() {
           
           {/* Project Badge */}
           {activeProject ? (
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.75rem', background: colors.greenLight, border: `1px solid ${colors.green}40`, borderRadius: 8, marginBottom: '1rem' }}>
-              <span style={{ color: colors.green }}>📁</span>
-              <span style={{ fontWeight: 600, color: colors.green }}>{activeProject.name}</span>
-              <span style={{ color: colors.green, fontSize: '0.85rem' }}>{activeProject.customer}</span>
-            </div>
+            (() => {
+              const custColors = getCustomerColorPalette(activeProject.customer || activeProject.name);
+              return (
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.75rem', background: custColors.bg, border: `1px solid ${custColors.border}`, borderRadius: 8, marginBottom: '1rem' }}>
+                  <span style={{ color: custColors.primary }}>📁</span>
+                  <span style={{ fontWeight: 600, color: custColors.primary }}>{activeProject.name}</span>
+                  <span style={{ color: custColors.primary, fontSize: '0.85rem' }}>{activeProject.customer}</span>
+                </div>
+              );
+            })()
           ) : (
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.75rem', background: colors.amberLight, border: `1px solid ${colors.amber}40`, borderRadius: 8, marginBottom: '1rem', color: colors.amber }}>
               <AlertTriangle size={16} />
