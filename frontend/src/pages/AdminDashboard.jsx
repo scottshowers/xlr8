@@ -112,8 +112,8 @@ export default function AdminDashboard() {
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-green-100 rounded-lg">
-                <Shield className="text-green-600" size={24} />
+              <div className="p-2 bg-[rgba(90,138,90,0.15)] rounded-lg">
+                <Shield className="text-[#5a8a5a]" size={24} />
               </div>
               <div>
                 <h1 className="text-xl font-bold text-gray-900">Learning Admin</h1>
@@ -131,7 +131,7 @@ export default function AdminDashboard() {
               </button>
               <button
                 onClick={() => exportData('all')}
-                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                className="flex items-center gap-2 px-4 py-2 bg-[#5a8a4a] text-white rounded-lg hover:bg-[#4a7a3a]"
               >
                 <Download size={18} />
                 Export All
@@ -150,7 +150,7 @@ export default function AdminDashboard() {
               onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-all ${
                 activeTab === tab.id
-                  ? 'bg-green-600 text-white'
+                  ? 'bg-[#5a8a4a] text-white'
                   : 'text-gray-600 hover:bg-gray-100'
               }`}
             >
@@ -163,7 +163,7 @@ export default function AdminDashboard() {
         {/* Content */}
         {loading ? (
           <div className="flex items-center justify-center py-20">
-            <RefreshCw className="animate-spin text-green-600" size={32} />
+            <RefreshCw className="animate-spin text-[#5a8a5a]" size={32} />
           </div>
         ) : (
           <>
@@ -258,10 +258,10 @@ function OverviewTab({ stats, learnedQueries, feedback, preferences }) {
   ]
 
   const colors = {
-    green: 'bg-green-100 text-green-600',
-    blue: 'bg-blue-100 text-blue-600',
-    teal: 'bg-teal-100 text-teal-600',
-    amber: 'bg-amber-100 text-amber-600',
+    green: 'bg-[rgba(90,138,90,0.15)] text-[#5a8a5a]',
+    blue: 'bg-[rgba(74,107,138,0.15)] text-[#4a6b8a]',
+    teal: 'bg-[rgba(74,122,122,0.15)] text-[#4a7a7a]',
+    amber: 'bg-[rgba(138,107,74,0.15)] text-[#8a6b4a]',
   }
 
   return (
@@ -288,7 +288,7 @@ function OverviewTab({ stats, learnedQueries, feedback, preferences }) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-xl p-6 border shadow-sm">
           <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
-            <TrendingUp className="text-green-500" size={20} />
+            <TrendingUp className="text-[#5a8a5a]" size={20} />
             Feedback Summary
           </h3>
           
@@ -296,8 +296,8 @@ function OverviewTab({ stats, learnedQueries, feedback, preferences }) {
             <div className="flex items-center justify-between">
               <span className="text-sm text-gray-600">Satisfaction Rate</span>
               <span className={`text-2xl font-bold ${
-                feedbackRate >= 80 ? 'text-green-600' : 
-                feedbackRate >= 60 ? 'text-amber-600' : 'text-red-600'
+                feedbackRate >= 80 ? 'text-[#5a8a5a]' : 
+                feedbackRate >= 60 ? 'text-[#8a6b4a]' : 'text-[#8a4a4a]'
               }`}>
                 {feedbackRate}%
               </span>
@@ -305,16 +305,16 @@ function OverviewTab({ stats, learnedQueries, feedback, preferences }) {
             
             <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
               <div 
-                className="h-full bg-gradient-to-r from-green-500 to-green-400 rounded-full"
+                className="h-full bg-[#5a8a5a] rounded-full"
                 style={{ width: `${feedbackRate}%` }}
               />
             </div>
             
             <div className="flex justify-between text-sm">
-              <span className="flex items-center gap-1 text-green-600">
+              <span className="flex items-center gap-1 text-[#5a8a5a]">
                 <ThumbsUp size={14} /> {positiveCount} positive
               </span>
-              <span className="flex items-center gap-1 text-red-600">
+              <span className="flex items-center gap-1 text-[#8a4a4a]">
                 <ThumbsDown size={14} /> {negativeCount} negative
               </span>
             </div>
@@ -323,28 +323,28 @@ function OverviewTab({ stats, learnedQueries, feedback, preferences }) {
 
         <div className="bg-white rounded-xl p-6 border shadow-sm">
           <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
-            <Brain className="text-green-500" size={20} />
+            <Brain className="text-[#5a8a5a]" size={20} />
             Learning Progress
           </h3>
           
           <div className="space-y-3">
             <div className="flex items-center justify-between text-sm">
               <span className="text-gray-600">Queries that skip clarification</span>
-              <span className="font-medium text-green-600">
+              <span className="font-medium text-[#5a8a5a]">
                 {preferences.filter(p => p.confidence >= 0.7).length} ready
               </span>
             </div>
             
             <div className="flex items-center justify-between text-sm">
               <span className="text-gray-600">High-confidence patterns</span>
-              <span className="font-medium text-green-600">
+              <span className="font-medium text-[#5a8a5a]">
                 {learnedQueries.filter(q => q.avg_feedback >= 0.5).length} patterns
               </span>
             </div>
             
             <div className="flex items-center justify-between text-sm">
               <span className="text-gray-600">Patterns needing more data</span>
-              <span className="font-medium text-amber-600">
+              <span className="font-medium text-[#8a6b4a]">
                 {learnedQueries.filter(q => q.use_count < 3).length} patterns
               </span>
             </div>
@@ -360,8 +360,8 @@ function OverviewTab({ stats, learnedQueries, feedback, preferences }) {
           {learnedQueries.slice(0, 5).map((query, i) => (
             <div key={i} className="flex items-center justify-between py-2 border-b last:border-0">
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-green-50 rounded-lg">
-                  <Brain className="text-green-500" size={16} />
+                <div className="p-2 bg-[rgba(90,138,90,0.1)] rounded-lg">
+                  <Brain className="text-[#5a8a5a]" size={16} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-900 truncate max-w-md">
@@ -374,9 +374,9 @@ function OverviewTab({ stats, learnedQueries, feedback, preferences }) {
               </div>
               <div className="flex items-center gap-2">
                 {query.avg_feedback >= 0 ? (
-                  <span className="text-green-500"><ThumbsUp size={14} /></span>
+                  <span className="text-[#5a8a5a]"><ThumbsUp size={14} /></span>
                 ) : (
-                  <span className="text-red-500"><ThumbsDown size={14} /></span>
+                  <span className="text-[#8a4a4a]"><ThumbsDown size={14} /></span>
                 )}
                 <span className="text-xs text-gray-400">
                   {new Date(query.created_at).toLocaleDateString()}
@@ -425,7 +425,7 @@ function QueriesTab({ queries, onDelete, onExport }) {
         </div>
         <button
           onClick={onExport}
-          className="flex items-center gap-2 px-4 py-2 text-green-600 hover:bg-green-50 rounded-lg"
+          className="flex items-center gap-2 px-4 py-2 text-[#5a8a5a] hover:bg-[rgba(90,138,90,0.1)] rounded-lg"
         >
           <Download size={18} />
           Export
@@ -463,7 +463,7 @@ function QueriesTab({ queries, onDelete, onExport }) {
                   )}
                 </td>
                 <td className="px-4 py-3">
-                  <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full">
+                  <span className="px-2 py-1 bg-[rgba(90,138,90,0.15)] text-[#4a6a4a] text-xs rounded-full">
                     {query.semantic_domain || 'general'}
                   </span>
                 </td>
@@ -472,8 +472,8 @@ function QueriesTab({ queries, onDelete, onExport }) {
                 </td>
                 <td className="px-4 py-3 text-center">
                   <span className={`text-sm font-medium ${
-                    query.avg_feedback >= 0.5 ? 'text-green-600' :
-                    query.avg_feedback >= 0 ? 'text-gray-600' : 'text-red-600'
+                    query.avg_feedback >= 0.5 ? 'text-[#5a8a5a]' :
+                    query.avg_feedback >= 0 ? 'text-gray-600' : 'text-[#8a4a4a]'
                   }`}>
                     {query.avg_feedback >= 0 ? '+' : ''}{query.avg_feedback?.toFixed(1) || '0'}
                   </span>
@@ -481,7 +481,7 @@ function QueriesTab({ queries, onDelete, onExport }) {
                 <td className="px-4 py-3 text-right">
                   <button
                     onClick={() => onDelete(query.id)}
-                    className="p-1 text-red-500 hover:bg-red-50 rounded"
+                    className="p-1 text-[#8a4a4a] hover:bg-[rgba(138,74,74,0.1)] rounded"
                     title="Delete"
                   >
                     <Trash2 size={16} />
@@ -523,9 +523,9 @@ function FeedbackTab({ feedback, onDelete }) {
             onClick={() => setFilter(f)}
             className={`px-4 py-2 rounded-lg text-sm font-medium ${
               filter === f
-                ? f === 'positive' ? 'bg-green-100 text-green-700' :
-                  f === 'negative' ? 'bg-red-100 text-red-700' :
-                  'bg-green-100 text-green-700'
+                ? f === 'positive' ? 'bg-[rgba(90,138,90,0.15)] text-[#4a6a4a]' :
+                  f === 'negative' ? 'bg-[rgba(138,74,74,0.15)] text-[#6a3a3a]' :
+                  'bg-[rgba(90,138,90,0.15)] text-[#4a6a4a]'
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
             }`}
           >
@@ -544,11 +544,11 @@ function FeedbackTab({ feedback, onDelete }) {
               <div className="flex items-start justify-between">
                 <div className="flex items-start gap-3">
                   <div className={`p-2 rounded-lg ${
-                    item.feedback === 'positive' ? 'bg-green-100' : 'bg-red-100'
+                    item.feedback === 'positive' ? 'bg-[rgba(90,138,90,0.15)]' : 'bg-[rgba(138,74,74,0.15)]'
                   }`}>
                     {item.feedback === 'positive' 
-                      ? <ThumbsUp className="text-green-600" size={16} />
-                      : <ThumbsDown className="text-red-600" size={16} />
+                      ? <ThumbsUp className="text-[#5a8a5a]" size={16} />
+                      : <ThumbsDown className="text-[#8a4a4a]" size={16} />
                     }
                   </div>
                   <div>
@@ -560,7 +560,7 @@ function FeedbackTab({ feedback, onDelete }) {
                       {item.was_intelligent_mode && (
                         <>
                           <span>•</span>
-                          <span className="text-green-600">🧠 Intelligent</span>
+                          <span className="text-[#5a8a5a]">🧠 Intelligent</span>
                         </>
                       )}
                     </div>
@@ -568,7 +568,7 @@ function FeedbackTab({ feedback, onDelete }) {
                 </div>
                 <button
                   onClick={() => onDelete(item.id)}
-                  className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded"
+                  className="p-1 text-gray-400 hover:text-[#8a4a4a] hover:bg-[rgba(138,74,74,0.1)] rounded"
                 >
                   <Trash2 size={16} />
                 </button>
@@ -614,12 +614,12 @@ function PreferencesTab({ preferences, onDelete }) {
               <div key={pref.id} className="p-4 flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="px-2 py-1 bg-blue-100 text-blue-700 text-sm rounded">
+                    <span className="px-2 py-1 bg-[rgba(74,107,138,0.15)] text-[#3a5a7a] text-sm rounded">
                       {pref.preference_value}
                     </span>
                     <span className={`text-xs ${
-                      pref.confidence >= 0.8 ? 'text-green-600' : 
-                      pref.confidence >= 0.5 ? 'text-amber-600' : 'text-gray-500'
+                      pref.confidence >= 0.8 ? 'text-[#5a8a5a]' : 
+                      pref.confidence >= 0.5 ? 'text-[#8a6b4a]' : 'text-gray-500'
                     }`}>
                       {(pref.confidence * 100).toFixed(0)}% confident
                     </span>
@@ -631,7 +631,7 @@ function PreferencesTab({ preferences, onDelete }) {
                 </div>
                 <button
                   onClick={() => onDelete(pref.id)}
-                  className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded"
+                  className="p-1 text-gray-400 hover:text-[#8a4a4a] hover:bg-[rgba(138,74,74,0.1)] rounded"
                 >
                   <Trash2 size={16} />
                 </button>
@@ -687,14 +687,14 @@ function ClarificationsTab({ patterns, onDelete }) {
                     </div>
                     <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                       <div 
-                        className="h-full bg-green-500 rounded-full"
+                        className="h-full bg-[#5a8a5a] rounded-full"
                         style={{ width: `${opt.choice_rate * 100}%` }}
                       />
                     </div>
                   </div>
                   <button
                     onClick={() => onDelete(opt.id)}
-                    className="p-1 text-gray-400 hover:text-red-500"
+                    className="p-1 text-gray-400 hover:text-[#8a4a4a]"
                   >
                     <Trash2 size={14} />
                   </button>
@@ -773,7 +773,7 @@ function MappingsTab({ mappings, onDelete, onRefresh }) {
                   </code>
                 </td>
                 <td className="px-4 py-3">
-                  <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full">
+                  <span className="px-2 py-1 bg-[rgba(90,138,90,0.15)] text-[#4a6a4a] text-xs rounded-full">
                     {mapping.semantic_type || 'unknown'}
                   </span>
                 </td>
@@ -785,7 +785,7 @@ function MappingsTab({ mappings, onDelete, onRefresh }) {
                 <td className="px-4 py-3 text-right">
                   <button
                     onClick={() => onDelete(mapping.id)}
-                    className="p-1 text-red-500 hover:bg-red-50 rounded"
+                    className="p-1 text-[#8a4a4a] hover:bg-[rgba(138,74,74,0.1)] rounded"
                     title="Delete"
                   >
                     <Trash2 size={16} />
