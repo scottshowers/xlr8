@@ -1,56 +1,69 @@
 /**
- * Vacuum Upload Page - Pay Register Extraction v12
- * 
- * Privacy-First Features:
- * - PyMuPDF (local extraction) as DEFAULT
- * - Textract toggle for scanned PDFs
- * - PII redaction indicator
- * - Async job polling with progress bar
- * - Full employee data with details
- * - XLSX Export
- * - Summary by Earnings/Taxes/Deductions type
- * 
- * Deploy to: frontend/src/pages/VacuumUploadPage.jsx
+ * VacuumUploadPage - Pay Register Extraction
+ * Theme-aware with muted professional colors
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Upload, FileText, Users, DollarSign, CheckCircle, XCircle, 
   Loader2, Trash2, Eye, AlertTriangle, ChevronDown, ChevronRight,
-  Shield, Cloud, Lock, Download, BarChart3, Wand2, HelpCircle,
+  Shield, Cloud, Lock, Download, BarChart3, Wand2,
   Maximize2, Minimize2
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import ConsultantAssist from '../components/ConsultantAssist';
 import { useProject } from '../context/ProjectContext';
+import { useTheme } from '../context/ThemeContext';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
+const getColors = (dark) => ({
+  bg: dark ? '#1a1f2e' : '#f5f7fa',
+  card: dark ? '#242b3d' : '#ffffff',
+  cardBorder: dark ? '#2d3548' : '#e8ecf1',
+  text: dark ? '#e8eaed' : '#2a3441',
+  textMuted: dark ? '#8b95a5' : '#6b7280',
+  textLight: dark ? '#5f6a7d' : '#9ca3af',
+  primary: '#5a8a4a',
+  primaryHover: '#4a7a3a',
+  primaryLight: dark ? 'rgba(90, 138, 74, 0.15)' : 'rgba(90, 138, 74, 0.1)',
+  blue: '#4a6b8a',
+  blueLight: dark ? 'rgba(74, 107, 138, 0.15)' : 'rgba(74, 107, 138, 0.1)',
+  amber: '#8a6b4a',
+  amberLight: dark ? 'rgba(138, 107, 74, 0.15)' : 'rgba(138, 107, 74, 0.1)',
+  red: '#8a4a4a',
+  redLight: dark ? 'rgba(138, 74, 74, 0.15)' : 'rgba(138, 74, 74, 0.1)',
+  green: '#5a8a5a',
+  greenLight: dark ? 'rgba(90, 138, 90, 0.15)' : 'rgba(90, 138, 90, 0.1)',
+  divider: dark ? '#2d3548' : '#e8ecf1',
+  inputBg: dark ? '#1a1f2e' : '#f8fafc',
+  tableHeader: dark ? '#1e2433' : '#f9fafb',
+  tableHover: dark ? 'rgba(90, 138, 74, 0.08)' : 'rgba(90, 138, 74, 0.05)',
+});
+
 export default function VacuumUploadPage() {
-  // Use project from context (no local selector)
   const { activeProject } = useProject();
+  const { darkMode } = useTheme();
+  const colors = getColors(darkMode);
   
-  // State
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState(null);
   const [extracts, setExtracts] = useState([]);
   const [selectedExtract, setSelectedExtract] = useState(null);
   const [error, setError] = useState(null);
-  const [maxPages, setMaxPages] = useState(0); // 0 = all pages
-  const [useTextract, setUseTextract] = useState(false); // PyMuPDF is default
-  const [vendorType, setVendorType] = useState('unknown'); // auto-detect by default
-  const [activeTab, setActiveTab] = useState('employees'); // 'employees' or 'summary'
-  const [historyTab, setHistoryTab] = useState('employees'); // for Extract Details panel
-  const [expandedDetails, setExpandedDetails] = useState(false); // full-width mode for details
-  const [showAssist, setShowAssist] = useState(false); // Consultant Assist modal
+  const [maxPages, setMaxPages] = useState(0);
+  const [useTextract, setUseTextract] = useState(false);
+  const [vendorType, setVendorType] = useState('unknown');
+  const [activeTab, setActiveTab] = useState('employees');
+  const [historyTab, setHistoryTab] = useState('employees');
+  const [expandedDetails, setExpandedDetails] = useState(false);
+  const [showAssist, setShowAssist] = useState(false);
   
-  // Job polling state
   const [jobId, setJobId] = useState(null);
   const [jobStatus, setJobStatus] = useState(null);
   const pollIntervalRef = useRef(null);
 
-  // Load extraction history
   const loadExtracts = useCallback(async () => {
     try {
       const url = activeProject?.id 
@@ -64,17 +77,12 @@ export default function VacuumUploadPage() {
     }
   }, [activeProject?.id]);
 
-  useEffect(() => {
-    loadExtracts();
-  }, [loadExtracts]);
+  useEffect(() => { loadExtracts(); }, [loadExtracts]);
 
-  // Poll job status
   const pollJobStatus = useCallback(async (id) => {
     try {
       const res = await fetch(`${API_BASE}/api/vacuum/job/${id}`);
-      if (!res.ok) {
-        throw new Error('Job not found');
-      }
+      if (!res.ok) throw new Error('Job not found');
       const data = await res.json();
       setJobStatus(data);
       
@@ -82,22 +90,16 @@ export default function VacuumUploadPage() {
         clearInterval(pollIntervalRef.current);
         setUploading(false);
         setJobId(null);
-        if (data.result) {
-          setResult(data.result);
-          loadExtracts();
-        }
+        if (data.result) { setResult(data.result); loadExtracts(); }
       } else if (data.status === 'failed') {
         clearInterval(pollIntervalRef.current);
         setUploading(false);
         setJobId(null);
         setError(data.message || 'Extraction failed');
       }
-    } catch (err) {
-      console.error('Poll failed:', err);
-    }
+    } catch (err) { console.error('Poll failed:', err); }
   }, [loadExtracts]);
 
-  // Start polling when job is created
   useEffect(() => {
     if (jobId) {
       pollIntervalRef.current = setInterval(() => pollJobStatus(jobId), 1000);
@@ -105,21 +107,11 @@ export default function VacuumUploadPage() {
     }
   }, [jobId, pollJobStatus]);
 
-  // Handle file upload
   const handleUpload = async () => {
-    if (!file) {
-      setError('Please select a file');
-      return;
-    }
-    if (!activeProject) {
-      setError('Please select a project from the header');
-      return;
-    }
+    if (!file) { setError('Please select a file'); return; }
+    if (!activeProject) { setError('Please select a project from the header'); return; }
     
-    setUploading(true);
-    setError(null);
-    setResult(null);
-    setJobStatus(null);
+    setUploading(true); setError(null); setResult(null); setJobStatus(null);
     
     try {
       const formData = new FormData();
@@ -130,103 +122,63 @@ export default function VacuumUploadPage() {
       formData.append('vendor_type', vendorType);
       formData.append('async_mode', 'true');
       
-      const res = await fetch(`${API_BASE}/api/vacuum/upload`, {
-        method: 'POST',
-        body: formData
-      });
-      
+      const res = await fetch(`${API_BASE}/api/vacuum/upload`, { method: 'POST', body: formData });
       const data = await res.json();
       
-      if (!res.ok) {
-        throw new Error(data.detail || 'Upload failed');
-      }
+      if (!res.ok) throw new Error(data.detail || 'Upload failed');
       
       if (data.job_id) {
-        // Async mode - start polling
         setJobId(data.job_id);
         setJobStatus({ status: 'processing', progress: 0, message: 'Starting...' });
       } else {
-        // Sync mode - result is immediate
-        setResult(data);
-        setUploading(false);
-        loadExtracts();
+        setResult(data); setUploading(false); loadExtracts();
       }
-      
-    } catch (err) {
-      setError(err.message);
-      setUploading(false);
-    }
+    } catch (err) { setError(err.message); setUploading(false); }
   };
 
-  // Load full extraction details
   const viewExtract = async (id) => {
     try {
       const res = await fetch(`${API_BASE}/api/vacuum/extract/${id}`);
       const data = await res.json();
       setSelectedExtract(data);
-    } catch (err) {
-      console.error('Failed to load extract:', err);
-    }
+    } catch (err) { console.error('Failed to load extract:', err); }
   };
 
-  // Delete extraction
   const deleteExtract = async (id) => {
     if (!confirm('Delete this extraction?')) return;
-    
     try {
       await fetch(`${API_BASE}/api/vacuum/extract/${id}`, { method: 'DELETE' });
       loadExtracts();
-      if (selectedExtract?.id === id) {
-        setSelectedExtract(null);
-      }
-    } catch (err) {
-      console.error('Failed to delete:', err);
-    }
+      if (selectedExtract?.id === id) setSelectedExtract(null);
+    } catch (err) { console.error('Failed to delete:', err); }
   };
 
-  // Calculate summary data from employees
   const calculateSummary = (employees) => {
-    if (!employees?.length) return { earnings: [], taxes: [], deductions: [] };
+    if (!employees?.length) return { earnings: [], taxes: [], deductions: [], totals: { grossPay: 0, netPay: 0, totalTaxes: 0, totalDeductions: 0 } };
     
     const earningsMap = new Map();
     const taxesMap = new Map();
     const deductionsMap = new Map();
     
     employees.forEach(emp => {
-      // Earnings
       (emp.earnings || []).forEach(e => {
         const key = e.type || e.description || 'Other';
         const existing = earningsMap.get(key) || { total: 0, count: 0 };
-        earningsMap.set(key, { 
-          total: existing.total + (e.amount || 0), 
-          count: existing.count + 1 
-        });
+        earningsMap.set(key, { total: existing.total + (e.amount || 0), count: existing.count + 1 });
       });
-      
-      // Taxes
       (emp.taxes || []).forEach(t => {
         const key = t.type || t.description || 'Other';
         const existing = taxesMap.get(key) || { total: 0, count: 0 };
-        taxesMap.set(key, { 
-          total: existing.total + (t.amount || 0), 
-          count: existing.count + 1 
-        });
+        taxesMap.set(key, { total: existing.total + (t.amount || 0), count: existing.count + 1 });
       });
-      
-      // Deductions
       (emp.deductions || []).forEach(d => {
         const key = d.type || d.description || 'Other';
         const existing = deductionsMap.get(key) || { total: 0, count: 0 };
-        deductionsMap.set(key, { 
-          total: existing.total + (d.amount || 0), 
-          count: existing.count + 1 
-        });
+        deductionsMap.set(key, { total: existing.total + (d.amount || 0), count: existing.count + 1 });
       });
     });
     
-    const mapToArray = (map) => Array.from(map.entries())
-      .map(([description, data]) => ({ description, ...data }))
-      .sort((a, b) => b.total - a.total);
+    const mapToArray = (map) => Array.from(map.entries()).map(([description, data]) => ({ description, ...data })).sort((a, b) => b.total - a.total);
     
     return {
       earnings: mapToArray(earningsMap),
@@ -241,266 +193,146 @@ export default function VacuumUploadPage() {
     };
   };
 
-  // Export to XLSX
   const exportToXLSX = (employees, filename = 'pay_extract') => {
     if (!employees?.length) return;
-    
     const summary = calculateSummary(employees);
     const wb = XLSX.utils.book_new();
     
-    // Sheet 1: Employee Summary (with demographics)
     const empData = employees.map(emp => ({
-      'Company': emp.company_name || '',
-      'Client Code': emp.client_code || '',
-      'Pay Period Start': emp.pay_period_start || '',
-      'Pay Period End': emp.pay_period_end || '',
-      'Check Date': emp.check_date || '',
-      'Name': emp.name || '',
-      'Employee ID': emp.employee_id || '',
-      'Department': emp.department || '',
-      'Status': emp.status || '',
-      'Hire Date': emp.hire_date || '',
-      'Term Date': emp.term_date || '',
-      'Employee Type': emp.employee_type || '',
-      'Pay Frequency': emp.pay_frequency || '',
-      'Hourly Rate': emp.hourly_rate || '',
-      'Salary': emp.salary || '',
-      'Resident State': emp.resident_state || '',
-      'Work State': emp.work_state || '',
-      'Federal Filing Status': emp.federal_filing_status || '',
-      'State Filing Status': emp.state_filing_status || '',
-      'Tax Profile': emp.tax_profile || '',
-      'Gross Pay': emp.gross_pay || 0,
-      'Total Taxes': emp.total_taxes || 0,
-      'Total Deductions': emp.total_deductions || 0,
-      'Net Pay': emp.net_pay || 0,
-      'Pay Method': emp.pay_method || '',
-      'Check Number': emp.check_number || '',
+      'Company': emp.company_name || '', 'Client Code': emp.client_code || '',
+      'Pay Period Start': emp.pay_period_start || '', 'Pay Period End': emp.pay_period_end || '',
+      'Check Date': emp.check_date || '', 'Name': emp.name || '', 'Employee ID': emp.employee_id || '',
+      'Department': emp.department || '', 'Status': emp.status || '', 'Hire Date': emp.hire_date || '',
+      'Term Date': emp.term_date || '', 'Employee Type': emp.employee_type || '',
+      'Pay Frequency': emp.pay_frequency || '', 'Hourly Rate': emp.hourly_rate || '',
+      'Salary': emp.salary || '', 'Resident State': emp.resident_state || '',
+      'Work State': emp.work_state || '', 'Federal Filing Status': emp.federal_filing_status || '',
+      'State Filing Status': emp.state_filing_status || '', 'Tax Profile': emp.tax_profile || '',
+      'Gross Pay': emp.gross_pay || 0, 'Total Taxes': emp.total_taxes || 0,
+      'Total Deductions': emp.total_deductions || 0, 'Net Pay': emp.net_pay || 0,
+      'Pay Method': emp.pay_method || '', 'Check Number': emp.check_number || '',
       'Valid': emp.is_valid ? 'Yes' : 'No'
     }));
-    const empSheet = XLSX.utils.json_to_sheet(empData);
-    XLSX.utils.book_append_sheet(wb, empSheet, 'Employees');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(empData), 'Employees');
     
-    // Sheet 2: Earnings Detail (each earning by employee with YTD)
     const earningsDetail = [];
     employees.forEach(emp => {
       (emp.earnings || []).forEach(e => {
         earningsDetail.push({
-          'Company': emp.company_name || '',
-          'Period Ending': emp.period_ending || '',
-          'Check Date': emp.check_date || '',
-          'Employee': emp.name || '',
-          'Employee ID': emp.employee_id || '',
-          'Department': emp.department || '',
-          'Earning Code': e.type || e.code || '',
-          'Description': e.description || '',
-          'Hours': e.hours || '',
-          'Rate': e.rate || '',
-          'Amount': e.amount || 0,
-          'Hours YTD': e.hours_ytd || '',
-          'Amount YTD': e.amount_ytd || ''
+          'Company': emp.company_name || '', 'Period Ending': emp.period_ending || '',
+          'Check Date': emp.check_date || '', 'Employee': emp.name || '',
+          'Employee ID': emp.employee_id || '', 'Department': emp.department || '',
+          'Earning Code': e.type || e.code || '', 'Description': e.description || '',
+          'Hours': e.hours || '', 'Rate': e.rate || '', 'Amount': e.amount || 0,
+          'Hours YTD': e.hours_ytd || '', 'Amount YTD': e.amount_ytd || ''
         });
       });
     });
-    const earningsDetailSheet = XLSX.utils.json_to_sheet(earningsDetail);
-    XLSX.utils.book_append_sheet(wb, earningsDetailSheet, 'Earnings');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(earningsDetail), 'Earnings');
     
-    // Sheet 3: Deductions Detail (each deduction by employee with YTD)
     const deductionsDetail = [];
     employees.forEach(emp => {
       (emp.deductions || []).forEach(d => {
         deductionsDetail.push({
-          'Company': emp.company_name || '',
-          'Period Ending': emp.period_ending || '',
-          'Check Date': emp.check_date || '',
-          'Employee': emp.name || '',
-          'Employee ID': emp.employee_id || '',
-          'Department': emp.department || '',
-          'Deduction Code': d.type || d.code || '',
-          'Description': d.description || '',
+          'Company': emp.company_name || '', 'Period Ending': emp.period_ending || '',
+          'Check Date': emp.check_date || '', 'Employee': emp.name || '',
+          'Employee ID': emp.employee_id || '', 'Department': emp.department || '',
+          'Deduction Code': d.type || d.code || '', 'Description': d.description || '',
           'Category': d.is_employer ? 'Employer' : (d.category || 'Employee'),
-          'Amount': d.amount || 0,
-          'Amount YTD': d.amount_ytd || ''
+          'Amount': d.amount || 0, 'Amount YTD': d.amount_ytd || ''
         });
       });
     });
-    const deductionsDetailSheet = XLSX.utils.json_to_sheet(deductionsDetail);
-    XLSX.utils.book_append_sheet(wb, deductionsDetailSheet, 'Deductions');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(deductionsDetail), 'Deductions');
     
-    // Sheet 4: Taxes Detail (each tax by employee with YTD)
     const taxesDetail = [];
     employees.forEach(emp => {
       (emp.taxes || []).forEach(t => {
         taxesDetail.push({
-          'Company': emp.company_name || '',
-          'Period Ending': emp.period_ending || '',
-          'Check Date': emp.check_date || '',
-          'Employee': emp.name || '',
-          'Employee ID': emp.employee_id || '',
-          'Department': emp.department || '',
-          'Tax Code': t.type || t.code || '',
-          'Description': t.description || '',
-          'EE/ER': t.is_employer ? 'Employer' : 'Employee',
-          'Amount': t.amount || 0,
-          'Taxable Wages': t.taxable_wages || '',
-          'Amount YTD': t.amount_ytd || '',
+          'Company': emp.company_name || '', 'Period Ending': emp.period_ending || '',
+          'Check Date': emp.check_date || '', 'Employee': emp.name || '',
+          'Employee ID': emp.employee_id || '', 'Department': emp.department || '',
+          'Tax Code': t.type || t.code || '', 'Description': t.description || '',
+          'EE/ER': t.is_employer ? 'Employer' : 'Employee', 'Amount': t.amount || 0,
+          'Taxable Wages': t.taxable_wages || '', 'Amount YTD': t.amount_ytd || '',
           'Taxable Wages YTD': t.taxable_wages_ytd || ''
         });
       });
     });
-    const taxesDetailSheet = XLSX.utils.json_to_sheet(taxesDetail);
-    XLSX.utils.book_append_sheet(wb, taxesDetailSheet, 'Taxes');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(taxesDetail), 'Taxes');
     
-    // Sheet 5: Summary (all rollups on one sheet)
     const summaryData = [];
-    
-    // Earnings section
     summaryData.push({ 'Category': 'EARNINGS', 'Code': '', 'Total Amount': '', 'Employee Count': '' });
-    summary.earnings.forEach(e => {
-      summaryData.push({
-        'Category': '',
-        'Code': e.description,
-        'Total Amount': e.total,
-        'Employee Count': e.count
-      });
-    });
+    summary.earnings.forEach(e => summaryData.push({ 'Category': '', 'Code': e.description, 'Total Amount': e.total, 'Employee Count': e.count }));
     summaryData.push({ 'Category': '', 'Code': 'EARNINGS TOTAL', 'Total Amount': summary.totals.grossPay, 'Employee Count': '' });
     summaryData.push({ 'Category': '', 'Code': '', 'Total Amount': '', 'Employee Count': '' });
-    
-    // Taxes section
     summaryData.push({ 'Category': 'TAXES', 'Code': '', 'Total Amount': '', 'Employee Count': '' });
-    summary.taxes.forEach(t => {
-      summaryData.push({
-        'Category': '',
-        'Code': t.description,
-        'Total Amount': t.total,
-        'Employee Count': t.count
-      });
-    });
+    summary.taxes.forEach(t => summaryData.push({ 'Category': '', 'Code': t.description, 'Total Amount': t.total, 'Employee Count': t.count }));
     summaryData.push({ 'Category': '', 'Code': 'TAXES TOTAL', 'Total Amount': summary.totals.totalTaxes, 'Employee Count': '' });
     summaryData.push({ 'Category': '', 'Code': '', 'Total Amount': '', 'Employee Count': '' });
-    
-    // Deductions section
     summaryData.push({ 'Category': 'DEDUCTIONS', 'Code': '', 'Total Amount': '', 'Employee Count': '' });
-    summary.deductions.forEach(d => {
-      summaryData.push({
-        'Category': '',
-        'Code': d.description,
-        'Total Amount': d.total,
-        'Employee Count': d.count
-      });
-    });
+    summary.deductions.forEach(d => summaryData.push({ 'Category': '', 'Code': d.description, 'Total Amount': d.total, 'Employee Count': d.count }));
     summaryData.push({ 'Category': '', 'Code': 'DEDUCTIONS TOTAL', 'Total Amount': summary.totals.totalDeductions, 'Employee Count': '' });
     summaryData.push({ 'Category': '', 'Code': '', 'Total Amount': '', 'Employee Count': '' });
-    
-    // Grand totals
     summaryData.push({ 'Category': 'GRAND TOTALS', 'Code': '', 'Total Amount': '', 'Employee Count': '' });
     summaryData.push({ 'Category': '', 'Code': 'Total Gross Pay', 'Total Amount': summary.totals.grossPay, 'Employee Count': employees.length });
     summaryData.push({ 'Category': '', 'Code': 'Total Taxes', 'Total Amount': summary.totals.totalTaxes, 'Employee Count': '' });
     summaryData.push({ 'Category': '', 'Code': 'Total Deductions', 'Total Amount': summary.totals.totalDeductions, 'Employee Count': '' });
     summaryData.push({ 'Category': '', 'Code': 'Total Net Pay', 'Total Amount': summary.totals.netPay, 'Employee Count': '' });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryData), 'Summary');
     
-    const summarySheet = XLSX.utils.json_to_sheet(summaryData);
-    XLSX.utils.book_append_sheet(wb, summarySheet, 'Summary');
-    
-    // Download
     const timestamp = new Date().toISOString().split('T')[0];
     XLSX.writeFile(wb, `${filename}_${timestamp}.xlsx`);
   };
 
-  // Calculate cost estimate
-  const estimatedCost = useTextract 
-    ? ((maxPages || 50) * 0.015 + 0.05).toFixed(2)
-    : '0.05'; // PyMuPDF is free, only Claude cost
+  const estimatedCost = useTextract ? ((maxPages || 50) * 0.015 + 0.05).toFixed(2) : '0.05';
+
+  const inputStyle = { width: '100%', padding: '0.5rem 0.75rem', border: `1px solid ${colors.divider}`, borderRadius: 6, background: colors.inputBg, color: colors.text, fontSize: '0.9rem' };
+  const labelStyle = { display: 'block', fontSize: '0.85rem', fontWeight: 500, color: colors.text, marginBottom: '0.25rem' };
+  const cardStyle = { background: colors.card, border: `1px solid ${colors.cardBorder}`, borderRadius: 12, padding: '1.5rem', marginBottom: '1.5rem', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">
-          Pay Register Extraction
-        </h1>
-        <p className="text-gray-600 mb-6">
-          Upload pay registers to extract employee data using AI-powered parsing
-        </p>
+    <div style={{ minHeight: '100vh', background: colors.bg, padding: '1.5rem' }}>
+      <div style={{ maxWidth: 1400, margin: '0 auto' }}>
+        <h1 style={{ fontSize: '1.75rem', fontWeight: 700, color: colors.text, marginBottom: '0.5rem' }}>Pay Register Extraction</h1>
+        <p style={{ color: colors.textMuted, marginBottom: '1.5rem' }}>Upload pay registers to extract employee data using AI-powered parsing</p>
         
         {/* Upload Section */}
-        <div className="bg-white rounded-lg shadow p-6 mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold">Upload Pay Register</h2>
-            
-            {/* Privacy Badge */}
-            <div className="flex items-center gap-2 text-sm">
-              <div className={`flex items-center gap-1 px-3 py-1 rounded-full ${
-                useTextract 
-                  ? 'bg-yellow-100 text-yellow-800' 
-                  : 'bg-green-100 text-green-800'
-              }`}>
-                {useTextract ? (
-                  <><Cloud className="w-4 h-4" /> AWS Processing</>
-                ) : (
-                  <><Lock className="w-4 h-4" /> Local Processing</>
-                )}
-              </div>
+        <div style={cardStyle}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+            <h2 style={{ fontSize: '1.1rem', fontWeight: 600, color: colors.text }}>Upload Pay Register</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', padding: '0.35rem 0.75rem', borderRadius: 20, background: useTextract ? colors.amberLight : colors.greenLight, color: useTextract ? colors.amber : colors.green }}>
+              {useTextract ? <><Cloud size={14} /> AWS Processing</> : <><Lock size={14} /> Local Processing</>}
             </div>
           </div>
           
-          <div className="grid md:grid-cols-4 gap-4 mb-4">
-            {/* Current Project Badge */}
-            {activeProject ? (
-              <div className="md:col-span-4 mb-2">
-                <div className="inline-flex items-center gap-2 px-3 py-2 bg-green-50 border border-green-200 rounded-lg">
-                  <span className="text-green-600">📁</span>
-                  <span className="font-semibold text-green-800">{activeProject.name}</span>
-                  <span className="text-green-600 text-sm">{activeProject.customer}</span>
-                </div>
-              </div>
-            ) : (
-              <div className="md:col-span-4 mb-2">
-                <div className="inline-flex items-center gap-2 px-3 py-2 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800">
-                  <AlertTriangle className="w-4 h-4" />
-                  <span>Select a project from the header to continue</span>
-                </div>
-              </div>
-            )}
-            
-            {/* File Input */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                PDF File <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="file"
-                accept=".pdf"
-                onChange={(e) => setFile(e.target.files?.[0] || null)}
-                className="w-full border rounded-lg px-3 py-2 text-sm"
-              />
+          {/* Project Badge */}
+          {activeProject ? (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.75rem', background: colors.greenLight, border: `1px solid ${colors.green}40`, borderRadius: 8, marginBottom: '1rem' }}>
+              <span style={{ color: colors.green }}>📁</span>
+              <span style={{ fontWeight: 600, color: colors.green }}>{activeProject.name}</span>
+              <span style={{ color: colors.green, fontSize: '0.85rem' }}>{activeProject.customer}</span>
             </div>
-            
-            {/* Max Pages */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Pages (0 = all)
-              </label>
-              <input
-                type="number"
-                value={maxPages}
-                onChange={(e) => setMaxPages(parseInt(e.target.value) || 0)}
-                min={0}
-                max={2000}
-                className="w-full border rounded-lg px-3 py-2"
-              />
+          ) : (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.75rem', background: colors.amberLight, border: `1px solid ${colors.amber}40`, borderRadius: 8, marginBottom: '1rem', color: colors.amber }}>
+              <AlertTriangle size={16} />
+              <span>Select a project from the header to continue</span>
             </div>
-            
-            {/* Vendor Type */}
+          )}
+          
+          {/* Form Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '1rem' }}>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Vendor
-              </label>
-              <select
-                value={vendorType}
-                onChange={(e) => setVendorType(e.target.value)}
-                className="w-full border rounded-lg px-3 py-2"
-              >
+              <label style={labelStyle}>PDF File <span style={{ color: colors.red }}>*</span></label>
+              <input type="file" accept=".pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} style={inputStyle} />
+            </div>
+            <div>
+              <label style={labelStyle}>Pages (0 = all)</label>
+              <input type="number" value={maxPages} onChange={(e) => setMaxPages(parseInt(e.target.value) || 0)} min={0} max={2000} style={inputStyle} />
+            </div>
+            <div>
+              <label style={labelStyle}>Vendor</label>
+              <select value={vendorType} onChange={(e) => setVendorType(e.target.value)} style={inputStyle}>
                 <option value="unknown">🔍 Auto-Detect</option>
                 <option value="paycom">Paycom</option>
                 <option value="dayforce">Dayforce / Ceridian</option>
@@ -512,287 +344,146 @@ export default function VacuumUploadPage() {
                 <option value="quickbooks">QuickBooks</option>
               </select>
             </div>
-            
-            {/* OCR Method Toggle */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Extraction Method
-              </label>
-              <select
-                value={useTextract ? 'textract' : 'pymupdf'}
-                onChange={(e) => setUseTextract(e.target.value === 'textract')}
-                className="w-full border rounded-lg px-3 py-2"
-              >
+              <label style={labelStyle}>Extraction Method</label>
+              <select value={useTextract ? 'textract' : 'pymupdf'} onChange={(e) => setUseTextract(e.target.value === 'textract')} style={inputStyle}>
                 <option value="pymupdf">🔒 PyMuPDF (Local/Free)</option>
                 <option value="textract">☁️ Textract (Scanned PDFs)</option>
               </select>
             </div>
-            
-            {/* Upload Button */}
-            <div className="flex items-end">
-              <button
-                onClick={handleUpload}
-                disabled={!file || !activeProject || uploading}
-                className="w-full px-6 py-2 bg-[#83b16d] text-white rounded-lg hover:bg-[#6b9a57] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                {uploading ? (
-                  <><Loader2 className="w-4 h-4 animate-spin" /> Processing...</>
-                ) : (
-                  <><Upload className="w-4 h-4" /> Extract Data</>
-                )}
-              </button>
-            </div>
           </div>
           
+          {/* Upload Button */}
+          <button onClick={handleUpload} disabled={!file || !activeProject || uploading} style={{ padding: '0.6rem 1.5rem', background: (!file || !activeProject || uploading) ? colors.textMuted : colors.primary, color: 'white', border: 'none', borderRadius: 8, fontWeight: 600, cursor: (!file || !activeProject || uploading) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', opacity: (!file || !activeProject || uploading) ? 0.6 : 1 }}>
+            {uploading ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Processing...</> : <><Upload size={16} /> Extract Data</>}
+          </button>
+          
           {/* Method Info */}
-          <div className="flex items-center gap-4 text-sm text-gray-500 mb-3">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.8rem', color: colors.textMuted, marginTop: '0.75rem' }}>
             {useTextract ? (
               <>
-                <span className="flex items-center gap-1">
-                  <Cloud className="w-4 h-4" />
-                  AWS Textract (for scanned/image PDFs)
-                </span>
-                <span className="text-gray-300">|</span>
-                <span>
-                  Estimated cost: <strong>${estimatedCost}</strong>
-                </span>
-                <span className="text-gray-300">|</span>
-                <span className="text-yellow-600">
-                  ⚠️ Data sent to AWS for OCR
-                </span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}><Cloud size={14} /> AWS Textract (for scanned PDFs)</span>
+                <span style={{ color: colors.divider }}>|</span>
+                <span>Est. cost: <strong>${estimatedCost}</strong></span>
+                <span style={{ color: colors.divider }}>|</span>
+                <span style={{ color: colors.amber }}>⚠️ Data sent to AWS</span>
               </>
             ) : (
               <>
-                <span className="flex items-center gap-1 text-green-600">
-                  <Shield className="w-4 h-4" />
-                  PII Redacted before AI processing
-                </span>
-                <span className="text-gray-300">|</span>
-                <span>
-                  Cost: <strong>~$0.05</strong> (AI parsing only)
-                </span>
-                <span className="text-gray-300">|</span>
-                <span className="text-green-600">
-                  ✓ Privacy-compliant extraction
-                </span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: colors.green }}><Shield size={14} /> PII Redacted before AI</span>
+                <span style={{ color: colors.divider }}>|</span>
+                <span>Cost: <strong>~$0.05</strong></span>
+                <span style={{ color: colors.divider }}>|</span>
+                <span style={{ color: colors.green }}>✓ Privacy-compliant</span>
               </>
             )}
           </div>
           
-          {/* Progress Bar (when processing) */}
+          {/* Progress Bar */}
           {uploading && jobStatus && (
-            <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-blue-700">
-                  {jobStatus.message || 'Processing...'}
-                </span>
-                <span className="text-sm text-[#83b16d]">
-                  {jobStatus.current_page > 0 && jobStatus.total_pages > 0 
-                    ? `Page ${jobStatus.current_page} of ${jobStatus.total_pages}`
-                    : `${jobStatus.progress || 0}%`
-                  }
-                </span>
+            <div style={{ marginTop: '1rem', padding: '1rem', background: colors.blueLight, border: `1px solid ${colors.blue}40`, borderRadius: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                <span style={{ fontSize: '0.85rem', fontWeight: 500, color: colors.blue }}>{jobStatus.message || 'Processing...'}</span>
+                <span style={{ fontSize: '0.85rem', color: colors.primary }}>{jobStatus.current_page > 0 && jobStatus.total_pages > 0 ? `Page ${jobStatus.current_page} of ${jobStatus.total_pages}` : `${jobStatus.progress || 0}%`}</span>
               </div>
-              <div className="w-full bg-blue-200 rounded-full h-2">
-                <div 
-                  className="bg-[#83b16d] h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${jobStatus.progress || 0}%` }}
-                />
+              <div style={{ width: '100%', background: `${colors.blue}30`, borderRadius: 4, height: 8 }}>
+                <div style={{ width: `${jobStatus.progress || 0}%`, background: colors.primary, height: 8, borderRadius: 4, transition: 'width 0.3s ease' }} />
               </div>
             </div>
           )}
           
           {/* Error */}
           {error && (
-            <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5" />
-              {error}
+            <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', background: colors.redLight, border: `1px solid ${colors.red}40`, borderRadius: 8, color: colors.red, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <AlertTriangle size={18} /> {error}
             </div>
           )}
         </div>
         
         {/* Results Section */}
         {result && (
-          <div className="bg-white rounded-lg shadow p-6 mb-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold">Extraction Results</h2>
-              <div className="flex items-center gap-3">
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+              <h2 style={{ fontSize: '1.1rem', fontWeight: 600, color: colors.text }}>Extraction Results</h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 {result.pii_redacted > 0 && (
-                  <span className="text-sm text-green-600 flex items-center gap-1">
-                    <Shield className="w-4 h-4" /> {result.pii_redacted} PII redacted
-                  </span>
+                  <span style={{ fontSize: '0.85rem', color: colors.green, display: 'flex', alignItems: 'center', gap: '0.25rem' }}><Shield size={14} /> {result.pii_redacted} PII redacted</span>
                 )}
                 {result.saved_to_db && (
-                  <span className="text-sm text-green-600 flex items-center gap-1">
-                    <CheckCircle className="w-4 h-4" /> Saved
-                  </span>
+                  <span style={{ fontSize: '0.85rem', color: colors.green, display: 'flex', alignItems: 'center', gap: '0.25rem' }}><CheckCircle size={14} /> Saved</span>
                 )}
-                <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                  result.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                }`}>
+                <span style={{ padding: '0.25rem 0.75rem', borderRadius: 20, fontSize: '0.8rem', fontWeight: 600, background: result.success ? colors.greenLight : colors.redLight, color: result.success ? colors.green : colors.red }}>
                   {result.success ? 'Success' : 'Needs Review'}
                 </span>
               </div>
             </div>
             
-            {/* Summary Stats */}
-            <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
-              <StatCard 
-                icon={<Users className="w-5 h-5 text-[#83b16d]" />}
-                label="Employees"
-                value={result.employee_count}
-              />
-              <StatCard 
-                icon={<FileText className="w-5 h-5 text-[#83b16d]" />}
-                label="Pages"
-                value={result.pages_processed}
-              />
-              <StatCard 
-                icon={<CheckCircle className="w-5 h-5 text-green-600" />}
-                label="Confidence"
-                value={`${(result.confidence * 100).toFixed(0)}%`}
-              />
-              <StatCard 
-                icon={<DollarSign className="w-5 h-5 text-amber-600" />}
-                label="Cost"
-                value={`$${result.cost_usd?.toFixed(3) || '0.000'}`}
-              />
-              <StatCard 
-                icon={<Shield className="w-5 h-5 text-green-600" />}
-                label="Method"
-                value={result.extraction_method === 'pymupdf' ? 'Local' : 'AWS'}
-              />
-              <StatCard 
-                icon={<Loader2 className="w-5 h-5 text-gray-600" />}
-                label="Time"
-                value={`${((result.processing_time_ms || 0) / 1000).toFixed(1)}s`}
-              />
+            {/* Stats Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
+              <StatCard icon={<Users size={18} style={{ color: colors.primary }} />} label="Employees" value={result.employee_count} colors={colors} />
+              <StatCard icon={<FileText size={18} style={{ color: colors.primary }} />} label="Pages" value={result.pages_processed} colors={colors} />
+              <StatCard icon={<CheckCircle size={18} style={{ color: colors.green }} />} label="Confidence" value={`${(result.confidence * 100).toFixed(0)}%`} colors={colors} />
+              <StatCard icon={<DollarSign size={18} style={{ color: colors.amber }} />} label="Cost" value={`$${result.cost_usd?.toFixed(3) || '0.000'}`} colors={colors} />
+              <StatCard icon={<Shield size={18} style={{ color: colors.green }} />} label="Method" value={result.extraction_method === 'pymupdf' ? 'Local' : 'AWS'} colors={colors} />
+              <StatCard icon={<Loader2 size={18} style={{ color: colors.textMuted }} />} label="Time" value={`${((result.processing_time_ms || 0) / 1000).toFixed(1)}s`} colors={colors} />
             </div>
             
             {/* Validation Errors */}
             {result.validation_errors?.length > 0 && (
-              <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                <h3 className="font-medium text-yellow-800 mb-2">Validation Notes</h3>
-                <ul className="text-sm text-yellow-700 space-y-1">
-                  {result.validation_errors.slice(0, 5).map((err, i) => (
-                    <li key={i}>• {err}</li>
-                  ))}
-                  {result.validation_errors.length > 5 && (
-                    <li className="text-yellow-600">
-                      ... and {result.validation_errors.length - 5} more
-                    </li>
-                  )}
+              <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: colors.amberLight, border: `1px solid ${colors.amber}40`, borderRadius: 8 }}>
+                <h3 style={{ fontWeight: 500, color: colors.amber, marginBottom: '0.5rem' }}>Validation Notes</h3>
+                <ul style={{ fontSize: '0.85rem', color: colors.amber, margin: 0, paddingLeft: '1.25rem' }}>
+                  {result.validation_errors.slice(0, 5).map((err, i) => <li key={i}>{err}</li>)}
+                  {result.validation_errors.length > 5 && <li style={{ opacity: 0.7 }}>... and {result.validation_errors.length - 5} more</li>}
                 </ul>
               </div>
             )}
             
-            {/* Tabs + Export + Assist */}
-            <div className="flex items-center justify-between mb-4 border-b">
-              <div className="flex">
-                <button
-                  onClick={() => setActiveTab('employees')}
-                  className={`px-4 py-2 font-medium text-sm border-b-2 -mb-px ${
-                    activeTab === 'employees' 
-                      ? 'border-[#83b16d] text-[#83b16d]' 
-                      : 'border-transparent text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  <Users className="w-4 h-4 inline mr-1" />
-                  Employees ({result.employee_count})
-                </button>
-                <button
-                  onClick={() => setActiveTab('summary')}
-                  className={`px-4 py-2 font-medium text-sm border-b-2 -mb-px ${
-                    activeTab === 'summary' 
-                      ? 'border-[#83b16d] text-[#83b16d]' 
-                      : 'border-transparent text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  <BarChart3 className="w-4 h-4 inline mr-1" />
-                  Summary
-                </button>
+            {/* Tabs + Export */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `1px solid ${colors.divider}`, marginBottom: '1rem' }}>
+              <div style={{ display: 'flex' }}>
+                <TabButton active={activeTab === 'employees'} onClick={() => setActiveTab('employees')} colors={colors}><Users size={14} style={{ marginRight: 4 }} /> Employees ({result.employee_count})</TabButton>
+                <TabButton active={activeTab === 'summary'} onClick={() => setActiveTab('summary')} colors={colors}><BarChart3 size={14} style={{ marginRight: 4 }} /> Summary</TabButton>
               </div>
-              
-              <div className="flex items-center gap-2">
-                {/* Consultant Assist Button - shows when confidence is low or validation errors exist */}
-                {(result.confidence < 0.7 || (result.validation_errors && result.validation_errors.length > 0)) && (
-                  <button
-                    onClick={() => setShowAssist(true)}
-                    className="px-4 py-2 bg-[#83b16d] text-white rounded-lg hover:bg-[#6b9a57] flex items-center gap-2 text-sm"
-                  >
-                    <Wand2 className="w-4 h-4" />
-                    Help Claude
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                {(result.confidence < 0.7 || result.validation_errors?.length > 0) && (
+                  <button onClick={() => setShowAssist(true)} style={{ padding: '0.5rem 1rem', background: colors.primary, color: 'white', border: 'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.85rem' }}>
+                    <Wand2 size={14} /> Help Claude
                   </button>
                 )}
-                
-                <button
-                  onClick={() => exportToXLSX(
-                    result.employees, 
-                    result.source_file?.replace('.pdf', '') || 'pay_extract'
-                  )}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 text-sm"
-                >
-                  <Download className="w-4 h-4" />
-                  Export XLSX
+                <button onClick={() => exportToXLSX(result.employees, result.source_file?.replace('.pdf', '') || 'pay_extract')} style={{ padding: '0.5rem 1rem', background: colors.green, color: 'white', border: 'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.85rem' }}>
+                  <Download size={14} /> Export XLSX
                 </button>
               </div>
             </div>
             
-            {/* Tab Content */}
             {activeTab === 'employees' ? (
-              <EmployeeTable employees={result.employees || []} />
+              <EmployeeTable employees={result.employees || []} colors={colors} />
             ) : (
-              <SummaryView employees={result.employees || []} calculateSummary={calculateSummary} />
+              <SummaryView employees={result.employees || []} calculateSummary={calculateSummary} colors={colors} />
             )}
           </div>
         )}
         
         {/* History Section */}
-        <div className={expandedDetails ? "" : "grid md:grid-cols-2 gap-6"}>
-          {/* Extraction History - hidden when expanded */}
+        <div style={{ display: expandedDetails ? 'block' : 'grid', gridTemplateColumns: expandedDetails ? '1fr' : '1fr 1fr', gap: '1.5rem' }}>
           {!expandedDetails && (
-            <div className="bg-white rounded-lg shadow p-6">
-              <h2 className="text-lg font-semibold mb-4">Extraction History</h2>
-              
+            <div style={cardStyle}>
+              <h2 style={{ fontSize: '1.1rem', fontWeight: 600, color: colors.text, marginBottom: '1rem' }}>Extraction History</h2>
               {extracts.length === 0 ? (
-                <p className="text-gray-500 text-center py-8">No extractions yet</p>
+                <p style={{ color: colors.textMuted, textAlign: 'center', padding: '2rem 0' }}>No extractions yet</p>
               ) : (
-                <div className="space-y-2 max-h-96 overflow-y-auto">
+                <div style={{ maxHeight: 400, overflowY: 'auto' }}>
                   {extracts.map(ext => (
-                    <div 
-                      key={ext.id}
-                      className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium text-sm truncate">{ext.source_file}</div>
-                        <div className="text-xs text-gray-500">
-                          {ext.employee_count} employees • {ext.pages_processed} pages 
-                          • {ext.extraction_method === 'pymupdf' ? '🔒 Local' : '☁️ AWS'}
-                          • {new Date(ext.created_at).toLocaleDateString()}
-                        </div>
+                    <div key={ext.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem', border: `1px solid ${colors.divider}`, borderRadius: 8, marginBottom: '0.5rem' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 500, fontSize: '0.9rem', color: colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ext.source_file}</div>
+                        <div style={{ fontSize: '0.75rem', color: colors.textMuted }}>{ext.employee_count} employees • {ext.pages_processed} pages • {ext.extraction_method === 'pymupdf' ? '🔒 Local' : '☁️ AWS'} • {new Date(ext.created_at).toLocaleDateString()}</div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className={`px-2 py-0.5 rounded text-xs ${
-                          ext.confidence >= 0.8 
-                            ? 'bg-green-100 text-green-800' 
-                            : 'bg-yellow-100 text-yellow-800'
-                        }`}>
-                          {(ext.confidence * 100).toFixed(0)}%
-                        </span>
-                        <button
-                          onClick={() => viewExtract(ext.id)}
-                          className="p-1.5 text-[#83b16d] hover:bg-[#f0fdf4] rounded"
-                          title="View Details"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => deleteExtract(ext.id)}
-                          className="p-1.5 text-red-600 hover:bg-red-50 rounded"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span style={{ padding: '0.15rem 0.5rem', borderRadius: 4, fontSize: '0.7rem', fontWeight: 600, background: ext.confidence >= 0.8 ? colors.greenLight : colors.amberLight, color: ext.confidence >= 0.8 ? colors.green : colors.amber }}>{(ext.confidence * 100).toFixed(0)}%</span>
+                        <button onClick={() => viewExtract(ext.id)} style={{ padding: '0.35rem', background: 'transparent', border: 'none', cursor: 'pointer', color: colors.primary, borderRadius: 4 }} title="View"><Eye size={16} /></button>
+                        <button onClick={() => deleteExtract(ext.id)} style={{ padding: '0.35rem', background: 'transparent', border: 'none', cursor: 'pointer', color: colors.red, borderRadius: 4 }} title="Delete"><Trash2 size={16} /></button>
                       </div>
                     </div>
                   ))}
@@ -802,185 +493,109 @@ export default function VacuumUploadPage() {
           )}
           
           {/* Selected Extract Details */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold">Extract Details</h2>
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+              <h2 style={{ fontSize: '1.1rem', fontWeight: 600, color: colors.text }}>Extract Details</h2>
               {selectedExtract && (
-                <button
-                  onClick={() => setExpandedDetails(!expandedDetails)}
-                  className="p-1.5 text-gray-500 hover:bg-gray-100 rounded"
-                  title={expandedDetails ? "Collapse" : "Expand"}
-                >
-                  {expandedDetails ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                <button onClick={() => setExpandedDetails(!expandedDetails)} style={{ padding: '0.35rem', background: 'transparent', border: 'none', cursor: 'pointer', color: colors.textMuted, borderRadius: 4 }} title={expandedDetails ? 'Collapse' : 'Expand'}>
+                  {expandedDetails ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
                 </button>
               )}
             </div>
             
             {selectedExtract ? (
               <div>
-                {/* Header with file info and status */}
-                <div className="flex items-center justify-between mb-4">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                   <div>
-                    <h3 className="font-medium">{selectedExtract.source_file}</h3>
-                    <p className="text-sm text-gray-500">
-                      {selectedExtract.employee_count || selectedExtract.employees?.length || 0} employees extracted on{' '}
-                      {new Date(selectedExtract.created_at).toLocaleString()}
-                    </p>
+                    <h3 style={{ fontWeight: 500, color: colors.text }}>{selectedExtract.source_file}</h3>
+                    <p style={{ fontSize: '0.85rem', color: colors.textMuted }}>{selectedExtract.employee_count || selectedExtract.employees?.length || 0} employees extracted on {new Date(selectedExtract.created_at).toLocaleString()}</p>
                   </div>
-                  <span className="px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
-                    Success
-                  </span>
+                  <span style={{ padding: '0.25rem 0.75rem', borderRadius: 20, fontSize: '0.8rem', fontWeight: 600, background: colors.greenLight, color: colors.green }}>Success</span>
                 </div>
                 
-                {/* Summary Stats */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                  <StatCard 
-                    icon={<Users className="w-5 h-5 text-[#83b16d]" />}
-                    label="Employees"
-                    value={selectedExtract.employee_count || selectedExtract.employees?.length || 0}
-                  />
-                  <StatCard 
-                    icon={<FileText className="w-5 h-5 text-[#83b16d]" />}
-                    label="Pages"
-                    value={selectedExtract.pages_processed || '-'}
-                  />
-                  <StatCard 
-                    icon={<CheckCircle className="w-5 h-5 text-green-600" />}
-                    label="Confidence"
-                    value={selectedExtract.confidence ? `${(selectedExtract.confidence * 100).toFixed(0)}%` : '100%'}
-                  />
-                  <StatCard 
-                    icon={<DollarSign className="w-5 h-5 text-amber-600" />}
-                    label="Cost"
-                    value={`$${(selectedExtract.cost_usd || 0).toFixed(3)}`}
-                  />
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
+                  <StatCard icon={<Users size={18} style={{ color: colors.primary }} />} label="Employees" value={selectedExtract.employee_count || selectedExtract.employees?.length || 0} colors={colors} />
+                  <StatCard icon={<FileText size={18} style={{ color: colors.primary }} />} label="Pages" value={selectedExtract.pages_processed || '-'} colors={colors} />
+                  <StatCard icon={<CheckCircle size={18} style={{ color: colors.green }} />} label="Confidence" value={selectedExtract.confidence ? `${(selectedExtract.confidence * 100).toFixed(0)}%` : '100%'} colors={colors} />
+                  <StatCard icon={<DollarSign size={18} style={{ color: colors.amber }} />} label="Cost" value={`$${(selectedExtract.cost_usd || 0).toFixed(3)}`} colors={colors} />
                 </div>
                 
-                {/* Tabs + Export */}
-                <div className="flex items-center justify-between mb-4 border-b">
-                  <div className="flex">
-                    <button
-                      onClick={() => setHistoryTab('employees')}
-                      className={`px-4 py-2 font-medium text-sm border-b-2 -mb-px ${
-                        historyTab === 'employees' 
-                          ? 'border-[#83b16d] text-[#83b16d]' 
-                          : 'border-transparent text-gray-500 hover:text-gray-700'
-                      }`}
-                    >
-                      <Users className="w-4 h-4 inline mr-1" />
-                      Employees ({selectedExtract.employees?.length || 0})
-                    </button>
-                    <button
-                      onClick={() => setHistoryTab('summary')}
-                      className={`px-4 py-2 font-medium text-sm border-b-2 -mb-px ${
-                        historyTab === 'summary' 
-                          ? 'border-[#83b16d] text-[#83b16d]' 
-                          : 'border-transparent text-gray-500 hover:text-gray-700'
-                      }`}
-                    >
-                      <BarChart3 className="w-4 h-4 inline mr-1" />
-                      Summary
-                    </button>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `1px solid ${colors.divider}`, marginBottom: '1rem' }}>
+                  <div style={{ display: 'flex' }}>
+                    <TabButton active={historyTab === 'employees'} onClick={() => setHistoryTab('employees')} colors={colors}><Users size={14} style={{ marginRight: 4 }} /> Employees ({selectedExtract.employees?.length || 0})</TabButton>
+                    <TabButton active={historyTab === 'summary'} onClick={() => setHistoryTab('summary')} colors={colors}><BarChart3 size={14} style={{ marginRight: 4 }} /> Summary</TabButton>
                   </div>
-                  
-                  <button
-                    onClick={() => exportToXLSX(
-                      selectedExtract.employees, 
-                      selectedExtract.source_file?.replace('.pdf', '') || 'pay_extract'
-                    )}
-                    disabled={!selectedExtract.employees?.length}
-                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 text-sm disabled:opacity-50"
-                  >
-                    <Download className="w-4 h-4" />
-                    Export XLSX
+                  <button onClick={() => exportToXLSX(selectedExtract.employees, selectedExtract.source_file?.replace('.pdf', '') || 'pay_extract')} disabled={!selectedExtract.employees?.length} style={{ padding: '0.5rem 1rem', background: selectedExtract.employees?.length ? colors.green : colors.textMuted, color: 'white', border: 'none', borderRadius: 6, fontWeight: 600, cursor: selectedExtract.employees?.length ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.85rem', opacity: selectedExtract.employees?.length ? 1 : 0.5 }}>
+                    <Download size={14} /> Export XLSX
                   </button>
                 </div>
                 
-                {/* Tab Content */}
                 {historyTab === 'employees' ? (
-                  <EmployeeTable employees={selectedExtract.employees || []} />
+                  <EmployeeTable employees={selectedExtract.employees || []} colors={colors} />
                 ) : (
-                  <SummaryView employees={selectedExtract.employees || []} calculateSummary={calculateSummary} />
+                  <SummaryView employees={selectedExtract.employees || []} calculateSummary={calculateSummary} colors={colors} />
                 )}
               </div>
             ) : (
-              <p className="text-gray-500 text-center py-8">
-                Select an extraction to view details
-              </p>
+              <p style={{ color: colors.textMuted, textAlign: 'center', padding: '2rem 0' }}>Select an extraction to view details</p>
             )}
           </div>
         </div>
       </div>
       
-      {/* Consultant Assist Modal */}
       {showAssist && result && (
-        <ConsultantAssist
-          extractionId={result.extract_id}
-          sourceFile={result.source_file}
-          vendorType={vendorType}
-          customerId={null}
-          confidence={result.confidence}
-          validationErrors={result.validation_errors}
-          onClose={() => setShowAssist(false)}
-          onRetry={(hints) => {
-            setShowAssist(false);
-            // Could trigger a re-extraction with hints here
-            console.log('Retry with hints:', hints);
-          }}
-        />
+        <ConsultantAssist extractionId={result.extract_id} sourceFile={result.source_file} vendorType={vendorType} customerId={null} confidence={result.confidence} validationErrors={result.validation_errors} onClose={() => setShowAssist(false)} onRetry={(hints) => { setShowAssist(false); console.log('Retry with hints:', hints); }} />
       )}
-      {/* Debug */}
-      {showAssist && console.log('ConsultantAssist extractionId:', result?.extract_id, 'sourceFile:', result?.source_file, 'full result:', result)}
+      
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
 
-// Stat Card Component
-function StatCard({ icon, label, value }) {
+function StatCard({ icon, label, value, colors }) {
   return (
-    <div className="bg-gray-50 rounded-lg p-3 flex items-center gap-3">
+    <div style={{ background: colors.inputBg, borderRadius: 8, padding: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
       {icon}
       <div>
-        <div className="text-xs text-gray-500">{label}</div>
-        <div className="font-semibold">{value}</div>
+        <div style={{ fontSize: '0.7rem', color: colors.textMuted, textTransform: 'uppercase' }}>{label}</div>
+        <div style={{ fontWeight: 600, color: colors.text }}>{value}</div>
       </div>
     </div>
   );
 }
 
-// Employee Table Component
-function EmployeeTable({ employees }) {
+function TabButton({ active, onClick, children, colors }) {
+  return (
+    <button onClick={onClick} style={{ padding: '0.5rem 1rem', fontWeight: 500, fontSize: '0.85rem', border: 'none', borderBottom: `2px solid ${active ? colors.primary : 'transparent'}`, background: 'transparent', color: active ? colors.primary : colors.textMuted, cursor: 'pointer', display: 'flex', alignItems: 'center', marginBottom: -1 }}>
+      {children}
+    </button>
+  );
+}
+
+function EmployeeTable({ employees, colors }) {
   const [expandedRows, setExpandedRows] = useState(new Set());
+  const toggleRow = (id) => { const next = new Set(expandedRows); if (next.has(id)) next.delete(id); else next.add(id); setExpandedRows(next); };
   
-  const toggleRow = (id) => {
-    const next = new Set(expandedRows);
-    if (next.has(id)) {
-      next.delete(id);
-    } else {
-      next.add(id);
-    }
-    setExpandedRows(next);
-  };
+  if (!employees || employees.length === 0) return <p style={{ color: colors.textMuted, textAlign: 'center', padding: '1rem' }}>No employee data</p>;
   
-  if (!employees || employees.length === 0) {
-    return <p className="text-gray-500 text-center py-4">No employee data</p>;
-  }
+  const thStyle = { textAlign: 'left', padding: '0.5rem', fontWeight: 600, fontSize: '0.75rem', color: colors.textMuted, textTransform: 'uppercase' };
+  const tdStyle = { padding: '0.5rem', fontSize: '0.85rem', color: colors.text };
   
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
         <thead>
-          <tr className="border-b bg-gray-50">
-            <th className="text-left p-2 w-8"></th>
-            <th className="text-left p-2">Employee</th>
-            <th className="text-left p-2">ID</th>
-            <th className="text-left p-2">Department</th>
-            <th className="text-left p-2">Tax Profile</th>
-            <th className="text-right p-2">Gross</th>
-            <th className="text-right p-2">Taxes</th>
-            <th className="text-right p-2">Deductions</th>
-            <th className="text-right p-2">Net</th>
-            <th className="text-center p-2">Valid</th>
+          <tr style={{ background: colors.tableHeader, borderBottom: `1px solid ${colors.divider}` }}>
+            <th style={{ ...thStyle, width: 32 }}></th>
+            <th style={thStyle}>Employee</th>
+            <th style={thStyle}>ID</th>
+            <th style={thStyle}>Department</th>
+            <th style={thStyle}>Tax Profile</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>Gross</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>Taxes</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>Deductions</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>Net</th>
+            <th style={{ ...thStyle, textAlign: 'center' }}>Valid</th>
           </tr>
         </thead>
         <tbody>
@@ -988,101 +603,68 @@ function EmployeeTable({ employees }) {
             const isExpanded = expandedRows.has(idx);
             return (
               <React.Fragment key={idx}>
-                <tr className={`border-b hover:bg-gray-50 cursor-pointer ${
-                  !emp.is_valid ? 'bg-red-50' : ''
-                }`} onClick={() => toggleRow(idx)}>
-                  <td className="p-2">
-                    {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                  </td>
-                  <td className="p-2 font-medium">{emp.name || '(Unknown)'}</td>
-                  <td className="p-2 text-gray-600">{emp.employee_id || '-'}</td>
-                  <td className="p-2 text-gray-600">{emp.department || '-'}</td>
-                  <td className="p-2 text-gray-600">{emp.tax_profile || '-'}</td>
-                  <td className="p-2 text-right font-medium">${parseFloat(emp.gross_pay || 0).toFixed(2)}</td>
-                  <td className="p-2 text-right text-red-600">${parseFloat(emp.total_taxes || 0).toFixed(2)}</td>
-                  <td className="p-2 text-right text-orange-600">${parseFloat(emp.total_deductions || 0).toFixed(2)}</td>
-                  <td className="p-2 text-right font-medium text-green-600">${parseFloat(emp.net_pay || 0).toFixed(2)}</td>
-                  <td className="p-2 text-center">
-                    {emp.is_valid ? (
-                      <CheckCircle className="w-4 h-4 text-green-500 inline" />
-                    ) : (
-                      <XCircle className="w-4 h-4 text-red-500 inline" />
-                    )}
-                  </td>
+                <tr onClick={() => toggleRow(idx)} style={{ borderBottom: `1px solid ${colors.divider}`, cursor: 'pointer', background: !emp.is_valid ? colors.redLight : 'transparent' }}>
+                  <td style={tdStyle}>{isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</td>
+                  <td style={{ ...tdStyle, fontWeight: 500 }}>{emp.name || '(Unknown)'}</td>
+                  <td style={{ ...tdStyle, color: colors.textMuted }}>{emp.employee_id || '-'}</td>
+                  <td style={{ ...tdStyle, color: colors.textMuted }}>{emp.department || '-'}</td>
+                  <td style={{ ...tdStyle, color: colors.textMuted }}>{emp.tax_profile || '-'}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 500 }}>${parseFloat(emp.gross_pay || 0).toFixed(2)}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right', color: colors.red }}>${parseFloat(emp.total_taxes || 0).toFixed(2)}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right', color: colors.amber }}>${parseFloat(emp.total_deductions || 0).toFixed(2)}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 500, color: colors.green }}>${parseFloat(emp.net_pay || 0).toFixed(2)}</td>
+                  <td style={{ ...tdStyle, textAlign: 'center' }}>{emp.is_valid ? <CheckCircle size={14} style={{ color: colors.green }} /> : <XCircle size={14} style={{ color: colors.red }} />}</td>
                 </tr>
-                
-                {/* Expanded Details */}
                 {isExpanded && (
-                  <tr className="bg-gray-50">
-                    <td colSpan={10} className="p-4">
-                      <div className="grid md:grid-cols-3 gap-4">
-                        {/* Earnings */}
+                  <tr style={{ background: colors.inputBg }}>
+                    <td colSpan={10} style={{ padding: '1rem' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
                         <div>
-                          <h4 className="font-medium mb-2 text-blue-700">Earnings</h4>
+                          <h4 style={{ fontWeight: 500, marginBottom: '0.5rem', color: colors.blue }}>Earnings</h4>
                           {emp.earnings?.length > 0 ? (
-                            <ul className="space-y-1">
+                            <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
                               {emp.earnings.map((e, i) => (
-                                <li key={i} className="flex justify-between text-xs">
-                                  <span>{e.description || e.type || 'Earning'}</span>
-                                  <span className="font-medium">${parseFloat(e.amount || 0).toFixed(2)}</span>
+                                <li key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '0.25rem' }}>
+                                  <span style={{ color: colors.textMuted }}>{e.description || e.type || 'Earning'}</span>
+                                  <span style={{ fontWeight: 500, color: colors.text }}>${parseFloat(e.amount || 0).toFixed(2)}</span>
                                 </li>
                               ))}
                             </ul>
-                          ) : (
-                            <p className="text-xs text-gray-400">No earnings data</p>
-                          )}
+                          ) : <p style={{ fontSize: '0.8rem', color: colors.textLight }}>No earnings data</p>}
                         </div>
-                        
-                        {/* Taxes */}
                         <div>
-                          <h4 className="font-medium mb-2 text-red-700">Taxes</h4>
+                          <h4 style={{ fontWeight: 500, marginBottom: '0.5rem', color: colors.red }}>Taxes</h4>
                           {emp.taxes?.length > 0 ? (
-                            <ul className="space-y-1">
+                            <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
                               {emp.taxes.map((t, i) => (
-                                <li key={i} className="flex justify-between text-xs">
-                                  <span>{t.description || t.type || 'Tax'}</span>
-                                  <span className="font-medium">${parseFloat(t.amount || 0).toFixed(2)}</span>
+                                <li key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '0.25rem' }}>
+                                  <span style={{ color: colors.textMuted }}>{t.description || t.type || 'Tax'}</span>
+                                  <span style={{ fontWeight: 500, color: colors.text }}>${parseFloat(t.amount || 0).toFixed(2)}</span>
                                 </li>
                               ))}
                             </ul>
-                          ) : (
-                            <p className="text-xs text-gray-400">No tax data</p>
-                          )}
+                          ) : <p style={{ fontSize: '0.8rem', color: colors.textLight }}>No tax data</p>}
                         </div>
-                        
-                        {/* Deductions */}
                         <div>
-                          <h4 className="font-medium mb-2 text-orange-700">Deductions</h4>
+                          <h4 style={{ fontWeight: 500, marginBottom: '0.5rem', color: colors.amber }}>Deductions</h4>
                           {emp.deductions?.length > 0 ? (
-                            <ul className="space-y-1">
+                            <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
                               {emp.deductions.map((d, i) => (
-                                <li key={i} className="flex justify-between text-xs">
-                                  <span>{d.description || d.type || 'Deduction'}</span>
-                                  <span className="font-medium">${parseFloat(d.amount || 0).toFixed(2)}</span>
+                                <li key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '0.25rem' }}>
+                                  <span style={{ color: colors.textMuted }}>{d.description || d.type || 'Deduction'}</span>
+                                  <span style={{ fontWeight: 500, color: colors.text }}>${parseFloat(d.amount || 0).toFixed(2)}</span>
                                 </li>
                               ))}
                             </ul>
-                          ) : (
-                            <p className="text-xs text-gray-400">No deduction data</p>
-                          )}
+                          ) : <p style={{ fontSize: '0.8rem', color: colors.textLight }}>No deduction data</p>}
                         </div>
                       </div>
-                      
-                      {/* Pay Method & Check */}
-                      <div className="mt-3 flex gap-4 text-xs text-gray-600">
-                        {emp.pay_method && (
-                          <span>Payment: <strong>{emp.pay_method}</strong></span>
-                        )}
-                        {emp.check_number && (
-                          <span>Check #: <strong>{emp.check_number}</strong></span>
-                        )}
+                      <div style={{ marginTop: '0.75rem', display: 'flex', gap: '1rem', fontSize: '0.8rem', color: colors.textMuted }}>
+                        {emp.pay_method && <span>Payment: <strong>{emp.pay_method}</strong></span>}
+                        {emp.check_number && <span>Check #: <strong>{emp.check_number}</strong></span>}
                       </div>
-                      
-                      {/* Validation Errors */}
                       {emp.validation_errors?.length > 0 && (
-                        <div className="mt-3 p-2 bg-red-50 rounded text-xs text-red-700">
-                          {emp.validation_errors.join(', ')}
-                        </div>
+                        <div style={{ marginTop: '0.75rem', padding: '0.5rem', background: colors.redLight, borderRadius: 4, fontSize: '0.8rem', color: colors.red }}>{emp.validation_errors.join(', ')}</div>
                       )}
                     </td>
                   </tr>
@@ -1096,147 +678,76 @@ function EmployeeTable({ employees }) {
   );
 }
 
-// Summary View Component
-function SummaryView({ employees, calculateSummary }) {
+function SummaryView({ employees, calculateSummary, colors }) {
   const summary = calculateSummary(employees);
+  const formatCurrency = (val) => '$' + val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   
   return (
-    <div className="space-y-6">
+    <div>
       {/* Grand Totals */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-gray-50 rounded-lg">
-        <div className="text-center">
-          <div className="text-2xl font-bold text-[#83b16d]">
-            ${summary.totals.grossPay.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </div>
-          <div className="text-sm text-gray-500">Total Gross Pay</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', padding: '1rem', background: colors.inputBg, borderRadius: 8, marginBottom: '1.5rem' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: '1.5rem', fontWeight: 700, color: colors.primary }}>{formatCurrency(summary.totals.grossPay)}</div>
+          <div style={{ fontSize: '0.8rem', color: colors.textMuted }}>Total Gross Pay</div>
         </div>
-        <div className="text-center">
-          <div className="text-2xl font-bold text-red-600">
-            ${summary.totals.totalTaxes.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </div>
-          <div className="text-sm text-gray-500">Total Taxes</div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: '1.5rem', fontWeight: 700, color: colors.red }}>{formatCurrency(summary.totals.totalTaxes)}</div>
+          <div style={{ fontSize: '0.8rem', color: colors.textMuted }}>Total Taxes</div>
         </div>
-        <div className="text-center">
-          <div className="text-2xl font-bold text-orange-600">
-            ${summary.totals.totalDeductions.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </div>
-          <div className="text-sm text-gray-500">Total Deductions</div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: '1.5rem', fontWeight: 700, color: colors.amber }}>{formatCurrency(summary.totals.totalDeductions)}</div>
+          <div style={{ fontSize: '0.8rem', color: colors.textMuted }}>Total Deductions</div>
         </div>
-        <div className="text-center">
-          <div className="text-2xl font-bold text-green-600">
-            ${summary.totals.netPay.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </div>
-          <div className="text-sm text-gray-500">Total Net Pay</div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: '1.5rem', fontWeight: 700, color: colors.green }}>{formatCurrency(summary.totals.netPay)}</div>
+          <div style={{ fontSize: '0.8rem', color: colors.textMuted }}>Total Net Pay</div>
         </div>
       </div>
       
       {/* Summary Tables */}
-      <div className="grid md:grid-cols-3 gap-6">
-        {/* Earnings by Type */}
-        <div>
-          <h3 className="font-semibold text-blue-700 mb-3 flex items-center gap-2">
-            <DollarSign className="w-5 h-5" />
-            Earnings by Type
-          </h3>
-          {summary.earnings.length > 0 ? (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-blue-50">
-                  <th className="text-left p-2">Type</th>
-                  <th className="text-right p-2">Total</th>
-                  <th className="text-right p-2"># Emp</th>
-                </tr>
-              </thead>
-              <tbody>
-                {summary.earnings.map((e, i) => (
-                  <tr key={i} className="border-b hover:bg-gray-50">
-                    <td className="p-2 truncate max-w-[150px]" title={e.description}>{e.description}</td>
-                    <td className="p-2 text-right font-medium">${e.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                    <td className="p-2 text-right text-gray-500">{e.count}</td>
-                  </tr>
-                ))}
-                <tr className="bg-blue-100 font-semibold">
-                  <td className="p-2">TOTAL</td>
-                  <td className="p-2 text-right">${summary.totals.grossPay.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                  <td className="p-2 text-right">{employees.length}</td>
-                </tr>
-              </tbody>
-            </table>
-          ) : (
-            <p className="text-gray-400 text-sm">No earnings data</p>
-          )}
-        </div>
-        
-        {/* Taxes by Type */}
-        <div>
-          <h3 className="font-semibold text-red-700 mb-3 flex items-center gap-2">
-            <FileText className="w-5 h-5" />
-            Taxes by Type
-          </h3>
-          {summary.taxes.length > 0 ? (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-red-50">
-                  <th className="text-left p-2">Type</th>
-                  <th className="text-right p-2">Total</th>
-                  <th className="text-right p-2"># Emp</th>
-                </tr>
-              </thead>
-              <tbody>
-                {summary.taxes.map((t, i) => (
-                  <tr key={i} className="border-b hover:bg-gray-50">
-                    <td className="p-2 truncate max-w-[150px]" title={t.description}>{t.description}</td>
-                    <td className="p-2 text-right font-medium">${t.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                    <td className="p-2 text-right text-gray-500">{t.count}</td>
-                  </tr>
-                ))}
-                <tr className="bg-red-100 font-semibold">
-                  <td className="p-2">TOTAL</td>
-                  <td className="p-2 text-right">${summary.totals.totalTaxes.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                  <td className="p-2 text-right">{employees.length}</td>
-                </tr>
-              </tbody>
-            </table>
-          ) : (
-            <p className="text-gray-400 text-sm">No tax data</p>
-          )}
-        </div>
-        
-        {/* Deductions by Type */}
-        <div>
-          <h3 className="font-semibold text-orange-700 mb-3 flex items-center gap-2">
-            <FileText className="w-5 h-5" />
-            Deductions by Type
-          </h3>
-          {summary.deductions.length > 0 ? (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-orange-50">
-                  <th className="text-left p-2">Type</th>
-                  <th className="text-right p-2">Total</th>
-                  <th className="text-right p-2"># Emp</th>
-                </tr>
-              </thead>
-              <tbody>
-                {summary.deductions.map((d, i) => (
-                  <tr key={i} className="border-b hover:bg-gray-50">
-                    <td className="p-2 truncate max-w-[150px]" title={d.description}>{d.description}</td>
-                    <td className="p-2 text-right font-medium">${d.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                    <td className="p-2 text-right text-gray-500">{d.count}</td>
-                  </tr>
-                ))}
-                <tr className="bg-orange-100 font-semibold">
-                  <td className="p-2">TOTAL</td>
-                  <td className="p-2 text-right">${summary.totals.totalDeductions.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                  <td className="p-2 text-right">{employees.length}</td>
-                </tr>
-              </tbody>
-            </table>
-          ) : (
-            <p className="text-gray-400 text-sm">No deduction data</p>
-          )}
-        </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem' }}>
+        <SummaryTable title="Earnings by Type" items={summary.earnings} total={summary.totals.grossPay} color={colors.blue} empCount={employees.length} colors={colors} icon={<DollarSign size={18} />} />
+        <SummaryTable title="Taxes by Type" items={summary.taxes} total={summary.totals.totalTaxes} color={colors.red} empCount={employees.length} colors={colors} icon={<FileText size={18} />} />
+        <SummaryTable title="Deductions by Type" items={summary.deductions} total={summary.totals.totalDeductions} color={colors.amber} empCount={employees.length} colors={colors} icon={<FileText size={18} />} />
       </div>
+    </div>
+  );
+}
+
+function SummaryTable({ title, items, total, color, empCount, colors, icon }) {
+  const formatCurrency = (val) => '$' + val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const thStyle = { textAlign: 'left', padding: '0.5rem', fontWeight: 600, fontSize: '0.75rem', color: colors.textMuted };
+  
+  return (
+    <div>
+      <h3 style={{ fontWeight: 600, color: color, marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>{icon} {title}</h3>
+      {items.length > 0 ? (
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+          <thead>
+            <tr style={{ background: `${color}15`, borderBottom: `1px solid ${colors.divider}` }}>
+              <th style={thStyle}>Type</th>
+              <th style={{ ...thStyle, textAlign: 'right' }}>Total</th>
+              <th style={{ ...thStyle, textAlign: 'right' }}># Emp</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item, i) => (
+              <tr key={i} style={{ borderBottom: `1px solid ${colors.divider}` }}>
+                <td style={{ padding: '0.5rem', color: colors.text, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.description}>{item.description}</td>
+                <td style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 500, color: colors.text }}>{formatCurrency(item.total)}</td>
+                <td style={{ padding: '0.5rem', textAlign: 'right', color: colors.textMuted }}>{item.count}</td>
+              </tr>
+            ))}
+            <tr style={{ background: `${color}20`, fontWeight: 600 }}>
+              <td style={{ padding: '0.5rem', color: colors.text }}>TOTAL</td>
+              <td style={{ padding: '0.5rem', textAlign: 'right', color: colors.text }}>{formatCurrency(total)}</td>
+              <td style={{ padding: '0.5rem', textAlign: 'right', color: colors.textMuted }}>{empCount}</td>
+            </tr>
+          </tbody>
+        </table>
+      ) : (
+        <p style={{ fontSize: '0.85rem', color: colors.textLight }}>No data</p>
+      )}
     </div>
   );
 }
