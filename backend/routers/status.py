@@ -1333,35 +1333,98 @@ async def check_data_integrity(project: Optional[str] = None):
         tables_checked = 0
         tables_with_issues = 0
         
-        # Get all tables
-        tables_result = handler.conn.execute("""
-            SELECT DISTINCT table_name 
-            FROM information_schema.columns 
-            WHERE table_schema = 'main'
-            AND table_name NOT LIKE '_%'
-        """).fetchall()
+        # Get all tables - either from metadata or information_schema
+        tables_to_check = []
         
-        bad_column_patterns = ['nan', 'unnamed', 'col_0', 'col_1', 'col_2', 'none']
+        # Try to get tables from metadata first (respects project)
+        try:
+            if project:
+                # Get tables for specific project from metadata
+                meta_result = handler.conn.execute("""
+                    SELECT DISTINCT table_name, project
+                    FROM _schema_metadata 
+                    WHERE is_current = TRUE
+                """).fetchall()
+                
+                for table_name, proj in meta_result:
+                    if proj and project.lower() in proj.lower():
+                        tables_to_check.append(table_name)
+                
+                # Also check PDF tables
+                try:
+                    pdf_result = handler.conn.execute("""
+                        SELECT DISTINCT table_name, project, project_id
+                        FROM _pdf_tables
+                    """).fetchall()
+                    for table_name, proj, proj_id in pdf_result:
+                        if (proj and project.lower() in proj.lower()) or (proj_id and project.lower() in proj_id.lower()):
+                            if table_name not in tables_to_check:
+                                tables_to_check.append(table_name)
+                except:
+                    pass
+                    
+                logger.info(f"[INTEGRITY] Project filter: {project}, found {len(tables_to_check)} tables")
+            else:
+                # No project filter - get all non-system tables
+                tables_result = handler.conn.execute("""
+                    SELECT DISTINCT table_name 
+                    FROM information_schema.columns 
+                    WHERE table_schema = 'main'
+                    AND table_name NOT LIKE '_%'
+                """).fetchall()
+                tables_to_check = [t[0] for t in tables_result]
+                
+        except Exception as meta_e:
+            logger.warning(f"Metadata query failed, using information_schema: {meta_e}")
+            tables_result = handler.conn.execute("""
+                SELECT DISTINCT table_name 
+                FROM information_schema.columns 
+                WHERE table_schema = 'main'
+                AND table_name NOT LIKE '_%'
+            """).fetchall()
+            tables_to_check = [t[0] for t in tables_result]
         
-        for (table_name,) in tables_result:
+        # Expanded patterns for bad column detection
+        bad_column_patterns = [
+            'nan', 'unnamed', 'none', 'null',  # Common pandas/Excel defaults
+            'col_0', 'col_1', 'col_2', 'col_3', 'col_4', 'col_5',  # Generic column names
+            'column0', 'column1', 'column2', 'column_0', 'column_1',  # More generic
+            'field0', 'field1', 'field_0', 'field_1',  # Field patterns
+            'var0', 'var1', 'var_0', 'var_1',  # Variable patterns
+        ]
+        
+        for table_name in tables_to_check:
             tables_checked += 1
             table_issues = []
             
             # Get columns for this table
-            cols_result = handler.conn.execute(f"""
-                SELECT column_name FROM information_schema.columns 
-                WHERE table_name = '{table_name}'
-            """).fetchall()
+            try:
+                cols_result = handler.conn.execute(f"""
+                    SELECT column_name FROM information_schema.columns 
+                    WHERE table_name = '{table_name}'
+                """).fetchall()
+            except Exception as col_e:
+                logger.warning(f"Failed to get columns for {table_name}: {col_e}")
+                continue
             
             column_names = [c[0] for c in cols_result]
             
             # Check for bad column names
             bad_cols = []
             for col in column_names:
-                col_lower = col.lower()
+                col_lower = col.lower().strip()
+                
+                # Check against known bad patterns
                 if any(pattern in col_lower for pattern in bad_column_patterns):
                     bad_cols.append(col)
-                elif col_lower.replace('.', '').replace('_', '').isdigit():
+                # Check if column name is purely numeric (e.g., "0", "1", "12345")
+                elif col_lower.replace('.', '').replace('_', '').replace('-', '').isdigit():
+                    bad_cols.append(col)
+                # Check for very short generic names like "a", "b", "c" or single digits
+                elif len(col_lower) == 1 and (col_lower.isdigit() or col_lower in 'abcdefghij'):
+                    bad_cols.append(col)
+                # Check for patterns like "0_0", "1_2", etc.
+                elif col_lower.replace('_', '').isdigit() and '_' in col:
                     bad_cols.append(col)
             
             if bad_cols:
@@ -1375,7 +1438,7 @@ async def check_data_integrity(project: Optional[str] = None):
             # Check first few column names for header detection issues
             if len(column_names) >= 3:
                 first_three = column_names[:3]
-                numeric_count = sum(1 for c in first_three if c.lower().replace('_', '').replace('.', '').isdigit())
+                numeric_count = sum(1 for c in first_three if c.lower().replace('_', '').replace('.', '').replace('-', '').isdigit())
                 if numeric_count >= 2:
                     table_issues.append({
                         "type": "likely_header_failure",
@@ -1391,8 +1454,18 @@ async def check_data_integrity(project: Optional[str] = None):
                     "issues": table_issues
                 })
         
-        # Summary
-        health_status = "healthy" if tables_with_issues == 0 else ("warning" if tables_with_issues < tables_checked * 0.2 else "critical")
+        # Log for debugging
+        logger.info(f"[INTEGRITY] Checked {tables_checked} tables, {tables_with_issues} have issues")
+        
+        # Summary - be more aggressive about flagging issues
+        if tables_with_issues == 0:
+            health_status = "healthy"
+        elif tables_with_issues == 1:
+            health_status = "warning"
+        elif tables_with_issues < tables_checked * 0.3:
+            health_status = "warning"
+        else:
+            health_status = "critical"
         
         return {
             "status": health_status,
