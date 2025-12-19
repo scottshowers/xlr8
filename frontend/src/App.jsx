@@ -12,7 +12,7 @@
  * - UploadProvider (background uploads)
  * - OnboardingProvider (Joyride tours)
  * 
- * Updated: December 19, 2025 - Renamed Data Model → Data Health
+ * Updated: December 19, 2025 - Analytics Explorer (replaces QueryBuilderPage)
  */
 
 import React from 'react';
@@ -42,12 +42,12 @@ import VacuumUploadPage from './pages/VacuumUploadPage';
 import VacuumExplore from './pages/VacuumExplore';
 import VacuumColumnMapping from './pages/VacuumColumnMapping';
 import PlaybooksPage from './pages/PlaybooksPage';
-import WorkAdvisor from './pages/WorkAdvisor';  // Replaces PlaybookBuilderPage
+import WorkAdvisor from './pages/WorkAdvisor';
 import AdminPage from './pages/AdminPage';
 import AdminDashboard from './pages/AdminDashboard';
-import DataHealthPage from './pages/DataHealthPage';  // Renamed from DataModelPage
+import DataHealthPage from './pages/DataHealthPage';
 import ReferenceLibraryPage from './pages/ReferenceLibraryPage';
-import QueryBuilderPage from './pages/QueryBuilderPage';
+import AnalyticsPage from './pages/AnalyticsPage';  // Replaces QueryBuilderPage
 
 // CSS
 import './index.css';
@@ -112,9 +112,9 @@ function AppRoutes() {
           <ProtectedRoute><Layout><WorkspacePage /></Layout></ProtectedRoute>
         } />
         
-        {/* Analytics (Query Builder) */}
+        {/* Analytics Explorer - 3-way mode: Natural Language, Visual Builder, SQL */}
         <Route path="/analytics" element={
-          <ProtectedRoute><Layout><QueryBuilderPage /></Layout></ProtectedRoute>
+          <ProtectedRoute><Layout><AnalyticsPage /></Layout></ProtectedRoute>
         } />
         
         {/* ====== ADMIN NAV ====== */}
@@ -147,6 +147,8 @@ function AppRoutes() {
         <Route path="/secure20" element={<Navigate to="/playbooks" replace />} />
         <Route path="/packs" element={<Navigate to="/playbooks" replace />} />
         <Route path="/playbooks/builder" element={<Navigate to="/advisor" replace />} />
+        <Route path="/query-builder" element={<Navigate to="/analytics" replace />} />
+        <Route path="/bi" element={<Navigate to="/analytics" replace />} />
         
         {/* 404 fallback */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
