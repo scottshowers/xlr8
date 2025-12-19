@@ -14,16 +14,33 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import ColumnSplitter from '../components/ColumnSplitter';
+import { useTheme } from '../context/ThemeContext';
 
 const API_BASE = '/api';
 
-// Section definitions with colors
+// Theme-aware colors
+const getColors = (dark) => ({
+  bg: dark ? '#1a1f2e' : '#f5f7fa',
+  card: dark ? '#242b3d' : '#ffffff',
+  cardBorder: dark ? '#2d3548' : '#e8ecf1',
+  text: dark ? '#e8eaed' : '#2a3441',
+  textMuted: dark ? '#8b95a5' : '#6b7280',
+  primary: '#5a8a4a',
+  blue: '#4a6b8a',
+  amber: '#8a6b4a',
+  red: '#8a4a4a',
+  green: '#5a8a5a',
+  purple: '#6b5a7a',
+  divider: dark ? '#2d3548' : '#e8ecf1',
+});
+
+// Section definitions with muted colors
 const SECTIONS = [
-  { id: 'employee_info', label: 'Employee Info', color: '#3b82f6', bgColor: '#eff6ff' },
-  { id: 'earnings', label: 'Earnings', color: '#22c55e', bgColor: '#f0fdf4' },
-  { id: 'taxes', label: 'Taxes', color: '#ef4444', bgColor: '#fef2f2' },
-  { id: 'deductions', label: 'Deductions', color: '#f97316', bgColor: '#fff7ed' },
-  { id: 'pay_info', label: 'Pay Info', color: '#8b5cf6', bgColor: '#f5f3ff' }
+  { id: 'employee_info', label: 'Employee Info', color: '#4a6b8a', bgColor: 'rgba(74, 107, 138, 0.1)' },
+  { id: 'earnings', label: 'Earnings', color: '#5a8a5a', bgColor: 'rgba(90, 138, 90, 0.1)' },
+  { id: 'taxes', label: 'Taxes', color: '#8a4a4a', bgColor: 'rgba(138, 74, 74, 0.1)' },
+  { id: 'deductions', label: 'Deductions', color: '#8a6b4a', bgColor: 'rgba(138, 107, 74, 0.1)' },
+  { id: 'pay_info', label: 'Pay Info', color: '#6b5a7a', bgColor: 'rgba(107, 90, 122, 0.1)' }
 ];
 
 // Target fields by section
@@ -53,6 +70,8 @@ const TARGET_FIELDS = {
 export default function VacuumColumnMapping() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { darkMode } = useTheme();
+  const colors = getColors(darkMode);
   const sourceFile = searchParams.get('file');
 
   // State
@@ -322,7 +341,7 @@ export default function VacuumColumnMapping() {
 
   // Get confidence color
   const getConfidenceColor = (confidence) => {
-    if (confidence >= 0.7) return '#22c55e';
+    if (confidence >= 0.7) return '#5a8a5a';
     if (confidence >= 0.4) return '#eab308';
     return '#9ca3af';
   };
@@ -500,7 +519,7 @@ export default function VacuumColumnMapping() {
                   return (
                     <div key={idx} style={{
                       ...styles.mappingCard,
-                      borderColor: mapping.confirmed ? '#22c55e' : (isMerged ? '#f59e0b' : '#e5e7eb')
+                      borderColor: mapping.confirmed ? '#5a8a5a' : (isMerged ? '#8a6b4a' : '#e5e7eb')
                     }}>
                       {/* Source Column */}
                       <div style={styles.sourceColumn}>
@@ -634,7 +653,7 @@ export default function VacuumColumnMapping() {
                 key={section.id}
                 style={{
                   ...styles.dot,
-                  backgroundColor: isConfirmed ? '#22c55e' : isActive ? section.color : (stats.hasData ? '#e5e7eb' : '#f3f4f6'),
+                  backgroundColor: isConfirmed ? '#5a8a5a' : isActive ? section.color : (stats.hasData ? '#e5e7eb' : '#f3f4f6'),
                   border: isActive ? `2px solid ${section.color}` : 'none'
                 }}
                 title={section.label}
@@ -823,7 +842,7 @@ const styles = {
   },
   exploreBtn: {
     padding: '10px 20px',
-    backgroundColor: '#3b82f6',
+    backgroundColor: '#4a6b8a',
     color: '#fff',
     border: 'none',
     borderRadius: '6px',
@@ -854,7 +873,7 @@ const styles = {
   },
   confirmHighBtn: {
     padding: '8px 16px',
-    backgroundColor: '#22c55e',
+    backgroundColor: '#5a8a5a',
     color: '#fff',
     border: 'none',
     borderRadius: '6px',
@@ -926,7 +945,7 @@ const styles = {
   splitBtn: {
     marginLeft: 'auto',
     padding: '4px 10px',
-    backgroundColor: '#f59e0b',
+    backgroundColor: '#8a6b4a',
     color: '#fff',
     border: 'none',
     borderRadius: '4px',
@@ -977,7 +996,7 @@ const styles = {
   },
   confirmedBadge: {
     fontSize: '12px',
-    color: '#22c55e',
+    color: '#5a8a5a',
     fontWeight: '500'
   },
   previewSection: {
@@ -1029,7 +1048,7 @@ const styles = {
   },
   confirmSectionBtn: {
     padding: '12px 24px',
-    backgroundColor: '#3b82f6',
+    backgroundColor: '#4a6b8a',
     color: '#fff',
     border: 'none',
     borderRadius: '8px',
@@ -1071,7 +1090,7 @@ const styles = {
   saveBtn: {
     marginLeft: 'auto',
     padding: '12px 24px',
-    backgroundColor: '#22c55e',
+    backgroundColor: '#5a8a5a',
     color: '#fff',
     border: 'none',
     borderRadius: '8px',
@@ -1083,14 +1102,14 @@ const styles = {
     width: '40px',
     height: '40px',
     border: '4px solid #f3f4f6',
-    borderTop: '4px solid #3b82f6',
+    borderTop: '4px solid #4a6b8a',
     borderRadius: '50%',
     animation: 'spin 1s linear infinite',
     margin: '0 auto 16px'
   },
   btn: {
     padding: '10px 20px',
-    backgroundColor: '#3b82f6',
+    backgroundColor: '#4a6b8a',
     color: '#fff',
     border: 'none',
     borderRadius: '6px',
