@@ -1055,7 +1055,7 @@ function StepReviewPlan({ playbook, setPlaybook, onRegenerate }) {
           label="Steps" 
           count={playbook.steps.length}
           items={playbook.steps.map(s => s.title)}
-          color={#5a8a4a}
+          color={'#5a8a4a'}
         />
         <SummaryCard 
           icon={FileText} 
