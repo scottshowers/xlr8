@@ -28,8 +28,8 @@ import {
 // Brand colors from the platform
 const COLORS = {
   grassGreen: '#5a8a4a',
-  grassGreenDark: '#6a9a54',
-  skyBlue: '#93abd9',
+  grassGreenDark: '#4a7a3a',
+  skyBlue: '#4a6b8a',
   iceFlow: '#c9d3d4',
   text: '#2a3441',
   textLight: '#5f6c7b',
@@ -68,7 +68,7 @@ const FEATURES = {
     icon: Upload,
     title: 'Upload Data',
     description: 'Ingest and profile your files to use across the platform.',
-    color: COLORS.grassGreen,
+    color: '#5a8a4a',
     bgColor: 'rgba(131, 177, 109, 0.1)',
     route: '/vacuum',
     available: true
@@ -256,7 +256,7 @@ export default function WorkAdvisor() {
       width: '56px',
       height: '56px',
       borderRadius: '16px',
-      background: `linear-gradient(135deg, ${COLORS.grassGreen} 0%, ${COLORS.grassGreenDark} 100%)`,
+      background: `linear-gradient(135deg, #5a8a4a 0%, #4a7a3a 100%)`,
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -333,7 +333,7 @@ export default function WorkAdvisor() {
       borderRadius: '12px',
       background: isUser 
         ? 'linear-gradient(135deg, #4a5568 0%, #2d3748 100%)'
-        : `linear-gradient(135deg, ${COLORS.grassGreen} 0%, ${COLORS.grassGreenDark} 100%)`,
+        : `linear-gradient(135deg, #5a8a4a 0%, #4a7a3a 100%)`,
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -349,7 +349,7 @@ export default function WorkAdvisor() {
       borderBottomLeftRadius: isUser ? '16px' : '6px',
       borderBottomRightRadius: isUser ? '6px' : '16px',
       background: isUser 
-        ? `linear-gradient(135deg, ${COLORS.grassGreen} 0%, ${COLORS.grassGreenDark} 100%)`
+        ? `linear-gradient(135deg, #5a8a4a 0%, #4a7a3a 100%)`
         : 'white',
       color: isUser ? 'white' : COLORS.text,
       boxShadow: isUser 
@@ -372,7 +372,7 @@ export default function WorkAdvisor() {
       width: '8px',
       height: '8px',
       borderRadius: '50%',
-      background: COLORS.grassGreen,
+      background: '#5a8a4a',
       animation: 'bounce 1s infinite',
       animationDelay: delay,
     }),
@@ -412,7 +412,7 @@ export default function WorkAdvisor() {
       height: '40px',
       borderRadius: '12px',
       border: 'none',
-      background: `linear-gradient(135deg, ${COLORS.grassGreen} 0%, ${COLORS.grassGreenDark} 100%)`,
+      background: `linear-gradient(135deg, #5a8a4a 0%, #4a7a3a 100%)`,
       color: 'white',
       cursor: 'pointer',
       display: 'flex',
@@ -512,7 +512,7 @@ export default function WorkAdvisor() {
           30% { transform: translateY(-6px); }
         }
         textarea:focus {
-          border-color: ${COLORS.grassGreen} !important;
+          border-color: '#5a8a4a' !important;
           background: white !important;
           box-shadow: 0 0 0 3px rgba(131, 177, 109, 0.15) !important;
         }
@@ -843,7 +843,7 @@ function PlaybookBuilderFlow({ draft, conversationContext, onBack, onComplete })
                     flex: 1,
                     height: '4px',
                     borderRadius: '2px',
-                    background: i <= step ? COLORS.grassGreen : '#e5e7eb',
+                    background: i <= step ?'#5a8a4a' : '#e5e7eb',
                     transition: 'background 0.3s',
                   }}
                 />
@@ -903,7 +903,7 @@ function PlaybookBuilderFlow({ draft, conversationContext, onBack, onComplete })
               onClick={() => step < 4 ? setStep(step + 1) : onComplete(playbook)}
               style={{
                 padding: '0.625rem 1.5rem',
-                background: `linear-gradient(135deg, ${COLORS.grassGreen} 0%, ${COLORS.grassGreenDark} 100%)`,
+                background: `linear-gradient(135deg, #5a8a4a 0%, #4a7a3a 100%)`,
                 border: 'none',
                 borderRadius: '10px',
                 fontWeight: '600',
@@ -940,7 +940,7 @@ function GeneratingState() {
         width: '80px',
         height: '80px',
         borderRadius: '20px',
-        background: `linear-gradient(135deg, ${COLORS.grassGreen} 0%, ${COLORS.grassGreenDark} 100%)`,
+        background: `linear-gradient(135deg, #5a8a4a 0%, #4a7a3a 100%)`,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -983,7 +983,7 @@ function StepReviewPlan({ playbook, setPlaybook, onRegenerate }) {
           width: '40px',
           height: '40px',
           borderRadius: '10px',
-          background: COLORS.grassGreen,
+          background: '#5a8a4a',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -1055,7 +1055,7 @@ function StepReviewPlan({ playbook, setPlaybook, onRegenerate }) {
           label="Steps" 
           count={playbook.steps.length}
           items={playbook.steps.map(s => s.title)}
-          color={COLORS.grassGreen}
+          color={#5a8a4a}
         />
         <SummaryCard 
           icon={FileText} 
@@ -1200,7 +1200,7 @@ function StepWorkflow({ playbook, setPlaybook }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
             <span style={{
               width: '28px', height: '28px', borderRadius: '8px',
-              background: COLORS.grassGreen, color: 'white', fontWeight: '700',
+              background: '#5a8a4a', color: 'white', fontWeight: '700',
               display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.85rem'
             }}>{i + 1}</span>
             <input
