@@ -15,7 +15,7 @@ import api from '../services/api';
 
 // Brand Colors
 const COLORS = {
-  grassGreen: '#83b16d',
+  grassGreen: '#5a8a4a',
   skyBlue: '#93abd9',
   iceFlow: '#c9d3d4',
   clearwater: '#b2d6de',
