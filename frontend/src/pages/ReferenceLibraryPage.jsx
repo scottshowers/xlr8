@@ -1,74 +1,50 @@
 /**
- * ReferenceLibraryPage.jsx - Reference Library (formerly Standards)
+ * ReferenceLibraryPage.jsx - Reference Library
  * 
- * COMMAND CENTER AESTHETIC
- * Upload compliance documents, best practices, extract rules, run checks.
- * 
- * Renamed from StandardsPage to better reflect its purpose as a
- * cross-project reference library for consultants.
+ * Clean professional design with:
+ * - Light/dark mode support via ThemeContext
+ * - Consistent styling with Command Center
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useProject } from '../context/ProjectContext';
+import { useTheme } from '../context/ThemeContext';
+import { getCustomerColorPalette } from '../utils/customerColors';
 import api from '../services/api';
 import {
-  Sun, Moon, Upload, FileText, ListChecks, Search as SearchIcon,
+  Upload, FileText, ListChecks, Search as SearchIcon,
   RefreshCw, Trash2, ChevronDown, ChevronRight, AlertTriangle,
   CheckCircle, XCircle, BookOpen, Folder, Filter
 } from 'lucide-react';
 
-// Brand colors
-const BRAND = {
-  grassGreen: '#83b16d',
-  skyBlue: '#93abd9',
-};
-
-// Theme definitions - matches Dashboard
-const themes = {
-  light: {
-    bg: '#f6f5fa',
-    bgCard: '#ffffff',
-    border: '#e2e8f0',
-    text: '#2a3441',
-    textDim: '#5f6c7b',
-    accent: BRAND.grassGreen,
-  },
-  dark: {
-    bg: '#1a2332',
-    bgCard: '#232f42',
-    border: '#334766',
-    text: '#e5e7eb',
-    textDim: '#9ca3af',
-    accent: BRAND.grassGreen,
-  },
-};
-
-const STATUS = {
+// Theme-aware colors
+const getColors = (dark) => ({
+  bg: dark ? '#1a1f2e' : '#f5f7fa',
+  card: dark ? '#242b3d' : '#ffffff',
+  cardBorder: dark ? '#2d3548' : '#e8ecf1',
+  text: dark ? '#e8eaed' : '#2a3441',
+  textMuted: dark ? '#8b95a5' : '#6b7280',
+  textLight: dark ? '#5f6a7d' : '#9ca3af',
+  primary: '#83b16d',
+  primaryLight: dark ? 'rgba(131, 177, 109, 0.15)' : 'rgba(131, 177, 109, 0.1)',
+  blue: '#5b8fb9',
+  blueLight: dark ? 'rgba(91, 143, 185, 0.15)' : 'rgba(91, 143, 185, 0.1)',
+  amber: '#d4a054',
+  amberLight: dark ? 'rgba(212, 160, 84, 0.15)' : 'rgba(212, 160, 84, 0.1)',
+  red: '#c76b6b',
+  redLight: dark ? 'rgba(199, 107, 107, 0.15)' : 'rgba(199, 107, 107, 0.1)',
   green: '#10b981',
-  amber: '#f59e0b',
-  red: '#ef4444',
-  blue: '#3b82f6',
-};
+  greenLight: dark ? 'rgba(16, 185, 129, 0.15)' : 'rgba(16, 185, 129, 0.1)',
+  divider: dark ? '#2d3548' : '#e8ecf1',
+  inputBg: dark ? '#1a1f2e' : '#f8fafc',
+  tabBg: dark ? '#1e2433' : '#fafbfc',
+});
 
 export default function ReferenceLibraryPage() {
-  const { activeProject, projectName, customerName, hasActiveProject, loading: projectLoading } = useProject();
-  const [darkMode, setDarkMode] = useState(() => {
-    const saved = localStorage.getItem('xlr8-theme');
-    return saved ? saved === 'dark' : true;
-  });
+  const { activeProject, projectName, customerName, hasActiveProject } = useProject();
+  const { darkMode } = useTheme();
+  const colors = getColors(darkMode);
   const [activeTab, setActiveTab] = useState('documents');
-  const [time, setTime] = useState(new Date());
-
-  const T = darkMode ? themes.dark : themes.light;
-
-  useEffect(() => {
-    localStorage.setItem('xlr8-theme', darkMode ? 'dark' : 'light');
-  }, [darkMode]);
-
-  useEffect(() => {
-    const interval = setInterval(() => setTime(new Date()), 1000);
-    return () => clearInterval(interval);
-  }, []);
 
   const tabs = [
     { id: 'documents', label: 'Documents', icon: BookOpen },
@@ -78,116 +54,53 @@ export default function ReferenceLibraryPage() {
   ];
 
   return (
-    <div style={{
-      padding: '1.5rem',
-      background: T.bg,
-      minHeight: '100vh',
-      color: T.text,
-      fontFamily: "'Inter', system-ui, sans-serif",
-      transition: 'background 0.3s ease, color 0.3s ease',
-    }}>
+    <div>
       {/* Header */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '2rem',
-      }}>
-        <div>
-          <h1 style={{
-            fontSize: '1.5rem',
-            fontWeight: 700,
-            margin: 0,
-            letterSpacing: '0.05em',
-            fontFamily: "'Sora', sans-serif",
-          }}>
-            REFERENCE LIBRARY
-          </h1>
-          <p style={{ color: T.textDim, margin: '0.25rem 0 0 0', fontSize: '0.85rem' }}>
-            Compliance Standards, Best Practices & Rules
-          </p>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <button
-            onClick={() => setDarkMode(!darkMode)}
-            style={{
-              background: T.bgCard,
-              border: `1px solid ${T.border}`,
-              borderRadius: '8px',
-              padding: '0.5rem 1rem',
-              cursor: 'pointer',
-              color: T.text,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              fontSize: '0.85rem',
-            }}
-          >
-            {darkMode ? <Sun size={16} /> : <Moon size={16} />}
-            {darkMode ? 'Light' : 'Dark'}
-          </button>
-
-          <div style={{
-            fontFamily: 'monospace',
-            fontSize: '1.5rem',
-            color: T.accent,
-            textShadow: darkMode ? `0 0 20px ${T.accent}40` : 'none',
-          }}>
-            {time.toLocaleTimeString()}
-          </div>
-        </div>
+      <div style={{ marginBottom: '1.5rem' }}>
+        <h1 style={{ fontFamily: "'Sora', sans-serif", fontSize: '1.5rem', fontWeight: 700, color: colors.text, margin: 0 }}>
+          Reference Library
+        </h1>
+        <p style={{ color: colors.textMuted, marginTop: '0.25rem', fontSize: '0.875rem' }}>
+          Compliance Standards, Best Practices & Rules
+        </p>
       </div>
 
-      {/* Tabs */}
-      <div style={{
-        display: 'flex',
-        gap: '0.5rem',
-        marginBottom: '1.5rem',
-        borderBottom: `1px solid ${T.border}`,
-        paddingBottom: '0.5rem',
-      }}>
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            style={{
-              background: activeTab === tab.id ? T.accent : 'transparent',
-              border: 'none',
-              borderRadius: '6px',
-              padding: '0.5rem 1rem',
-              cursor: 'pointer',
-              color: activeTab === tab.id ? 'white' : T.textDim,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              fontSize: '0.85rem',
-              fontWeight: activeTab === tab.id ? 600 : 400,
-              transition: 'all 0.2s ease',
-            }}
-          >
-            <tab.icon size={16} />
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      {/* Main Card */}
+      <div style={{ background: colors.card, border: `1px solid ${colors.cardBorder}`, borderRadius: 12, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+        {/* Tabs */}
+        <div style={{ display: 'flex', borderBottom: `1px solid ${colors.divider}`, background: colors.tabBg }}>
+          {tabs.map(tab => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '1rem 1.25rem',
+                  border: 'none', background: isActive ? colors.card : 'transparent',
+                  color: isActive ? colors.primary : colors.textMuted, fontWeight: 600, fontSize: '0.85rem',
+                  cursor: 'pointer', borderBottom: isActive ? `2px solid ${colors.primary}` : '2px solid transparent',
+                  marginBottom: '-1px', transition: 'all 0.15s ease',
+                }}
+              >
+                <Icon size={18} />
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
 
-      {/* Content */}
-      <div style={{
-        background: T.bgCard,
-        border: `1px solid ${T.border}`,
-        borderRadius: '12px',
-        overflow: 'hidden',
-      }}>
+        {/* Tab Content */}
         <div style={{ padding: '1.5rem' }}>
-          {activeTab === 'documents' && <DocumentsTab T={T} darkMode={darkMode} />}
-          {activeTab === 'upload' && <UploadTab T={T} darkMode={darkMode} />}
-          {activeTab === 'rules' && <RulesTab T={T} darkMode={darkMode} />}
+          {activeTab === 'documents' && <DocumentsTab colors={colors} darkMode={darkMode} />}
+          {activeTab === 'upload' && <UploadTab colors={colors} darkMode={darkMode} />}
+          {activeTab === 'rules' && <RulesTab colors={colors} darkMode={darkMode} />}
           {activeTab === 'compliance' && (
             hasActiveProject ? (
-              <ComplianceTab T={T} darkMode={darkMode} activeProject={activeProject} projectName={projectName} customerName={customerName} />
+              <ComplianceTab colors={colors} darkMode={darkMode} activeProject={activeProject} projectName={projectName} customerName={customerName} />
             ) : (
-              <SelectProjectPrompt T={T} />
+              <SelectProjectPrompt colors={colors} />
             )
           )}
         </div>
@@ -196,50 +109,36 @@ export default function ReferenceLibraryPage() {
   );
 }
 
-// Select Project Prompt
-function SelectProjectPrompt({ T }) {
+function SelectProjectPrompt({ colors }) {
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: '4rem',
-      textAlign: 'center',
-    }}>
-      <Folder size={64} style={{ opacity: 0.3, color: T.textDim, marginBottom: '1.5rem' }} />
-      <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '0.5rem' }}>Select a Project First</h2>
-      <p style={{ color: T.textDim, maxWidth: '400px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4rem', textAlign: 'center' }}>
+      <div style={{ width: 64, height: 64, borderRadius: 16, background: colors.primaryLight, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1.25rem' }}>
+        <Folder size={28} style={{ color: colors.primary }} />
+      </div>
+      <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '0.5rem', color: colors.text }}>Select a Project First</h2>
+      <p style={{ color: colors.textMuted, maxWidth: '400px', margin: 0 }}>
         Choose a project from the selector above to run compliance checks against your data.
       </p>
     </div>
   );
 }
 
-// Documents Tab
-function DocumentsTab({ T, darkMode }) {
+function DocumentsTab({ colors, darkMode }) {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadDocuments();
-  }, []);
+  useEffect(() => { loadDocuments(); }, []);
 
   const loadDocuments = async () => {
     setLoading(true);
-    try {
-      const res = await api.get('/standards/documents');
-      setDocuments(res.data.documents || []);
-    } catch {
-      setDocuments([]);
-    } finally {
-      setLoading(false);
-    }
+    try { const res = await api.get('/standards/documents'); setDocuments(res.data.documents || []); }
+    catch { setDocuments([]); }
+    finally { setLoading(false); }
   };
 
   if (loading) {
     return (
-      <div style={{ padding: '3rem', textAlign: 'center', color: T.textDim }}>
+      <div style={{ padding: '3rem', textAlign: 'center', color: colors.textMuted }}>
         <RefreshCw size={24} style={{ animation: 'spin 1s linear infinite', marginBottom: '1rem' }} />
         <p>Loading documents...</p>
         <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
@@ -247,275 +146,132 @@ function DocumentsTab({ T, darkMode }) {
     );
   }
 
-  if (documents.length === 0) {
-    return (
-      <div style={{ padding: '3rem', textAlign: 'center', color: T.textDim }}>
-        <FileText size={48} style={{ opacity: 0.3, marginBottom: '1rem' }} />
-        <p>No documents uploaded yet.</p>
-        <p style={{ fontSize: '0.85rem' }}>Upload compliance standards to get started.</p>
-      </div>
-    );
-  }
-
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-        <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>
-          📚 Reference Documents ({documents.length})
+        <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <BookOpen size={18} style={{ color: colors.primary }} />
+          Reference Documents ({documents.length})
         </h3>
-        <button
-          onClick={loadDocuments}
-          style={{
-            background: T.bg,
-            border: `1px solid ${T.border}`,
-            borderRadius: '6px',
-            padding: '0.5rem 0.75rem',
-            cursor: 'pointer',
-            color: T.text,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            fontSize: '0.8rem',
-          }}
-        >
+        <button onClick={loadDocuments} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.4rem 0.75rem', background: 'transparent', border: `1px solid ${colors.divider}`, borderRadius: 6, color: colors.textMuted, fontSize: '0.8rem', cursor: 'pointer' }}>
           <RefreshCw size={14} /> Refresh
         </button>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-        {documents.map((doc, i) => (
-          <div
-            key={doc.id || i}
-            style={{
-              background: T.bg,
-              border: `1px solid ${T.border}`,
-              borderRadius: '8px',
-              padding: '1rem',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-              <FileText size={24} style={{ color: T.accent }} />
-              <div>
-                <div style={{ fontWeight: 600 }}>{doc.title || doc.filename}</div>
-                <div style={{ fontSize: '0.8rem', color: T.textDim }}>
-                  {doc.domain} • {doc.rules_count || 0} rules • Uploaded {doc.created_at ? new Date(doc.created_at).toLocaleDateString() : 'N/A'}
-                </div>
+      {documents.length === 0 ? (
+        <div style={{ padding: '3rem', textAlign: 'center', color: colors.textMuted }}>
+          <BookOpen size={48} style={{ opacity: 0.3, marginBottom: '1rem' }} />
+          <p style={{ margin: 0 }}>No documents in the reference library yet.</p>
+          <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.85rem' }}>Upload compliance documents to get started.</p>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          {documents.map((doc, i) => (
+            <div key={doc.id || i} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 1rem', background: colors.inputBg, border: `1px solid ${colors.divider}`, borderRadius: 8 }}>
+              <FileText size={18} style={{ color: colors.blue }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: '0.9rem', fontWeight: 500, color: colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.filename}</div>
+                <div style={{ fontSize: '0.75rem', color: colors.textMuted }}>{doc.rules_count || 0} rules extracted • {doc.domain || 'General'}</div>
               </div>
+              <span style={{ padding: '0.2rem 0.5rem', background: colors.greenLight, color: colors.green, borderRadius: 4, fontSize: '0.7rem', fontWeight: 600 }}>
+                {doc.status || 'Active'}
+              </span>
             </div>
-            <div style={{
-              padding: '0.25rem 0.75rem',
-              background: darkMode ? `${T.accent}20` : '#f0fdf4',
-              color: T.accent,
-              fontSize: '0.75rem',
-              fontWeight: 600,
-              borderRadius: '20px',
-            }}>
-              {doc.domain || 'General'}
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-// Upload Tab
-function UploadTab({ T, darkMode }) {
-  const [file, setFile] = useState(null);
-  const [domain, setDomain] = useState('general');
+function UploadTab({ colors, darkMode }) {
+  const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState(null);
+  const [uploadStatus, setUploadStatus] = useState(null);
+  const fileInputRef = useRef(null);
 
-  const domains = [
-    { value: 'general', label: 'General' },
-    { value: 'retirement', label: 'Retirement / 401(k)' },
-    { value: 'tax', label: 'Tax Compliance' },
-    { value: 'benefits', label: 'Benefits' },
-    { value: 'payroll', label: 'Payroll' },
-    { value: 'security', label: 'Security / SOC' },
-    { value: 'hr', label: 'HR Policies' },
-  ];
-
-  const handleUpload = async (e) => {
-    e.preventDefault();
-    if (!file) return;
-
+  const handleUpload = async (files) => {
+    if (!files || files.length === 0) return;
     setUploading(true);
-    setError(null);
-    setResult(null);
-
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('project', '__STANDARDS__');
-    formData.append('standards_mode', 'true');
-    formData.append('domain', domain);
-
+    setUploadStatus(null);
+    
     try {
-      const response = await api.post('/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 120000
-      });
-      setResult(response.data);
-      setFile(null);
+      for (const file of Array.from(files)) {
+        const formData = new FormData();
+        formData.append('file', file);
+        await api.post('/standards/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300000 });
+      }
+      setUploadStatus({ type: 'success', message: `Successfully uploaded ${files.length} file(s)` });
     } catch (err) {
-      setError(err.response?.data?.detail || err.message || 'Upload failed');
+      setUploadStatus({ type: 'error', message: err.response?.data?.detail || err.message });
     } finally {
       setUploading(false);
     }
   };
 
-  const inputStyle = {
-    width: '100%',
-    padding: '0.75rem',
-    background: T.bg,
-    border: `1px solid ${T.border}`,
-    borderRadius: '8px',
-    color: T.text,
-    fontSize: '0.9rem',
-  };
+  const handleDrop = (e) => { e.preventDefault(); setDragOver(false); handleUpload(e.dataTransfer.files); };
+  const handleFileSelect = (e) => { handleUpload(e.target.files); e.target.value = ''; };
 
   return (
     <div>
-      <div style={{ marginBottom: '1.5rem' }}>
-        <h3 style={{ margin: '0 0 0.25rem 0', fontSize: '1rem', fontWeight: 600 }}>
-          📤 Upload Reference Document
-        </h3>
-        <p style={{ margin: 0, color: T.textDim, fontSize: '0.85rem' }}>
-          Upload compliance documents (PDF, DOCX). XLR8 will extract actionable rules.
-        </p>
+      <h3 style={{ margin: '0 0 1rem 0', fontSize: '1rem', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <Upload size={18} style={{ color: colors.primary }} />
+        Upload Standards Documents
+      </h3>
+      
+      <input type="file" ref={fileInputRef} style={{ display: 'none' }} multiple accept=".pdf,.docx,.doc,.txt,.md" onChange={handleFileSelect} />
+      <div onDragOver={(e) => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={handleDrop} onClick={() => !uploading && fileInputRef.current?.click()} style={{ border: `2px dashed ${dragOver ? colors.primary : colors.divider}`, borderRadius: 12, padding: '3rem', textAlign: 'center', cursor: uploading ? 'wait' : 'pointer', background: dragOver ? colors.primaryLight : colors.inputBg, transition: 'all 0.2s ease', opacity: uploading ? 0.6 : 1 }}>
+        {uploading ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            <RefreshCw size={48} style={{ color: colors.primary, marginBottom: '1rem', animation: 'spin 1s linear infinite' }} />
+            <h3 style={{ margin: '0 0 0.5rem', color: colors.text }}>Processing...</h3>
+            <p style={{ color: colors.textMuted, margin: 0, fontSize: '0.9rem' }}>Extracting rules from documents</p>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            <Upload size={48} style={{ color: colors.primary, marginBottom: '1rem' }} />
+            <h3 style={{ margin: '0 0 0.5rem', color: colors.text }}>{dragOver ? 'Drop files here' : 'Click or drag files to upload'}</h3>
+            <p style={{ color: colors.textMuted, margin: 0, fontSize: '0.9rem' }}>PDF, Word, or Text files containing compliance rules</p>
+          </div>
+        )}
       </div>
 
-      <form onSubmit={handleUpload} style={{ maxWidth: '500px' }}>
-        <div style={{ marginBottom: '1rem' }}>
-          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, fontSize: '0.85rem' }}>
-            Document File
-          </label>
-          <input
-            type="file"
-            accept=".pdf,.docx,.doc,.txt,.xlsx,.xls,.csv"
-            onChange={(e) => setFile(e.target.files[0])}
-            style={inputStyle}
-          />
-          <span style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem', display: 'block' }}>
-            Supported: PDF, Word, Excel, CSV, Text
-          </span>
-        </div>
-
-        <div style={{ marginBottom: '1.5rem' }}>
-          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, fontSize: '0.85rem' }}>
-            Domain Category
-          </label>
-          <select value={domain} onChange={(e) => setDomain(e.target.value)} style={inputStyle}>
-            {domains.map(d => (
-              <option key={d.value} value={d.value}>{d.label}</option>
-            ))}
-          </select>
-        </div>
-
-        <button
-          type="submit"
-          disabled={!file || uploading}
-          style={{
-            padding: '0.75rem 1.5rem',
-            background: T.accent,
-            color: 'white',
-            border: 'none',
-            borderRadius: '8px',
-            fontWeight: 600,
-            cursor: 'pointer',
-            opacity: (!file || uploading) ? 0.5 : 1,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-          }}
-        >
-          {uploading ? (
-            <>
-              <RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} />
-              Processing...
-            </>
-          ) : (
-            <>
-              <Upload size={16} />
-              Upload & Extract Rules
-            </>
-          )}
-        </button>
-      </form>
-
-      {error && (
-        <div style={{
-          padding: '1rem',
-          background: darkMode ? `${STATUS.red}20` : '#fef2f2',
-          border: `1px solid ${STATUS.red}40`,
-          borderRadius: '8px',
-          marginTop: '1rem',
-          color: STATUS.red,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.5rem',
-        }}>
-          <XCircle size={18} />
-          {error}
+      {uploadStatus && (
+        <div style={{ marginTop: '1rem', padding: '1rem', background: uploadStatus.type === 'success' ? colors.greenLight : colors.redLight, border: `1px solid ${uploadStatus.type === 'success' ? colors.green : colors.red}40`, borderRadius: 8, display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          {uploadStatus.type === 'success' ? <CheckCircle size={18} style={{ color: colors.green }} /> : <XCircle size={18} style={{ color: colors.red }} />}
+          <span style={{ color: uploadStatus.type === 'success' ? colors.green : colors.red, fontSize: '0.9rem' }}>{uploadStatus.message}</span>
         </div>
       )}
 
-      {result && (
-        <div style={{
-          padding: '1rem',
-          background: darkMode ? `${STATUS.green}20` : '#f0fdf4',
-          border: `1px solid ${STATUS.green}40`,
-          borderRadius: '8px',
-          marginTop: '1rem',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', color: STATUS.green, fontWeight: 600 }}>
-            <CheckCircle size={18} />
-            Document Processed
-          </div>
-          <div style={{ fontSize: '0.85rem', color: T.text }}>
-            <p style={{ margin: '0.25rem 0' }}><strong>Title:</strong> {result.title}</p>
-            <p style={{ margin: '0.25rem 0' }}><strong>Domain:</strong> {result.domain}</p>
-            <p style={{ margin: '0.25rem 0' }}><strong>Rules Extracted:</strong> {result.rules_extracted}</p>
-          </div>
-        </div>
-      )}
-
+      <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', background: colors.inputBg, borderRadius: 8, fontSize: '0.85rem', color: colors.textMuted, border: `1px solid ${colors.divider}` }}>
+        💡 <strong>Tip:</strong> Upload compliance documents like Year-End Checklists, SECURE 2.0 guides, or internal policies. XLR8 will automatically extract actionable rules.
+      </div>
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
 
-// Rules Tab
-function RulesTab({ T, darkMode }) {
+function RulesTab({ colors, darkMode }) {
   const [rules, setRules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState({});
 
   useEffect(() => {
-    api.get('/standards/rules')
-      .then(res => setRules(res.data.rules || []))
-      .catch(() => setRules([]))
-      .finally(() => setLoading(false));
+    api.get('/standards/rules').then(res => setRules(res.data.rules || [])).catch(() => setRules([])).finally(() => setLoading(false));
   }, []);
 
-  const toggleExpand = (id) => {
-    setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
-  };
+  const toggleExpand = (id) => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
 
   const getSeverityColor = (severity) => {
-    if (severity === 'critical') return STATUS.red;
-    if (severity === 'high') return STATUS.amber;
-    if (severity === 'medium') return STATUS.blue;
-    return STATUS.green;
+    if (severity === 'critical') return colors.red;
+    if (severity === 'high') return colors.amber;
+    if (severity === 'medium') return colors.blue;
+    return colors.green;
   };
 
   if (loading) {
     return (
-      <div style={{ padding: '3rem', textAlign: 'center', color: T.textDim }}>
+      <div style={{ padding: '3rem', textAlign: 'center', color: colors.textMuted }}>
         <RefreshCw size={24} style={{ animation: 'spin 1s linear infinite' }} />
         <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
       </div>
@@ -524,54 +280,31 @@ function RulesTab({ T, darkMode }) {
 
   return (
     <div>
-      <h3 style={{ margin: '0 0 1rem 0', fontSize: '1rem', fontWeight: 600 }}>
-        📋 Extracted Rules ({rules.length})
+      <h3 style={{ margin: '0 0 1rem 0', fontSize: '1rem', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <ListChecks size={18} style={{ color: colors.primary }} />
+        Extracted Rules ({rules.length})
       </h3>
 
       {rules.length === 0 ? (
-        <div style={{ padding: '2rem', textAlign: 'center', color: T.textDim }}>
+        <div style={{ padding: '2rem', textAlign: 'center', color: colors.textMuted }}>
           <ListChecks size={48} style={{ opacity: 0.3, marginBottom: '1rem' }} />
-          <p>No rules yet. Upload a standards document first.</p>
+          <p style={{ margin: 0 }}>No rules yet. Upload a standards document first.</p>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
           {rules.map((rule, i) => (
-            <div
-              key={rule.rule_id || i}
-              style={{
-                background: T.bg,
-                border: `1px solid ${T.border}`,
-                borderLeft: `4px solid ${getSeverityColor(rule.severity)}`,
-                borderRadius: '8px',
-                overflow: 'hidden',
-              }}
-            >
-              <div
-                onClick={() => toggleExpand(rule.rule_id || i)}
-                style={{
-                  padding: '1rem',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
-              >
+            <div key={rule.rule_id || i} style={{ background: colors.inputBg, border: `1px solid ${colors.divider}`, borderLeft: `4px solid ${getSeverityColor(rule.severity)}`, borderRadius: 8, overflow: 'hidden' }}>
+              <div onClick={() => toggleExpand(rule.rule_id || i)} style={{ padding: '1rem', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
-                  <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>{rule.title}</div>
-                  <div style={{ fontSize: '0.8rem', color: T.textDim }}>
-                    {rule.domain} • {rule.severity}
-                  </div>
+                  <div style={{ fontWeight: 600, marginBottom: '0.25rem', color: colors.text }}>{rule.title}</div>
+                  <div style={{ fontSize: '0.8rem', color: colors.textMuted }}>{rule.domain} • {rule.severity}</div>
                 </div>
-                {expanded[rule.rule_id || i] ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
+                {expanded[rule.rule_id || i] ? <ChevronDown size={20} style={{ color: colors.textMuted }} /> : <ChevronRight size={20} style={{ color: colors.textMuted }} />}
               </div>
               {expanded[rule.rule_id || i] && (
-                <div style={{ padding: '0 1rem 1rem', borderTop: `1px solid ${T.border}` }}>
-                  <p style={{ margin: '1rem 0 0.5rem', fontSize: '0.85rem' }}>{rule.description}</p>
-                  {rule.citation && (
-                    <p style={{ margin: '0.25rem 0', fontSize: '0.8rem', color: T.textDim }}>
-                      <strong>Citation:</strong> {rule.citation}
-                    </p>
-                  )}
+                <div style={{ padding: '0 1rem 1rem', borderTop: `1px solid ${colors.divider}` }}>
+                  <p style={{ margin: '1rem 0 0.5rem', fontSize: '0.85rem', color: colors.text }}>{rule.description}</p>
+                  {rule.citation && <p style={{ margin: '0.25rem 0', fontSize: '0.8rem', color: colors.textMuted }}><strong>Citation:</strong> {rule.citation}</p>}
                 </div>
               )}
             </div>
@@ -582,17 +315,16 @@ function RulesTab({ T, darkMode }) {
   );
 }
 
-// Compliance Check Tab
-function ComplianceTab({ T, darkMode, activeProject, projectName, customerName }) {
+function ComplianceTab({ colors, darkMode, activeProject, projectName, customerName }) {
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState(null);
   const [error, setError] = useState(null);
+  const customerColors = getCustomerColorPalette(customerName || projectName);
 
   const runCheck = async () => {
     setRunning(true);
     setError(null);
     setResults(null);
-
     try {
       const response = await api.post('/standards/check', { project_id: activeProject }, { timeout: 180000 });
       setResults(response.data);
@@ -605,126 +337,56 @@ function ComplianceTab({ T, darkMode, activeProject, projectName, customerName }
 
   return (
     <div>
-      <h3 style={{ margin: '0 0 1rem 0', fontSize: '1rem', fontWeight: 600 }}>
-        🔍 Run Compliance Check
+      <h3 style={{ margin: '0 0 1rem 0', fontSize: '1rem', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <SearchIcon size={18} style={{ color: colors.primary }} />
+        Run Compliance Check
       </h3>
 
       {/* Project Context */}
-      <div style={{
-        padding: '1rem',
-        background: T.bg,
-        border: `1px solid ${T.border}`,
-        borderRadius: '8px',
-        marginBottom: '1.5rem',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '1rem',
-      }}>
-        <Folder size={24} style={{ color: T.accent }} />
+      <div style={{ padding: '1rem', background: customerColors.bg, border: `1px solid ${customerColors.primary}40`, borderLeft: `4px solid ${customerColors.primary}`, borderRadius: 8, marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+        <Folder size={24} style={{ color: customerColors.primary }} />
         <div>
-          <div style={{ fontWeight: 600 }}>{projectName}</div>
-          <div style={{ fontSize: '0.85rem', color: T.textDim }}>{customerName}</div>
+          <div style={{ fontWeight: 600, color: customerColors.primary }}>{projectName}</div>
+          <div style={{ fontSize: '0.85rem', color: colors.textMuted }}>{customerName}</div>
         </div>
       </div>
 
-      <button
-        onClick={runCheck}
-        disabled={running}
-        style={{
-          padding: '0.75rem 1.5rem',
-          background: T.accent,
-          color: 'white',
-          border: 'none',
-          borderRadius: '8px',
-          fontWeight: 600,
-          cursor: 'pointer',
-          opacity: running ? 0.5 : 1,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.5rem',
-        }}
-      >
-        {running ? (
-          <>
-            <RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} />
-            Running...
-          </>
-        ) : (
-          <>
-            <SearchIcon size={16} />
-            Run Compliance Check
-          </>
-        )}
+      <button onClick={runCheck} disabled={running} style={{ padding: '0.75rem 1.5rem', background: colors.primary, color: 'white', border: 'none', borderRadius: 8, fontWeight: 600, cursor: 'pointer', opacity: running ? 0.5 : 1, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        {running ? (<><RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} />Running...</>) : (<><SearchIcon size={16} />Run Compliance Check</>)}
       </button>
 
       {error && (
-        <div style={{
-          padding: '1rem',
-          background: darkMode ? `${STATUS.red}20` : '#fef2f2',
-          border: `1px solid ${STATUS.red}40`,
-          borderRadius: '8px',
-          marginTop: '1rem',
-          color: STATUS.red,
-        }}>
-          ❌ {error}
+        <div style={{ padding: '1rem', background: colors.redLight, border: `1px solid ${colors.red}40`, borderRadius: 8, marginTop: '1rem', color: colors.red, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <XCircle size={18} /> {error}
         </div>
       )}
 
       {results && (
         <div style={{ marginTop: '1.5rem' }}>
-          {/* Summary Stats */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
             {[
-              { label: 'Rules Checked', value: results.rules_checked || 0, color: T.accent },
-              { label: 'Findings', value: results.findings_count || 0, color: results.findings_count > 0 ? STATUS.amber : STATUS.green },
-              { label: 'Compliant', value: results.compliant_count || 0, color: STATUS.green },
+              { label: 'Rules Checked', value: results.rules_checked || 0, color: colors.primary },
+              { label: 'Findings', value: results.findings_count || 0, color: results.findings_count > 0 ? colors.amber : colors.green },
+              { label: 'Compliant', value: results.compliant_count || 0, color: colors.green },
             ].map((stat, i) => (
-              <div key={i} style={{
-                padding: '1rem',
-                background: T.bg,
-                border: `1px solid ${T.border}`,
-                borderRadius: '8px',
-                textAlign: 'center',
-              }}>
-                <div style={{
-                  fontSize: '2rem',
-                  fontWeight: 700,
-                  color: stat.color,
-                  textShadow: darkMode ? `0 0 15px ${stat.color}40` : 'none',
-                  fontFamily: 'monospace',
-                }}>
-                  {stat.value}
-                </div>
-                <div style={{ fontSize: '0.8rem', color: T.textDim }}>{stat.label}</div>
+              <div key={i} style={{ padding: '1rem', background: colors.inputBg, border: `1px solid ${colors.divider}`, borderRadius: 8, textAlign: 'center' }}>
+                <div style={{ fontSize: '2rem', fontWeight: 700, color: stat.color, fontFamily: 'monospace' }}>{stat.value}</div>
+                <div style={{ fontSize: '0.8rem', color: colors.textMuted }}>{stat.label}</div>
               </div>
             ))}
           </div>
 
-          {/* Findings */}
           {results.findings && results.findings.length > 0 && (
             <div>
-              <h4 style={{ margin: '0 0 1rem 0', fontSize: '0.9rem', fontWeight: 600 }}>Findings</h4>
+              <h4 style={{ margin: '0 0 1rem 0', fontSize: '0.9rem', fontWeight: 600, color: colors.text }}>Findings</h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 {results.findings.map((finding, i) => (
-                  <div key={i} style={{
-                    background: T.bg,
-                    border: `1px solid ${T.border}`,
-                    borderLeft: `4px solid ${
-                      finding.severity === 'critical' ? STATUS.red :
-                      finding.severity === 'high' ? STATUS.amber : STATUS.blue
-                    }`,
-                    borderRadius: '8px',
-                    padding: '1rem',
-                  }}>
-                    <div style={{ fontWeight: 600, marginBottom: '0.5rem' }}>{finding.condition || finding.title}</div>
-                    {finding.criteria && <p style={{ margin: '0.25rem 0', fontSize: '0.85rem' }}><strong>Criteria:</strong> {finding.criteria}</p>}
-                    {finding.cause && <p style={{ margin: '0.25rem 0', fontSize: '0.85rem' }}><strong>Cause:</strong> {finding.cause}</p>}
-                    {finding.corrective_action && <p style={{ margin: '0.25rem 0', fontSize: '0.85rem' }}><strong>Action:</strong> {finding.corrective_action}</p>}
-                    {finding.affected_count && (
-                      <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: T.textDim }}>
-                        Affected: {finding.affected_count} records
-                      </div>
-                    )}
+                  <div key={i} style={{ background: colors.inputBg, border: `1px solid ${colors.divider}`, borderLeft: `4px solid ${finding.severity === 'critical' ? colors.red : finding.severity === 'high' ? colors.amber : colors.blue}`, borderRadius: 8, padding: '1rem' }}>
+                    <div style={{ fontWeight: 600, marginBottom: '0.5rem', color: colors.text }}>{finding.condition || finding.title}</div>
+                    {finding.criteria && <p style={{ margin: '0.25rem 0', fontSize: '0.85rem', color: colors.text }}><strong>Criteria:</strong> {finding.criteria}</p>}
+                    {finding.cause && <p style={{ margin: '0.25rem 0', fontSize: '0.85rem', color: colors.text }}><strong>Cause:</strong> {finding.cause}</p>}
+                    {finding.corrective_action && <p style={{ margin: '0.25rem 0', fontSize: '0.85rem', color: colors.text }}><strong>Action:</strong> {finding.corrective_action}</p>}
+                    {finding.affected_count && <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: colors.textMuted }}>Affected: {finding.affected_count} records</div>}
                   </div>
                 ))}
               </div>
@@ -732,7 +394,6 @@ function ComplianceTab({ T, darkMode, activeProject, projectName, customerName }
           )}
         </div>
       )}
-
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
