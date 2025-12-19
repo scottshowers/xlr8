@@ -1,8 +1,23 @@
+"""
+Status Router - Fixed Version
+==============================
+
+FIXED December 19, 2025:
+- Delete now ALWAYS cleans _schema_metadata and _pdf_tables
+- Case-insensitive matching for project/filename
+- Explicit checkpoint after deletes
+- Metadata cleanup happens even if table drop fails
+- Added /status/structured/clean-orphans endpoint
+
+Deploy to: backend/routers/status.py
+"""
+
 from fastapi import APIRouter, HTTPException
 from typing import Optional
 import sys
 import logging
 import json
+import traceback
 
 sys.path.insert(0, '/app')
 sys.path.insert(0, '/data')
@@ -64,6 +79,13 @@ async def get_structured_data_status(project: Optional[str] = None):
                     if project and proj.lower() != project.lower():
                         continue
                     
+                    # Verify table actually exists before including
+                    try:
+                        handler.conn.execute(f'SELECT 1 FROM "{table_name}" LIMIT 1')
+                    except:
+                        logger.warning(f"[STATUS] Skipping stale metadata for non-existent table: {table_name}")
+                        continue
+                    
                     try:
                         columns_data = json.loads(columns_json) if columns_json else []
                         columns = [c.get('name', c) if isinstance(c, dict) else c for c in columns_data]
@@ -110,6 +132,13 @@ async def get_structured_data_status(project: Optional[str] = None):
                     table_name, source_file, proj, project_id, row_count, columns_json, created_at = row
                     
                     if project and proj and proj.lower() != project.lower():
+                        continue
+                    
+                    # Verify table actually exists before including
+                    try:
+                        handler.conn.execute(f'SELECT 1 FROM "{table_name}" LIMIT 1')
+                    except:
+                        logger.warning(f"[STATUS] Skipping stale metadata for non-existent PDF table: {table_name}")
                         continue
                     
                     try:
@@ -246,9 +275,18 @@ async def get_structured_data_status(project: Optional[str] = None):
         }
 
 
+# =============================================================================
+# FIXED DELETE ENDPOINT
+# =============================================================================
+
 @router.delete("/status/structured/{project}/{filename}")
 async def delete_structured_file(project: str, filename: str):
-    """Delete a structured data file from DuckDB"""
+    """
+    Delete a structured data file from DuckDB.
+    
+    FIXED: Now properly cleans _schema_metadata and _pdf_tables even if
+    table lookup or drop fails.
+    """
     logger.warning(f"[DELETE] Request to delete project={project}, filename={filename}")
     
     if not STRUCTURED_AVAILABLE:
@@ -258,72 +296,143 @@ async def delete_structured_file(project: str, filename: str):
         handler = get_structured_handler()
         conn = handler.conn
         deleted_tables = []
+        metadata_cleaned = {"_schema_metadata": 0, "_pdf_tables": 0}
         
-        # 1. Find tables for this file from _schema_metadata
+        # Normalize for case-insensitive matching
+        project_lower = project.lower()
+        filename_lower = filename.lower()
+        
+        # =================================================================
+        # STEP 1: Find and drop tables from _schema_metadata (Excel files)
+        # =================================================================
+        tables_from_metadata = []
         try:
+            # Case-insensitive lookup
             tables_result = conn.execute("""
                 SELECT table_name FROM _schema_metadata 
-                WHERE project = ? AND file_name = ?
-            """, [project, filename]).fetchall()
+                WHERE LOWER(project) = ? AND LOWER(file_name) = ?
+            """, [project_lower, filename_lower]).fetchall()
             
-            for (table_name,) in tables_result:
-                try:
-                    conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
-                    deleted_tables.append(table_name)
-                    logger.info(f"[DELETE] Dropped table: {table_name}")
-                except Exception as te:
-                    logger.warning(f"[DELETE] Could not drop {table_name}: {te}")
-            
-            # Clean up metadata
-            conn.execute("""
-                DELETE FROM _schema_metadata WHERE project = ? AND file_name = ?
-            """, [project, filename])
+            tables_from_metadata = [t[0] for t in tables_result]
+            logger.info(f"[DELETE] Found {len(tables_from_metadata)} tables in _schema_metadata")
             
         except Exception as meta_e:
             logger.warning(f"[DELETE] Metadata lookup failed: {meta_e}")
         
-        # 2. Also check _pdf_tables for PDF-derived data
-        try:
-            pdf_result = conn.execute("""
-                SELECT table_name FROM _pdf_tables 
-                WHERE source_file = ? OR (project = ? AND source_file LIKE ?)
-            """, [filename, project, f"%{filename}%"]).fetchall()
-            
-            for (table_name,) in pdf_result:
-                try:
-                    conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
-                    deleted_tables.append(table_name)
-                    logger.info(f"[DELETE] Dropped PDF table: {table_name}")
-                except Exception as te:
-                    logger.warning(f"[DELETE] Could not drop PDF table {table_name}: {te}")
-            
-            conn.execute("""
-                DELETE FROM _pdf_tables WHERE source_file = ? OR (project = ? AND source_file LIKE ?)
-            """, [filename, project, f"%{filename}%"])
-            
-        except Exception as pdf_e:
-            logger.debug(f"[DELETE] PDF tables check: {pdf_e}")
+        # Drop the tables
+        for table_name in tables_from_metadata:
+            try:
+                conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+                deleted_tables.append(table_name)
+                logger.info(f"[DELETE] Dropped table: {table_name}")
+            except Exception as te:
+                logger.warning(f"[DELETE] Could not drop {table_name}: {te}")
         
-        # 3. Try fallback: match by generated table name pattern
+        # =================================================================
+        # STEP 2: ALWAYS clean _schema_metadata (even if table drop failed)
+        # =================================================================
+        try:
+            conn.execute("""
+                DELETE FROM _schema_metadata 
+                WHERE LOWER(project) = ? AND LOWER(file_name) = ?
+            """, [project_lower, filename_lower])
+            metadata_cleaned["_schema_metadata"] = len(tables_from_metadata) or 1
+            logger.info(f"[DELETE] Cleaned _schema_metadata")
+        except Exception as meta_del_e:
+            logger.warning(f"[DELETE] Failed to clean _schema_metadata: {meta_del_e}")
+        
+        # =================================================================
+        # STEP 3: Find and drop tables from _pdf_tables (PDF files)
+        # =================================================================
+        try:
+            # Check if _pdf_tables exists
+            table_check = conn.execute("""
+                SELECT COUNT(*) FROM information_schema.tables 
+                WHERE table_name = '_pdf_tables'
+            """).fetchone()
+            
+            if table_check[0] > 0:
+                # Case-insensitive lookup
+                pdf_result = conn.execute("""
+                    SELECT table_name FROM _pdf_tables 
+                    WHERE LOWER(source_file) = ? 
+                       OR (LOWER(project) = ? AND LOWER(source_file) LIKE ?)
+                       OR LOWER(source_file) LIKE ?
+                """, [filename_lower, project_lower, f"%{filename_lower}%", f"%{filename_lower}%"]).fetchall()
+                
+                pdf_tables = [t[0] for t in pdf_result]
+                logger.info(f"[DELETE] Found {len(pdf_tables)} tables in _pdf_tables")
+                
+                for table_name in pdf_tables:
+                    try:
+                        conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+                        if table_name not in deleted_tables:
+                            deleted_tables.append(table_name)
+                        logger.info(f"[DELETE] Dropped PDF table: {table_name}")
+                    except Exception as te:
+                        logger.warning(f"[DELETE] Could not drop PDF table {table_name}: {te}")
+                
+                # ALWAYS clean _pdf_tables
+                conn.execute("""
+                    DELETE FROM _pdf_tables 
+                    WHERE LOWER(source_file) = ? 
+                       OR (LOWER(project) = ? AND LOWER(source_file) LIKE ?)
+                       OR LOWER(source_file) LIKE ?
+                """, [filename_lower, project_lower, f"%{filename_lower}%", f"%{filename_lower}%"])
+                metadata_cleaned["_pdf_tables"] = len(pdf_tables) or 1
+                logger.info(f"[DELETE] Cleaned _pdf_tables")
+                
+        except Exception as pdf_e:
+            logger.warning(f"[DELETE] PDF tables check failed: {pdf_e}")
+        
+        # =================================================================
+        # STEP 4: Fallback - pattern matching on actual tables
+        # =================================================================
         if not deleted_tables:
             try:
                 # Generate expected table name pattern
-                safe_project = project.lower().replace(' ', '_').replace('-', '_')
+                safe_project = project_lower.replace(' ', '_').replace('-', '_')
                 safe_file = filename.rsplit('.', 1)[0].lower().replace(' ', '_').replace('-', '_')
-                pattern = f"{safe_project}__{safe_file}%"
                 
                 all_tables = conn.execute("SHOW TABLES").fetchall()
                 for (tbl,) in all_tables:
-                    if tbl.lower().startswith(f"{safe_project}__{safe_file}"):
-                        conn.execute(f'DROP TABLE IF EXISTS "{tbl}"')
-                        deleted_tables.append(tbl)
-                        logger.info(f"[DELETE] Dropped by pattern match: {tbl}")
+                    tbl_lower = tbl.lower()
+                    # Match: project__filename or project__filename__sheet
+                    if tbl_lower.startswith(f"{safe_project}__{safe_file}"):
+                        try:
+                            conn.execute(f'DROP TABLE IF EXISTS "{tbl}"')
+                            deleted_tables.append(tbl)
+                            logger.info(f"[DELETE] Dropped by pattern match: {tbl}")
+                            
+                            # Also clean metadata for this table
+                            try:
+                                conn.execute("DELETE FROM _schema_metadata WHERE table_name = ?", [tbl])
+                            except:
+                                pass
+                            try:
+                                conn.execute("DELETE FROM _pdf_tables WHERE table_name = ?", [tbl])
+                            except:
+                                pass
+                                
+                        except Exception as drop_e:
+                            logger.warning(f"[DELETE] Could not drop {tbl}: {drop_e}")
+                            
             except Exception as fb_e:
                 logger.warning(f"[DELETE] Fallback pattern match failed: {fb_e}")
         
+        # =================================================================
+        # STEP 5: Checkpoint to persist changes
+        # =================================================================
+        try:
+            conn.execute("CHECKPOINT")
+            logger.info("[DELETE] Checkpoint complete")
+        except Exception as cp_e:
+            logger.debug(f"[DELETE] Checkpoint failed (may not be needed): {cp_e}")
+        
         result = {
             "deleted_tables": deleted_tables,
-            "count": len(deleted_tables)
+            "count": len(deleted_tables),
+            "metadata_cleaned": metadata_cleaned
         }
         
         logger.warning(f"[DELETE] Result: {result}")
@@ -331,7 +440,94 @@ async def delete_structured_file(project: str, filename: str):
         
     except Exception as e:
         logger.error(f"Failed to delete structured file: {e}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# ORPHAN CLEANUP ENDPOINT
+# =============================================================================
+
+@router.post("/status/structured/clean-orphans")
+async def clean_orphaned_metadata(project: Optional[str] = None):
+    """
+    Remove metadata entries that reference non-existent tables.
+    
+    Call this to fix stale metrics after deletes.
+    """
+    if not STRUCTURED_AVAILABLE:
+        raise HTTPException(503, "Structured data not available")
+    
+    try:
+        handler = get_structured_handler()
+        conn = handler.conn
+        
+        # Get all actual tables
+        tables = conn.execute("SHOW TABLES").fetchall()
+        actual_tables = set(t[0] for t in tables)
+        
+        orphaned = {"_schema_metadata": 0, "_pdf_tables": 0}
+        
+        # Clean orphaned _schema_metadata entries
+        try:
+            if project:
+                meta_result = conn.execute(
+                    "SELECT table_name FROM _schema_metadata WHERE LOWER(project) = ?",
+                    [project.lower()]
+                ).fetchall()
+            else:
+                meta_result = conn.execute("SELECT table_name FROM _schema_metadata").fetchall()
+            
+            for (table_name,) in meta_result:
+                if table_name not in actual_tables:
+                    conn.execute("DELETE FROM _schema_metadata WHERE table_name = ?", [table_name])
+                    orphaned["_schema_metadata"] += 1
+                    logger.info(f"[CLEANUP] Removed orphaned _schema_metadata: {table_name}")
+                    
+        except Exception as e:
+            logger.warning(f"[CLEANUP] _schema_metadata cleanup error: {e}")
+        
+        # Clean orphaned _pdf_tables entries
+        try:
+            table_check = conn.execute("""
+                SELECT COUNT(*) FROM information_schema.tables 
+                WHERE table_name = '_pdf_tables'
+            """).fetchone()
+            
+            if table_check[0] > 0:
+                if project:
+                    pdf_result = conn.execute(
+                        "SELECT table_name FROM _pdf_tables WHERE LOWER(project) = ? OR LOWER(project_id) = ?",
+                        [project.lower(), project.lower()]
+                    ).fetchall()
+                else:
+                    pdf_result = conn.execute("SELECT table_name FROM _pdf_tables").fetchall()
+                
+                for (table_name,) in pdf_result:
+                    if table_name not in actual_tables:
+                        conn.execute("DELETE FROM _pdf_tables WHERE table_name = ?", [table_name])
+                        orphaned["_pdf_tables"] += 1
+                        logger.info(f"[CLEANUP] Removed orphaned _pdf_tables: {table_name}")
+                        
+        except Exception as e:
+            logger.warning(f"[CLEANUP] _pdf_tables cleanup error: {e}")
+        
+        # Checkpoint
+        try:
+            conn.execute("CHECKPOINT")
+        except:
+            pass
+        
+        logger.info(f"[CLEANUP] Orphan cleanup complete: {orphaned}")
+        return {
+            "success": True, 
+            "orphaned_removed": orphaned, 
+            "actual_tables": len(actual_tables)
+        }
+        
+    except Exception as e:
+        logger.error(f"[CLEANUP] Failed: {e}")
+        raise HTTPException(500, str(e))
 
 
 @router.post("/status/structured/reset")
