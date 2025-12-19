@@ -1,58 +1,184 @@
 /**
- * DashboardPage.jsx - COMMAND CENTER
+ * DashboardPage.jsx - Command Center (Clean Professional)
  * 
- * Premium dashboard with:
- * - Radial gauges for health scores
- * - Consistent customer color coding
- * - Clickable project cards → select project
- * - Clickable feed items → navigate to relevant page
- * - Animated elements
+ * Clean, muted design with meaningful charts:
+ * - Project health horizontal bars
+ * - Weekly activity area chart
+ * - Findings donut chart
+ * 
+ * Real data from existing endpoints
  */
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useTheme, STATUS, BRAND } from '../context/ThemeContext';
 import { useProject } from '../context/ProjectContext';
-import { getCustomerColorPalette } from '../utils/customerColors';
+import api from '../services/api';
 import { 
-  Upload, Zap, MessageSquare, ClipboardList,
-  FolderOpen, PlayCircle, AlertTriangle, Shield, Activity,
-  TrendingUp, ArrowRight
+  Upload, Zap, MessageSquare, FolderOpen, 
+  AlertTriangle, CheckCircle, Clock, ArrowRight,
+  FileText, Database, TrendingUp, Activity, BarChart3
 } from 'lucide-react';
 
-// Radial Gauge Component
-function RadialGauge({ value, size = 80, strokeWidth = 8, color, label }) {
-  const radius = (size - strokeWidth) / 2;
-  const circumference = radius * 2 * Math.PI;
-  const offset = circumference - (value / 100) * circumference;
+// Muted professional colors
+const COLORS = {
+  primary: '#83b16d',      // XLR8 green
+  primaryMuted: '#a8ca99',
+  blue: '#5b8fb9',
+  amber: '#d4a054',
+  red: '#c76b6b',
+  purple: '#8b7bb8',
+  text: '#2a3441',
+  textMuted: '#6b7785',
+  border: '#e2e8f0',
+  bgCard: '#ffffff',
+  bgPage: '#f8fafc',
+};
+
+// Simple horizontal bar component
+function HealthBar({ label, value, maxValue = 100, color = COLORS.primary }) {
+  const percentage = Math.min((value / maxValue) * 100, 100);
+  
+  return (
+    <div style={{ marginBottom: '0.75rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+        <span style={{ fontSize: '0.85rem', color: COLORS.text, fontWeight: 500 }}>{label}</span>
+        <span style={{ fontSize: '0.85rem', color: COLORS.textMuted }}>{value}%</span>
+      </div>
+      <div style={{ 
+        height: 8, 
+        background: '#f1f5f9', 
+        borderRadius: 4,
+        overflow: 'hidden',
+      }}>
+        <div style={{ 
+          height: '100%', 
+          width: `${percentage}%`, 
+          background: color,
+          borderRadius: 4,
+          transition: 'width 0.6s ease-out',
+        }} />
+      </div>
+    </div>
+  );
+}
+
+// Simple area chart component
+function AreaChart({ data, width = 280, height = 120 }) {
+  if (!data || data.length === 0) return null;
+  
+  const max = Math.max(...data.map(d => d.value), 1);
+  const padding = { top: 10, right: 10, bottom: 25, left: 10 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+  
+  const points = data.map((d, i) => ({
+    x: padding.left + (i / (data.length - 1)) * chartWidth,
+    y: padding.top + chartHeight - (d.value / max) * chartHeight,
+  }));
+  
+  // Create path for area
+  const areaPath = `
+    M ${points[0].x} ${padding.top + chartHeight}
+    L ${points.map(p => `${p.x} ${p.y}`).join(' L ')}
+    L ${points[points.length - 1].x} ${padding.top + chartHeight}
+    Z
+  `;
+  
+  // Create path for line
+  const linePath = `M ${points.map(p => `${p.x} ${p.y}`).join(' L ')}`;
+  
+  return (
+    <svg width={width} height={height}>
+      {/* Gradient definition */}
+      <defs>
+        <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={COLORS.primary} stopOpacity="0.3" />
+          <stop offset="100%" stopColor={COLORS.primary} stopOpacity="0.05" />
+        </linearGradient>
+      </defs>
+      
+      {/* Area fill */}
+      <path d={areaPath} fill="url(#areaGradient)" />
+      
+      {/* Line */}
+      <path d={linePath} fill="none" stroke={COLORS.primary} strokeWidth="2" strokeLinecap="round" />
+      
+      {/* Data points */}
+      {points.map((p, i) => (
+        <circle key={i} cx={p.x} cy={p.y} r="3" fill={COLORS.bgCard} stroke={COLORS.primary} strokeWidth="2" />
+      ))}
+      
+      {/* X-axis labels */}
+      {data.map((d, i) => (
+        <text 
+          key={i} 
+          x={points[i].x} 
+          y={height - 5} 
+          textAnchor="middle" 
+          fontSize="10" 
+          fill={COLORS.textMuted}
+        >
+          {d.label}
+        </text>
+      ))}
+    </svg>
+  );
+}
+
+// Simple donut chart component
+function DonutChart({ data, size = 140 }) {
+  const total = data.reduce((sum, d) => sum + d.value, 0);
+  if (total === 0) {
+    // Empty state
+    return (
+      <div style={{ width: size, height: size, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ 
+          width: size * 0.7, 
+          height: size * 0.7, 
+          borderRadius: '50%', 
+          border: `8px solid #f1f5f9`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: COLORS.textMuted,
+          fontSize: '0.75rem',
+        }}>
+          No data
+        </div>
+      </div>
+    );
+  }
+  
+  const radius = size / 2;
+  const strokeWidth = 24;
+  const innerRadius = radius - strokeWidth / 2;
+  const circumference = 2 * Math.PI * innerRadius;
+  
+  let currentOffset = 0;
   
   return (
     <div style={{ position: 'relative', width: size, height: size }}>
       <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={strokeWidth}
-          opacity={0.1}
-        />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke={color}
-          strokeWidth={strokeWidth}
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-          strokeLinecap="round"
-          style={{ 
-            transition: 'stroke-dashoffset 1s ease-out',
-            filter: `drop-shadow(0 0 6px ${color}60)`,
-          }}
-        />
+        {data.map((segment, i) => {
+          const segmentLength = (segment.value / total) * circumference;
+          const offset = currentOffset;
+          currentOffset += segmentLength;
+          
+          return (
+            <circle
+              key={i}
+              cx={radius}
+              cy={radius}
+              r={innerRadius}
+              fill="none"
+              stroke={segment.color}
+              strokeWidth={strokeWidth}
+              strokeDasharray={`${segmentLength} ${circumference}`}
+              strokeDashoffset={-offset}
+              style={{ transition: 'stroke-dasharray 0.6s ease-out' }}
+            />
+          );
+        })}
       </svg>
       <div style={{
         position: 'absolute',
@@ -61,744 +187,535 @@ function RadialGauge({ value, size = 80, strokeWidth = 8, color, label }) {
         transform: 'translate(-50%, -50%)',
         textAlign: 'center',
       }}>
-        <div style={{ 
-          fontSize: size * 0.25, 
-          fontWeight: 700, 
-          fontFamily: 'monospace',
-          color: color,
-          textShadow: `0 0 10px ${color}40`,
-        }}>
-          {value}%
-        </div>
-        {label && (
-          <div style={{ fontSize: size * 0.12, opacity: 0.6, marginTop: 2 }}>{label}</div>
-        )}
+        <div style={{ fontSize: '1.5rem', fontWeight: 700, color: COLORS.text }}>{total}</div>
+        <div style={{ fontSize: '0.7rem', color: COLORS.textMuted }}>Total</div>
       </div>
     </div>
   );
 }
 
-// Mini Sparkline Component
-function Sparkline({ data, color, width = 60, height = 24 }) {
-  const max = Math.max(...data);
-  const min = Math.min(...data);
-  const range = max - min || 1;
-  
-  const points = data.map((val, i) => {
-    const x = (i / (data.length - 1)) * width;
-    const y = height - ((val - min) / range) * height;
-    return `${x},${y}`;
-  }).join(' ');
-
+// Stat card component
+function StatCard({ label, value, icon: Icon, subtitle, onClick }) {
   return (
-    <svg width={width} height={height} style={{ overflow: 'visible' }}>
-      <polyline
-        points={points}
-        fill="none"
-        stroke={color}
-        strokeWidth={2}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        style={{ filter: `drop-shadow(0 0 4px ${color}60)` }}
-      />
-    </svg>
-  );
-}
-
-// Stat Card Component
-function StatCard({ label, value, icon: Icon, color, trend, sparkData, T, darkMode }) {
-  return (
-    <div style={{ 
-      background: T.bgCard, 
-      border: `1px solid ${T.border}`, 
-      borderRadius: '12px', 
-      padding: '1.25rem', 
-      position: 'relative', 
-      overflow: 'hidden',
-      transition: 'all 0.3s ease',
-    }}>
-      <div style={{ 
-        position: 'absolute', 
-        top: 0, 
-        left: 0, 
-        right: 0, 
-        height: 3, 
-        background: `linear-gradient(90deg, ${color}, ${color}80)`,
-        boxShadow: `0 0 20px ${color}60`,
-      }} />
-      
+    <div 
+      onClick={onClick}
+      style={{ 
+        background: COLORS.bgCard, 
+        border: `1px solid ${COLORS.border}`, 
+        borderRadius: 12, 
+        padding: '1.25rem',
+        cursor: onClick ? 'pointer' : 'default',
+        transition: 'all 0.2s ease',
+      }}
+      onMouseEnter={(e) => onClick && (e.currentTarget.style.borderColor = COLORS.primary)}
+      onMouseLeave={(e) => onClick && (e.currentTarget.style.borderColor = COLORS.border)}
+    >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
-          <div style={{ 
-            fontSize: '0.7rem', 
-            color: T.textDim, 
-            marginBottom: '0.5rem', 
-            textTransform: 'uppercase', 
-            letterSpacing: '0.1em',
-            fontWeight: 600,
-          }}>
+          <div style={{ fontSize: '0.75rem', color: COLORS.textMuted, marginBottom: '0.5rem', fontWeight: 500 }}>
             {label}
           </div>
-          <div style={{ 
-            fontSize: '2.25rem', 
-            fontWeight: 700, 
-            color: color, 
-            textShadow: darkMode ? `0 0 30px ${color}50` : 'none', 
-            fontFamily: 'monospace',
-            lineHeight: 1,
-          }}>
+          <div style={{ fontSize: '2rem', fontWeight: 700, color: COLORS.text, lineHeight: 1 }}>
             {value}
           </div>
-          {trend && (
-            <div style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '0.25rem', 
-              marginTop: '0.5rem',
-              fontSize: '0.75rem',
-              color: trend > 0 ? STATUS.green : STATUS.red,
-            }}>
-              <TrendingUp size={12} style={{ transform: trend < 0 ? 'rotate(180deg)' : 'none' }} />
-              {Math.abs(trend)}% vs last week
+          {subtitle && (
+            <div style={{ fontSize: '0.75rem', color: COLORS.textMuted, marginTop: '0.35rem' }}>
+              {subtitle}
             </div>
           )}
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.5rem' }}>
-          <Icon size={24} style={{ opacity: 0.4, color: T.textDim }} />
-          {sparkData && <Sparkline data={sparkData} color={color} />}
+        <div style={{ 
+          width: 40, 
+          height: 40, 
+          borderRadius: 10, 
+          background: '#f1f5f9',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}>
+          <Icon size={20} style={{ color: COLORS.primary }} />
         </div>
       </div>
     </div>
   );
 }
 
-// Project Card Component with Gauge
-function ProjectCard({ project, T, darkMode, onClick, isSelected }) {
-  const colors = getCustomerColorPalette(project.customer || project.name);
-  const healthColor = project.health >= 80 ? STATUS.green : project.health >= 60 ? STATUS.amber : STATUS.red;
+// Project row component
+function ProjectRow({ project, onClick, isSelected }) {
+  const healthColor = project.health >= 80 ? COLORS.primary : project.health >= 50 ? COLORS.amber : COLORS.red;
   
   return (
     <div 
       onClick={onClick}
       style={{ 
-        background: darkMode ? T.bgCard : 'white',
-        border: `2px solid ${isSelected ? colors.primary : T.border}`,
-        borderRadius: '16px', 
-        padding: '1.25rem', 
-        cursor: 'pointer', 
-        position: 'relative',
-        overflow: 'hidden',
-        transition: 'all 0.3s ease',
-        boxShadow: isSelected ? `0 0 20px ${colors.primary}30` : 'none',
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.transform = 'translateY(-2px)';
-        e.currentTarget.style.boxShadow = `0 8px 30px ${colors.primary}20`;
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.transform = 'translateY(0)';
-        e.currentTarget.style.boxShadow = isSelected ? `0 0 20px ${colors.primary}30` : 'none';
-      }}
-    >
-      <div style={{ 
-        position: 'absolute', 
-        top: 0, 
-        left: 0, 
-        right: 0, 
-        height: 4, 
-        background: `linear-gradient(90deg, ${colors.primary}, ${colors.primary}90)`,
-      }} />
-      
-      <div style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: colors.bg,
-        opacity: darkMode ? 0.5 : 1,
-      }} />
-      
-      <div style={{ position: 'relative', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ 
-            fontWeight: 700, 
-            fontSize: '1.1rem',
-            color: colors.primary,
-            marginBottom: '0.25rem',
-          }}>
-            {project.name}
-          </div>
-          <div style={{ fontSize: '0.85rem', color: T.textDim, marginBottom: '1rem' }}>
-            {project.customer}
-          </div>
-          
-          <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.8rem' }}>
-            <div>
-              <span style={{ color: T.textDim }}>Playbooks </span>
-              <span style={{ 
-                color: STATUS.blue, 
-                fontWeight: 600,
-                background: `${STATUS.blue}15`,
-                padding: '0.15rem 0.5rem',
-                borderRadius: '10px',
-              }}>
-                {project.activePlaybooks || 0}
-              </span>
-            </div>
-            <div>
-              <span style={{ color: T.textDim }}>Findings </span>
-              <span style={{ 
-                color: (project.pendingFindings || 0) > 10 ? STATUS.amber : STATUS.green,
-                fontWeight: 600,
-                background: (project.pendingFindings || 0) > 10 ? `${STATUS.amber}15` : `${STATUS.green}15`,
-                padding: '0.15rem 0.5rem',
-                borderRadius: '10px',
-              }}>
-                {project.pendingFindings || 0}
-              </span>
-            </div>
-          </div>
-        </div>
-        
-        <RadialGauge 
-          value={project.health || 75} 
-          size={70} 
-          strokeWidth={6} 
-          color={healthColor}
-          label="Health"
-        />
-      </div>
-      
-      <div style={{
-        position: 'absolute',
-        bottom: '0.75rem',
-        right: '0.75rem',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '0.25rem',
-        fontSize: '0.7rem',
-        color: colors.primary,
-        opacity: 0.7,
-      }}>
-        Select <ArrowRight size={12} />
-      </div>
-    </div>
-  );
-}
-
-// Feed Item Component
-function FeedItem({ item, T, darkMode, onClick }) {
-  const colors = getCustomerColorPalette(item.project);
-  
-  const getLevelStyle = (level) => {
-    if (level === 'success') return { color: STATUS.green, bg: `${STATUS.green}15` };
-    if (level === 'warning') return { color: STATUS.amber, bg: `${STATUS.amber}15` };
-    return { color: STATUS.blue, bg: `${STATUS.blue}15` };
-  };
-  
-  const style = getLevelStyle(item.level);
-  
-  return (
-    <div 
-      onClick={onClick}
-      style={{ 
-        background: darkMode ? T.bg : 'white', 
-        border: `1px solid ${T.border}`, 
-        borderLeft: `4px solid ${colors.primary}`,
-        borderRadius: '8px', 
-        padding: '0.875rem 1rem', 
+        display: 'flex', 
+        alignItems: 'center', 
+        padding: '0.875rem 1rem',
+        borderBottom: `1px solid ${COLORS.border}`,
         cursor: 'pointer',
-        transition: 'all 0.2s ease',
-        position: 'relative',
-        overflow: 'hidden',
+        background: isSelected ? '#f0fdf4' : 'transparent',
+        transition: 'background 0.15s ease',
       }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.transform = 'translateX(4px)';
-        e.currentTarget.style.borderLeftWidth = '6px';
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.transform = 'translateX(0)';
-        e.currentTarget.style.borderLeftWidth = '4px';
-      }}
+      onMouseEnter={(e) => !isSelected && (e.currentTarget.style.background = '#fafbfc')}
+      onMouseLeave={(e) => !isSelected && (e.currentTarget.style.background = 'transparent')}
     >
-      <div style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: colors.bg,
-        opacity: 0.3,
-      }} />
-      
-      <div style={{ position: 'relative' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>{item.msg}</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <div style={{ 
-              width: 60, 
-              height: 6, 
-              background: T.border, 
-              borderRadius: 3,
-              overflow: 'hidden',
-            }}>
-              <div style={{
-                width: '100%',
-                height: '100%',
-                background: `linear-gradient(90deg, ${style.color}, ${style.color}60)`,
-                borderRadius: 3,
-                boxShadow: `0 0 8px ${style.color}60`,
-              }} />
-            </div>
-            <span style={{ fontSize: '0.75rem', color: T.textDim, minWidth: 30, textAlign: 'right' }}>{item.time}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 600, color: COLORS.text, fontSize: '0.9rem' }}>{project.name}</div>
+        <div style={{ fontSize: '0.75rem', color: COLORS.textMuted }}>{project.customer || 'No customer'}</div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: '0.7rem', color: COLORS.textMuted }}>Playbooks</div>
+          <div style={{ fontSize: '0.9rem', fontWeight: 600, color: COLORS.blue }}>{project.playbookCount || 0}</div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: '0.7rem', color: COLORS.textMuted }}>Findings</div>
+          <div style={{ fontSize: '0.9rem', fontWeight: 600, color: project.findingsCount > 0 ? COLORS.amber : COLORS.textMuted }}>
+            {project.findingsCount || 0}
           </div>
         </div>
         <div style={{ 
-          marginTop: '0.4rem',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.5rem',
+          width: 50,
+          height: 6, 
+          background: '#f1f5f9', 
+          borderRadius: 3,
+          overflow: 'hidden',
         }}>
-          <span style={{ 
-            fontSize: '0.75rem',
-            fontWeight: 700,
-            color: colors.primary,
-            background: colors.bgSolid,
-            padding: '0.2rem 0.6rem',
-            borderRadius: '10px',
-            border: `1px solid ${colors.primary}30`,
-          }}>
-            {item.project}
-          </span>
-          <span style={{
-            fontSize: '0.7rem',
-            color: style.color,
-            background: style.bg,
-            padding: '0.15rem 0.5rem',
-            borderRadius: '8px',
-            textTransform: 'capitalize',
-          }}>
-            {item.level}
-          </span>
+          <div style={{ 
+            height: '100%', 
+            width: `${project.health || 0}%`, 
+            background: healthColor,
+            borderRadius: 3,
+          }} />
         </div>
+        <ArrowRight size={16} style={{ color: COLORS.textMuted }} />
       </div>
     </div>
   );
 }
 
-// Quick Action Button
-function QuickAction({ icon: Icon, label, shortcut, onClick, T }) {
+// Quick action button
+function QuickAction({ icon: Icon, label, onClick }) {
   return (
-    <button 
+    <button
       onClick={onClick}
-      style={{ 
-        background: T.bgCard, 
-        border: `1px solid ${T.border}`, 
-        borderRadius: '12px', 
-        padding: '1rem 1.25rem', 
-        cursor: 'pointer', 
-        display: 'flex', 
-        alignItems: 'center', 
-        gap: '0.75rem', 
-        color: T.text,
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: '0.5rem',
+        padding: '1rem',
+        background: COLORS.bgCard,
+        border: `1px solid ${COLORS.border}`,
+        borderRadius: 12,
+        cursor: 'pointer',
         transition: 'all 0.2s ease',
-        position: 'relative',
-        overflow: 'hidden',
+        flex: 1,
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.borderColor = BRAND.grassGreen;
-        e.currentTarget.style.boxShadow = `0 4px 20px ${BRAND.grassGreen}20`;
+        e.currentTarget.style.borderColor = COLORS.primary;
+        e.currentTarget.style.background = '#f0fdf4';
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.borderColor = T.border;
-        e.currentTarget.style.boxShadow = 'none';
+        e.currentTarget.style.borderColor = COLORS.border;
+        e.currentTarget.style.background = COLORS.bgCard;
       }}
     >
-      <div style={{
-        width: 36,
-        height: 36,
-        borderRadius: '10px',
-        background: `${BRAND.grassGreen}15`,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}>
-        <Icon size={18} style={{ color: BRAND.grassGreen }} />
-      </div>
-      <span style={{ fontWeight: 600, flex: 1 }}>{label}</span>
-      <span style={{ 
-        fontSize: '0.7rem', 
-        color: T.textDim, 
-        padding: '0.3rem 0.5rem', 
-        background: T.bg, 
-        borderRadius: '6px', 
-        fontFamily: 'monospace',
-        fontWeight: 600,
-      }}>
-        {shortcut}
-      </span>
+      <Icon size={22} style={{ color: COLORS.primary }} />
+      <span style={{ fontSize: '0.8rem', fontWeight: 500, color: COLORS.text }}>{label}</span>
     </button>
   );
 }
 
+
 export default function DashboardPage() {
   const navigate = useNavigate();
-  const { darkMode, T } = useTheme();
-  const { selectProject, activeProject, projects: realProjects } = useProject();
-  const [time, setTime] = useState(new Date());
+  const { projects: realProjects, activeProject, selectProject } = useProject();
   
-  // Real stats from backend
-  const [dashboardStats, setDashboardStats] = useState({
-    playbooksRunning: 0,
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({
+    totalProjects: 0,
+    activePlaybooks: 0,
     pendingFindings: 0,
-    complianceScore: 0,
-    projectStats: {} // projectId -> {health, findings, playbooks}
+    filesUploaded: 0,
   });
-  const [statsLoading, setStatsLoading] = useState(true);
+  const [projectsWithHealth, setProjectsWithHealth] = useState([]);
+  const [weeklyActivity, setWeeklyActivity] = useState([]);
+  const [findingsBreakdown, setFindingsBreakdown] = useState([]);
+  const [recentActivity, setRecentActivity] = useState([]);
 
   useEffect(() => {
-    const interval = setInterval(() => setTime(new Date()), 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Fetch real stats from backend
-  useEffect(() => {
-    const fetchStats = async () => {
-      try {
-        // Get playbook builder configs count
-        const playbooksRes = await fetch('/api/playbook-builder/configs').then(r => r.json()).catch(() => ({ total: 0 }));
-        const builderPlaybooks = playbooksRes.total || playbooksRes.configs?.length || 0;
-        
-        // Get findings/stats for each project
-        const projectStats = {};
-        let totalFindings = 0;
-        let totalCritical = 0;
-        let totalTasks = 0;
-        let totalComplete = 0;
-        let totalPlaybooks = builderPlaybooks;
-        
-        for (const project of (realProjects || [])) {
-          try {
-            // Check Year-End playbook progress for this project
-            let hasYearEndPlaybook = false;
-            try {
-              const progressRes = await fetch(`/api/playbooks/year-end/progress/${project.id}`).then(r => r.json()).catch(() => null);
-              // If progress exists and has any actions tracked, count as active playbook
-              if (progressRes && Object.keys(progressRes).length > 0) {
-                hasYearEndPlaybook = true;
-                totalPlaybooks++;
-              }
-            } catch (e) {
-              // No Year-End progress for this project
-            }
-            
-            // Get intelligence summary
-            const summaryRes = await fetch(`/api/intelligence/${project.id}/summary`).then(r => r.json()).catch(() => null);
-            
-            if (summaryRes && summaryRes.analyzed) {
-              const findings = summaryRes.findings || {};
-              const tasks = summaryRes.tasks || {};
-              
-              // Calculate health: 100 - (critical*10 + warning*3 + pending_tasks*2), min 0
-              const health = Math.max(0, Math.min(100, 
-                100 - (findings.critical || 0) * 10 - (findings.warning || 0) * 3 - (tasks.pending || 0) * 2
-              ));
-              
-              projectStats[project.id] = {
-                health,
-                pendingFindings: (findings.critical || 0) + (findings.warning || 0),
-                activePlaybooks: hasYearEndPlaybook ? 1 : 0
-              };
-              
-              totalFindings += (findings.critical || 0) + (findings.warning || 0);
-              totalCritical += findings.critical || 0;
-              totalTasks += tasks.total || 0;
-              totalComplete += tasks.complete || 0;
-            } else {
-              // No intelligence analysis yet - show health based on just playbook status
-              projectStats[project.id] = { 
-                health: 100, 
-                pendingFindings: 0, 
-                activePlaybooks: hasYearEndPlaybook ? 1 : 0 
-              };
-            }
-          } catch (e) {
-            projectStats[project.id] = { health: 100, pendingFindings: 0, activePlaybooks: 0 };
-          }
-        }
-        
-        // Calculate compliance score: (complete tasks / total tasks) * 100, or 100 if no tasks
-        const complianceScore = totalTasks > 0 ? Math.round((totalComplete / totalTasks) * 100) : 100;
-        
-        setDashboardStats({
-          playbooksRunning: totalPlaybooks,
-          pendingFindings: totalFindings,
-          complianceScore,
-          projectStats
-        });
-      } catch (e) {
-        console.error('Failed to fetch dashboard stats:', e);
-      } finally {
-        setStatsLoading(false);
-      }
-    };
-    
-    fetchStats();
-    const interval = setInterval(fetchStats, 30000); // Refresh every 30s
-    return () => clearInterval(interval);
+    loadDashboardData();
   }, [realProjects]);
 
-  // Stats - use real data
-  const stats = [
-    { label: 'Active Projects', value: realProjects?.length || 0, icon: FolderOpen, color: BRAND.grassGreen },
-    { label: 'Playbooks', value: statsLoading ? '...' : dashboardStats.playbooksRunning, icon: PlayCircle, color: STATUS.blue },
-    { label: 'Pending Findings', value: statsLoading ? '...' : dashboardStats.pendingFindings, icon: AlertTriangle, color: STATUS.amber },
-    { label: 'Compliance', value: statsLoading ? '...' : `${dashboardStats.complianceScore}%`, icon: Shield, color: dashboardStats.complianceScore >= 80 ? STATUS.green : dashboardStats.complianceScore >= 60 ? STATUS.amber : STATUS.red },
-  ];
-
-  // Use real projects with real stats
-  const displayProjects = (realProjects || []).slice(0, 4).map((p) => ({
-    ...p,
-    health: dashboardStats.projectStats[p.id]?.health ?? 100,
-    activePlaybooks: dashboardStats.projectStats[p.id]?.activePlaybooks ?? 0,
-    pendingFindings: dashboardStats.projectStats[p.id]?.pendingFindings ?? 0,
-  }));
-
-  // If no real projects, show empty state
-  if (displayProjects.length === 0) {
-    displayProjects.push(
-      { id: 'demo-1', name: 'No Projects', customer: 'Create a project to get started', health: 0, activePlaybooks: 0, pendingFindings: 0 }
-    );
-  }
-
-  const liveFeed = [
-    { level: 'info', msg: 'Payroll register processed', project: displayProjects[0]?.name || 'Project', time: '2m', path: '/data' },
-    { level: 'warning', msg: 'SECURE 2.0 gap detected', project: displayProjects[1]?.name || displayProjects[0]?.name || 'Project', time: '15m', path: '/playbooks' },
-    { level: 'success', msg: 'Year-End Checklist passed', project: displayProjects[0]?.name || 'Project', time: '1h', path: '/playbooks' },
-    { level: 'warning', msg: 'Missing deduction codes', project: displayProjects[2]?.name || displayProjects[0]?.name || 'Project', time: '2h', path: '/playbooks' },
-    { level: 'info', msg: 'New standards doc uploaded', project: 'GLOBAL', time: '3h', path: '/reference-library' },
-  ];
-
-  const quickActions = [
-    { icon: Upload, label: 'Upload Data', key: 'U', path: '/data' },
-    { icon: Zap, label: 'Run Playbook', key: 'P', path: '/playbooks' },
-    { icon: MessageSquare, label: 'Open Chat', key: 'C', path: '/workspace' },
-    { icon: ClipboardList, label: 'View Findings', key: 'F', path: '/playbooks' },
-  ];
-
-  const handleProjectClick = (project) => {
-    if (project.id === 'demo-1') {
-      navigate('/projects');
-      return;
+  const loadDashboardData = async () => {
+    setLoading(true);
+    try {
+      // Get jobs for activity data
+      const jobsRes = await api.get('/jobs').catch(() => ({ data: { jobs: [] } }));
+      const jobs = jobsRes.data.jobs || [];
+      
+      // Get structured data for file counts
+      const structuredRes = await api.get('/status/structured').catch(() => ({ data: { files: [], total_files: 0 } }));
+      
+      // Get playbook stats if available
+      let playbookStats = { total: 0, findings: [] };
+      try {
+        const playbookRes = await api.get('/playbooks/stats');
+        playbookStats = playbookRes.data || playbookStats;
+      } catch {}
+      
+      // Calculate stats
+      const totalProjects = realProjects?.length || 0;
+      const filesUploaded = structuredRes.data.total_files || structuredRes.data.files?.length || 0;
+      
+      // Build projects with health scores
+      const projectsHealth = (realProjects || []).map(p => ({
+        ...p,
+        health: 100, // Will be updated per-project if we have integrity data
+        playbookCount: 0,
+        findingsCount: 0,
+      }));
+      
+      // Try to get per-project health
+      for (const proj of projectsHealth) {
+        try {
+          const integrityRes = await api.get(`/status/data-integrity?project=${proj.id}`);
+          if (integrityRes.data && !integrityRes.data.error) {
+            const { tables_checked, tables_with_issues } = integrityRes.data;
+            if (tables_checked > 0) {
+              proj.health = Math.round(((tables_checked - tables_with_issues) / tables_checked) * 100);
+            }
+          }
+        } catch {}
+      }
+      
+      setProjectsWithHealth(projectsHealth.slice(0, 6));
+      
+      // Build weekly activity from jobs
+      const now = new Date();
+      const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const weekData = [];
+      
+      for (let i = 6; i >= 0; i--) {
+        const date = new Date(now);
+        date.setDate(date.getDate() - i);
+        const dayStart = new Date(date.setHours(0, 0, 0, 0));
+        const dayEnd = new Date(date.setHours(23, 59, 59, 999));
+        
+        const dayJobs = jobs.filter(j => {
+          const jobDate = new Date(j.created_at);
+          return jobDate >= dayStart && jobDate <= dayEnd;
+        });
+        
+        weekData.push({
+          label: dayNames[dayStart.getDay()],
+          value: dayJobs.length,
+        });
+      }
+      setWeeklyActivity(weekData);
+      
+      // Findings breakdown (mocked structure - would come from playbooks endpoint)
+      const findings = playbookStats.findings || [];
+      const resolved = findings.filter(f => f.status === 'resolved').length;
+      const pending = findings.filter(f => f.status === 'pending' || !f.status).length;
+      const newFindings = findings.filter(f => f.status === 'new').length;
+      
+      setFindingsBreakdown([
+        { label: 'Resolved', value: resolved || 0, color: COLORS.primary },
+        { label: 'Pending', value: pending || 0, color: COLORS.amber },
+        { label: 'New', value: newFindings || 0, color: COLORS.blue },
+      ]);
+      
+      // Recent activity from jobs
+      const recent = jobs.slice(0, 5).map(j => ({
+        type: j.job_type || 'upload',
+        filename: j.input_data?.filename || j.filename || 'File',
+        project: j.input_data?.project_name || j.project_id || 'Unknown',
+        status: j.status,
+        time: formatTimeAgo(j.created_at),
+      }));
+      setRecentActivity(recent);
+      
+      setStats({
+        totalProjects,
+        activePlaybooks: playbookStats.total || 0,
+        pendingFindings: pending || 0,
+        filesUploaded,
+      });
+      
+    } catch (err) {
+      console.error('Dashboard load error:', err);
+    } finally {
+      setLoading(false);
     }
-    selectProject(project);
-    navigate('/data');
+  };
+  
+  const formatTimeAgo = (dateStr) => {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return `${diffDays}d ago`;
   };
 
-  const handleFeedClick = (item) => {
-    const project = displayProjects.find(p => p.name === item.project);
-    if (project && item.project !== 'GLOBAL' && project.id !== 'demo-1') {
-      selectProject(project);
-    }
-    navigate(item.path);
+  const handleProjectClick = (project) => {
+    selectProject(project);
+    navigate('/data');
   };
 
   return (
     <div style={{ 
       padding: '1.5rem', 
-      background: T.bg, 
-      minHeight: '100vh', 
-      color: T.text, 
+      background: COLORS.bgPage, 
+      minHeight: 'calc(100vh - 60px)',
       fontFamily: "'Inter', system-ui, sans-serif",
-      transition: 'background 0.3s ease, color 0.3s ease',
     }}>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-        <div>
-          <h1 style={{ 
-            fontSize: '1.75rem', 
-            fontWeight: 700, 
-            margin: 0, 
-            letterSpacing: '0.05em', 
-            fontFamily: "'Sora', sans-serif",
-            color: T.text,
-          }}>
-            COMMAND CENTER
-          </h1>
-          <p style={{ color: T.textDim, margin: '0.25rem 0 0 0', fontSize: '0.85rem' }}>XLR8 Operations Overview</p>
-        </div>
-        
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-          <div style={{ 
-            background: `${STATUS.green}15`, 
-            border: `1px solid ${STATUS.green}30`,
-            borderRadius: '12px',
-            padding: '0.5rem 1rem',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.75rem',
-          }}>
-            <div style={{ 
-              fontSize: '0.7rem', 
-              color: T.textDim, 
-              textTransform: 'uppercase', 
-              letterSpacing: '0.05em' 
-            }}>
-              System Status
-            </div>
-            <div style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '0.5rem',
-              color: STATUS.green,
-              fontWeight: 600,
-              fontSize: '0.85rem',
-            }}>
-              <span style={{ 
-                width: 8, 
-                height: 8, 
-                borderRadius: '50%', 
-                background: STATUS.green, 
-                boxShadow: `0 0 10px ${STATUS.green}`,
-                animation: 'pulse 2s infinite',
-              }} />
-              OPERATIONAL
-            </div>
-          </div>
-
-          <div style={{ 
-            fontFamily: 'monospace', 
-            fontSize: '1.75rem', 
-            fontWeight: 600,
-            color: BRAND.grassGreen, 
-            textShadow: darkMode ? `0 0 30px ${BRAND.grassGreen}50` : 'none',
-            letterSpacing: '0.05em',
-          }}>
-            {time.toLocaleTimeString()}
-          </div>
-        </div>
+      <div style={{ marginBottom: '1.5rem' }}>
+        <h1 style={{ 
+          fontSize: '1.5rem', 
+          fontWeight: 700, 
+          margin: 0, 
+          color: COLORS.text,
+          fontFamily: "'Sora', sans-serif",
+        }}>
+          Command Center
+        </h1>
+        <p style={{ color: COLORS.textMuted, margin: '0.25rem 0 0 0', fontSize: '0.875rem' }}>
+          Overview of your XLR8 workspace
+        </p>
       </div>
 
-      {/* Stats Bar */}
-      <div data-tour="dashboard-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
-        {stats.map((stat, i) => (
-          <StatCard key={i} {...stat} T={T} darkMode={darkMode} />
-        ))}
+      {/* Stats Row */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
+        <StatCard 
+          label="Projects" 
+          value={stats.totalProjects} 
+          icon={FolderOpen}
+          subtitle="Active engagements"
+          onClick={() => navigate('/projects')}
+        />
+        <StatCard 
+          label="Files Loaded" 
+          value={stats.filesUploaded} 
+          icon={Database}
+          subtitle="Across all projects"
+          onClick={() => navigate('/data')}
+        />
+        <StatCard 
+          label="Playbooks" 
+          value={stats.activePlaybooks} 
+          icon={Zap}
+          subtitle="Configured"
+          onClick={() => navigate('/playbooks')}
+        />
+        <StatCard 
+          label="Pending Findings" 
+          value={stats.pendingFindings} 
+          icon={AlertTriangle}
+          subtitle="Require attention"
+          onClick={() => navigate('/playbooks')}
+        />
       </div>
 
       {/* Main Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '1.5rem' }}>
-        {/* Project Grid */}
-        <div data-tour="dashboard-projects">
-          <div style={{ 
-            display: 'flex', 
-            justifyContent: 'space-between', 
-            alignItems: 'center', 
-            marginBottom: '1rem',
-          }}>
-            <h2 style={{ 
-              fontSize: '0.8rem', 
-              fontWeight: 600, 
-              color: T.textDim, 
-              margin: 0,
-              textTransform: 'uppercase', 
-              letterSpacing: '0.1em' 
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: '1.5rem' }}>
+        {/* Left Column */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {/* Projects List */}
+          <div style={{ background: COLORS.bgCard, border: `1px solid ${COLORS.border}`, borderRadius: 12, overflow: 'hidden' }}>
+            <div style={{ 
+              padding: '1rem 1.25rem', 
+              borderBottom: `1px solid ${COLORS.border}`,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
             }}>
-              Active Engagements
-            </h2>
-            <button
-              onClick={() => navigate('/projects')}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: BRAND.grassGreen,
-                fontSize: '0.8rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.25rem',
-              }}
-            >
-              View All <ArrowRight size={14} />
-            </button>
+              <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: COLORS.text }}>Projects</h2>
+              <button
+                onClick={() => navigate('/projects')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: COLORS.primary,
+                  fontSize: '0.8rem',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.25rem',
+                }}
+              >
+                View All <ArrowRight size={14} />
+              </button>
+            </div>
+            
+            {projectsWithHealth.length === 0 ? (
+              <div style={{ padding: '2rem', textAlign: 'center', color: COLORS.textMuted }}>
+                <FolderOpen size={32} style={{ opacity: 0.3, marginBottom: '0.5rem' }} />
+                <p style={{ margin: 0 }}>No projects yet</p>
+                <button
+                  onClick={() => navigate('/projects')}
+                  style={{
+                    marginTop: '1rem',
+                    padding: '0.5rem 1rem',
+                    background: COLORS.primary,
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    fontSize: '0.85rem',
+                    fontWeight: 500,
+                  }}
+                >
+                  Create Project
+                </button>
+              </div>
+            ) : (
+              projectsWithHealth.map(project => (
+                <ProjectRow 
+                  key={project.id} 
+                  project={project} 
+                  onClick={() => handleProjectClick(project)}
+                  isSelected={activeProject?.id === project.id}
+                />
+              ))
+            )}
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-            {displayProjects.map(project => (
-              <ProjectCard 
-                key={project.id} 
-                project={project} 
-                T={T} 
-                darkMode={darkMode}
-                onClick={() => handleProjectClick(project)}
-                isSelected={activeProject?.id === project.id}
-              />
-            ))}
+
+          {/* Recent Activity */}
+          <div style={{ background: COLORS.bgCard, border: `1px solid ${COLORS.border}`, borderRadius: 12, overflow: 'hidden' }}>
+            <div style={{ 
+              padding: '1rem 1.25rem', 
+              borderBottom: `1px solid ${COLORS.border}`,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+            }}>
+              <Activity size={16} style={{ color: COLORS.primary }} />
+              <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: COLORS.text }}>Recent Activity</h2>
+            </div>
+            
+            {recentActivity.length === 0 ? (
+              <div style={{ padding: '2rem', textAlign: 'center', color: COLORS.textMuted, fontSize: '0.85rem' }}>
+                No recent activity
+              </div>
+            ) : (
+              <div>
+                {recentActivity.map((item, i) => (
+                  <div key={i} style={{ 
+                    padding: '0.75rem 1.25rem', 
+                    borderBottom: i < recentActivity.length - 1 ? `1px solid ${COLORS.border}` : 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.75rem',
+                  }}>
+                    {item.status === 'completed' ? (
+                      <CheckCircle size={16} style={{ color: COLORS.primary }} />
+                    ) : item.status === 'failed' ? (
+                      <AlertTriangle size={16} style={{ color: COLORS.red }} />
+                    ) : (
+                      <Clock size={16} style={{ color: COLORS.amber }} />
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '0.85rem', color: COLORS.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {item.filename}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: COLORS.textMuted }}>{item.project}</div>
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: COLORS.textMuted }}>{item.time}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Live Feed */}
-        <div>
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: '0.5rem',
-            marginBottom: '1rem',
-          }}>
-            <Activity size={16} style={{ color: STATUS.green }} />
-            <h2 style={{ 
-              fontSize: '0.8rem', 
-              fontWeight: 600, 
-              color: T.textDim, 
-              margin: 0,
-              textTransform: 'uppercase', 
-              letterSpacing: '0.1em' 
-            }}>
-              Live Feed
-            </h2>
-            <div style={{
-              width: 6,
-              height: 6,
-              borderRadius: '50%',
-              background: STATUS.green,
-              animation: 'pulse 1.5s infinite',
-            }} />
+        {/* Right Column - Charts */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {/* Weekly Activity Chart */}
+          <div style={{ background: COLORS.bgCard, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: '1.25rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+              <BarChart3 size={16} style={{ color: COLORS.primary }} />
+              <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: COLORS.text }}>Weekly Activity</h3>
+            </div>
+            <AreaChart data={weeklyActivity} width={320} height={130} />
+            <div style={{ fontSize: '0.75rem', color: COLORS.textMuted, marginTop: '0.5rem' }}>
+              File uploads and processing jobs
+            </div>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            {liveFeed.map((item, i) => (
-              <FeedItem 
-                key={i} 
-                item={item} 
-                T={T} 
-                darkMode={darkMode}
-                onClick={() => handleFeedClick(item)}
+
+          {/* Findings Breakdown */}
+          <div style={{ background: COLORS.bgCard, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: '1.25rem' }}>
+            <h3 style={{ margin: '0 0 1rem 0', fontSize: '0.9rem', fontWeight: 600, color: COLORS.text }}>Findings Overview</h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+              <DonutChart data={findingsBreakdown} size={120} />
+              <div style={{ flex: 1 }}>
+                {findingsBreakdown.map((item, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                    <div style={{ width: 10, height: 10, borderRadius: 2, background: item.color }} />
+                    <span style={{ fontSize: '0.8rem', color: COLORS.textMuted, flex: 1 }}>{item.label}</span>
+                    <span style={{ fontSize: '0.85rem', fontWeight: 600, color: COLORS.text }}>{item.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Data Health Summary */}
+          <div style={{ background: COLORS.bgCard, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: '1.25rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: COLORS.text }}>Data Health</h3>
+              <button
+                onClick={() => navigate('/data-health')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: COLORS.primary,
+                  fontSize: '0.75rem',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                }}
+              >
+                Details →
+              </button>
+            </div>
+            {projectsWithHealth.slice(0, 4).map((project, i) => (
+              <HealthBar 
+                key={i}
+                label={project.name} 
+                value={project.health} 
+                color={project.health >= 80 ? COLORS.primary : project.health >= 50 ? COLORS.amber : COLORS.red}
               />
             ))}
+            {projectsWithHealth.length === 0 && (
+              <div style={{ fontSize: '0.85rem', color: COLORS.textMuted, textAlign: 'center', padding: '1rem' }}>
+                No projects to analyze
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       {/* Quick Actions */}
-      <div data-tour="dashboard-actions" style={{ marginTop: '2rem', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
-        {quickActions.map((action, i) => (
-          <QuickAction 
-            key={i} 
-            icon={action.icon}
-            label={action.label}
-            shortcut={action.key}
-            onClick={() => navigate(action.path)}
-            T={T}
-          />
-        ))}
+      <div style={{ marginTop: '1.5rem' }}>
+        <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '0.8rem', fontWeight: 600, color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          Quick Actions
+        </h3>
+        <div style={{ display: 'flex', gap: '1rem' }}>
+          <QuickAction icon={Upload} label="Upload Data" onClick={() => navigate('/data')} />
+          <QuickAction icon={Zap} label="Run Playbook" onClick={() => navigate('/playbooks')} />
+          <QuickAction icon={MessageSquare} label="AI Assist" onClick={() => navigate('/workspace')} />
+          <QuickAction icon={FileText} label="Reference Library" onClick={() => navigate('/reference-library')} />
+        </div>
       </div>
-
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.6; transform: scale(0.95); }
-        }
-      `}</style>
     </div>
   );
 }
