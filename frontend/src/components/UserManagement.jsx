@@ -65,8 +65,8 @@ const styles = {
     borderRadius: '999px',
     fontSize: '0.75rem',
     fontWeight: '600',
-    background: role === 'admin' ? '#fef3c7' : role === 'consultant' ? '#dbeafe' : '#f3e8ff',
-    color: role === 'admin' ? '#92400e' : role === 'consultant' ? '#1e40af' : '#6b21a8',
+    background: role === 'admin' ? 'rgba(138, 107, 74, 0.15)' : role === 'consultant' ? 'rgba(74, 107, 138, 0.15)' : 'rgba(107, 90, 122, 0.15)',
+    color: role === 'admin' ? '#8a6b4a' : role === 'consultant' ? '#4a6b8a' : '#6b5a7a',
   }),
   actionButton: {
     padding: '0.375rem 0.75rem',
@@ -77,11 +77,11 @@ const styles = {
     marginRight: '0.5rem',
   },
   editButton: {
-    background: '#e0e7ff',
-    color: '#4338ca',
+    background: 'rgba(74, 107, 138, 0.15)',
+    color: '#4a6b8a',
   },
   deleteButton: {
-    background: '#fee2e2',
+    background: 'rgba(138, 74, 74, 0.15)',
     color: '#8a4a4a',
   },
   modal: {
@@ -163,8 +163,8 @@ const styles = {
     cursor: 'pointer',
   },
   error: {
-    background: '#fef2f2',
-    border: '1px solid #fecaca',
+    background: 'rgba(138, 74, 74, 0.1)',
+    border: '1px solid rgba(138, 74, 74, 0.3)',
     color: '#8a4a4a',
     padding: '0.75rem',
     borderRadius: '8px',
