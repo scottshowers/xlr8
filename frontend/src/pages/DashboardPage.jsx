@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { getCustomerColorPalette } from '../utils/customerColors';
 
-// Theme-aware colors
+// Theme-aware colors - muted professional palette
 const getColors = (dark) => ({
   bg: dark ? '#1a1f2e' : '#f5f7fa',
   card: dark ? '#242b3d' : '#ffffff',
@@ -31,12 +31,12 @@ const getColors = (dark) => ({
   text: dark ? '#e8eaed' : '#2a3441',
   textMuted: dark ? '#8b95a5' : '#6b7280',
   textLight: dark ? '#5f6a7d' : '#9ca3af',
-  primary: '#83b16d',
-  primaryLight: dark ? 'rgba(131, 177, 109, 0.15)' : 'rgba(131, 177, 109, 0.1)',
-  blue: '#5b8fb9',
-  blueLight: dark ? 'rgba(91, 143, 185, 0.15)' : 'rgba(91, 143, 185, 0.1)',
-  amber: '#d4a054',
-  red: '#c76b6b',
+  primary: '#6b9b5a',  // Darker, more muted green
+  primaryLight: dark ? 'rgba(107, 155, 90, 0.15)' : 'rgba(107, 155, 90, 0.1)',
+  blue: '#4a6b8a',     // Slate blue, not bright
+  blueLight: dark ? 'rgba(74, 107, 138, 0.15)' : 'rgba(74, 107, 138, 0.1)',
+  amber: '#8a6b4a',    // Muted rust/brown, not orange
+  red: '#8a4a4a',      // Muted burgundy
   divider: dark ? '#2d3548' : '#e8ecf1',
   inputBg: dark ? '#1a1f2e' : '#f8fafc',
 });
@@ -139,19 +139,19 @@ function StatCard({ label, value, goal, icon: Icon, trend, colors, onClick }) {
   );
 }
 
-// Simple Bar Chart with brand color variety
+// Simple Bar Chart with muted brand color variety
 function BarChart({ data, colors, height = 160 }) {
   const max = Math.max(...data.map(d => d.value), 1);
   
-  // Brand-aligned color palette for variety
+  // Muted, professional color palette for variety
   const barColors = [
-    '#83b16d', // XLR8 green
-    '#6a9a5a', // darker green
-    '#93abd9', // sky blue
-    '#7a96c4', // deeper blue
-    '#83b16d', // green again
-    '#5b8fb9', // steel blue
-    '#a8ca99', // light green
+    '#6b9b5a', // muted green
+    '#5a8a4a', // darker green
+    '#4a6b8a', // slate blue
+    '#5a6a7a', // steel
+    '#6b9b5a', // green again
+    '#3a4a6a', // navy
+    '#5a8a6a', // sage
   ];
   
   return (
