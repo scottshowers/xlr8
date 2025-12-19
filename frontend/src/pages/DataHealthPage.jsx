@@ -1,17 +1,19 @@
 /**
  * DataHealthPage - Data Integrity + Relationship Review
  * Clean professional design with theme support
+ * 
+ * FIXED: Uses api service instead of raw fetch
+ * FIXED: Proper error handling to prevent auth cascades
  */
 
 import React, { useState, useEffect } from 'react';
 import { useProject } from '../context/ProjectContext';
 import { useTheme } from '../context/ThemeContext';
+import api from '../services/api';
 import { 
   CheckCircle, AlertTriangle, RefreshCw, Zap, ChevronDown, ChevronRight,
   Database, Link2, X, Check, HelpCircle, Table2, Loader2
 } from 'lucide-react';
-
-const API_BASE = import.meta.env.VITE_API_URL || '';
 
 const getColors = (dark) => ({
   bg: dark ? '#1a1f2e' : '#f5f7fa',
@@ -41,6 +43,7 @@ export default function DataHealthPage({ embedded = false }) {
   
   const [integrityLoading, setIntegrityLoading] = useState(false);
   const [integrityData, setIntegrityData] = useState(null);
+  const [integrityError, setIntegrityError] = useState(null);
   const [expandedTables, setExpandedTables] = useState(new Set());
   const [tableProfiles, setTableProfiles] = useState({});
   const [loadingProfiles, setLoadingProfiles] = useState(new Set());
@@ -53,46 +56,48 @@ export default function DataHealthPage({ embedded = false }) {
   const [showHighConfidence, setShowHighConfidence] = useState(false);
   const [showNeedsReview, setShowNeedsReview] = useState(false);
 
-  const needsReview = relationships.filter(function(r) { return r.needs_review && !r.confirmed; });
-  const autoMatched = relationships.filter(function(r) { return !r.needs_review || r.confirmed; });
+  const needsReview = relationships.filter(r => r.needs_review && !r.confirmed);
+  const autoMatched = relationships.filter(r => !r.needs_review || r.confirmed);
 
-  useEffect(function() { 
-    if (activeProject && activeProject.name) { 
+  useEffect(() => { 
+    if (activeProject?.name) { 
       loadDataIntegrity(); 
       loadExistingRelationships(); 
     } 
-  }, [activeProject]);
+  }, [activeProject?.id]);
 
-  const loadDataIntegrity = async function() {
+  const loadDataIntegrity = async () => {
     setIntegrityLoading(true);
+    setIntegrityError(null);
     try {
-      const url = API_BASE + '/api/status/data-integrity?project=' + encodeURIComponent(activeProject?.name || '');
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        setIntegrityData(data);
-      }
+      const res = await api.get('/status/data-integrity', {
+        params: { project: activeProject?.name || '' },
+        timeout: 15000 // 15 second timeout
+      });
+      setIntegrityData(res.data);
     } catch (err) {
       console.error('Failed to load integrity:', err);
+      // Don't let errors cascade - just show error state
+      setIntegrityError(err.message || 'Failed to load data integrity');
+      setIntegrityData(null);
     } finally {
       setIntegrityLoading(false);
     }
   };
 
-  const loadTableProfile = async function(tableName) {
+  const loadTableProfile = async (tableName) => {
     if (tableProfiles[tableName] || loadingProfiles.has(tableName)) return;
-    setLoadingProfiles(function(prev) { return new Set([...prev, tableName]); });
+    setLoadingProfiles(prev => new Set([...prev, tableName]));
     try {
-      const url = API_BASE + '/api/status/table-profile/' + encodeURIComponent(tableName);
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        setTableProfiles(function(prev) { return { ...prev, [tableName]: data }; });
-      }
+      const res = await api.get(`/status/table-profile/${encodeURIComponent(tableName)}`, {
+        timeout: 10000
+      });
+      setTableProfiles(prev => ({ ...prev, [tableName]: res.data }));
     } catch (err) {
       console.error('Failed to load profile:', err);
+      setTableProfiles(prev => ({ ...prev, [tableName]: { error: err.message } }));
     } finally {
-      setLoadingProfiles(function(prev) { 
+      setLoadingProfiles(prev => { 
         const n = new Set(prev); 
         n.delete(tableName); 
         return n; 
@@ -100,7 +105,7 @@ export default function DataHealthPage({ embedded = false }) {
     }
   };
 
-  const toggleTableExpand = function(tableName) {
+  const toggleTableExpand = (tableName) => {
     const s = new Set(expandedTables);
     if (s.has(tableName)) {
       s.delete(tableName);
@@ -111,74 +116,71 @@ export default function DataHealthPage({ embedded = false }) {
     setExpandedTables(s);
   };
 
-  const loadExistingRelationships = async function() {
-    if (!activeProject || !activeProject.name) return;
+  const loadExistingRelationships = async () => {
+    if (!activeProject?.name) return;
     setRelLoading(true);
     try {
-      const url = API_BASE + '/api/data-model/relationships/' + encodeURIComponent(activeProject.name);
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.relationships && data.relationships.length > 0) {
-          setRelationships(data.relationships);
-          setStats(data.stats || null);
-          setAnalyzed(true);
-        } else {
-          setStats(data.stats || null);
-        }
-      }
-    } catch (err) {
-      console.warn('No relationships:', err.message);
-    } finally {
-      setRelLoading(false);
-    }
-  };
-
-  const analyzeProject = async function() {
-    if (!activeProject || !activeProject.name) return;
-    setRelLoading(true);
-    try {
-      const url = API_BASE + '/api/data-model/analyze/' + encodeURIComponent(activeProject.name);
-      const res = await fetch(url, { method: 'POST' });
-      if (res.ok) {
-        const data = await res.json();
-        setRelationships(data.relationships || []);
-        setStats(data.stats || null);
+      const res = await api.get(`/data-model/relationships/${encodeURIComponent(activeProject.name)}`, {
+        timeout: 15000
+      });
+      if (res.data?.relationships?.length > 0) {
+        setRelationships(res.data.relationships);
+        setStats(res.data.stats || null);
         setAnalyzed(true);
+      } else {
+        setStats(res.data?.stats || null);
       }
     } catch (err) {
-      console.error(err.message);
+      // 404 is expected if no relationships analyzed yet
+      if (err.response?.status !== 404) {
+        console.warn('Relationships load error:', err.message);
+      }
     } finally {
       setRelLoading(false);
     }
   };
 
-  const confirmRelationship = async function(rel, confirmed) {
+  const analyzeProject = async () => {
+    if (!activeProject?.name) return;
+    setRelLoading(true);
     try {
-      const url = API_BASE + '/api/data-model/relationships/' + encodeURIComponent(activeProject.name) + '/confirm';
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const res = await api.post(`/data-model/analyze/${encodeURIComponent(activeProject.name)}`, null, {
+        timeout: 60000 // Analysis can take a while
+      });
+      setRelationships(res.data?.relationships || []);
+      setStats(res.data?.stats || null);
+      setAnalyzed(true);
+    } catch (err) {
+      console.error('Analysis failed:', err.message);
+    } finally {
+      setRelLoading(false);
+    }
+  };
+
+  const confirmRelationship = async (rel, confirmed) => {
+    try {
+      await api.post(
+        `/data-model/relationships/${encodeURIComponent(activeProject.name)}/confirm`,
+        {
           source_table: rel.source_table,
           source_column: rel.source_column,
           target_table: rel.target_table,
           target_column: rel.target_column,
           confirmed: confirmed,
           semantic_type: rel.semantic_type
-        })
-      });
-      if (res.ok) {
-        setRelationships(function(prev) {
-          return prev.map(function(r) {
-            if (r.source_table === rel.source_table && r.source_column === rel.source_column && 
-                r.target_table === rel.target_table && r.target_column === rel.target_column) {
-              return confirmed ? { ...r, confirmed: true, needs_review: false } : null;
-            }
-            return r;
-          }).filter(Boolean);
-        });
-      }
+        },
+        { timeout: 10000 }
+      );
+      
+      setRelationships(prev => 
+        prev.map(r => {
+          if (r.source_table === rel.source_table && r.source_column === rel.source_column && 
+              r.target_table === rel.target_table && r.target_column === rel.target_column) {
+            return confirmed ? { ...r, confirmed: true, needs_review: false } : null;
+          }
+          return r;
+        }).filter(Boolean)
+      );
     } catch (err) {
       console.error('Failed to confirm:', err);
     }
@@ -213,6 +215,17 @@ export default function DataHealthPage({ embedded = false }) {
         </div>
 
         <div style={{ padding: '1.25rem' }}>
+          {/* Error State */}
+          {integrityError && (
+            <div style={{ padding: '1rem', background: colors.redLight, border: '1px solid ' + colors.red + '40', borderRadius: 8, marginBottom: '1rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: colors.red }}>
+                <AlertTriangle size={16} />
+                <span style={{ fontWeight: 600 }}>Error loading data</span>
+              </div>
+              <p style={{ margin: '0.5rem 0 0', fontSize: '0.85rem', color: colors.textMuted }}>{integrityError}</p>
+            </div>
+          )}
+
           {integrityLoading && !integrityData ? (
             <div style={{ padding: '2rem', textAlign: 'center', color: colors.textMuted }}>
               <Loader2 size={24} style={{ animation: 'spin 1s linear infinite', marginBottom: '0.5rem' }} />
@@ -246,7 +259,7 @@ export default function DataHealthPage({ embedded = false }) {
 
               {/* Tables List */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                {integrityData.tables.map(function(table, i) {
+                {integrityData.tables.map((table, i) => {
                   const isExpanded = expandedTables.has(table.table_name);
                   const profile = tableProfiles[table.table_name];
                   const isLoadingProfile = loadingProfiles.has(table.table_name);
@@ -254,7 +267,7 @@ export default function DataHealthPage({ embedded = false }) {
                   
                   return (
                     <div key={i} style={{ border: '1px solid ' + colors.divider, borderRadius: 8, overflow: 'hidden' }}>
-                      <div onClick={function() { toggleTableExpand(table.table_name); }} style={{ padding: '0.875rem 1rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.75rem', background: colors.inputBg }}>
+                      <div onClick={() => toggleTableExpand(table.table_name)} style={{ padding: '0.875rem 1rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.75rem', background: colors.inputBg }}>
                         {isExpanded ? <ChevronDown size={16} style={{ color: colors.textMuted }} /> : <ChevronRight size={16} style={{ color: colors.textMuted }} />}
                         <div style={{ width: 8, height: 8, borderRadius: '50%', background: statusColor }} />
                         <div style={{ flex: 1 }}>
@@ -279,14 +292,14 @@ export default function DataHealthPage({ embedded = false }) {
                               {table.issues && table.issues.length > 0 && (
                                 <div style={{ marginBottom: '1rem' }}>
                                   <div style={{ fontSize: '0.8rem', fontWeight: 600, color: colors.text, marginBottom: '0.5rem' }}>Issues:</div>
-                                  {table.issues.map(function(issue, j) {
-                                    return <div key={j} style={{ fontSize: '0.8rem', color: colors.amber, marginBottom: '0.25rem' }}>• {issue.message || issue.type || String(issue)}</div>;
-                                  })}
+                                  {table.issues.map((issue, j) => (
+                                    <div key={j} style={{ fontSize: '0.8rem', color: colors.amber, marginBottom: '0.25rem' }}>• {issue.message || issue.type || String(issue)}</div>
+                                  ))}
                                 </div>
                               )}
                               <div style={{ fontSize: '0.8rem', fontWeight: 600, color: colors.text, marginBottom: '0.5rem' }}>Columns:</div>
                               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
-                                {profile.columns && profile.columns.map(function(col, ci) {
+                                {profile.columns?.map((col, ci) => {
                                   const fillRate = col.fill_rate != null ? col.fill_rate : 100;
                                   return (
                                     <span key={ci} style={{ fontSize: '0.7rem', padding: '0.25rem 0.5rem', background: fillRate < 50 ? colors.amberLight : colors.inputBg, border: '1px solid ' + (fillRate < 50 ? colors.amber : colors.divider), borderRadius: 4, color: fillRate < 50 ? colors.amber : colors.textMuted }}>
@@ -296,6 +309,8 @@ export default function DataHealthPage({ embedded = false }) {
                                 })}
                               </div>
                             </div>
+                          ) : profile?.error ? (
+                            <div style={{ color: colors.red, fontSize: '0.85rem' }}>Error: {profile.error}</div>
                           ) : (
                             <div style={{ color: colors.textMuted, fontSize: '0.85rem' }}>No profile data</div>
                           )}
@@ -362,7 +377,7 @@ export default function DataHealthPage({ embedded = false }) {
                 count={autoMatched.length} 
                 icon={<CheckCircle size={18} style={{ color: colors.green }} />} 
                 expanded={showHighConfidence} 
-                onToggle={function() { setShowHighConfidence(!showHighConfidence); }} 
+                onToggle={() => setShowHighConfidence(!showHighConfidence)} 
                 colors={colors}
               >
                 <RelationshipTable relationships={autoMatched} colors={colors} showActions={false} />
@@ -375,7 +390,7 @@ export default function DataHealthPage({ embedded = false }) {
                   count={needsReview.length} 
                   icon={<AlertTriangle size={18} style={{ color: colors.amber }} />} 
                   expanded={showNeedsReview} 
-                  onToggle={function() { setShowNeedsReview(!showNeedsReview); }} 
+                  onToggle={() => setShowNeedsReview(!showNeedsReview)} 
                   colors={colors}
                 >
                   <RelationshipTable relationships={needsReview} colors={colors} showActions={true} onConfirm={confirmRelationship} />
@@ -440,39 +455,37 @@ function RelationshipTable({ relationships, colors, showActions, onConfirm }) {
           </tr>
         </thead>
         <tbody>
-          {relationships.slice(0, 50).map(function(rel, i) {
-            return (
-              <tr key={i} style={{ borderBottom: '1px solid ' + colors.divider }}>
-                <td style={{ padding: '0.75rem' }}>
-                  <span style={{ color: colors.textMuted }}>{rel.source_table}.</span>
-                  <span style={{ fontWeight: 500, color: colors.text }}>{rel.source_column}</span>
-                </td>
-                <td style={{ padding: '0.75rem', textAlign: 'center' }}>
-                  <Link2 size={14} style={{ color: showActions ? colors.amber : colors.textLight }} />
-                </td>
-                <td style={{ padding: '0.75rem' }}>
-                  <span style={{ color: colors.textMuted }}>{rel.target_table}.</span>
-                  <span style={{ fontWeight: 500, color: colors.text }}>{rel.target_column}</span>
-                </td>
-                <td style={{ padding: '0.75rem', textAlign: 'right' }}>
-                  {showActions ? (
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.5rem' }}>
-                      <button onClick={function() { onConfirm(rel, true); }} style={{ padding: '0.35rem', borderRadius: 4, background: colors.greenLight, border: 'none', cursor: 'pointer', color: colors.green }} title="Confirm">
-                        <Check size={14} />
-                      </button>
-                      <button onClick={function() { onConfirm(rel, false); }} style={{ padding: '0.35rem', borderRadius: 4, background: colors.redLight, border: 'none', cursor: 'pointer', color: colors.red }} title="Reject">
-                        <X size={14} />
-                      </button>
-                    </div>
-                  ) : (
-                    <span style={{ padding: '0.2rem 0.5rem', borderRadius: 4, fontSize: '0.75rem', fontWeight: 600, background: rel.confidence >= 0.95 ? colors.greenLight : rel.confidence >= 0.85 ? colors.blueLight : colors.inputBg, color: rel.confidence >= 0.95 ? colors.green : rel.confidence >= 0.85 ? colors.blue : colors.textMuted }}>
-                      {Math.round(rel.confidence * 100)}%
-                    </span>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
+          {relationships.slice(0, 50).map((rel, i) => (
+            <tr key={i} style={{ borderBottom: '1px solid ' + colors.divider }}>
+              <td style={{ padding: '0.75rem' }}>
+                <span style={{ color: colors.textMuted }}>{rel.source_table}.</span>
+                <span style={{ fontWeight: 500, color: colors.text }}>{rel.source_column}</span>
+              </td>
+              <td style={{ padding: '0.75rem', textAlign: 'center' }}>
+                <Link2 size={14} style={{ color: showActions ? colors.amber : colors.textLight }} />
+              </td>
+              <td style={{ padding: '0.75rem' }}>
+                <span style={{ color: colors.textMuted }}>{rel.target_table}.</span>
+                <span style={{ fontWeight: 500, color: colors.text }}>{rel.target_column}</span>
+              </td>
+              <td style={{ padding: '0.75rem', textAlign: 'right' }}>
+                {showActions ? (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                    <button onClick={() => onConfirm(rel, true)} style={{ padding: '0.35rem', borderRadius: 4, background: colors.greenLight, border: 'none', cursor: 'pointer', color: colors.green }} title="Confirm">
+                      <Check size={14} />
+                    </button>
+                    <button onClick={() => onConfirm(rel, false)} style={{ padding: '0.35rem', borderRadius: 4, background: colors.redLight, border: 'none', cursor: 'pointer', color: colors.red }} title="Reject">
+                      <X size={14} />
+                    </button>
+                  </div>
+                ) : (
+                  <span style={{ padding: '0.2rem 0.5rem', borderRadius: 4, fontSize: '0.75rem', fontWeight: 600, background: rel.confidence >= 0.95 ? colors.greenLight : rel.confidence >= 0.85 ? colors.blueLight : colors.inputBg, color: rel.confidence >= 0.95 ? colors.green : rel.confidence >= 0.85 ? colors.blue : colors.textMuted }}>
+                    {Math.round(rel.confidence * 100)}%
+                  </span>
+                )}
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
       {relationships.length > 50 && (
