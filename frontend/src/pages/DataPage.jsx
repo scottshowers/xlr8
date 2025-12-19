@@ -1,7 +1,7 @@
 /**
  * DataPage.jsx - Restructured Data Hub
  * 
- * Tabs: Upload | Vacuum | Files | Data Model
+ * Tabs: Upload | Files | Data Health | Observatory | Register Extractor
  * 
  * Files tab shows:
  * - Structured Data (queryable tables)
@@ -25,9 +25,10 @@ import {
   Upload as UploadIcon, Sparkles, Database, RefreshCw,
   CheckCircle, XCircle, Clock, Loader2, Trash2, StopCircle,
   FileText, Table2, ChevronDown, ChevronUp, User, Calendar,
-  CheckSquare, Square, BookOpen, AlertCircle
+  CheckSquare, Square, BookOpen, AlertCircle, Eye
 } from 'lucide-react';
-import DataModelComponent from '../components/DataModelPage';
+import DataHealthComponent from './DataHealthPage';
+import DataObservatoryPage from './DataObservatoryPage';
 
 const COLORS = {
   grassGreen: '#83b16d',
@@ -38,9 +39,10 @@ const COLORS = {
 
 const TABS = [
   { id: 'upload', label: 'Upload', icon: UploadIcon },
-  { id: 'vacuum', label: 'Register Extractor', icon: Sparkles },
   { id: 'files', label: 'Files', icon: Database },
-  { id: 'model', label: 'Data Model', icon: Database },
+  { id: 'health', label: 'Data Health', icon: Database },
+  { id: 'observatory', label: 'Observatory', icon: Eye },
+  { id: 'vacuum', label: 'Register Extractor', icon: Sparkles },
 ];
 
 export default function DataPage() {
@@ -87,9 +89,10 @@ export default function DataPage() {
 
         <div style={{ padding: '1.5rem' }}>
           {activeTab === 'upload' && <UploadTab project={activeProject} projectName={projectName} />}
-          {activeTab === 'vacuum' && <VacuumTab />}
           {activeTab === 'files' && <FilesTab />}
-          {activeTab === 'model' && <DataModelComponent embedded />}
+          {activeTab === 'health' && <DataHealthComponent embedded />}
+          {activeTab === 'observatory' && <DataObservatoryPage embedded />}
+          {activeTab === 'vacuum' && <VacuumTab />}
         </div>
       </div>
     </div>
@@ -853,7 +856,7 @@ function FilesTab() {
                         <div style={{ fontSize: '0.65rem', color: '#92400e', marginTop: '0.25rem' }}>
                           Issues in: {validationIssues.slice(0, 3).map(i => i.table).join(', ')}
                           {validationIssues.length > 3 && ` +${validationIssues.length - 3} more`}
-                          {' — Check Data Model tab'}
+                          {' — Check Data Health tab'}
                         </div>
                       )}
                     </div>
