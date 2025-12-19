@@ -157,12 +157,24 @@ export function AuthProvider({ children }) {
           return;
         }
 
-        // Get initial session
+        // Get initial session with timeout
         console.log('[Auth] Getting initial session...');
-        const { data: { session: initialSession }, error: sessionError } = await supabase.auth.getSession();
         
-        if (sessionError) {
-          console.error('[Auth] Session error:', sessionError);
+        let initialSession = null;
+        try {
+          const sessionTimeout = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('getSession timeout')), 5000)
+          );
+          const sessionPromise = supabase.auth.getSession();
+          const result = await Promise.race([sessionPromise, sessionTimeout]);
+          initialSession = result?.data?.session;
+          
+          if (result?.error) {
+            console.error('[Auth] Session error:', result.error);
+          }
+        } catch (sessionErr) {
+          console.error('[Auth] Session fetch failed:', sessionErr.message);
+          // Continue without session - user will need to login
         }
         
         console.log('[Auth] Initial session:', !!initialSession);
