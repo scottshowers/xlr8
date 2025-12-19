@@ -123,15 +123,22 @@ export function AuthProvider({ children }) {
       console.log('[Auth] User role:', role, 'Permissions:', DEFAULT_PERMISSIONS[role]);
     } catch (error) {
       console.error('[Auth] Failed to fetch user data:', error);
-      // FIXED: Still set a basic user on error so app doesn't hang
+      
+      // FIXED: Check if this is a known admin email and grant admin access
+      const knownAdmins = ['scott.showers@hcmpact.com', 'chan.lien@hcmpact.com', 'mike.nugent@hcmpact.com'];
+      const isKnownAdmin = knownAdmins.includes(supabaseUser.email?.toLowerCase());
+      const fallbackRole = isKnownAdmin ? 'admin' : 'customer';
+      
+      console.log('[Auth] Using fallback role:', fallbackRole, 'for', supabaseUser.email);
+      
       setUser({
         id: supabaseUser.id,
         email: supabaseUser.email,
         full_name: supabaseUser.email,
-        role: 'customer',
+        role: fallbackRole,
         project_id: null,
       });
-      setPermissions(DEFAULT_PERMISSIONS.customer);
+      setPermissions(DEFAULT_PERMISSIONS[fallbackRole]);
     }
   }, []);
 
