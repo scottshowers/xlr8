@@ -18,8 +18,8 @@ import { UploadStatusIndicator } from '../context/UploadContext';
 import { useOnboarding } from '../context/OnboardingContext';
 
 const COLORS = {
-  grassGreen: '#83b16d',
-  skyBlue: '#93abd9',
+  grassGreen: '#5a8a4a',
+  skyBlue: '#4a6b8a',
   iceFlow: '#c9d3d4',
   white: '#f6f5fa',
   text: '#2a3441',
@@ -170,8 +170,8 @@ function Navigation() {
       textDecoration: 'none',
       fontSize: '0.85rem',
       fontWeight: '600',
-      color: active ? COLORS.grassGreen : COLORS.textLight,
-      borderBottom: active ? `2px solid ${COLORS.grassGreen}` : '2px solid transparent',
+      color: active ?'#5a8a4a' : COLORS.textLight,
+      borderBottom: active ? `2px solid #5a8a4a` : '2px solid transparent',
       marginBottom: '-1px',
       transition: 'color 0.2s ease',
       whiteSpace: 'nowrap',
@@ -183,8 +183,8 @@ function Navigation() {
       padding: '0.875rem 0.75rem',
       fontSize: '0.85rem',
       fontWeight: '600',
-      color: active || expanded ? COLORS.grassGreen : COLORS.textLight,
-      borderBottom: active ? `2px solid ${COLORS.grassGreen}` : '2px solid transparent',
+      color: active || expanded ?'#5a8a4a' : COLORS.textLight,
+      borderBottom: active ? `2px solid #5a8a4a` : '2px solid transparent',
       marginBottom: '-1px',
       cursor: 'pointer',
       background: 'none',
@@ -212,7 +212,7 @@ function Navigation() {
       textDecoration: 'none',
       fontSize: '0.85rem',
       fontWeight: active ? '600' : '500',
-      color: active ? COLORS.grassGreen : COLORS.text,
+      color: active ?'#5a8a4a' : COLORS.text,
       background: active ? '#f0fdf4' : 'transparent',
       borderBottom: '1px solid #f0f0f0',
       transition: 'background 0.2s ease',
@@ -288,7 +288,7 @@ function Navigation() {
             <div style={styles.logoIcon}><HLogoGreen /></div>
             <div style={styles.logoText}>
               <span style={styles.logoName}>XLR8</span>
-              <Rocket style={{ width: 14, height: 14, color: COLORS.grassGreen }} />
+              <Rocket style={{ width: 14, height: 14, color: '#5a8a4a' }} />
             </div>
           </Link>
 
@@ -361,9 +361,9 @@ function Navigation() {
             }}
             style={{
               ...styles.helpBtn,
-              background: tourEnabled ? COLORS.grassGreen : '#f8fafc',
+              background: tourEnabled ?'#5a8a4a' : '#f8fafc',
               color: tourEnabled ? 'white' : COLORS.textLight,
-              borderColor: tourEnabled ? COLORS.grassGreen : '#e1e8ed',
+              borderColor: tourEnabled ?'#5a8a4a' : '#e1e8ed',
             }}
             title={tourEnabled ? 'Turn off guide' : 'Turn on guide'}
           >
