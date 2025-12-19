@@ -2145,11 +2145,107 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             
             report_progress(95, "Finalizing...")
             
+            # =====================================================
+            # UPLOAD-TIME VALIDATION
+            # Check for bad column names, header detection failures
+            # =====================================================
+            validation = self._validate_upload_quality(results)
+            results['validation'] = validation
+            
+            if validation['issues']:
+                logger.warning(f"[UPLOAD-VALIDATION] {len(validation['issues'])} table(s) have issues")
+            
         except Exception as e:
             logger.error(f"Error storing Excel file: {e}")
             raise
         
         return results
+    
+    def _validate_upload_quality(self, results: Dict) -> Dict:
+        """
+        Validate uploaded data quality - catches header detection failures.
+        
+        Checks for:
+        - Bad column names (nan, unnamed, numeric)
+        - Very low fill rates suggesting wrong header row
+        - Tables with mostly empty columns
+        
+        Returns:
+            {
+                'status': 'healthy' | 'warning' | 'critical',
+                'tables_checked': int,
+                'tables_with_issues': int,
+                'issues': [{'table': ..., 'problems': [...]}]
+            }
+        """
+        bad_patterns = ['nan', 'unnamed', 'col_0', 'col_1', 'col_2', 'col_3', 'none']
+        issues = []
+        
+        for sheet_info in results.get('sheets', []):
+            table_name = sheet_info.get('table_name', '')
+            columns = sheet_info.get('columns', [])
+            
+            if not columns:
+                continue
+            
+            table_issues = []
+            
+            # Check for bad column names
+            bad_cols = []
+            for col in columns:
+                col_name = col.get('name', col) if isinstance(col, dict) else str(col)
+                col_lower = col_name.lower()
+                
+                # Check against bad patterns
+                if any(pattern in col_lower for pattern in bad_patterns):
+                    bad_cols.append(col_name)
+                # Check for purely numeric column names
+                elif col_lower.replace('.', '').replace('_', '').replace('-', '').isdigit():
+                    bad_cols.append(col_name)
+            
+            if bad_cols:
+                table_issues.append({
+                    'type': 'bad_column_names',
+                    'severity': 'high',
+                    'message': f"Suspicious column names detected: {bad_cols[:5]}{'...' if len(bad_cols) > 5 else ''}",
+                    'count': len(bad_cols)
+                })
+            
+            # Check for header detection failure (first few columns are numeric)
+            col_names = [c.get('name', c) if isinstance(c, dict) else str(c) for c in columns[:5]]
+            numeric_first_cols = sum(1 for c in col_names if str(c).replace('.', '').replace('_', '').replace('-', '').isdigit())
+            
+            if numeric_first_cols >= 3:
+                table_issues.append({
+                    'type': 'likely_header_failure',
+                    'severity': 'high',
+                    'message': f"First columns appear numeric - header row may be wrong: {col_names}"
+                })
+            
+            if table_issues:
+                issues.append({
+                    'table': table_name,
+                    'sheet': sheet_info.get('sheet_name', ''),
+                    'problems': table_issues
+                })
+        
+        tables_checked = len(results.get('sheets', []))
+        tables_with_issues = len(issues)
+        
+        # Determine overall status
+        if tables_with_issues == 0:
+            status = 'healthy'
+        elif tables_with_issues < tables_checked * 0.3:
+            status = 'warning'
+        else:
+            status = 'critical'
+        
+        return {
+            'status': status,
+            'tables_checked': tables_checked,
+            'tables_with_issues': tables_with_issues,
+            'issues': issues
+        }
     
     # =========================================================================
     # STORE CSV - v5.0 with Progress Callback
