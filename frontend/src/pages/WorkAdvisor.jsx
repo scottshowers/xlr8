@@ -27,7 +27,7 @@ import {
 
 // Brand colors from the platform
 const COLORS = {
-  grassGreen: '#83b16d',
+  grassGreen: '#5a8a4a',
   grassGreenDark: '#6a9a54',
   skyBlue: '#93abd9',
   iceFlow: '#c9d3d4',
