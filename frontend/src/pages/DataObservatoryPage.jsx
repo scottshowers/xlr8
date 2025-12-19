@@ -60,10 +60,10 @@ const DATA_STORES = {
   chromadb: { label: 'ChromaDB', icon: Layers, color: STATUS.purple, desc: 'Vector Embeddings & Semantic Chunks' },
 };
 
-export default function DataObservatoryPage() {
+export default function DataObservatoryPage({ embedded = false }) {
   const [darkMode, setDarkMode] = useState(() => {
     const saved = localStorage.getItem('xlr8-theme');
-    return saved ? saved === 'dark' : true;
+    return saved ? saved === 'dark' : false; // Default to light when embedded
   });
   const [time, setTime] = useState(new Date());
   const [loading, setLoading] = useState(true);
@@ -74,11 +74,14 @@ export default function DataObservatoryPage() {
   const [supabaseData, setSupabaseData] = useState(null);
   const [chromadbData, setChromadbData] = useState(null);
   
-  const T = darkMode ? themes.dark : themes.light;
+  // When embedded, always use light theme
+  const T = embedded ? themes.light : (darkMode ? themes.dark : themes.light);
 
   useEffect(() => {
-    localStorage.setItem('xlr8-theme', darkMode ? 'dark' : 'light');
-  }, [darkMode]);
+    if (!embedded) {
+      localStorage.setItem('xlr8-theme', darkMode ? 'dark' : 'light');
+    }
+  }, [darkMode, embedded]);
 
   useEffect(() => {
     const interval = setInterval(() => setTime(new Date()), 1000);
@@ -132,14 +135,15 @@ export default function DataObservatoryPage() {
 
   return (
     <div style={{
-      padding: '1.5rem',
-      background: T.bg,
-      minHeight: '100vh',
+      padding: embedded ? '0' : '1.5rem',
+      background: embedded ? 'transparent' : T.bg,
+      minHeight: embedded ? 'auto' : '100vh',
       color: T.text,
       fontFamily: "'Inter', system-ui, sans-serif",
       transition: 'background 0.3s ease, color 0.3s ease',
     }}>
-      {/* Header */}
+      {/* Header - hidden when embedded */}
+      {!embedded && (
       <div style={{
         display: 'flex',
         justifyContent: 'space-between',
@@ -211,6 +215,33 @@ export default function DataObservatoryPage() {
           </div>
         </div>
       </div>
+      )}
+
+      {/* Embedded header - simplified */}
+      {embedded && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: '#2a3441' }}>Data Observatory</h2>
+          <button
+            onClick={loadAllData}
+            disabled={loading}
+            style={{
+              background: '#f8fafc',
+              border: '1px solid #e1e8ed',
+              borderRadius: '6px',
+              padding: '0.4rem 0.75rem',
+              cursor: 'pointer',
+              color: '#5f6c7b',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.35rem',
+              fontSize: '0.8rem',
+            }}
+          >
+            <RefreshCw size={14} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+            Refresh
+          </button>
+        </div>
+      )}
 
       {/* Stats Bar - Three Stores */}
       <div style={{
