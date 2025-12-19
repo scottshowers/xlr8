@@ -111,9 +111,6 @@ function Navigation() {
     nav: {
       background: 'white',
       borderBottom: '1px solid #e1e8ed',
-      position: 'sticky',
-      top: 0,
-      zIndex: 100,
     },
     container: {
       display: 'flex',
@@ -408,8 +405,11 @@ export default function Layout({ children }) {
 
   return (
     <div style={{ minHeight: '100vh', background: '#f6f5fa' }}>
-      <ContextBar />
-      <Navigation />
+      {/* Sticky header container - keeps both bars together */}
+      <div style={{ position: 'sticky', top: 0, zIndex: 100 }}>
+        <ContextBar />
+        <Navigation />
+      </div>
       <main style={{ padding: '1.5rem', maxWidth: '1800px', margin: '0 auto' }}>
         {children}
       </main>
