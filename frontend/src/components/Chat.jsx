@@ -416,9 +416,9 @@ export default function Chat({ functionalAreas = [] }) {
   const isDisabled = loading || (!input.trim()) || (scope === 'project' && !activeProject)
 
   return (
-    <div className="h-[75vh] min-h-[500px] flex flex-col bg-white rounded-xl shadow-lg overflow-hidden border">
+    <div className="h-[75vh] min-h-[500px] flex flex-col bg-white overflow-hidden">
       {/* Header */}
-      <div className="px-4 py-3 bg-gradient-to-r from-slate-50 to-white border-b flex items-center justify-between flex-wrap gap-3">
+      <div className="px-4 py-3 bg-white border-b flex items-center justify-between flex-wrap gap-3" style={{ borderColor: '#e8ecf1' }}>
         <div className="flex items-center gap-3">
           <PersonaSwitcher 
             currentPersona={currentPersona}
@@ -468,7 +468,7 @@ export default function Chat({ functionalAreas = [] }) {
 
       {/* Intelligent Mode Banner */}
       {intelligentMode && (
-        <div className="px-4 py-2 border-b flex items-center justify-between text-sm" style={{ background: BRAND_LIGHT, borderColor: BRAND_BORDER }}>
+        <div className="px-4 py-2 border-b flex items-center justify-between text-sm" style={{ background: BRAND_LIGHT, borderColor: '#e8ecf1' }}>
           <div className="flex items-center gap-2">
             <Zap size={16} style={{ color: BRAND }} />
             <span style={{ color: '#4a6a4a' }}>
@@ -548,7 +548,7 @@ export default function Chat({ functionalAreas = [] }) {
       </div>
 
       {/* Input Area */}
-      <div className="p-4 bg-white border-t">
+      <div className="p-4 bg-white border-t" style={{ borderColor: '#e8ecf1' }}>
         <div className="flex gap-2">
           <textarea
             value={input}
