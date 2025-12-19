@@ -533,7 +533,7 @@ export default function VacuumUploadPage() {
               <button
                 onClick={handleUpload}
                 disabled={!file || !activeProject || uploading}
-                className="w-full px-6 py-2 bg-[#83b16d] text-white rounded-lg hover:bg-[#6b9a57] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                className="w-full px-6 py-2 bg-[#5a8a4a] text-white rounded-lg hover:bg-[#4a7a3a] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 {uploading ? (
                   <><Loader2 className="w-4 h-4 animate-spin" /> Processing...</>
@@ -586,7 +586,7 @@ export default function VacuumUploadPage() {
                 <span className="text-sm font-medium text-blue-700">
                   {jobStatus.message || 'Processing...'}
                 </span>
-                <span className="text-sm text-[#83b16d]">
+                <span className="text-sm text-[#5a8a4a]">
                   {jobStatus.current_page > 0 && jobStatus.total_pages > 0 
                     ? `Page ${jobStatus.current_page} of ${jobStatus.total_pages}`
                     : `${jobStatus.progress || 0}%`
@@ -595,7 +595,7 @@ export default function VacuumUploadPage() {
               </div>
               <div className="w-full bg-blue-200 rounded-full h-2">
                 <div 
-                  className="bg-[#83b16d] h-2 rounded-full transition-all duration-300"
+                  className="bg-[#5a8a4a] h-2 rounded-full transition-all duration-300"
                   style={{ width: `${jobStatus.progress || 0}%` }}
                 />
               </div>
@@ -638,12 +638,12 @@ export default function VacuumUploadPage() {
             {/* Summary Stats */}
             <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
               <StatCard 
-                icon={<Users className="w-5 h-5 text-[#83b16d]" />}
+                icon={<Users className="w-5 h-5 text-[#5a8a4a]" />}
                 label="Employees"
                 value={result.employee_count}
               />
               <StatCard 
-                icon={<FileText className="w-5 h-5 text-[#83b16d]" />}
+                icon={<FileText className="w-5 h-5 text-[#5a8a4a]" />}
                 label="Pages"
                 value={result.pages_processed}
               />
@@ -693,7 +693,7 @@ export default function VacuumUploadPage() {
                   onClick={() => setActiveTab('employees')}
                   className={`px-4 py-2 font-medium text-sm border-b-2 -mb-px ${
                     activeTab === 'employees' 
-                      ? 'border-[#83b16d] text-[#83b16d]' 
+                      ? 'border-[#5a8a4a] text-[#5a8a4a]' 
                       : 'border-transparent text-gray-500 hover:text-gray-700'
                   }`}
                 >
@@ -704,7 +704,7 @@ export default function VacuumUploadPage() {
                   onClick={() => setActiveTab('summary')}
                   className={`px-4 py-2 font-medium text-sm border-b-2 -mb-px ${
                     activeTab === 'summary' 
-                      ? 'border-[#83b16d] text-[#83b16d]' 
+                      ? 'border-[#5a8a4a] text-[#5a8a4a]' 
                       : 'border-transparent text-gray-500 hover:text-gray-700'
                   }`}
                 >
@@ -718,7 +718,7 @@ export default function VacuumUploadPage() {
                 {(result.confidence < 0.7 || (result.validation_errors && result.validation_errors.length > 0)) && (
                   <button
                     onClick={() => setShowAssist(true)}
-                    className="px-4 py-2 bg-[#83b16d] text-white rounded-lg hover:bg-[#6b9a57] flex items-center gap-2 text-sm"
+                    className="px-4 py-2 bg-[#5a8a4a] text-white rounded-lg hover:bg-[#4a7a3a] flex items-center gap-2 text-sm"
                   >
                     <Wand2 className="w-4 h-4" />
                     Help Claude
@@ -781,7 +781,7 @@ export default function VacuumUploadPage() {
                         </span>
                         <button
                           onClick={() => viewExtract(ext.id)}
-                          className="p-1.5 text-[#83b16d] hover:bg-[#f0fdf4] rounded"
+                          className="p-1.5 text-[#5a8a4a] hover:bg-[rgba(90, 138, 74, 0.1)] rounded"
                           title="View Details"
                         >
                           <Eye className="w-4 h-4" />
@@ -835,12 +835,12 @@ export default function VacuumUploadPage() {
                 {/* Summary Stats */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                   <StatCard 
-                    icon={<Users className="w-5 h-5 text-[#83b16d]" />}
+                    icon={<Users className="w-5 h-5 text-[#5a8a4a]" />}
                     label="Employees"
                     value={selectedExtract.employee_count || selectedExtract.employees?.length || 0}
                   />
                   <StatCard 
-                    icon={<FileText className="w-5 h-5 text-[#83b16d]" />}
+                    icon={<FileText className="w-5 h-5 text-[#5a8a4a]" />}
                     label="Pages"
                     value={selectedExtract.pages_processed || '-'}
                   />
@@ -863,7 +863,7 @@ export default function VacuumUploadPage() {
                       onClick={() => setHistoryTab('employees')}
                       className={`px-4 py-2 font-medium text-sm border-b-2 -mb-px ${
                         historyTab === 'employees' 
-                          ? 'border-[#83b16d] text-[#83b16d]' 
+                          ? 'border-[#5a8a4a] text-[#5a8a4a]' 
                           : 'border-transparent text-gray-500 hover:text-gray-700'
                       }`}
                     >
@@ -874,7 +874,7 @@ export default function VacuumUploadPage() {
                       onClick={() => setHistoryTab('summary')}
                       className={`px-4 py-2 font-medium text-sm border-b-2 -mb-px ${
                         historyTab === 'summary' 
-                          ? 'border-[#83b16d] text-[#83b16d]' 
+                          ? 'border-[#5a8a4a] text-[#5a8a4a]' 
                           : 'border-transparent text-gray-500 hover:text-gray-700'
                       }`}
                     >
@@ -1105,7 +1105,7 @@ function SummaryView({ employees, calculateSummary }) {
       {/* Grand Totals */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-gray-50 rounded-lg">
         <div className="text-center">
-          <div className="text-2xl font-bold text-[#83b16d]">
+          <div className="text-2xl font-bold text-[#5a8a4a]">
             ${summary.totals.grossPay.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
           <div className="text-sm text-gray-500">Total Gross Pay</div>
