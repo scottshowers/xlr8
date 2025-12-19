@@ -10,9 +10,36 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTheme } from '../context/ThemeContext';
 
 // API base - adjust for your environment
 const API_BASE = '/api';
+
+// Theme-aware colors
+const getColors = (dark) => ({
+  bg: dark ? '#1a1f2e' : '#f5f7fa',
+  card: dark ? '#242b3d' : '#ffffff',
+  cardBorder: dark ? '#2d3548' : '#e8ecf1',
+  text: dark ? '#e8eaed' : '#2a3441',
+  textMuted: dark ? '#8b95a5' : '#6b7280',
+  textLight: dark ? '#5f6a7d' : '#9ca3af',
+  primary: '#5a8a4a',
+  primaryLight: dark ? 'rgba(90, 138, 74, 0.15)' : 'rgba(90, 138, 74, 0.1)',
+  blue: '#4a6b8a',
+  blueLight: dark ? 'rgba(74, 107, 138, 0.15)' : 'rgba(74, 107, 138, 0.1)',
+  amber: '#8a6b4a',
+  amberLight: dark ? 'rgba(138, 107, 74, 0.15)' : 'rgba(138, 107, 74, 0.1)',
+  red: '#8a4a4a',
+  redLight: dark ? 'rgba(138, 74, 74, 0.15)' : 'rgba(138, 74, 74, 0.1)',
+  green: '#5a8a5a',
+  greenLight: dark ? 'rgba(90, 138, 90, 0.15)' : 'rgba(90, 138, 90, 0.1)',
+  purple: '#6b5a7a',
+  purpleLight: dark ? 'rgba(107, 90, 122, 0.15)' : 'rgba(107, 90, 122, 0.1)',
+  divider: dark ? '#2d3548' : '#e8ecf1',
+  inputBg: dark ? '#1a1f2e' : '#f8fafc',
+  selected: dark ? 'rgba(90, 138, 74, 0.2)' : 'rgba(90, 138, 74, 0.1)',
+  selectedBorder: '#5a8a4a',
+});
 
 // Confidence thresholds for visual indicators
 const CONFIDENCE = {
@@ -20,13 +47,13 @@ const CONFIDENCE = {
   MEDIUM: 0.4
 };
 
-// Section type display info
+// Section type display info - muted colors
 const SECTION_INFO = {
-  employee_info: { label: 'Employee Info', color: '#3b82f6', icon: '👤' },
-  earnings: { label: 'Earnings', color: '#22c55e', icon: '💰' },
-  taxes: { label: 'Taxes', color: '#ef4444', icon: '🏛️' },
-  deductions: { label: 'Deductions', color: '#f59e0b', icon: '📋' },
-  pay_info: { label: 'Pay Info', color: '#8b5cf6', icon: '💵' },
+  employee_info: { label: 'Employee Info', color: '#4a6b8a', icon: '👤' },
+  earnings: { label: 'Earnings', color: '#5a8a5a', icon: '💰' },
+  taxes: { label: 'Taxes', color: '#8a4a4a', icon: '🏛️' },
+  deductions: { label: 'Deductions', color: '#8a6b4a', icon: '📋' },
+  pay_info: { label: 'Pay Info', color: '#6b5a7a', icon: '💵' },
   unknown: { label: 'Unknown', color: '#6b7280', icon: '❓' }
 };
 
@@ -36,6 +63,8 @@ const SECTION_INFO = {
 
 export default function VacuumExplore() {
   const navigate = useNavigate();
+  const { darkMode } = useTheme();
+  const colors = getColors(darkMode);
   
   // State
   const [files, setFiles] = useState([]);
@@ -628,14 +657,14 @@ function ColumnCard({ column, header, editing, availableTypes, onEdit, onConfirm
 
 function ConfidenceBadge({ confidence, showLabel = false, small = false }) {
   const pct = Math.round((confidence || 0) * 100);
-  let color = '#ef4444'; // red
+  let color = '#8a4a4a'; // muted red
   let label = 'Low';
   
   if (confidence >= CONFIDENCE.HIGH) {
-    color = '#22c55e'; // green
+    color = '#5a8a5a'; // muted green
     label = 'High';
   } else if (confidence >= CONFIDENCE.MEDIUM) {
-    color = '#f59e0b'; // amber
+    color = '#8a6b4a'; // muted amber
     label = 'Medium';
   }
   
@@ -708,7 +737,7 @@ const styles = {
   },
   mapFileBtn: {
     padding: '8px 16px',
-    background: '#3b82f6',
+    background: '#5a8a4a',
     color: 'white',
     border: 'none',
     borderRadius: '6px',
@@ -736,9 +765,9 @@ const styles = {
     gap: '4px'
   },
   error: {
-    backgroundColor: '#fef2f2',
-    border: '1px solid #fecaca',
-    color: '#dc2626',
+    backgroundColor: 'rgba(138, 74, 74, 0.1)',
+    border: '1px solid rgba(138, 74, 74, 0.3)',
+    color: '#8a4a4a',
     padding: '12px 16px',
     borderRadius: '8px',
     marginBottom: '16px',
@@ -751,7 +780,7 @@ const styles = {
     border: 'none',
     fontSize: '20px',
     cursor: 'pointer',
-    color: '#dc2626'
+    color: '#8a4a4a'
   },
   layout: {
     display: 'flex',
@@ -799,7 +828,7 @@ const styles = {
   },
   fileItemSelected: {
     backgroundColor: '#e0f2fe',
-    boxShadow: '0 0 0 2px #0ea5e9'
+    boxShadow: '0 0 0 2px #5a8a4a'
   },
   fileName: {
     fontSize: '13px',
@@ -827,7 +856,7 @@ const styles = {
   },
   extractCardSelected: {
     backgroundColor: '#f0f9ff',
-    boxShadow: '0 0 0 2px #0ea5e9'
+    boxShadow: '0 0 0 2px #5a8a4a'
   },
   extractHeader: {
     display: 'flex',
@@ -899,7 +928,7 @@ const styles = {
     marginTop: '8px'
   },
   btnConfirm: {
-    backgroundColor: '#22c55e',
+    backgroundColor: '#5a8a5a',
     color: '#fff',
     border: 'none',
     borderRadius: '6px',
@@ -909,7 +938,7 @@ const styles = {
     cursor: 'pointer'
   },
   btnCorrect: {
-    backgroundColor: '#f59e0b',
+    backgroundColor: '#8a6b4a',
     color: '#fff',
     border: 'none',
     borderRadius: '6px',
@@ -939,7 +968,7 @@ const styles = {
     cursor: 'pointer'
   },
   btnConfirmAll: {
-    backgroundColor: '#22c55e',
+    backgroundColor: '#5a8a5a',
     color: '#fff',
     border: 'none',
     borderRadius: '6px',
@@ -999,7 +1028,7 @@ const styles = {
   },
   columnDetected: {
     fontSize: '11px',
-    color: '#0ea5e9',
+    color: '#5a8a4a',
     marginBottom: '4px'
   },
   columnActions: {
@@ -1019,7 +1048,7 @@ const styles = {
     marginTop: '4px'
   },
   btnSmallConfirm: {
-    backgroundColor: '#22c55e',
+    backgroundColor: '#5a8a5a',
     color: '#fff',
     border: 'none',
     borderRadius: '4px',
@@ -1028,7 +1057,7 @@ const styles = {
     cursor: 'pointer'
   },
   btnSmallEdit: {
-    backgroundColor: '#f59e0b',
+    backgroundColor: '#8a6b4a',
     color: '#fff',
     border: 'none',
     borderRadius: '4px',
@@ -1093,7 +1122,7 @@ const styles = {
   },
   thType: {
     fontSize: '10px',
-    color: '#0ea5e9',
+    color: '#5a8a4a',
     fontWeight: '400'
   },
   td: {
