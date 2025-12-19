@@ -274,22 +274,23 @@ export default function DataHealthPage({ embedded = false }) {
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: colors.textMuted }}>
                               <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Loading...
                             </div>
-                          ) : profile ? (
+                          ) : profile && profile.columns ? (
                             <div>
                               {table.issues && table.issues.length > 0 && (
                                 <div style={{ marginBottom: '1rem' }}>
                                   <div style={{ fontSize: '0.8rem', fontWeight: 600, color: colors.text, marginBottom: '0.5rem' }}>Issues:</div>
                                   {table.issues.map(function(issue, j) {
-                                    return <div key={j} style={{ fontSize: '0.8rem', color: colors.amber, marginBottom: '0.25rem' }}>• {issue}</div>;
+                                    return <div key={j} style={{ fontSize: '0.8rem', color: colors.amber, marginBottom: '0.25rem' }}>• {issue.message || issue.type || String(issue)}</div>;
                                   })}
                                 </div>
                               )}
                               <div style={{ fontSize: '0.8rem', fontWeight: 600, color: colors.text, marginBottom: '0.5rem' }}>Columns:</div>
                               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
                                 {profile.columns && profile.columns.map(function(col, ci) {
+                                  const fillRate = col.fill_rate != null ? col.fill_rate : 100;
                                   return (
-                                    <span key={ci} style={{ fontSize: '0.7rem', padding: '0.25rem 0.5rem', background: col.fill_rate < 50 ? colors.amberLight : colors.inputBg, border: '1px solid ' + (col.fill_rate < 50 ? colors.amber : colors.divider), borderRadius: 4, color: col.fill_rate < 50 ? colors.amber : colors.textMuted }}>
-                                      {col.name}: {col.fill_rate}%
+                                    <span key={ci} style={{ fontSize: '0.7rem', padding: '0.25rem 0.5rem', background: fillRate < 50 ? colors.amberLight : colors.inputBg, border: '1px solid ' + (fillRate < 50 ? colors.amber : colors.divider), borderRadius: 4, color: fillRate < 50 ? colors.amber : colors.textMuted }}>
+                                      {col.name || 'Unknown'}: {fillRate}%
                                     </span>
                                   );
                                 })}
