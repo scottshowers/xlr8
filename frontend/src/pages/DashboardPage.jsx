@@ -21,6 +21,7 @@ import {
   AlertTriangle, CheckCircle, Clock, ArrowRight,
   TrendingUp, TrendingDown, Calendar, RefreshCw
 } from 'lucide-react';
+import { getCustomerColorPalette } from '../utils/customerColors';
 
 // Theme-aware colors
 const getColors = (dark) => ({
@@ -138,21 +139,33 @@ function StatCard({ label, value, goal, icon: Icon, trend, colors, onClick }) {
   );
 }
 
-// Simple Bar Chart
+// Simple Bar Chart with brand color variety
 function BarChart({ data, colors, height = 160 }) {
   const max = Math.max(...data.map(d => d.value), 1);
+  
+  // Brand-aligned color palette for variety
+  const barColors = [
+    '#83b16d', // XLR8 green
+    '#6a9a5a', // darker green
+    '#93abd9', // sky blue
+    '#7a96c4', // deeper blue
+    '#83b16d', // green again
+    '#5b8fb9', // steel blue
+    '#a8ca99', // light green
+  ];
   
   return (
     <div style={{ height, display: 'flex', alignItems: 'flex-end', gap: '0.5rem', padding: '0 0.5rem' }}>
       {data.map((item, i) => {
         const barHeight = (item.value / max) * (height - 30);
+        const barColor = barColors[i % barColors.length];
         return (
           <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.35rem' }}>
             <span style={{ fontSize: '0.7rem', fontWeight: 600, color: colors.text }}>{item.value}</span>
             <div style={{
               width: '100%',
               height: barHeight,
-              background: item.type === 'playbook' ? colors.blue : colors.primary,
+              background: barColor,
               borderRadius: '4px 4px 0 0',
               minHeight: 4,
               transition: 'height 0.3s ease',
@@ -165,8 +178,9 @@ function BarChart({ data, colors, height = 160 }) {
   );
 }
 
-// Project Row for Leaderboard
+// Project Row for Leaderboard with customer colors
 function ProjectRow({ rank, project, colors, onClick, isSelected }) {
+  const customerColors = getCustomerColorPalette(project.customer || project.name);
   const healthColor = project.health >= 80 ? colors.primary : project.health >= 50 ? colors.amber : colors.red;
   
   return (
@@ -178,30 +192,42 @@ function ProjectRow({ rank, project, colors, onClick, isSelected }) {
         padding: '0.875rem 1rem',
         borderBottom: `1px solid ${colors.divider}`,
         cursor: 'pointer',
-        background: isSelected ? colors.primaryLight : 'transparent',
-        transition: 'background 0.15s ease',
+        background: isSelected ? customerColors.bg : 'transparent',
+        borderLeft: `3px solid ${isSelected ? customerColors.primary : 'transparent'}`,
+        transition: 'all 0.15s ease',
       }}
-      onMouseEnter={(e) => !isSelected && (e.currentTarget.style.background = colors.inputBg)}
-      onMouseLeave={(e) => !isSelected && (e.currentTarget.style.background = 'transparent')}
+      onMouseEnter={(e) => {
+        if (!isSelected) {
+          e.currentTarget.style.background = customerColors.bg;
+          e.currentTarget.style.borderLeftColor = customerColors.primary;
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!isSelected) {
+          e.currentTarget.style.background = 'transparent';
+          e.currentTarget.style.borderLeftColor = 'transparent';
+        }
+      }}
     >
       <div style={{
         width: 28,
         height: 28,
         borderRadius: '50%',
-        background: rank <= 3 ? colors.primaryLight : colors.inputBg,
+        background: rank <= 3 ? customerColors.bg : colors.inputBg,
+        border: rank <= 3 ? `2px solid ${customerColors.primary}` : 'none',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         marginRight: '0.875rem',
         fontSize: '0.8rem',
         fontWeight: 700,
-        color: rank <= 3 ? colors.primary : colors.textMuted,
+        color: rank <= 3 ? customerColors.primary : colors.textMuted,
       }}>
         #{rank}
       </div>
       
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 600, color: colors.text, fontSize: '0.9rem' }}>{project.name}</div>
+        <div style={{ fontWeight: 600, color: customerColors.primary, fontSize: '0.9rem' }}>{project.name}</div>
         <div style={{ fontSize: '0.75rem', color: colors.textMuted }}>{project.customer || 'No customer'}</div>
       </div>
       
