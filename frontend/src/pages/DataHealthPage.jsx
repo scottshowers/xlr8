@@ -66,7 +66,7 @@ export default function DataHealthPage({ embedded = false }) {
   const loadDataIntegrity = async function() {
     setIntegrityLoading(true);
     try {
-      const url = API_BASE + '/api/status/data-integrity?project=' + encodeURIComponent(activeProject?.id || '');
+      const url = API_BASE + '/api/status/data-integrity?project=' + encodeURIComponent(activeProject?.name || '');
       const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
