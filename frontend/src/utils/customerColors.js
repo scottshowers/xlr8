@@ -45,15 +45,13 @@ const COLOR_PALETTES = [
 ];
 
 /**
- * Simple string hash for consistent color assignment
+ * Better hash function for consistent color assignment with more variety
  */
 function hashString(str) {
   if (!str) return 0;
-  let hash = 0;
+  let hash = 5381;
   for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
+    hash = ((hash << 5) + hash) ^ str.charCodeAt(i);
   }
   return Math.abs(hash);
 }
