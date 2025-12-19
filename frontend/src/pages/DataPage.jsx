@@ -6,6 +6,8 @@
  * - Customer color accents
  * - Consistent styling with Command Center
  * 
+ * UPDATED: Added Deep Clean button to Files tab
+ * 
  * Tabs: Upload | Files | Data Health | Observatory | Register Extractor
  */
 
@@ -21,7 +23,7 @@ import {
   Upload as UploadIcon, Sparkles, Database, RefreshCw,
   CheckCircle, XCircle, Clock, Loader2, Trash2,
   FileText, Table2, ChevronDown, ChevronUp, User, Calendar,
-  CheckSquare, Square, Eye
+  CheckSquare, Square, Eye, AlertTriangle, Zap
 } from 'lucide-react';
 import DataHealthComponent from './DataHealthPage';
 import DataObservatoryPage from './DataObservatoryPage';
@@ -39,7 +41,9 @@ const getColors = (dark) => ({
   blue: '#4a6b8a',     // Slate blue
   blueLight: dark ? 'rgba(74, 107, 138, 0.15)' : 'rgba(74, 107, 138, 0.1)',
   amber: '#8a6b4a',    // Muted rust
+  amberLight: dark ? 'rgba(138, 107, 74, 0.15)' : 'rgba(138, 107, 74, 0.1)',
   red: '#8a4a4a',      // Muted burgundy
+  redLight: dark ? 'rgba(138, 74, 74, 0.15)' : 'rgba(138, 74, 74, 0.1)',
   green: '#5a8a5a',    // Muted green
   greenLight: dark ? 'rgba(90, 138, 90, 0.15)' : 'rgba(90, 138, 90, 0.1)',
   divider: dark ? '#2d3548' : '#e8ecf1',
@@ -148,13 +152,12 @@ function UploadTab({ project, projectName, colors }) {
       <input type="file" ref={fileInputRef} style={{ display: 'none' }} multiple accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.txt,.md" onChange={handleFileSelect} />
       <div onDragOver={(e) => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={handleDrop} onClick={() => fileInputRef.current?.click()} style={{ border: `2px dashed ${dragOver ? colors.primary : colors.divider}`, borderRadius: 12, padding: '3rem', textAlign: 'center', cursor: 'pointer', background: dragOver ? colors.primaryLight : colors.inputBg, transition: 'all 0.2s ease' }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <UploadIcon size={48} style={{ color: colors.primary, marginBottom: '1rem' }} />
-          <h3 style={{ margin: '0 0 0.5rem', color: colors.text }}>{dragOver ? 'Drop files here' : 'Click or drag files to upload'}</h3>
-          <p style={{ color: colors.textMuted, margin: 0, fontSize: '0.9rem' }}>PDF, Word, Excel, CSV, or Text files</p>
+          <div style={{ width: 56, height: 56, borderRadius: 12, background: colors.primaryLight, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1rem' }}>
+            <UploadIcon size={24} style={{ color: colors.primary }} />
+          </div>
+          <p style={{ fontWeight: 600, color: colors.text, margin: '0 0 0.25rem' }}>Drop files here or click to browse</p>
+          <p style={{ fontSize: '0.85rem', color: colors.textMuted, margin: 0 }}>PDF, Excel, Word, CSV supported</p>
         </div>
-      </div>
-      <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', background: colors.inputBg, borderRadius: 8, fontSize: '0.85rem', color: colors.textMuted, border: `1px solid ${colors.divider}` }}>
-        💡 <strong>Tip:</strong> Files upload in the background. You can navigate away and check progress in the top-right indicator.
       </div>
     </div>
   );
@@ -197,6 +200,11 @@ function FilesTab({ colors }) {
   const [expandedFiles, setExpandedFiles] = useState(new Set());
   const [tableProfiles, setTableProfiles] = useState({});
   const [loadingProfiles, setLoadingProfiles] = useState(new Set());
+  
+  // Deep Clean state
+  const [deepCleanLoading, setDeepCleanLoading] = useState(false);
+  const [deepCleanResult, setDeepCleanResult] = useState(null);
+  const [showDeepCleanModal, setShowDeepCleanModal] = useState(false);
 
   const toggleFileExpand = (key) => { const s = new Set(expandedFiles); if (s.has(key)) s.delete(key); else s.add(key); setExpandedFiles(s); };
   const loadTableProfile = async (tableName) => {
@@ -250,6 +258,25 @@ function FilesTab({ colors }) {
   const clearAllJobs = async () => { if (!confirm('Clear all processing history?')) return; setDeleting(true); try { await api.post('/jobs/clear-all'); loadData(); } catch (err) { alert('Error: ' + (err.response?.data?.detail || err.message)); } finally { setDeleting(false); } };
   const getStatusIcon = (status) => { if (status === 'completed') return <CheckCircle size={14} style={{ color: colors.green }} />; if (status === 'failed') return <XCircle size={14} style={{ color: colors.red }} />; if (status === 'processing') return <Loader2 size={14} style={{ color: colors.blue, animation: 'spin 1s linear infinite' }} />; return <Clock size={14} style={{ color: colors.amber }} />; };
 
+  // Deep Clean functions
+  const handleDeepClean = async () => {
+    setDeepCleanLoading(true);
+    setDeepCleanResult(null);
+    try {
+      const res = await api.post('/deep-clean?confirm=true');
+      setDeepCleanResult(res.data);
+      // Reload data after cleanup
+      await loadData();
+    } catch (err) {
+      setDeepCleanResult({ 
+        success: false, 
+        error: err.response?.data?.detail || err.message 
+      });
+    } finally {
+      setDeepCleanLoading(false);
+    }
+  };
+
   const sectionStyle = { border: `1px solid ${colors.divider}`, borderRadius: 10, marginBottom: '1rem', overflow: 'hidden', background: colors.card };
   const headerStyle = { display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.875rem 1rem', background: colors.inputBg, borderBottom: `1px solid ${colors.divider}` };
   const colHeaderStyle = { display: 'grid', gridTemplateColumns: '30px 1fr 100px 100px 80px', gap: '0.75rem', padding: '0.5rem 1rem', background: colors.inputBg, fontSize: '0.7rem', fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: `1px solid ${colors.divider}` };
@@ -259,6 +286,197 @@ function FilesTab({ colors }) {
 
   return (
     <div>
+      {/* DEEP CLEAN BUTTON */}
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'flex-end', 
+        marginBottom: '1rem',
+        gap: '0.5rem'
+      }}>
+        <button
+          onClick={() => setShowDeepCleanModal(true)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            padding: '0.5rem 1rem',
+            background: colors.amberLight,
+            border: `1px solid ${colors.amber}40`,
+            borderRadius: 8,
+            color: colors.amber,
+            fontSize: '0.85rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          <Zap size={16} />
+          Deep Clean
+        </button>
+      </div>
+
+      {/* DEEP CLEAN MODAL */}
+      {showDeepCleanModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+        }}>
+          <div style={{
+            background: colors.card,
+            borderRadius: 12,
+            padding: '1.5rem',
+            maxWidth: 500,
+            width: '90%',
+            maxHeight: '80vh',
+            overflow: 'auto',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+              <div style={{
+                width: 40,
+                height: 40,
+                borderRadius: 10,
+                background: colors.amberLight,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+                <Zap size={20} style={{ color: colors.amber }} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, color: colors.text }}>Deep Clean</h3>
+                <p style={{ margin: 0, fontSize: '0.8rem', color: colors.textMuted }}>
+                  Remove orphaned data across all storage systems
+                </p>
+              </div>
+            </div>
+
+            <div style={{
+              background: colors.inputBg,
+              border: `1px solid ${colors.divider}`,
+              borderRadius: 8,
+              padding: '1rem',
+              marginBottom: '1rem',
+            }}>
+              <p style={{ margin: '0 0 0.75rem', fontSize: '0.85rem', color: colors.text, fontWeight: 500 }}>
+                This will clean orphaned entries from:
+              </p>
+              <ul style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.8rem', color: colors.textMuted }}>
+                <li>ChromaDB vector chunks (deleted files)</li>
+                <li>DuckDB metadata tables (_schema_metadata, _pdf_tables)</li>
+                <li>DuckDB support tables (file_metadata, column_profiles)</li>
+                <li>Supabase document records</li>
+                <li>Playbook scan cache</li>
+              </ul>
+            </div>
+
+            {deepCleanResult && (
+              <div style={{
+                background: deepCleanResult.success ? colors.greenLight : colors.redLight,
+                border: `1px solid ${deepCleanResult.success ? colors.green : colors.red}40`,
+                borderRadius: 8,
+                padding: '1rem',
+                marginBottom: '1rem',
+              }}>
+                {deepCleanResult.success ? (
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                      <CheckCircle size={16} style={{ color: colors.green }} />
+                      <span style={{ fontWeight: 600, color: colors.green }}>
+                        Cleaned {deepCleanResult.total_cleaned} orphaned items
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: colors.textMuted }}>
+                      {deepCleanResult.details?.chromadb?.cleaned > 0 && (
+                        <div>• ChromaDB: {deepCleanResult.details.chromadb.cleaned} chunks</div>
+                      )}
+                      {deepCleanResult.details?.duckdb_metadata?.cleaned > 0 && (
+                        <div>• DuckDB metadata: {deepCleanResult.details.duckdb_metadata.cleaned} entries</div>
+                      )}
+                      {deepCleanResult.details?.supabase?.cleaned > 0 && (
+                        <div>• Supabase: {deepCleanResult.details.supabase.cleaned} records</div>
+                      )}
+                      {deepCleanResult.details?.playbook_cache?.cleaned > 0 && (
+                        <div>• Playbook cache: cleared</div>
+                      )}
+                      {deepCleanResult.total_cleaned === 0 && (
+                        <div>No orphaned data found - everything is clean!</div>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <XCircle size={16} style={{ color: colors.red }} />
+                    <span style={{ color: colors.red }}>
+                      Error: {deepCleanResult.error}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => {
+                  setShowDeepCleanModal(false);
+                  setDeepCleanResult(null);
+                }}
+                style={{
+                  padding: '0.6rem 1.25rem',
+                  background: colors.inputBg,
+                  border: `1px solid ${colors.divider}`,
+                  borderRadius: 8,
+                  color: colors.text,
+                  fontSize: '0.85rem',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                }}
+              >
+                {deepCleanResult ? 'Close' : 'Cancel'}
+              </button>
+              {!deepCleanResult && (
+                <button
+                  onClick={handleDeepClean}
+                  disabled={deepCleanLoading}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.6rem 1.25rem',
+                    background: colors.amber,
+                    border: 'none',
+                    borderRadius: 8,
+                    color: 'white',
+                    fontSize: '0.85rem',
+                    fontWeight: 600,
+                    cursor: deepCleanLoading ? 'wait' : 'pointer',
+                    opacity: deepCleanLoading ? 0.7 : 1,
+                  }}
+                >
+                  {deepCleanLoading ? (
+                    <>
+                      <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+                      Cleaning...
+                    </>
+                  ) : (
+                    <>
+                      <Zap size={16} />
+                      Run Deep Clean
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* STRUCTURED DATA */}
       <div style={sectionStyle}>
         <div style={headerStyle}>
