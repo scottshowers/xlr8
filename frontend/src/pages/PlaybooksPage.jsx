@@ -275,7 +275,7 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
       width: '52px',
       height: '52px',
       borderRadius: '12px',
-      background: `linear-gradient(135deg, '#5a8a4a' 0%, ${#5a8a4aDark} 100%)`,
+      background: 'linear-gradient(135deg, #5a8a4a 0%, #4a7a3a 100%)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -416,7 +416,7 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
     },
     executeBtn: {
       padding: '0.75rem 1.5rem',
-      background: `linear-gradient(135deg, '#5a8a4a' 0%, ${#5a8a4aDark} 100%)`,
+      background: 'linear-gradient(135deg, #5a8a4a 0%, #4a7a3a 100%)',
       border: 'none',
       borderRadius: '8px',
       color: 'white',
