@@ -2,9 +2,12 @@
  * AuthContext - Authentication & Authorization State
  * 
  * Reads user profile directly from Supabase profiles table
+ * 
+ * FIXED: Proper error handling so loading always resolves
+ * FIXED: Proper cleanup function registration
  */
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
 // Supabase client
@@ -59,10 +62,16 @@ export function AuthProvider({ children }) {
   const [permissions, setPermissions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);
+  
+  // Use ref to store subscription for cleanup
+  const subscriptionRef = useRef(null);
 
   // Fetch user profile directly from Supabase
   const fetchUserProfile = useCallback(async (supabaseUser) => {
-    if (!supabase || !supabaseUser) return;
+    if (!supabase || !supabaseUser) {
+      console.log('[Auth] No supabase client or user, skipping profile fetch');
+      return;
+    }
     
     try {
       console.log('[Auth] Fetching profile for:', supabaseUser.email);
@@ -107,42 +116,80 @@ export function AuthProvider({ children }) {
       console.log('[Auth] User role:', role, 'Permissions:', DEFAULT_PERMISSIONS[role]);
     } catch (error) {
       console.error('[Auth] Failed to fetch user data:', error);
+      // FIXED: Still set a basic user on error so app doesn't hang
+      setUser({
+        id: supabaseUser.id,
+        email: supabaseUser.email,
+        full_name: supabaseUser.email,
+        role: 'customer',
+        project_id: null,
+      });
+      setPermissions(DEFAULT_PERMISSIONS.customer);
     }
   }, []);
 
   // Initialize auth state
   useEffect(() => {
+    let isMounted = true;
+    
     const initAuth = async () => {
-      if (!supabase) {
-        // Dev mode - auto-login as admin
-        console.log('[Auth] Dev mode - using mock admin');
-        setUser({
-          id: 'dev-user',
-          email: 'dev@xlr8.com',
-          full_name: 'Dev User',
-          role: 'admin',
-          project_id: null,
-        });
-        setPermissions(DEFAULT_PERMISSIONS.admin);
-        setLoading(false);
-        return;
-      }
+      try {
+        if (!supabase) {
+          // Dev mode - auto-login as admin
+          console.log('[Auth] Dev mode - using mock admin');
+          if (isMounted) {
+            setUser({
+              id: 'dev-user',
+              email: 'dev@xlr8.com',
+              full_name: 'Dev User',
+              role: 'admin',
+              project_id: null,
+            });
+            setPermissions(DEFAULT_PERMISSIONS.admin);
+          }
+          return;
+        }
 
-      // Get initial session
-      const { data: { session: initialSession } } = await supabase.auth.getSession();
-      console.log('[Auth] Initial session:', !!initialSession);
-      setSession(initialSession);
-      
-      if (initialSession?.user) {
-        await fetchUserProfile(initialSession.user);
-      }
-      
-      setLoading(false);
+        // Get initial session
+        console.log('[Auth] Getting initial session...');
+        const { data: { session: initialSession }, error: sessionError } = await supabase.auth.getSession();
+        
+        if (sessionError) {
+          console.error('[Auth] Session error:', sessionError);
+        }
+        
+        console.log('[Auth] Initial session:', !!initialSession);
+        
+        if (isMounted) {
+          setSession(initialSession);
+        }
+        
+        if (initialSession?.user && isMounted) {
+          await fetchUserProfile(initialSession.user);
+        }
 
-      // Listen for auth changes
+      } catch (error) {
+        console.error('[Auth] Init error:', error);
+      } finally {
+        // FIXED: ALWAYS set loading to false, even on error
+        if (isMounted) {
+          console.log('[Auth] Setting loading to false');
+          setLoading(false);
+        }
+      }
+    };
+
+    // Run init
+    initAuth();
+    
+    // FIXED: Set up auth listener separately (not inside async function)
+    if (supabase) {
       const { data: { subscription } } = supabase.auth.onAuthStateChange(
         async (event, newSession) => {
           console.log('[Auth] Auth state changed:', event);
+          
+          if (!isMounted) return;
+          
           setSession(newSession);
           
           if (event === 'SIGNED_IN' && newSession?.user) {
@@ -153,11 +200,17 @@ export function AuthProvider({ children }) {
           }
         }
       );
+      
+      subscriptionRef.current = subscription;
+    }
 
-      return () => subscription?.unsubscribe();
+    // FIXED: Proper cleanup function
+    return () => {
+      isMounted = false;
+      if (subscriptionRef.current) {
+        subscriptionRef.current.unsubscribe();
+      }
     };
-
-    initAuth();
   }, [fetchUserProfile]);
 
   // Login
