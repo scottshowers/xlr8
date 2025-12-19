@@ -27,7 +27,12 @@ router = APIRouter()
 @router.get("/status/structured")
 async def get_structured_data_status(project: Optional[str] = None):
     """Get structured data (DuckDB) statistics"""
+    import time
+    start_time = time.time()
+    logger.info(f"[STATUS/STRUCTURED] Starting request, project={project}")
+    
     if not STRUCTURED_AVAILABLE:
+        logger.warning("[STATUS/STRUCTURED] Handler not available")
         return {
             "available": False,
             "error": "Structured data handler not available",
@@ -39,16 +44,19 @@ async def get_structured_data_status(project: Optional[str] = None):
     
     try:
         handler = get_structured_handler()
+        logger.info(f"[STATUS/STRUCTURED] Got handler in {time.time() - start_time:.2f}s")
         
         tables = []
         try:
             # First try to get data from metadata table (has timestamps) - EXCEL FILES
             try:
+                logger.info("[STATUS/STRUCTURED] Querying _schema_metadata...")
                 metadata_result = handler.conn.execute("""
                     SELECT table_name, project, file_name, sheet_name, columns, row_count, created_at
                     FROM _schema_metadata 
                     WHERE is_current = TRUE
                 """).fetchall()
+                logger.info(f"[STATUS/STRUCTURED] _schema_metadata returned {len(metadata_result)} rows in {time.time() - start_time:.2f}s")
                 
                 for row in metadata_result:
                     table_name, proj, filename, sheet, columns_json, row_count, created_at = row
@@ -345,10 +353,15 @@ async def reset_structured_data():
 @router.get("/status/chromadb")
 async def get_chromadb_stats():
     """Get ChromaDB statistics"""
+    import time
+    start_time = time.time()
+    logger.info("[STATUS/CHROMADB] Starting request...")
     try:
         rag = RAGHandler()
+        logger.info(f"[STATUS/CHROMADB] RAGHandler initialized in {time.time() - start_time:.2f}s")
         collection = rag.client.get_or_create_collection(name="documents")
         count = collection.count()
+        logger.info(f"[STATUS/CHROMADB] Got count={count} in {time.time() - start_time:.2f}s total")
         return {"total_chunks": count}
     except Exception as e:
         logger.error(f"ChromaDB stats error: {e}")
@@ -467,18 +480,27 @@ async def get_documents(project: Optional[str] = None, limit: int = 1000):
     Get all documents with chunk counts.
     Combines Supabase document metadata with ChromaDB chunk counts.
     """
+    import time
+    start_time = time.time()
+    logger.info("[STATUS/DOCUMENTS] Starting request...")
+    
     try:
         # Step 1: Get documents from Supabase
         supabase_docs = DocumentModel.get_all(limit=limit)
+        logger.info(f"[STATUS/DOCUMENTS] Got {len(supabase_docs)} docs from Supabase in {time.time() - start_time:.2f}s")
         
-        # Step 2: Get chunk counts from ChromaDB
+        # Step 2: Get chunk counts from ChromaDB (limited for performance)
         chunk_counts = {}
         try:
+            chroma_start = time.time()
             rag = RAGHandler()
             collection = rag.client.get_or_create_collection(name="documents")
+            total_chunks = collection.count()
+            logger.info(f"[STATUS/DOCUMENTS] ChromaDB has {total_chunks} total chunks")
             
-            if collection.count() > 0:
-                results = collection.get(include=["metadatas"], limit=10000)
+            # Only fetch if reasonable number of chunks (limit to 2000 for performance)
+            if total_chunks > 0 and total_chunks <= 2000:
+                results = collection.get(include=["metadatas"], limit=2000)
                 
                 for metadata in results.get("metadatas", []):
                     # Try multiple fields for filename
@@ -496,6 +518,9 @@ async def get_documents(project: Optional[str] = None, limit: int = 1000):
                             "upload_date": metadata.get("upload_date", "")
                         }
                     chunk_counts[filename]["chunks"] += 1
+                logger.info(f"[STATUS/DOCUMENTS] Processed ChromaDB chunks in {time.time() - chroma_start:.2f}s")
+            elif total_chunks > 2000:
+                logger.warning(f"[STATUS/DOCUMENTS] Skipping detailed chunk counts - too many chunks ({total_chunks})")
         except Exception as chroma_e:
             logger.warning(f"ChromaDB query failed: {chroma_e}")
         
