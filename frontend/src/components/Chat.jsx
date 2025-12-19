@@ -26,9 +26,9 @@ import {
 } from 'lucide-react'
 
 // Brand color for consistent styling
-const BRAND = COLORS?.grassGreen || '#83b16d';
-const BRAND_LIGHT = '#f0fdf4';
-const BRAND_BORDER = '#bbf7d0';
+const BRAND = COLORS?.grassGreen || '#5a8a4a';
+const BRAND_LIGHT = 'rgba(90, 138, 74, 0.1)';
+const BRAND_BORDER = 'rgba(90, 138, 74, 0.3)';
 
 export default function Chat({ functionalAreas = [] }) {
   const { activeProject, projectName } = useProject()
@@ -433,7 +433,7 @@ export default function Chat({ functionalAreas = [] }) {
             style={intelligentMode ? {
               background: BRAND,
               color: 'white',
-              boxShadow: '0 1px 3px rgba(131, 177, 109, 0.3)'
+              boxShadow: '0 1px 3px rgba(90, 138, 74, 0.3)'
             } : {
               background: '#f3f4f6',
               color: '#6b7280'
@@ -471,7 +471,7 @@ export default function Chat({ functionalAreas = [] }) {
         <div className="px-4 py-2 border-b flex items-center justify-between text-sm" style={{ background: BRAND_LIGHT, borderColor: BRAND_BORDER }}>
           <div className="flex items-center gap-2">
             <Zap size={16} style={{ color: BRAND }} />
-            <span style={{ color: '#166534' }}>
+            <span style={{ color: '#4a6a4a' }}>
               <strong>Intelligent Mode:</strong> Synthesizes data + documents + best practices
             </span>
           </div>
@@ -577,7 +577,7 @@ export default function Chat({ functionalAreas = [] }) {
             } : {
               background: BRAND,
               color: 'white',
-              boxShadow: '0 2px 8px rgba(131, 177, 109, 0.3)'
+              boxShadow: '0 2px 8px rgba(90, 138, 74, 0.3)'
             }}
           >
             <Send size={18} />
@@ -649,7 +649,7 @@ function MessageBubble({ message, index, persona, expandedSources, toggleSources
       <div 
         className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
         style={isUser ? {
-          background: `linear-gradient(135deg, ${BRAND}, #6b9a57)`,
+          background: `linear-gradient(135deg, ${BRAND}, #4a7a3a)`,
           color: 'white'
         } : {
           background: BRAND_LIGHT,
@@ -666,7 +666,7 @@ function MessageBubble({ message, index, persona, expandedSources, toggleSources
           : message.error
             ? 'bg-red-50 border border-red-200 text-red-700 rounded-bl-sm'
             : 'bg-white shadow-sm border rounded-bl-sm'
-      }`} style={isUser ? { background: `linear-gradient(135deg, ${BRAND}, #6b9a57)` } : {}}>
+      }`} style={isUser ? { background: `linear-gradient(135deg, ${BRAND}, #4a7a3a)` } : {}}>
         <div className="whitespace-pre-wrap text-sm leading-relaxed">
           {message.content}
         </div>
@@ -760,7 +760,7 @@ function ClarificationCard({ questions, originalQuestion, onSubmit }) {
           <Brain size={20} style={{ color: BRAND }} />
         </div>
         <div>
-          <h3 className="font-semibold" style={{ color: '#166534' }}>Let me clarify</h3>
+          <h3 className="font-semibold" style={{ color: '#4a6a4a' }}>Let me clarify</h3>
           <p className="text-sm" style={{ color: BRAND }}>Quick questions for a better answer</p>
         </div>
       </div>
@@ -884,7 +884,7 @@ function IntelligentResponse({ message, index, onFeedback, onResetPreferences })
       <div className="px-4 py-2 border-b flex items-center justify-between" style={{ background: BRAND_LIGHT }}>
         <div className="flex items-center gap-2">
           <Brain size={16} style={{ color: BRAND }} />
-          <span className="text-sm font-medium" style={{ color: '#166534' }}>Intelligent Analysis</span>
+          <span className="text-sm font-medium" style={{ color: '#4a6a4a' }}>Intelligent Analysis</span>
           {message.used_learning && (
             <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full flex items-center gap-1">
               🧠 Learned
