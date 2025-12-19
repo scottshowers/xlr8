@@ -832,19 +832,30 @@ function FilesTab() {
                     : null;
                 // Get project from nested structure
                 const projectName = job.input_data?.project_name || job.project_id || job.project;
+                // Check for data quality issues
+                const hasQualityIssues = job.result_data?.has_data_quality_issues;
+                const validationIssues = job.result_data?.validation?.issues || [];
                 
                 return (
-                  <div key={job.id} style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <div key={job.id} style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', gap: '0.75rem', background: hasQualityIssues ? '#fef3c7' : 'white' }}>
                     {getStatusIcon(job.status)}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: '0.8rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: COLORS.text }}>
                         {filename}
+                        {hasQualityIssues && <span style={{ marginLeft: '0.5rem', fontSize: '0.7rem', color: '#d97706' }}>⚠️ Data issues</span>}
                       </div>
                       <div style={{ fontSize: '0.7rem', color: COLORS.textLight }}>
-                        {resultMsg && <span style={{ color: COLORS.grassGreen }}>{resultMsg} • </span>}
+                        {resultMsg && <span style={{ color: hasQualityIssues ? '#d97706' : COLORS.grassGreen }}>{resultMsg} • </span>}
                         {getProjectName(projectName)} • {formatDate(job.created_at)}
                         {job.error_message && <span style={{ color: '#ef4444' }}> • {job.error_message}</span>}
                       </div>
+                      {hasQualityIssues && validationIssues.length > 0 && (
+                        <div style={{ fontSize: '0.65rem', color: '#92400e', marginTop: '0.25rem' }}>
+                          Issues in: {validationIssues.slice(0, 3).map(i => i.table).join(', ')}
+                          {validationIssues.length > 3 && ` +${validationIssues.length - 3} more`}
+                          {' — Check Data Model tab'}
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
