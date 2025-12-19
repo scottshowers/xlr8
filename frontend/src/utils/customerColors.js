@@ -45,30 +45,70 @@ const COLOR_PALETTES = [
 ];
 
 /**
+ * Simple string hash for consistent color assignment
+ */
+function hashString(str) {
+  if (!str) return 0;
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return Math.abs(hash);
+}
+
+/**
  * Generate a consistent color palette for a customer name.
  * Uses string hashing to ensure the same customer always gets the same color.
  */
 export function getCustomerColorPalette(customerName) {
   if (!customerName) {
-    // Default to XLR8 green for no customer
-    return {
-      primary: '#5a8a4a',
-      bg: 'rgba(90, 138, 74, 0.08)',
-      border: 'rgba(90, 138, 74, 0.25)',
-    };
+    return COLOR_PALETTES[0];
   }
-  
-  // Simple string hash
-  let hash = 0;
-  for (let i = 0; i < customerName.length; i++) {
-    const char = customerName.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32bit integer
-  }
-  
-  // Use absolute value and mod to get palette index
-  const index = Math.abs(hash) % COLOR_PALETTES.length;
+  const index = hashString(customerName) % COLOR_PALETTES.length;
   return COLOR_PALETTES[index];
+}
+
+/**
+ * Get just the primary color for a customer
+ */
+export function getCustomerColor(customerName) {
+  return getCustomerColorPalette(customerName).primary;
+}
+
+/**
+ * Get initials from a customer name (for avatars)
+ */
+export function getCustomerInitials(customerName) {
+  if (!customerName) return '?';
+  const words = customerName.trim().split(/\s+/);
+  if (words.length === 1) {
+    return words[0].substring(0, 2).toUpperCase();
+  }
+  return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+}
+
+/**
+ * Determine if text should be light or dark based on background color
+ * Returns 'white' or a dark color for readable contrast
+ */
+export function getContrastText(hexColor) {
+  if (!hexColor) return '#ffffff';
+  
+  // Remove # if present
+  const hex = hexColor.replace('#', '');
+  
+  // Parse RGB values
+  const r = parseInt(hex.substr(0, 2), 16);
+  const g = parseInt(hex.substr(2, 2), 16);
+  const b = parseInt(hex.substr(4, 2), 16);
+  
+  // Calculate relative luminance
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  
+  // Return white for dark backgrounds, dark for light backgrounds
+  return luminance > 0.5 ? '#2a3441' : '#ffffff';
 }
 
 /**
@@ -78,4 +118,10 @@ export function getAllPalettes() {
   return COLOR_PALETTES;
 }
 
-export default { getCustomerColorPalette, getAllPalettes };
+export default { 
+  getCustomerColorPalette, 
+  getCustomerColor, 
+  getCustomerInitials, 
+  getContrastText,
+  getAllPalettes 
+};
