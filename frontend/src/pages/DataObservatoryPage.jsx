@@ -94,20 +94,35 @@ export default function DataObservatoryPage({ embedded = false }) {
 
   const loadAllData = async () => {
     setLoading(true);
+    console.log('[Observatory] Loading data...');
     try {
       const [duckRes, docsRes, chromaRes] = await Promise.all([
-        api.get('/status/structured').catch(() => ({ data: { available: false, files: [], total_rows: 0 } })),
-        api.get('/status/documents').catch(() => ({ data: { documents: [] } })),
-        api.get('/status/chromadb').catch(() => ({ data: { total_chunks: 0 } })),
+        api.get('/status/structured').catch((err) => {
+          console.error('[Observatory] DuckDB fetch failed:', err);
+          return { data: { available: false, files: [], total_rows: 0 } };
+        }),
+        api.get('/status/documents').catch((err) => {
+          console.error('[Observatory] Documents fetch failed:', err);
+          return { data: { documents: [] } };
+        }),
+        api.get('/status/chromadb').catch((err) => {
+          console.error('[Observatory] ChromaDB fetch failed:', err);
+          return { data: { total_chunks: 0 } };
+        }),
       ]);
+      
+      console.log('[Observatory] DuckDB response:', duckRes.data);
+      console.log('[Observatory] Documents response:', docsRes.data);
+      console.log('[Observatory] ChromaDB response:', chromaRes.data);
       
       setDuckdbData(duckRes.data);
       setSupabaseData(docsRes.data);
       setChromadbData(chromaRes.data);
     } catch (err) {
-      console.error('Failed to load data:', err);
+      console.error('[Observatory] Failed to load data:', err);
     } finally {
       setLoading(false);
+      console.log('[Observatory] Loading complete');
     }
   };
 
