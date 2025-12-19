@@ -1,14 +1,33 @@
 /**
  * AI Assist - Chat Interface with Bessie
- * Streamlined chat page, no tabs
+ * 
+ * Clean professional design with:
+ * - Light/dark mode support
+ * - Customer color accents
+ * - Consistent styling with Command Center
  */
 
 import React from 'react';
 import { useProject } from '../context/ProjectContext';
+import { useTheme } from '../context/ThemeContext';
+import { getCustomerColorPalette } from '../utils/customerColors';
 import Chat from '../components/Chat';
+import { MessageSquare, FolderOpen } from 'lucide-react';
+
+// Theme-aware colors
+const getColors = (dark) => ({
+  bg: dark ? '#1a1f2e' : '#f5f7fa',
+  card: dark ? '#242b3d' : '#ffffff',
+  cardBorder: dark ? '#2d3548' : '#e8ecf1',
+  text: dark ? '#e8eaed' : '#2a3441',
+  textMuted: dark ? '#8b95a5' : '#6b7280',
+  textLight: dark ? '#5f6a7d' : '#9ca3af',
+  primary: '#83b16d',
+  primaryLight: dark ? 'rgba(131, 177, 109, 0.15)' : 'rgba(131, 177, 109, 0.1)',
+});
 
 // No-project placeholder
-function SelectProjectPrompt() {
+function SelectProjectPrompt({ colors }) {
   return (
     <div style={{
       display: 'flex',
@@ -19,21 +38,35 @@ function SelectProjectPrompt() {
       textAlign: 'center',
       padding: '2rem',
     }}>
-      <div style={{ fontSize: '3rem', marginBottom: '1rem', opacity: 0.6 }}>🎯</div>
+      <div style={{
+        width: 64,
+        height: 64,
+        borderRadius: 16,
+        background: colors.primaryLight,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: '1.25rem',
+      }}>
+        <FolderOpen size={28} style={{ color: colors.primary }} />
+      </div>
       <h2 style={{
         fontFamily: "'Sora', sans-serif",
         fontSize: '1.25rem',
-        fontWeight: '700',
-        color: '#2a3441',
-        marginBottom: '0.5rem',
-      }}>Select a Project to Begin</h2>
+        fontWeight: 700,
+        color: colors.text,
+        margin: '0 0 0.5rem 0',
+      }}>
+        Select a Project to Begin
+      </h2>
       <p style={{
-        color: '#5f6c7b',
+        color: colors.textMuted,
         fontSize: '0.9rem',
         maxWidth: '350px',
-        lineHeight: '1.5',
+        lineHeight: 1.5,
+        margin: 0,
       }}>
-        Choose a project from the selector above to get started.
+        Choose a project from the selector above to start chatting with AI Assist.
       </p>
     </div>
   );
@@ -41,62 +74,81 @@ function SelectProjectPrompt() {
 
 export default function WorkspacePage() {
   const { activeProject, projectName, customerName, hasActiveProject, loading } = useProject();
-
-  const styles = {
-    header: { marginBottom: '1rem' },
-    title: {
-      fontFamily: "'Sora', sans-serif",
-      fontSize: '1.5rem',
-      fontWeight: '700',
-      color: '#2a3441',
-      margin: 0,
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.75rem',
-    },
-    projectLabel: {
-      fontSize: '1rem',
-      fontWeight: '500',
-      color: '#5f6c7b',
-    },
-    container: {
-      background: 'white',
-      borderRadius: '16px',
-      boxShadow: '0 1px 3px rgba(42, 52, 65, 0.08)',
-      overflow: 'hidden',
-      minHeight: '60vh',
-    },
-  };
+  const { darkMode } = useTheme();
+  const colors = getColors(darkMode);
+  
+  // Get customer colors if project is active
+  const customerColors = hasActiveProject 
+    ? getCustomerColorPalette(customerName || projectName)
+    : null;
 
   if (loading) {
-    return <div style={{ textAlign: 'center', padding: '3rem', color: '#5f6c7b' }}>Loading...</div>;
-  }
-
-  if (!hasActiveProject) {
     return (
-      <div>
-        <div style={styles.header}>
-          <h1 style={styles.title}>AI Assist</h1>
-        </div>
-        <div style={styles.container}>
-          <SelectProjectPrompt />
-        </div>
+      <div style={{ textAlign: 'center', padding: '3rem', color: colors.textMuted }}>
+        Loading...
       </div>
     );
   }
 
   return (
     <div>
-      <div style={styles.header}>
-        <h1 style={styles.title}>
+      {/* Header */}
+      <div style={{ marginBottom: '1rem' }}>
+        <h1 style={{
+          fontFamily: "'Sora', sans-serif",
+          fontSize: '1.5rem',
+          fontWeight: 700,
+          color: colors.text,
+          margin: 0,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.75rem',
+        }}>
+          <MessageSquare size={24} style={{ color: colors.primary }} />
           AI Assist
-          <span style={styles.projectLabel}>
-            {customerName ? `${customerName} • ` : ''}{projectName || 'Project'}
-          </span>
+          {hasActiveProject && customerColors && (
+            <span style={{
+              fontSize: '1rem',
+              fontWeight: 500,
+              color: customerColors.primary,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+            }}>
+              <span style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: customerColors.primary,
+              }} />
+              {customerName ? `${customerName} • ` : ''}{projectName || 'Project'}
+            </span>
+          )}
         </h1>
+        {!hasActiveProject && (
+          <p style={{ color: colors.textMuted, margin: '0.25rem 0 0 0', fontSize: '0.875rem' }}>
+            Chat with your data and get intelligent insights
+          </p>
+        )}
       </div>
-      <div style={styles.container}>
-        <Chat />
+
+      {/* Chat Container */}
+      <div style={{
+        background: colors.card,
+        border: `1px solid ${colors.cardBorder}`,
+        borderRadius: 12,
+        overflow: 'hidden',
+        minHeight: '60vh',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+        ...(hasActiveProject && customerColors ? {
+          borderTop: `3px solid ${customerColors.primary}`,
+        } : {}),
+      }}>
+        {hasActiveProject ? (
+          <Chat />
+        ) : (
+          <SelectProjectPrompt colors={colors} />
+        )}
       </div>
     </div>
   );
