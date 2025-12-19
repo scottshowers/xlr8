@@ -11,20 +11,44 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useProject } from '../context/ProjectContext';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
 import { useNavigate } from 'react-router-dom';
 import YearEndPlaybook from '../components/YearEndPlaybook';
 import { LoadingSpinner, ErrorState, EmptyState, PageHeader, Card } from '../components/ui';
 import api from '../services/api';
+import { getCustomerColorPalette } from '../utils/customerColors';
 
-// Brand Colors
-const COLORS = {
-  grassGreen: '#83b16d',
-  grassGreenDark: '#6a9a54',
-  skyBlue: '#93abd9',
-  iceFlow: '#c9d3d4',
-  white: '#f6f5fa',
-  text: '#2a3441',
-  textLight: '#5f6c7b',
+// Theme-aware colors - muted professional palette
+const getColors = (dark) => ({
+  bg: dark ? '#1a1f2e' : '#f5f7fa',
+  card: dark ? '#242b3d' : '#ffffff',
+  cardBorder: dark ? '#2d3548' : '#e8ecf1',
+  text: dark ? '#e8eaed' : '#2a3441',
+  textMuted: dark ? '#8b95a5' : '#6b7280',
+  textLight: dark ? '#5f6a7d' : '#9ca3af',
+  primary: '#5a8a4a',
+  primaryLight: dark ? 'rgba(90, 138, 74, 0.15)' : 'rgba(90, 138, 74, 0.1)',
+  blue: '#4a6b8a',
+  blueLight: dark ? 'rgba(74, 107, 138, 0.15)' : 'rgba(74, 107, 138, 0.1)',
+  amber: '#8a6b4a',
+  amberLight: dark ? 'rgba(138, 107, 74, 0.15)' : 'rgba(138, 107, 74, 0.1)',
+  red: '#8a4a4a',
+  redLight: dark ? 'rgba(138, 74, 74, 0.15)' : 'rgba(138, 74, 74, 0.1)',
+  green: '#5a8a5a',
+  greenLight: dark ? 'rgba(90, 138, 90, 0.15)' : 'rgba(90, 138, 90, 0.1)',
+  purple: '#6b5a7a',
+  purpleLight: dark ? 'rgba(107, 90, 122, 0.15)' : 'rgba(107, 90, 122, 0.1)',
+  divider: dark ? '#2d3548' : '#e8ecf1',
+  inputBg: dark ? '#1a1f2e' : '#f8fafc',
+});
+
+// Category colors - muted
+const CATEGORY_COLORS = {
+  'Year-End': { color: '#5a8a4a', bg: 'rgba(90, 138, 74, 0.1)' },
+  'Compliance': { color: '#4a6b8a', bg: 'rgba(74, 107, 138, 0.1)' },
+  'Regulatory': { color: '#8a6b4a', bg: 'rgba(138, 107, 74, 0.1)' },
+  'Audit': { color: '#6b5a7a', bg: 'rgba(107, 90, 122, 0.1)' },
+  'Implementation': { color: '#4a7a7a', bg: 'rgba(74, 122, 122, 0.1)' },
 };
 
 // Playbook Definitions
@@ -251,7 +275,7 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
       width: '52px',
       height: '52px',
       borderRadius: '12px',
-      background: `linear-gradient(135deg, ${COLORS.grassGreen} 0%, ${COLORS.grassGreenDark} 100%)`,
+      background: `linear-gradient(135deg, '#5a8a4a' 0%, ${#5a8a4aDark} 100%)`,
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -261,12 +285,12 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
       margin: 0,
       fontSize: '1.25rem',
       fontWeight: '700',
-      color: COLORS.text,
+      color: '#2a3441',
     },
     subtitle: {
       margin: 0,
       fontSize: '0.85rem',
-      color: COLORS.textLight,
+      color: '#6b7280',
     },
     closeBtn: {
       padding: '0.5rem',
@@ -274,7 +298,7 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
       border: 'none',
       borderRadius: '8px',
       cursor: 'pointer',
-      color: COLORS.textLight,
+      color: '#6b7280',
       fontSize: '1.25rem',
     },
     body: {
@@ -294,7 +318,7 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
     sectionTitle: {
       fontSize: '0.9rem',
       fontWeight: '600',
-      color: COLORS.text,
+      color: '#2a3441',
       display: 'flex',
       alignItems: 'center',
       gap: '0.5rem',
@@ -302,7 +326,7 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
     badge: {
       padding: '0.25rem 0.6rem',
       background: rules.length > 0 ? '#dcfce7' : '#f3f4f6',
-      color: rules.length > 0 ? '#166534' : COLORS.textLight,
+      color: rules.length > 0 ? '#4a6a4a' : '#6b7280',
       borderRadius: '12px',
       fontSize: '0.75rem',
       fontWeight: '600',
@@ -321,7 +345,7 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
       width: '36px',
       height: '36px',
       borderRadius: '8px',
-      background: COLORS.skyBlue,
+      background: '#4a6b8a',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -333,7 +357,7 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
       background: 'white',
       border: '1px solid #fecaca',
       borderRadius: '6px',
-      color: '#dc2626',
+      color: '#8a4a4a',
       cursor: 'pointer',
       fontSize: '0.8rem',
     },
@@ -343,7 +367,7 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
       background: showAvailable ? '#f0f4f7' : 'white',
       border: '2px dashed #d1d5db',
       borderRadius: '10px',
-      color: COLORS.textLight,
+      color: '#6b7280',
       cursor: 'pointer',
       fontSize: '0.85rem',
       fontWeight: '600',
@@ -366,7 +390,7 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
     },
     linkBtn: {
       padding: '0.35rem 0.75rem',
-      background: COLORS.grassGreen,
+      background: '#5a8a4a',
       border: 'none',
       borderRadius: '6px',
       color: 'white',
@@ -379,7 +403,7 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
       background: type === 'error' ? '#fef2f2' : '#f0fdf4',
       border: `1px solid ${type === 'error' ? '#fecaca' : '#bbf7d0'}`,
       borderRadius: '8px',
-      color: type === 'error' ? '#dc2626' : '#166534',
+      color: type === 'error' ? '#8a4a4a' : '#4a6a4a',
       fontSize: '0.85rem',
       marginBottom: '1rem',
     }),
@@ -392,7 +416,7 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
     },
     executeBtn: {
       padding: '0.75rem 1.5rem',
-      background: `linear-gradient(135deg, ${COLORS.grassGreen} 0%, ${COLORS.grassGreenDark} 100%)`,
+      background: `linear-gradient(135deg, '#5a8a4a' 0%, ${#5a8a4aDark} 100%)`,
       border: 'none',
       borderRadius: '8px',
       color: 'white',
@@ -410,7 +434,7 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
     },
     resultTitle: {
       fontWeight: '700',
-      color: '#166534',
+      color: '#4a6a4a',
       marginBottom: '0.5rem',
     },
     findingItem: {
@@ -439,7 +463,7 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
         <div style={modalStyles.body}>
           {loading ? (
             <div style={{ textAlign: 'center', padding: '2rem' }}>
-              <p style={{ color: COLORS.textLight }}>Loading...</p>
+              <p style={{ color: '#6b7280' }}>Loading...</p>
             </div>
           ) : (
             <>
@@ -462,10 +486,10 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
                       <div style={{ display: 'flex', alignItems: 'center' }}>
                         <div style={modalStyles.linkedIcon}>📄</div>
                         <div>
-                          <div style={{ fontWeight: '600', color: COLORS.text }}>
+                          <div style={{ fontWeight: '600', color: '#2a3441' }}>
                             {ls.name || `Standard ${ls.id}`}
                           </div>
-                          <div style={{ fontSize: '0.75rem', color: COLORS.textLight }}>
+                          <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
                             {ls.domain || 'General'}
                           </div>
                         </div>
@@ -476,7 +500,7 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
                     </div>
                   ))
                 ) : (
-                  <div style={{ padding: '1.5rem', textAlign: 'center', color: COLORS.textLight, background: '#f8faf9', borderRadius: '10px' }}>
+                  <div style={{ padding: '1.5rem', textAlign: 'center', color: '#6b7280', background: '#f8faf9', borderRadius: '10px' }}>
                     <p style={{ margin: 0 }}>No standards linked yet</p>
                     <p style={{ fontSize: '0.8rem', margin: '0.25rem 0 0' }}>
                       Link a standard to enable compliance checking
@@ -497,8 +521,8 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
                           unlinkedStandards.map(s => (
                             <div key={s.id} style={modalStyles.dropdownItem}>
                               <div>
-                                <div style={{ fontWeight: '600', color: COLORS.text }}>{s.title || s.filename}</div>
-                                <div style={{ fontSize: '0.75rem', color: COLORS.textLight }}>{s.domain || 'General'}</div>
+                                <div style={{ fontWeight: '600', color: '#2a3441' }}>{s.title || s.filename}</div>
+                                <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>{s.domain || 'General'}</div>
                               </div>
                               <button style={modalStyles.linkBtn} onClick={() => handleLink(s.id)} disabled={linking}>
                                 {linking ? '...' : 'Link'}
@@ -506,7 +530,7 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
                             </div>
                           ))
                         ) : (
-                          <div style={{ padding: '1rem', textAlign: 'center', color: COLORS.textLight }}>
+                          <div style={{ padding: '1rem', textAlign: 'center', color: '#6b7280' }}>
                             All standards are linked
                           </div>
                         )}
@@ -538,9 +562,9 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
                         <div key={i} style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #e8ecef', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                           <span style={{
                             width: '8px', height: '8px', borderRadius: '50%',
-                            background: { critical: '#dc2626', high: '#f97316', medium: '#eab308', low: '#22c55e' }[rule.severity] || '#9ca3af'
+                            background: { critical: '#8a4a4a', high: '#8a6b4a', medium: '#7a6a3a', low: '#5a8a5a' }[rule.severity] || '#9ca3af'
                           }} />
-                          <span style={{ fontSize: '0.85rem', color: COLORS.text }}>{rule.title}</span>
+                          <span style={{ fontSize: '0.85rem', color: '#2a3441' }}>{rule.title}</span>
                         </div>
                       ))}
                     </div>
@@ -556,8 +580,8 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
                   </div>
                   <div style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>
                     <strong>{executionResult.total_rules_checked}</strong> rules checked • 
-                    <strong style={{ color: executionResult.violations_found > 0 ? '#dc2626' : '#166534' }}> {executionResult.violations_found}</strong> violations • 
-                    <strong style={{ color: '#f97316' }}> {executionResult.warnings_found}</strong> warnings
+                    <strong style={{ color: executionResult.violations_found > 0 ? '#8a4a4a' : '#4a6a4a' }}> {executionResult.violations_found}</strong> violations • 
+                    <strong style={{ color: '#8a6b4a' }}> {executionResult.warnings_found}</strong> warnings
                   </div>
                   {executionResult.findings?.length > 0 && (
                     <div style={{ marginTop: '0.75rem' }}>
@@ -566,13 +590,13 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
                         <div key={i} style={modalStyles.findingItem}>
                           <span style={{
                             display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', marginRight: '0.5rem',
-                            background: { critical: '#dc2626', high: '#f97316', medium: '#eab308', low: '#22c55e' }[f.severity] || '#9ca3af'
+                            background: { critical: '#8a4a4a', high: '#8a6b4a', medium: '#7a6a3a', low: '#5a8a5a' }[f.severity] || '#9ca3af'
                           }} />
                           {f.title} ({f.affected_count} affected)
                         </div>
                       ))}
                       {executionResult.findings.length > 5 && (
-                        <div style={{ fontSize: '0.8rem', color: COLORS.textLight, marginTop: '0.5rem' }}>
+                        <div style={{ fontSize: '0.8rem', color: '#6b7280', marginTop: '0.5rem' }}>
                           ...and {executionResult.findings.length - 5} more
                         </div>
                       )}
@@ -586,7 +610,7 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
 
         {/* Footer */}
         <div style={modalStyles.footer}>
-          <div style={{ fontSize: '0.85rem', color: COLORS.textLight }}>
+          <div style={{ fontSize: '0.85rem', color: '#6b7280' }}>
             {linkedStandards.length > 0 
               ? `${linkedStandards.length} standard${linkedStandards.length > 1 ? 's' : ''} linked`
               : 'Link standards to run compliance checks'
@@ -620,7 +644,7 @@ function PlaybookCard({ playbook, onRun, onConfigure, hasProgress, isAssigned, i
       borderRadius: '12px',
       padding: '1.5rem',
       boxShadow: '0 1px 3px rgba(42, 52, 65, 0.08)',
-      border: playbook.hasRunner ? `2px solid ${COLORS.grassGreen}` : '1px solid #e1e8ed',
+      border: playbook.hasRunner ? `2px solid '#5a8a4a'` : '1px solid #e1e8ed',
       transition: 'all 0.2s ease',
       cursor: 'pointer',
       position: 'relative',
@@ -649,25 +673,25 @@ function PlaybookCard({ playbook, onRun, onConfigure, hasProgress, isAssigned, i
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background: COLORS.iceFlow,
+      background: '#e8ecf1',
       borderRadius: '10px',
     },
     title: {
       fontFamily: "'Sora', sans-serif",
       fontSize: '1.1rem',
       fontWeight: '700',
-      color: COLORS.text,
+      color: '#2a3441',
       marginBottom: '0.25rem',
     },
     category: {
       fontSize: '0.75rem',
-      color: COLORS.grassGreen,
+      color: '#5a8a4a',
       fontWeight: '600',
       textTransform: 'uppercase',
       letterSpacing: '0.05em',
     },
     description: {
-      color: COLORS.textLight,
+      color: '#6b7280',
       fontSize: '0.9rem',
       lineHeight: '1.5',
       marginBottom: '1rem',
@@ -683,7 +707,7 @@ function PlaybookCard({ playbook, onRun, onConfigure, hasProgress, isAssigned, i
       padding: '0.25rem 0.5rem',
       background: '#f0f4f7',
       borderRadius: '4px',
-      color: COLORS.textLight,
+      color: '#6b7280',
     },
     footer: {
       display: 'flex',
@@ -694,7 +718,7 @@ function PlaybookCard({ playbook, onRun, onConfigure, hasProgress, isAssigned, i
     },
     time: {
       fontSize: '0.8rem',
-      color: COLORS.textLight,
+      color: '#6b7280',
     },
     buttons: {
       display: 'flex',
@@ -705,7 +729,7 @@ function PlaybookCard({ playbook, onRun, onConfigure, hasProgress, isAssigned, i
       background: '#f5f7f9',
       border: '1px solid #e1e8ed',
       borderRadius: '6px',
-      color: COLORS.textLight,
+      color: '#6b7280',
       fontWeight: '600',
       fontSize: '0.8rem',
       cursor: 'pointer',
@@ -715,7 +739,7 @@ function PlaybookCard({ playbook, onRun, onConfigure, hasProgress, isAssigned, i
     },
     button: {
       padding: '0.5rem 1rem',
-      background: playbook.hasRunner ? COLORS.grassGreen : COLORS.textLight,
+      background: playbook.hasRunner ? '#5a8a4a' : '#6b7280',
       border: 'none',
       borderRadius: '6px',
       color: 'white',
@@ -794,6 +818,8 @@ function PlaybookCard({ playbook, onRun, onConfigure, hasProgress, isAssigned, i
 export default function PlaybooksPage() {
   const { activeProject, projectName, customerName, hasActiveProject, loading: projectLoading } = useProject();
   const { isAdmin } = useAuth();
+  const { darkMode } = useTheme();
+  const colors = getColors(darkMode);
   const navigate = useNavigate();
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [activePlaybook, setActivePlaybook] = useState(null);
@@ -907,10 +933,10 @@ export default function PlaybooksPage() {
     },
     filterButton: (active) => ({
       padding: '0.5rem 1rem',
-      background: active ? COLORS.grassGreen : '#f0f4f7',
+      background: active ? '#5a8a4a' : '#f0f4f7',
       border: 'none',
       borderRadius: '20px',
-      color: active ? 'white' : COLORS.textLight,
+      color: active ? 'white' : '#6b7280',
       fontWeight: '600',
       fontSize: '0.85rem',
       cursor: 'pointer',
