@@ -15,17 +15,17 @@ const getColors = (dark) => ({
   text: dark ? '#e8eaed' : '#2a3441',
   textMuted: dark ? '#8b95a5' : '#6b7280',
   textLight: dark ? '#5f6a7d' : '#9ca3af',
-  primary: '#83b16d',
-  primaryLight: dark ? 'rgba(131, 177, 109, 0.15)' : 'rgba(131, 177, 109, 0.1)',
-  blue: '#5b8fb9',
-  blueLight: dark ? 'rgba(91, 143, 185, 0.15)' : 'rgba(91, 143, 185, 0.1)',
-  amber: '#d4a054',
-  amberLight: dark ? 'rgba(212, 160, 84, 0.15)' : 'rgba(212, 160, 84, 0.1)',
-  green: '#10b981',
-  greenLight: dark ? 'rgba(16, 185, 129, 0.15)' : 'rgba(16, 185, 129, 0.1)',
-  purple: '#8b5cf6',
-  purpleLight: dark ? 'rgba(139, 92, 246, 0.15)' : 'rgba(139, 92, 246, 0.1)',
-  cyan: '#06b6d4',
+  primary: '#5a8a4a',  // Muted forest green
+  primaryLight: dark ? 'rgba(90, 138, 74, 0.15)' : 'rgba(90, 138, 74, 0.1)',
+  blue: '#4a6b8a',     // Slate blue
+  blueLight: dark ? 'rgba(74, 107, 138, 0.15)' : 'rgba(74, 107, 138, 0.1)',
+  amber: '#8a6b4a',    // Muted rust
+  amberLight: dark ? 'rgba(138, 107, 74, 0.15)' : 'rgba(138, 107, 74, 0.1)',
+  green: '#5a8a5a',    // Muted green
+  greenLight: dark ? 'rgba(90, 138, 90, 0.15)' : 'rgba(90, 138, 90, 0.1)',
+  purple: '#6b5a7a',   // Dusty purple
+  purpleLight: dark ? 'rgba(107, 90, 122, 0.15)' : 'rgba(107, 90, 122, 0.1)',
+  cyan: '#4a7a7a',     // Deep teal
   divider: dark ? '#2d3548' : '#e8ecf1',
   inputBg: dark ? '#1a1f2e' : '#f8fafc',
   tabBg: dark ? '#1e2433' : '#fafbfc',
