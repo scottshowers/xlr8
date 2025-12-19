@@ -22,9 +22,9 @@ import {
 import { COLORS } from '../components/ui';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
-const BRAND = COLORS?.grassGreen || '#83b16d';
-const BRAND_DARK = '#6b9a57';
-const BRAND_LIGHT = '#f0fdf4';
+const BRAND = COLORS?.grassGreen || '#5a8a4a';
+const BRAND_DARK = '#4a7a3a';
+const BRAND_LIGHT = 'rgba(90, 138, 74, 0.1)';
 
 export default function ConsultantAssist({ 
   extractionId, 
