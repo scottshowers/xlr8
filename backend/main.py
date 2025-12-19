@@ -133,6 +133,14 @@ except ImportError as e:
     CLEANUP_AVAILABLE = False
     logging.warning(f"Cleanup router import failed: {e}")
 
+# Import deep_clean router (unified orphan cleanup across all storage systems)
+try:
+    from backend.routers import deep_clean
+    DEEP_CLEAN_AVAILABLE = True
+except ImportError as e:
+    DEEP_CLEAN_AVAILABLE = False
+    logging.warning(f"Deep clean router import failed: {e}")
+
 # Standards endpoints are now in upload.py (no separate router needed)
 
 logging.basicConfig(level=logging.INFO)
@@ -183,6 +191,13 @@ if CLEANUP_AVAILABLE:
     logger.info("Cleanup router registered at /api (jobs, structured, documents deletion)")
 else:
     logger.warning("Cleanup router not available")
+
+# Register deep_clean router if available (unified orphan cleanup)
+if DEEP_CLEAN_AVAILABLE:
+    app.include_router(deep_clean.router, prefix="/api", tags=["deep-clean"])
+    logger.info("Deep clean router registered at /api/deep-clean")
+else:
+    logger.warning("Deep clean router not available")
 
 # Register register_extractor router if available (pay register extraction + DuckDB storage)
 if REGISTER_EXTRACTOR_AVAILABLE:
@@ -359,6 +374,7 @@ async def health():
             "unified_chat": UNIFIED_CHAT_AVAILABLE,
             "bi": BI_ROUTER_AVAILABLE,
             "cleanup": CLEANUP_AVAILABLE,
+            "deep_clean": DEEP_CLEAN_AVAILABLE,
             "standards": True,
         }
         
@@ -386,6 +402,7 @@ async def health():
                 "unified_chat": UNIFIED_CHAT_AVAILABLE,
                 "bi": BI_ROUTER_AVAILABLE,
                 "cleanup": CLEANUP_AVAILABLE,
+                "deep_clean": DEEP_CLEAN_AVAILABLE,
                 "standards": True,
             }
         }
