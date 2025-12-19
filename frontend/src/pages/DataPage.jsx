@@ -1,18 +1,12 @@
 /**
- * DataPage.jsx - Restructured Data Hub
+ * DataPage.jsx - Data Hub
+ * 
+ * Clean professional design with:
+ * - Light/dark mode support
+ * - Customer color accents
+ * - Consistent styling with Command Center
  * 
  * Tabs: Upload | Files | Data Health | Observatory | Register Extractor
- * 
- * Files tab shows:
- * - Structured Data (queryable tables)
- * - Documents (searchable PDFs/docs)
- * - Reference Data (standards, lookups)
- * - Processing History (collapsed, at bottom)
- * 
- * Features:
- * - Multi-select delete with checkboxes
- * - Metadata: uploaded by, date
- * - Bulk actions
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -20,22 +14,38 @@ import { Link } from 'react-router-dom';
 import { useProject } from '../context/ProjectContext';
 import { useUpload } from '../context/UploadContext';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
+import { getCustomerColorPalette } from '../utils/customerColors';
 import api from '../services/api';
 import {
   Upload as UploadIcon, Sparkles, Database, RefreshCw,
-  CheckCircle, XCircle, Clock, Loader2, Trash2, StopCircle,
+  CheckCircle, XCircle, Clock, Loader2, Trash2,
   FileText, Table2, ChevronDown, ChevronUp, User, Calendar,
-  CheckSquare, Square, BookOpen, AlertCircle, Eye
+  CheckSquare, Square, Eye
 } from 'lucide-react';
 import DataHealthComponent from './DataHealthPage';
 import DataObservatoryPage from './DataObservatoryPage';
 
-const COLORS = {
-  grassGreen: '#83b16d',
-  skyBlue: '#93abd9',
-  text: '#2a3441',
-  textLight: '#5f6c7b',
-};
+// Theme-aware colors
+const getColors = (dark) => ({
+  bg: dark ? '#1a1f2e' : '#f5f7fa',
+  card: dark ? '#242b3d' : '#ffffff',
+  cardBorder: dark ? '#2d3548' : '#e8ecf1',
+  text: dark ? '#e8eaed' : '#2a3441',
+  textMuted: dark ? '#8b95a5' : '#6b7280',
+  textLight: dark ? '#5f6a7d' : '#9ca3af',
+  primary: '#83b16d',
+  primaryLight: dark ? 'rgba(131, 177, 109, 0.15)' : 'rgba(131, 177, 109, 0.1)',
+  blue: '#5b8fb9',
+  blueLight: dark ? 'rgba(91, 143, 185, 0.15)' : 'rgba(91, 143, 185, 0.1)',
+  amber: '#d4a054',
+  red: '#c76b6b',
+  green: '#10b981',
+  greenLight: dark ? 'rgba(16, 185, 129, 0.15)' : 'rgba(16, 185, 129, 0.1)',
+  divider: dark ? '#2d3548' : '#e8ecf1',
+  inputBg: dark ? '#1a1f2e' : '#f8fafc',
+  tabBg: dark ? '#1e2433' : '#fafbfc',
+});
 
 const TABS = [
   { id: 'upload', label: 'Upload', icon: UploadIcon },
@@ -46,38 +56,42 @@ const TABS = [
 ];
 
 export default function DataPage() {
-  const { activeProject, projectName } = useProject();
+  const { activeProject, projectName, customerName } = useProject();
+  const { darkMode } = useTheme();
+  const colors = getColors(darkMode);
   const [activeTab, setActiveTab] = useState('upload');
+  
+  const customerColors = activeProject ? getCustomerColorPalette(customerName || projectName) : null;
 
   return (
     <div>
-      <div data-tour="data-header" style={{ marginBottom: '1.5rem' }}>
-        <h1 style={{ fontFamily: "'Sora', sans-serif", fontSize: '1.75rem', fontWeight: 700, color: COLORS.text, margin: 0 }}>
+      <div style={{ marginBottom: '1.5rem' }}>
+        <h1 style={{ fontFamily: "'Sora', sans-serif", fontSize: '1.5rem', fontWeight: 700, color: colors.text, margin: 0 }}>
           Data
         </h1>
-        <p data-tour="data-project-context" style={{ color: COLORS.textLight, marginTop: '0.25rem' }}>
+        <p style={{ color: colors.textMuted, marginTop: '0.25rem', fontSize: '0.875rem' }}>
           Upload and manage project data
-          {projectName && <span> • <strong>{projectName}</strong></span>}
+          {projectName && customerColors && (
+            <span style={{ color: customerColors.primary, fontWeight: 500 }}> • {projectName}</span>
+          )}
         </p>
       </div>
 
-      <div style={{ background: 'white', borderRadius: '16px', boxShadow: '0 1px 3px rgba(42, 52, 65, 0.08)', overflow: 'hidden' }}>
-        <div style={{ display: 'flex', borderBottom: '1px solid #e1e8ed', background: '#fafbfc' }}>
+      <div style={{ background: colors.card, border: `1px solid ${colors.cardBorder}`, borderRadius: 12, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+        <div style={{ display: 'flex', borderBottom: `1px solid ${colors.divider}`, background: colors.tabBg }}>
           {TABS.map(tab => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
             return (
               <button
                 key={tab.id}
-                data-tour={`data-tab-${tab.id}`}
                 onClick={() => setActiveTab(tab.id)}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '1rem 1.5rem',
-                  border: 'none', background: isActive ? 'white' : 'transparent',
-                  color: isActive ? COLORS.grassGreen : COLORS.textLight, fontWeight: 600,
-                  fontSize: '0.9rem', cursor: 'pointer',
-                  borderBottom: isActive ? `2px solid ${COLORS.grassGreen}` : '2px solid transparent',
-                  marginBottom: '-1px',
+                  display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '1rem 1.25rem',
+                  border: 'none', background: isActive ? colors.card : 'transparent',
+                  color: isActive ? colors.primary : colors.textMuted, fontWeight: 600, fontSize: '0.85rem',
+                  cursor: 'pointer', borderBottom: isActive ? `2px solid ${colors.primary}` : '2px solid transparent',
+                  marginBottom: '-1px', transition: 'all 0.15s ease',
                 }}
               >
                 <Icon size={18} />
@@ -88,19 +102,18 @@ export default function DataPage() {
         </div>
 
         <div style={{ padding: '1.5rem' }}>
-          {activeTab === 'upload' && <UploadTab project={activeProject} projectName={projectName} />}
-          {activeTab === 'files' && <FilesTab />}
+          {activeTab === 'upload' && <UploadTab project={activeProject} projectName={projectName} colors={colors} />}
+          {activeTab === 'files' && <FilesTab colors={colors} />}
           {activeTab === 'health' && <DataHealthComponent embedded />}
           {activeTab === 'observatory' && <DataObservatoryPage embedded />}
-          {activeTab === 'vacuum' && <VacuumTab />}
+          {activeTab === 'vacuum' && <VacuumTab colors={colors} />}
         </div>
       </div>
     </div>
   );
 }
 
-// ==================== UPLOAD TAB ====================
-function UploadTab({ project, projectName }) {
+function UploadTab({ project, projectName, colors }) {
   const { addUpload } = useUpload();
   const [dragOver, setDragOver] = useState(false);
   const [targetProject, setTargetProject] = useState('current');
@@ -123,78 +136,46 @@ function UploadTab({ project, projectName }) {
 
   return (
     <div>
-      {/* Project Target Selector */}
       <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-        <label style={{ fontWeight: 500, color: COLORS.text }}>Upload to:</label>
-        <select
-          value={targetProject}
-          onChange={(e) => setTargetProject(e.target.value)}
-          style={{
-            padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid #e1e8ed',
-            fontSize: '0.9rem', cursor: 'pointer', minWidth: '200px'
-          }}
-        >
+        <label style={{ fontWeight: 500, color: colors.text, fontSize: '0.9rem' }}>Upload to:</label>
+        <select value={targetProject} onChange={(e) => setTargetProject(e.target.value)} style={{ padding: '0.5rem 1rem', borderRadius: 8, border: `1px solid ${colors.divider}`, fontSize: '0.9rem', cursor: 'pointer', minWidth: '200px', background: colors.card, color: colors.text }}>
           <option value="current">{projectName || 'Current Project'}{project ? '' : ' (select one above)'}</option>
           <option value="reference">📚 Reference Library (Global)</option>
         </select>
-        {targetProject === 'reference' && (
-          <span style={{ fontSize: '0.8rem', color: COLORS.grassGreen }}>
-            ✓ Year-End Checklist and global standards
-          </span>
-        )}
+        {targetProject === 'reference' && <span style={{ fontSize: '0.8rem', color: colors.primary }}>✓ Year-End Checklist and global standards</span>}
       </div>
 
       <input type="file" ref={fileInputRef} style={{ display: 'none' }} multiple accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.txt,.md" onChange={handleFileSelect} />
-      <div
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
-        style={{
-          border: `2px dashed ${dragOver ? COLORS.grassGreen : '#e1e8ed'}`, borderRadius: '12px',
-          padding: '3rem', textAlign: 'center', cursor: 'pointer',
-          background: dragOver ? '#f0fdf4' : '#fafbfc', transition: 'all 0.2s ease',
-        }}
-      >
+      <div onDragOver={(e) => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={handleDrop} onClick={() => fileInputRef.current?.click()} style={{ border: `2px dashed ${dragOver ? colors.primary : colors.divider}`, borderRadius: 12, padding: '3rem', textAlign: 'center', cursor: 'pointer', background: dragOver ? colors.primaryLight : colors.inputBg, transition: 'all 0.2s ease' }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <UploadIcon size={48} style={{ color: COLORS.grassGreen, marginBottom: '1rem' }} />
-          <h3 style={{ margin: '0 0 0.5rem', color: COLORS.text }}>{dragOver ? 'Drop files here' : 'Click or drag files to upload'}</h3>
-          <p style={{ color: COLORS.textLight, margin: 0, fontSize: '0.9rem' }}>PDF, Word, Excel, CSV, or Text files</p>
+          <UploadIcon size={48} style={{ color: colors.primary, marginBottom: '1rem' }} />
+          <h3 style={{ margin: '0 0 0.5rem', color: colors.text }}>{dragOver ? 'Drop files here' : 'Click or drag files to upload'}</h3>
+          <p style={{ color: colors.textMuted, margin: 0, fontSize: '0.9rem' }}>PDF, Word, Excel, CSV, or Text files</p>
         </div>
       </div>
-      <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', background: '#f8fafc', borderRadius: '8px', fontSize: '0.85rem', color: COLORS.textLight }}>
+      <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', background: colors.inputBg, borderRadius: 8, fontSize: '0.85rem', color: colors.textMuted, border: `1px solid ${colors.divider}` }}>
         💡 <strong>Tip:</strong> Files upload in the background. You can navigate away and check progress in the top-right indicator.
       </div>
     </div>
   );
 }
 
-// ==================== VACUUM TAB ====================
-function VacuumTab() {
+function VacuumTab({ colors }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '2rem' }}>
-      <Sparkles size={48} style={{ color: COLORS.grassGreen, marginBottom: '1rem' }} />
-      <h2 style={{ margin: '0 0 0.5rem', color: COLORS.text }}>Register Extractor</h2>
-      <p style={{ color: COLORS.textLight, maxWidth: '500px', margin: '0 auto 1.5rem', lineHeight: 1.6, textAlign: 'center' }}>
-        Deep extraction for payroll registers and complex documents. Intelligent employee detection, earnings/deductions parsing, and validation.
-      </p>
-      <Link to="/vacuum" style={{
-        display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.875rem 1.75rem',
-        background: COLORS.grassGreen, border: 'none', borderRadius: '10px', color: 'white',
-        fontSize: '1rem', fontWeight: 600, textDecoration: 'none', boxShadow: '0 2px 8px rgba(131, 177, 109, 0.3)',
-      }}>
+      <div style={{ width: 72, height: 72, borderRadius: 16, background: colors.primaryLight, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1.25rem' }}>
+        <Sparkles size={32} style={{ color: colors.primary }} />
+      </div>
+      <h2 style={{ margin: '0 0 0.5rem', color: colors.text, fontFamily: "'Sora', sans-serif" }}>Register Extractor</h2>
+      <p style={{ color: colors.textMuted, maxWidth: '500px', margin: '0 auto 1.5rem', lineHeight: 1.6, textAlign: 'center' }}>Deep extraction for payroll registers and complex documents.</p>
+      <Link to="/vacuum" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.875rem 1.75rem', background: colors.primary, border: 'none', borderRadius: 10, color: 'white', fontSize: '1rem', fontWeight: 600, textDecoration: 'none' }}>
         <Sparkles size={18} />Open Register Extractor
       </Link>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', maxWidth: '600px', margin: '2rem auto 0', textAlign: 'left' }}>
-        {[
-          { icon: '📊', text: 'Smart employee detection from PDFs' },
-          { icon: '💰', text: 'Earnings & deductions parsing' },
-          { icon: '✅', text: 'Automatic balance validation' },
-          { icon: '📋', text: 'Multi-vendor support (Paycom, ADP, etc.)' },
-        ].map((f, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '1rem', background: '#f8fafc', borderRadius: '8px' }}>
+        {[{ icon: '📊', text: 'Smart employee detection from PDFs' }, { icon: '💰', text: 'Earnings & deductions parsing' }, { icon: '✅', text: 'Automatic balance validation' }, { icon: '📋', text: 'Multi-vendor support' }].map((f, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '1rem', background: colors.inputBg, border: `1px solid ${colors.divider}`, borderRadius: 8 }}>
             <span style={{ fontSize: '1.25rem' }}>{f.icon}</span>
-            <span style={{ fontSize: '0.9rem', color: COLORS.text }}>{f.text}</span>
+            <span style={{ fontSize: '0.9rem', color: colors.text }}>{f.text}</span>
           </div>
         ))}
       </div>
@@ -202,57 +183,31 @@ function VacuumTab() {
   );
 }
 
-// ==================== FILES TAB (Restructured) ====================
-function FilesTab() {
+function FilesTab({ colors }) {
   const { projects, activeProject } = useProject();
-  const { user } = useAuth();
+  const { darkMode } = useTheme();
   const [structuredData, setStructuredData] = useState(null);
   const [documents, setDocuments] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-  
-  // Multi-select state
   const [selectedStructured, setSelectedStructured] = useState(new Set());
   const [selectedDocs, setSelectedDocs] = useState(new Set());
-  
-  // Expansion state for table inspection
   const [expandedFiles, setExpandedFiles] = useState(new Set());
-  const [tableProfiles, setTableProfiles] = useState({}); // Cache for table profiles
+  const [tableProfiles, setTableProfiles] = useState({});
   const [loadingProfiles, setLoadingProfiles] = useState(new Set());
-  
-  const toggleFileExpand = (key) => {
-    const newSet = new Set(expandedFiles);
-    if (newSet.has(key)) newSet.delete(key);
-    else newSet.add(key);
-    setExpandedFiles(newSet);
-  };
-  
+
+  const toggleFileExpand = (key) => { const s = new Set(expandedFiles); if (s.has(key)) s.delete(key); else s.add(key); setExpandedFiles(s); };
   const loadTableProfile = async (tableName) => {
     if (tableProfiles[tableName] || loadingProfiles.has(tableName)) return;
-    
     setLoadingProfiles(prev => new Set([...prev, tableName]));
-    try {
-      const res = await api.get(`/status/table-profile/${encodeURIComponent(tableName)}`);
-      setTableProfiles(prev => ({ ...prev, [tableName]: res.data }));
-    } catch (err) {
-      console.error(`Failed to load profile for ${tableName}:`, err);
-      setTableProfiles(prev => ({ ...prev, [tableName]: { error: err.message } }));
-    } finally {
-      setLoadingProfiles(prev => {
-        const next = new Set(prev);
-        next.delete(tableName);
-        return next;
-      });
-    }
+    try { const res = await api.get(`/status/table-profile/${encodeURIComponent(tableName)}`); setTableProfiles(prev => ({ ...prev, [tableName]: res.data })); }
+    catch (err) { setTableProfiles(prev => ({ ...prev, [tableName]: { error: err.message } })); }
+    finally { setLoadingProfiles(prev => { const n = new Set(prev); n.delete(tableName); return n; }); }
   };
 
-  useEffect(() => {
-    loadData();
-    const interval = setInterval(loadData, 10000); // Slower refresh
-    return () => clearInterval(interval);
-  }, [activeProject?.id]);
+  useEffect(() => { loadData(); const i = setInterval(loadData, 10000); return () => clearInterval(i); }, [activeProject?.id]);
 
   const loadData = async () => {
     try {
@@ -261,613 +216,110 @@ function FilesTab() {
         api.get('/status/documents').catch(() => ({ data: { documents: [] } })),
         api.get('/jobs').catch(() => ({ data: { jobs: [] } })),
       ]);
-      setStructuredData(structRes.data);
-      setDocuments(docsRes.data);
-      setJobs(jobsRes.data.jobs || []);
-    } catch (err) { 
-      console.error('Failed to load:', err); 
-    } finally { 
-      setLoading(false); 
-    }
+      setStructuredData(structRes.data); setDocuments(docsRes.data); setJobs(jobsRes.data.jobs || []);
+    } catch (err) { console.error('Failed to load:', err); } finally { setLoading(false); }
   };
 
-  // Filter by active project if selected
-  const structuredFiles = (structuredData?.files || []).filter(f => 
-    !activeProject || f.project === activeProject.id || f.project === activeProject.name
-  );
-  const docs = (documents?.documents || []).filter(d => 
-    !activeProject || d.project === activeProject.id || d.project === activeProject.name
-  );
-  const recentJobs = jobs.filter(j => 
-    !activeProject || j.project_id === activeProject.id
-  ).slice(0, 20);
+  const structuredFiles = (structuredData?.files || []).filter(f => !activeProject || f.project === activeProject.id || f.project === activeProject.name);
+  const docs = (documents?.documents || []).filter(d => !activeProject || d.project === activeProject.id || d.project === activeProject.name);
+  const recentJobs = jobs.filter(j => !activeProject || j.project_id === activeProject.id).slice(0, 20);
 
-  const getProjectName = (pv) => {
-    if (!pv) return 'Unknown';
-    if (pv === 'GLOBAL') return 'GLOBAL';
-    if (pv.length === 36 && pv.includes('-')) {
-      const found = projects.find(p => p.id === pv);
-      return found ? found.name : pv.slice(0, 8) + '...';
-    }
-    return pv;
-  };
+  const getProjectName = (pv) => { if (!pv) return 'Unknown'; if (pv === 'GLOBAL') return 'GLOBAL'; if (pv.length === 36 && pv.includes('-')) { const f = projects.find(p => p.id === pv); return f ? f.name : pv.slice(0, 8) + '...'; } return pv; };
+  const formatDate = (dateStr) => { if (!dateStr) return '—'; try { return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return '—'; } };
+  const toggleStructured = (key) => { const s = new Set(selectedStructured); if (s.has(key)) s.delete(key); else s.add(key); setSelectedStructured(s); };
+  const toggleDoc = (key) => { const s = new Set(selectedDocs); if (s.has(key)) s.delete(key); else s.add(key); setSelectedDocs(s); };
+  const selectAllStructured = () => { if (selectedStructured.size === structuredFiles.length) setSelectedStructured(new Set()); else setSelectedStructured(new Set(structuredFiles.map(f => `${f.project}:${f.filename}`))); };
+  const selectAllDocs = () => { if (selectedDocs.size === docs.length) setSelectedDocs(new Set()); else setSelectedDocs(new Set(docs.map(d => d.filename))); };
 
-  const formatDate = (dateStr) => {
-    if (!dateStr) return '—';
-    try {
-      const d = new Date(dateStr);
-      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    } catch { return '—'; }
-  };
-
-  // Toggle selection
-  const toggleStructured = (key) => {
-    const newSet = new Set(selectedStructured);
-    if (newSet.has(key)) newSet.delete(key);
-    else newSet.add(key);
-    setSelectedStructured(newSet);
-  };
-
-  const toggleDoc = (key) => {
-    const newSet = new Set(selectedDocs);
-    if (newSet.has(key)) newSet.delete(key);
-    else newSet.add(key);
-    setSelectedDocs(newSet);
-  };
-
-  const selectAllStructured = () => {
-    if (selectedStructured.size === structuredFiles.length) {
-      setSelectedStructured(new Set());
-    } else {
-      setSelectedStructured(new Set(structuredFiles.map(f => `${f.project}:${f.filename}`)));
-    }
-  };
-
-  const selectAllDocs = () => {
-    if (selectedDocs.size === docs.length) {
-      setSelectedDocs(new Set());
-    } else {
-      setSelectedDocs(new Set(docs.map(d => d.filename)));
-    }
-  };
-
-  // Bulk delete
   const deleteSelectedStructured = async () => {
     if (selectedStructured.size === 0) return;
     if (!confirm(`Delete ${selectedStructured.size} structured file(s)?`)) return;
-    
     setDeleting(true);
-    try {
-      for (const key of selectedStructured) {
-        const [project, filename] = key.split(':');
-        await api.delete(`/status/structured/${encodeURIComponent(project)}/${encodeURIComponent(filename)}`);
-      }
-      setSelectedStructured(new Set());
-      loadData();
-    } catch (err) {
-      alert('Error: ' + (err.response?.data?.detail || err.message));
-    } finally {
-      setDeleting(false);
-    }
+    try { for (const key of selectedStructured) { const [project, filename] = key.split(':'); await api.delete(`/status/structured/${encodeURIComponent(project)}/${encodeURIComponent(filename)}`); } setSelectedStructured(new Set()); loadData(); }
+    catch (err) { alert('Error: ' + (err.response?.data?.detail || err.message)); } finally { setDeleting(false); }
   };
 
   const deleteSelectedDocs = async () => {
     if (selectedDocs.size === 0) return;
     if (!confirm(`Delete ${selectedDocs.size} document(s)?`)) return;
-    
     setDeleting(true);
-    try {
-      for (const filename of selectedDocs) {
-        await api.delete(`/status/documents/${encodeURIComponent(filename)}`);
-      }
-      setSelectedDocs(new Set());
-      loadData();
-    } catch (err) {
-      alert('Error: ' + (err.response?.data?.detail || err.message));
-    } finally {
-      setDeleting(false);
-    }
+    try { for (const filename of selectedDocs) { await api.delete(`/status/documents/${encodeURIComponent(filename)}`); } setSelectedDocs(new Set()); loadData(); }
+    catch (err) { alert('Error: ' + (err.response?.data?.detail || err.message)); } finally { setDeleting(false); }
   };
 
-  const clearAllJobs = async () => {
-    if (!confirm('Clear all processing history?')) return;
-    setDeleting(true);
-    try {
-      await api.post('/jobs/clear-all');
-      loadData();
-    } catch (err) {
-      alert('Error: ' + (err.response?.data?.detail || err.message));
-    } finally {
-      setDeleting(false);
-    }
-  };
+  const clearAllJobs = async () => { if (!confirm('Clear all processing history?')) return; setDeleting(true); try { await api.post('/jobs/clear-all'); loadData(); } catch (err) { alert('Error: ' + (err.response?.data?.detail || err.message)); } finally { setDeleting(false); } };
+  const getStatusIcon = (status) => { if (status === 'completed') return <CheckCircle size={14} style={{ color: colors.green }} />; if (status === 'failed') return <XCircle size={14} style={{ color: colors.red }} />; if (status === 'processing') return <Loader2 size={14} style={{ color: colors.blue, animation: 'spin 1s linear infinite' }} />; return <Clock size={14} style={{ color: colors.amber }} />; };
 
-  const getStatusIcon = (status) => {
-    if (status === 'completed') return <CheckCircle size={14} style={{ color: '#10b981' }} />;
-    if (status === 'failed') return <XCircle size={14} style={{ color: '#ef4444' }} />;
-    if (status === 'processing') return <Loader2 size={14} style={{ color: '#3b82f6', animation: 'spin 1s linear infinite' }} />;
-    return <Clock size={14} style={{ color: '#f59e0b' }} />;
-  };
+  const sectionStyle = { border: `1px solid ${colors.divider}`, borderRadius: 10, marginBottom: '1rem', overflow: 'hidden', background: colors.card };
+  const headerStyle = { display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.875rem 1rem', background: colors.inputBg, borderBottom: `1px solid ${colors.divider}` };
+  const colHeaderStyle = { display: 'grid', gridTemplateColumns: '30px 1fr 100px 100px 80px', gap: '0.75rem', padding: '0.5rem 1rem', background: colors.inputBg, fontSize: '0.7rem', fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: `1px solid ${colors.divider}` };
+  const rowStyle = { display: 'grid', gridTemplateColumns: '30px 1fr 100px 100px 80px', gap: '0.75rem', padding: '0.6rem 1rem', alignItems: 'center', borderBottom: `1px solid ${colors.divider}` };
 
-  if (loading) {
-    return (
-      <div style={{ textAlign: 'center', padding: '3rem', color: COLORS.textLight }}>
-        <RefreshCw size={24} style={{ animation: 'spin 1s linear infinite', marginBottom: '1rem' }} />
-        <p>Loading...</p>
-        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
-      </div>
-    );
-  }
-
-  const sectionStyle = { 
-    background: 'white', 
-    border: '1px solid #e1e8ed', 
-    borderRadius: '12px', 
-    overflow: 'hidden',
-    marginBottom: '1.5rem',
-  };
-  
-  const headerStyle = { 
-    padding: '0.875rem 1rem', 
-    borderBottom: '1px solid #e1e8ed', 
-    display: 'flex', 
-    alignItems: 'center', 
-    gap: '0.75rem',
-    background: '#fafbfc',
-  };
-
-  const rowStyle = {
-    display: 'grid',
-    gridTemplateColumns: '32px 1fr 120px 140px 40px',
-    alignItems: 'center',
-    padding: '0.75rem 1rem',
-    borderBottom: '1px solid #f0f0f0',
-    gap: '0.5rem',
-  };
-
-  const colHeaderStyle = {
-    display: 'grid',
-    gridTemplateColumns: '32px 1fr 120px 140px 40px',
-    alignItems: 'center',
-    padding: '0.5rem 1rem',
-    background: '#f8fafc',
-    borderBottom: '1px solid #e1e8ed',
-    gap: '0.5rem',
-    fontSize: '0.7rem',
-    fontWeight: 600,
-    color: COLORS.textLight,
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px',
-  };
+  if (loading) return <div style={{ textAlign: 'center', padding: '3rem', color: colors.textMuted }}><RefreshCw size={24} style={{ animation: 'spin 1s linear infinite', marginBottom: '1rem' }} /><p>Loading...</p><style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style></div>;
 
   return (
     <div>
-      {/* Summary Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
-        {[
-          { label: 'Structured Files', value: structuredFiles.length, color: '#f59e0b', icon: Table2 },
-          { label: 'Documents', value: docs.length, color: '#10b981', icon: FileText },
-          { label: 'Total Rows', value: (structuredData?.total_rows || 0).toLocaleString(), color: COLORS.grassGreen, icon: Database },
-        ].map((s, i) => {
-          const Icon = s.icon;
-          return (
-            <div key={i} style={{ background: '#f8fafc', borderRadius: '10px', padding: '1rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-              <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: `${s.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Icon size={20} style={{ color: s.color }} />
-              </div>
-              <div>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: s.color, fontFamily: 'monospace' }}>{s.value}</div>
-                <div style={{ fontSize: '0.75rem', color: COLORS.textLight }}>{s.label}</div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* STRUCTURED DATA SECTION */}
+      {/* STRUCTURED DATA */}
       <div style={sectionStyle}>
         <div style={headerStyle}>
-          <Table2 size={20} style={{ color: '#f59e0b' }} />
-          <span style={{ fontWeight: 600, color: COLORS.text, flex: 1 }}>Structured Data</span>
-          <span style={{ background: '#fef3c7', color: '#92400e', padding: '0.2rem 0.6rem', borderRadius: '10px', fontSize: '0.75rem', fontWeight: 600 }}>
-            {structuredFiles.length}
-          </span>
-          {selectedStructured.size > 0 && (
-            <button
-              onClick={deleteSelectedStructured}
-              disabled={deleting}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '0.35rem',
-                padding: '0.4rem 0.75rem', background: '#fef2f2', border: '1px solid #fecaca',
-                borderRadius: '6px', color: '#dc2626', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
-              }}
-            >
-              <Trash2 size={14} />
-              Delete ({selectedStructured.size})
-            </button>
-          )}
-          <button onClick={loadData} style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.textLight, padding: '0.25rem' }}>
-            <RefreshCw size={16} />
-          </button>
+          <Table2 size={20} style={{ color: colors.blue }} />
+          <span style={{ fontWeight: 600, color: colors.text, flex: 1 }}>Structured Data</span>
+          <span style={{ background: colors.blueLight, color: colors.blue, padding: '0.2rem 0.6rem', borderRadius: 10, fontSize: '0.75rem', fontWeight: 600 }}>{structuredFiles.length} files</span>
+          {selectedStructured.size > 0 && <button onClick={deleteSelectedStructured} disabled={deleting} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.4rem 0.75rem', background: darkMode ? 'rgba(199, 107, 107, 0.15)' : '#fef2f2', border: `1px solid ${colors.red}40`, borderRadius: 6, color: colors.red, fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}><Trash2 size={14} />Delete ({selectedStructured.size})</button>}
         </div>
-
-        {structuredFiles.length > 0 && (
-          <div style={colHeaderStyle}>
-            <button onClick={selectAllStructured} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-              {selectedStructured.size === structuredFiles.length ? <CheckSquare size={16} style={{ color: COLORS.grassGreen }} /> : <Square size={16} style={{ color: COLORS.textLight }} />}
-            </button>
-            <span>File Name</span>
-            <span>Uploaded By</span>
-            <span>Date</span>
-            <span></span>
-          </div>
-        )}
-
+        {structuredFiles.length > 0 && <div style={colHeaderStyle}><button onClick={selectAllStructured} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>{selectedStructured.size === structuredFiles.length ? <CheckSquare size={16} style={{ color: colors.primary }} /> : <Square size={16} style={{ color: colors.textMuted }} />}</button><span>File Name</span><span>Uploaded By</span><span>Date</span><span></span></div>}
         <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
-          {structuredFiles.length === 0 ? (
-            <div style={{ padding: '2rem', textAlign: 'center', color: COLORS.textLight }}>
-              <Table2 size={32} style={{ opacity: 0.3, marginBottom: '0.5rem' }} />
-              <p style={{ margin: 0 }}>No structured data files</p>
-            </div>
-          ) : (
-            structuredFiles.map((file, i) => {
-              const key = `${file.project}:${file.filename}`;
-              const isSelected = selectedStructured.has(key);
-              const sheets = file.sheets || [];
-              return (
-                <div key={i} style={{ background: isSelected ? '#f0fdf4' : 'white', borderBottom: '1px solid #f0f0f0' }}>
-                  <div style={{ ...rowStyle, borderBottom: 'none' }}>
-                    <button onClick={() => toggleStructured(key)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-                      {isSelected ? <CheckSquare size={16} style={{ color: COLORS.grassGreen }} /> : <Square size={16} style={{ color: COLORS.textLight }} />}
-                    </button>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: '0.85rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: COLORS.text }}>
-                        {file.filename}
-                      </div>
-                      <div style={{ fontSize: '0.7rem', color: COLORS.textLight }}>
-                        {(file.total_rows || 0).toLocaleString()} rows • {sheets.length} table{sheets.length !== 1 ? 's' : ''} • {getProjectName(file.project)}
-                      </div>
-                    </div>
-                    <div style={{ fontSize: '0.75rem', color: COLORS.textLight, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                      <User size={12} />
-                      {file.uploaded_by || 'System'}
-                    </div>
-                    <div style={{ fontSize: '0.75rem', color: COLORS.textLight, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                      <Calendar size={12} />
-                      {formatDate(file.loaded_at || file.uploaded_at || file.created_at)}
-                    </div>
-                    <div></div>
-                  </div>
-                  {/* Show tables/sheets loaded - EXPANDABLE */}
-                  {sheets.length > 0 && (
-                    <div style={{ marginLeft: '2.5rem', marginRight: '1rem', paddingBottom: '0.75rem' }}>
-                      {/* Expand/Collapse toggle */}
-                      <button 
-                        onClick={() => toggleFileExpand(key)}
-                        style={{ 
-                          background: 'none', border: 'none', cursor: 'pointer', 
-                          display: 'flex', alignItems: 'center', gap: '0.25rem',
-                          color: COLORS.textLight, fontSize: '0.7rem', marginBottom: '0.5rem',
-                          padding: 0
-                        }}
-                      >
-                        {expandedFiles.has(key) ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                        {expandedFiles.has(key) ? 'Collapse tables' : `View ${sheets.length} table${sheets.length !== 1 ? 's' : ''} with columns`}
-                      </button>
-                      
-                      {!expandedFiles.has(key) ? (
-                        /* Collapsed: show pills */
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-                          {sheets.slice(0, 8).map((sheet, si) => (
-                            <div key={si} style={{ 
-                              fontSize: '0.65rem', 
-                              padding: '0.2rem 0.4rem', 
-                              background: '#f0f9ff', 
-                              borderRadius: '4px',
-                              color: '#0369a1',
-                              border: '1px solid #bae6fd'
-                            }}>
-                              <strong>{sheet.sheet_name || sheet.table_name?.split('_').pop() || `Table ${si + 1}`}</strong>
-                              <span style={{ opacity: 0.7 }}> ({(sheet.row_count || 0).toLocaleString()})</span>
-                            </div>
-                          ))}
-                          {sheets.length > 8 && (
-                            <div style={{ fontSize: '0.65rem', padding: '0.2rem 0.4rem', color: COLORS.textLight }}>
-                              +{sheets.length - 8} more
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        /* Expanded: show tables with columns */
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                          {sheets.map((sheet, si) => {
-                            const tableName = sheet.table_name;
-                            const profile = tableProfiles[tableName];
-                            const isLoadingProfile = loadingProfiles.has(tableName);
-                            
-                            return (
-                            <div key={si} style={{ 
-                              background: '#fafbfc', 
-                              border: '1px solid #e1e8ed', 
-                              borderRadius: '8px',
-                              overflow: 'hidden'
-                            }}>
-                              {/* Table header */}
-                              <div style={{ 
-                                padding: '0.5rem 0.75rem', 
-                                background: '#f0f9ff',
-                                borderBottom: '1px solid #e1e8ed',
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center'
-                              }}>
-                                <span style={{ fontWeight: 600, fontSize: '0.75rem', color: '#0369a1' }}>
-                                  {sheet.sheet_name || sheet.table_name?.split('_').pop() || `Table ${si + 1}`}
-                                </span>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                  <span style={{ fontSize: '0.7rem', color: COLORS.textLight }}>
-                                    {(sheet.row_count || 0).toLocaleString()} rows • {(sheet.columns || []).length} cols
-                                  </span>
-                                  {!profile && tableName && (
-                                    <button
-                                      onClick={() => loadTableProfile(tableName)}
-                                      disabled={isLoadingProfile}
-                                      style={{
-                                        fontSize: '0.65rem',
-                                        padding: '0.15rem 0.4rem',
-                                        background: isLoadingProfile ? '#f3f4f6' : '#dbeafe',
-                                        border: '1px solid #93c5fd',
-                                        borderRadius: '4px',
-                                        color: '#1d4ed8',
-                                        cursor: isLoadingProfile ? 'wait' : 'pointer'
-                                      }}
-                                    >
-                                      {isLoadingProfile ? 'Loading...' : 'Load Stats'}
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                              
-                              {/* Columns grid */}
-                              <div style={{ padding: '0.5rem 0.75rem' }}>
-                                {profile?.columns ? (
-                                  /* Show profiled columns with stats */
-                                  <div style={{ 
-                                    display: 'grid', 
-                                    gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', 
-                                    gap: '0.35rem' 
-                                  }}>
-                                    {profile.columns.map((col, ci) => (
-                                      <div key={ci} style={{ 
-                                        fontSize: '0.65rem', 
-                                        padding: '0.25rem 0.4rem',
-                                        background: 'white',
-                                        border: `1px solid ${col.fill_rate >= 90 ? '#86efac' : col.fill_rate >= 50 ? '#fde68a' : '#fecaca'}`,
-                                        borderRadius: '4px',
-                                        display: 'flex',
-                                        justifyContent: 'space-between',
-                                        alignItems: 'center'
-                                      }}>
-                                        <span style={{ 
-                                          color: COLORS.text, 
-                                          overflow: 'hidden', 
-                                          textOverflow: 'ellipsis', 
-                                          whiteSpace: 'nowrap',
-                                          maxWidth: '100px'
-                                        }} title={col.name}>
-                                          {col.name}
-                                        </span>
-                                        <span style={{ 
-                                          color: COLORS.textLight, 
-                                          fontSize: '0.6rem',
-                                          whiteSpace: 'nowrap',
-                                          marginLeft: '0.25rem'
-                                        }}>
-                                          {col.distinct_values?.toLocaleString() || '?'} vals • {col.fill_rate ?? '?'}%
-                                        </span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                ) : (sheet.columns || []).length === 0 ? (
-                                  <span style={{ fontSize: '0.7rem', color: COLORS.textLight, fontStyle: 'italic' }}>
-                                    No column metadata available
-                                  </span>
-                                ) : (
-                                  /* Show basic column names */
-                                  <div style={{ 
-                                    display: 'grid', 
-                                    gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', 
-                                    gap: '0.25rem' 
-                                  }}>
-                                    {(sheet.columns || []).map((col, ci) => (
-                                      <div key={ci} style={{ 
-                                        fontSize: '0.65rem', 
-                                        padding: '0.15rem 0.35rem',
-                                        background: 'white',
-                                        border: '1px solid #e5e7eb',
-                                        borderRadius: '3px',
-                                        color: COLORS.text,
-                                        overflow: 'hidden',
-                                        textOverflow: 'ellipsis',
-                                        whiteSpace: 'nowrap'
-                                      }}>
-                                        {typeof col === 'object' ? col.name : col}
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          );})}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          )}
-        </div>
-      </div>
-
-      {/* DOCUMENTS SECTION */}
-      <div style={sectionStyle}>
-        <div style={headerStyle}>
-          <FileText size={20} style={{ color: '#10b981' }} />
-          <span style={{ fontWeight: 600, color: COLORS.text, flex: 1 }}>Documents</span>
-          <span style={{ background: '#d1fae5', color: '#065f46', padding: '0.2rem 0.6rem', borderRadius: '10px', fontSize: '0.75rem', fontWeight: 600 }}>
-            {docs.length}
-          </span>
-          {selectedDocs.size > 0 && (
-            <button
-              onClick={deleteSelectedDocs}
-              disabled={deleting}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '0.35rem',
-                padding: '0.4rem 0.75rem', background: '#fef2f2', border: '1px solid #fecaca',
-                borderRadius: '6px', color: '#dc2626', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
-              }}
-            >
-              <Trash2 size={14} />
-              Delete ({selectedDocs.size})
-            </button>
-          )}
-        </div>
-
-        {docs.length > 0 && (
-          <div style={colHeaderStyle}>
-            <button onClick={selectAllDocs} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-              {selectedDocs.size === docs.length ? <CheckSquare size={16} style={{ color: COLORS.grassGreen }} /> : <Square size={16} style={{ color: COLORS.textLight }} />}
-            </button>
-            <span>Document Name</span>
-            <span>Uploaded By</span>
-            <span>Date</span>
-            <span></span>
-          </div>
-        )}
-
-        <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
-          {docs.length === 0 ? (
-            <div style={{ padding: '2rem', textAlign: 'center', color: COLORS.textLight }}>
-              <FileText size={32} style={{ opacity: 0.3, marginBottom: '0.5rem' }} />
-              <p style={{ margin: 0 }}>No documents</p>
-            </div>
-          ) : (
-            docs.map((doc, i) => {
-              const isSelected = selectedDocs.has(doc.filename);
-              return (
-                <div key={i} style={{ ...rowStyle, background: isSelected ? '#f0fdf4' : 'white' }}>
-                  <button onClick={() => toggleDoc(doc.filename)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-                    {isSelected ? <CheckSquare size={16} style={{ color: COLORS.grassGreen }} /> : <Square size={16} style={{ color: COLORS.textLight }} />}
-                  </button>
+          {structuredFiles.length === 0 ? <div style={{ padding: '2rem', textAlign: 'center', color: colors.textMuted }}><Table2 size={32} style={{ opacity: 0.3, marginBottom: '0.5rem' }} /><p style={{ margin: 0 }}>No structured data</p></div> : structuredFiles.map((file, i) => {
+            const key = `${file.project}:${file.filename}`;
+            const isSelected = selectedStructured.has(key);
+            const isExpanded = expandedFiles.has(key);
+            return (
+              <div key={i}>
+                <div style={{ ...rowStyle, background: isSelected ? colors.primaryLight : 'transparent' }}>
+                  <button onClick={() => toggleStructured(key)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>{isSelected ? <CheckSquare size={16} style={{ color: colors.primary }} /> : <Square size={16} style={{ color: colors.textMuted }} />}</button>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: '0.85rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: COLORS.text }}>
-                      {doc.filename}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: colors.text }}>{file.filename}</div>
+                      <button onClick={() => { toggleFileExpand(key); if (!isExpanded && file.sheets?.[0]?.table_name) loadTableProfile(file.sheets[0].table_name); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.15rem', color: colors.textMuted }}>{isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button>
                     </div>
-                    <div style={{ fontSize: '0.7rem', color: COLORS.textLight }}>
-                      {doc.chunk_count || doc.chunks || 0} chunks • {getProjectName(doc.project)}
-                    </div>
+                    <div style={{ fontSize: '0.7rem', color: colors.textMuted }}>{file.sheets?.length || 0} sheet(s) • {(file.total_rows || 0).toLocaleString()} rows • {getProjectName(file.project)}</div>
                   </div>
-                  <div style={{ fontSize: '0.75rem', color: COLORS.textLight, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <User size={12} />
-                    {doc.uploaded_by || 'System'}
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: COLORS.textLight, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <Calendar size={12} />
-                    {formatDate(doc.uploaded_at || doc.created_at)}
-                  </div>
+                  <div style={{ fontSize: '0.75rem', color: colors.textMuted, display: 'flex', alignItems: 'center', gap: '0.35rem' }}><User size={12} />{file.uploaded_by || 'System'}</div>
+                  <div style={{ fontSize: '0.75rem', color: colors.textMuted, display: 'flex', alignItems: 'center', gap: '0.35rem' }}><Calendar size={12} />{formatDate(file.loaded_at)}</div>
                   <div></div>
                 </div>
-              );
-            })
-          )}
+                {isExpanded && <div style={{ padding: '0.75rem 1rem 0.75rem 2.5rem', background: colors.inputBg, borderBottom: `1px solid ${colors.divider}` }}>{file.sheets?.map((sheet, si) => { const profile = tableProfiles[sheet.table_name]; const isLoadingProfile = loadingProfiles.has(sheet.table_name); return (<div key={si} style={{ marginBottom: si < file.sheets.length - 1 ? '0.75rem' : 0 }}><div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}><span style={{ fontSize: '0.8rem', fontWeight: 600, color: colors.text }}>{sheet.sheet_name || 'Sheet'}</span><span style={{ fontSize: '0.7rem', color: colors.textMuted }}>{sheet.columns?.length || 0} cols • {(sheet.row_count || 0).toLocaleString()} rows</span>{!profile && !isLoadingProfile && <button onClick={() => loadTableProfile(sheet.table_name)} style={{ fontSize: '0.65rem', padding: '0.15rem 0.4rem', background: colors.primaryLight, border: `1px solid ${colors.primary}40`, borderRadius: 4, color: colors.primary, cursor: 'pointer' }}>Profile</button>}{isLoadingProfile && <Loader2 size={12} style={{ animation: 'spin 1s linear infinite', color: colors.primary }} />}</div>{profile && !profile.error && <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>{profile.columns?.slice(0, 8).map((col, ci) => <span key={ci} style={{ fontSize: '0.65rem', padding: '0.2rem 0.4rem', background: col.fill_rate < 50 ? `${colors.amber}20` : colors.inputBg, border: `1px solid ${col.fill_rate < 50 ? colors.amber : colors.divider}`, borderRadius: 4, color: col.fill_rate < 50 ? colors.amber : colors.textMuted }}>{col.name}: {col.fill_rate}%</span>)}{profile.columns?.length > 8 && <span style={{ fontSize: '0.65rem', color: colors.textMuted }}>+{profile.columns.length - 8} more</span>}</div>}</div>); })}</div>}
+              </div>
+            );
+          })}
         </div>
       </div>
 
-      {/* PROCESSING HISTORY (Collapsed) */}
-      <div style={{ ...sectionStyle, marginBottom: 0 }}>
-        <button
-          onClick={() => setShowHistory(!showHistory)}
-          style={{
-            ...headerStyle,
-            cursor: 'pointer',
-            width: '100%',
-            border: 'none',
-            borderBottom: showHistory ? '1px solid #e1e8ed' : 'none',
-          }}
-        >
-          <Clock size={20} style={{ color: '#3b82f6' }} />
-          <span style={{ fontWeight: 600, color: COLORS.text, flex: 1, textAlign: 'left' }}>Processing History</span>
-          <span style={{ background: '#dbeafe', color: '#1e40af', padding: '0.2rem 0.6rem', borderRadius: '10px', fontSize: '0.75rem', fontWeight: 600 }}>
-            {recentJobs.length}
-          </span>
-          {showHistory && recentJobs.length > 0 && (
-            <button
-              onClick={(e) => { e.stopPropagation(); clearAllJobs(); }}
-              disabled={deleting}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '0.35rem',
-                padding: '0.35rem 0.6rem', background: '#f5f5f5', border: '1px solid #e1e8ed',
-                borderRadius: '6px', color: COLORS.textLight, fontSize: '0.75rem', cursor: 'pointer',
-              }}
-            >
-              Clear All
-            </button>
-          )}
-          {showHistory ? <ChevronUp size={18} style={{ color: COLORS.textLight }} /> : <ChevronDown size={18} style={{ color: COLORS.textLight }} />}
-        </button>
-
-        {showHistory && (
-          <div style={{ maxHeight: '250px', overflowY: 'auto' }}>
-            {recentJobs.length === 0 ? (
-              <div style={{ padding: '1.5rem', textAlign: 'center', color: COLORS.textLight, fontSize: '0.85rem' }}>
-                No processing history
-              </div>
-            ) : (
-              recentJobs.map((job) => {
-                // Extract filename from nested structure
-                const filename = job.input_data?.filename || job.result_data?.filename || job.filename || 'Processing job';
-                // Build result message from result_data
-                const resultMsg = job.result_data?.chunks_created 
-                  ? `${job.result_data.chunks_created} chunks`
-                  : job.result_data?.tables_created
-                    ? `${job.result_data.tables_created} table(s), ${(job.result_data.total_rows || 0).toLocaleString()} rows`
-                    : null;
-                // Get project from nested structure
-                const projectName = job.input_data?.project_name || job.project_id || job.project;
-                // Check for data quality issues
-                const hasQualityIssues = job.result_data?.has_data_quality_issues;
-                const validationIssues = job.result_data?.validation?.issues || [];
-                
-                return (
-                  <div key={job.id} style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', gap: '0.75rem', background: hasQualityIssues ? '#fef3c7' : 'white' }}>
-                    {getStatusIcon(job.status)}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: '0.8rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: COLORS.text }}>
-                        {filename}
-                        {hasQualityIssues && <span style={{ marginLeft: '0.5rem', fontSize: '0.7rem', color: '#d97706' }}>⚠️ Data issues</span>}
-                      </div>
-                      <div style={{ fontSize: '0.7rem', color: COLORS.textLight }}>
-                        {resultMsg && <span style={{ color: hasQualityIssues ? '#d97706' : COLORS.grassGreen }}>{resultMsg} • </span>}
-                        {getProjectName(projectName)} • {formatDate(job.created_at)}
-                        {job.error_message && <span style={{ color: '#ef4444' }}> • {job.error_message}</span>}
-                      </div>
-                      {hasQualityIssues && validationIssues.length > 0 && (
-                        <div style={{ fontSize: '0.65rem', color: '#92400e', marginTop: '0.25rem' }}>
-                          Issues in: {validationIssues.slice(0, 3).map(i => i.table).join(', ')}
-                          {validationIssues.length > 3 && ` +${validationIssues.length - 3} more`}
-                          {' — Check Data Health tab'}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        )}
+      {/* DOCUMENTS */}
+      <div style={sectionStyle}>
+        <div style={headerStyle}>
+          <FileText size={20} style={{ color: colors.green }} />
+          <span style={{ fontWeight: 600, color: colors.text, flex: 1 }}>Documents</span>
+          <span style={{ background: colors.greenLight, color: colors.green, padding: '0.2rem 0.6rem', borderRadius: 10, fontSize: '0.75rem', fontWeight: 600 }}>{docs.length}</span>
+          {selectedDocs.size > 0 && <button onClick={deleteSelectedDocs} disabled={deleting} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.4rem 0.75rem', background: darkMode ? 'rgba(199, 107, 107, 0.15)' : '#fef2f2', border: `1px solid ${colors.red}40`, borderRadius: 6, color: colors.red, fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}><Trash2 size={14} />Delete ({selectedDocs.size})</button>}
+        </div>
+        {docs.length > 0 && <div style={colHeaderStyle}><button onClick={selectAllDocs} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>{selectedDocs.size === docs.length ? <CheckSquare size={16} style={{ color: colors.primary }} /> : <Square size={16} style={{ color: colors.textMuted }} />}</button><span>Document Name</span><span>Uploaded By</span><span>Date</span><span></span></div>}
+        <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+          {docs.length === 0 ? <div style={{ padding: '2rem', textAlign: 'center', color: colors.textMuted }}><FileText size={32} style={{ opacity: 0.3, marginBottom: '0.5rem' }} /><p style={{ margin: 0 }}>No documents</p></div> : docs.map((doc, i) => { const isSelected = selectedDocs.has(doc.filename); return (<div key={i} style={{ ...rowStyle, background: isSelected ? colors.primaryLight : 'transparent' }}><button onClick={() => toggleDoc(doc.filename)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>{isSelected ? <CheckSquare size={16} style={{ color: colors.primary }} /> : <Square size={16} style={{ color: colors.textMuted }} />}</button><div style={{ minWidth: 0 }}><div style={{ fontSize: '0.85rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: colors.text }}>{doc.filename}</div><div style={{ fontSize: '0.7rem', color: colors.textMuted }}>{doc.chunk_count || doc.chunks || 0} chunks • {getProjectName(doc.project)}</div></div><div style={{ fontSize: '0.75rem', color: colors.textMuted, display: 'flex', alignItems: 'center', gap: '0.35rem' }}><User size={12} />{doc.uploaded_by || 'System'}</div><div style={{ fontSize: '0.75rem', color: colors.textMuted, display: 'flex', alignItems: 'center', gap: '0.35rem' }}><Calendar size={12} />{formatDate(doc.uploaded_at || doc.created_at)}</div><div></div></div>); })}
+        </div>
       </div>
 
+      {/* PROCESSING HISTORY */}
+      <div style={{ ...sectionStyle, marginBottom: 0 }}>
+        <button onClick={() => setShowHistory(!showHistory)} style={{ ...headerStyle, cursor: 'pointer', width: '100%', border: 'none', borderBottom: showHistory ? `1px solid ${colors.divider}` : 'none' }}>
+          <Clock size={20} style={{ color: colors.blue }} />
+          <span style={{ fontWeight: 600, color: colors.text, flex: 1, textAlign: 'left' }}>Processing History</span>
+          <span style={{ background: colors.blueLight, color: colors.blue, padding: '0.2rem 0.6rem', borderRadius: 10, fontSize: '0.75rem', fontWeight: 600 }}>{recentJobs.length}</span>
+          {showHistory && recentJobs.length > 0 && <button onClick={(e) => { e.stopPropagation(); clearAllJobs(); }} disabled={deleting} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.35rem 0.6rem', background: colors.inputBg, border: `1px solid ${colors.divider}`, borderRadius: 6, color: colors.textMuted, fontSize: '0.75rem', cursor: 'pointer' }}>Clear All</button>}
+          {showHistory ? <ChevronUp size={18} style={{ color: colors.textMuted }} /> : <ChevronDown size={18} style={{ color: colors.textMuted }} />}
+        </button>
+        {showHistory && <div style={{ maxHeight: '250px', overflowY: 'auto' }}>{recentJobs.length === 0 ? <div style={{ padding: '1.5rem', textAlign: 'center', color: colors.textMuted, fontSize: '0.85rem' }}>No processing history</div> : recentJobs.map((job) => { const filename = job.input_data?.filename || job.result_data?.filename || job.filename || 'Processing job'; const resultMsg = job.result_data?.chunks_created ? `${job.result_data.chunks_created} chunks` : job.result_data?.tables_created ? `${job.result_data.tables_created} table(s), ${(job.result_data.total_rows || 0).toLocaleString()} rows` : null; const projectNameVal = job.input_data?.project_name || job.project_id || job.project; const hasQualityIssues = job.result_data?.has_data_quality_issues; const validationIssues = job.result_data?.validation?.issues || []; return (<div key={job.id} style={{ padding: '0.6rem 1rem', borderBottom: `1px solid ${colors.divider}`, display: 'flex', alignItems: 'center', gap: '0.75rem', background: hasQualityIssues ? `${colors.amber}15` : 'transparent' }}>{getStatusIcon(job.status)}<div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: '0.8rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: colors.text }}>{filename}{hasQualityIssues && <span style={{ marginLeft: '0.5rem', fontSize: '0.7rem', color: colors.amber }}>⚠️ Data issues</span>}</div><div style={{ fontSize: '0.7rem', color: colors.textMuted }}>{resultMsg && <span style={{ color: hasQualityIssues ? colors.amber : colors.primary }}>{resultMsg} • </span>}{getProjectName(projectNameVal)} • {formatDate(job.created_at)}{job.error_message && <span style={{ color: colors.red }}> • {job.error_message}</span>}</div>{hasQualityIssues && validationIssues.length > 0 && <div style={{ fontSize: '0.65rem', color: colors.amber, marginTop: '0.25rem' }}>Issues in: {validationIssues.slice(0, 3).map(i => i.table).join(', ')}{validationIssues.length > 3 && ` +${validationIssues.length - 3} more`} — Check Data Health tab</div>}</div></div>); })}</div>}
+      </div>
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
