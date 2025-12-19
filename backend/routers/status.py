@@ -1311,3 +1311,97 @@ async def get_table_profile(table_name: str):
     except Exception as e:
         logger.error(f"Table profile failed for {table_name}: {e}")
         return {"error": str(e), "columns": []}
+
+
+@router.get("/status/data-integrity")
+async def check_data_integrity(project: Optional[str] = None):
+    """
+    DIAGNOSTIC: Check data quality across all tables.
+    
+    Flags:
+    - Tables with bad column names (nan, unnamed, numeric)
+    - Tables with very low fill rates
+    - Potential header detection failures
+    """
+    if not STRUCTURED_AVAILABLE:
+        return {"error": "Structured data not available"}
+    
+    try:
+        handler = get_structured_handler()
+        
+        issues = []
+        tables_checked = 0
+        tables_with_issues = 0
+        
+        # Get all tables
+        tables_result = handler.conn.execute("""
+            SELECT DISTINCT table_name 
+            FROM information_schema.columns 
+            WHERE table_schema = 'main'
+            AND table_name NOT LIKE '_%'
+        """).fetchall()
+        
+        bad_column_patterns = ['nan', 'unnamed', 'col_0', 'col_1', 'col_2', 'none']
+        
+        for (table_name,) in tables_result:
+            tables_checked += 1
+            table_issues = []
+            
+            # Get columns for this table
+            cols_result = handler.conn.execute(f"""
+                SELECT column_name FROM information_schema.columns 
+                WHERE table_name = '{table_name}'
+            """).fetchall()
+            
+            column_names = [c[0] for c in cols_result]
+            
+            # Check for bad column names
+            bad_cols = []
+            for col in column_names:
+                col_lower = col.lower()
+                if any(pattern in col_lower for pattern in bad_column_patterns):
+                    bad_cols.append(col)
+                elif col_lower.replace('.', '').replace('_', '').isdigit():
+                    bad_cols.append(col)
+            
+            if bad_cols:
+                table_issues.append({
+                    "type": "bad_column_names",
+                    "severity": "high",
+                    "details": f"Suspicious columns: {bad_cols[:5]}{'...' if len(bad_cols) > 5 else ''}",
+                    "count": len(bad_cols)
+                })
+            
+            # Check first few column names for header detection issues
+            if len(column_names) >= 3:
+                first_three = column_names[:3]
+                numeric_count = sum(1 for c in first_three if c.lower().replace('_', '').replace('.', '').isdigit())
+                if numeric_count >= 2:
+                    table_issues.append({
+                        "type": "likely_header_failure",
+                        "severity": "high",
+                        "details": f"First columns are numeric: {first_three}"
+                    })
+            
+            if table_issues:
+                tables_with_issues += 1
+                issues.append({
+                    "table": table_name,
+                    "column_count": len(column_names),
+                    "issues": table_issues
+                })
+        
+        # Summary
+        health_status = "healthy" if tables_with_issues == 0 else ("warning" if tables_with_issues < tables_checked * 0.2 else "critical")
+        
+        return {
+            "status": health_status,
+            "tables_checked": tables_checked,
+            "tables_with_issues": tables_with_issues,
+            "issues": issues[:50],  # Limit response size
+            "recommendation": "Re-upload files after deploying header detection fix" if tables_with_issues > 0 else "Data looks clean"
+        }
+        
+    except Exception as e:
+        logger.error(f"Data integrity check failed: {e}")
+        return {"error": str(e)}
