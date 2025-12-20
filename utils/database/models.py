@@ -3,14 +3,21 @@ Database Models for XLR8
 CRUD operations for projects, documents, chat history, suppressions, and entity config
 
 Uses Supabase for persistent storage.
+
+Version: 2.0 - Universal Classification Architecture
+Updated: December 2024
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 import uuid
 import hashlib
 import re
+import logging
+
 from .supabase_client import get_supabase
+
+logger = logging.getLogger(__name__)
 
 
 class ProjectModel:
@@ -227,77 +234,216 @@ class DocumentModel:
             return 0
 
 
+# =============================================================================
+# DOCUMENT REGISTRY MODEL - Universal Classification Architecture
+# =============================================================================
+
 class DocumentRegistryModel:
     """
     Document Registry - THE SOURCE OF TRUTH for all uploaded files.
     
     Tracks ALL files in ChromaDB and/or DuckDB with unified metadata.
     All components should query this registry instead of backends directly.
+    
+    Classification Architecture (Three Truths):
+    - REALITY: Customer's actual data (queryable in DuckDB)
+    - INTENT: Customer's documentation (searchable in ChromaDB)
+    - REFERENCE: Standards, best practices (global, searchable)
+    - CONFIGURATION: Mapping/lookup files (queryable AND searchable)
+    - OUTPUT: Generated deliverables (archive only)
+    
+    truth_type determines WHAT the file is
+    storage_type determines WHERE it's stored
+    Routing is determined by truth_type, NOT file extension
     """
     
-    # Storage types
+    # ==========================================================================
+    # TRUTH TYPES - The core classification
+    # ==========================================================================
+    TRUTH_REALITY = 'reality'
+    TRUTH_INTENT = 'intent'
+    TRUTH_REFERENCE = 'reference'
+    TRUTH_CONFIGURATION = 'configuration'
+    TRUTH_OUTPUT = 'output'
+    
+    VALID_TRUTH_TYPES = [TRUTH_REALITY, TRUTH_INTENT, TRUTH_REFERENCE, TRUTH_CONFIGURATION, TRUTH_OUTPUT]
+    
+    # ==========================================================================
+    # STORAGE TYPES
+    # ==========================================================================
     STORAGE_CHROMADB = 'chromadb'
     STORAGE_DUCKDB = 'duckdb'
     STORAGE_BOTH = 'both'
     
-    # Usage types
-    USAGE_RAG_KNOWLEDGE = 'rag_knowledge'      # Unstructured docs for RAG
-    USAGE_STRUCTURED_DATA = 'structured_data'  # Excel/CSV/PDF tables
-    USAGE_PLAYBOOK = 'playbook'                # Playbook-related data
-    USAGE_PLAYBOOK_SOURCE = 'playbook_source'  # Playbook definition doc (e.g., Year-End Checklist)
-    USAGE_TEMPLATE = 'template'                # Reference library templates
+    VALID_STORAGE_TYPES = [STORAGE_CHROMADB, STORAGE_DUCKDB, STORAGE_BOTH]
+    
+    # ==========================================================================
+    # CLASSIFICATION METHODS
+    # ==========================================================================
+    CLASS_USER_SELECTED = 'user_selected'
+    CLASS_AUTO_DETECTED = 'auto_detected'
+    CLASS_FILENAME_INFERRED = 'filename_inferred'
+    
+    VALID_CLASSIFICATION_METHODS = [CLASS_USER_SELECTED, CLASS_AUTO_DETECTED, CLASS_FILENAME_INFERRED]
+    
+    # ==========================================================================
+    # PARSE STATUS
+    # ==========================================================================
+    PARSE_PENDING = 'pending'
+    PARSE_SUCCESS = 'success'
+    PARSE_PARTIAL = 'partial'
+    PARSE_FAILED = 'failed'
+    
+    # ==========================================================================
+    # LEGACY USAGE TYPES - Backward compatibility
+    # ==========================================================================
+    USAGE_RAG_KNOWLEDGE = 'rag_knowledge'
+    USAGE_STRUCTURED_DATA = 'structured_data'
+    USAGE_PLAYBOOK = 'playbook'
+    USAGE_PLAYBOOK_SOURCE = 'playbook_source'
+    USAGE_TEMPLATE = 'template'
+    
+    # ==========================================================================
+    # ROUTING RULES
+    # ==========================================================================
+    
+    @classmethod
+    def get_storage_for_truth_type(cls, truth_type: str) -> str:
+        """Determine storage type based on truth_type."""
+        routing = {
+            cls.TRUTH_REALITY: cls.STORAGE_DUCKDB,
+            cls.TRUTH_INTENT: cls.STORAGE_CHROMADB,
+            cls.TRUTH_REFERENCE: cls.STORAGE_CHROMADB,
+            cls.TRUTH_CONFIGURATION: cls.STORAGE_BOTH,
+            cls.TRUTH_OUTPUT: cls.STORAGE_CHROMADB,
+        }
+        return routing.get(truth_type, cls.STORAGE_CHROMADB)
+    
+    @classmethod
+    def get_legacy_usage_type(cls, truth_type: str, is_global: bool) -> str:
+        """Map truth_type to legacy usage_type for backward compatibility."""
+        if truth_type == cls.TRUTH_REALITY:
+            return cls.USAGE_STRUCTURED_DATA
+        elif truth_type == cls.TRUTH_REFERENCE:
+            return cls.USAGE_PLAYBOOK_SOURCE if is_global else cls.USAGE_TEMPLATE
+        elif truth_type == cls.TRUTH_CONFIGURATION:
+            return cls.USAGE_STRUCTURED_DATA
+        else:
+            return cls.USAGE_RAG_KNOWLEDGE
+    
+    # ==========================================================================
+    # REGISTRATION
+    # ==========================================================================
     
     @staticmethod
-    def create_table_sql() -> str:
-        """Returns SQL to create the document_registry table"""
-        return """
-        CREATE TABLE IF NOT EXISTS document_registry (
-            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-            filename TEXT NOT NULL,
-            file_type TEXT,
-            storage_type TEXT DEFAULT 'chromadb',
-            usage_type TEXT DEFAULT 'rag_knowledge',
-            project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
-            is_global BOOLEAN DEFAULT FALSE,
-            chunk_count INTEGER DEFAULT 0,
-            file_size INTEGER,
-            metadata JSONB DEFAULT '{}',
-            created_at TIMESTAMPTZ DEFAULT NOW(),
-            updated_at TIMESTAMPTZ DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_doc_registry_project ON document_registry(project_id);
-        CREATE INDEX IF NOT EXISTS idx_doc_registry_filename ON document_registry(filename);
-        CREATE INDEX IF NOT EXISTS idx_doc_registry_global ON document_registry(is_global);
-        """
-    
-    @staticmethod
-    def register(filename: str, file_type: str = None, storage_type: str = 'chromadb',
-                usage_type: str = 'rag_knowledge', project_id: str = None,
-                is_global: bool = False, chunk_count: int = 0, 
-                file_size: int = None, metadata: dict = None) -> Optional[Dict[str, Any]]:
-        """Register a document in the registry"""
+    def register(
+        filename: str,
+        truth_type: str = None,
+        classification_method: str = None,
+        file_type: str = None,
+        storage_type: str = None,
+        usage_type: str = None,
+        project_id: str = None,
+        is_global: bool = False,
+        classification_confidence: float = 0.5,
+        content_domain: List[str] = None,
+        chunk_count: int = 0,
+        file_size: int = None,
+        duckdb_tables: List[str] = None,
+        chromadb_collection: str = None,
+        row_count: int = None,
+        sheet_count: int = None,
+        page_count: int = None,
+        parse_status: str = 'success',
+        parse_errors: List[str] = None,
+        schema_confidence: float = None,
+        metadata: dict = None
+    ) -> Optional[Dict[str, Any]]:
+        """Register a document in the registry."""
         supabase = get_supabase()
         if not supabase:
+            logger.error("[REGISTRY] No Supabase connection")
             return None
+        
+        # Handle backward compatibility
+        if truth_type is None and usage_type is not None:
+            if usage_type == DocumentRegistryModel.USAGE_STRUCTURED_DATA:
+                truth_type = DocumentRegistryModel.TRUTH_REALITY
+            elif usage_type in [DocumentRegistryModel.USAGE_PLAYBOOK_SOURCE, DocumentRegistryModel.USAGE_TEMPLATE]:
+                truth_type = DocumentRegistryModel.TRUTH_REFERENCE
+            else:
+                truth_type = DocumentRegistryModel.TRUTH_INTENT if not is_global else DocumentRegistryModel.TRUTH_REFERENCE
+            classification_method = classification_method or DocumentRegistryModel.CLASS_FILENAME_INFERRED
+        
+        if truth_type is None:
+            truth_type = DocumentRegistryModel.TRUTH_INTENT if not is_global else DocumentRegistryModel.TRUTH_REFERENCE
+            classification_method = classification_method or DocumentRegistryModel.CLASS_FILENAME_INFERRED
+        
+        if classification_method is None:
+            classification_method = DocumentRegistryModel.CLASS_FILENAME_INFERRED
+        
+        if storage_type is None:
+            storage_type = DocumentRegistryModel.get_storage_for_truth_type(truth_type)
+        
+        if usage_type is None:
+            usage_type = DocumentRegistryModel.get_legacy_usage_type(truth_type, is_global)
+        
+        intelligence_ready = True
+        readiness_blockers = []
+        
+        if parse_status == 'failed':
+            intelligence_ready = False
+            readiness_blockers.append('parse_failed')
+        elif parse_status == 'partial':
+            readiness_blockers.append('parse_partial')
+        
+        if classification_confidence < 0.4:
+            readiness_blockers.append('low_classification_confidence')
         
         try:
             data = {
                 'filename': filename,
                 'file_type': file_type,
+                'truth_type': truth_type,
+                'classification_method': classification_method,
+                'classification_confidence': classification_confidence,
+                'content_domain': content_domain or [],
                 'storage_type': storage_type,
                 'usage_type': usage_type,
                 'project_id': project_id,
                 'is_global': is_global,
                 'chunk_count': chunk_count,
                 'file_size': file_size,
+                'row_count': row_count,
+                'sheet_count': sheet_count,
+                'page_count': page_count,
+                'parse_status': parse_status,
+                'parse_errors': parse_errors or [],
+                'schema_confidence': schema_confidence,
+                'intelligence_ready': intelligence_ready,
+                'readiness_blockers': readiness_blockers,
+                'citation_count': 0,
+                'positive_feedback': 0,
+                'negative_feedback': 0,
                 'metadata': metadata or {}
             }
+            
             data = {k: v for k, v in data.items() if v is not None}
+            
             response = supabase.table('document_registry').insert(data).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            print(f"Error registering document: {e}")
+            
+            if response.data:
+                logger.info(f"[REGISTRY] Registered: {filename} as {truth_type} -> {storage_type}")
+                return response.data[0]
             return None
+            
+        except Exception as e:
+            logger.error(f"[REGISTRY] Error registering {filename}: {e}")
+            return None
+    
+    # ==========================================================================
+    # BASIC QUERIES
+    # ==========================================================================
     
     @staticmethod
     def get_all(limit: int = 1000) -> List[Dict[str, Any]]:
@@ -314,39 +460,53 @@ class DocumentRegistryModel:
                 .execute()
             return response.data if response.data else []
         except Exception as e:
-            print(f"Error getting document registry: {e}")
+            logger.error(f"[REGISTRY] Error getting all: {e}")
             return []
     
     @staticmethod
-    def get_by_project(project_id: str = None, include_global: bool = True) -> List[Dict[str, Any]]:
-        """Get documents for a project"""
+    def get_by_project(
+        project_id: str = None, 
+        include_global: bool = True,
+        truth_type: str = None,
+        storage_type: str = None,
+        intelligence_ready_only: bool = False
+    ) -> List[Dict[str, Any]]:
+        """Get documents for a project with optional filters."""
         supabase = get_supabase()
         if not supabase:
             return []
         
         try:
+            query = supabase.table('document_registry').select('*')
+            
             if project_id:
                 if include_global:
-                    response = supabase.table('document_registry') \
-                        .select('*') \
-                        .or_(f'project_id.eq.{project_id},is_global.eq.true') \
-                        .order('created_at', desc=True) \
-                        .execute()
+                    query = query.or_(f'project_id.eq.{project_id},is_global.eq.true')
                 else:
-                    response = supabase.table('document_registry') \
-                        .select('*') \
-                        .eq('project_id', project_id) \
-                        .order('created_at', desc=True) \
-                        .execute()
+                    query = query.eq('project_id', project_id)
             else:
-                response = supabase.table('document_registry') \
-                    .select('*') \
-                    .eq('is_global', True) \
-                    .order('created_at', desc=True) \
-                    .execute()
+                query = query.eq('is_global', True)
+            
+            if truth_type:
+                if isinstance(truth_type, list):
+                    query = query.in_('truth_type', truth_type)
+                else:
+                    query = query.eq('truth_type', truth_type)
+            
+            if storage_type:
+                if isinstance(storage_type, list):
+                    query = query.in_('storage_type', storage_type)
+                else:
+                    query = query.eq('storage_type', storage_type)
+            
+            if intelligence_ready_only:
+                query = query.eq('intelligence_ready', True)
+            
+            response = query.order('created_at', desc=True).execute()
             return response.data if response.data else []
+            
         except Exception as e:
-            print(f"Error getting documents by project: {e}")
+            logger.error(f"[REGISTRY] Error getting by project: {e}")
             return []
     
     @staticmethod
@@ -363,61 +523,321 @@ class DocumentRegistryModel:
             response = query.limit(1).execute()
             return response.data[0] if response.data else None
         except Exception as e:
-            print(f"Error finding document: {e}")
+            logger.error(f"[REGISTRY] Error finding {filename}: {e}")
             return None
     
     @staticmethod
-    def unregister(filename: str, project_id: str = None) -> bool:
-        """
-        Remove a document from the registry.
+    def find_by_id(registry_id: str) -> Optional[Dict[str, Any]]:
+        """Find a document by registry ID"""
+        supabase = get_supabase()
+        if not supabase:
+            return None
         
-        If project_id is provided, deletes only the matching entry.
-        If project_id is None, first tries to find by filename alone,
-        then deletes any matching entry (project-specific or global).
-        """
+        try:
+            response = supabase.table('document_registry').select('*').eq('id', registry_id).limit(1).execute()
+            return response.data[0] if response.data else None
+        except Exception as e:
+            logger.error(f"[REGISTRY] Error finding by ID {registry_id}: {e}")
+            return None
+    
+    # ==========================================================================
+    # TRUTH-TYPE SPECIFIC QUERIES
+    # ==========================================================================
+    
+    @staticmethod
+    def get_reality_files(project_id: str, include_global: bool = False) -> List[Dict[str, Any]]:
+        """Get REALITY files (customer data) for a project."""
+        return DocumentRegistryModel.get_by_project(
+            project_id=project_id,
+            include_global=include_global,
+            truth_type=DocumentRegistryModel.TRUTH_REALITY,
+            intelligence_ready_only=True
+        )
+    
+    @staticmethod
+    def get_intent_files(project_id: str) -> List[Dict[str, Any]]:
+        """Get INTENT files (customer documentation) for a project."""
+        return DocumentRegistryModel.get_by_project(
+            project_id=project_id,
+            include_global=False,
+            truth_type=DocumentRegistryModel.TRUTH_INTENT,
+            intelligence_ready_only=True
+        )
+    
+    @staticmethod
+    def get_reference_files() -> List[Dict[str, Any]]:
+        """Get REFERENCE files (standards, checklists)."""
+        return DocumentRegistryModel.get_by_project(
+            project_id=None,
+            include_global=True,
+            truth_type=DocumentRegistryModel.TRUTH_REFERENCE,
+            intelligence_ready_only=True
+        )
+    
+    @staticmethod
+    def get_configuration_files(project_id: str = None, include_global: bool = True) -> List[Dict[str, Any]]:
+        """Get CONFIGURATION files (mappings, lookups)."""
+        return DocumentRegistryModel.get_by_project(
+            project_id=project_id,
+            include_global=include_global,
+            truth_type=DocumentRegistryModel.TRUTH_CONFIGURATION,
+            intelligence_ready_only=True
+        )
+    
+    @staticmethod
+    def get_queryable_tables(project_id: str, include_global: bool = False) -> List[str]:
+        """Get list of DuckDB table names that are queryable for a project."""
+        files = DocumentRegistryModel.get_by_project(
+            project_id=project_id,
+            include_global=include_global,
+            truth_type=[DocumentRegistryModel.TRUTH_REALITY, DocumentRegistryModel.TRUTH_CONFIGURATION],
+            storage_type=[DocumentRegistryModel.STORAGE_DUCKDB, DocumentRegistryModel.STORAGE_BOTH],
+            intelligence_ready_only=True
+        )
+        
+        tables = []
+        for f in files:
+            metadata = f.get('metadata', {})
+            if isinstance(metadata, dict) and 'tables' in metadata:
+                tables.extend(metadata['tables'])
+            if f.get('duckdb_tables'):
+                tables.extend(f['duckdb_tables'])
+        
+        return list(set(tables))
+    
+    @staticmethod
+    def get_for_intelligence(project_id: str) -> Dict[str, List[Dict[str, Any]]]:
+        """Get all files organized by truth type for the Intelligence Engine."""
+        return {
+            'reality': DocumentRegistryModel.get_reality_files(project_id),
+            'intent': DocumentRegistryModel.get_intent_files(project_id),
+            'reference': DocumentRegistryModel.get_reference_files(),
+            'configuration': DocumentRegistryModel.get_configuration_files(project_id)
+        }
+    
+    # ==========================================================================
+    # UNREGISTER / DELETE
+    # ==========================================================================
+    
+    @staticmethod
+    def unregister(filename: str, project_id: str = None) -> bool:
+        """Remove a document from the registry."""
         supabase = get_supabase()
         if not supabase:
             return False
         
         try:
             if project_id:
-                # Delete specific project entry
-                result = supabase.table('document_registry').delete().eq(
-                    'filename', filename
-                ).eq('project_id', project_id).execute()
+                result = supabase.table('document_registry').delete().eq('filename', filename).eq('project_id', project_id).execute()
             else:
-                # No project_id - delete by filename only
-                # This catches both project-specific (where we don't know the ID)
-                # and global entries
-                result = supabase.table('document_registry').delete().eq(
-                    'filename', filename
-                ).execute()
+                result = supabase.table('document_registry').delete().eq('filename', filename).execute()
             
-            # Check if anything was deleted
             deleted_count = len(result.data) if result.data else 0
-            return deleted_count > 0 or True  # Return True even if nothing found (idempotent)
+            if deleted_count > 0:
+                logger.info(f"[REGISTRY] Unregistered: {filename}")
+            return deleted_count > 0 or True
+            
         except Exception as e:
-            print(f"Error unregistering document: {e}")
+            logger.error(f"[REGISTRY] Error unregistering {filename}: {e}")
             return False
     
+    # ==========================================================================
+    # UPDATES
+    # ==========================================================================
+    
     @staticmethod
-    def update_chunk_count(filename: str, chunk_count: int, project_id: str = None) -> bool:
-        """Update the chunk count for a document"""
+    def update(filename: str, project_id: str = None, **updates) -> bool:
+        """Update fields for a document."""
         supabase = get_supabase()
         if not supabase:
             return False
         
         try:
-            query = supabase.table('document_registry') \
-                .update({'chunk_count': chunk_count, 'updated_at': datetime.utcnow().isoformat()}) \
-                .eq('filename', filename)
+            updates['updated_at'] = datetime.utcnow().isoformat()
+            query = supabase.table('document_registry').update(updates).eq('filename', filename)
             if project_id:
                 query = query.eq('project_id', project_id)
             query.execute()
             return True
         except Exception as e:
-            print(f"Error updating chunk count: {e}")
+            logger.error(f"[REGISTRY] Error updating {filename}: {e}")
             return False
+    
+    @staticmethod
+    def update_chunk_count(filename: str, chunk_count: int, project_id: str = None) -> bool:
+        """Update the chunk count for a document"""
+        return DocumentRegistryModel.update(filename, project_id, chunk_count=chunk_count)
+    
+    @staticmethod
+    def reclassify(filename: str, truth_type: str, classification_method: str = 'user_selected',
+                   classification_confidence: float = 1.0, project_id: str = None) -> bool:
+        """Reclassify a document with a new truth_type."""
+        if truth_type not in DocumentRegistryModel.VALID_TRUTH_TYPES:
+            return False
+        new_storage = DocumentRegistryModel.get_storage_for_truth_type(truth_type)
+        return DocumentRegistryModel.update(filename, project_id, truth_type=truth_type,
+                                            storage_type=new_storage, classification_method=classification_method,
+                                            classification_confidence=classification_confidence)
+    
+    # ==========================================================================
+    # LEARNING METRICS
+    # ==========================================================================
+    
+    @staticmethod
+    def increment_citation(filename: str, project_id: str = None) -> bool:
+        """Increment citation count when a file is used in an answer."""
+        supabase = get_supabase()
+        if not supabase:
+            return False
+        
+        try:
+            doc = DocumentRegistryModel.find_by_filename(filename, project_id)
+            if not doc:
+                return False
+            
+            current_count = doc.get('citation_count', 0) or 0
+            updates = {
+                'citation_count': current_count + 1,
+                'last_cited_at': datetime.utcnow().isoformat(),
+                'updated_at': datetime.utcnow().isoformat()
+            }
+            
+            query = supabase.table('document_registry').update(updates).eq('filename', filename)
+            if project_id:
+                query = query.eq('project_id', project_id)
+            query.execute()
+            return True
+        except Exception as e:
+            logger.error(f"[REGISTRY] Error incrementing citation for {filename}: {e}")
+            return False
+    
+    @staticmethod
+    def record_feedback(filename: str, positive: bool, project_id: str = None) -> bool:
+        """Record feedback for a file (thumbs up/down)."""
+        supabase = get_supabase()
+        if not supabase:
+            return False
+        
+        try:
+            doc = DocumentRegistryModel.find_by_filename(filename, project_id)
+            if not doc:
+                return False
+            
+            if positive:
+                current = doc.get('positive_feedback', 0) or 0
+                updates = {'positive_feedback': current + 1}
+            else:
+                current = doc.get('negative_feedback', 0) or 0
+                updates = {'negative_feedback': current + 1}
+            
+            updates['updated_at'] = datetime.utcnow().isoformat()
+            
+            query = supabase.table('document_registry').update(updates).eq('filename', filename)
+            if project_id:
+                query = query.eq('project_id', project_id)
+            query.execute()
+            return True
+        except Exception as e:
+            logger.error(f"[REGISTRY] Error recording feedback for {filename}: {e}")
+            return False
+    
+    # ==========================================================================
+    # DIAGNOSTICS
+    # ==========================================================================
+    
+    @staticmethod
+    def get_classification_stats(project_id: str = None) -> Dict[str, Any]:
+        """Get classification statistics for diagnostics dashboard."""
+        supabase = get_supabase()
+        if not supabase:
+            return {}
+        
+        try:
+            files = DocumentRegistryModel.get_by_project(project_id, include_global=True) if project_id else DocumentRegistryModel.get_all()
+            
+            stats = {
+                'total_files': len(files),
+                'by_truth_type': {},
+                'by_classification_method': {},
+                'by_parse_status': {},
+                'intelligence_ready': 0,
+                'not_ready': 0,
+                'low_confidence': 0,
+                'never_cited': 0,
+                'avg_feedback_score': 0.0
+            }
+            
+            total_feedback = 0
+            positive_total = 0
+            
+            for f in files:
+                tt = f.get('truth_type', 'unknown')
+                stats['by_truth_type'][tt] = stats['by_truth_type'].get(tt, 0) + 1
+                
+                cm = f.get('classification_method', 'unknown')
+                stats['by_classification_method'][cm] = stats['by_classification_method'].get(cm, 0) + 1
+                
+                ps = f.get('parse_status', 'unknown')
+                stats['by_parse_status'][ps] = stats['by_parse_status'].get(ps, 0) + 1
+                
+                if f.get('intelligence_ready', True):
+                    stats['intelligence_ready'] += 1
+                else:
+                    stats['not_ready'] += 1
+                
+                conf = f.get('classification_confidence')
+                if conf is not None and conf < 0.5:
+                    stats['low_confidence'] += 1
+                
+                if (f.get('citation_count') or 0) == 0:
+                    stats['never_cited'] += 1
+                
+                pos = f.get('positive_feedback') or 0
+                neg = f.get('negative_feedback') or 0
+                if pos + neg > 0:
+                    total_feedback += pos + neg
+                    positive_total += pos
+            
+            if total_feedback > 0:
+                stats['avg_feedback_score'] = round(positive_total / total_feedback, 2)
+            
+            return stats
+        except Exception as e:
+            logger.error(f"[REGISTRY] Error getting stats: {e}")
+            return {}
+    
+    @staticmethod
+    def get_files_needing_review(project_id: str = None) -> List[Dict[str, Any]]:
+        """Get files that need manual review."""
+        try:
+            files = DocumentRegistryModel.get_by_project(project_id, include_global=True) if project_id else DocumentRegistryModel.get_all()
+            
+            needs_review = []
+            for f in files:
+                reasons = []
+                if not f.get('intelligence_ready', True):
+                    reasons.append('not_intelligence_ready')
+                conf = f.get('classification_confidence')
+                if conf is not None and conf < 0.5:
+                    reasons.append('low_confidence')
+                ps = f.get('parse_status', 'success')
+                if ps in ['partial', 'failed']:
+                    reasons.append(f'parse_{ps}')
+                blockers = f.get('readiness_blockers', [])
+                if blockers:
+                    reasons.extend(blockers)
+                if reasons:
+                    f['review_reasons'] = reasons
+                    needs_review.append(f)
+            
+            return needs_review
+        except Exception as e:
+            logger.error(f"[REGISTRY] Error getting files needing review: {e}")
+            return []
+    
+    # ==========================================================================
+    # UTILITY
+    # ==========================================================================
     
     @staticmethod
     def table_exists() -> bool:
@@ -430,7 +850,65 @@ class DocumentRegistryModel:
             return True
         except Exception:
             return False
+    
+    @staticmethod
+    def validate_truth_type(truth_type: str) -> bool:
+        return truth_type in DocumentRegistryModel.VALID_TRUTH_TYPES
+    
+    @staticmethod
+    def validate_classification_method(method: str) -> bool:
+        return method in DocumentRegistryModel.VALID_CLASSIFICATION_METHODS
 
+
+# =============================================================================
+# AUTO-CLASSIFICATION HELPER
+# =============================================================================
+
+def auto_classify_file(filename: str, file_extension: str, project_name: str, 
+                       file_content_sample: str = None) -> Tuple[str, str, float]:
+    """Auto-classify a file based on filename, extension, and optionally content."""
+    filename_lower = filename.lower()
+    is_global = project_name.lower() in ['global', '__global__', 'global/universal', 'reference library']
+    
+    reality_keywords = ['register', 'export', 'report', 'data', 'payroll', 'employee', 'hr_', 'audit']
+    intent_keywords = ['sow', 'requirement', 'statement of work', 'notes', 'meeting', 'spec', 'scope']
+    reference_keywords = ['checklist', 'standard', 'guide', 'reference', 'compliance', 'template', 
+                          'best_practice', 'best-practice', 'year-end', 'yearend', 'year_end']
+    config_keywords = ['mapping', 'lookup', 'codes', 'config', 'crosswalk', 'translation', 'xref']
+    
+    if any(kw in filename_lower for kw in reference_keywords):
+        return (DocumentRegistryModel.TRUTH_REFERENCE, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.8)
+    
+    if any(kw in filename_lower for kw in config_keywords):
+        return (DocumentRegistryModel.TRUTH_CONFIGURATION, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.8)
+    
+    if any(kw in filename_lower for kw in intent_keywords):
+        return (DocumentRegistryModel.TRUTH_INTENT, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.8)
+    
+    if any(kw in filename_lower for kw in reality_keywords) and not is_global:
+        return (DocumentRegistryModel.TRUTH_REALITY, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.8)
+    
+    if file_extension in ['xlsx', 'xls', 'csv']:
+        if is_global:
+            return (DocumentRegistryModel.TRUTH_REFERENCE, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.5)
+        else:
+            return (DocumentRegistryModel.TRUTH_REALITY, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.6)
+    
+    if file_extension in ['docx', 'doc', 'pdf']:
+        if is_global:
+            return (DocumentRegistryModel.TRUTH_REFERENCE, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.6)
+        else:
+            return (DocumentRegistryModel.TRUTH_INTENT, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.6)
+    
+    if is_global:
+        return (DocumentRegistryModel.TRUTH_REFERENCE, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.4)
+    else:
+        return (DocumentRegistryModel.TRUTH_INTENT, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.4)
+
+
+# =============================================================================
+# CHAT HISTORY MODEL
+# =============================================================================
 
 class ChatHistoryModel:
     """Chat history database operations"""
@@ -438,19 +916,13 @@ class ChatHistoryModel:
     @staticmethod
     def add_message(project_id: str, session_id: str, role: str,
                    content: str, sources: list = None, metadata: dict = None) -> Optional[Dict[str, Any]]:
-        """Add a chat message"""
         supabase = get_supabase()
         if not supabase:
             return None
-        
         try:
             data = {
-                'project_id': project_id,
-                'session_id': session_id,
-                'role': role,
-                'content': content,
-                'sources': sources or [],
-                'metadata': metadata or {}
+                'project_id': project_id, 'session_id': session_id, 'role': role,
+                'content': content, 'sources': sources or [], 'metadata': metadata or {}
             }
             response = supabase.table('chat_history').insert(data).execute()
             return response.data[0] if response.data else None
@@ -460,18 +932,11 @@ class ChatHistoryModel:
     
     @staticmethod
     def get_by_session(session_id: str, limit: int = 100) -> List[Dict[str, Any]]:
-        """Get chat history for a session"""
         supabase = get_supabase()
         if not supabase:
             return []
-        
         try:
-            response = supabase.table('chat_history') \
-                .select('*') \
-                .eq('session_id', session_id) \
-                .order('created_at', desc=False) \
-                .limit(limit) \
-                .execute()
+            response = supabase.table('chat_history').select('*').eq('session_id', session_id).order('created_at', desc=False).limit(limit).execute()
             return response.data if response.data else []
         except Exception as e:
             print(f"Error getting chat history: {e}")
@@ -479,18 +944,11 @@ class ChatHistoryModel:
     
     @staticmethod
     def get_by_project(project_id: str, limit: int = 100) -> List[Dict[str, Any]]:
-        """Get all chat history for a project"""
         supabase = get_supabase()
         if not supabase:
             return []
-        
         try:
-            response = supabase.table('chat_history') \
-                .select('*') \
-                .eq('project_id', project_id) \
-                .order('created_at', desc=True) \
-                .limit(limit) \
-                .execute()
+            response = supabase.table('chat_history').select('*').eq('project_id', project_id).order('created_at', desc=True).limit(limit).execute()
             return response.data if response.data else []
         except Exception as e:
             print(f"Error getting chat history: {e}")
@@ -498,11 +956,9 @@ class ChatHistoryModel:
     
     @staticmethod
     def delete_session(session_id: str) -> bool:
-        """Delete all messages in a session"""
         supabase = get_supabase()
         if not supabase:
             return False
-        
         try:
             supabase.table('chat_history').delete().eq('session_id', session_id).execute()
             return True
@@ -511,25 +967,21 @@ class ChatHistoryModel:
             return False
 
 
+# =============================================================================
+# PROCESSING JOB MODEL
+# =============================================================================
+
 class ProcessingJobModel:
     """Processing job database operations"""
     
     @staticmethod
-    def create(job_type: str, project_id: str = None, filename: str = None,
-              input_data: dict = None) -> Optional[Dict[str, Any]]:
-        """Create a new processing job"""
+    def create(job_type: str, project_id: str = None, filename: str = None, input_data: dict = None) -> Optional[Dict[str, Any]]:
         supabase = get_supabase()
         if not supabase:
             return None
-        
         try:
-            data = {
-                'job_type': job_type,
-                'project_id': project_id,
-                'status': 'queued',
-                'progress': {'percent': 0, 'step': 'Queued...'},
-                'input_data': input_data or {'filename': filename}
-            }
+            data = {'job_type': job_type, 'project_id': project_id, 'status': 'queued',
+                    'progress': {'percent': 0, 'step': 'Queued...'}, 'input_data': input_data or {'filename': filename}}
             response = supabase.table('processing_jobs').insert(data).execute()
             return response.data[0] if response.data else None
         except Exception as e:
@@ -538,17 +990,11 @@ class ProcessingJobModel:
     
     @staticmethod
     def update_progress(job_id: str, percent: int, step: str) -> bool:
-        """Update job progress"""
         supabase = get_supabase()
         if not supabase:
             return False
-        
         try:
-            data = {
-                'status': 'processing',
-                'progress': {'percent': percent, 'step': step},
-                'updated_at': datetime.utcnow().isoformat()
-            }
+            data = {'status': 'processing', 'progress': {'percent': percent, 'step': step}, 'updated_at': datetime.utcnow().isoformat()}
             if percent == 0:
                 data['started_at'] = datetime.utcnow().isoformat()
             supabase.table('processing_jobs').update(data).eq('id', job_id).execute()
@@ -559,19 +1005,12 @@ class ProcessingJobModel:
     
     @staticmethod
     def complete(job_id: str, result_data: dict = None) -> bool:
-        """Mark job as completed"""
         supabase = get_supabase()
         if not supabase:
             return False
-        
         try:
-            data = {
-                'status': 'completed',
-                'progress': {'percent': 100, 'step': 'Complete'},
-                'result_data': result_data or {},
-                'completed_at': datetime.utcnow().isoformat(),
-                'updated_at': datetime.utcnow().isoformat()
-            }
+            data = {'status': 'completed', 'progress': {'percent': 100, 'step': 'Complete'},
+                    'result_data': result_data or {}, 'completed_at': datetime.utcnow().isoformat(), 'updated_at': datetime.utcnow().isoformat()}
             supabase.table('processing_jobs').update(data).eq('id', job_id).execute()
             return True
         except Exception as e:
@@ -580,18 +1019,11 @@ class ProcessingJobModel:
     
     @staticmethod
     def fail(job_id: str, error_message: str) -> bool:
-        """Mark job as failed"""
         supabase = get_supabase()
         if not supabase:
             return False
-        
         try:
-            data = {
-                'status': 'failed',
-                'error_message': error_message,
-                'completed_at': datetime.utcnow().isoformat(),
-                'updated_at': datetime.utcnow().isoformat()
-            }
+            data = {'status': 'failed', 'error_message': error_message, 'completed_at': datetime.utcnow().isoformat(), 'updated_at': datetime.utcnow().isoformat()}
             supabase.table('processing_jobs').update(data).eq('id', job_id).execute()
             return True
         except Exception as e:
@@ -600,17 +1032,11 @@ class ProcessingJobModel:
     
     @staticmethod
     def get_all(limit: int = 50) -> List[Dict[str, Any]]:
-        """Get recent jobs"""
         supabase = get_supabase()
         if not supabase:
             return []
-        
         try:
-            response = supabase.table('processing_jobs') \
-                .select('*') \
-                .order('created_at', desc=True) \
-                .limit(limit) \
-                .execute()
+            response = supabase.table('processing_jobs').select('*').order('created_at', desc=True).limit(limit).execute()
             return response.data if response.data else []
         except Exception as e:
             print(f"Error getting jobs: {e}")
@@ -618,11 +1044,9 @@ class ProcessingJobModel:
     
     @staticmethod
     def get_by_id(job_id: str) -> Optional[Dict[str, Any]]:
-        """Get job by ID"""
         supabase = get_supabase()
         if not supabase:
             return None
-        
         try:
             response = supabase.table('processing_jobs').select('*').eq('id', job_id).execute()
             return response.data[0] if response.data else None
@@ -632,11 +1056,9 @@ class ProcessingJobModel:
     
     @staticmethod
     def delete(job_id: str) -> bool:
-        """Delete a job"""
         supabase = get_supabase()
         if not supabase:
             return False
-        
         try:
             supabase.table('processing_jobs').delete().eq('id', job_id).execute()
             return True
@@ -646,11 +1068,9 @@ class ProcessingJobModel:
     
     @staticmethod
     def delete_all() -> int:
-        """Delete all jobs"""
         supabase = get_supabase()
         if not supabase:
             return 0
-        
         try:
             count_response = supabase.table('processing_jobs').select('id', count='exact').execute()
             count = count_response.count or 0
@@ -663,11 +1083,9 @@ class ProcessingJobModel:
     
     @staticmethod
     def delete_older_than(days: int = 7) -> int:
-        """Delete jobs older than X days"""
         supabase = get_supabase()
         if not supabase:
             return 0
-        
         try:
             from datetime import timedelta
             cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
@@ -682,20 +1100,13 @@ class ProcessingJobModel:
     
     @staticmethod
     def get_recent(days: int = 7, limit: int = 100) -> List[Dict[str, Any]]:
-        """Get jobs from the last X days"""
         supabase = get_supabase()
         if not supabase:
             return []
-        
         try:
             from datetime import timedelta
             cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
-            response = supabase.table('processing_jobs') \
-                .select('*') \
-                .gte('created_at', cutoff) \
-                .order('created_at', desc=True) \
-                .limit(limit) \
-                .execute()
+            response = supabase.table('processing_jobs').select('*').gte('created_at', cutoff).order('created_at', desc=True).limit(limit).execute()
             return response.data if response.data else []
         except Exception as e:
             print(f"Error getting recent jobs: {e}")
@@ -707,68 +1118,36 @@ class ProcessingJobModel:
 # =============================================================================
 
 class FindingSuppressionModel:
-    """
-    Finding Suppression - Manage acknowledged/suppressed findings
-    
-    Playbook-agnostic: works for year_end, post_live, assessment, etc.
-    """
+    """Finding Suppression - Manage acknowledged/suppressed findings"""
     
     @staticmethod
     def _hash_finding(finding_text: str) -> str:
-        """Create normalized hash of finding text for matching"""
         normalized = finding_text.lower().strip()
-        normalized = re.sub(r'\d+\.?\d*%?', 'N', normalized)  # Replace numbers
-        normalized = re.sub(r'\s+', ' ', normalized)  # Collapse whitespace
+        normalized = re.sub(r'\d+\.?\d*%?', 'N', normalized)
+        normalized = re.sub(r'\s+', ' ', normalized)
         return hashlib.sha256(normalized.encode()).hexdigest()[:32]
     
     @staticmethod
-    def create(
-        project_id: str,
-        playbook_type: str,
-        suppression_type: str,
-        reason: str,
-        action_id: str = None,
-        finding_text: str = None,
-        pattern: str = None,
-        category: str = None,
-        document_filter: str = None,
-        state_filter: List[str] = None,
-        keyword_filter: List[str] = None,
-        fein_filter: List[str] = None,
-        notes: str = None,
-        expires_at: str = None,
-        created_by: str = None
-    ) -> Optional[Dict[str, Any]]:
-        """Create a suppression rule"""
+    def create(project_id: str, playbook_type: str, suppression_type: str, reason: str,
+               action_id: str = None, finding_text: str = None, pattern: str = None,
+               category: str = None, document_filter: str = None, state_filter: List[str] = None,
+               keyword_filter: List[str] = None, fein_filter: List[str] = None,
+               notes: str = None, expires_at: str = None, created_by: str = None) -> Optional[Dict[str, Any]]:
         supabase = get_supabase()
         if not supabase:
             return None
-        
         try:
             finding_hash = None
             if finding_text and suppression_type in ('suppress', 'acknowledge'):
                 finding_hash = FindingSuppressionModel._hash_finding(finding_text)
-            
             data = {
-                'project_id': project_id,
-                'playbook_type': playbook_type,
-                'action_id': action_id,
-                'suppression_type': suppression_type,
-                'finding_hash': finding_hash,
-                'pattern': pattern,
-                'category': category,
-                'document_filter': document_filter,
-                'state_filter': state_filter,
-                'keyword_filter': keyword_filter,
-                'fein_filter': fein_filter,
-                'reason': reason,
-                'notes': notes,
-                'expires_at': expires_at,
-                'created_by': created_by,
-                'is_active': True
+                'project_id': project_id, 'playbook_type': playbook_type, 'action_id': action_id,
+                'suppression_type': suppression_type, 'finding_hash': finding_hash, 'pattern': pattern,
+                'category': category, 'document_filter': document_filter, 'state_filter': state_filter,
+                'keyword_filter': keyword_filter, 'fein_filter': fein_filter, 'reason': reason,
+                'notes': notes, 'expires_at': expires_at, 'created_by': created_by, 'is_active': True
             }
             data = {k: v for k, v in data.items() if v is not None}
-            
             response = supabase.table('finding_suppressions').insert(data).execute()
             return response.data[0] if response.data else None
         except Exception as e:
@@ -777,68 +1156,40 @@ class FindingSuppressionModel:
     
     @staticmethod
     def get_active_rules(project_id: str, playbook_type: str, action_id: str = None) -> List[Dict[str, Any]]:
-        """Get active suppression rules for a project/playbook"""
         supabase = get_supabase()
         if not supabase:
             return []
-        
         try:
-            query = supabase.table('finding_suppressions') \
-                .select('*') \
-                .eq('project_id', project_id) \
-                .eq('playbook_type', playbook_type) \
-                .eq('is_active', True)
-            
+            query = supabase.table('finding_suppressions').select('*').eq('project_id', project_id).eq('playbook_type', playbook_type).eq('is_active', True)
             response = query.execute()
             rules = response.data if response.data else []
-            
-            # Filter by action scope
             now = datetime.utcnow().isoformat()
             filtered = []
             for rule in rules:
-                # Skip expired
                 if rule.get('expires_at') and rule['expires_at'] < now:
                     continue
-                # Skip if action-specific and doesn't match
                 if rule.get('action_id') and action_id and rule['action_id'] != action_id:
                     continue
                 filtered.append(rule)
-            
             return filtered
         except Exception as e:
             print(f"Error getting suppression rules: {e}")
             return []
     
     @staticmethod
-    def check_finding(
-        project_id: str,
-        playbook_type: str,
-        finding_text: str,
-        action_id: str = None,
-        document_name: str = None,
-        state: str = None,
-        fein: str = None
-    ) -> Optional[Dict[str, Any]]:
-        """Check if a finding matches any suppression rule. Returns matching rule or None."""
+    def check_finding(project_id: str, playbook_type: str, finding_text: str, action_id: str = None,
+                      document_name: str = None, state: str = None, fein: str = None) -> Optional[Dict[str, Any]]:
         rules = FindingSuppressionModel.get_active_rules(project_id, playbook_type, action_id)
         if not rules:
             return None
-        
         finding_hash = FindingSuppressionModel._hash_finding(finding_text)
         finding_lower = finding_text.lower()
-        
         for rule in rules:
-            # Check FEIN filter
-            if rule.get('fein_filter') and fein:
-                if fein not in rule['fein_filter']:
-                    continue
-            
-            # Check hash match
+            if rule.get('fein_filter') and fein and fein not in rule['fein_filter']:
+                continue
             if rule.get('finding_hash') and rule['finding_hash'] == finding_hash:
                 FindingSuppressionModel._record_match(rule['id'])
                 return rule
-            
-            # Check pattern match
             if rule.get('pattern'):
                 try:
                     if re.search(rule['pattern'], finding_text, re.IGNORECASE):
@@ -846,61 +1197,40 @@ class FindingSuppressionModel:
                         return rule
                 except re.error:
                     pass
-            
-            # Check document filter
-            if rule.get('document_filter') and document_name:
-                if rule['document_filter'].lower() in document_name.lower():
-                    FindingSuppressionModel._record_match(rule['id'])
-                    return rule
-            
-            # Check state filter
-            if rule.get('state_filter') and state:
-                if state.upper() in [s.upper() for s in rule['state_filter']]:
-                    FindingSuppressionModel._record_match(rule['id'])
-                    return rule
-            
-            # Check keyword filter
-            if rule.get('keyword_filter'):
-                if any(kw.lower() in finding_lower for kw in rule['keyword_filter']):
-                    FindingSuppressionModel._record_match(rule['id'])
-                    return rule
-        
+            if rule.get('document_filter') and document_name and rule['document_filter'].lower() in document_name.lower():
+                FindingSuppressionModel._record_match(rule['id'])
+                return rule
+            if rule.get('state_filter') and state and state.upper() in [s.upper() for s in rule['state_filter']]:
+                FindingSuppressionModel._record_match(rule['id'])
+                return rule
+            if rule.get('keyword_filter') and any(kw.lower() in finding_lower for kw in rule['keyword_filter']):
+                FindingSuppressionModel._record_match(rule['id'])
+                return rule
         return None
     
     @staticmethod
     def _record_match(rule_id: str) -> None:
-        """Record that a rule matched (increment counter)"""
         supabase = get_supabase()
         if not supabase:
             return
-        
         try:
             supabase.rpc('increment_suppression_match', {'rule_id': rule_id}).execute()
         except Exception:
             try:
-                supabase.table('finding_suppressions') \
-                    .update({
-                        'match_count': supabase.table('finding_suppressions')
-                            .select('match_count').eq('id', rule_id).execute().data[0].get('match_count', 0) + 1,
-                        'last_matched_at': datetime.utcnow().isoformat()
-                    }) \
-                    .eq('id', rule_id) \
-                    .execute()
+                supabase.table('finding_suppressions').update({
+                    'match_count': supabase.table('finding_suppressions').select('match_count').eq('id', rule_id).execute().data[0].get('match_count', 0) + 1,
+                    'last_matched_at': datetime.utcnow().isoformat()
+                }).eq('id', rule_id).execute()
             except Exception:
                 pass
     
     @staticmethod
     def deactivate(rule_id: str) -> bool:
-        """Soft-delete a rule"""
         supabase = get_supabase()
         if not supabase:
             return False
-        
         try:
-            supabase.table('finding_suppressions') \
-                .update({'is_active': False, 'updated_at': datetime.utcnow().isoformat()}) \
-                .eq('id', rule_id) \
-                .execute()
+            supabase.table('finding_suppressions').update({'is_active': False, 'updated_at': datetime.utcnow().isoformat()}).eq('id', rule_id).execute()
             return True
         except Exception as e:
             print(f"Error deactivating suppression: {e}")
@@ -908,16 +1238,11 @@ class FindingSuppressionModel:
     
     @staticmethod
     def reactivate(rule_id: str) -> bool:
-        """Reactivate a soft-deleted rule"""
         supabase = get_supabase()
         if not supabase:
             return False
-        
         try:
-            supabase.table('finding_suppressions') \
-                .update({'is_active': True, 'updated_at': datetime.utcnow().isoformat()}) \
-                .eq('id', rule_id) \
-                .execute()
+            supabase.table('finding_suppressions').update({'is_active': True, 'updated_at': datetime.utcnow().isoformat()}).eq('id', rule_id).execute()
             return True
         except Exception as e:
             print(f"Error reactivating suppression: {e}")
@@ -925,21 +1250,13 @@ class FindingSuppressionModel:
     
     @staticmethod
     def get_by_project(project_id: str, playbook_type: str, include_inactive: bool = False) -> List[Dict[str, Any]]:
-        """Get all rules for a project"""
         supabase = get_supabase()
         if not supabase:
             return []
-        
         try:
-            query = supabase.table('finding_suppressions') \
-                .select('*') \
-                .eq('project_id', project_id) \
-                .eq('playbook_type', playbook_type) \
-                .order('created_at', desc=True)
-            
+            query = supabase.table('finding_suppressions').select('*').eq('project_id', project_id).eq('playbook_type', playbook_type).order('created_at', desc=True)
             if not include_inactive:
                 query = query.eq('is_active', True)
-            
             response = query.execute()
             return response.data if response.data else []
         except Exception as e:
@@ -948,25 +1265,15 @@ class FindingSuppressionModel:
     
     @staticmethod
     def get_stats(project_id: str, playbook_type: str) -> Dict[str, Any]:
-        """Get suppression statistics"""
         supabase = get_supabase()
         if not supabase:
             return {}
-        
         try:
-            response = supabase.table('finding_suppressions') \
-                .select('*') \
-                .eq('project_id', project_id) \
-                .eq('playbook_type', playbook_type) \
-                .execute()
-            
+            response = supabase.table('finding_suppressions').select('*').eq('project_id', project_id).eq('playbook_type', playbook_type).execute()
             rules = response.data or []
             active = [r for r in rules if r.get('is_active')]
-            
             return {
-                'total_rules': len(rules),
-                'active_rules': len(active),
-                'inactive_rules': len(rules) - len(active),
+                'total_rules': len(rules), 'active_rules': len(active), 'inactive_rules': len(rules) - len(active),
                 'total_matches': sum(r.get('match_count', 0) for r in rules),
                 'by_type': {
                     'acknowledge': len([r for r in active if r.get('suppression_type') == 'acknowledge']),
@@ -984,42 +1291,21 @@ class FindingSuppressionModel:
 # =============================================================================
 
 class EntityConfigModel:
-    """
-    Entity Configuration - Track which FEINs/BNs are being analyzed per project
-    
-    Playbook-agnostic: works for year_end, post_live, assessment, etc.
-    """
+    """Entity Configuration - Track which FEINs/BNs are being analyzed per project"""
     
     @staticmethod
-    def save(
-        project_id: str,
-        playbook_type: str,
-        analysis_scope: str,
-        selected_entities: List[str],
-        primary_entity: str = None,
-        country_mode: str = 'us_only',
-        detected_entities: Dict = None
-    ) -> Optional[Dict[str, Any]]:
-        """Save entity configuration"""
+    def save(project_id: str, playbook_type: str, analysis_scope: str, selected_entities: List[str],
+             primary_entity: str = None, country_mode: str = 'us_only', detected_entities: Dict = None) -> Optional[Dict[str, Any]]:
         supabase = get_supabase()
         if not supabase:
             return None
-        
         try:
             data = {
-                'project_id': project_id,
-                'playbook_type': playbook_type,
-                'analysis_scope': analysis_scope,
-                'selected_entities': selected_entities,
-                'primary_entity': primary_entity,
-                'country_mode': country_mode,
-                'configured_at': datetime.utcnow().isoformat()
+                'project_id': project_id, 'playbook_type': playbook_type, 'analysis_scope': analysis_scope,
+                'selected_entities': selected_entities, 'primary_entity': primary_entity,
+                'country_mode': country_mode, 'configured_at': datetime.utcnow().isoformat()
             }
-            
-            response = supabase.table('project_entity_config') \
-                .upsert(data, on_conflict='project_id,playbook_type') \
-                .execute()
-            
+            response = supabase.table('project_entity_config').upsert(data, on_conflict='project_id,playbook_type').execute()
             return response.data[0] if response.data else None
         except Exception as e:
             print(f"Error saving entity config: {e}")
@@ -1027,18 +1313,11 @@ class EntityConfigModel:
     
     @staticmethod
     def get(project_id: str, playbook_type: str) -> Optional[Dict[str, Any]]:
-        """Get entity configuration"""
         supabase = get_supabase()
         if not supabase:
             return None
-        
         try:
-            response = supabase.table('project_entity_config') \
-                .select('*') \
-                .eq('project_id', project_id) \
-                .eq('playbook_type', playbook_type) \
-                .execute()
-            
+            response = supabase.table('project_entity_config').select('*').eq('project_id', project_id).eq('playbook_type', playbook_type).execute()
             return response.data[0] if response.data else None
         except Exception as e:
             print(f"Error getting entity config: {e}")
@@ -1046,17 +1325,11 @@ class EntityConfigModel:
     
     @staticmethod
     def delete(project_id: str, playbook_type: str) -> bool:
-        """Delete entity configuration"""
         supabase = get_supabase()
         if not supabase:
             return False
-        
         try:
-            supabase.table('project_entity_config') \
-                .delete() \
-                .eq('project_id', project_id) \
-                .eq('playbook_type', playbook_type) \
-                .execute()
+            supabase.table('project_entity_config').delete().eq('project_id', project_id).eq('playbook_type', playbook_type).execute()
             return True
         except Exception as e:
             print(f"Error deleting entity config: {e}")
