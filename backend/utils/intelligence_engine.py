@@ -1,10 +1,13 @@
 """
-XLR8 INTELLIGENCE ENGINE v5.16.0
+XLR8 INTELLIGENCE ENGINE v5.16.1
 ================================
 
 Deploy to: backend/utils/intelligence_engine.py
 
 UPDATES:
+- v5.16.1: PLURAL HANDLING - Fixed direct name match to handle plurals.
+           "ale groups" now matches "ale_group" by trying singular forms.
+           Also expanded skip-words list to avoid false matches.
 - v5.16.0: DIRECT NAME MATCH - Critical fix for simple "show me X" queries.
            When question contains "ale group", tables with "ale_group" in name
            get +100 boost. Two-word matches (+100), three-word matches (+120).
@@ -69,7 +72,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.16.0 DIRECT NAME MATCH FIX ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.16.1 PLURAL HANDLING FIX ======")
 
 
 # =============================================================================
@@ -3115,29 +3118,55 @@ class IntelligenceEngine:
             # "what ale groups have been setup" -> ["ale", "groups", "ale_group", "ale_groups"]
             words = re.findall(r'\b[a-z]+\b', q_lower)
             
+            # Common words to skip (wouldn't meaningfully identify a table)
+            skip_words = {'the', 'and', 'for', 'are', 'have', 'been', 'what', 'which', 'show', 
+                         'list', 'all', 'get', 'setup', 'set', 'how', 'many', 'config', 'table',
+                         'tell', 'give', 'find', 'display', 'view', 'see', 'configured', 'exist',
+                         'exists', 'there', 'any', 'our', 'the', 'this', 'that', 'with', 'has'}
+            
             # Build n-grams and convert to snake_case for matching
             name_match_found = False
             for i in range(len(words)):
+                word = words[i]
+                
                 # Single word matches (for short table names like "pto", "unions")
-                if len(words[i]) >= 3 and words[i] in table_name:
-                    # Skip common words that would match too broadly
-                    if words[i] not in ['the', 'and', 'for', 'are', 'have', 'been', 'what', 'which', 'show', 'list', 'all', 'get', 'setup', 'set', 'how', 'many', 'config', 'table']:
+                if len(word) >= 3 and word not in skip_words:
+                    # Try exact match and singular form (remove trailing 's')
+                    word_singular = word.rstrip('s') if len(word) > 3 and word.endswith('s') else word
+                    
+                    if word in table_name or word_singular in table_name:
                         score += 30  # Moderate boost for single word match
                         name_match_found = True
                 
                 # Two-word combinations (e.g., "ale group" -> "ale_group")
                 if i < len(words) - 1:
-                    two_word = f"{words[i]}_{words[i+1]}"
-                    two_word_alt = f"{words[i]}{words[i+1]}"  # Also try without underscore
-                    if two_word in table_name or two_word_alt in table_name:
+                    word2 = words[i+1]
+                    two_word = f"{word}_{word2}"
+                    two_word_alt = f"{word}{word2}"  # Also try without underscore
+                    
+                    # Also try singular forms
+                    word2_singular = word2.rstrip('s') if len(word2) > 3 and word2.endswith('s') else word2
+                    two_word_singular = f"{word}_{word2_singular}"
+                    two_word_alt_singular = f"{word}{word2_singular}"
+                    
+                    matches_two = (two_word in table_name or two_word_alt in table_name or
+                                   two_word_singular in table_name or two_word_alt_singular in table_name)
+                    
+                    if matches_two:
                         score += 100  # MASSIVE boost - this is almost certainly the right table
                         name_match_found = True
-                        logger.warning(f"[SQL-GEN] DIRECT NAME MATCH: '{two_word}' in {table_name[-40:]} (+100)")
+                        matched = two_word if two_word in table_name else (two_word_singular if two_word_singular in table_name else two_word_alt)
+                        logger.warning(f"[SQL-GEN] DIRECT NAME MATCH: '{matched}' in {table_name[-40:]} (+100)")
                 
                 # Three-word combinations (e.g., "job change reasons" -> "job_change_reasons")
                 if i < len(words) - 2:
-                    three_word = f"{words[i]}_{words[i+1]}_{words[i+2]}"
-                    if three_word in table_name:
+                    word2 = words[i+1]
+                    word3 = words[i+2]
+                    three_word = f"{word}_{word2}_{word3}"
+                    word3_singular = word3.rstrip('s') if len(word3) > 3 and word3.endswith('s') else word3
+                    three_word_singular = f"{word}_{word2}_{word3_singular}"
+                    
+                    if three_word in table_name or three_word_singular in table_name:
                         score += 120  # Even bigger boost for 3-word match
                         name_match_found = True
                         logger.warning(f"[SQL-GEN] DIRECT NAME MATCH: '{three_word}' in {table_name[-40:]} (+120)")
