@@ -1,1366 +1,1717 @@
 """
-Database Models for XLR8
-CRUD operations for projects, documents, chat history, suppressions, and entity config
+Async Upload Router for XLR8
+============================
 
-Uses Supabase for persistent storage.
+v21 CHANGES:
+- Added progress_callback support for structured data uploads
+- Smooth progress updates during large file processing (no more frozen UI)
+- Maps handler progress (5-95%) to job progress (15-65%)
 
-Version: 2.0 - Universal Classification Architecture
-Updated: December 2024
+FEATURES:
+- Returns immediately after file save (no timeout!)
+- Processes in background thread
+- Real-time status updates via job polling
+- Handles large files gracefully
+- Smart Excel parsing (detects blue/colored headers)
+- SMART PDF ROUTING - tabular PDFs go to DuckDB!
+- CONTENT-BASED ROUTING - routes by content, not file extension
+- INTELLIGENCE ANALYSIS - runs on upload for instant insights (Phase 3)
+
+ROUTING LOGIC (Universal Classification Architecture):
+- truth_type determines routing, NOT file extension
+- REALITY (customer data) → DuckDB (structured queries)
+- INTENT (customer docs) → ChromaDB (semantic search)
+- REFERENCE (standards) → ChromaDB (semantic search, global)
+- CONFIGURATION (mappings) → DuckDB + ChromaDB (both)
+- Legacy extension-based routing used when truth_type not specified
+
+Author: XLR8 Team
 """
 
-from typing import List, Dict, Any, Optional, Tuple
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
+from typing import Optional
 from datetime import datetime
-import uuid
-import hashlib
-import re
+import sys
+import os
+import json
+import threading
+import traceback
+import PyPDF2
+import docx
+import pandas as pd
 import logging
 
-from .supabase_client import get_supabase
+# Try to import openpyxl for smart Excel parsing
+try:
+    from openpyxl import load_workbook
+    OPENPYXL_AVAILABLE = True
+except ImportError:
+    OPENPYXL_AVAILABLE = False
+    logger_temp = logging.getLogger(__name__)
+    logger_temp.warning("openpyxl not available - Excel color detection disabled")
+
+sys.path.insert(0, '/app')
+sys.path.insert(0, '/data')
+
+from utils.rag_handler import RAGHandler
+from utils.database.models import (
+    ProcessingJobModel, DocumentModel, ProjectModel, 
+    DocumentRegistryModel, auto_classify_file
+)
+
+# Import structured data handler for Excel/CSV
+try:
+    from utils.structured_data_handler import get_structured_handler
+    STRUCTURED_HANDLER_AVAILABLE = True
+except ImportError:
+    STRUCTURED_HANDLER_AVAILABLE = False
+    logger_temp = logging.getLogger(__name__)
+    logger_temp.warning("Structured data handler not available - Excel/CSV will use RAG only")
+
+# Import smart PDF analyzer for tabular PDFs
+try:
+    from backend.utils.smart_pdf_analyzer import process_pdf_intelligently
+    SMART_PDF_AVAILABLE = True
+except ImportError:
+    SMART_PDF_AVAILABLE = False
+    logger_temp = logging.getLogger(__name__)
+    logger_temp.warning("Smart PDF analyzer not available - PDFs will use RAG only")
+
+# Import document analyzer for content-based routing
+try:
+    from backend.utils.document_analyzer import DocumentAnalyzer, DocumentStructure
+    DOCUMENT_ANALYZER_AVAILABLE = True
+except ImportError:
+    DOCUMENT_ANALYZER_AVAILABLE = False
+    logger_temp = logging.getLogger(__name__)
+    logger_temp.warning("Document analyzer not available - DOCX/TXT will use extension-based routing")
+
+# Import intelligence service for Phase 3 analysis
+try:
+    from backend.utils.project_intelligence import ProjectIntelligenceService, AnalysisTier
+    INTELLIGENCE_AVAILABLE = True
+except ImportError:
+    INTELLIGENCE_AVAILABLE = False
+    logger_temp = logging.getLogger(__name__)
+    logger_temp.warning("Project intelligence not available - upload analysis disabled")
 
 logger = logging.getLogger(__name__)
 
-
-class ProjectModel:
-    """Project database operations"""
-    
-    @staticmethod
-    def create(name: str, client_name: str = None, project_type: str = 'Implementation', 
-              notes: str = None, product: str = None) -> Optional[Dict[str, Any]]:
-        """Create a new project"""
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        
-        try:
-            data = {
-                'name': name,
-                'customer': client_name or '',
-                'status': 'active',
-                'metadata': {
-                    'type': project_type,
-                    'notes': notes,
-                    'product': product
-                }
-            }
-            
-            response = supabase.table('projects').insert(data).execute()
-            return response.data[0] if response.data else None
-        
-        except Exception as e:
-            print(f"Error creating project: {e}")
-            return None
-    
-    @staticmethod
-    def get_all(status: str = 'active') -> List[Dict[str, Any]]:
-        """Get all projects"""
-        supabase = get_supabase()
-        if not supabase:
-            return []
-        
-        try:
-            query = supabase.table('projects').select('*').order('created_at', desc=True)
-            if status:
-                query = query.eq('status', status)
-            response = query.execute()
-            return response.data if response.data else []
-        except Exception as e:
-            print(f"Error getting projects: {e}")
-            return []
-    
-    @staticmethod
-    def get_by_id(project_id: str) -> Optional[Dict[str, Any]]:
-        """Get project by ID"""
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        
-        try:
-            response = supabase.table('projects').select('*').eq('id', project_id).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            print(f"Error getting project: {e}")
-            return None
-    
-    @staticmethod
-    def get_by_name(name: str) -> Optional[Dict[str, Any]]:
-        """Get project by name"""
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        
-        try:
-            response = supabase.table('projects').select('*').eq('name', name).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            print(f"Error getting project by name: {e}")
-            return None
-    
-    @staticmethod
-    def update(project_id: str, **kwargs) -> Optional[Dict[str, Any]]:
-        """Update project"""
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        
-        try:
-            kwargs['updated_at'] = datetime.utcnow().isoformat()
-            response = supabase.table('projects').update(kwargs).eq('id', project_id).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            print(f"Error updating project: {e}")
-            return None
-    
-    @staticmethod
-    def delete(project_id: str) -> bool:
-        """Delete project"""
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        
-        try:
-            supabase.table('projects').delete().eq('id', project_id).execute()
-            return True
-        except Exception as e:
-            print(f"Error deleting project: {e}")
-            return False
-
-
-class DocumentModel:
-    """Document database operations"""
-    
-    @staticmethod
-    def create(project_id: str, name: str, category: str, 
-              content: str = None, file_type: str = None,
-              file_size: int = None, metadata: dict = None) -> Optional[Dict[str, Any]]:
-        """Create a new document"""
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        
-        try:
-            data = {
-                'project_id': project_id,
-                'name': name,
-                'category': category,
-                'content': content,
-                'file_type': file_type,
-                'file_size': file_size,
-                'metadata': metadata or {}
-            }
-            response = supabase.table('documents').insert(data).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            print(f"Error creating document: {e}")
-            return None
-    
-    @staticmethod
-    def get_all(limit: int = 500) -> List[Dict[str, Any]]:
-        """Get all documents"""
-        supabase = get_supabase()
-        if not supabase:
-            return []
-        
-        try:
-            response = supabase.table('documents') \
-                .select('*') \
-                .order('created_at', desc=True) \
-                .limit(limit) \
-                .execute()
-            return response.data if response.data else []
-        except Exception as e:
-            print(f"Error getting all documents: {e}")
-            return []
-    
-    @staticmethod
-    def get_by_id(document_id: str) -> Optional[Dict[str, Any]]:
-        """Get document by ID"""
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        
-        try:
-            response = supabase.table('documents').select('*').eq('id', document_id).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            print(f"Error getting document: {e}")
-            return None
-    
-    @staticmethod
-    def get_by_project(project_id: str, category: str = None) -> List[Dict[str, Any]]:
-        """Get documents for a project"""
-        supabase = get_supabase()
-        if not supabase:
-            return []
-        
-        try:
-            query = supabase.table('documents').select('*').eq('project_id', project_id).order('created_at', desc=True)
-            if category:
-                query = query.eq('category', category)
-            response = query.execute()
-            return response.data if response.data else []
-        except Exception as e:
-            print(f"Error getting documents: {e}")
-            return []
-    
-    @staticmethod
-    def delete(document_id: str) -> bool:
-        """Delete document"""
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        
-        try:
-            supabase.table('documents').delete().eq('id', document_id).execute()
-            return True
-        except Exception as e:
-            print(f"Error deleting document: {e}")
-            return False
-    
-    @staticmethod
-    def delete_all() -> int:
-        """Delete all documents - returns count deleted"""
-        supabase = get_supabase()
-        if not supabase:
-            return 0
-        
-        try:
-            count_response = supabase.table('documents').select('id', count='exact').execute()
-            count = count_response.count or 0
-            if count > 0:
-                supabase.table('documents').delete().neq('id', '00000000-0000-0000-0000-000000000000').execute()
-            return count
-        except Exception as e:
-            print(f"Error deleting all documents: {e}")
-            return 0
+router = APIRouter()
 
 
 # =============================================================================
-# DOCUMENT REGISTRY MODEL - Universal Classification Architecture
+# DEBUG ENDPOINT - Check what's available
 # =============================================================================
-
-class DocumentRegistryModel:
-    """
-    Document Registry - THE SOURCE OF TRUTH for all uploaded files.
+@router.get("/upload/debug")
+async def debug_features():
+    """Debug endpoint to check what features are available"""
+    import os
     
-    Tracks ALL files in ChromaDB and/or DuckDB with unified metadata.
-    All components should query this registry instead of backends directly.
+    results = {
+        "version": "2025-12-15-v21-with-progress-callbacks",  # Update this when deploying
+        "smart_pdf_available": SMART_PDF_AVAILABLE,
+        "structured_handler_available": STRUCTURED_HANDLER_AVAILABLE,
+        "openpyxl_available": OPENPYXL_AVAILABLE,
+        "intelligence_available": INTELLIGENCE_AVAILABLE,
+        "files_in_utils": [],
+        "import_errors": []
+    }
     
-    Classification Architecture (Three Truths):
-    - REALITY: Customer's actual data (queryable in DuckDB)
-    - INTENT: Customer's documentation (searchable in ChromaDB)
-    - REFERENCE: Standards, best practices (global, searchable)
-    - CONFIGURATION: Mapping/lookup files (queryable AND searchable)
-    - OUTPUT: Generated deliverables (archive only)
-    
-    truth_type determines WHAT the file is
-    storage_type determines WHERE it's stored
-    Routing is determined by truth_type, NOT file extension
-    """
-    
-    # ==========================================================================
-    # TRUTH TYPES - The core classification
-    # ==========================================================================
-    TRUTH_REALITY = 'reality'
-    TRUTH_INTENT = 'intent'
-    TRUTH_REFERENCE = 'reference'
-    TRUTH_CONFIGURATION = 'configuration'
-    TRUTH_OUTPUT = 'output'
-    
-    VALID_TRUTH_TYPES = [TRUTH_REALITY, TRUTH_INTENT, TRUTH_REFERENCE, TRUTH_CONFIGURATION, TRUTH_OUTPUT]
-    
-    # ==========================================================================
-    # STORAGE TYPES
-    # ==========================================================================
-    STORAGE_CHROMADB = 'chromadb'
-    STORAGE_DUCKDB = 'duckdb'
-    STORAGE_BOTH = 'both'
-    
-    VALID_STORAGE_TYPES = [STORAGE_CHROMADB, STORAGE_DUCKDB, STORAGE_BOTH]
-    
-    # ==========================================================================
-    # CLASSIFICATION METHODS
-    # ==========================================================================
-    CLASS_USER_SELECTED = 'user_selected'
-    CLASS_AUTO_DETECTED = 'auto_detected'
-    CLASS_FILENAME_INFERRED = 'filename_inferred'
-    
-    VALID_CLASSIFICATION_METHODS = [CLASS_USER_SELECTED, CLASS_AUTO_DETECTED, CLASS_FILENAME_INFERRED]
-    
-    # ==========================================================================
-    # PARSE STATUS
-    # ==========================================================================
-    PARSE_PENDING = 'pending'
-    PARSE_SUCCESS = 'success'
-    PARSE_PARTIAL = 'partial'
-    PARSE_FAILED = 'failed'
-    
-    # ==========================================================================
-    # LEGACY USAGE TYPES - Backward compatibility
-    # ==========================================================================
-    USAGE_RAG_KNOWLEDGE = 'rag_knowledge'
-    USAGE_STRUCTURED_DATA = 'structured_data'
-    USAGE_PLAYBOOK = 'playbook'
-    USAGE_PLAYBOOK_SOURCE = 'playbook_source'
-    USAGE_TEMPLATE = 'template'
-    
-    # ==========================================================================
-    # ROUTING RULES
-    # ==========================================================================
-    
-    @classmethod
-    def get_storage_for_truth_type(cls, truth_type: str) -> str:
-        """Determine storage type based on truth_type."""
-        routing = {
-            cls.TRUTH_REALITY: cls.STORAGE_DUCKDB,
-            cls.TRUTH_INTENT: cls.STORAGE_CHROMADB,
-            cls.TRUTH_REFERENCE: cls.STORAGE_CHROMADB,
-            cls.TRUTH_CONFIGURATION: cls.STORAGE_BOTH,
-            cls.TRUTH_OUTPUT: cls.STORAGE_CHROMADB,
-        }
-        return routing.get(truth_type, cls.STORAGE_CHROMADB)
-    
-    @classmethod
-    def get_legacy_usage_type(cls, truth_type: str, is_global: bool) -> str:
-        """Map truth_type to legacy usage_type for backward compatibility."""
-        if truth_type == cls.TRUTH_REALITY:
-            return cls.USAGE_STRUCTURED_DATA
-        elif truth_type == cls.TRUTH_REFERENCE:
-            return cls.USAGE_PLAYBOOK_SOURCE if is_global else cls.USAGE_TEMPLATE
-        elif truth_type == cls.TRUTH_CONFIGURATION:
-            return cls.USAGE_STRUCTURED_DATA
+    # Check what files exist in /app/utils
+    try:
+        utils_path = "/app/utils"
+        if os.path.exists(utils_path):
+            results["files_in_utils"] = os.listdir(utils_path)
         else:
-            return cls.USAGE_RAG_KNOWLEDGE
+            results["files_in_utils"] = ["DIRECTORY NOT FOUND"]
+    except Exception as e:
+        results["files_in_utils"] = [f"ERROR: {e}"]
     
-    # ==========================================================================
-    # REGISTRATION
-    # ==========================================================================
+    # Try imports and capture specific errors
+    try:
+        from backend.utils.smart_pdf_analyzer import process_pdf_intelligently
+        results["smart_pdf_import"] = "SUCCESS"
+    except ImportError as e:
+        results["smart_pdf_import"] = f"FAILED: {e}"
+        results["import_errors"].append(f"smart_pdf_analyzer: {e}")
+    except Exception as e:
+        results["smart_pdf_import"] = f"ERROR: {e}"
+        results["import_errors"].append(f"smart_pdf_analyzer: {e}")
     
-    @staticmethod
-    def register(
-        filename: str,
-        truth_type: str = None,
-        classification_method: str = None,
-        file_type: str = None,
-        storage_type: str = None,
-        usage_type: str = None,
-        project_id: str = None,
-        is_global: bool = False,
-        classification_confidence: float = 0.5,
-        content_domain: List[str] = None,
-        chunk_count: int = 0,
-        file_size: int = None,
-        duckdb_tables: List[str] = None,
-        chromadb_collection: str = None,
-        row_count: int = None,
-        sheet_count: int = None,
-        page_count: int = None,
-        parse_status: str = 'success',
-        parse_errors: List[str] = None,
-        schema_confidence: float = None,
-        metadata: dict = None
-    ) -> Optional[Dict[str, Any]]:
-        """Register a document in the registry."""
-        supabase = get_supabase()
-        if not supabase:
-            logger.error("[REGISTRY] No Supabase connection")
-            return None
-        
-        # Handle backward compatibility
-        if truth_type is None and usage_type is not None:
-            if usage_type == DocumentRegistryModel.USAGE_STRUCTURED_DATA:
-                truth_type = DocumentRegistryModel.TRUTH_REALITY
-            elif usage_type in [DocumentRegistryModel.USAGE_PLAYBOOK_SOURCE, DocumentRegistryModel.USAGE_TEMPLATE]:
-                truth_type = DocumentRegistryModel.TRUTH_REFERENCE
-            else:
-                truth_type = DocumentRegistryModel.TRUTH_INTENT if not is_global else DocumentRegistryModel.TRUTH_REFERENCE
-            classification_method = classification_method or DocumentRegistryModel.CLASS_FILENAME_INFERRED
-        
-        if truth_type is None:
-            truth_type = DocumentRegistryModel.TRUTH_INTENT if not is_global else DocumentRegistryModel.TRUTH_REFERENCE
-            classification_method = classification_method or DocumentRegistryModel.CLASS_FILENAME_INFERRED
-        
-        if classification_method is None:
-            classification_method = DocumentRegistryModel.CLASS_FILENAME_INFERRED
-        
-        if storage_type is None:
-            storage_type = DocumentRegistryModel.get_storage_for_truth_type(truth_type)
-        
-        if usage_type is None:
-            usage_type = DocumentRegistryModel.get_legacy_usage_type(truth_type, is_global)
-        
-        intelligence_ready = True
-        readiness_blockers = []
-        
-        if parse_status == 'failed':
-            intelligence_ready = False
-            readiness_blockers.append('parse_failed')
-        elif parse_status == 'partial':
-            readiness_blockers.append('parse_partial')
-        
-        if classification_confidence < 0.4:
-            readiness_blockers.append('low_classification_confidence')
-        
-        try:
-            data = {
-                'filename': filename,
-                'file_type': file_type,
-                'truth_type': truth_type,
-                'classification_method': classification_method,
-                'classification_confidence': classification_confidence,
-                'content_domain': content_domain or [],
-                'storage_type': storage_type,
-                'usage_type': usage_type,
-                'project_id': project_id,
-                'is_global': is_global,
-                'chunk_count': chunk_count,
-                'file_size': file_size,
-                'row_count': row_count,
-                'sheet_count': sheet_count,
-                'page_count': page_count,
-                'parse_status': parse_status,
-                'parse_errors': parse_errors or [],
-                'schema_confidence': schema_confidence,
-                'intelligence_ready': intelligence_ready,
-                'readiness_blockers': readiness_blockers,
-                'citation_count': 0,
-                'positive_feedback': 0,
-                'negative_feedback': 0,
-                'metadata': metadata or {}
-            }
-            
-            data = {k: v for k, v in data.items() if v is not None}
-            
-            response = supabase.table('document_registry').insert(data).execute()
-            
-            if response.data:
-                logger.info(f"[REGISTRY] Registered: {filename} as {truth_type} -> {storage_type}")
-                return response.data[0]
-            return None
-            
-        except Exception as e:
-            logger.error(f"[REGISTRY] Error registering {filename}: {e}")
-            return None
+    try:
+        from utils.structured_data_handler import get_structured_handler
+        results["structured_handler_import"] = "SUCCESS"
+    except ImportError as e:
+        results["structured_handler_import"] = f"FAILED: {e}"
+        results["import_errors"].append(f"structured_data_handler: {e}")
+    except Exception as e:
+        results["structured_handler_import"] = f"ERROR: {e}"
+        results["import_errors"].append(f"structured_data_handler: {e}")
     
-    # ==========================================================================
-    # BASIC QUERIES
-    # ==========================================================================
+    try:
+        from utils.project_intelligence import ProjectIntelligenceService
+        results["intelligence_import"] = "SUCCESS"
+    except ImportError as e:
+        results["intelligence_import"] = f"FAILED: {e}"
+        results["import_errors"].append(f"project_intelligence: {e}")
+    except Exception as e:
+        results["intelligence_import"] = f"ERROR: {e}"
+        results["import_errors"].append(f"project_intelligence: {e}")
     
-    @staticmethod
-    def get_all(limit: int = 1000) -> List[Dict[str, Any]]:
-        """Get all registered documents"""
-        supabase = get_supabase()
-        if not supabase:
-            return []
-        
-        try:
-            response = supabase.table('document_registry') \
-                .select('*') \
-                .order('created_at', desc=True) \
-                .limit(limit) \
-                .execute()
-            return response.data if response.data else []
-        except Exception as e:
-            logger.error(f"[REGISTRY] Error getting all: {e}")
-            return []
+    # Check pdfplumber
+    try:
+        import pdfplumber
+        results["pdfplumber_available"] = True
+    except ImportError:
+        results["pdfplumber_available"] = False
+        results["import_errors"].append("pdfplumber not installed")
     
-    @staticmethod
-    def get_by_project(
-        project_id: str = None, 
-        include_global: bool = True,
-        truth_type: str = None,
-        storage_type: str = None,
-        intelligence_ready_only: bool = False
-    ) -> List[Dict[str, Any]]:
-        """Get documents for a project with optional filters."""
-        supabase = get_supabase()
-        if not supabase:
-            return []
-        
-        try:
-            query = supabase.table('document_registry').select('*')
-            
-            if project_id:
-                if include_global:
-                    query = query.or_(f'project_id.eq.{project_id},is_global.eq.true')
-                else:
-                    query = query.eq('project_id', project_id)
-            else:
-                query = query.eq('is_global', True)
-            
-            if truth_type:
-                if isinstance(truth_type, list):
-                    query = query.in_('truth_type', truth_type)
-                else:
-                    query = query.eq('truth_type', truth_type)
-            
-            if storage_type:
-                if isinstance(storage_type, list):
-                    query = query.in_('storage_type', storage_type)
-                else:
-                    query = query.eq('storage_type', storage_type)
-            
-            if intelligence_ready_only:
-                query = query.eq('intelligence_ready', True)
-            
-            response = query.order('created_at', desc=True).execute()
-            return response.data if response.data else []
-            
-        except Exception as e:
-            logger.error(f"[REGISTRY] Error getting by project: {e}")
-            return []
-    
-    @staticmethod
-    def find_by_filename(filename: str, project_id: str = None) -> Optional[Dict[str, Any]]:
-        """Find a document by filename"""
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        
-        try:
-            query = supabase.table('document_registry').select('*').eq('filename', filename)
-            if project_id:
-                query = query.eq('project_id', project_id)
-            response = query.limit(1).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            logger.error(f"[REGISTRY] Error finding {filename}: {e}")
-            return None
-    
-    @staticmethod
-    def find_by_id(registry_id: str) -> Optional[Dict[str, Any]]:
-        """Find a document by registry ID"""
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        
-        try:
-            response = supabase.table('document_registry').select('*').eq('id', registry_id).limit(1).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            logger.error(f"[REGISTRY] Error finding by ID {registry_id}: {e}")
-            return None
-    
-    # ==========================================================================
-    # TRUTH-TYPE SPECIFIC QUERIES
-    # ==========================================================================
-    
-    @staticmethod
-    def get_reality_files(project_id: str, include_global: bool = False) -> List[Dict[str, Any]]:
-        """Get REALITY files (customer data) for a project."""
-        return DocumentRegistryModel.get_by_project(
-            project_id=project_id,
-            include_global=include_global,
-            truth_type=DocumentRegistryModel.TRUTH_REALITY,
-            intelligence_ready_only=True
-        )
-    
-    @staticmethod
-    def get_intent_files(project_id: str) -> List[Dict[str, Any]]:
-        """Get INTENT files (customer documentation) for a project."""
-        return DocumentRegistryModel.get_by_project(
-            project_id=project_id,
-            include_global=False,
-            truth_type=DocumentRegistryModel.TRUTH_INTENT,
-            intelligence_ready_only=True
-        )
-    
-    @staticmethod
-    def get_reference_files() -> List[Dict[str, Any]]:
-        """Get REFERENCE files (standards, checklists)."""
-        return DocumentRegistryModel.get_by_project(
-            project_id=None,
-            include_global=True,
-            truth_type=DocumentRegistryModel.TRUTH_REFERENCE,
-            intelligence_ready_only=True
-        )
-    
-    @staticmethod
-    def get_configuration_files(project_id: str = None, include_global: bool = True) -> List[Dict[str, Any]]:
-        """Get CONFIGURATION files (mappings, lookups)."""
-        return DocumentRegistryModel.get_by_project(
-            project_id=project_id,
-            include_global=include_global,
-            truth_type=DocumentRegistryModel.TRUTH_CONFIGURATION,
-            intelligence_ready_only=True
-        )
-    
-    @staticmethod
-    def get_queryable_tables(project_id: str, include_global: bool = False) -> List[str]:
-        """Get list of DuckDB table names that are queryable for a project."""
-        files = DocumentRegistryModel.get_by_project(
-            project_id=project_id,
-            include_global=include_global,
-            truth_type=[DocumentRegistryModel.TRUTH_REALITY, DocumentRegistryModel.TRUTH_CONFIGURATION],
-            storage_type=[DocumentRegistryModel.STORAGE_DUCKDB, DocumentRegistryModel.STORAGE_BOTH],
-            intelligence_ready_only=True
-        )
-        
-        tables = []
-        for f in files:
-            metadata = f.get('metadata', {})
-            if isinstance(metadata, dict) and 'tables' in metadata:
-                tables.extend(metadata['tables'])
-            if f.get('duckdb_tables'):
-                tables.extend(f['duckdb_tables'])
-        
-        return list(set(tables))
-    
-    @staticmethod
-    def get_for_intelligence(project_id: str) -> Dict[str, List[Dict[str, Any]]]:
-        """Get all files organized by truth type for the Intelligence Engine."""
-        return {
-            'reality': DocumentRegistryModel.get_reality_files(project_id),
-            'intent': DocumentRegistryModel.get_intent_files(project_id),
-            'reference': DocumentRegistryModel.get_reference_files(),
-            'configuration': DocumentRegistryModel.get_configuration_files(project_id)
-        }
-    
-    # ==========================================================================
-    # UNREGISTER / DELETE
-    # ==========================================================================
-    
-    @staticmethod
-    def unregister(filename: str, project_id: str = None) -> bool:
-        """Remove a document from the registry."""
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        
-        try:
-            if project_id:
-                result = supabase.table('document_registry').delete().eq('filename', filename).eq('project_id', project_id).execute()
-            else:
-                result = supabase.table('document_registry').delete().eq('filename', filename).execute()
-            
-            deleted_count = len(result.data) if result.data else 0
-            if deleted_count > 0:
-                logger.info(f"[REGISTRY] Unregistered: {filename}")
-            return deleted_count > 0 or True
-            
-        except Exception as e:
-            logger.error(f"[REGISTRY] Error unregistering {filename}: {e}")
-            return False
-    
-    # ==========================================================================
-    # UPDATES
-    # ==========================================================================
-    
-    @staticmethod
-    def update(filename: str, project_id: str = None, **updates) -> bool:
-        """Update fields for a document."""
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        
-        try:
-            updates['updated_at'] = datetime.utcnow().isoformat()
-            query = supabase.table('document_registry').update(updates).eq('filename', filename)
-            if project_id:
-                query = query.eq('project_id', project_id)
-            query.execute()
-            return True
-        except Exception as e:
-            logger.error(f"[REGISTRY] Error updating {filename}: {e}")
-            return False
-    
-    @staticmethod
-    def update_chunk_count(filename: str, chunk_count: int, project_id: str = None) -> bool:
-        """Update the chunk count for a document"""
-        return DocumentRegistryModel.update(filename, project_id, chunk_count=chunk_count)
-    
-    @staticmethod
-    def reclassify(filename: str, truth_type: str, classification_method: str = 'user_selected',
-                   classification_confidence: float = 1.0, project_id: str = None) -> bool:
-        """Reclassify a document with a new truth_type."""
-        if truth_type not in DocumentRegistryModel.VALID_TRUTH_TYPES:
-            return False
-        new_storage = DocumentRegistryModel.get_storage_for_truth_type(truth_type)
-        return DocumentRegistryModel.update(filename, project_id, truth_type=truth_type,
-                                            storage_type=new_storage, classification_method=classification_method,
-                                            classification_confidence=classification_confidence)
-    
-    # ==========================================================================
-    # LEARNING METRICS
-    # ==========================================================================
-    
-    @staticmethod
-    def increment_citation(filename: str, project_id: str = None) -> bool:
-        """Increment citation count when a file is used in an answer."""
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        
-        try:
-            doc = DocumentRegistryModel.find_by_filename(filename, project_id)
-            if not doc:
-                return False
-            
-            current_count = doc.get('citation_count', 0) or 0
-            updates = {
-                'citation_count': current_count + 1,
-                'last_cited_at': datetime.utcnow().isoformat(),
-                'updated_at': datetime.utcnow().isoformat()
-            }
-            
-            query = supabase.table('document_registry').update(updates).eq('filename', filename)
-            if project_id:
-                query = query.eq('project_id', project_id)
-            query.execute()
-            return True
-        except Exception as e:
-            logger.error(f"[REGISTRY] Error incrementing citation for {filename}: {e}")
-            return False
-    
-    @staticmethod
-    def record_feedback(filename: str, positive: bool, project_id: str = None) -> bool:
-        """Record feedback for a file (thumbs up/down)."""
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        
-        try:
-            doc = DocumentRegistryModel.find_by_filename(filename, project_id)
-            if not doc:
-                return False
-            
-            if positive:
-                current = doc.get('positive_feedback', 0) or 0
-                updates = {'positive_feedback': current + 1}
-            else:
-                current = doc.get('negative_feedback', 0) or 0
-                updates = {'negative_feedback': current + 1}
-            
-            updates['updated_at'] = datetime.utcnow().isoformat()
-            
-            query = supabase.table('document_registry').update(updates).eq('filename', filename)
-            if project_id:
-                query = query.eq('project_id', project_id)
-            query.execute()
-            return True
-        except Exception as e:
-            logger.error(f"[REGISTRY] Error recording feedback for {filename}: {e}")
-            return False
-    
-    # ==========================================================================
-    # DIAGNOSTICS
-    # ==========================================================================
-    
-    @staticmethod
-    def get_classification_stats(project_id: str = None) -> Dict[str, Any]:
-        """Get classification statistics for diagnostics dashboard."""
-        supabase = get_supabase()
-        if not supabase:
-            return {}
-        
-        try:
-            files = DocumentRegistryModel.get_by_project(project_id, include_global=True) if project_id else DocumentRegistryModel.get_all()
-            
-            stats = {
-                'total_files': len(files),
-                'by_truth_type': {},
-                'by_classification_method': {},
-                'by_parse_status': {},
-                'intelligence_ready': 0,
-                'not_ready': 0,
-                'low_confidence': 0,
-                'never_cited': 0,
-                'avg_feedback_score': 0.0
-            }
-            
-            total_feedback = 0
-            positive_total = 0
-            
-            for f in files:
-                tt = f.get('truth_type', 'unknown')
-                stats['by_truth_type'][tt] = stats['by_truth_type'].get(tt, 0) + 1
-                
-                cm = f.get('classification_method', 'unknown')
-                stats['by_classification_method'][cm] = stats['by_classification_method'].get(cm, 0) + 1
-                
-                ps = f.get('parse_status', 'unknown')
-                stats['by_parse_status'][ps] = stats['by_parse_status'].get(ps, 0) + 1
-                
-                if f.get('intelligence_ready', True):
-                    stats['intelligence_ready'] += 1
-                else:
-                    stats['not_ready'] += 1
-                
-                conf = f.get('classification_confidence')
-                if conf is not None and conf < 0.5:
-                    stats['low_confidence'] += 1
-                
-                if (f.get('citation_count') or 0) == 0:
-                    stats['never_cited'] += 1
-                
-                pos = f.get('positive_feedback') or 0
-                neg = f.get('negative_feedback') or 0
-                if pos + neg > 0:
-                    total_feedback += pos + neg
-                    positive_total += pos
-            
-            if total_feedback > 0:
-                stats['avg_feedback_score'] = round(positive_total / total_feedback, 2)
-            
-            return stats
-        except Exception as e:
-            logger.error(f"[REGISTRY] Error getting stats: {e}")
-            return {}
-    
-    @staticmethod
-    def get_files_needing_review(project_id: str = None) -> List[Dict[str, Any]]:
-        """Get files that need manual review."""
-        try:
-            files = DocumentRegistryModel.get_by_project(project_id, include_global=True) if project_id else DocumentRegistryModel.get_all()
-            
-            needs_review = []
-            for f in files:
-                reasons = []
-                if not f.get('intelligence_ready', True):
-                    reasons.append('not_intelligence_ready')
-                conf = f.get('classification_confidence')
-                if conf is not None and conf < 0.5:
-                    reasons.append('low_confidence')
-                ps = f.get('parse_status', 'success')
-                if ps in ['partial', 'failed']:
-                    reasons.append(f'parse_{ps}')
-                blockers = f.get('readiness_blockers', [])
-                if blockers:
-                    reasons.extend(blockers)
-                if reasons:
-                    f['review_reasons'] = reasons
-                    needs_review.append(f)
-            
-            return needs_review
-        except Exception as e:
-            logger.error(f"[REGISTRY] Error getting files needing review: {e}")
-            return []
-    
-    # ==========================================================================
-    # UTILITY
-    # ==========================================================================
-    
-    @staticmethod
-    def table_exists() -> bool:
-        """Check if the document_registry table exists"""
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        try:
-            supabase.table('document_registry').select('id').limit(1).execute()
-            return True
-        except Exception:
-            return False
-    
-    @staticmethod
-    def validate_truth_type(truth_type: str) -> bool:
-        return truth_type in DocumentRegistryModel.VALID_TRUTH_TYPES
-    
-    @staticmethod
-    def validate_classification_method(method: str) -> bool:
-        return method in DocumentRegistryModel.VALID_CLASSIFICATION_METHODS
+    return results
 
 
-# =============================================================================
-# AUTO-CLASSIFICATION HELPER
-# =============================================================================
-
-def auto_classify_file(filename: str, file_extension: str, project_name: str, 
-                       file_content_sample: str = None) -> Tuple[str, str, float]:
-    """Auto-classify a file based on filename, extension, and optionally content."""
-    filename_lower = filename.lower()
-    is_global = project_name.lower() in ['global', '__global__', 'global/universal', 'reference library']
+def extract_text(file_path: str) -> str:
+    """Extract text from file based on extension"""
+    ext = file_path.split('.')[-1].lower()
     
-    reality_keywords = ['register', 'export', 'report', 'data', 'payroll', 'employee', 'hr_', 'audit']
-    intent_keywords = ['sow', 'requirement', 'statement of work', 'notes', 'meeting', 'spec', 'scope']
-    reference_keywords = ['checklist', 'standard', 'guide', 'reference', 'compliance', 'template', 
-                          'best_practice', 'best-practice', 'year-end', 'yearend', 'year_end']
-    config_keywords = ['mapping', 'lookup', 'codes', 'config', 'crosswalk', 'translation', 'xref']
-    
-    if any(kw in filename_lower for kw in reference_keywords):
-        return (DocumentRegistryModel.TRUTH_REFERENCE, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.8)
-    
-    if any(kw in filename_lower for kw in config_keywords):
-        return (DocumentRegistryModel.TRUTH_CONFIGURATION, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.8)
-    
-    if any(kw in filename_lower for kw in intent_keywords):
-        return (DocumentRegistryModel.TRUTH_INTENT, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.8)
-    
-    if any(kw in filename_lower for kw in reality_keywords) and not is_global:
-        return (DocumentRegistryModel.TRUTH_REALITY, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.8)
-    
-    if file_extension in ['xlsx', 'xls', 'csv']:
-        if is_global:
-            return (DocumentRegistryModel.TRUTH_REFERENCE, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.5)
-        else:
-            return (DocumentRegistryModel.TRUTH_REALITY, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.6)
-    
-    if file_extension in ['docx', 'doc', 'pdf']:
-        if is_global:
-            return (DocumentRegistryModel.TRUTH_REFERENCE, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.6)
-        else:
-            return (DocumentRegistryModel.TRUTH_INTENT, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.6)
-    
-    if is_global:
-        return (DocumentRegistryModel.TRUTH_REFERENCE, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.4)
-    else:
-        return (DocumentRegistryModel.TRUTH_INTENT, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.4)
-
-
-# =============================================================================
-# CHAT HISTORY MODEL
-# =============================================================================
-
-class ChatHistoryModel:
-    """Chat history database operations"""
-    
-    @staticmethod
-    def add_message(project_id: str, session_id: str, role: str,
-                   content: str, sources: list = None, metadata: dict = None) -> Optional[Dict[str, Any]]:
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        try:
-            data = {
-                'project_id': project_id, 'session_id': session_id, 'role': role,
-                'content': content, 'sources': sources or [], 'metadata': metadata or {}
-            }
-            response = supabase.table('chat_history').insert(data).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            print(f"Error adding chat message: {e}")
-            return None
-    
-    @staticmethod
-    def get_by_session(session_id: str, limit: int = 100) -> List[Dict[str, Any]]:
-        supabase = get_supabase()
-        if not supabase:
-            return []
-        try:
-            response = supabase.table('chat_history').select('*').eq('session_id', session_id).order('created_at', desc=False).limit(limit).execute()
-            return response.data if response.data else []
-        except Exception as e:
-            print(f"Error getting chat history: {e}")
-            return []
-    
-    @staticmethod
-    def get_by_project(project_id: str, limit: int = 100) -> List[Dict[str, Any]]:
-        supabase = get_supabase()
-        if not supabase:
-            return []
-        try:
-            response = supabase.table('chat_history').select('*').eq('project_id', project_id).order('created_at', desc=True).limit(limit).execute()
-            return response.data if response.data else []
-        except Exception as e:
-            print(f"Error getting chat history: {e}")
-            return []
-    
-    @staticmethod
-    def delete_session(session_id: str) -> bool:
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        try:
-            supabase.table('chat_history').delete().eq('session_id', session_id).execute()
-            return True
-        except Exception as e:
-            print(f"Error deleting session: {e}")
-            return False
-
-
-# =============================================================================
-# PROCESSING JOB MODEL
-# =============================================================================
-
-class ProcessingJobModel:
-    """Processing job database operations"""
-    
-    @staticmethod
-    def create(job_type: str, project_id: str = None, filename: str = None, input_data: dict = None) -> Optional[Dict[str, Any]]:
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        try:
-            data = {'job_type': job_type, 'project_id': project_id, 'status': 'queued',
-                    'progress': {'percent': 0, 'step': 'Queued...'}, 'input_data': input_data or {'filename': filename}}
-            response = supabase.table('processing_jobs').insert(data).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            print(f"Error creating job: {e}")
-            return None
-    
-    @staticmethod
-    def update_progress(job_id: str, percent: int, step: str) -> bool:
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        try:
-            data = {'status': 'processing', 'progress': {'percent': percent, 'step': step}, 'updated_at': datetime.utcnow().isoformat()}
-            if percent == 0:
-                data['started_at'] = datetime.utcnow().isoformat()
-            supabase.table('processing_jobs').update(data).eq('id', job_id).execute()
-            return True
-        except Exception as e:
-            print(f"Error updating job progress: {e}")
-            return False
-    
-    @staticmethod
-    def complete(job_id: str, result_data: dict = None) -> bool:
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        try:
-            data = {'status': 'completed', 'progress': {'percent': 100, 'step': 'Complete'},
-                    'result_data': result_data or {}, 'completed_at': datetime.utcnow().isoformat(), 'updated_at': datetime.utcnow().isoformat()}
-            supabase.table('processing_jobs').update(data).eq('id', job_id).execute()
-            return True
-        except Exception as e:
-            print(f"Error completing job: {e}")
-            return False
-    
-    @staticmethod
-    def fail(job_id: str, error_message: str) -> bool:
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        try:
-            data = {'status': 'failed', 'error_message': error_message, 'completed_at': datetime.utcnow().isoformat(), 'updated_at': datetime.utcnow().isoformat()}
-            supabase.table('processing_jobs').update(data).eq('id', job_id).execute()
-            return True
-        except Exception as e:
-            print(f"Error failing job: {e}")
-            return False
-    
-    @staticmethod
-    def get_all(limit: int = 50) -> List[Dict[str, Any]]:
-        supabase = get_supabase()
-        if not supabase:
-            return []
-        try:
-            response = supabase.table('processing_jobs').select('*').order('created_at', desc=True).limit(limit).execute()
-            return response.data if response.data else []
-        except Exception as e:
-            print(f"Error getting jobs: {e}")
-            return []
-    
-    @staticmethod
-    def get_by_id(job_id: str) -> Optional[Dict[str, Any]]:
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        try:
-            response = supabase.table('processing_jobs').select('*').eq('id', job_id).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            print(f"Error getting job: {e}")
-            return None
-    
-    @staticmethod
-    def delete(job_id: str) -> bool:
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        try:
-            supabase.table('processing_jobs').delete().eq('id', job_id).execute()
-            return True
-        except Exception as e:
-            print(f"Error deleting job: {e}")
-            return False
-    
-    @staticmethod
-    def delete_all() -> int:
-        supabase = get_supabase()
-        if not supabase:
-            return 0
-        try:
-            count_response = supabase.table('processing_jobs').select('id', count='exact').execute()
-            count = count_response.count or 0
-            if count > 0:
-                supabase.table('processing_jobs').delete().neq('id', '00000000-0000-0000-0000-000000000000').execute()
-            return count
-        except Exception as e:
-            print(f"Error deleting all jobs: {e}")
-            return 0
-    
-    @staticmethod
-    def delete_older_than(days: int = 7) -> int:
-        supabase = get_supabase()
-        if not supabase:
-            return 0
-        try:
-            from datetime import timedelta
-            cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
-            count_response = supabase.table('processing_jobs').select('id', count='exact').lt('created_at', cutoff).execute()
-            count = count_response.count or 0
-            if count > 0:
-                supabase.table('processing_jobs').delete().lt('created_at', cutoff).execute()
-            return count
-        except Exception as e:
-            print(f"Error deleting old jobs: {e}")
-            return 0
-    
-    @staticmethod
-    def get_recent(days: int = 7, limit: int = 100) -> List[Dict[str, Any]]:
-        supabase = get_supabase()
-        if not supabase:
-            return []
-        try:
-            from datetime import timedelta
-            cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
-            response = supabase.table('processing_jobs').select('*').gte('created_at', cutoff).order('created_at', desc=True).limit(limit).execute()
-            return response.data if response.data else []
-        except Exception as e:
-            print(f"Error getting recent jobs: {e}")
-            return []
-
-
-# =============================================================================
-# FINDING SUPPRESSION MODEL
-# =============================================================================
-
-class FindingSuppressionModel:
-    """Finding Suppression - Manage acknowledged/suppressed findings"""
-    
-    @staticmethod
-    def _hash_finding(finding_text: str) -> str:
-        normalized = finding_text.lower().strip()
-        normalized = re.sub(r'\d+\.?\d*%?', 'N', normalized)
-        normalized = re.sub(r'\s+', ' ', normalized)
-        return hashlib.sha256(normalized.encode()).hexdigest()[:32]
-    
-    @staticmethod
-    def create(project_id: str, playbook_type: str, suppression_type: str, reason: str,
-               action_id: str = None, finding_text: str = None, pattern: str = None,
-               category: str = None, document_filter: str = None, state_filter: List[str] = None,
-               keyword_filter: List[str] = None, fein_filter: List[str] = None,
-               notes: str = None, expires_at: str = None, created_by: str = None) -> Optional[Dict[str, Any]]:
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        try:
-            finding_hash = None
-            if finding_text and suppression_type in ('suppress', 'acknowledge'):
-                finding_hash = FindingSuppressionModel._hash_finding(finding_text)
-            data = {
-                'project_id': project_id, 'playbook_type': playbook_type, 'action_id': action_id,
-                'suppression_type': suppression_type, 'finding_hash': finding_hash, 'pattern': pattern,
-                'category': category, 'document_filter': document_filter, 'state_filter': state_filter,
-                'keyword_filter': keyword_filter, 'fein_filter': fein_filter, 'reason': reason,
-                'notes': notes, 'expires_at': expires_at, 'created_by': created_by, 'is_active': True
-            }
-            data = {k: v for k, v in data.items() if v is not None}
-            response = supabase.table('finding_suppressions').insert(data).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            print(f"Error creating suppression: {e}")
-            return None
-    
-    @staticmethod
-    def get_active_rules(project_id: str, playbook_type: str, action_id: str = None) -> List[Dict[str, Any]]:
-        supabase = get_supabase()
-        if not supabase:
-            return []
-        try:
-            query = supabase.table('finding_suppressions').select('*').eq('project_id', project_id).eq('playbook_type', playbook_type).eq('is_active', True)
-            response = query.execute()
-            rules = response.data if response.data else []
-            now = datetime.utcnow().isoformat()
-            filtered = []
-            for rule in rules:
-                if rule.get('expires_at') and rule['expires_at'] < now:
-                    continue
-                if rule.get('action_id') and action_id and rule['action_id'] != action_id:
-                    continue
-                filtered.append(rule)
-            return filtered
-        except Exception as e:
-            print(f"Error getting suppression rules: {e}")
-            return []
-    
-    @staticmethod
-    def check_finding(project_id: str, playbook_type: str, finding_text: str, action_id: str = None,
-                      document_name: str = None, state: str = None, fein: str = None) -> Optional[Dict[str, Any]]:
-        rules = FindingSuppressionModel.get_active_rules(project_id, playbook_type, action_id)
-        if not rules:
-            return None
-        finding_hash = FindingSuppressionModel._hash_finding(finding_text)
-        finding_lower = finding_text.lower()
-        for rule in rules:
-            if rule.get('fein_filter') and fein and fein not in rule['fein_filter']:
-                continue
-            if rule.get('finding_hash') and rule['finding_hash'] == finding_hash:
-                FindingSuppressionModel._record_match(rule['id'])
-                return rule
-            if rule.get('pattern'):
+    try:
+        if ext == 'pdf':
+            # ENHANCED PDF EXTRACTION - try multiple methods
+            text = ""
+            pages_extracted = 0
+            
+            # Method 1: Try pdfplumber first (best for tables and structured PDFs)
+            try:
+                import pdfplumber
+                logger.info("[PDF] Trying pdfplumber extraction...")
+                with pdfplumber.open(file_path) as pdf:
+                    page_texts = []
+                    for i, page in enumerate(pdf.pages):
+                        page_text = page.extract_text() or ''
+                        if page_text.strip():
+                            page_texts.append(f"--- Page {i+1} ---\n{page_text}")
+                            pages_extracted += 1
+                    text = "\n\n".join(page_texts)
+                    logger.info(f"[PDF] pdfplumber extracted {pages_extracted} pages, {len(text)} chars")
+            except Exception as e:
+                logger.warning(f"[PDF] pdfplumber failed: {e}")
+            
+            # Method 2: If pdfplumber got little/no content, try PyMuPDF
+            if len(text) < 500:
                 try:
-                    if re.search(rule['pattern'], finding_text, re.IGNORECASE):
-                        FindingSuppressionModel._record_match(rule['id'])
-                        return rule
-                except re.error:
-                    pass
-            if rule.get('document_filter') and document_name and rule['document_filter'].lower() in document_name.lower():
-                FindingSuppressionModel._record_match(rule['id'])
-                return rule
-            if rule.get('state_filter') and state and state.upper() in [s.upper() for s in rule['state_filter']]:
-                FindingSuppressionModel._record_match(rule['id'])
-                return rule
-            if rule.get('keyword_filter') and any(kw.lower() in finding_lower for kw in rule['keyword_filter']):
-                FindingSuppressionModel._record_match(rule['id'])
-                return rule
+                    import fitz  # PyMuPDF
+                    logger.info("[PDF] Trying PyMuPDF extraction...")
+                    doc = fitz.open(file_path)
+                    page_texts = []
+                    for i, page in enumerate(doc):
+                        page_text = page.get_text()
+                        if page_text.strip():
+                            page_texts.append(f"--- Page {i+1} ---\n{page_text}")
+                            pages_extracted += 1
+                    doc.close()
+                    fitz_text = "\n\n".join(page_texts)
+                    if len(fitz_text) > len(text):
+                        text = fitz_text
+                        logger.info(f"[PDF] PyMuPDF extracted {pages_extracted} pages, {len(text)} chars")
+                except Exception as e:
+                    logger.warning(f"[PDF] PyMuPDF failed: {e}")
+            
+            # Method 3: Fallback to PyPDF2 if others failed
+            if len(text) < 100:
+                try:
+                    logger.info("[PDF] Trying PyPDF2 extraction...")
+                    with open(file_path, 'rb') as f:
+                        pdf = PyPDF2.PdfReader(f)
+                        page_texts = []
+                        for i, page in enumerate(pdf.pages):
+                            page_text = page.extract_text() or ''
+                            if page_text.strip():
+                                page_texts.append(f"--- Page {i+1} ---\n{page_text}")
+                                pages_extracted += 1
+                        pypdf_text = "\n\n".join(page_texts)
+                        if len(pypdf_text) > len(text):
+                            text = pypdf_text
+                            logger.info(f"[PDF] PyPDF2 extracted {pages_extracted} pages, {len(text)} chars")
+                except Exception as e:
+                    logger.warning(f"[PDF] PyPDF2 failed: {e}")
+            
+            # Log final result
+            if len(text) < 100:
+                logger.error(f"[PDF] All extraction methods failed or returned minimal text ({len(text)} chars)")
+            else:
+                logger.info(f"[PDF] Final extraction: {len(text)} chars from {pages_extracted} pages")
+                
+            return text
+            
+        elif ext == 'docx':
+            doc = docx.Document(file_path)
+            return '\n'.join([para.text for para in doc.paragraphs])
+        elif ext == 'txt':
+            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                return f.read()
+        elif ext == 'md':
+            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                return f.read()
+        elif ext in ['xlsx', 'xls']:
+            # For structured data, return a text representation
+            df = pd.read_excel(file_path)
+            return df.to_string()
+        elif ext == 'csv':
+            df = pd.read_csv(file_path)
+            return df.to_string()
+        else:
+            # Try to read as text
+            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                return f.read()
+    except Exception as e:
+        logger.error(f"Error extracting text from {file_path}: {e}")
+        return ""
+
+
+def detect_excel_header_row(file_path: str) -> int:
+    """
+    Intelligently detect the header row in an Excel file by looking for:
+    - Colored/styled rows (often headers have background colors)
+    - Rows with bold text
+    - Rows where all cells contain text (not numbers)
+    - Common header patterns
+    
+    Returns the 0-based row index of the likely header row.
+    """
+    if not OPENPYXL_AVAILABLE:
+        return 0  # Default to first row if openpyxl not available
+        
+    try:
+        wb = load_workbook(file_path, data_only=True)
+        ws = wb.active
+        
+        if ws.max_row is None or ws.max_row < 2:
+            return 0
+            
+        # Check first 15 rows for header characteristics
+        max_check = min(15, ws.max_row)
+        
+        for row_idx in range(1, max_check + 1):
+            row_cells = list(ws.iter_rows(min_row=row_idx, max_row=row_idx, values_only=False))[0]
+            
+            # Check for fill color (background color)
+            has_fill = False
+            has_bold = False
+            non_empty_count = 0
+            all_text = True
+            
+            for cell in row_cells:
+                if cell.value is not None:
+                    non_empty_count += 1
+                    
+                    # Check if it looks like a number
+                    if isinstance(cell.value, (int, float)):
+                        all_text = False
+                    
+                    # Check for fill color
+                    if cell.fill and cell.fill.fgColor and cell.fill.fgColor.rgb:
+                        rgb = cell.fill.fgColor.rgb
+                        # Check if it's not white or transparent
+                        if rgb not in ['00000000', 'FFFFFFFF', '00FFFFFF', None]:
+                            has_fill = True
+                    
+                    # Check for bold
+                    if cell.font and cell.font.bold:
+                        has_bold = True
+            
+            # If this row has 3+ non-empty cells, has styling, and is mostly text
+            if non_empty_count >= 3 and (has_fill or has_bold) and all_text:
+                logger.info(f"[EXCEL] Detected header at row {row_idx} (fill={has_fill}, bold={has_bold})")
+                wb.close()
+                return row_idx - 1  # Convert to 0-based index
+        
+        wb.close()
+        return 0  # Default to first row
+        
+    except Exception as e:
+        logger.warning(f"[EXCEL] Header detection failed: {e}, using row 0")
+        return 0
+
+
+# =============================================================================
+# JOB QUEUE FOR SEQUENTIAL PROCESSING
+# =============================================================================
+import queue
+from dataclasses import dataclass, field
+from typing import Callable, Any, Tuple
+
+@dataclass(order=True)
+class QueuedJob:
+    """A job waiting in the queue"""
+    priority: int
+    job_id: str = field(compare=False)
+    func: Callable = field(compare=False)
+    args: Tuple = field(compare=False)
+    kwargs: dict = field(compare=False, default_factory=dict)
+    queued_at: datetime = field(compare=False, default_factory=datetime.now)
+
+
+class JobQueue:
+    """
+    Sequential job queue - processes ONE job at a time.
+    Prevents Ollama from being overloaded with concurrent requests.
+    """
+    _instance = None
+    _lock = threading.Lock()
+    
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
+    
+    def __init__(self):
+        if self._initialized:
+            return
+            
+        self._queue = queue.PriorityQueue()
+        self._current_job = None
+        self._processed_count = 0
+        self._worker_thread = None
+        self._running = True
+        self._job_positions = {}  # job_id -> position
+        
+        # Start worker thread
+        self._worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
+        self._worker_thread.start()
+        
+        self._initialized = True
+        logger.info("[QUEUE] Job queue initialized with sequential processing")
+    
+    def enqueue(self, job_id: str, func: Callable, args: Tuple = (), kwargs: dict = None, priority: int = 10) -> dict:
+        """Add a job to the queue. Returns immediately with queue position."""
+        if kwargs is None:
+            kwargs = {}
+            
+        job = QueuedJob(
+            priority=priority,
+            job_id=job_id,
+            func=func,
+            args=args,
+            kwargs=kwargs
+        )
+        
+        self._queue.put(job)
+        position = self._queue.qsize()
+        self._job_positions[job_id] = position
+        
+        logger.info(f"[QUEUE] Job {job_id} queued at position {position}")
+        
+        return {
+            'queued': True,
+            'position': position,
+            'queue_size': position,
+            'message': f'Queued at position {position}'
+        }
+    
+    def get_position(self, job_id: str) -> int:
+        """Get current queue position for a job (0 = processing now)"""
+        if self._current_job and self._current_job.job_id == job_id:
+            return 0
+        return self._job_positions.get(job_id, -1)
+    
+    def get_status(self) -> dict:
+        """Get queue status"""
+        return {
+            'queue_size': self._queue.qsize(),
+            'currently_processing': self._current_job.job_id if self._current_job else None,
+            'processed_count': self._processed_count,
+            'worker_alive': self._worker_thread.is_alive() if self._worker_thread else False
+        }
+    
+    def _worker_loop(self):
+        """Background worker that processes jobs one at a time"""
+        logger.info("[QUEUE] Worker thread started")
+        
+        while self._running:
+            try:
+                # Wait for a job (timeout allows checking _running flag)
+                try:
+                    job = self._queue.get(timeout=1.0)
+                except queue.Empty:
+                    continue
+                
+                self._current_job = job
+                logger.info(f"[QUEUE] Processing job {job.job_id}")
+                
+                try:
+                    # Execute the job function
+                    job.func(*job.args, **job.kwargs)
+                    self._processed_count += 1
+                    logger.info(f"[QUEUE] Job {job.job_id} completed")
+                except Exception as e:
+                    logger.error(f"[QUEUE] Job {job.job_id} failed: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                finally:
+                    self._current_job = None
+                    if job.job_id in self._job_positions:
+                        del self._job_positions[job.job_id]
+                    self._queue.task_done()
+                    self._update_positions()
+                    
+            except Exception as e:
+                logger.error(f"[QUEUE] Worker error: {e}")
+    
+    def _update_positions(self):
+        """Update position tracking after a job completes"""
+        # Positions shift down as jobs complete
+        for job_id in list(self._job_positions.keys()):
+            if self._job_positions[job_id] > 0:
+                self._job_positions[job_id] -= 1
+
+
+# Global queue instance
+job_queue = JobQueue()
+
+
+# =============================================================================
+# INTELLIGENCE ANALYSIS HELPER
+# =============================================================================
+
+def run_intelligence_analysis(project: str, handler, job_id: str) -> dict:
+    """
+    Run intelligence analysis on uploaded data.
+    
+    This is the Phase 3 Universal Analysis Engine integration.
+    Runs Tier 1 (instant) and Tier 2 (fast) analysis.
+    
+    Returns summary of findings, tasks, and alerts.
+    """
+    if not INTELLIGENCE_AVAILABLE:
+        logger.warning("[INTELLIGENCE] Intelligence module not available, skipping analysis")
         return None
     
-    @staticmethod
-    def _record_match(rule_id: str) -> None:
-        supabase = get_supabase()
-        if not supabase:
-            return
-        try:
-            supabase.rpc('increment_suppression_match', {'rule_id': rule_id}).execute()
-        except Exception:
+    try:
+        ProcessingJobModel.update_progress(job_id, 72, "Running intelligence analysis...")
+        
+        intelligence = ProjectIntelligenceService(project, handler)
+        analysis = intelligence.analyze(tiers=[AnalysisTier.TIER_1, AnalysisTier.TIER_2])
+        
+        if 'error' in analysis:
+            logger.warning(f"[INTELLIGENCE] Analysis returned error: {analysis.get('error')}")
+            return None
+        
+        # Extract summary
+        findings_count = len(analysis.get('findings', []))
+        tasks_count = analysis.get('tasks', {}).get('total', 0)
+        critical_count = analysis.get('findings_summary', {}).get('critical', 0)
+        warning_count = analysis.get('findings_summary', {}).get('warning', 0)
+        lookups_count = len(analysis.get('lookups', []))
+        relationships_count = len(analysis.get('structure', {}).get('relationships', []))
+        
+        intelligence_summary = {
+            'findings': findings_count,
+            'tasks': tasks_count,
+            'critical': critical_count,
+            'warning': warning_count,
+            'lookups_detected': lookups_count,
+            'relationships_detected': relationships_count,
+            'analyzed_at': analysis.get('analyzed_at'),
+            'analysis_time_seconds': analysis.get('analysis_time_seconds')
+        }
+        
+        # Build status message
+        if critical_count > 0:
+            status_msg = f"⚠️ Intelligence: {critical_count} critical, {warning_count} warnings, {tasks_count} tasks"
+        elif findings_count > 0:
+            status_msg = f"✅ Intelligence: {findings_count} findings, {tasks_count} tasks"
+        else:
+            status_msg = f"✅ Intelligence: Data looks clean"
+        
+        ProcessingJobModel.update_progress(job_id, 78, status_msg)
+        logger.info(f"[INTELLIGENCE] Analysis complete: {findings_count} findings, {tasks_count} tasks, {critical_count} critical")
+        
+        return intelligence_summary
+        
+    except Exception as e:
+        logger.warning(f"[INTELLIGENCE] Analysis failed: {e}")
+        import traceback
+        logger.warning(traceback.format_exc())
+        return None
+
+
+# =============================================================================
+# BACKGROUND PROCESSING
+# =============================================================================
+
+def process_file_background(
+    job_id: str, 
+    file_path: str, 
+    filename: str, 
+    project: str,
+    project_id: Optional[str],
+    functional_area: Optional[str],
+    file_size: int,
+    truth_type: Optional[str] = None,
+    content_domain: Optional[str] = None
+):
+    """
+    Background processing function - runs in separate thread
+    
+    Universal Classification Architecture:
+    - truth_type determines routing (reality→DuckDB, intent→ChromaDB, etc.)
+    - If truth_type not provided, auto-classifies based on filename/extension
+    
+    Processing:
+    1. Classify file (user-provided or auto-detected)
+    2. Route based on truth_type:
+       - REALITY/CONFIGURATION → DuckDB (structured queries)
+       - INTENT/REFERENCE → ChromaDB (semantic search)
+    3. Run intelligence analysis (Phase 3)
+    4. Update job status throughout
+    """
+    try:
+        logger.warning(f"[BACKGROUND] === STARTING JOB {job_id} ===")
+        logger.warning(f"[BACKGROUND] filename={filename}, project={project}, project_id={project_id}")
+        
+        file_ext = filename.split('.')[-1].lower()
+        logger.warning(f"[BACKGROUND] Detected file extension: '{file_ext}'")
+        
+        # =================================================================
+        # CLASSIFICATION - Determine truth_type for routing
+        # =================================================================
+        is_global = project.lower() in ['global', '__global__', 'global/universal', 'reference library']
+        
+        if truth_type:
+            # User explicitly provided truth_type
+            classification_method = DocumentRegistryModel.CLASS_USER_SELECTED
+            classification_confidence = 1.0
+            logger.info(f"[BACKGROUND] User-specified truth_type: {truth_type}")
+        else:
+            # Auto-classify based on filename and extension
+            truth_type, classification_method, classification_confidence = auto_classify_file(
+                filename=filename,
+                file_extension=file_ext,
+                project_name=project
+            )
+            logger.info(f"[BACKGROUND] Auto-classified: {truth_type} (method={classification_method}, confidence={classification_confidence})")
+        
+        # Determine target storage based on truth_type
+        target_storage = DocumentRegistryModel.get_storage_for_truth_type(truth_type)
+        logger.info(f"[BACKGROUND] Target storage: {target_storage}")
+        
+        # Parse content_domain if provided as comma-separated string
+        domain_list = []
+        if content_domain:
+            domain_list = [d.strip() for d in content_domain.split(',') if d.strip()]
+        
+        # ROUTE 1: STRUCTURED DATA (Excel/CSV) → DuckDB
+        if file_ext in ['xlsx', 'xls', 'csv'] and STRUCTURED_HANDLER_AVAILABLE:
+            ProcessingJobModel.update_progress(job_id, 10, "Detected tabular data - storing for SQL queries...")
+            
             try:
-                supabase.table('finding_suppressions').update({
-                    'match_count': supabase.table('finding_suppressions').select('match_count').eq('id', rule_id).execute().data[0].get('match_count', 0) + 1,
-                    'last_matched_at': datetime.utcnow().isoformat()
-                }).eq('id', rule_id).execute()
-            except Exception:
-                pass
-    
-    @staticmethod
-    def deactivate(rule_id: str) -> bool:
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        try:
-            supabase.table('finding_suppressions').update({'is_active': False, 'updated_at': datetime.utcnow().isoformat()}).eq('id', rule_id).execute()
-            return True
-        except Exception as e:
-            print(f"Error deactivating suppression: {e}")
-            return False
-    
-    @staticmethod
-    def reactivate(rule_id: str) -> bool:
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        try:
-            supabase.table('finding_suppressions').update({'is_active': True, 'updated_at': datetime.utcnow().isoformat()}).eq('id', rule_id).execute()
-            return True
-        except Exception as e:
-            print(f"Error reactivating suppression: {e}")
-            return False
-    
-    @staticmethod
-    def get_by_project(project_id: str, playbook_type: str, include_inactive: bool = False) -> List[Dict[str, Any]]:
-        supabase = get_supabase()
-        if not supabase:
-            return []
-        try:
-            query = supabase.table('finding_suppressions').select('*').eq('project_id', project_id).eq('playbook_type', playbook_type).order('created_at', desc=True)
-            if not include_inactive:
-                query = query.eq('is_active', True)
-            response = query.execute()
-            return response.data if response.data else []
-        except Exception as e:
-            print(f"Error getting suppressions by project: {e}")
-            return []
-    
-    @staticmethod
-    def get_stats(project_id: str, playbook_type: str) -> Dict[str, Any]:
-        supabase = get_supabase()
-        if not supabase:
-            return {}
-        try:
-            response = supabase.table('finding_suppressions').select('*').eq('project_id', project_id).eq('playbook_type', playbook_type).execute()
-            rules = response.data or []
-            active = [r for r in rules if r.get('is_active')]
-            return {
-                'total_rules': len(rules), 'active_rules': len(active), 'inactive_rules': len(rules) - len(active),
-                'total_matches': sum(r.get('match_count', 0) for r in rules),
-                'by_type': {
-                    'acknowledge': len([r for r in active if r.get('suppression_type') == 'acknowledge']),
-                    'suppress': len([r for r in active if r.get('suppression_type') == 'suppress']),
-                    'pattern': len([r for r in active if r.get('suppression_type') == 'pattern'])
+                handler = get_structured_handler()
+                
+                # ===========================================================
+                # PROGRESS CALLBACK - v21 Performance Optimization
+                # Maps handler progress (5-95%) to job progress (15-65%)
+                # This eliminates the "frozen UI" during large file processing
+                # ===========================================================
+                def structured_progress_callback(percent: int, message: str):
+                    """Map structured handler progress to overall job progress"""
+                    # Handler reports 5-95%, we map to 15-65% of overall job
+                    # This leaves room for: 0-15% detection, 65-80% intelligence, 80-100% cleanup
+                    mapped_percent = 15 + int((percent / 100) * 50)
+                    mapped_percent = min(65, max(15, mapped_percent))  # Clamp to 15-65
+                    try:
+                        ProcessingJobModel.update_progress(job_id, mapped_percent, message)
+                    except Exception as cb_e:
+                        logger.warning(f"[PROGRESS] Callback error: {cb_e}")
+                
+                if file_ext == 'csv':
+                    result = handler.store_csv(
+                        file_path, project, filename,
+                        progress_callback=structured_progress_callback
+                    )
+                    tables_created = 1
+                    total_rows = result.get('row_count', 0)
+                else:
+                    result = handler.store_excel(
+                        file_path, project, filename,
+                        progress_callback=structured_progress_callback
+                    )
+                    tables_created = len(result.get('tables_created', []))
+                    total_rows = result.get('total_rows', 0)
+                
+                # =====================================================
+                # UPLOAD VALIDATION CHECK
+                # Warn if data quality issues detected
+                # =====================================================
+                validation = result.get('validation', {})
+                if validation.get('status') in ['warning', 'critical']:
+                    issues_count = validation.get('tables_with_issues', 0)
+                    issue_tables = [i.get('table', '') for i in validation.get('issues', [])[:3]]
+                    warning_msg = f"⚠️ Data quality issues in {issues_count} table(s): {', '.join(issue_tables)}"
+                    if issues_count > 3:
+                        warning_msg += f" and {issues_count - 3} more"
+                    ProcessingJobModel.update_progress(job_id, 68, warning_msg)
+                    result['upload_warnings'] = [warning_msg]
+                    logger.warning(f"[UPLOAD] Validation issues: {validation}")
+                
+                ProcessingJobModel.update_progress(
+                    job_id, 70, 
+                    f"Created {tables_created} table(s) with {total_rows:,} rows"
+                )
+                
+                # =====================================================
+                # INTELLIGENCE ANALYSIS - Phase 3
+                # Run Tier 1 + 2 analysis on uploaded data
+                # =====================================================
+                intelligence_summary = run_intelligence_analysis(project, handler, job_id)
+                if intelligence_summary:
+                    result['intelligence'] = intelligence_summary
+                
+                # =====================================================
+                # DOMAIN INFERENCE - Phase 4
+                # Detect what type of data this is for intelligent context
+                # =====================================================
+                try:
+                    from utils.domain_inference_engine import infer_project_domains
+                    ProcessingJobModel.update_progress(job_id, 79, "Analyzing data domains...")
+                    domains = infer_project_domains(project, project_id, handler)
+                    if domains:
+                        result['detected_domains'] = domains
+                        primary = domains.get('primary_domain')
+                        logger.info(f"[BACKGROUND] Domain inference: primary={primary}")
+                except ImportError:
+                    logger.debug("[BACKGROUND] Domain inference not available")
+                except Exception as di_e:
+                    logger.warning(f"[BACKGROUND] Domain inference failed: {di_e}")
+                
+                # Store schema summary in documents table for reference
+                if project_id:
+                    try:
+                        schema_summary = json.dumps(result, indent=2)
+                        DocumentModel.create(
+                            project_id=project_id,
+                            name=filename,
+                            category=functional_area or 'Structured Data',
+                            file_type=file_ext,
+                            file_size=file_size,
+                            content=f"STRUCTURED DATA FILE\n\nSchema:\n{schema_summary[:4000]}",
+                            metadata={
+                                'type': 'structured',
+                                'storage': 'duckdb',
+                                'tables': result.get('tables_created', []),
+                                'total_rows': total_rows,
+                                'project': project,
+                                'functional_area': functional_area,
+                                'intelligence': intelligence_summary
+                            }
+                        )
+                        logger.info(f"[BACKGROUND] Saved structured data metadata to database")
+                    except Exception as e:
+                        logger.warning(f"[BACKGROUND] Could not save to documents table: {e}")
+                
+                # Register in document registry with classification
+                try:
+                    DocumentRegistryModel.register(
+                        filename=filename,
+                        file_type=file_ext,
+                        truth_type=truth_type,
+                        classification_method=classification_method,
+                        classification_confidence=classification_confidence,
+                        content_domain=domain_list,
+                        storage_type=DocumentRegistryModel.STORAGE_DUCKDB,
+                        project_id=project_id if not is_global else None,
+                        is_global=is_global,
+                        duckdb_tables=result.get('tables_created', []),
+                        row_count=total_rows,
+                        sheet_count=tables_created,
+                        parse_status='success',
+                        metadata={
+                            'project_name': project,
+                            'functional_area': functional_area,
+                            'file_size': file_size,
+                            'intelligence': intelligence_summary
+                        }
+                    )
+                    logger.info(f"[BACKGROUND] Registered: {filename} as {truth_type} -> DUCKDB")
+                except Exception as e:
+                    logger.warning(f"[BACKGROUND] Could not register document: {e}")
+                
+                # Cleanup
+                ProcessingJobModel.update_progress(job_id, 90, "Cleaning up...")
+                if file_path and os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                    except:
+                        pass
+                
+                # Build completion result
+                completion_result = {
+                    'filename': filename,
+                    'type': 'structured',
+                    'tables_created': tables_created,
+                    'total_rows': total_rows,
+                    'project': project,
+                    'functional_area': functional_area
                 }
+                
+                # Add intelligence summary to completion
+                if intelligence_summary:
+                    completion_result['intelligence'] = intelligence_summary
+                
+                # Add validation warnings if any
+                validation = result.get('validation', {})
+                if validation.get('issues'):
+                    completion_result['validation'] = validation
+                    completion_result['has_data_quality_issues'] = True
+                
+                # Complete!
+                ProcessingJobModel.complete(job_id, completion_result)
+                
+                logger.info(f"[BACKGROUND] Structured data job {job_id} completed!")
+                return
+                
+            except Exception as e:
+                # XLSX/CSV should NEVER go to ChromaDB - structured data doesn't chunk well
+                logger.error(f"[BACKGROUND] Structured storage failed: {e}")
+                ProcessingJobModel.fail(job_id, f"Failed to process structured data: {str(e)}")
+                
+                # Cleanup
+                if file_path and os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                    except:
+                        pass
+                return  # Do NOT fall through to RAG
+        
+        # =================================================================
+        # ROUTE 1.5: SMART PDF ROUTING - Check if PDF is tabular
+        # =================================================================
+        logger.warning(f"[BACKGROUND] Route 1.5 check: file_ext='{file_ext}', SMART_PDF_AVAILABLE={SMART_PDF_AVAILABLE}")
+        
+        if file_ext == 'pdf' and SMART_PDF_AVAILABLE:
+            ProcessingJobModel.update_progress(job_id, 5, "Analyzing PDF structure...")
+            logger.warning(f"[BACKGROUND] >>> ENTERING SMART PDF ROUTE for {filename}")
+            
+            try:
+                def status_callback(msg, progress=None):
+                    if progress:
+                        # Map smart PDF progress (0-100) to our range (5-50)
+                        mapped = 5 + int(progress * 0.45)
+                        ProcessingJobModel.update_progress(job_id, mapped, msg)
+                    else:
+                        logger.warning(f"[SMART-PDF] {msg}")
+                
+                logger.warning(f"[BACKGROUND] Calling process_pdf_intelligently...")
+                
+                # Run smart PDF analysis and routing
+                pdf_result = process_pdf_intelligently(
+                    file_path=file_path,
+                    project=project,
+                    filename=filename,
+                    project_id=project_id,
+                    status_callback=status_callback
+                )
+                
+                logger.warning(f"[BACKGROUND] Smart PDF result: success={pdf_result.get('success')}, storage={pdf_result.get('storage_used', [])}")
+                
+                if pdf_result.get('error'):
+                    logger.warning(f"[BACKGROUND] Smart PDF error: {pdf_result.get('error')}")
+                
+                # Check if DuckDB storage was successful
+                duckdb_success = 'duckdb' in pdf_result.get('storage_used', [])
+                
+                if duckdb_success:
+                    # Run intelligence analysis on PDF tables
+                    try:
+                        handler = get_structured_handler()
+                        intelligence_summary = run_intelligence_analysis(project, handler, job_id)
+                        if intelligence_summary:
+                            pdf_result['intelligence'] = intelligence_summary
+                    except Exception as int_e:
+                        logger.warning(f"[BACKGROUND] PDF intelligence analysis failed: {int_e}")
+                    
+                    # Register in document registry with classification
+                    try:
+                        duckdb_result = pdf_result.get('duckdb_result', {})
+                        analysis = pdf_result.get('analysis', {})
+                        
+                        DocumentRegistryModel.register(
+                            filename=filename,
+                            file_type='pdf',
+                            truth_type=truth_type,
+                            classification_method=classification_method,
+                            classification_confidence=classification_confidence,
+                            content_domain=domain_list,
+                            storage_type=DocumentRegistryModel.STORAGE_DUCKDB,
+                            project_id=project_id,
+                            is_global=is_global,
+                            duckdb_tables=duckdb_result.get('tables_created', []),
+                            row_count=duckdb_result.get('total_rows', 0),
+                            parse_status='success',
+                            metadata={
+                                'project_name': project,
+                                'functional_area': functional_area,
+                                'file_size': file_size,
+                                'pdf_analysis': {
+                                    'is_tabular': analysis.get('is_tabular', False),
+                                    'confidence': analysis.get('confidence', 0),
+                                    'table_pages': len(analysis.get('table_pages', []))
+                                },
+                                'intelligence': pdf_result.get('intelligence')
+                            }
+                        )
+                        logger.info(f"[BACKGROUND] Registered PDF: {truth_type} -> DUCKDB")
+                    except Exception as e:
+                        logger.warning(f"[BACKGROUND] Could not register PDF: {e}")
+                
+                # Get text content for ChromaDB (either from analysis or re-extract)
+                chromadb_result = pdf_result.get('chromadb_result', {})
+                text = chromadb_result.get('text_content', '')
+                
+                if not text:
+                    # Fallback: extract text normally
+                    text = extract_text(file_path)
+                
+                # If we got DuckDB storage but no text, we can complete here
+                if duckdb_success and (not text or len(text.strip()) < 100):
+                    ProcessingJobModel.update_progress(job_id, 90, "Cleaning up...")
+                    if file_path and os.path.exists(file_path):
+                        try:
+                            os.remove(file_path)
+                        except:
+                            pass
+                    
+                    ProcessingJobModel.complete(job_id, {
+                        'filename': filename,
+                        'type': 'smart_pdf',
+                        'storage': pdf_result.get('storage_used', []),
+                        'duckdb_rows': pdf_result.get('duckdb_result', {}).get('total_rows', 0),
+                        'project': project,
+                        'intelligence': pdf_result.get('intelligence')
+                    })
+                    logger.info(f"[BACKGROUND] Smart PDF job {job_id} completed (DuckDB only)")
+                    return
+                
+                # Check if smart_pdf_analyzer says to skip ChromaDB (large tabular PDFs)
+                skip_chromadb = 'chromadb' not in pdf_result.get('storage_used', [])
+                
+                if skip_chromadb and duckdb_success:
+                    # Large tabular PDF - DuckDB only, skip ChromaDB
+                    ProcessingJobModel.update_progress(job_id, 90, "Cleaning up (skipping semantic search for large table)...")
+                    if file_path and os.path.exists(file_path):
+                        try:
+                            os.remove(file_path)
+                        except:
+                            pass
+                    
+                    ProcessingJobModel.complete(job_id, {
+                        'filename': filename,
+                        'type': 'smart_pdf_tabular_only',
+                        'storage': pdf_result.get('storage_used', []),
+                        'duckdb_rows': pdf_result.get('duckdb_result', {}).get('total_rows', 0),
+                        'project': project,
+                        'note': 'ChromaDB skipped - large tabular PDF',
+                        'intelligence': pdf_result.get('intelligence')
+                    })
+                    logger.info(f"[BACKGROUND] Smart PDF job {job_id} completed (DuckDB only - large tabular)")
+                    return
+                
+                # Continue with ChromaDB using extracted text
+                # (Fall through to ROUTE 2 below, but we already have text)
+                if text:
+                    logger.warning(f"[BACKGROUND] Smart PDF: continuing to ChromaDB with {len(text)} chars")
+                    ProcessingJobModel.update_progress(job_id, 50, f"Adding to semantic search ({len(text):,} chars)...")
+                
+            except Exception as e:
+                logger.warning(f"[BACKGROUND] !!! Smart PDF EXCEPTION: {e}")
+                import traceback
+                logger.warning(traceback.format_exc())
+                text = None  # Force re-extraction below
+        else:
+            text = None
+        
+        # =================================================================
+        # ROUTE 1.75: DOCX/TXT CONTENT ANALYSIS - Route by content, not extension
+        # =================================================================
+        if file_ext in ['docx', 'txt', 'md'] and DOCUMENT_ANALYZER_AVAILABLE and STRUCTURED_HANDLER_AVAILABLE:
+            logger.warning(f"[BACKGROUND] Route 1.75: Analyzing {file_ext} content structure...")
+            ProcessingJobModel.update_progress(job_id, 5, "Analyzing document structure...")
+            
+            try:
+                # Extract text first
+                text = extract_text(file_path)
+                
+                if text and len(text.strip()) > 100:
+                    # Analyze content structure
+                    analyzer = DocumentAnalyzer()
+                    analysis = analyzer.analyze(text, filename, file_ext)
+                    
+                    logger.warning(f"[BACKGROUND] Content analysis: structure={analysis.structure.value}, "
+                                   f"patterns={analysis.patterns}")
+                    
+                    # If content is TABULAR, route to DuckDB
+                    if analysis.structure == DocumentStructure.TABULAR:
+                        logger.warning(f"[BACKGROUND] >>> TABULAR content detected in {file_ext}! Routing to DuckDB")
+                        ProcessingJobModel.update_progress(job_id, 15, "Detected tabular data - converting for SQL queries...")
+                        
+                        try:
+                            # Convert text to structured format and store in DuckDB
+                            handler = get_structured_handler()
+                            
+                            # Parse the tabular content
+                            # Try to detect delimiter and parse as table
+                            lines = [l for l in text.strip().split('\n') if l.strip()]
+                            
+                            if lines:
+                                # Detect delimiter
+                                first_lines = '\n'.join(lines[:10])
+                                if '\t' in first_lines:
+                                    delimiter = '\t'
+                                elif '|' in first_lines:
+                                    delimiter = '|'
+                                elif ',' in first_lines and first_lines.count(',') > 3:
+                                    delimiter = ','
+                                else:
+                                    delimiter = None
+                                
+                                if delimiter:
+                                    # Parse as delimited data
+                                    import io
+                                    
+                                    # Clean up pipe-delimited format
+                                    if delimiter == '|':
+                                        cleaned_lines = []
+                                        for line in lines:
+                                            # Remove leading/trailing pipes and strip
+                                            cleaned = line.strip().strip('|').strip()
+                                            if cleaned and not cleaned.startswith('-'):  # Skip separator lines
+                                                cleaned_lines.append(cleaned)
+                                        text_for_parsing = '\n'.join(cleaned_lines)
+                                        delimiter = '|'
+                                    else:
+                                        text_for_parsing = '\n'.join(lines)
+                                    
+                                    try:
+                                        df = pd.read_csv(io.StringIO(text_for_parsing), sep=delimiter, skipinitialspace=True)
+                                        
+                                        if len(df) > 0 and len(df.columns) > 1:
+                                            # Save as temp CSV and store
+                                            temp_csv = f"/tmp/{job_id}_converted.csv"
+                                            df.to_csv(temp_csv, index=False)
+                                            
+                                            result = handler.store_csv(temp_csv, project, f"{filename}_extracted.csv")
+                                            
+                                            # Cleanup temp file
+                                            try:
+                                                os.remove(temp_csv)
+                                            except:
+                                                pass
+                                            
+                                            ProcessingJobModel.update_progress(job_id, 70, 
+                                                f"Created table with {result.get('row_count', 0):,} rows")
+                                            
+                                            # Run intelligence analysis
+                                            intelligence_summary = run_intelligence_analysis(project, handler, job_id)
+                                            
+                                            # Register in document registry with classification
+                                            try:
+                                                DocumentRegistryModel.register(
+                                                    filename=filename,
+                                                    file_type=file_ext,
+                                                    truth_type=truth_type,
+                                                    classification_method=classification_method,
+                                                    classification_confidence=classification_confidence,
+                                                    content_domain=domain_list,
+                                                    storage_type=DocumentRegistryModel.STORAGE_DUCKDB,
+                                                    project_id=project_id,
+                                                    is_global=is_global,
+                                                    row_count=result.get('row_count', 0),
+                                                    parse_status='success',
+                                                    metadata={
+                                                        'project_name': project,
+                                                        'functional_area': functional_area,
+                                                        'original_type': file_ext,
+                                                        'detected_structure': 'tabular',
+                                                        'delimiter': delimiter,
+                                                        'intelligence': intelligence_summary
+                                                    }
+                                                )
+                                            except Exception as reg_e:
+                                                logger.warning(f"[BACKGROUND] Could not register: {reg_e}")
+                                            
+                                            # Cleanup and complete
+                                            if file_path and os.path.exists(file_path):
+                                                try:
+                                                    os.remove(file_path)
+                                                except:
+                                                    pass
+                                            
+                                            ProcessingJobModel.complete(job_id, {
+                                                'filename': filename,
+                                                'type': 'structured_from_text',
+                                                'original_format': file_ext,
+                                                'rows': result.get('row_count', 0),
+                                                'project': project,
+                                                'intelligence': intelligence_summary
+                                            })
+                                            
+                                            logger.info(f"[BACKGROUND] Converted {file_ext} to structured data!")
+                                            return
+                                    
+                                    except Exception as parse_e:
+                                        logger.warning(f"[BACKGROUND] Could not parse as delimited: {parse_e}")
+                                
+                                # If delimiter parsing failed, try Word table extraction for DOCX
+                                if file_ext == 'docx':
+                                    try:
+                                        doc = docx.Document(file_path)
+                                        tables_data = []
+                                        
+                                        for table in doc.tables:
+                                            table_rows = []
+                                            for row in table.rows:
+                                                row_data = [cell.text.strip() for cell in row.cells]
+                                                table_rows.append(row_data)
+                                            
+                                            if table_rows:
+                                                tables_data.append(table_rows)
+                                        
+                                        if tables_data:
+                                            # Convert first table to DataFrame
+                                            first_table = tables_data[0]
+                                            if len(first_table) > 1:
+                                                df = pd.DataFrame(first_table[1:], columns=first_table[0])
+                                                
+                                                temp_csv = f"/tmp/{job_id}_docx_table.csv"
+                                                df.to_csv(temp_csv, index=False)
+                                                
+                                                result = handler.store_csv(temp_csv, project, f"{filename}_table.csv")
+                                                
+                                                try:
+                                                    os.remove(temp_csv)
+                                                except:
+                                                    pass
+                                                
+                                                # Run intelligence analysis
+                                                intelligence_summary = run_intelligence_analysis(project, handler, job_id)
+                                                
+                                                # Complete as structured
+                                                if file_path and os.path.exists(file_path):
+                                                    try:
+                                                        os.remove(file_path)
+                                                    except:
+                                                        pass
+                                                
+                                                ProcessingJobModel.complete(job_id, {
+                                                    'filename': filename,
+                                                    'type': 'structured_from_docx_table',
+                                                    'tables_found': len(tables_data),
+                                                    'rows': result.get('row_count', 0),
+                                                    'project': project,
+                                                    'intelligence': intelligence_summary
+                                                })
+                                                
+                                                logger.info(f"[BACKGROUND] Extracted {len(tables_data)} tables from DOCX!")
+                                                return
+                                    
+                                    except Exception as docx_e:
+                                        logger.warning(f"[BACKGROUND] DOCX table extraction failed: {docx_e}")
+                        
+                        except Exception as struct_e:
+                            logger.warning(f"[BACKGROUND] Structured conversion failed: {struct_e}, continuing to ChromaDB")
+                    
+                    # If we get here, content is not tabular or conversion failed
+                    # Continue to Route 2 with the already-extracted text
+                    logger.warning(f"[BACKGROUND] Content is {analysis.structure.value}, continuing to ChromaDB")
+                    
+            except Exception as analyze_e:
+                logger.warning(f"[BACKGROUND] Content analysis failed: {analyze_e}, continuing to ChromaDB")
+                text = None  # Force re-extraction
+        
+        # ROUTE 2: UNSTRUCTURED DATA (PDF/Word/Text) → ChromaDB
+        logger.warning(f"[BACKGROUND] Route 2 check: text is {'set' if text else 'None'}")
+        if text is None:
+            ProcessingJobModel.update_progress(job_id, 5, "Extracting text from file...")
+            text = extract_text(file_path)
+        
+        if not text or len(text.strip()) < 10:
+            ProcessingJobModel.fail(job_id, "No text could be extracted from file")
+            return
+        
+        logger.info(f"[BACKGROUND] Extracted {len(text)} characters")
+        ProcessingJobModel.update_progress(job_id, 15, f"Extracted {len(text):,} characters")
+        
+        # Step 2: Prepare metadata (includes truth_type for filtering)
+        file_ext = filename.split('.')[-1].lower()
+        
+        metadata = {
+            "project": project,
+            "filename": filename,
+            "file_type": file_ext,
+            "source": filename,
+            "upload_date": datetime.now().isoformat(),
+            "truth_type": truth_type  # NEW: Enable truth_type filtering in searches
+        }
+        
+        if project_id:
+            metadata["project_id"] = project_id
+            logger.info(f"[BACKGROUND] ✓ Metadata includes project_id: {project_id}")
+        else:
+            logger.warning(f"[BACKGROUND] ✗ No project_id in metadata!")
+        
+        if functional_area:
+            metadata["functional_area"] = functional_area
+        
+        if domain_list:
+            metadata["content_domain"] = ','.join(domain_list)
+        
+        # Step 3: Initialize RAG and process
+        ProcessingJobModel.update_progress(job_id, 20, "Initializing document processor...")
+        
+        def update_progress(current: int, total: int, message: str):
+            """Callback for RAG handler progress updates"""
+            # Map RAG progress (0-100) to our range (20-90)
+            overall_percent = 20 + int(current * 0.70)
+            ProcessingJobModel.update_progress(job_id, overall_percent, message)
+        
+        rag = RAGHandler()
+        
+        ProcessingJobModel.update_progress(job_id, 25, "Chunking document...")
+        
+        success = rag.add_document(
+            collection_name="documents",
+            text=text,
+            metadata=metadata,
+            progress_callback=update_progress
+        )
+        
+        if not success:
+            ProcessingJobModel.fail(job_id, "Failed to add document to vector store")
+            return
+        
+        # Step 4: Save to documents table (if we have project UUID)
+        ProcessingJobModel.update_progress(job_id, 92, "Saving to database...")
+        
+        if project_id:
+            try:
+                DocumentModel.create(
+                    project_id=project_id,
+                    name=filename,
+                    category=functional_area or 'General',
+                    file_type=file_ext,
+                    file_size=file_size,
+                    content=text[:5000],
+                    metadata=metadata
+                )
+                logger.info(f"[BACKGROUND] Saved document to database")
+            except Exception as e:
+                logger.warning(f"[BACKGROUND] Could not save to documents table: {e}")
+        
+        # Register in document registry with classification
+        try:
+            DocumentRegistryModel.register(
+                filename=filename,
+                file_type=file_ext,
+                truth_type=truth_type,
+                classification_method=classification_method,
+                classification_confidence=classification_confidence,
+                content_domain=domain_list,
+                storage_type=DocumentRegistryModel.STORAGE_CHROMADB,
+                project_id=project_id if not is_global else None,
+                is_global=is_global,
+                chunk_count=len(text) // 500,  # Approximate
+                parse_status='success',
+                metadata={
+                    'project_name': project,
+                    'functional_area': functional_area,
+                    'file_size': file_size,
+                    'char_count': len(text)
+                }
+            )
+            logger.info(f"[BACKGROUND] Registered: {filename} as {truth_type} -> CHROMADB")
+        except Exception as e:
+            logger.warning(f"[BACKGROUND] Could not register document: {e}")
+        
+        # Cleanup
+        ProcessingJobModel.update_progress(job_id, 95, "Cleaning up...")
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except:
+                pass
+        
+        # Complete!
+        ProcessingJobModel.complete(job_id, {
+            'filename': filename,
+            'type': 'unstructured',
+            'chunks_created': len(text) // 500,
+            'project': project,
+            'functional_area': functional_area
+        })
+        
+        logger.info(f"[BACKGROUND] Job {job_id} completed!")
+        
+    except Exception as e:
+        error_msg = f"Processing failed: {str(e)}"
+        logger.error(f"[BACKGROUND] {error_msg}")
+        logger.error(traceback.format_exc())
+        ProcessingJobModel.fail(job_id, error_msg)
+        
+        # Cleanup on failure too
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except:
+                pass
+
+
+# =============================================================================
+# API ENDPOINTS
+# =============================================================================
+
+@router.post("/upload")
+async def upload_file(
+    file: UploadFile = File(...),
+    project: str = Form(...),
+    functional_area: Optional[str] = Form(None),
+    standards_mode: Optional[str] = Form(None),
+    domain: Optional[str] = Form(None),
+    truth_type: Optional[str] = Form(None),  # NEW: User-specified classification
+    content_domain: Optional[str] = Form(None)  # NEW: Comma-separated domain tags
+):
+    """
+    Upload a file for async processing
+    
+    Universal Classification Architecture:
+    - truth_type: 'reality', 'intent', 'reference', 'configuration' (optional, auto-detected if not provided)
+    - content_domain: Comma-separated tags like 'payroll,benefits' (optional)
+    
+    If standards_mode=true, extracts compliance rules instead of normal processing.
+    Returns immediately with job_id for status polling (or rules for standards mode)
+    """
+    
+    # STANDARDS MODE - Extract rules from compliance documents
+    if standards_mode == "true" or project.lower() == "__standards__":
+        try:
+            if not file.filename:
+                raise HTTPException(status_code=400, detail="No filename provided")
+            
+            filename = file.filename
+            ext = filename.split('.')[-1].lower()
+            
+            if ext not in ['pdf', 'docx', 'doc', 'txt', 'md', 'xlsx', 'xls', 'csv']:
+                raise HTTPException(status_code=400, detail=f"File type '{ext}' not supported for standards")
+            
+            logger.info(f"[STANDARDS] Upload: {filename}, domain={domain or 'general'}")
+            
+            content = await file.read()
+            logger.info(f"[STANDARDS] Size: {len(content)} bytes")
+            
+            if not STANDARDS_AVAILABLE:
+                raise HTTPException(status_code=503, detail="Standards processor not available")
+            
+            file_path = f"/tmp/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filename}"
+            with open(file_path, 'wb') as f:
+                f.write(content)
+            
+            try:
+                if ext == 'pdf':
+                    doc = standards_process_pdf(file_path, domain or 'general')
+                elif ext in ['xlsx', 'xls']:
+                    # Convert Excel to text for processing
+                    import pandas as pd
+                    try:
+                        dfs = pd.read_excel(file_path, sheet_name=None)
+                        text_parts = []
+                        for sheet_name, df in dfs.items():
+                            text_parts.append(f"=== {sheet_name} ===\n")
+                            text_parts.append(df.to_string(index=False))
+                            text_parts.append("\n\n")
+                        text = "\n".join(text_parts)
+                    except Exception as e:
+                        logger.warning(f"[STANDARDS] Excel parse error: {e}")
+                        raise HTTPException(status_code=400, detail=f"Failed to parse Excel file: {str(e)}")
+                    doc = standards_process_text(text, filename, domain or 'general')
+                elif ext == 'csv':
+                    # Read CSV as text
+                    import pandas as pd
+                    try:
+                        df = pd.read_csv(file_path)
+                        text = df.to_string(index=False)
+                    except Exception as e:
+                        logger.warning(f"[STANDARDS] CSV parse error: {e}")
+                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            text = f.read()
+                    doc = standards_process_text(text, filename, domain or 'general')
+                else:
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        text = f.read()
+                    doc = standards_process_text(text, filename, domain or 'general')
+                
+                registry = get_rule_registry()
+                registry.add_document(doc)
+                
+                logger.info(f"[STANDARDS] Extracted {len(doc.rules)} rules")
+                
+                return {
+                    "success": True,
+                    "document_id": doc.document_id,
+                    "filename": doc.filename,
+                    "title": doc.title,
+                    "domain": doc.domain,
+                    "rules_extracted": len(doc.rules),
+                    "page_count": doc.page_count,
+                    "rules": [r.to_dict() for r in doc.rules[:10]]
+                }
+            finally:
+                if os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                    except:
+                        pass
+                        
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"[STANDARDS] Upload failed: {e}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    # NORMAL MODE - Regular file processing
+    try:
+        # Validate file
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="No filename provided")
+        
+        # Check file extension
+        allowed_extensions = ['pdf', 'docx', 'doc', 'txt', 'md', 'xlsx', 'xls', 'csv']
+        ext = file.filename.split('.')[-1].lower()
+        if ext not in allowed_extensions:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"File type '{ext}' not supported. Allowed: {', '.join(allowed_extensions)}"
+            )
+        
+        # Look up project to get UUID
+        project_id = None
+        try:
+            # Handle global/reference library project
+            global_names = ['global', '__global__', 'global/universal', 'reference library', 'reference_library', '__standards__']
+            if project.lower() in global_names:
+                project_id = None
+                logger.info(f"[UPLOAD] Using GLOBAL/Reference Library project (no project_id)")
+            else:
+                # Check if project is already a UUID (frontend might send ID directly)
+                import re
+                uuid_pattern = r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                if re.match(uuid_pattern, project.lower()):
+                    # It's a UUID - verify it exists and use it directly
+                    project_record = ProjectModel.get_by_id(project)
+                    if project_record:
+                        project_id = project
+                        logger.info(f"[UPLOAD] Using project UUID directly: {project_id}")
+                    else:
+                        logger.warning(f"[UPLOAD] Project UUID '{project}' not found in database")
+                else:
+                    # It's a name - look up by name
+                    project_record = ProjectModel.get_by_name(project)
+                    if project_record:
+                        project_id = project_record.get('id')
+                        logger.info(f"[UPLOAD] Found project '{project}' with id: {project_id}")
+                    else:
+                        logger.warning(f"[UPLOAD] Project '{project}' not found in database")
+        except Exception as e:
+            logger.warning(f"[UPLOAD] Could not look up project: {e}")
+        
+        # Save file temporarily
+        file_path = f"/tmp/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}"
+        
+        # Read file content
+        content = await file.read()
+        file_size = len(content)
+        
+        # Write to temp file
+        with open(file_path, 'wb') as f:
+            f.write(content)
+        
+        logger.info(f"[UPLOAD] Saved {file.filename} ({file_size} bytes) to {file_path}")
+        
+        # Create job record
+        job_result = ProcessingJobModel.create(
+            job_type='upload',
+            project_id=project_id,
+            input_data={'filename': file.filename, 'functional_area': functional_area, 'project_name': project}
+        )
+        
+        if not job_result:
+            raise HTTPException(status_code=500, detail="Failed to create processing job")
+        
+        job_id = job_result['id']
+        
+        logger.info(f"[UPLOAD] Created job {job_id} for project_id={project_id}, truth_type={truth_type}")
+        
+        # Queue for background processing (sequential!)
+        queue_info = job_queue.enqueue(
+            job_id,
+            process_file_background,
+            (job_id, file_path, file.filename, project, project_id, functional_area, file_size, truth_type, content_domain)
+        )
+        
+        return {
+            "job_id": job_id,
+            "status": "queued",
+            "queue_position": queue_info.get('position', 1),
+            "queue_size": queue_info.get('queue_size', 1),
+            "message": f"File '{file.filename}' queued for processing",
+            "project": project,
+            "project_id": project_id,
+            "truth_type": truth_type or "auto"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[UPLOAD] Upload failed: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/upload/queue-status")
+async def get_queue_status():
+    """Get current queue status"""
+    return job_queue.get_status()
+
+
+@router.get("/upload/status/{job_id}")
+async def get_job_status(job_id: str):
+    """Get processing status for a specific job"""
+    try:
+        job = ProcessingJobModel.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        # Add queue position if still queued
+        if job.get('status') in ['pending', 'queued']:
+            position = job_queue.get_position(job_id)
+            job['queue_position'] = position
+        
+        return job
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[STATUS] Error getting job status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# STANDARDS UPLOAD - P4 Standards Layer
+# =============================================================================
+
+# Import standards processor
+try:
+    from backend.utils.standards_processor import (
+        process_pdf as standards_process_pdf,
+        process_text as standards_process_text,
+        get_rule_registry,
+        search_standards
+    )
+    STANDARDS_AVAILABLE = True
+except ImportError:
+    try:
+        from utils.standards_processor import (
+            process_pdf as standards_process_pdf,
+            process_text as standards_process_text,
+            get_rule_registry,
+            search_standards
+        )
+        STANDARDS_AVAILABLE = True
+    except ImportError:
+        STANDARDS_AVAILABLE = False
+        logger.warning("[UPLOAD] Standards processor not available")
+
+
+@router.get("/standards/health")
+async def standards_health():
+    """Standards health check."""
+    status = {
+        "standards_processor": STANDARDS_AVAILABLE,
+        "rules_loaded": 0,
+        "documents_loaded": 0
+    }
+    if STANDARDS_AVAILABLE:
+        try:
+            registry = get_rule_registry()
+            status["rules_loaded"] = len(registry.rules)
+            status["documents_loaded"] = len(registry.documents)
+        except:
+            pass
+    return status
+
+
+@router.post("/standards/upload")
+async def upload_standards(
+    file: UploadFile = File(...),
+    domain: str = Form(default="general"),
+    title: Optional[str] = Form(default=None)
+):
+    """Upload standards document for rule extraction."""
+    try:
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="No filename provided")
+        
+        filename = file.filename
+        ext = filename.split('.')[-1].lower()
+        
+        if ext not in ['pdf', 'docx', 'doc', 'txt', 'md']:
+            raise HTTPException(status_code=400, detail=f"File type '{ext}' not supported")
+        
+        logger.info(f"[STANDARDS] Upload: {filename}, domain={domain}")
+        
+        content = await file.read()
+        logger.info(f"[STANDARDS] Size: {len(content)} bytes")
+        
+        if not STANDARDS_AVAILABLE:
+            raise HTTPException(status_code=503, detail="Standards processor not available")
+        
+        file_path = f"/tmp/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filename}"
+        with open(file_path, 'wb') as f:
+            f.write(content)
+        
+        try:
+            if ext == 'pdf':
+                doc = standards_process_pdf(file_path, domain)
+            else:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    text = f.read()
+                doc = standards_process_text(text, filename, domain)
+            
+            if title:
+                doc.title = title
+            
+            registry = get_rule_registry()
+            registry.add_document(doc)
+            
+            logger.info(f"[STANDARDS] Extracted {len(doc.rules)} rules")
+            
+            return {
+                "success": True,
+                "document_id": doc.document_id,
+                "filename": doc.filename,
+                "title": doc.title,
+                "domain": doc.domain,
+                "rules_extracted": len(doc.rules),
+                "page_count": doc.page_count,
+                "rules": [r.to_dict() for r in doc.rules[:10]]
             }
-        except Exception as e:
-            print(f"Error getting suppression stats: {e}")
-            return {}
+        finally:
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except:
+                    pass
+                    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[STANDARDS] Upload failed: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/standards/rules")
+async def list_standards_rules(limit: int = 100):
+    """List extracted rules."""
+    if not STANDARDS_AVAILABLE:
+        raise HTTPException(503, "Standards processor not available")
+    registry = get_rule_registry()
+    rules = registry.get_all_rules()
+    return {"total": len(rules), "rules": [r.to_dict() for r in rules[:limit]]}
+
+
+@router.get("/standards/documents")
+async def list_standards_documents():
+    """List processed documents."""
+    if not STANDARDS_AVAILABLE:
+        raise HTTPException(503, "Standards processor not available")
+    registry = get_rule_registry()
+    return {"total": len(registry.documents), "documents": [d.to_dict() for d in registry.documents.values()]}
 
 
 # =============================================================================
-# ENTITY CONFIGURATION MODEL
+# COMPLIANCE CHECK - P4 Standards Layer
 # =============================================================================
 
-class EntityConfigModel:
-    """Entity Configuration - Track which FEINs/BNs are being analyzed per project"""
+# Import compliance engine
+try:
+    from backend.utils.compliance_engine import get_compliance_engine, run_compliance_scan
+    COMPLIANCE_ENGINE_AVAILABLE = True
+except ImportError:
+    try:
+        from utils.compliance_engine import get_compliance_engine, run_compliance_scan
+        COMPLIANCE_ENGINE_AVAILABLE = True
+    except ImportError:
+        COMPLIANCE_ENGINE_AVAILABLE = False
+        logger.warning("[UPLOAD] Compliance engine not available")
+
+
+@router.post("/standards/compliance/check/{project_id}")
+async def run_compliance_check(
+    project_id: str,
+    domain: Optional[str] = None
+):
+    """
+    Run compliance check against a project's data.
     
-    @staticmethod
-    def save(project_id: str, playbook_type: str, analysis_scope: str, selected_entities: List[str],
-             primary_entity: str = None, country_mode: str = 'us_only', detected_entities: Dict = None) -> Optional[Dict[str, Any]]:
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        try:
-            data = {
-                'project_id': project_id, 'playbook_type': playbook_type, 'analysis_scope': analysis_scope,
-                'selected_entities': selected_entities, 'primary_entity': primary_entity,
-                'country_mode': country_mode, 'configured_at': datetime.utcnow().isoformat()
+    Uses extracted rules to check for violations in the project's data.
+    Returns findings in Five C's format (Condition, Criteria, Cause, Consequence, Corrective Action).
+    """
+    try:
+        logger.info(f"[COMPLIANCE] Starting check for project {project_id}, domain={domain}")
+        
+        if not STANDARDS_AVAILABLE:
+            raise HTTPException(503, "Standards processor not available")
+        
+        if not COMPLIANCE_ENGINE_AVAILABLE:
+            raise HTTPException(503, "Compliance engine not available")
+        
+        # Get rules
+        registry = get_rule_registry()
+        
+        if domain:
+            rules = [r.to_dict() for r in registry.get_rules_by_domain(domain)]
+        else:
+            rules = [r.to_dict() for r in registry.get_all_rules()]
+        
+        if not rules:
+            return {
+                "project_id": project_id,
+                "rules_checked": 0,
+                "findings": [],
+                "findings_count": 0,
+                "compliant_count": 0,
+                "message": "No rules found. Upload standards documents first."
             }
-            response = supabase.table('project_entity_config').upsert(data, on_conflict='project_id,playbook_type').execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            print(f"Error saving entity config: {e}")
-            return None
-    
-    @staticmethod
-    def get(project_id: str, playbook_type: str) -> Optional[Dict[str, Any]]:
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        try:
-            response = supabase.table('project_entity_config').select('*').eq('project_id', project_id).eq('playbook_type', playbook_type).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            print(f"Error getting entity config: {e}")
-            return None
-    
-    @staticmethod
-    def delete(project_id: str, playbook_type: str) -> bool:
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        try:
-            supabase.table('project_entity_config').delete().eq('project_id', project_id).eq('playbook_type', playbook_type).execute()
-            return True
-        except Exception as e:
-            print(f"Error deleting entity config: {e}")
-            return False
-
-
-# =============================================================================
-# CONVENIENCE FUNCTIONS
-# =============================================================================
-
-def create_project(name: str, **kwargs) -> Optional[Dict]:
-    return ProjectModel.create(name, **kwargs)
-
-def get_projects() -> List[Dict]:
-    return ProjectModel.get_all()
-
-def add_chat_message(session_id: str, role: str, content: str, **kwargs) -> Optional[Dict]:
-    project_id = kwargs.pop('project_id', None)
-    return ChatHistoryModel.add_message(project_id, session_id, role, content, **kwargs)
-
-def get_chat_history(session_id: str) -> List[Dict]:
-    return ChatHistoryModel.get_by_session(session_id)
-
-def create_job(job_type: str, **kwargs) -> Optional[Dict]:
-    return ProcessingJobModel.create(job_type, **kwargs)
-
-def update_job_progress(job_id: str, percent: int, step: str) -> bool:
-    return ProcessingJobModel.update_progress(job_id, percent, step)
-
-def complete_job(job_id: str, result_data: dict = None) -> bool:
-    return ProcessingJobModel.complete(job_id, result_data)
-
-def fail_job(job_id: str, error: str) -> bool:
-    return ProcessingJobModel.fail(job_id, error)
+        
+        logger.info(f"[COMPLIANCE] Running {len(rules)} rules against project {project_id}")
+        
+        # Run compliance scan
+        findings = run_compliance_scan(project_id, rules=rules, domain=domain)
+        
+        logger.info(f"[COMPLIANCE] Scan complete: {len(findings)} findings")
+        
+        return {
+            "project_id": project_id,
+            "rules_checked": len(rules),
+            "findings_count": len(findings),
+            "findings": findings,
+            "compliant_count": len(rules) - len(findings)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[COMPLIANCE] Check failed: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(500, f"Compliance check failed: {e}")
