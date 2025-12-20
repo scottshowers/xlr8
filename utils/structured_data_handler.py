@@ -1119,15 +1119,18 @@ class StructuredDataHandler:
         relationships = []
         
         try:
-            # Get all tables for this project
-            tables_info = self.conn.execute("""
+            # Get all tables for this project (thread-safe)
+            tables_info = self.safe_fetchall("""
                 SELECT DISTINCT table_name, columns, likely_keys 
                 FROM _schema_metadata 
                 WHERE project = ? AND is_current = TRUE
-            """, [project]).fetchall()
+            """, [project])
             
             if len(tables_info) < 2:
+                logger.warning(f"[RELATIONSHIPS] Project {project} has {len(tables_info)} tables, need at least 2")
                 return []  # Need at least 2 tables
+            
+            logger.warning(f"[RELATIONSHIPS] Analyzing {len(tables_info)} tables for project {project}")
             
             # Parse table schemas
             tables = []
@@ -1168,19 +1171,21 @@ class StructuredDataHandler:
                         }
                         relationships.append(relationship)
             
-            # Store relationships
+            logger.warning(f"[RELATIONSHIPS] Found {len(relationships)} potential relationships")
+            
+            # Store relationships (thread-safe)
             if relationships:
                 # Clear existing relationships for this project
-                self.conn.execute("DELETE FROM _table_relationships WHERE project = ?", [project])
+                self.safe_execute("DELETE FROM _table_relationships WHERE project = ?", [project])
                 
-                for rel in relationships:
-                    self.conn.execute("""
+                for idx, rel in enumerate(relationships):
+                    self.safe_execute("""
                         INSERT INTO _table_relationships 
                         (id, project, source_table, source_columns, target_table, target_columns, 
                          relationship_type, confidence)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """, [
-                        len(relationships),
+                        idx + 1,
                         project,
                         rel['source_table'],
                         json.dumps(rel['source_columns']),
@@ -1191,23 +1196,25 @@ class StructuredDataHandler:
                     ])
                 
                 self.conn.commit()
-                logger.info(f"[RELATIONSHIPS] Stored {len(relationships)} relationships for project {project}")
+                logger.warning(f"[RELATIONSHIPS] Stored {len(relationships)} relationships for project {project}")
             
             return relationships
             
         except Exception as e:
             logger.error(f"[RELATIONSHIPS] Detection failed: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     def get_relationships(self, project: str) -> List[Dict[str, Any]]:
         """Get stored relationships for a project"""
         try:
-            result = self.conn.execute("""
+            result = self.safe_fetchall("""
                 SELECT source_table, source_columns, target_table, target_columns, 
                        relationship_type, confidence
                 FROM _table_relationships
                 WHERE project = ?
-            """, [project]).fetchall()
+            """, [project])
             
             relationships = []
             for row in result:
