@@ -170,7 +170,7 @@ function BarChart({ data, colors, height = 160 }) {
               minHeight: 4,
               transition: 'height 0.3s ease',
             }} />
-            <span style={{ fontSize: '0.65rem', color: colors.textMuted, fontWeight: 500 }}>{item.label}</span>
+            <span style={{ fontSize: '0.7rem', color: colors.textMuted, fontWeight: 500 }}>{item.label}</span>
           </div>
         );
       })}
@@ -227,17 +227,17 @@ function ProjectRow({ rank, project, colors, onClick, isSelected }) {
       </div>
       
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 600, color: customerColors.primary, fontSize: '0.9rem' }}>{project.name}</div>
+        <div style={{ fontWeight: 600, color: customerColors.primary, fontSize: '0.85rem' }}>{project.name}</div>
         <div style={{ fontSize: '0.75rem', color: colors.textMuted }}>{project.customer || 'No customer'}</div>
       </div>
       
       <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '0.65rem', color: colors.textMuted, marginBottom: 2 }}>FILES</div>
-          <div style={{ fontSize: '0.9rem', fontWeight: 600, color: colors.text }}>{project.fileCount || 0}</div>
+          <div style={{ fontSize: '0.7rem', color: colors.textMuted, marginBottom: 2 }}>FILES</div>
+          <div style={{ fontSize: '0.85rem', fontWeight: 600, color: colors.text }}>{project.fileCount || 0}</div>
         </div>
         <div style={{ width: 60 }}>
-          <div style={{ fontSize: '0.65rem', color: colors.textMuted, marginBottom: 4, textAlign: 'right' }}>HEALTH</div>
+          <div style={{ fontSize: '0.7rem', color: colors.textMuted, marginBottom: 4, textAlign: 'right' }}>HEALTH</div>
           <div style={{ 
             height: 6, 
             background: colors.inputBg, 
@@ -499,7 +499,7 @@ export default function DashboardPage() {
           }}>
             Command Center
           </h1>
-          <p style={{ color: colors.textMuted, margin: '0.25rem 0 0 0', fontSize: '0.875rem' }}>
+          <p style={{ color: colors.textMuted, margin: '0.25rem 0 0 0', fontSize: '0.85rem' }}>
             Welcome back! Here's your overview.
           </p>
         </div>
@@ -589,7 +589,7 @@ export default function DashboardPage() {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
               <div>
-                <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: colors.text }}>
+                <h3 style={{ margin: 0, fontSize: '0.85rem', fontWeight: 600, color: colors.text }}>
                   Activity
                 </h3>
                 <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.75rem', color: colors.textMuted }}>
@@ -625,7 +625,7 @@ export default function DashboardPage() {
               justifyContent: 'space-between',
               alignItems: 'center',
             }}>
-              <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: colors.text }}>
+              <h3 style={{ margin: 0, fontSize: '0.85rem', fontWeight: 600, color: colors.text }}>
                 Projects by Health
               </h3>
               <button
@@ -649,7 +649,7 @@ export default function DashboardPage() {
             {projectsData.length === 0 ? (
               <div style={{ padding: '2rem', textAlign: 'center', color: colors.textMuted }}>
                 <FolderOpen size={32} style={{ opacity: 0.3, marginBottom: '0.5rem' }} />
-                <p style={{ margin: 0, fontSize: '0.9rem' }}>No projects yet</p>
+                <p style={{ margin: 0, fontSize: '0.85rem' }}>No projects yet</p>
                 <button
                   onClick={() => navigate('/projects')}
                   style={{
@@ -692,7 +692,7 @@ export default function DashboardPage() {
             padding: '1.25rem',
             boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
           }}>
-            <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '0.9rem', fontWeight: 600, color: colors.text }}>
+            <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '0.85rem', fontWeight: 600, color: colors.text }}>
               Recent Activity
             </h3>
             
@@ -717,7 +717,7 @@ export default function DashboardPage() {
             padding: '1.25rem',
             boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
           }}>
-            <h3 style={{ margin: '0 0 1rem 0', fontSize: '0.9rem', fontWeight: 600, color: colors.text }}>
+            <h3 style={{ margin: '0 0 1rem 0', fontSize: '0.85rem', fontWeight: 600, color: colors.text }}>
               Quick Actions
             </h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -737,7 +737,7 @@ export default function DashboardPage() {
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
               <Calendar size={16} style={{ color: colors.primary }} />
-              <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: colors.text }}>
+              <h3 style={{ margin: 0, fontSize: '0.85rem', fontWeight: 600, color: colors.text }}>
                 Upcoming
               </h3>
             </div>
