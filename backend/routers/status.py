@@ -1,6 +1,11 @@
 """
-Status Router - Fixed Version
-==============================
+Status Router - Registry-Aware Version
+======================================
+
+UPDATED December 19, 2025:
+- Delete endpoints now call DocumentRegistryModel.unregister()
+- Registry is the SOURCE OF TRUTH for all file existence checks
+- Added /status/registry/sync endpoint for one-time cleanup
 
 FIXED December 19, 2025:
 - Delete now ALWAYS cleans _schema_metadata and _pdf_tables
@@ -14,6 +19,7 @@ Deploy to: backend/routers/status.py
 
 from fastapi import APIRouter, HTTPException
 from typing import Optional
+from datetime import datetime
 import sys
 import logging
 import json
@@ -23,7 +29,7 @@ sys.path.insert(0, '/app')
 sys.path.insert(0, '/data')
 
 from utils.rag_handler import RAGHandler
-from utils.database.models import ProcessingJobModel, DocumentModel
+from utils.database.models import ProcessingJobModel, DocumentModel, DocumentRegistryModel
 
 # Import structured data handler
 try:
@@ -429,10 +435,33 @@ async def delete_structured_file(project: str, filename: str):
         except Exception as cp_e:
             logger.debug(f"[DELETE] Checkpoint failed (may not be needed): {cp_e}")
         
+        # =================================================================
+        # STEP 6: Unregister from document registry (SOURCE OF TRUTH)
+        # =================================================================
+        registry_cleaned = False
+        try:
+            # Try to find the project_id for this project name
+            from utils.database.models import ProjectModel
+            project_record = ProjectModel.get_by_name(project)
+            project_id = project_record.get('id') if project_record else None
+            
+            # Unregister from registry
+            registry_cleaned = DocumentRegistryModel.unregister(filename, project_id)
+            if registry_cleaned:
+                logger.info(f"[DELETE] Unregistered {filename} from document registry")
+            else:
+                # Try without project_id (might be global)
+                registry_cleaned = DocumentRegistryModel.unregister(filename, None)
+                if registry_cleaned:
+                    logger.info(f"[DELETE] Unregistered {filename} from document registry (global)")
+        except Exception as reg_e:
+            logger.warning(f"[DELETE] Registry unregister failed: {reg_e}")
+        
         result = {
             "deleted_tables": deleted_tables,
             "count": len(deleted_tables),
-            "metadata_cleaned": metadata_cleaned
+            "metadata_cleaned": metadata_cleaned,
+            "registry_cleaned": registry_cleaned
         }
         
         logger.warning(f"[DELETE] Result: {result}")
@@ -834,7 +863,25 @@ async def delete_document(doc_id: str, filename: str = None, project: str = None
             except Exception as db_e:
                 logger.warning(f"Could not delete from Supabase by filename: {db_e}")
         
-        return {"success": True, "message": f"Document deleted"}
+        # =================================================================
+        # Unregister from document registry (SOURCE OF TRUTH)
+        # =================================================================
+        registry_cleaned = False
+        try:
+            # Get project_id from doc or param
+            project_id = doc.get("project_id") if doc else None
+            
+            if actual_filename:
+                registry_cleaned = DocumentRegistryModel.unregister(actual_filename, project_id)
+                if registry_cleaned:
+                    logger.info(f"Unregistered {actual_filename} from document registry")
+                elif not project_id:
+                    # File might be global or project_id not found
+                    logger.info(f"Registry entry not found for {actual_filename} (may not exist)")
+        except Exception as reg_e:
+            logger.warning(f"Registry unregister failed: {reg_e}")
+        
+        return {"success": True, "message": f"Document deleted", "registry_cleaned": registry_cleaned}
             
     except Exception as e:
         logger.error(f"Failed to delete document: {e}")
@@ -843,26 +890,234 @@ async def delete_document(doc_id: str, filename: str = None, project: str = None
 
 @router.post("/status/documents/reset")
 async def reset_all_documents():
-    """Reset all documents (ChromaDB and database)"""
+    """Reset all documents (ChromaDB, database, and registry)"""
     try:
         # Reset ChromaDB
+        chroma_count = 0
         try:
             rag = RAGHandler()
             collection = rag.client.get_or_create_collection(name="documents")
             all_ids = collection.get()['ids']
             if all_ids:
                 collection.delete(ids=all_ids)
-            logger.warning(f"⚠️ Deleted {len(all_ids)} chunks from ChromaDB")
+                chroma_count = len(all_ids)
+            logger.warning(f"⚠️ Deleted {chroma_count} chunks from ChromaDB")
         except Exception as ce:
             logger.error(f"ChromaDB reset error: {ce}")
         
         # Reset database documents
-        count = DocumentModel.delete_all()
-        logger.warning(f"⚠️ Deleted {count} documents from database")
+        doc_count = DocumentModel.delete_all()
+        logger.warning(f"⚠️ Deleted {doc_count} documents from database")
         
-        return {"success": True, "message": f"Reset complete: {count} documents deleted"}
+        # Reset document registry
+        registry_count = 0
+        try:
+            from utils.database.supabase_client import get_supabase
+            supabase = get_supabase()
+            if supabase:
+                # Count first
+                count_result = supabase.table('document_registry').select('id', count='exact').execute()
+                registry_count = count_result.count or 0
+                # Delete all
+                if registry_count > 0:
+                    supabase.table('document_registry').delete().neq('id', '00000000-0000-0000-0000-000000000000').execute()
+                logger.warning(f"⚠️ Deleted {registry_count} entries from document registry")
+        except Exception as reg_e:
+            logger.error(f"Registry reset error: {reg_e}")
+        
+        return {
+            "success": True, 
+            "message": f"Reset complete",
+            "details": {
+                "chromadb_chunks": chroma_count,
+                "supabase_documents": doc_count,
+                "registry_entries": registry_count
+            }
+        }
     except Exception as e:
         logger.error(f"Failed to reset documents: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/status/registry/sync")
+async def sync_document_registry():
+    """
+    Sync document registry with actual data in backends.
+    
+    This is a one-time cleanup to fix orphaned registry entries
+    and add missing entries for existing files.
+    
+    Run this ONCE after deploying the registry-aware delete.
+    """
+    try:
+        from utils.database.supabase_client import get_supabase
+        supabase = get_supabase()
+        
+        results = {
+            "orphans_removed": 0,
+            "missing_added": 0,
+            "errors": []
+        }
+        
+        # =================================================================
+        # STEP 1: Get all files that actually exist in backends
+        # =================================================================
+        actual_files = {}  # filename -> {storage_type, project_id, ...}
+        
+        # 1a. Get files from DuckDB _schema_metadata (Excel)
+        if STRUCTURED_AVAILABLE:
+            try:
+                handler = get_structured_handler()
+                meta_result = handler.conn.execute("""
+                    SELECT DISTINCT file_name, project
+                    FROM _schema_metadata 
+                    WHERE is_current = TRUE AND file_name IS NOT NULL
+                """).fetchall()
+                
+                for filename, project in meta_result:
+                    if filename:
+                        actual_files[filename] = {
+                            'storage_type': 'duckdb',
+                            'project_name': project,
+                            'source': '_schema_metadata'
+                        }
+                logger.info(f"[SYNC] Found {len(meta_result)} Excel files in _schema_metadata")
+            except Exception as e:
+                results["errors"].append(f"_schema_metadata query: {e}")
+        
+        # 1b. Get files from DuckDB _pdf_tables (PDF)
+        if STRUCTURED_AVAILABLE:
+            try:
+                handler = get_structured_handler()
+                table_check = handler.conn.execute("""
+                    SELECT COUNT(*) FROM information_schema.tables 
+                    WHERE table_name = '_pdf_tables'
+                """).fetchone()
+                
+                if table_check[0] > 0:
+                    pdf_result = handler.conn.execute("""
+                        SELECT DISTINCT source_file, project, project_id
+                        FROM _pdf_tables 
+                        WHERE source_file IS NOT NULL
+                    """).fetchall()
+                    
+                    for filename, project, project_id in pdf_result:
+                        if filename:
+                            actual_files[filename] = {
+                                'storage_type': 'duckdb',
+                                'project_name': project,
+                                'project_id': project_id,
+                                'source': '_pdf_tables'
+                            }
+                    logger.info(f"[SYNC] Found {len(pdf_result)} PDF files in _pdf_tables")
+            except Exception as e:
+                results["errors"].append(f"_pdf_tables query: {e}")
+        
+        # 1c. Get files from ChromaDB
+        try:
+            rag = RAGHandler()
+            collection = rag.client.get_or_create_collection(name="documents")
+            chroma_results = collection.get(include=["metadatas"], limit=5000)
+            
+            seen_chroma = set()
+            for metadata in chroma_results.get("metadatas", []):
+                filename = metadata.get("source") or metadata.get("filename")
+                if filename and filename not in seen_chroma:
+                    seen_chroma.add(filename)
+                    if filename not in actual_files:
+                        actual_files[filename] = {
+                            'storage_type': 'chromadb',
+                            'project_name': metadata.get("project"),
+                            'project_id': metadata.get("project_id"),
+                            'source': 'chromadb'
+                        }
+                    elif actual_files[filename]['storage_type'] == 'duckdb':
+                        # File is in both
+                        actual_files[filename]['storage_type'] = 'both'
+            
+            logger.info(f"[SYNC] Found {len(seen_chroma)} unique files in ChromaDB")
+        except Exception as e:
+            results["errors"].append(f"ChromaDB query: {e}")
+        
+        # =================================================================
+        # STEP 2: Get all entries currently in registry
+        # =================================================================
+        registry_entries = {}
+        try:
+            registry_data = DocumentRegistryModel.get_all(limit=5000)
+            for entry in registry_data:
+                registry_entries[entry['filename']] = entry
+            logger.info(f"[SYNC] Found {len(registry_entries)} entries in registry")
+        except Exception as e:
+            results["errors"].append(f"Registry query: {e}")
+        
+        # =================================================================
+        # STEP 3: Remove orphaned registry entries (file doesn't exist)
+        # =================================================================
+        for filename, entry in registry_entries.items():
+            if filename not in actual_files:
+                try:
+                    DocumentRegistryModel.unregister(filename, entry.get('project_id'))
+                    results["orphans_removed"] += 1
+                    logger.info(f"[SYNC] Removed orphan: {filename}")
+                except Exception as e:
+                    results["errors"].append(f"Remove orphan {filename}: {e}")
+        
+        # =================================================================
+        # STEP 4: Add missing registry entries (file exists but not registered)
+        # =================================================================
+        for filename, file_info in actual_files.items():
+            if filename not in registry_entries:
+                try:
+                    # Determine usage type
+                    is_global = file_info.get('project_name', '').lower() in (
+                        'global', '__global__', 'reference library', 'reference_library'
+                    )
+                    
+                    # Try to get project_id from project name
+                    project_id = file_info.get('project_id')
+                    if not project_id and file_info.get('project_name') and not is_global:
+                        try:
+                            from utils.database.models import ProjectModel
+                            proj = ProjectModel.get_by_name(file_info['project_name'])
+                            if proj:
+                                project_id = proj.get('id')
+                        except:
+                            pass
+                    
+                    DocumentRegistryModel.register(
+                        filename=filename,
+                        file_type=filename.rsplit('.', 1)[-1] if '.' in filename else None,
+                        storage_type=file_info['storage_type'],
+                        usage_type='structured_data' if file_info['storage_type'] in ('duckdb', 'both') else 'rag_knowledge',
+                        project_id=project_id if not is_global else None,
+                        is_global=is_global,
+                        metadata={
+                            'project_name': file_info.get('project_name'),
+                            'synced_from': file_info.get('source'),
+                            'synced_at': datetime.utcnow().isoformat()
+                        }
+                    )
+                    results["missing_added"] += 1
+                    logger.info(f"[SYNC] Added missing: {filename}")
+                except Exception as e:
+                    results["errors"].append(f"Add missing {filename}: {e}")
+        
+        logger.info(f"[SYNC] Complete: {results}")
+        
+        return {
+            "success": True,
+            "message": f"Registry sync complete",
+            "actual_files_found": len(actual_files),
+            "registry_entries_before": len(registry_entries),
+            "orphans_removed": results["orphans_removed"],
+            "missing_added": results["missing_added"],
+            "errors": results["errors"][:10] if results["errors"] else []
+        }
+        
+    except Exception as e:
+        logger.error(f"Registry sync failed: {e}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 
