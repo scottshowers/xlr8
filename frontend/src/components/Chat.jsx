@@ -1,9 +1,7 @@
 /**
- * Chat.jsx - REVOLUTIONARY INTELLIGENT CHAT
+ * Chat.jsx - Intelligent Chat Interface
  * 
- * v13: Updated to use unified_chat endpoint
- * 
- * POLISHED: All purple/blue → grassGreen for consistency
+ * v14: Full theme conversion - inline styles, consistent sizing
  * 
  * Features:
  * - INTELLIGENT MODE: Three Truths synthesis, smart clarification, proactive insights
@@ -16,22 +14,42 @@
 import { useState, useEffect, useRef } from 'react'
 import api from '../services/api'
 import { useProject } from '../context/ProjectContext'
+import { useTheme } from '../context/ThemeContext'
 import PersonaSwitcher from '../components/PersonaSwitcher'
 import PersonaCreator from '../components/PersonaCreator'
-import { COLORS } from '../components/ui'
 import { 
   Zap, Brain, Database, FileText, BookOpen, AlertTriangle, 
   CheckCircle, ChevronDown, ChevronRight, Lightbulb, Download,
   ThumbsUp, ThumbsDown, Copy, RefreshCw, Send, Trash2, Eye, EyeOff
 } from 'lucide-react'
 
-// Brand color for consistent styling
-const BRAND = COLORS?.grassGreen || '#5a8a4a';
-const BRAND_LIGHT = 'rgba(90, 138, 74, 0.1)';
-const BRAND_BORDER = 'rgba(90, 138, 74, 0.3)';
+// Theme-aware colors - matches other pages
+const getColors = (dark) => ({
+  bg: dark ? '#1a1f2e' : '#f5f7fa',
+  card: dark ? '#242b3d' : '#ffffff',
+  cardBorder: dark ? '#2d3548' : '#e8ecf1',
+  text: dark ? '#e8eaed' : '#2a3441',
+  textMuted: dark ? '#8b95a5' : '#6b7280',
+  textLight: dark ? '#5f6a7d' : '#9ca3af',
+  primary: '#5a8a4a',
+  primaryDark: '#4a7a3a',
+  primaryLight: dark ? 'rgba(90, 138, 74, 0.15)' : 'rgba(90, 138, 74, 0.1)',
+  primaryBorder: 'rgba(90, 138, 74, 0.3)',
+  blue: '#4a6b8a',
+  blueLight: dark ? 'rgba(74, 107, 138, 0.15)' : 'rgba(74, 107, 138, 0.1)',
+  amber: '#8a6b4a',
+  amberLight: dark ? 'rgba(138, 107, 74, 0.15)' : 'rgba(138, 107, 74, 0.1)',
+  red: '#8a4a4a',
+  redLight: dark ? 'rgba(138, 74, 74, 0.15)' : 'rgba(138, 74, 74, 0.1)',
+  divider: dark ? '#2d3548' : '#e8ecf1',
+  inputBg: dark ? '#1a1f2e' : '#f8fafc',
+  messageBg: dark ? '#2d3548' : '#f1f5f9',
+})
 
 export default function Chat({ functionalAreas = [] }) {
   const { activeProject, projectName } = useProject()
+  const { darkMode } = useTheme()
+  const colors = getColors(darkMode)
   
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
@@ -46,7 +64,7 @@ export default function Chat({ functionalAreas = [] }) {
   const [scope, setScope] = useState('project')
   
   // INTELLIGENT MODE
-  const [intelligentMode, setIntelligentMode] = useState(true)  // ON by default!
+  const [intelligentMode, setIntelligentMode] = useState(true)
   const [sessionId, setSessionId] = useState(null)
   const [pendingClarification, setPendingClarification] = useState(null)
   const [learningStats, setLearningStats] = useState(null)
@@ -69,7 +87,6 @@ export default function Chat({ functionalAreas = [] }) {
   useEffect(() => {
     loadModelInfo()
     loadLearningStats()
-    // Generate session ID for intelligent mode
     setSessionId(`session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
   }, [])
 
@@ -97,7 +114,6 @@ export default function Chat({ functionalAreas = [] }) {
     }
   }
 
-  // Reset preferences (clear learned filters)
   const resetPreferences = async (resetType = 'session') => {
     try {
       const response = await api.post('/chat/unified/reset-preferences', {
@@ -107,7 +123,6 @@ export default function Chat({ functionalAreas = [] }) {
       })
       
       if (response.data.success) {
-        // Add a system message indicating reset
         setMessages(prev => [...prev, {
           role: 'assistant',
           type: 'system',
@@ -151,16 +166,12 @@ export default function Chat({ functionalAreas = [] }) {
     }
   }
 
-  // ============================================================
   // INTELLIGENT MESSAGE HANDLER
-  // ============================================================
-  
   const sendIntelligentMessage = async (clarifications = null) => {
     const messageText = clarifications ? pendingClarification?.originalQuestion : input.trim()
     if (!messageText) return
 
     if (!clarifications) {
-      // Add user message
       const userMessage = {
         role: 'user',
         content: messageText,
@@ -188,7 +199,6 @@ export default function Chat({ functionalAreas = [] }) {
 
       const data = response.data
 
-      // Check for export data and trigger download
       if (data.export) {
         const { filename, data: base64Data, mime_type } = data.export
         const link = document.createElement('a')
@@ -197,10 +207,8 @@ export default function Chat({ functionalAreas = [] }) {
         document.body.appendChild(link)
         link.click()
         document.body.removeChild(link)
-        console.log('Export downloaded:', filename)
       }
 
-      // Check if clarification needed
       if (data.needs_clarification) {
         setPendingClarification({
           originalQuestion: messageText,
@@ -208,7 +216,6 @@ export default function Chat({ functionalAreas = [] }) {
           sessionId: data.session_id
         })
         
-        // Add clarification message
         setMessages(prev => [...prev, {
           role: 'assistant',
           type: 'clarification',
@@ -217,7 +224,6 @@ export default function Chat({ functionalAreas = [] }) {
           timestamp: new Date().toISOString()
         }])
       } else {
-        // Add intelligent response
         setMessages(prev => [...prev, {
           role: 'assistant',
           type: 'intelligent',
@@ -233,11 +239,9 @@ export default function Chat({ functionalAreas = [] }) {
           auto_applied_note: data.auto_applied_note || null,
           auto_applied_facts: data.auto_applied_facts || null,
           can_reset_preferences: data.can_reset_preferences || false,
-          // New unified_chat fields
           quality_alerts: data.quality_alerts || null,
           follow_up_suggestions: data.follow_up_suggestions || [],
           citations: data.citations || null,
-          // Export data for re-download
           export: data.export || null,
           timestamp: new Date().toISOString()
         }])
@@ -260,10 +264,7 @@ export default function Chat({ functionalAreas = [] }) {
     }
   }
 
-  // ============================================================
-  // STANDARD MESSAGE HANDLER (original)
-  // ============================================================
-  
+  // STANDARD MESSAGE HANDLER
   const sendStandardMessage = async () => {
     if (!input.trim()) return
 
@@ -300,70 +301,63 @@ export default function Chat({ functionalAreas = [] }) {
       const pollInterval = setInterval(async () => {
         try {
           const statusResponse = await api.get(`/chat/status/${job_id}`)
-          const jobStatus = statusResponse.data
+          const { status, message: statusMessage, result } = statusResponse.data
 
-          setMessages(prev => prev.map(msg =>
-            msg.tempId === tempId
-              ? { ...msg, content: jobStatus.current_step, progress: jobStatus.progress }
-              : msg
+          setMessages(prev => prev.map(m => 
+            m.tempId === tempId ? { ...m, content: statusMessage } : m
           ))
 
-          if (jobStatus.status === 'complete') {
+          if (status === 'completed') {
             clearInterval(pollInterval)
-            setMessages(prev => prev.map(msg =>
-              msg.tempId === tempId ? {
-                role: 'assistant',
-                type: 'standard',
-                content: jobStatus.response,
-                sources: jobStatus.sources || [],
-                chunks_found: jobStatus.chunks_found || 0,
-                routing_info: jobStatus.routing_info,
-                job_id: job_id,
-                userQuery: userMessage.content,
-                timestamp: new Date().toISOString()
-              } : msg
-            ))
+            setMessages(prev => prev.filter(m => m.tempId !== tempId))
+            
+            setMessages(prev => [...prev, {
+              role: 'assistant',
+              type: 'standard',
+              content: result.answer || result.content,
+              sources: result.sources || [],
+              piiDetected: result.piiDetected,
+              job_id: job_id,
+              userQuery: userMessage.content,
+              timestamp: new Date().toISOString()
+            }])
+            setLoading(false)
+          } else if (status === 'failed') {
+            clearInterval(pollInterval)
+            setMessages(prev => prev.filter(m => m.tempId !== tempId))
+            setMessages(prev => [...prev, {
+              role: 'assistant',
+              content: '❌ ' + (statusMessage || 'Failed to process question'),
+              error: true,
+              timestamp: new Date().toISOString()
+            }])
             setLoading(false)
           }
-
-          if (jobStatus.status === 'failed') {
-            clearInterval(pollInterval)
-            setMessages(prev => prev.map(msg =>
-              msg.tempId === tempId
-                ? { ...msg, content: '❌ ' + (jobStatus.error || 'Failed'), error: true }
-                : msg
-            ))
-            setLoading(false)
-          }
-        } catch (pollErr) {
-          console.error('Poll error:', pollErr)
-        }
-      }, 500)
-
-      setTimeout(() => {
-        clearInterval(pollInterval)
-        if (loading) {
-          setMessages(prev => prev.map(msg =>
-            msg.tempId === tempId
-              ? { ...msg, content: '⚠️ Request timed out', error: true }
-              : msg
-          ))
+        } catch (err) {
+          clearInterval(pollInterval)
+          setMessages(prev => prev.filter(m => m.tempId !== tempId))
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: '❌ ' + err.message,
+            error: true,
+            timestamp: new Date().toISOString()
+          }])
           setLoading(false)
         }
-      }, 120000)
+      }, 1000)
 
     } catch (err) {
-      console.error('Chat error:', err)
-      setMessages(prev => prev.map(msg =>
-        msg.tempId === tempId
-          ? { ...msg, content: '❌ ' + (err.response?.data?.detail || err.message), error: true }
-          : msg
-      ))
+      setMessages(prev => prev.filter(m => m.tempId !== tempId))
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: '❌ ' + (err.response?.data?.detail || err.message),
+        error: true,
+        timestamp: new Date().toISOString()
+      }])
       setLoading(false)
     }
   }
 
-  // Main send handler
   const sendMessage = () => {
     if (intelligentMode) {
       sendIntelligentMessage()
@@ -382,33 +376,22 @@ export default function Chat({ functionalAreas = [] }) {
   const clearChat = () => {
     setMessages([])
     setPendingClarification(null)
-    setSessionId(`session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
   }
 
-  const handleFeedback = async (messageIndex, feedbackType) => {
-    const message = messages[messageIndex]
-    
-    // Update UI immediately
+  const handleFeedback = (messageIndex, feedbackType) => {
     setMessages(prev => prev.map((msg, idx) => 
       idx === messageIndex ? { ...msg, feedbackGiven: feedbackType } : msg
     ))
     
-    // Send feedback to appropriate endpoint
-    if (message?.type === 'intelligent') {
-      // Use learning feedback endpoint
-      try {
-        await api.post('/chat/intelligent/feedback', {
-          question: message.question || messages[messageIndex - 1]?.content || '',
-          feedback: feedbackType,
-          project: projectName,
-          intent: message.structured_output?.detected_mode
-        })
-        console.log(`✅ Learning feedback recorded: ${feedbackType}`)
-      } catch (err) {
-        console.error('Failed to submit learning feedback:', err)
-      }
+    const message = messages[messageIndex]
+    if (message?.type === 'intelligent' && sessionId) {
+      api.post('/chat/intelligent/feedback', {
+        session_id: sessionId,
+        message_index: messageIndex,
+        feedback: feedbackType,
+        question: messages[messageIndex - 1]?.content || ''
+      }).catch(console.error)
     } else if (message?.job_id) {
-      // Use standard feedback endpoint
       submitFeedback(message.job_id, feedbackType, message.userQuery, message.content)
     }
   }
@@ -416,10 +399,26 @@ export default function Chat({ functionalAreas = [] }) {
   const isDisabled = loading || (!input.trim()) || (scope === 'project' && !activeProject)
 
   return (
-    <div className="h-[75vh] min-h-[500px] flex flex-col bg-white overflow-hidden">
+    <div style={{
+      height: '75vh',
+      minHeight: 500,
+      display: 'flex',
+      flexDirection: 'column',
+      background: colors.card,
+      overflow: 'hidden',
+    }}>
       {/* Header */}
-      <div className="px-4 py-3 bg-white border-b flex items-center justify-between flex-wrap gap-3" style={{ borderColor: '#e8ecf1' }}>
-        <div className="flex items-center gap-3">
+      <div style={{
+        padding: '0.75rem 1rem',
+        background: colors.card,
+        borderBottom: `1px solid ${colors.divider}`,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: '0.75rem',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <PersonaSwitcher 
             currentPersona={currentPersona}
             onPersonaChange={setCurrentPersona}
@@ -429,27 +428,44 @@ export default function Chat({ functionalAreas = [] }) {
           {/* Intelligent Mode Toggle */}
           <button
             onClick={() => setIntelligentMode(!intelligentMode)}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
-            style={intelligentMode ? {
-              background: BRAND,
-              color: 'white',
-              boxShadow: '0 1px 3px rgba(90, 138, 74, 0.3)'
-            } : {
-              background: '#f3f4f6',
-              color: '#6b7280'
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.375rem 0.75rem',
+              borderRadius: 8,
+              fontSize: '0.85rem',
+              fontWeight: 500,
+              border: 'none',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+              ...(intelligentMode ? {
+                background: colors.primary,
+                color: 'white',
+              } : {
+                background: colors.inputBg,
+                color: colors.textMuted,
+              })
             }}
           >
             <Brain size={16} />
-            {intelligentMode ? '🧠 Intelligent' : 'Standard'}
+            {intelligentMode ? 'Intelligent' : 'Standard'}
           </button>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           {/* Scope Selector */}
           <select
             value={scope}
             onChange={(e) => setScope(e.target.value)}
-            className="px-3 py-1.5 text-sm border rounded-lg bg-white"
+            style={{
+              padding: '0.375rem 0.75rem',
+              fontSize: '0.85rem',
+              border: `1px solid ${colors.divider}`,
+              borderRadius: 8,
+              background: colors.card,
+              color: colors.text,
+            }}
           >
             {Object.entries(scopeLabels).map(([value, label]) => (
               <option key={value} value={value}>{label}</option>
@@ -458,7 +474,14 @@ export default function Chat({ functionalAreas = [] }) {
 
           <button
             onClick={clearChat}
-            className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
+            style={{
+              padding: '0.5rem',
+              background: 'transparent',
+              border: 'none',
+              borderRadius: 8,
+              cursor: 'pointer',
+              color: colors.textMuted,
+            }}
             title="Clear chat"
           >
             <Trash2 size={18} />
@@ -468,21 +491,25 @@ export default function Chat({ functionalAreas = [] }) {
 
       {/* Intelligent Mode Banner */}
       {intelligentMode && (
-        <div className="px-4 py-2 border-b flex items-center justify-between text-sm" style={{ background: BRAND_LIGHT, borderColor: '#e8ecf1' }}>
-          <div className="flex items-center gap-2">
-            <Zap size={16} style={{ color: BRAND }} />
-            <span style={{ color: '#4a6a4a' }}>
-              <strong>Intelligent Mode:</strong> Synthesizes data + documents + best practices
+        <div style={{
+          padding: '0.5rem 1rem',
+          background: colors.primaryLight,
+          borderBottom: `1px solid ${colors.divider}`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          fontSize: '0.85rem',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Zap size={16} style={{ color: colors.primary }} />
+            <span style={{ color: colors.primary }}>
+              <strong>Intelligent Mode:</strong> Synthesizes data + documents + reference library
             </span>
           </div>
           {learningStats?.available && (
-            <div className="flex items-center gap-3 text-xs" style={{ color: BRAND }}>
-              <span title="Learned query patterns">
-                🧠 {learningStats.learned_queries || 0} patterns
-              </span>
-              <span title="Feedback records">
-                👍 {learningStats.feedback_records || 0} feedback
-              </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.75rem', color: colors.primary }}>
+              <span title="Learned query patterns">🧠 {learningStats.learned_queries || 0} patterns</span>
+              <span title="Feedback records">👍 {learningStats.feedback_records || 0} feedback</span>
             </div>
           )}
         </div>
@@ -491,32 +518,47 @@ export default function Chat({ functionalAreas = [] }) {
       {/* Messages Area */}
       <div 
         ref={messagesAreaRef}
-        className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50"
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: '1rem',
+          background: colors.messageBg,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '1rem',
+        }}
       >
         {messages.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-gray-500">
-            <div className="text-6xl mb-4 opacity-50">
+          <div style={{
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: colors.textMuted,
+          }}>
+            <div style={{ fontSize: '3.5rem', marginBottom: '1rem', opacity: 0.5 }}>
               {intelligentMode ? '🧠' : '💬'}
             </div>
-            <h3 className="text-lg font-semibold text-gray-700 mb-2">
+            <h3 style={{ fontSize: '1rem', fontWeight: 600, color: colors.text, marginBottom: '0.5rem' }}>
               {intelligentMode ? 'Intelligent Analysis Ready' : 'Start a Conversation'}
             </h3>
-            <p className="text-sm text-center max-w-md">
+            <p style={{ fontSize: '0.85rem', textAlign: 'center', maxWidth: 400 }}>
               {intelligentMode 
-                ? 'Ask questions and I\'ll synthesize answers from your data, documents, and UKG best practices.'
+                ? 'Ask questions and I\'ll synthesize answers from your data, documents, and reference library.'
                 : 'Ask questions about your uploaded data and documents.'
               }
             </p>
             {intelligentMode && (
-              <div className="mt-4 flex gap-4 text-xs">
-                <div className="flex items-center gap-1 text-blue-600">
+              <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem', fontSize: '0.75rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: colors.blue }}>
                   <Database size={14} /> Data
                 </div>
-                <div className="flex items-center gap-1" style={{ color: BRAND }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: colors.primary }}>
                   <FileText size={14} /> Docs
                 </div>
-                <div className="flex items-center gap-1 text-amber-600">
-                  <BookOpen size={14} /> Best Practice
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: colors.amber }}>
+                  <BookOpen size={14} /> Reference
                 </div>
               </div>
             )}
@@ -533,13 +575,14 @@ export default function Chat({ functionalAreas = [] }) {
               onFeedback={handleFeedback}
               onClarificationSubmit={(answers) => sendIntelligentMessage(answers)}
               onResetPreferences={resetPreferences}
+              colors={colors}
             />
           ))
         )}
         
         {loading && (
-          <div className="flex items-center gap-2 text-gray-500 text-sm">
-            <RefreshCw className="animate-spin" size={16} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: colors.textMuted, fontSize: '0.85rem' }}>
+            <RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} />
             {intelligentMode ? 'Analyzing sources...' : 'Processing...'}
           </div>
         )}
@@ -548,8 +591,12 @@ export default function Chat({ functionalAreas = [] }) {
       </div>
 
       {/* Input Area */}
-      <div className="p-4 bg-white border-t" style={{ borderColor: '#e8ecf1' }}>
-        <div className="flex gap-2">
+      <div style={{
+        padding: '1rem',
+        background: colors.card,
+        borderTop: `1px solid ${colors.divider}`,
+      }}>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -561,23 +608,41 @@ export default function Chat({ functionalAreas = [] }) {
                   ? "Ask anything - I'll synthesize from all sources..."
                   : "Type your question..."
             }
-            className="flex-1 px-4 py-3 border rounded-xl resize-none focus:outline-none focus:ring-2 focus:border-transparent"
-            style={{ '--tw-ring-color': BRAND }}
+            style={{
+              flex: 1,
+              padding: '0.75rem 1rem',
+              border: `1px solid ${colors.divider}`,
+              borderRadius: 12,
+              resize: 'none',
+              fontSize: '0.85rem',
+              background: colors.card,
+              color: colors.text,
+              outline: 'none',
+            }}
             rows={2}
             disabled={scope === 'project' && !activeProject}
           />
           <button
             onClick={sendMessage}
             disabled={isDisabled}
-            className="px-6 py-3 rounded-xl font-medium transition-all flex items-center gap-2"
-            style={isDisabled ? {
-              background: '#f3f4f6',
-              color: '#9ca3af',
-              cursor: 'not-allowed'
-            } : {
-              background: BRAND,
-              color: 'white',
-              boxShadow: '0 2px 8px rgba(90, 138, 74, 0.3)'
+            style={{
+              padding: '0.75rem 1.25rem',
+              borderRadius: 12,
+              fontWeight: 500,
+              fontSize: '0.85rem',
+              border: 'none',
+              cursor: isDisabled ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              transition: 'all 0.15s ease',
+              ...(isDisabled ? {
+                background: colors.inputBg,
+                color: colors.textLight,
+              } : {
+                background: colors.primary,
+                color: 'white',
+              })
             }}
           >
             <Send size={18} />
@@ -596,23 +661,33 @@ export default function Chat({ functionalAreas = [] }) {
           }}
         />
       )}
+      
+      <style>{`
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   )
 }
 
 
-// ============================================================
 // MESSAGE BUBBLE COMPONENT
-// ============================================================
-
-function MessageBubble({ message, index, persona, expandedSources, toggleSources, onFeedback, onClarificationSubmit, onResetPreferences }) {
+function MessageBubble({ message, index, persona, expandedSources, toggleSources, onFeedback, onClarificationSubmit, onResetPreferences, colors }) {
   const isUser = message.role === 'user'
   
-  // System message (like reset confirmation)
+  // System message
   if (message.type === 'system') {
     return (
-      <div className="flex justify-center my-2">
-        <div className="px-4 py-2 bg-gray-100 text-gray-600 text-sm rounded-full">
+      <div style={{ display: 'flex', justifyContent: 'center', margin: '0.5rem 0' }}>
+        <div style={{
+          padding: '0.5rem 1rem',
+          background: colors.inputBg,
+          color: colors.textMuted,
+          fontSize: '0.85rem',
+          borderRadius: 20,
+        }}>
           {message.content}
         </div>
       </div>
@@ -621,71 +696,85 @@ function MessageBubble({ message, index, persona, expandedSources, toggleSources
   
   // Clarification message
   if (message.type === 'clarification') {
-    return (
-      <ClarificationCard 
-        questions={message.questions}
-        originalQuestion={message.originalQuestion}
-        onSubmit={onClarificationSubmit}
-      />
-    )
+    return <ClarificationCard questions={message.questions} originalQuestion={message.originalQuestion} onSubmit={onClarificationSubmit} colors={colors} />
   }
   
   // Intelligent response
   if (message.type === 'intelligent') {
-    return (
-      <IntelligentResponse 
-        message={message}
-        index={index}
-        onFeedback={onFeedback}
-        onResetPreferences={onResetPreferences}
-      />
-    )
+    return <IntelligentResponse message={message} index={index} onFeedback={onFeedback} onResetPreferences={onResetPreferences} colors={colors} />
   }
   
-  // Standard message (user or assistant)
+  // Standard message
   return (
-    <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
+    <div style={{ display: 'flex', gap: '0.75rem', flexDirection: isUser ? 'row-reverse' : 'row' }}>
       {/* Avatar */}
-      <div 
-        className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
-        style={isUser ? {
-          background: `linear-gradient(135deg, ${BRAND}, #4a7a3a)`,
+      <div style={{
+        width: 36,
+        height: 36,
+        borderRadius: '50%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+        fontSize: '1rem',
+        ...(isUser ? {
+          background: `linear-gradient(135deg, ${colors.primary}, ${colors.primaryDark})`,
           color: 'white'
         } : {
-          background: BRAND_LIGHT,
-          color: BRAND
-        }}
-      >
+          background: colors.primaryLight,
+          color: colors.primary
+        })
+      }}>
         {isUser ? '👤' : persona?.icon || '🐮'}
       </div>
       
       {/* Bubble */}
-      <div className={`max-w-[75%] rounded-xl px-4 py-3 ${
-        isUser 
-          ? 'rounded-br-sm text-white'
-          : message.error
-            ? 'bg-red-50 border border-red-200 text-red-700 rounded-bl-sm'
-            : 'bg-white shadow-sm border rounded-bl-sm'
-      }`} style={isUser ? { background: `linear-gradient(135deg, ${BRAND}, #4a7a3a)` } : {}}>
-        <div className="whitespace-pre-wrap text-sm leading-relaxed">
+      <div style={{
+        maxWidth: '75%',
+        borderRadius: 12,
+        padding: '0.75rem 1rem',
+        ...(isUser ? {
+          background: `linear-gradient(135deg, ${colors.primary}, ${colors.primaryDark})`,
+          color: 'white',
+          borderBottomRightRadius: 4,
+        } : message.error ? {
+          background: colors.redLight,
+          border: `1px solid ${colors.red}40`,
+          color: colors.red,
+          borderBottomLeftRadius: 4,
+        } : {
+          background: colors.card,
+          border: `1px solid ${colors.divider}`,
+          borderBottomLeftRadius: 4,
+        })
+      }}>
+        <div style={{ whiteSpace: 'pre-wrap', fontSize: '0.85rem', lineHeight: 1.6, color: isUser ? 'white' : colors.text }}>
           {message.content}
         </div>
         
-        {/* Sources for standard responses */}
+        {/* Sources */}
         {message.sources?.length > 0 && (
-          <div className="mt-3 pt-3 border-t border-gray-100">
+          <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: `1px solid ${colors.divider}` }}>
             <button 
               onClick={() => toggleSources(index)}
-              className="text-xs flex items-center gap-1"
-              style={{ color: BRAND }}
+              style={{
+                fontSize: '0.75rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.25rem',
+                color: colors.primary,
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+              }}
             >
               {expandedSources[index] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
               {message.sources.length} sources
             </button>
             {expandedSources[index] && (
-              <div className="mt-2 space-y-1">
+              <div style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                 {message.sources.slice(0, 5).map((src, i) => (
-                  <div key={i} className="text-xs text-gray-500 truncate">
+                  <div key={i} style={{ fontSize: '0.75rem', color: colors.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     📄 {src.filename || src.source || 'Unknown'}
                   </div>
                 ))}
@@ -694,18 +783,32 @@ function MessageBubble({ message, index, persona, expandedSources, toggleSources
           </div>
         )}
         
-        {/* Feedback buttons */}
+        {/* Feedback */}
         {!isUser && !message.error && !message.isStatus && message.type === 'standard' && (
-          <div className="mt-2 pt-2 border-t border-gray-100 flex gap-2">
+          <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: `1px solid ${colors.divider}`, display: 'flex', gap: '0.5rem' }}>
             <button
               onClick={() => onFeedback(index, 'positive')}
-              className={`p-1 rounded ${message.feedbackGiven === 'positive' ? 'text-green-600 bg-green-50' : 'text-gray-400 hover:text-green-600'}`}
+              style={{
+                padding: '0.25rem',
+                borderRadius: 4,
+                background: message.feedbackGiven === 'positive' ? colors.primaryLight : 'transparent',
+                color: message.feedbackGiven === 'positive' ? colors.primary : colors.textLight,
+                border: 'none',
+                cursor: 'pointer',
+              }}
             >
               <ThumbsUp size={14} />
             </button>
             <button
               onClick={() => onFeedback(index, 'negative')}
-              className={`p-1 rounded ${message.feedbackGiven === 'negative' ? 'text-red-600 bg-red-50' : 'text-gray-400 hover:text-red-600'}`}
+              style={{
+                padding: '0.25rem',
+                borderRadius: 4,
+                background: message.feedbackGiven === 'negative' ? colors.redLight : 'transparent',
+                color: message.feedbackGiven === 'negative' ? colors.red : colors.textLight,
+                border: 'none',
+                cursor: 'pointer',
+              }}
             >
               <ThumbsDown size={14} />
             </button>
@@ -717,11 +820,8 @@ function MessageBubble({ message, index, persona, expandedSources, toggleSources
 }
 
 
-// ============================================================
 // CLARIFICATION CARD
-// ============================================================
-
-function ClarificationCard({ questions, originalQuestion, onSubmit }) {
+function ClarificationCard({ questions, originalQuestion, onSubmit, colors }) {
   const [answers, setAnswers] = useState({})
   
   const handleChange = (questionId, value, type) => {
@@ -737,7 +837,6 @@ function ClarificationCard({ questions, originalQuestion, onSubmit }) {
     }
   }
   
-  // Set defaults
   useEffect(() => {
     const defaults = {}
     questions?.forEach(q => {
@@ -754,53 +853,69 @@ function ClarificationCard({ questions, originalQuestion, onSubmit }) {
   }, [questions])
   
   return (
-    <div className="rounded-xl p-5 max-w-lg" style={{ background: BRAND_LIGHT, border: `1px solid ${BRAND_BORDER}` }}>
-      <div className="flex items-center gap-3 mb-4">
-        <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: 'white' }}>
-          <Brain size={20} style={{ color: BRAND }} />
+    <div style={{
+      borderRadius: 12,
+      padding: '1.25rem',
+      maxWidth: 480,
+      background: colors.primaryLight,
+      border: `1px solid ${colors.primaryBorder}`,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+        <div style={{
+          width: 40,
+          height: 40,
+          borderRadius: '50%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: colors.card,
+        }}>
+          <Brain size={20} style={{ color: colors.primary }} />
         </div>
         <div>
-          <h3 className="font-semibold" style={{ color: '#4a6a4a' }}>Let me clarify</h3>
-          <p className="text-sm" style={{ color: BRAND }}>Quick questions for a better answer</p>
+          <h3 style={{ fontWeight: 600, color: colors.primary, margin: 0, fontSize: '0.9rem' }}>Let me clarify</h3>
+          <p style={{ fontSize: '0.85rem', color: colors.primary, margin: 0, opacity: 0.8 }}>Quick questions for a better answer</p>
         </div>
       </div>
       
-      <div className="space-y-4">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
         {questions?.map((q) => (
-          <div key={q.id} className="bg-white rounded-lg p-4" style={{ border: `1px solid ${BRAND_BORDER}` }}>
-            <div className="font-medium text-gray-800 mb-3">{q.question}</div>
+          <div key={q.id} style={{
+            background: colors.card,
+            borderRadius: 8,
+            padding: '1rem',
+            border: `1px solid ${colors.primaryBorder}`,
+          }}>
+            <div style={{ fontWeight: 500, color: colors.text, marginBottom: '0.75rem', fontSize: '0.85rem' }}>{q.question}</div>
             
             {q.type === 'radio' && (
-              <div className="space-y-2">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 {q.options?.map((opt) => (
-                  <label key={opt.id} className="flex items-center gap-3 cursor-pointer group">
+                  <label key={opt.id} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}>
                     <input
                       type="radio"
                       name={q.id}
                       checked={answers[q.id] === opt.id}
                       onChange={() => handleChange(q.id, opt.id, 'radio')}
-                      style={{ accentColor: BRAND }}
+                      style={{ accentColor: colors.primary }}
                     />
-                    <span className="text-sm text-gray-700 group-hover:text-gray-900">
-                      {opt.label}
-                    </span>
+                    <span style={{ fontSize: '0.85rem', color: colors.text }}>{opt.label}</span>
                   </label>
                 ))}
               </div>
             )}
             
             {q.type === 'checkbox' && (
-              <div className="flex flex-wrap gap-3">
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem' }}>
                 {q.options?.map((opt) => (
-                  <label key={opt.id} className="flex items-center gap-2 cursor-pointer">
+                  <label key={opt.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
                     <input
                       type="checkbox"
                       checked={answers[q.id]?.includes(opt.id)}
                       onChange={() => handleChange(q.id, opt.id, 'checkbox')}
-                      className="rounded"
-                      style={{ accentColor: BRAND }}
+                      style={{ accentColor: colors.primary }}
                     />
-                    <span className="text-sm text-gray-700">{opt.label}</span>
+                    <span style={{ fontSize: '0.85rem', color: colors.text }}>{opt.label}</span>
                   </label>
                 ))}
               </div>
@@ -809,17 +924,36 @@ function ClarificationCard({ questions, originalQuestion, onSubmit }) {
         ))}
       </div>
       
-      <div className="mt-5 flex gap-3">
+      <div style={{ marginTop: '1.25rem', display: 'flex', gap: '0.75rem' }}>
         <button
           onClick={() => onSubmit(answers)}
-          className="px-5 py-2 text-white rounded-lg font-medium flex items-center gap-2"
-          style={{ background: BRAND }}
+          style={{
+            padding: '0.5rem 1.25rem',
+            background: colors.primary,
+            color: 'white',
+            border: 'none',
+            borderRadius: 8,
+            fontWeight: 500,
+            fontSize: '0.85rem',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+          }}
         >
           <Zap size={16} /> Get Answer
         </button>
         <button
           onClick={() => onSubmit(null)}
-          className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm"
+          style={{
+            padding: '0.5rem 1rem',
+            background: 'transparent',
+            color: colors.textMuted,
+            border: 'none',
+            borderRadius: 8,
+            fontSize: '0.85rem',
+            cursor: 'pointer',
+          }}
         >
           Skip
         </button>
@@ -829,11 +963,8 @@ function ClarificationCard({ questions, originalQuestion, onSubmit }) {
 }
 
 
-// ============================================================
 // INTELLIGENT RESPONSE COMPONENT
-// ============================================================
-
-function IntelligentResponse({ message, index, onFeedback, onResetPreferences }) {
+function IntelligentResponse({ message, index, onFeedback, onResetPreferences, colors }) {
   const [showSources, setShowSources] = useState(false)
   const [expandedSection, setExpandedSection] = useState(null)
   const [resetting, setResetting] = useState(false)
@@ -854,25 +985,36 @@ function IntelligentResponse({ message, index, onFeedback, onResetPreferences })
   }
   
   return (
-    <div className="bg-white rounded-xl border shadow-sm overflow-hidden max-w-2xl">
-      {/* Auto-Applied Preferences Banner */}
+    <div style={{
+      background: colors.card,
+      borderRadius: 12,
+      border: `1px solid ${colors.divider}`,
+      overflow: 'hidden',
+      maxWidth: 640,
+    }}>
+      {/* Auto-Applied Banner */}
       {message.auto_applied_note && message.can_reset_preferences && (
-        <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 flex items-center justify-between">
-          <span className="text-sm text-amber-800">{message.auto_applied_note}</span>
-          <div className="flex gap-2">
+        <div style={{
+          padding: '0.5rem 1rem',
+          background: colors.amberLight,
+          borderBottom: `1px solid ${colors.amber}40`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}>
+          <span style={{ fontSize: '0.85rem', color: colors.amber }}>{message.auto_applied_note}</span>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
             <button
               onClick={() => handleReset('session')}
               disabled={resetting}
-              className="text-xs text-amber-600 hover:text-amber-800 hover:underline disabled:opacity-50"
-              title="Ask clarification again for this session"
+              style={{ fontSize: '0.75rem', color: colors.amber, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
             >
               {resetting ? '...' : 'Reset'}
             </button>
             <button
               onClick={() => handleReset('learned')}
               disabled={resetting}
-              className="text-xs text-red-600 hover:text-red-800 hover:underline disabled:opacity-50"
-              title="Forget this preference permanently"
+              style={{ fontSize: '0.75rem', color: colors.red, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
             >
               {resetting ? '...' : 'Forget'}
             </button>
@@ -881,34 +1023,53 @@ function IntelligentResponse({ message, index, onFeedback, onResetPreferences })
       )}
       
       {/* Confidence Header */}
-      <div className="px-4 py-2 border-b flex items-center justify-between" style={{ background: BRAND_LIGHT }}>
-        <div className="flex items-center gap-2">
-          <Brain size={16} style={{ color: BRAND }} />
-          <span className="text-sm font-medium" style={{ color: '#4a6a4a' }}>Intelligent Analysis</span>
+      <div style={{
+        padding: '0.5rem 1rem',
+        background: colors.primaryLight,
+        borderBottom: `1px solid ${colors.divider}`,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <Brain size={16} style={{ color: colors.primary }} />
+          <span style={{ fontSize: '0.85rem', fontWeight: 500, color: colors.primary }}>Intelligent Analysis</span>
           {message.used_learning && (
-            <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full flex items-center gap-1">
+            <span style={{
+              padding: '0.125rem 0.5rem',
+              background: colors.primaryLight,
+              color: colors.primary,
+              fontSize: '0.75rem',
+              borderRadius: 12,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.25rem',
+            }}>
               🧠 Learned
             </span>
           )}
         </div>
-        <div className={`px-2 py-0.5 rounded text-xs font-medium ${
-          message.confidence >= 0.8 ? 'bg-green-100 text-green-700' :
-          message.confidence >= 0.6 ? 'bg-blue-100 text-blue-700' :
-          'bg-amber-100 text-amber-700'
-        }`}>
+        <div style={{
+          padding: '0.125rem 0.5rem',
+          borderRadius: 4,
+          fontSize: '0.75rem',
+          fontWeight: 500,
+          background: message.confidence >= 0.8 ? colors.primaryLight : message.confidence >= 0.6 ? colors.blueLight : colors.amberLight,
+          color: message.confidence >= 0.8 ? colors.primary : message.confidence >= 0.6 ? colors.blue : colors.amber,
+        }}>
           {Math.round((message.confidence || 0) * 100)}% confidence
         </div>
       </div>
       
       {/* Main Answer */}
-      <div className="p-4">
-        <div className="prose prose-sm max-w-none whitespace-pre-wrap">
+      <div style={{ padding: '1rem' }}>
+        <div style={{ whiteSpace: 'pre-wrap', fontSize: '0.85rem', lineHeight: 1.6, color: colors.text }}>
           {message.content}
         </div>
         
-        {/* Export Download Button */}
+        {/* Export Button */}
         {message.export && (
-          <div className="mt-3 pt-3 border-t border-gray-100">
+          <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: `1px solid ${colors.divider}` }}>
             <button
               onClick={() => {
                 const { filename, data, mime_type } = message.export
@@ -919,7 +1080,19 @@ function IntelligentResponse({ message, index, onFeedback, onResetPreferences })
                 link.click()
                 document.body.removeChild(link)
               }}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all bg-green-50 text-green-700 hover:bg-green-100 border border-green-200"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.5rem 0.75rem',
+                borderRadius: 8,
+                fontSize: '0.85rem',
+                fontWeight: 500,
+                background: colors.primaryLight,
+                color: colors.primary,
+                border: `1px solid ${colors.primary}40`,
+                cursor: 'pointer',
+              }}
             >
               <Download size={16} />
               Download {message.export.filename}
@@ -928,22 +1101,26 @@ function IntelligentResponse({ message, index, onFeedback, onResetPreferences })
         )}
       </div>
       
-      {/* Proactive Insights */}
+      {/* Insights */}
       {hasInsights && (
-        <div className="mx-4 mb-4 bg-amber-50 border border-amber-200 rounded-lg p-3">
-          <div className="flex items-center gap-2 mb-2">
-            <Lightbulb className="text-amber-600" size={16} />
-            <span className="font-medium text-amber-800 text-sm">Proactive Insights</span>
+        <div style={{
+          margin: '0 1rem 1rem',
+          background: colors.amberLight,
+          border: `1px solid ${colors.amber}40`,
+          borderRadius: 8,
+          padding: '0.75rem',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+            <Lightbulb size={16} style={{ color: colors.amber }} />
+            <span style={{ fontWeight: 500, color: colors.amber, fontSize: '0.85rem' }}>Proactive Insights</span>
           </div>
-          <div className="space-y-1">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
             {message.insights.map((insight, i) => (
-              <div key={i} className="flex items-start gap-2 text-sm">
-                <span className={`flex-shrink-0 ${
-                  insight.severity === 'high' ? 'text-red-500' : 'text-amber-500'
-                }`}>
+              <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', fontSize: '0.85rem' }}>
+                <span style={{ flexShrink: 0, color: insight.severity === 'high' ? colors.red : colors.amber }}>
                   {insight.severity === 'high' ? '🔴' : '🟡'}
                 </span>
-                <span className="text-amber-900">
+                <span style={{ color: colors.text }}>
                   <strong>{insight.title}:</strong> {insight.description}
                 </span>
               </div>
@@ -954,15 +1131,21 @@ function IntelligentResponse({ message, index, onFeedback, onResetPreferences })
       
       {/* Conflicts */}
       {hasConflicts && (
-        <div className="mx-4 mb-4 bg-red-50 border border-red-200 rounded-lg p-3">
-          <div className="flex items-center gap-2 mb-2">
-            <AlertTriangle className="text-red-600" size={16} />
-            <span className="font-medium text-red-800 text-sm">Conflicts Detected</span>
+        <div style={{
+          margin: '0 1rem 1rem',
+          background: colors.redLight,
+          border: `1px solid ${colors.red}40`,
+          borderRadius: 8,
+          padding: '0.75rem',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+            <AlertTriangle size={16} style={{ color: colors.red }} />
+            <span style={{ fontWeight: 500, color: colors.red, fontSize: '0.85rem' }}>Conflicts Detected</span>
           </div>
           {message.conflicts.map((conflict, i) => (
-            <div key={i} className="text-sm text-red-900 mb-2">
+            <div key={i} style={{ fontSize: '0.85rem', color: colors.text, marginBottom: '0.5rem' }}>
               <div>{conflict.description}</div>
-              <div className="text-red-700 text-xs mt-1">
+              <div style={{ color: colors.red, fontSize: '0.75rem', marginTop: '0.25rem' }}>
                 💡 Recommendation: {conflict.recommendation}
               </div>
             </div>
@@ -972,55 +1155,65 @@ function IntelligentResponse({ message, index, onFeedback, onResetPreferences })
       
       {/* Sources Toggle */}
       {(hasReality || hasIntent || hasBestPractice) && (
-        <div className="border-t">
+        <div style={{ borderTop: `1px solid ${colors.divider}` }}>
           <button
             onClick={() => setShowSources(!showSources)}
-            className="w-full px-4 py-2 flex items-center justify-between hover:bg-gray-50 text-sm"
+            style={{
+              width: '100%',
+              padding: '0.5rem 1rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: '0.85rem',
+            }}
           >
-            <span className="text-gray-600">Sources of Truth</span>
-            <div className="flex items-center gap-3">
-              {hasReality && <span className="text-blue-600 text-xs">📊 Data</span>}
-              {hasIntent && <span className="text-xs" style={{ color: BRAND }}>📄 Docs</span>}
-              {hasBestPractice && <span className="text-amber-600 text-xs">📘 UKG</span>}
-              {showSources ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            <span style={{ color: colors.textMuted }}>Sources of Truth</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              {hasReality && <span style={{ color: colors.blue, fontSize: '0.75rem' }}>📊 Data</span>}
+              {hasIntent && <span style={{ color: colors.primary, fontSize: '0.75rem' }}>📄 Docs</span>}
+              {hasBestPractice && <span style={{ color: colors.amber, fontSize: '0.75rem' }}>📘 Reference</span>}
+              {showSources ? <ChevronDown size={16} style={{ color: colors.textMuted }} /> : <ChevronRight size={16} style={{ color: colors.textMuted }} />}
             </div>
           </button>
           
           {showSources && (
-            <div className="px-4 pb-4 space-y-2">
-              {/* Reality */}
+            <div style={{ padding: '0 1rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               {hasReality && (
                 <SourceSection
                   title="Customer Data"
-                  icon={<Database className="text-blue-500" size={14} />}
-                  color="blue"
+                  icon={<Database size={14} style={{ color: colors.blue }} />}
+                  colorScheme="blue"
                   items={message.from_reality}
                   expanded={expandedSection === 'reality'}
                   onToggle={() => setExpandedSection(expandedSection === 'reality' ? null : 'reality')}
+                  colors={colors}
                 />
               )}
               
-              {/* Intent */}
               {hasIntent && (
                 <SourceSection
                   title="Customer Documents"
-                  icon={<FileText size={14} style={{ color: BRAND }} />}
-                  color="green"
+                  icon={<FileText size={14} style={{ color: colors.primary }} />}
+                  colorScheme="green"
                   items={message.from_intent}
                   expanded={expandedSection === 'intent'}
                   onToggle={() => setExpandedSection(expandedSection === 'intent' ? null : 'intent')}
+                  colors={colors}
                 />
               )}
               
-              {/* Best Practice */}
               {hasBestPractice && (
                 <SourceSection
-                  title="UKG Best Practice"
-                  icon={<BookOpen className="text-amber-500" size={14} />}
-                  color="amber"
+                  title="Reference Library"
+                  icon={<BookOpen size={14} style={{ color: colors.amber }} />}
+                  colorScheme="amber"
                   items={message.from_best_practice}
                   expanded={expandedSection === 'best_practice'}
                   onToggle={() => setExpandedSection(expandedSection === 'best_practice' ? null : 'best_practice')}
+                  colors={colors}
                 />
               )}
             </div>
@@ -1028,29 +1221,40 @@ function IntelligentResponse({ message, index, onFeedback, onResetPreferences })
         </div>
       )}
       
-      {/* Feedback Buttons */}
-      <div className="px-4 py-2 border-t bg-gray-50 flex items-center justify-between">
-        <span className="text-xs text-gray-500">Was this helpful?</span>
-        <div className="flex gap-2">
+      {/* Feedback */}
+      <div style={{
+        padding: '0.5rem 1rem',
+        borderTop: `1px solid ${colors.divider}`,
+        background: colors.inputBg,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+      }}>
+        <span style={{ fontSize: '0.75rem', color: colors.textMuted }}>Was this helpful?</span>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
           <button
             onClick={() => onFeedback(index, 'positive')}
-            className={`p-1.5 rounded-lg transition-all ${
-              message.feedbackGiven === 'positive' 
-                ? 'bg-green-100 text-green-600' 
-                : 'text-gray-400 hover:text-green-600 hover:bg-green-50'
-            }`}
-            title="This was helpful"
+            style={{
+              padding: '0.375rem',
+              borderRadius: 8,
+              background: message.feedbackGiven === 'positive' ? colors.primaryLight : 'transparent',
+              color: message.feedbackGiven === 'positive' ? colors.primary : colors.textLight,
+              border: 'none',
+              cursor: 'pointer',
+            }}
           >
             <ThumbsUp size={16} />
           </button>
           <button
             onClick={() => onFeedback(index, 'negative')}
-            className={`p-1.5 rounded-lg transition-all ${
-              message.feedbackGiven === 'negative' 
-                ? 'bg-red-100 text-red-600' 
-                : 'text-gray-400 hover:text-red-600 hover:bg-red-50'
-            }`}
-            title="This needs improvement"
+            style={{
+              padding: '0.375rem',
+              borderRadius: 8,
+              background: message.feedbackGiven === 'negative' ? colors.redLight : 'transparent',
+              color: message.feedbackGiven === 'negative' ? colors.red : colors.textLight,
+              border: 'none',
+              cursor: 'pointer',
+            }}
           >
             <ThumbsDown size={16} />
           </button>
@@ -1061,36 +1265,62 @@ function IntelligentResponse({ message, index, onFeedback, onResetPreferences })
 }
 
 
-// Source Section Component
-function SourceSection({ title, icon, color, items, expanded, onToggle }) {
-  const colors = {
-    blue: { bg: 'bg-blue-50', border: 'border-blue-100', hover: 'hover:bg-blue-100' },
-    green: { bg: BRAND_LIGHT, border: `border-[${BRAND_BORDER}]`, hover: 'hover:bg-green-100' },
-    amber: { bg: 'bg-amber-50', border: 'border-amber-100', hover: 'hover:bg-amber-100' },
+// SOURCE SECTION COMPONENT
+function SourceSection({ title, icon, colorScheme, items, expanded, onToggle, colors }) {
+  const schemeColors = {
+    blue: { bg: colors.blueLight, border: `${colors.blue}40` },
+    green: { bg: colors.primaryLight, border: colors.primaryBorder },
+    amber: { bg: colors.amberLight, border: `${colors.amber}40` },
   }
   
-  const colorStyle = colors[color] || colors.green
+  const scheme = schemeColors[colorScheme] || schemeColors.green
   
   return (
-    <div className={`rounded-lg border ${colorStyle.bg} ${colorStyle.border}`}>
+    <div style={{
+      borderRadius: 8,
+      border: `1px solid ${scheme.border}`,
+      background: scheme.bg,
+      overflow: 'hidden',
+    }}>
       <button
         onClick={onToggle}
-        className={`w-full px-3 py-2 flex items-center justify-between ${colorStyle.hover}`}
+        style={{
+          width: '100%',
+          padding: '0.5rem 0.75rem',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          background: 'transparent',
+          border: 'none',
+          cursor: 'pointer',
+        }}
       >
-        <div className="flex items-center gap-2">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           {icon}
-          <span className="text-sm font-medium">{title}</span>
-          <span className="text-xs text-gray-400">({items.length})</span>
+          <span style={{ fontSize: '0.85rem', fontWeight: 500, color: colors.text }}>{title}</span>
+          <span style={{ fontSize: '0.75rem', color: colors.textLight }}>({items.length})</span>
         </div>
-        {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        {expanded ? <ChevronDown size={14} style={{ color: colors.textMuted }} /> : <ChevronRight size={14} style={{ color: colors.textMuted }} />}
       </button>
       
       {expanded && (
-        <div className="px-3 pb-3 space-y-2">
+        <div style={{ padding: '0 0.75rem 0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           {items.slice(0, 3).map((item, i) => (
-            <div key={i} className="bg-white rounded p-2 text-xs">
-              <div className="font-medium text-gray-700">{item.source_name}</div>
-              <div className="text-gray-500 mt-1 line-clamp-3">
+            <div key={i} style={{
+              background: colors.card,
+              borderRadius: 6,
+              padding: '0.5rem',
+              fontSize: '0.75rem',
+            }}>
+              <div style={{ fontWeight: 500, color: colors.text }}>{item.source_name}</div>
+              <div style={{
+                color: colors.textMuted,
+                marginTop: '0.25rem',
+                overflow: 'hidden',
+                display: '-webkit-box',
+                WebkitLineClamp: 3,
+                WebkitBoxOrient: 'vertical',
+              }}>
                 {typeof item.content === 'string' 
                   ? item.content.slice(0, 200) 
                   : JSON.stringify(item.content).slice(0, 200)
