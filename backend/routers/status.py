@@ -47,7 +47,11 @@ router = APIRouter()
 
 @router.get("/status/structured")
 async def get_structured_data_status(project: Optional[str] = None):
-    """Get structured data (DuckDB) statistics"""
+    """
+    Get structured data (DuckDB) statistics.
+    
+    Uses document_registry as source of truth, enriched with DuckDB table details.
+    """
     import time
     start_time = time.time()
     logger.info(f"[STATUS/STRUCTURED] Starting request, project={project}")
@@ -67,112 +71,156 @@ async def get_structured_data_status(project: Optional[str] = None):
         handler = get_structured_handler()
         logger.info(f"[STATUS/STRUCTURED] Got handler in {time.time() - start_time:.2f}s")
         
+        # =================================================================
+        # STEP 1: Get valid files from REGISTRY (source of truth)
+        # =================================================================
+        valid_files = set()
+        try:
+            # Get registry entries for DuckDB files
+            if project:
+                # Try to get project_id from project name
+                from utils.database.models import ProjectModel
+                proj_record = ProjectModel.get_by_name(project)
+                project_id = proj_record.get('id') if proj_record else None
+                
+                registry_entries = DocumentRegistryModel.get_by_project(project_id, include_global=True)
+            else:
+                registry_entries = DocumentRegistryModel.get_all()
+            
+            # Filter to only DuckDB files
+            for entry in registry_entries:
+                storage = entry.get('storage_type', '')
+                if storage in ('duckdb', 'both'):
+                    valid_files.add(entry.get('filename', '').lower())
+            
+            logger.info(f"[STATUS/STRUCTURED] Registry has {len(valid_files)} valid DuckDB files")
+        except Exception as reg_e:
+            logger.warning(f"[STATUS/STRUCTURED] Registry query failed: {reg_e}, falling back to direct query")
+            valid_files = None  # Fall back to showing all
+        
+        # =================================================================
+        # STEP 2: Get table details from DuckDB metadata
+        # =================================================================
         tables = []
         try:
-            # First try to get data from metadata table (has timestamps) - EXCEL FILES
-            try:
-                logger.info("[STATUS/STRUCTURED] Querying _schema_metadata...")
-                metadata_result = handler.conn.execute("""
-                    SELECT table_name, project, file_name, sheet_name, columns, row_count, created_at
-                    FROM _schema_metadata 
-                    WHERE is_current = TRUE
+            logger.info("[STATUS/STRUCTURED] Querying _schema_metadata...")
+            metadata_result = handler.conn.execute("""
+                SELECT table_name, project, file_name, sheet_name, columns, row_count, created_at
+                FROM _schema_metadata 
+                WHERE is_current = TRUE
+            """).fetchall()
+            logger.info(f"[STATUS/STRUCTURED] _schema_metadata returned {len(metadata_result)} rows")
+            
+            for row in metadata_result:
+                table_name, proj, filename, sheet, columns_json, row_count, created_at = row
+                
+                # Filter by project if specified
+                if project and proj and proj.lower() != project.lower():
+                    continue
+                
+                # Filter by registry (if available)
+                if valid_files is not None and filename and filename.lower() not in valid_files:
+                    logger.debug(f"[STATUS/STRUCTURED] Skipping {filename} - not in registry")
+                    continue
+                
+                # Verify table actually exists
+                try:
+                    handler.conn.execute(f'SELECT 1 FROM "{table_name}" LIMIT 1')
+                except:
+                    logger.warning(f"[STATUS] Skipping stale metadata for non-existent table: {table_name}")
+                    continue
+                
+                try:
+                    columns_data = json.loads(columns_json) if columns_json else []
+                    columns = [c.get('name', c) if isinstance(c, dict) else c for c in columns_data]
+                except:
+                    columns = []
+                
+                tables.append({
+                    'table_name': table_name,
+                    'project': proj,
+                    'file': filename,
+                    'sheet': sheet,
+                    'columns': columns,
+                    'row_count': row_count or 0,
+                    'loaded_at': str(created_at) if created_at else None,
+                    'source_type': 'excel'
+                })
+            
+            logger.info(f"[STATUS] Got {len(tables)} tables from _schema_metadata (Excel)")
+            
+        except Exception as meta_e:
+            logger.warning(f"Metadata query failed: {meta_e}")
+        
+        # =================================================================
+        # STEP 3: Also query _pdf_tables for PDF-derived tables
+        # =================================================================
+        try:
+            # First check if table exists
+            table_check = handler.conn.execute("""
+                SELECT COUNT(*) FROM information_schema.tables 
+                WHERE table_name = '_pdf_tables'
+            """).fetchone()
+            logger.info(f"[STATUS] _pdf_tables exists: {table_check[0] > 0}")
+            
+            if table_check[0] > 0:
+                pdf_result = handler.conn.execute("""
+                    SELECT table_name, source_file, project, project_id, row_count, columns, created_at
+                    FROM _pdf_tables
                 """).fetchall()
-                logger.info(f"[STATUS/STRUCTURED] _schema_metadata returned {len(metadata_result)} rows in {time.time() - start_time:.2f}s")
-                
-                for row in metadata_result:
-                    table_name, proj, filename, sheet, columns_json, row_count, created_at = row
-                    
-                    if project and proj.lower() != project.lower():
-                        continue
-                    
-                    # Verify table actually exists before including
-                    try:
-                        handler.conn.execute(f'SELECT 1 FROM "{table_name}" LIMIT 1')
-                    except:
-                        logger.warning(f"[STATUS] Skipping stale metadata for non-existent table: {table_name}")
-                        continue
-                    
-                    try:
-                        columns_data = json.loads(columns_json) if columns_json else []
-                        columns = [c.get('name', c) if isinstance(c, dict) else c for c in columns_data]
-                    except:
-                        columns = []
-                    
-                    tables.append({
-                        'table_name': table_name,
-                        'project': proj,
-                        'file': filename,
-                        'sheet': sheet,
-                        'columns': columns,
-                        'row_count': row_count or 0,
-                        'loaded_at': str(created_at) if created_at else None,
-                        'source_type': 'excel'
-                    })
-                
-                logger.info(f"[STATUS] Got {len(tables)} tables from _schema_metadata (Excel)")
-                
-            except Exception as meta_e:
-                logger.warning(f"Metadata query failed: {meta_e}")
+                logger.info(f"[STATUS] _pdf_tables has {len(pdf_result)} rows")
+            else:
+                pdf_result = []
             
-            # ALSO query _pdf_tables for PDF-derived tables
+            pdf_count = 0
+            for row in pdf_result:
+                table_name, source_file, proj, project_id, row_count, columns_json, created_at = row
+                
+                # Filter by project if specified
+                if project and proj and proj.lower() != project.lower():
+                    continue
+                
+                # Filter by registry (if available)
+                if valid_files is not None and source_file and source_file.lower() not in valid_files:
+                    logger.debug(f"[STATUS/STRUCTURED] Skipping PDF {source_file} - not in registry")
+                    continue
+                
+                # Verify table actually exists
+                try:
+                    handler.conn.execute(f'SELECT 1 FROM "{table_name}" LIMIT 1')
+                except:
+                    logger.warning(f"[STATUS] Skipping stale metadata for non-existent PDF table: {table_name}")
+                    continue
+                
+                try:
+                    columns = json.loads(columns_json) if columns_json else []
+                except:
+                    columns = []
+                
+                tables.append({
+                    'table_name': table_name,
+                    'project': proj or 'Unknown',
+                    'file': source_file,
+                    'sheet': 'PDF Data',
+                    'columns': columns,
+                    'row_count': row_count or 0,
+                    'loaded_at': str(created_at) if created_at else None,
+                    'source_type': 'pdf'
+                })
+                pdf_count += 1
+            
+            logger.info(f"[STATUS] Got {pdf_count} tables from _pdf_tables (PDF)")
+            
+        except Exception as pdf_e:
+            logger.debug(f"PDF tables query: {pdf_e}")
+        
+        # =================================================================
+        # STEP 4: Fallback to information_schema if no metadata
+        # =================================================================
+        if not tables:
+            logger.warning("No metadata found, falling back to information_schema")
+            
             try:
-                # First check if table exists
-                table_check = handler.conn.execute("""
-                    SELECT COUNT(*) FROM information_schema.tables 
-                    WHERE table_name = '_pdf_tables'
-                """).fetchone()
-                logger.warning(f"[STATUS] _pdf_tables exists: {table_check[0] > 0}")
-                
-                if table_check[0] > 0:
-                    pdf_result = handler.conn.execute("""
-                        SELECT table_name, source_file, project, project_id, row_count, columns, created_at
-                        FROM _pdf_tables
-                    """).fetchall()
-                    logger.warning(f"[STATUS] _pdf_tables has {len(pdf_result)} rows")
-                else:
-                    pdf_result = []
-                    logger.warning("[STATUS] _pdf_tables does not exist yet")
-                
-                pdf_count = 0
-                for row in pdf_result:
-                    table_name, source_file, proj, project_id, row_count, columns_json, created_at = row
-                    
-                    if project and proj and proj.lower() != project.lower():
-                        continue
-                    
-                    # Verify table actually exists before including
-                    try:
-                        handler.conn.execute(f'SELECT 1 FROM "{table_name}" LIMIT 1')
-                    except:
-                        logger.warning(f"[STATUS] Skipping stale metadata for non-existent PDF table: {table_name}")
-                        continue
-                    
-                    try:
-                        columns = json.loads(columns_json) if columns_json else []
-                    except:
-                        columns = []
-                    
-                    tables.append({
-                        'table_name': table_name,
-                        'project': proj or 'Unknown',
-                        'file': source_file,
-                        'sheet': 'PDF Data',
-                        'columns': columns,
-                        'row_count': row_count or 0,
-                        'loaded_at': str(created_at) if created_at else None,
-                        'source_type': 'pdf'
-                    })
-                    pdf_count += 1
-                
-                logger.info(f"[STATUS] Got {pdf_count} tables from _pdf_tables (PDF)")
-                
-            except Exception as pdf_e:
-                logger.debug(f"PDF tables query: {pdf_e}")
-            
-            # Fallback to information_schema if no metadata
-            if not tables:
-                logger.warning("No metadata found, falling back to information_schema")
-                
                 table_result = handler.conn.execute("""
                     SELECT table_name 
                     FROM information_schema.tables 
@@ -201,6 +249,10 @@ async def get_structured_data_status(project: Optional[str] = None):
                         if project and proj.lower() != project.lower():
                             continue
                         
+                        # Filter by registry (if available)
+                        if valid_files is not None and filename and filename.lower() not in valid_files:
+                            continue
+                        
                         tables.append({
                             'table_name': table_name,
                             'project': proj,
@@ -213,11 +265,10 @@ async def get_structured_data_status(project: Optional[str] = None):
                         })
                     except Exception as te:
                         logger.warning(f"Error getting info for table {table_name}: {te}")
-                    
-        except Exception as qe:
-            logger.error(f"Error querying tables: {qe}")
-            schema = handler.get_schema_for_project(project)
-            tables = schema.get('tables', [])
+            except Exception as qe:
+                logger.error(f"Error querying tables: {qe}")
+                schema = handler.get_schema_for_project(project)
+                tables = schema.get('tables', [])
         
         # Group by file
         files_dict = {}
@@ -702,108 +753,73 @@ async def delete_all_jobs():
 @router.get("/status/documents")
 async def get_documents(project: Optional[str] = None, limit: int = 1000):
     """
-    Get all documents with chunk counts.
-    Combines Supabase document metadata with ChromaDB chunk counts.
+    Get all documents.
+    
+    Uses document_registry as source of truth.
     """
     import time
     start_time = time.time()
     logger.info("[STATUS/DOCUMENTS] Starting request...")
     
     try:
-        # Step 1: Get documents from Supabase
-        supabase_docs = DocumentModel.get_all(limit=limit)
-        logger.info(f"[STATUS/DOCUMENTS] Got {len(supabase_docs)} docs from Supabase in {time.time() - start_time:.2f}s")
-        
-        # Step 2: Get chunk counts from ChromaDB (limited for performance)
-        chunk_counts = {}
-        try:
-            chroma_start = time.time()
-            rag = RAGHandler()
-            collection = rag.client.get_or_create_collection(name="documents")
-            total_chunks = collection.count()
-            logger.info(f"[STATUS/DOCUMENTS] ChromaDB has {total_chunks} total chunks")
-            
-            # Only fetch if reasonable number of chunks (limit to 2000 for performance)
-            if total_chunks > 0 and total_chunks <= 2000:
-                results = collection.get(include=["metadatas"], limit=2000)
-                
-                for metadata in results.get("metadatas", []):
-                    # Try multiple fields for filename
-                    filename = (
-                        metadata.get("filename") or 
-                        metadata.get("source") or 
-                        metadata.get("name") or 
-                        "unknown"
-                    )
-                    if filename not in chunk_counts:
-                        chunk_counts[filename] = {
-                            "chunks": 0,
-                            "project": metadata.get("project", "unknown"),
-                            "functional_area": metadata.get("functional_area", ""),
-                            "upload_date": metadata.get("upload_date", "")
-                        }
-                    chunk_counts[filename]["chunks"] += 1
-                logger.info(f"[STATUS/DOCUMENTS] Processed ChromaDB chunks in {time.time() - chroma_start:.2f}s")
-            elif total_chunks > 2000:
-                logger.warning(f"[STATUS/DOCUMENTS] Skipping detailed chunk counts - too many chunks ({total_chunks})")
-        except Exception as chroma_e:
-            logger.warning(f"ChromaDB query failed: {chroma_e}")
-        
-        # Step 3: Build merged document list
+        # =================================================================
+        # Get documents from REGISTRY (source of truth)
+        # =================================================================
         documents = []
-        seen_filenames = set()
         
-        # First, add documents from Supabase (authoritative source)
-        for doc in supabase_docs:
-            filename = doc.get("name", "unknown")
-            metadata = doc.get("metadata", {})
-            
-            # Get chunk count from ChromaDB if available
-            chroma_data = chunk_counts.get(filename, {})
-            
-            doc_entry = {
-                "id": doc.get("id"),
-                "filename": filename,
-                "file_type": doc.get("file_type", ""),
-                "file_size": doc.get("file_size"),
-                "project": metadata.get("project") or doc.get("project_id", "unknown"),
-                "project_id": doc.get("project_id"),
-                "functional_area": metadata.get("functional_area", ""),
-                "upload_date": metadata.get("upload_date") or doc.get("created_at", ""),
-                "chunks": chroma_data.get("chunks", 0),
-                "category": doc.get("category", ""),
-            }
-            
-            documents.append(doc_entry)
-            seen_filenames.add(filename)
-        
-        # Then add any ChromaDB-only documents (not in Supabase)
-        for filename, data in chunk_counts.items():
-            if filename not in seen_filenames and filename != "unknown":
-                documents.append({
-                    "id": None,
-                    "filename": filename,
-                    "file_type": filename.split(".")[-1] if "." in filename else "",
-                    "file_size": None,
-                    "project": data.get("project", "unknown"),
-                    "project_id": None,
-                    "functional_area": data.get("functional_area", ""),
-                    "upload_date": data.get("upload_date", ""),
-                    "chunks": data.get("chunks", 0),
-                    "category": "",
-                })
-        
-        # Filter by project if specified
-        if project:
-            if project == "__GLOBAL__" or project == "GLOBAL":
-                documents = [d for d in documents if d["project"] in ("__GLOBAL__", "GLOBAL", "Global/Universal")]
+        try:
+            if project:
+                # Check if project is a UUID or name
+                is_uuid = len(project) == 36 and '-' in project
+                
+                if is_uuid:
+                    project_id = project
+                else:
+                    # Try to get project_id from project name
+                    from utils.database.models import ProjectModel
+                    proj_record = ProjectModel.get_by_name(project)
+                    project_id = proj_record.get('id') if proj_record else None
+                
+                # Handle global projects
+                if project.upper() in ('__GLOBAL__', 'GLOBAL', 'GLOBAL/UNIVERSAL'):
+                    registry_entries = DocumentRegistryModel.get_by_project(None, include_global=False)
+                    # Filter to only global
+                    registry_entries = [e for e in registry_entries if e.get('is_global')]
+                else:
+                    registry_entries = DocumentRegistryModel.get_by_project(project_id, include_global=True)
             else:
-                documents = [d for d in documents if d["project"] == project or d["project_id"] == project]
+                registry_entries = DocumentRegistryModel.get_all(limit=limit)
+            
+            logger.info(f"[STATUS/DOCUMENTS] Registry returned {len(registry_entries)} entries")
+            
+            for entry in registry_entries:
+                doc_entry = {
+                    "id": entry.get("id"),
+                    "filename": entry.get("filename", "unknown"),
+                    "file_type": entry.get("file_type", ""),
+                    "file_size": entry.get("file_size"),
+                    "project": entry.get("metadata", {}).get("project_name") or ("GLOBAL" if entry.get("is_global") else "unknown"),
+                    "project_id": entry.get("project_id"),
+                    "functional_area": entry.get("metadata", {}).get("functional_area", ""),
+                    "upload_date": entry.get("created_at", ""),
+                    "chunks": entry.get("chunk_count", 0),
+                    "storage_type": entry.get("storage_type", ""),
+                    "usage_type": entry.get("usage_type", ""),
+                    "is_global": entry.get("is_global", False),
+                }
+                documents.append(doc_entry)
+                
+        except Exception as reg_e:
+            logger.warning(f"[STATUS/DOCUMENTS] Registry query failed: {reg_e}")
+            # Don't fall back - if registry fails, return empty
+            return {"documents": [], "total": 0, "total_chunks": 0, "error": f"Registry unavailable: {reg_e}"}
         
         # Sort by upload date (newest first)
         documents.sort(key=lambda x: x.get("upload_date", "") or "", reverse=True)
         
         total_chunks = sum(d.get("chunks", 0) for d in documents)
+        
+        logger.info(f"[STATUS/DOCUMENTS] Returning {len(documents)} documents in {time.time() - start_time:.2f}s")
         
         return {
             "documents": documents,
