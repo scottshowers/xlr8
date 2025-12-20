@@ -5,7 +5,9 @@
  * Main: Command Center | Projects | Data | Playbooks | AI Assist
  * Admin: Collapsible dropdown with Standards, Work Advisor, Playbook Builder, Learning, System
  * 
- * Includes: Upload status indicator, theme toggle, help button
+ * Includes: Upload status indicator, theme toggle, help button, Customer Genome
+ * 
+ * Updated: December 20, 2025 - Added Customer Genome button
  */
 
 import React, { useLayoutEffect, useState } from 'react';
@@ -16,6 +18,7 @@ import { useAuth, Permissions } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { UploadStatusIndicator } from '../context/UploadContext';
 import { useOnboarding } from '../context/OnboardingContext';
+import CustomerGenome, { GenomeButton } from './CustomerGenome';
 
 const COLORS = {
   grassGreen: '#5a8a4a',
@@ -82,7 +85,7 @@ const HLogoGreen = () => (
   </svg>
 );
 
-function Navigation() {
+function Navigation({ onOpenGenome }) {
   const location = useLocation();
   const { hasPermission, user, isAdmin, logout } = useAuth();
   const { darkMode, toggle } = useTheme();
@@ -349,6 +352,9 @@ function Navigation() {
           {/* Upload Status Indicator */}
           <UploadStatusIndicator />
           
+          {/* Customer Genome Button */}
+          <GenomeButton onClick={onOpenGenome} />
+          
           {/* Tour Guide Toggle */}
           <button
             onClick={() => {
@@ -398,6 +404,7 @@ function Navigation() {
 
 export default function Layout({ children }) {
   const location = useLocation();
+  const [genomeOpen, setGenomeOpen] = useState(false);
 
   useLayoutEffect(() => {
     window.scrollTo(0, 0);
@@ -408,11 +415,14 @@ export default function Layout({ children }) {
       {/* Sticky header container - keeps both bars together */}
       <div style={{ position: 'sticky', top: 0, zIndex: 100 }}>
         <ContextBar />
-        <Navigation />
+        <Navigation onOpenGenome={() => setGenomeOpen(true)} />
       </div>
       <main style={{ padding: '1.5rem', maxWidth: '1800px', margin: '0 auto' }}>
         {children}
       </main>
+      
+      {/* Customer Genome Panel */}
+      <CustomerGenome isOpen={genomeOpen} onClose={() => setGenomeOpen(false)} />
     </div>
   );
 }
