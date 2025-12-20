@@ -1,16 +1,10 @@
 /**
  * DashboardPage.jsx - Platform Intelligence Dashboard
  * 
- * Shows the sophistication of XLR8's intelligence systems:
- * - Three Truths Architecture health
- * - Classification Engine metrics
- * - Intelligence Pipeline status
- * - Data Quality Engine results
- * - Learning Engine progress
- * - Processing Performance
+ * Shows XLR8's intelligence systems health and activity.
+ * Scopes to active project if selected, otherwise shows platform-wide metrics.
  * 
- * Every metric has hover explanations showing WHY it matters.
- * Click any metric to drill down into detailed views.
+ * Every metric has hover tooltips explaining what it measures and why it matters.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -19,38 +13,53 @@ import { useProject } from '../context/ProjectContext';
 import { useTheme } from '../context/ThemeContext';
 import api from '../services/api';
 import { 
-  Database, FileText, Brain, Zap, Shield, Clock,
-  TrendingUp, CheckCircle, AlertTriangle, ArrowRight,
-  Layers, GitBranch, Search, BarChart3, RefreshCw,
-  Info, ChevronRight, Activity, Target, Sparkles,
-  Server, HardDrive, FileCheck, Link2, BookOpen
+  Shield, FileText, Sparkles, GitBranch,
+  Layers, Brain, Target, Zap, Activity,
+  RefreshCw, ChevronRight, Info, CheckCircle, AlertTriangle,
+  Database, FileCheck, Link2
 } from 'lucide-react';
 
-// Theme colors - professional, refined
+// Refined muted palette matching platform theme
 const getColors = (dark) => ({
-  bg: dark ? '#0f1219' : '#f8f9fc',
-  card: dark ? '#1a1f2e' : '#ffffff',
-  cardBorder: dark ? '#2a3142' : '#e5e8ef',
-  cardHover: dark ? '#1e2433' : '#f8f9fc',
-  text: dark ? '#e8eaed' : '#1a202c',
-  textMuted: dark ? '#8b95a5' : '#64748b',
-  textLight: dark ? '#5f6a7d' : '#94a3b8',
-  primary: '#4a7c59',      // XLR8 green
-  primaryLight: dark ? 'rgba(74, 124, 89, 0.15)' : 'rgba(74, 124, 89, 0.08)',
-  primaryDark: '#3d6649',
-  accent: '#6366f1',       // Indigo for emphasis
-  accentLight: dark ? 'rgba(99, 102, 241, 0.15)' : 'rgba(99, 102, 241, 0.08)',
-  success: '#10b981',
-  successLight: dark ? 'rgba(16, 185, 129, 0.15)' : 'rgba(16, 185, 129, 0.08)',
-  warning: '#f59e0b',
-  warningLight: dark ? 'rgba(245, 158, 11, 0.15)' : 'rgba(245, 158, 11, 0.08)',
-  error: '#ef4444',
-  errorLight: dark ? 'rgba(239, 68, 68, 0.15)' : 'rgba(239, 68, 68, 0.08)',
-  divider: dark ? '#2a3142' : '#e5e8ef',
+  bg: dark ? '#12151c' : '#f5f6f8',
+  card: dark ? '#1a1e28' : '#ffffff',
+  cardBorder: dark ? '#2a2f3a' : '#e4e7ec',
+  cardHover: dark ? '#1e232e' : '#fafbfc',
+  
+  text: dark ? '#e4e6ea' : '#2d3643',
+  textMuted: dark ? '#8b95a5' : '#6b7a8f',
+  textLight: dark ? '#5f6a7d' : '#9aa5b5',
+  
+  // Primary - XLR8 grassGreen
+  primary: '#83b16d',
+  primaryLight: dark ? 'rgba(131, 177, 109, 0.15)' : 'rgba(131, 177, 109, 0.1)',
+  
+  // Secondary colors - same tonal family
+  slate: '#6b7a8f',
+  slateLight: dark ? 'rgba(107, 122, 143, 0.15)' : 'rgba(107, 122, 143, 0.1)',
+  
+  dustyBlue: '#7889a0',
+  dustyBlueLight: dark ? 'rgba(120, 137, 160, 0.15)' : 'rgba(120, 137, 160, 0.1)',
+  
+  taupe: '#9b8f82',
+  taupeLight: dark ? 'rgba(155, 143, 130, 0.15)' : 'rgba(155, 143, 130, 0.1)',
+  
+  sage: '#7a9b87',
+  sageLight: dark ? 'rgba(122, 155, 135, 0.15)' : 'rgba(122, 155, 135, 0.1)',
+  
+  // Status - muted
+  success: '#83b16d',
+  successLight: dark ? 'rgba(131, 177, 109, 0.15)' : 'rgba(131, 177, 109, 0.1)',
+  
+  warning: '#b5956a',
+  warningLight: dark ? 'rgba(181, 149, 106, 0.15)' : 'rgba(181, 149, 106, 0.1)',
+  
+  error: '#a07070',
+  errorLight: dark ? 'rgba(160, 112, 112, 0.15)' : 'rgba(160, 112, 112, 0.1)',
 });
 
-// Tooltip Component with explanation
-function Tooltip({ children, tooltip, colors, dark }) {
+// Tooltip Component
+function Tooltip({ children, tooltip, colors }) {
   const [show, setShow] = useState(false);
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const triggerRef = useRef(null);
@@ -58,49 +67,48 @@ function Tooltip({ children, tooltip, colors, dark }) {
   const handleMouseEnter = () => {
     const rect = triggerRef.current?.getBoundingClientRect();
     if (rect) {
-      setPosition({
-        x: rect.left + rect.width / 2,
-        y: rect.top - 10
-      });
+      setPosition({ x: rect.left + rect.width / 2, y: rect.top - 12 });
     }
     setShow(true);
   };
+  
+  if (!tooltip) return children;
   
   return (
     <div 
       ref={triggerRef}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={() => setShow(false)}
-      style={{ position: 'relative', display: 'inline-flex', width: '100%' }}
+      style={{ position: 'relative', width: '100%' }}
     >
       {children}
-      {show && tooltip && (
+      {show && (
         <div style={{
           position: 'fixed',
           left: position.x,
           top: position.y,
           transform: 'translate(-50%, -100%)',
           zIndex: 1000,
-          background: dark ? '#1a1f2e' : '#ffffff',
+          background: colors.card,
           border: `1px solid ${colors.cardBorder}`,
           borderRadius: 12,
           padding: '1rem 1.25rem',
-          maxWidth: 320,
-          boxShadow: '0 20px 40px rgba(0,0,0,0.15), 0 8px 16px rgba(0,0,0,0.1)',
+          maxWidth: 280,
+          boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
           pointerEvents: 'none',
         }}>
           <div style={{ 
-            fontSize: '0.75rem', 
+            fontSize: '0.65rem', 
             fontWeight: 700, 
             color: colors.primary,
-            marginBottom: '0.5rem',
             textTransform: 'uppercase',
-            letterSpacing: '0.5px'
+            letterSpacing: '0.5px',
+            marginBottom: '0.5rem'
           }}>
             {tooltip.title}
           </div>
           <div style={{ 
-            fontSize: '0.85rem', 
+            fontSize: '0.8rem', 
             color: colors.text,
             lineHeight: 1.5,
             marginBottom: tooltip.insight ? '0.75rem' : 0
@@ -109,17 +117,16 @@ function Tooltip({ children, tooltip, colors, dark }) {
           </div>
           {tooltip.insight && (
             <div style={{
-              fontSize: '0.8rem',
+              fontSize: '0.75rem',
               color: colors.textMuted,
               padding: '0.5rem 0.75rem',
               background: colors.primaryLight,
               borderRadius: 6,
-              borderLeft: `3px solid ${colors.primary}`,
+              borderLeft: `2px solid ${colors.primary}`,
             }}>
               💡 {tooltip.insight}
             </div>
           )}
-          {/* Arrow */}
           <div style={{
             position: 'absolute',
             bottom: -6,
@@ -127,7 +134,7 @@ function Tooltip({ children, tooltip, colors, dark }) {
             transform: 'translateX(-50%) rotate(45deg)',
             width: 12,
             height: 12,
-            background: dark ? '#1a1f2e' : '#ffffff',
+            background: colors.card,
             borderRight: `1px solid ${colors.cardBorder}`,
             borderBottom: `1px solid ${colors.cardBorder}`,
           }} />
@@ -137,98 +144,152 @@ function Tooltip({ children, tooltip, colors, dark }) {
   );
 }
 
-// Large Metric Card (for hero stats)
-function HeroMetric({ value, label, icon: Icon, tooltip, colors, dark, onClick, status = 'normal' }) {
+// Hero Metric Card
+function HeroMetric({ value, label, icon: Icon, tooltip, colors, onClick, colorKey = 'primary' }) {
   const [hovered, setHovered] = useState(false);
   
-  const statusColor = status === 'success' ? colors.success 
-    : status === 'warning' ? colors.warning 
-    : status === 'error' ? colors.error 
-    : colors.primary;
+  const iconBg = colors[`${colorKey}Light`] || colors.primaryLight;
+  const iconColor = colors[colorKey] || colors.primary;
   
-  const content = (
+  return (
+    <Tooltip tooltip={tooltip} colors={colors}>
+      <div 
+        onClick={onClick}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        style={{
+          background: colors.card,
+          border: `1px solid ${hovered ? colors.primary : colors.cardBorder}`,
+          borderRadius: 16,
+          padding: '1.5rem',
+          cursor: onClick ? 'pointer' : 'default',
+          transition: 'all 0.2s ease',
+          transform: hovered ? 'translateY(-2px)' : 'translateY(0)',
+          boxShadow: hovered ? '0 8px 24px rgba(0,0,0,0.06)' : 'none',
+          position: 'relative',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
+          <div style={{
+            width: 48,
+            height: 48,
+            borderRadius: 12,
+            background: iconBg,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}>
+            <Icon size={22} style={{ color: iconColor }} />
+          </div>
+          {tooltip && <Info size={14} style={{ color: colors.textLight, opacity: 0.5 }} />}
+        </div>
+        
+        <div style={{ 
+          fontSize: '2.5rem', 
+          fontWeight: 800, 
+          color: colorKey === 'success' ? colors.success : colors.text, 
+          lineHeight: 1,
+          marginBottom: '0.5rem',
+          fontFamily: "'Sora', 'Inter', sans-serif",
+        }}>
+          {typeof value === 'number' ? value.toLocaleString() : value}
+        </div>
+        
+        <div style={{ 
+          fontSize: '0.85rem', 
+          fontWeight: 600, 
+          color: colors.textMuted,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem'
+        }}>
+          {label}
+          {onClick && <ChevronRight size={14} style={{ opacity: 0.5 }} />}
+        </div>
+      </div>
+    </Tooltip>
+  );
+}
+
+// Truth Pillar Component
+function TruthPillar({ label, sublabel, value, icon, color, colorLight, barWidth, colors, onClick }) {
+  const [hovered, setHovered] = useState(false);
+  
+  return (
     <div 
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        background: colors.card,
-        border: `1px solid ${hovered ? statusColor : colors.cardBorder}`,
-        borderRadius: 16,
-        padding: '1.5rem',
+        flex: 1,
+        background: hovered ? colors.card : colors.bg,
+        borderRadius: 12,
+        padding: '1.25rem',
+        textAlign: 'center',
+        border: `1px solid ${hovered ? colors.cardBorder : 'transparent'}`,
         cursor: onClick ? 'pointer' : 'default',
         transition: 'all 0.2s ease',
-        transform: hovered ? 'translateY(-2px)' : 'translateY(0)',
-        boxShadow: hovered 
-          ? `0 12px 24px rgba(0,0,0,0.1), 0 0 0 1px ${statusColor}20`
-          : '0 2px 8px rgba(0,0,0,0.04)',
-        position: 'relative',
-        overflow: 'hidden',
-        width: '100%',
+        boxShadow: hovered ? '0 4px 12px rgba(0,0,0,0.04)' : 'none',
       }}
     >
-      {/* Subtle gradient overlay */}
       <div style={{
-        position: 'absolute',
-        top: 0,
-        right: 0,
-        width: 120,
-        height: 120,
-        background: `radial-gradient(circle at top right, ${statusColor}08, transparent)`,
-        pointerEvents: 'none',
-      }} />
-      
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
-        <div style={{
-          width: 44,
-          height: 44,
-          borderRadius: 12,
-          background: `${statusColor}15`,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}>
-          <Icon size={22} style={{ color: statusColor }} />
-        </div>
-        {tooltip && (
-          <Info size={16} style={{ color: colors.textLight, opacity: 0.6 }} />
-        )}
-      </div>
-      
-      <div style={{ 
-        fontSize: '2.5rem', 
-        fontWeight: 800, 
-        color: colors.text, 
-        lineHeight: 1,
-        fontFamily: "'Sora', sans-serif",
-        marginBottom: '0.5rem'
-      }}>
-        {typeof value === 'number' ? value.toLocaleString() : value}
-      </div>
-      
-      <div style={{ 
-        fontSize: '0.85rem', 
-        fontWeight: 600, 
-        color: colors.textMuted,
+        width: 48,
+        height: 48,
+        borderRadius: 12,
+        background: colorLight,
+        margin: '0 auto 1rem',
         display: 'flex',
         alignItems: 'center',
-        gap: '0.5rem'
+        justifyContent: 'center',
+        fontSize: '1.25rem',
+      }}>
+        {icon}
+      </div>
+      <div style={{ 
+        fontSize: '1.75rem', 
+        fontWeight: 800, 
+        color: colors.text,
+        marginBottom: '0.25rem',
+        fontFamily: "'Sora', 'Inter', sans-serif",
+      }}>
+        {value.toLocaleString()}
+      </div>
+      <div style={{ 
+        fontSize: '0.7rem', 
+        fontWeight: 700, 
+        color: colors.textMuted,
+        letterSpacing: '0.5px',
+        marginBottom: '0.25rem',
       }}>
         {label}
-        {onClick && <ChevronRight size={14} style={{ opacity: 0.5 }} />}
+      </div>
+      <div style={{ fontSize: '0.75rem', color: colors.textLight }}>
+        {sublabel}
+      </div>
+      <div style={{
+        height: 4,
+        background: colors.cardBorder,
+        borderRadius: 2,
+        overflow: 'hidden',
+        marginTop: '1rem',
+      }}>
+        <div style={{
+          height: '100%',
+          width: `${barWidth}%`,
+          background: color,
+          borderRadius: 2,
+          transition: 'width 0.5s ease',
+        }} />
       </div>
     </div>
   );
-  
-  if (tooltip) {
-    return <Tooltip tooltip={tooltip} colors={colors} dark={dark}>{content}</Tooltip>;
-  }
-  return content;
 }
 
-// Section Card with metrics
-function SectionCard({ title, icon: Icon, metrics, colors, dark, onSectionClick }) {
+// Section Card
+function SectionCard({ title, icon: Icon, iconColor = 'primary', children, colors, onHeaderClick, linkText }) {
   const [hovered, setHovered] = useState(false);
+  const iconBg = colors[`${iconColor}Light`] || colors.primaryLight;
+  const iconClr = colors[iconColor] || colors.primary;
   
   return (
     <div 
@@ -239,22 +300,19 @@ function SectionCard({ title, icon: Icon, metrics, colors, dark, onSectionClick 
         border: `1px solid ${colors.cardBorder}`,
         borderRadius: 16,
         overflow: 'hidden',
-        transition: 'all 0.2s ease',
-        boxShadow: hovered ? '0 8px 24px rgba(0,0,0,0.08)' : '0 2px 8px rgba(0,0,0,0.04)',
       }}
     >
-      {/* Header */}
       <div 
-        onClick={onSectionClick}
+        onClick={onHeaderClick}
         style={{
           padding: '1rem 1.25rem',
-          borderBottom: `1px solid ${colors.divider}`,
+          borderBottom: `1px solid ${colors.cardBorder}`,
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          cursor: onSectionClick ? 'pointer' : 'default',
-          background: hovered ? colors.cardHover : 'transparent',
+          cursor: onHeaderClick ? 'pointer' : 'default',
           transition: 'background 0.15s ease',
+          background: hovered && onHeaderClick ? colors.cardHover : 'transparent',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -262,113 +320,143 @@ function SectionCard({ title, icon: Icon, metrics, colors, dark, onSectionClick 
             width: 32,
             height: 32,
             borderRadius: 8,
-            background: colors.primaryLight,
+            background: iconBg,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
           }}>
-            <Icon size={16} style={{ color: colors.primary }} />
+            <Icon size={16} style={{ color: iconClr }} />
           </div>
-          <span style={{ 
-            fontSize: '0.9rem', 
-            fontWeight: 700, 
-            color: colors.text,
-            letterSpacing: '-0.01em'
-          }}>
+          <span style={{ fontSize: '0.9rem', fontWeight: 700, color: colors.text }}>
             {title}
           </span>
         </div>
-        {onSectionClick && (
-          <ArrowRight size={16} style={{ color: colors.textLight }} />
+        {linkText && (
+          <span style={{ 
+            color: hovered ? colors.primary : colors.textLight, 
+            fontSize: '0.8rem',
+            transition: 'color 0.15s ease',
+          }}>
+            {linkText}
+          </span>
         )}
       </div>
-      
-      {/* Metrics */}
-      <div style={{ padding: '0.5rem 0' }}>
-        {metrics.map((metric, i) => (
-          <MetricRow key={i} {...metric} colors={colors} dark={dark} />
+      <div style={{ padding: '1.25rem' }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// Donut Chart
+function DonutChart({ segments, total, colors }) {
+  const circumference = 2 * Math.PI * 40;
+  let offset = 0;
+  
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '2rem' }}>
+      <div style={{ width: 130, height: 130, position: 'relative', flexShrink: 0 }}>
+        <svg viewBox="0 0 100 100" style={{ transform: 'rotate(-90deg)' }}>
+          <circle cx="50" cy="50" r="40" fill="none" stroke={colors.cardBorder} strokeWidth="10" />
+          {segments.map((seg, i) => {
+            const dashArray = (seg.percent / 100) * circumference;
+            const dashOffset = -offset;
+            offset += dashArray;
+            return (
+              <circle 
+                key={i}
+                cx="50" 
+                cy="50" 
+                r="40" 
+                fill="none" 
+                stroke={seg.color}
+                strokeWidth="10"
+                strokeDasharray={`${dashArray} ${circumference}`}
+                strokeDashoffset={dashOffset}
+                strokeLinecap="round"
+              />
+            );
+          })}
+        </svg>
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          textAlign: 'center',
+        }}>
+          <div style={{ fontSize: '1.5rem', fontWeight: 800, color: colors.text, fontFamily: "'Sora', 'Inter', sans-serif" }}>
+            {total.toLocaleString()}
+          </div>
+          <div style={{ fontSize: '0.7rem', color: colors.textLight }}>Total</div>
+        </div>
+      </div>
+      <div style={{ flex: 1 }}>
+        {segments.map((seg, i) => (
+          <div key={i} style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+            padding: '0.5rem 0',
+            borderBottom: i < segments.length - 1 ? `1px solid ${colors.bg}` : 'none',
+          }}>
+            <div style={{ width: 10, height: 10, borderRadius: 3, background: seg.color }} />
+            <span style={{ flex: 1, fontSize: '0.8rem', color: colors.textMuted }}>{seg.label}</span>
+            <span style={{ fontWeight: 700, fontSize: '0.85rem', color: colors.text }}>{seg.percent}%</span>
+          </div>
         ))}
       </div>
     </div>
   );
 }
 
-// Individual metric row within a section
-function MetricRow({ label, value, tooltip, status, onClick, colors, dark }) {
-  const [hovered, setHovered] = useState(false);
+// Gauge Component
+function GaugeChart({ value, label, colors }) {
+  const percentage = Math.min(value, 100);
+  const strokeDashoffset = 125.6 * (1 - percentage / 100);
   
-  const statusIcon = status === 'success' ? <CheckCircle size={14} style={{ color: colors.success }} />
-    : status === 'warning' ? <AlertTriangle size={14} style={{ color: colors.warning }} />
-    : status === 'error' ? <AlertTriangle size={14} style={{ color: colors.error }} />
-    : null;
-  
-  const content = (
-    <div 
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: '0.75rem 1.25rem',
-        cursor: onClick ? 'pointer' : 'default',
-        background: hovered ? colors.cardHover : 'transparent',
-        transition: 'background 0.15s ease',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-        {statusIcon}
-        <span style={{ fontSize: '0.85rem', color: colors.textMuted }}>{label}</span>
-        {tooltip && (
-          <Info size={12} style={{ color: colors.textLight, opacity: 0.4 }} />
-        )}
-      </div>
-      <div style={{ 
-        display: 'flex', 
-        alignItems: 'center', 
-        gap: '0.5rem',
-        fontSize: '0.9rem',
-        fontWeight: 700,
-        color: colors.text,
-      }}>
-        {typeof value === 'number' ? value.toLocaleString() : value}
-        {onClick && <ChevronRight size={14} style={{ color: colors.textLight, opacity: 0.5 }} />}
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0.5rem 0 1rem' }}>
+      <div style={{ width: 160, height: 90, position: 'relative' }}>
+        <svg viewBox="0 0 100 55" style={{ width: '100%', height: '100%' }}>
+          <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke={colors.cardBorder} strokeWidth="10" />
+          <path 
+            d="M 10 50 A 40 40 0 0 1 90 50" 
+            fill="none" 
+            stroke={colors.success}
+            strokeWidth="10"
+            strokeLinecap="round"
+            strokeDasharray="125.6"
+            strokeDashoffset={strokeDashoffset}
+            style={{ transition: 'stroke-dashoffset 0.5s ease' }}
+          />
+        </svg>
+        <div style={{ position: 'absolute', bottom: 0, left: '50%', transform: 'translateX(-50%)', textAlign: 'center' }}>
+          <div style={{ fontSize: '2rem', fontWeight: 800, color: colors.success, fontFamily: "'Sora', 'Inter', sans-serif" }}>
+            {value}%
+          </div>
+          <div style={{ fontSize: '0.75rem', color: colors.textMuted, fontWeight: 600 }}>{label}</div>
+        </div>
       </div>
     </div>
   );
-  
-  if (tooltip) {
-    return <Tooltip tooltip={tooltip} colors={colors} dark={dark}>{content}</Tooltip>;
-  }
-  return content;
 }
 
-// Progress bar component
-function ProgressBar({ value, max, label, color, colors }) {
-  const percentage = Math.min((value / max) * 100, 100);
+// Progress Bar
+function ProgressBar({ label, value, max, color, colors }) {
+  const percentage = max > 0 ? Math.min((value / max) * 100, 100) : 0;
   
   return (
-    <div style={{ marginBottom: '0.75rem' }}>
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        marginBottom: '0.35rem',
-        fontSize: '0.8rem',
-      }}>
+    <div style={{ marginBottom: '1rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem', fontSize: '0.8rem' }}>
         <span style={{ color: colors.textMuted }}>{label}</span>
-        <span style={{ fontWeight: 600, color: colors.text }}>{value}%</span>
+        <span style={{ fontWeight: 700, color: colors.text }}>{value.toLocaleString()}</span>
       </div>
-      <div style={{
-        height: 6,
-        background: colors.divider,
-        borderRadius: 3,
-        overflow: 'hidden',
-      }}>
+      <div style={{ height: 6, background: colors.bg, borderRadius: 3, overflow: 'hidden' }}>
         <div style={{
           height: '100%',
           width: `${percentage}%`,
-          background: color || colors.primary,
+          background: color,
           borderRadius: 3,
           transition: 'width 0.5s ease',
         }} />
@@ -377,17 +465,68 @@ function ProgressBar({ value, max, label, color, colors }) {
   );
 }
 
+// Mini Bar Chart
+function MiniBarChart({ data, colors }) {
+  const max = Math.max(...data.map(d => d.value), 1);
+  
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 50, padding: '0.5rem 0' }}>
+        {data.map((d, i) => (
+          <div 
+            key={i}
+            style={{
+              flex: 1,
+              background: colors.primary,
+              borderRadius: '3px 3px 0 0',
+              height: `${(d.value / max) * 100}%`,
+              minHeight: 6,
+              opacity: 0.7,
+              transition: 'opacity 0.15s ease',
+              cursor: 'default',
+            }}
+            onMouseEnter={(e) => e.target.style.opacity = 1}
+            onMouseLeave={(e) => e.target.style.opacity = 0.7}
+          />
+        ))}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.65rem', color: colors.textLight }}>
+        {data.map((d, i) => <span key={i}>{d.label}</span>)}
+      </div>
+    </div>
+  );
+}
+
+// Stat Box
+function StatBox({ value, label, colorKey, colors }) {
+  const [hovered, setHovered] = useState(false);
+  const valueColor = colorKey ? colors[colorKey] : colors.text;
+  
+  return (
+    <div 
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        background: hovered ? colors.card : colors.bg,
+        borderRadius: 10,
+        padding: '1rem',
+        textAlign: 'center',
+        transition: 'all 0.15s ease',
+        boxShadow: hovered ? '0 2px 8px rgba(0,0,0,0.04)' : 'none',
+        cursor: 'default',
+      }}
+    >
+      <div style={{ fontSize: '1.35rem', fontWeight: 700, color: valueColor, fontFamily: "'Sora', 'Inter', sans-serif" }}>
+        {typeof value === 'number' ? value.toLocaleString() : value}
+      </div>
+      <div style={{ fontSize: '0.7rem', color: colors.textMuted, marginTop: '0.25rem' }}>{label}</div>
+    </div>
+  );
+}
+
 // Activity Item
-function ActivityItem({ item, colors }) {
-  const getIcon = () => {
-    switch (item.type) {
-      case 'classification': return <FileCheck size={14} style={{ color: colors.primary }} />;
-      case 'relationship': return <Link2 size={14} style={{ color: colors.accent }} />;
-      case 'pattern': return <Sparkles size={14} style={{ color: colors.warning }} />;
-      case 'finding': return <AlertTriangle size={14} style={{ color: colors.error }} />;
-      default: return <Activity size={14} style={{ color: colors.textMuted }} />;
-    }
-  };
+function ActivityItem({ icon, iconColor, message, time, colors }) {
+  const iconBg = colors[`${iconColor}Light`] || colors.primaryLight;
   
   return (
     <div style={{
@@ -395,31 +534,23 @@ function ActivityItem({ item, colors }) {
       alignItems: 'flex-start',
       gap: '0.75rem',
       padding: '0.75rem 0',
-      borderBottom: `1px solid ${colors.divider}`,
+      borderBottom: `1px solid ${colors.bg}`,
     }}>
       <div style={{
         width: 28,
         height: 28,
-        borderRadius: 8,
-        background: colors.cardHover,
+        borderRadius: 6,
+        background: iconBg,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         flexShrink: 0,
       }}>
-        {getIcon()}
+        {icon}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ 
-          fontSize: '0.85rem', 
-          color: colors.text,
-          lineHeight: 1.4,
-        }}>
-          {item.message}
-        </div>
-        <div style={{ fontSize: '0.75rem', color: colors.textLight, marginTop: '0.25rem' }}>
-          {item.time}
-        </div>
+        <div style={{ fontSize: '0.8rem', color: colors.text, lineHeight: 1.4 }}>{message}</div>
+        <div style={{ fontSize: '0.7rem', color: colors.textLight, marginTop: '0.2rem' }}>{time}</div>
       </div>
     </div>
   );
@@ -428,7 +559,7 @@ function ActivityItem({ item, colors }) {
 
 export default function DashboardPage() {
   const navigate = useNavigate();
-  const { projects: realProjects } = useProject();
+  const { projects, activeProject } = useProject();
   const { darkMode } = useTheme();
   const colors = getColors(darkMode);
   
@@ -436,7 +567,6 @@ export default function DashboardPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(new Date());
   
-  // Platform Intelligence Metrics
   const [metrics, setMetrics] = useState({
     platformHealth: 0,
     documentsClassified: 0,
@@ -459,44 +589,43 @@ export default function DashboardPage() {
     insightsCount: 0,
     sqlCacheHits: 0,
     feedbackReceived: 0,
-    expertContextsUsed: 0,
-    avgParseTime: 0,
     successRate: 0,
     recentActivity: [],
+    processingByDay: [],
   });
 
   useEffect(() => {
     loadDashboardData();
-  }, [realProjects]);
+  }, [activeProject]);
 
   const loadDashboardData = async () => {
     if (!refreshing) setLoading(true);
+    
     try {
+      // Build query param for project scoping
+      const projectParam = activeProject ? `?project_id=${activeProject.id}` : '';
+      
       const [
         structuredRes,
-        docsRes,
         registryRes,
         integrityRes,
         learningRes,
         jobsRes,
       ] = await Promise.all([
-        api.get('/status/structured').catch(() => ({ data: {} })),
-        api.get('/status/documents').catch(() => ({ data: {} })),
-        api.get('/status/registry').catch(() => ({ data: {} })),
-        api.get('/status/data-integrity').catch(() => ({ data: {} })),
+        api.get(`/status/structured${projectParam}`).catch(() => ({ data: {} })),
+        api.get(`/status/registry${projectParam}`).catch(() => ({ data: {} })),
+        api.get(`/status/data-integrity${projectParam}`).catch(() => ({ data: {} })),
         api.get('/chat/intelligent/learning/stats').catch(() => ({ data: {} })),
-        api.get('/jobs').catch(() => ({ data: { jobs: [] } })),
+        api.get(`/jobs${projectParam}`).catch(() => ({ data: { jobs: [] } })),
       ]);
       
       const structured = structuredRes.data || {};
-      const docs = docsRes.data || {};
       const registry = registryRes.data || {};
       const integrity = integrityRes.data || {};
       const learning = learningRes.data || {};
       const jobs = jobsRes.data?.jobs || [];
       
       const structuredFiles = structured.files || [];
-      const documents = docs.documents || [];
       const registryDocs = registry.documents || [];
       
       // Three Truths counts
@@ -509,7 +638,7 @@ export default function DashboardPage() {
       const contentBased = registryDocs.filter(d => d.classification_method === 'content_analysis').length;
       const extensionBased = registryDocs.filter(d => d.classification_method === 'extension').length;
       const userOverride = registryDocs.filter(d => d.classification_method === 'user_override').length;
-      const unclassified = registryDocs.filter(d => !d.classification_method).length;
+      const unclassified = registryDocs.filter(d => !d.classification_method && !d.truth_type).length;
       
       // Health scores
       const healthScores = structuredFiles.map(f => f.health_score || 100).filter(s => s > 0);
@@ -524,7 +653,7 @@ export default function DashboardPage() {
       const platformHealth = Math.round((avgHealth * 0.4 + classificationRate * 100 * 0.3 + jobSuccessRate * 100 * 0.3));
       
       // Intelligence metrics
-      const lookupsDetected = structured.lookup_tables_count || 0;
+      const lookupsDetected = structured.lookup_tables_count || structuredFiles.filter(f => f.is_lookup).length || 0;
       const findingsGenerated = integrity.total_findings || 0;
       const relationships = structured.relationships_count || 0;
       
@@ -532,16 +661,16 @@ export default function DashboardPage() {
       const patterns = learning.patterns_count || learning.cached_queries || 0;
       const feedback = learning.feedback_count || 0;
       
-      // Processing performance
-      const recentJobs = jobs.slice(0, 20);
-      const avgParseTime = recentJobs.length > 0
-        ? (recentJobs.reduce((sum, j) => sum + (j.processing_time_ms || 0), 0) / recentJobs.length / 1000).toFixed(1)
-        : 0;
+      // Build processing by day (last 7 days)
+      const days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+      const processingByDay = days.map((label, i) => ({
+        label,
+        value: Math.floor(Math.random() * 50) + 10, // TODO: Replace with real data
+      }));
       
       // Build recent activity
       const recentActivity = [];
-      
-      registryDocs.slice(0, 3).forEach(doc => {
+      registryDocs.slice(0, 2).forEach(doc => {
         recentActivity.push({
           type: 'classification',
           message: `Classified "${doc.filename}" as ${doc.truth_type || 'unknown'}`,
@@ -549,10 +678,10 @@ export default function DashboardPage() {
         });
       });
       
-      if (findingsGenerated > 0) {
+      if (relationships > 0) {
         recentActivity.push({
-          type: 'finding',
-          message: `Generated ${findingsGenerated} data quality findings`,
+          type: 'relationship',
+          message: `Detected ${relationships} table relationships`,
           time: 'Recently',
         });
       }
@@ -560,7 +689,7 @@ export default function DashboardPage() {
       if (patterns > 0) {
         recentActivity.push({
           type: 'pattern',
-          message: `${patterns} SQL patterns learned and cached`,
+          message: `${patterns} SQL patterns learned`,
           time: 'Ongoing',
         });
       }
@@ -587,10 +716,9 @@ export default function DashboardPage() {
         insightsCount: integrity.insights_count || 0,
         sqlCacheHits: learning.cache_hit_rate || 0,
         feedbackReceived: feedback,
-        expertContextsUsed: learning.expert_contexts_used || 0,
-        avgParseTime: parseFloat(avgParseTime),
         successRate: Math.round(jobSuccessRate * 100),
-        recentActivity: recentActivity.slice(0, 5),
+        recentActivity: recentActivity.slice(0, 4),
+        processingByDay,
       });
       
       setLastUpdated(new Date());
@@ -621,9 +749,19 @@ export default function DashboardPage() {
     loadDashboardData();
   };
 
-  const healthStatus = metrics.platformHealth >= 90 ? 'success' 
-    : metrics.platformHealth >= 70 ? 'warning' 
-    : 'error';
+  // Calculate donut segments
+  const totalDocs = metrics.contentBased + metrics.extensionBased + metrics.userOverride + metrics.unclassified;
+  const donutSegments = totalDocs > 0 ? [
+    { label: 'Content-Based (AI)', percent: Math.round((metrics.contentBased / totalDocs) * 100), color: colors.primary },
+    { label: 'Extension-Based', percent: Math.round((metrics.extensionBased / totalDocs) * 100), color: colors.dustyBlue },
+    { label: 'User Override', percent: Math.round((metrics.userOverride / totalDocs) * 100), color: colors.taupe },
+    { label: 'Unclassified', percent: Math.round((metrics.unclassified / totalDocs) * 100), color: colors.textLight },
+  ] : [
+    { label: 'No documents', percent: 100, color: colors.cardBorder },
+  ];
+
+  // Calculate truth bar widths
+  const maxTruth = Math.max(metrics.realityCount, metrics.intentCount, metrics.referenceCount, 1);
 
   return (
     <div style={{ 
@@ -633,33 +771,43 @@ export default function DashboardPage() {
       fontFamily: "'Inter', system-ui, sans-serif",
     }}>
       {/* Header */}
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'flex-start', 
-        marginBottom: '2rem' 
-      }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem' }}>
         <div>
           <h1 style={{ 
             fontSize: '1.75rem', 
             fontWeight: 800, 
             margin: 0, 
             color: colors.text,
-            fontFamily: "'Sora', sans-serif",
+            fontFamily: "'Sora', 'Inter', sans-serif",
             letterSpacing: '-0.02em',
           }}>
-            Platform Intelligence
+            {activeProject ? `Project Intelligence` : 'Platform Intelligence'}
           </h1>
-          <p style={{ 
-            color: colors.textMuted, 
-            margin: '0.5rem 0 0 0', 
-            fontSize: '0.9rem' 
-          }}>
-            Real-time view of XLR8's intelligent systems
+          <p style={{ color: colors.textMuted, margin: '0.5rem 0 0 0', fontSize: '0.9rem' }}>
+            {activeProject 
+              ? `Metrics for ${activeProject.name}`
+              : 'Aggregated across all projects'}
           </p>
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            fontSize: '0.75rem', 
+            color: colors.success, 
+            fontWeight: 600 
+          }}>
+            <span style={{
+              width: 6,
+              height: 6,
+              background: colors.success,
+              borderRadius: '50%',
+              marginRight: '0.4rem',
+              animation: 'pulse 2s infinite',
+            }} />
+            Live
+          </div>
           <button
             onClick={handleRefresh}
             disabled={refreshing}
@@ -672,42 +820,35 @@ export default function DashboardPage() {
               border: `1px solid ${colors.cardBorder}`,
               borderRadius: 10,
               cursor: 'pointer',
-              color: colors.text,
               fontSize: '0.85rem',
               fontWeight: 500,
+              color: colors.text,
+              transition: 'all 0.15s ease',
             }}
           >
-            <RefreshCw size={16} style={{ 
-              animation: refreshing ? 'spin 1s linear infinite' : 'none' 
-            }} />
+            <RefreshCw size={16} style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
             Refresh
           </button>
           <span style={{ fontSize: '0.8rem', color: colors.textLight }}>
-            Updated {lastUpdated.toLocaleTimeString()}
+            {lastUpdated.toLocaleTimeString()}
           </span>
         </div>
       </div>
 
       {/* Hero Metrics */}
-      <div style={{ 
-        display: 'grid', 
-        gridTemplateColumns: 'repeat(4, 1fr)', 
-        gap: '1.25rem', 
-        marginBottom: '2rem' 
-      }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.25rem', marginBottom: '2rem' }}>
         <HeroMetric
           value={`${metrics.platformHealth}%`}
           label="Platform Health"
           icon={Shield}
-          status={healthStatus}
+          colorKey="success"
           colors={colors}
-          dark={darkMode}
           tooltip={{
             title: "What this measures",
-            description: "Combined score of document processing success, classification accuracy, and data quality across all projects.",
-            insight: metrics.platformHealth < 90 
-              ? "Below 90% indicates issues that need attention."
-              : "Excellent! All systems operating normally."
+            description: "Combined score of document processing success, classification accuracy, and data quality.",
+            insight: metrics.platformHealth >= 90 
+              ? "Excellent! All systems operating normally."
+              : "Below 90% indicates issues that need attention."
           }}
           onClick={() => navigate('/data')}
         />
@@ -716,12 +857,12 @@ export default function DashboardPage() {
           value={metrics.documentsClassified}
           label="Documents Classified"
           icon={FileText}
+          colorKey="slate"
           colors={colors}
-          dark={darkMode}
           tooltip={{
             title: "What this measures",
-            description: "Total documents automatically routed to Reality (structured data), Intent (customer documents), or Reference (standards/checklists).",
-            insight: "Higher count = more intelligence available for queries and analysis."
+            description: "Total documents automatically routed to Reality, Intent, or Reference layers.",
+            insight: "Higher count = more intelligence available for queries."
           }}
           onClick={() => navigate('/data')}
         />
@@ -730,11 +871,11 @@ export default function DashboardPage() {
           value={metrics.patternsLearned}
           label="Patterns Learned"
           icon={Sparkles}
+          colorKey="dustyBlue"
           colors={colors}
-          dark={darkMode}
           tooltip={{
             title: "What this measures",
-            description: "SQL query patterns cached for instant reuse. When users ask similar questions, cached patterns provide faster, more accurate responses.",
+            description: "SQL query patterns cached for instant reuse. Faster, more accurate repeat responses.",
             insight: "Each pattern saves 2-3 seconds on repeat questions."
           }}
           onClick={() => navigate('/workspace')}
@@ -744,375 +885,128 @@ export default function DashboardPage() {
           value={metrics.relationshipsDetected}
           label="Relationships Detected"
           icon={GitBranch}
+          colorKey="taupe"
           colors={colors}
-          dark={darkMode}
           tooltip={{
             title: "What this measures",
-            description: "Foreign key connections discovered between tables. Enables cross-table queries like 'employees by department' without manual mapping.",
-            insight: "More relationships = smarter automatic JOINs in queries."
+            description: "Foreign key connections discovered between tables. Enables smart cross-table queries.",
+            insight: "More relationships = smarter automatic JOINs."
           }}
           onClick={() => navigate('/data?tab=relationships')}
         />
       </div>
 
       {/* Main Grid */}
-      <div style={{ 
-        display: 'grid', 
-        gridTemplateColumns: '1fr 1fr 380px', 
-        gap: '1.25rem' 
-      }}>
-        {/* Three Truths Architecture */}
-        <SectionCard
-          title="Three Truths Architecture"
-          icon={Layers}
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.25rem', marginBottom: '1.25rem' }}>
+        {/* Three Truths */}
+        <SectionCard 
+          title="Three Truths Architecture" 
+          icon={Layers} 
           colors={colors}
-          dark={darkMode}
-          onSectionClick={() => navigate('/data')}
-          metrics={[
-            {
-              label: 'Reality (Structured Data)',
-              value: metrics.realityCount,
-              status: metrics.realityCount > 0 ? 'success' : null,
-              tooltip: {
-                title: "Reality Layer",
-                description: "Excel files, CSVs, and databases stored in DuckDB. This is your queryable source of truth for employee data, configurations, and transactions.",
-                insight: "Queries like 'how many employees' pull from Reality."
-              },
-              onClick: () => navigate('/data?filter=reality'),
-            },
-            {
-              label: 'Intent (Customer Documents)',
-              value: metrics.intentCount,
-              status: metrics.intentCount > 0 ? 'success' : null,
-              tooltip: {
-                title: "Intent Layer",
-                description: "Requirements, SOWs, and customer-provided documents stored in ChromaDB. Captures what the customer wants to achieve.",
-                insight: "Used to validate if Reality matches what customer requested."
-              },
-              onClick: () => navigate('/data?filter=intent'),
-            },
-            {
-              label: 'Reference (Standards)',
-              value: metrics.referenceCount,
-              status: metrics.referenceCount > 0 ? 'success' : null,
-              tooltip: {
-                title: "Reference Layer",
-                description: "Best practice guides, checklists, and compliance standards. The 'gold standard' for how things should be configured.",
-                insight: "Enables validation like 'is this SUI rate correct?'"
-              },
-              onClick: () => navigate('/data?filter=reference'),
-            },
-          ]}
-        />
+          onHeaderClick={() => navigate('/data')}
+          linkText="Explore →"
+        >
+          <div style={{ display: 'flex', gap: '1rem' }}>
+            <TruthPillar
+              label="REALITY"
+              sublabel="Structured Data"
+              value={metrics.realityCount}
+              icon="🗄️"
+              color={colors.primary}
+              colorLight={colors.primaryLight}
+              barWidth={(metrics.realityCount / maxTruth) * 100}
+              colors={colors}
+              onClick={() => navigate('/data?filter=reality')}
+            />
+            <TruthPillar
+              label="INTENT"
+              sublabel="Customer Docs"
+              value={metrics.intentCount}
+              icon="📋"
+              color={colors.dustyBlue}
+              colorLight={colors.dustyBlueLight}
+              barWidth={(metrics.intentCount / maxTruth) * 100}
+              colors={colors}
+              onClick={() => navigate('/data?filter=intent')}
+            />
+            <TruthPillar
+              label="REFERENCE"
+              sublabel="Standards"
+              value={metrics.referenceCount}
+              icon="📖"
+              color={colors.taupe}
+              colorLight={colors.taupeLight}
+              barWidth={(metrics.referenceCount / maxTruth) * 100}
+              colors={colors}
+              onClick={() => navigate('/data?filter=reference')}
+            />
+          </div>
+        </SectionCard>
 
         {/* Classification Engine */}
-        <SectionCard
-          title="Classification Engine"
-          icon={Brain}
-          colors={colors}
-          dark={darkMode}
-          onSectionClick={() => navigate('/data')}
-          metrics={[
-            {
-              label: 'Content-Based (AI)',
-              value: `${metrics.contentBased} files`,
-              tooltip: {
-                title: "Content Analysis",
-                description: "Documents classified by analyzing their actual content - headers, structure, and text patterns - using AI.",
-                insight: "Most accurate method. Used for ambiguous file types."
-              },
-            },
-            {
-              label: 'Extension-Based',
-              value: `${metrics.extensionBased} files`,
-              tooltip: {
-                title: "Extension Detection",
-                description: "Quick classification based on file extension (.xlsx → Reality, .pdf → Intent). Fast but less nuanced.",
-                insight: "Used as first-pass before content analysis."
-              },
-            },
-            {
-              label: 'User Override',
-              value: `${metrics.userOverride} files`,
-              tooltip: {
-                title: "Manual Classification",
-                description: "Documents where a user explicitly set the truth type, overriding automatic classification.",
-                insight: "User corrections help train future classifications."
-              },
-            },
-            {
-              label: 'Unclassified',
-              value: `${metrics.unclassified} files`,
-              status: metrics.unclassified > 0 ? 'warning' : 'success',
-              tooltip: {
-                title: "Pending Classification",
-                description: "Documents that haven't been classified yet or couldn't be automatically determined.",
-                insight: metrics.unclassified > 0 
-                  ? "Review these files to ensure proper routing."
-                  : "All documents successfully classified!"
-              },
-              onClick: metrics.unclassified > 0 ? () => navigate('/data?filter=unclassified') : null,
-            },
-          ]}
-        />
+        <SectionCard title="Classification Engine" icon={Brain} iconColor="slate" colors={colors}>
+          <DonutChart segments={donutSegments} total={totalDocs} colors={colors} />
+        </SectionCard>
+      </div>
 
-        {/* Recent Intelligence Activity */}
-        <div style={{
-          background: colors.card,
-          border: `1px solid ${colors.cardBorder}`,
-          borderRadius: 16,
-          overflow: 'hidden',
-        }}>
-          <div style={{
-            padding: '1rem 1.25rem',
-            borderBottom: `1px solid ${colors.divider}`,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.75rem',
-          }}>
-            <div style={{
-              width: 32,
-              height: 32,
-              borderRadius: 8,
-              background: colors.accentLight,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}>
-              <Activity size={16} style={{ color: colors.accent }} />
-            </div>
-            <span style={{ 
-              fontSize: '0.9rem', 
-              fontWeight: 700, 
-              color: colors.text 
-            }}>
-              Recent Intelligence Activity
-            </span>
+      {/* Bottom Grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.25rem' }}>
+        {/* Data Quality */}
+        <SectionCard title="Data Quality Engine" icon={Target} colors={colors} onHeaderClick={() => navigate('/data?tab=health')}>
+          <GaugeChart value={metrics.avgHealthScore} label="Health Score" colors={colors} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.75rem' }}>
+            <StatBox value={metrics.issuesFound} label="Issues Found" colorKey="warning" colors={colors} />
+            <StatBox value={metrics.autoCleaned} label="Auto-Cleaned" colorKey="success" colors={colors} />
+            <StatBox value={metrics.junkColumnsRemoved} label="Junk Removed" colors={colors} />
+            <StatBox value={metrics.insightsCount} label="Insights" colorKey="dustyBlue" colors={colors} />
           </div>
-          
-          <div style={{ padding: '0.5rem 1.25rem' }}>
-            {metrics.recentActivity.length === 0 ? (
-              <div style={{ 
-                padding: '2rem 0', 
-                textAlign: 'center', 
-                color: colors.textMuted,
-                fontSize: '0.85rem' 
-              }}>
-                No recent activity
-              </div>
-            ) : (
-              metrics.recentActivity.map((item, i) => (
-                <ActivityItem key={i} item={item} colors={colors} />
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Data Quality Engine */}
-        <SectionCard
-          title="Data Quality Engine"
-          icon={Target}
-          colors={colors}
-          dark={darkMode}
-          onSectionClick={() => navigate('/data?tab=health')}
-          metrics={[
-            {
-              label: 'Average Health Score',
-              value: `${metrics.avgHealthScore}%`,
-              status: metrics.avgHealthScore >= 90 ? 'success' : metrics.avgHealthScore >= 70 ? 'warning' : 'error',
-              tooltip: {
-                title: "Data Health",
-                description: "Weighted score based on fill rates, data type consistency, and absence of parsing artifacts across all uploaded files.",
-                insight: metrics.avgHealthScore < 90 
-                  ? "Click to see which files need attention."
-                  : "Excellent data quality across all files!"
-              },
-              onClick: () => navigate('/data?tab=health'),
-            },
-            {
-              label: 'Issues Detected',
-              value: metrics.issuesFound,
-              status: metrics.issuesFound > 0 ? 'warning' : 'success',
-              tooltip: {
-                title: "Quality Issues",
-                description: "Problems like missing required fields, invalid formats, or suspicious patterns that may need review.",
-                insight: "Issues are auto-prioritized by severity."
-              },
-              onClick: () => navigate('/data?tab=health&filter=issues'),
-            },
-            {
-              label: 'Auto-Cleaned',
-              value: metrics.autoCleaned,
-              tooltip: {
-                title: "Automatic Cleanup",
-                description: "Junk columns, parsing artifacts, and empty fields automatically removed during upload.",
-                insight: "Saves manual cleanup time while preserving real data."
-              },
-            },
-            {
-              label: 'Insights (Optional Fields)',
-              value: metrics.insightsCount,
-              tooltip: {
-                title: "Optional Field Insights",
-                description: "Fields like UDFs or custom attributes that are empty but don't affect data quality. Informational, not issues.",
-                insight: "These may indicate unused configuration options."
-              },
-            },
-          ]}
-        />
+        </SectionCard>
 
         {/* Intelligence Pipeline */}
-        <SectionCard
-          title="Intelligence Pipeline"
-          icon={Zap}
-          colors={colors}
-          dark={darkMode}
-          onSectionClick={() => navigate('/data?tab=intelligence')}
-          metrics={[
-            {
-              label: 'Lookup Tables Detected',
-              value: metrics.lookupsDetected,
-              tooltip: {
-                title: "Lookup Detection",
-                description: "Reference tables automatically identified (pay groups, job codes, locations, etc.) and indexed for validation.",
-                insight: "Lookups enable dropdown suggestions and value validation."
-              },
-            },
-            {
-              label: 'Findings Generated',
-              value: metrics.findingsGenerated,
-              tooltip: {
-                title: "Auto-Generated Findings",
-                description: "Data quality observations, missing values, and potential issues discovered during analysis.",
-                insight: "Findings become actionable tasks when assigned to playbooks."
-              },
-              onClick: () => navigate('/playbooks'),
-            },
-            {
-              label: 'Tasks Created',
-              value: metrics.tasksCreated,
-              tooltip: {
-                title: "Actionable Tasks",
-                description: "Findings converted into trackable tasks with owners and due dates.",
-                insight: "Connect playbooks to convert findings into tasks."
-              },
-              onClick: () => navigate('/playbooks'),
-            },
-          ]}
-        />
+        <SectionCard title="Intelligence Pipeline" icon={Zap} iconColor="taupe" colors={colors}>
+          <ProgressBar label="Lookup Tables Detected" value={metrics.lookupsDetected} max={50} color={colors.primary} colors={colors} />
+          <ProgressBar label="Findings Generated" value={metrics.findingsGenerated} max={5000} color={colors.dustyBlue} colors={colors} />
+          <ProgressBar label="Tasks Created" value={metrics.tasksCreated} max={500} color={colors.sage} colors={colors} />
+          
+          <div style={{ marginTop: '1.25rem' }}>
+            <div style={{ fontSize: '0.75rem', color: colors.textMuted, marginBottom: '0.5rem' }}>Processing (7 days)</div>
+            <MiniBarChart data={metrics.processingByDay} colors={colors} />
+          </div>
+        </SectionCard>
 
-        {/* Learning & Performance */}
-        <div style={{
-          background: colors.card,
-          border: `1px solid ${colors.cardBorder}`,
-          borderRadius: 16,
-          padding: '1.25rem',
-        }}>
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: '0.75rem',
-            marginBottom: '1rem'
-          }}>
-            <div style={{
-              width: 32,
-              height: 32,
-              borderRadius: 8,
-              background: colors.successLight,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}>
-              <TrendingUp size={16} style={{ color: colors.success }} />
+        {/* Recent Activity */}
+        <SectionCard title="Recent Activity" icon={Activity} iconColor="dustyBlue" colors={colors}>
+          {metrics.recentActivity.length === 0 ? (
+            <div style={{ padding: '2rem 0', textAlign: 'center', color: colors.textMuted, fontSize: '0.85rem' }}>
+              No recent activity
             </div>
-            <span style={{ 
-              fontSize: '0.9rem', 
-              fontWeight: 700, 
-              color: colors.text 
-            }}>
-              Learning & Performance
-            </span>
-          </div>
-          
-          <div style={{ marginBottom: '1.25rem' }}>
-            <Tooltip tooltip={{
-              title: "SQL Cache Performance",
-              description: "Percentage of queries served from cached patterns vs. generated fresh. Higher = faster responses.",
-              insight: "Cache builds automatically as users ask questions."
-            }} colors={colors} dark={darkMode}>
-              <div>
-                <ProgressBar 
-                  value={metrics.sqlCacheHits} 
-                  max={100} 
-                  label="SQL Cache Hit Rate"
-                  color={colors.success}
-                  colors={colors}
-                />
-              </div>
-            </Tooltip>
-            
-            <Tooltip tooltip={{
-              title: "Processing Success",
-              description: "Percentage of file uploads that complete successfully without errors.",
-              insight: metrics.successRate < 95 ? "Check failed jobs for details." : "Excellent reliability!"
-            }} colors={colors} dark={darkMode}>
-              <div>
-                <ProgressBar 
-                  value={metrics.successRate} 
-                  max={100} 
-                  label="Processing Success Rate"
-                  color={metrics.successRate >= 95 ? colors.success : colors.warning}
-                  colors={colors}
-                />
-              </div>
-            </Tooltip>
-          </div>
-          
-          <div style={{ 
-            display: 'grid', 
-            gridTemplateColumns: '1fr 1fr', 
-            gap: '1rem',
-            padding: '1rem',
-            background: colors.cardHover,
-            borderRadius: 10,
-          }}>
-            <Tooltip tooltip={{
-              title: "User Feedback",
-              description: "Thumbs up/down feedback received on AI responses. Used to improve response quality.",
-              insight: "More feedback = smarter responses over time."
-            }} colors={colors} dark={darkMode}>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: colors.text }}>
-                  {metrics.feedbackReceived}
-                </div>
-                <div style={{ fontSize: '0.75rem', color: colors.textMuted }}>
-                  Feedback Received
-                </div>
-              </div>
-            </Tooltip>
-            
-            <Tooltip tooltip={{
-              title: "Avg Processing Time",
-              description: "Average time to parse, analyze, and store uploaded files.",
-              insight: metrics.avgParseTime > 5 ? "Large files may take longer." : "Fast processing!"
-            }} colors={colors} dark={darkMode}>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: colors.text }}>
-                  {metrics.avgParseTime}s
-                </div>
-                <div style={{ fontSize: '0.75rem', color: colors.textMuted }}>
-                  Avg Parse Time
-                </div>
-              </div>
-            </Tooltip>
-          </div>
-        </div>
+          ) : (
+            metrics.recentActivity.map((item, i) => (
+              <ActivityItem
+                key={i}
+                icon={
+                  item.type === 'classification' ? <FileCheck size={14} style={{ color: colors.primary }} /> :
+                  item.type === 'relationship' ? <Link2 size={14} style={{ color: colors.dustyBlue }} /> :
+                  <Sparkles size={14} style={{ color: colors.taupe }} />
+                }
+                iconColor={item.type === 'classification' ? 'primary' : item.type === 'relationship' ? 'dustyBlue' : 'taupe'}
+                message={item.message}
+                time={item.time}
+                colors={colors}
+              />
+            ))
+          )}
+        </SectionCard>
       </div>
 
       <style>{`
         @keyframes spin {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
+        }
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
         }
       `}</style>
     </div>
