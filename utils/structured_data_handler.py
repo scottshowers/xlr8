@@ -2047,11 +2047,8 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                                 # Generate table name
                                 table_name = self._generate_table_name(project, file_name, combined_sheet)
                                 
-                                # Drop existing and create table
-                                self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
-                                self.conn.register('temp_df', sub_df)
-                                self.conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM temp_df")
-                                self.conn.unregister('temp_df')
+                                # Create table (thread-safe)
+                                self.safe_create_table_from_df(table_name, sub_df)
                                 
                                 # Store metadata
                                 columns_info = [
@@ -2059,7 +2056,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                                     for col in sub_df.columns
                                 ]
                                 
-                                self.conn.execute("""
+                                self.safe_execute("""
                                     INSERT INTO _schema_metadata 
                                     (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys, encrypted_columns, version, is_current)
                                     VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
@@ -2141,11 +2138,8 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                                 # Generate table name
                                 table_name = self._generate_table_name(project, file_name, combined_sheet)
                                 
-                                # Drop existing and create table
-                                self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
-                                self.conn.register('temp_df', sub_df)
-                                self.conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM temp_df")
-                                self.conn.unregister('temp_df')
+                                # Create table (thread-safe)
+                                self.safe_create_table_from_df(table_name, sub_df)
                                 
                                 # Store metadata
                                 columns_info = [
@@ -2153,7 +2147,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                                     for col in sub_df.columns
                                 ]
                                 
-                                self.conn.execute("""
+                                self.safe_execute("""
                                     INSERT INTO _schema_metadata 
                                     (id, project, file_name, sheet_name, table_name, columns, row_count, encrypted_columns)
                                     VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?)
@@ -2270,13 +2264,8 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                     # Generate table name
                     table_name = self._generate_table_name(project, file_name, sheet_name)
                     
-                    # Drop existing current table if exists
-                    self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
-                    
-                    # Create table from DataFrame - all VARCHAR columns
-                    self.conn.register('temp_df', df)
-                    self.conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM temp_df")
-                    self.conn.unregister('temp_df')
+                    # Create table (thread-safe)
+                    self.safe_create_table_from_df(table_name, df)
                     
                     # Detect key columns
                     likely_keys = self._detect_key_columns(df)
@@ -2288,13 +2277,13 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                     ]
                     
                     # Mark previous metadata as not current
-                    self.conn.execute("""
+                    self.safe_execute("""
                         UPDATE _schema_metadata 
                         SET is_current = FALSE 
                         WHERE project = ? AND file_name = ? AND sheet_name = ?
                     """, [project, file_name, sheet_name])
                     
-                    self.conn.execute("""
+                    self.safe_execute("""
                         INSERT INTO _schema_metadata 
                         (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys, encrypted_columns, version, is_current)
                         VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
@@ -2598,13 +2587,8 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             
             table_name = self._generate_table_name(project, file_name, 'data')
             
-            # Drop existing table
-            self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
-            
-            # Create table
-            self.conn.register('temp_df', df)
-            self.conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM temp_df")
-            self.conn.unregister('temp_df')
+            # Create table (thread-safe)
+            self.safe_create_table_from_df(table_name, df)
             
             report_progress(50, "Detecting key columns...")
             
@@ -2617,7 +2601,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 for col in df.columns
             ]
             
-            self.conn.execute("""
+            self.safe_execute("""
                 INSERT INTO _schema_metadata 
                 (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys)
                 VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?)
@@ -3596,6 +3580,29 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 return self.conn.execute(sql).fetchone()
             except Exception as e:
                 logger.error(f"[SAFE_FETCHONE] Error: {e}")
+                raise
+    
+    def safe_create_table_from_df(self, table_name: str, df: pd.DataFrame, drop_existing: bool = True):
+        """
+        Thread-safe table creation from DataFrame.
+        
+        This wraps DROP/register/CREATE/unregister in a single lock to prevent
+        race conditions with concurrent status polling.
+        """
+        with self._db_lock:
+            try:
+                if drop_existing:
+                    self.conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+                
+                temp_name = f"temp_{table_name[:30]}_{id(df)}"
+                self.conn.register(temp_name, df)
+                self.conn.execute(f'CREATE TABLE "{table_name}" AS SELECT * FROM {temp_name}')
+                self.conn.unregister(temp_name)
+                
+                logger.debug(f"[SAFE_CREATE] Created table {table_name} with {len(df)} rows")
+                return True
+            except Exception as e:
+                logger.error(f"[SAFE_CREATE] Failed to create {table_name}: {e}")
                 raise
     
     def get_schema(self, project: str = None) -> Dict[str, Any]:
