@@ -12,7 +12,7 @@
  * - UploadProvider (background uploads)
  * - OnboardingProvider (Joyride tours)
  * 
- * Updated: December 19, 2025 - Analytics Explorer (replaces QueryBuilderPage)
+ * Updated: December 20, 2025 - Added Welcome/Story/Journey/Intelligence Demo pages
  */
 
 import React from 'react';
@@ -47,7 +47,13 @@ import AdminPage from './pages/AdminPage';
 import AdminDashboard from './pages/AdminDashboard';
 import DataHealthPage from './pages/DataHealthPage';
 import ReferenceLibraryPage from './pages/ReferenceLibraryPage';
-import AnalyticsPage from './pages/AnalyticsPage';  // Replaces QueryBuilderPage
+import AnalyticsPage from './pages/AnalyticsPage';
+
+// Sales/Onboarding Pages
+import WelcomePage from './pages/WelcomePage';
+import StoryPage from './pages/StoryPage';
+import JourneyPage from './pages/JourneyPage';
+import IntelligenceDemo from './pages/IntelligenceDemo';
 
 // CSS
 import './index.css';
@@ -60,6 +66,20 @@ function AppRoutes() {
         {/* Public routes */}
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<LoginPage />} />
+        
+        {/* ====== SALES / ONBOARDING PAGES ====== */}
+        
+        {/* Welcome - Sales landing with 3 presentation options */}
+        <Route path="/welcome" element={<WelcomePage />} />
+        
+        {/* Story - Narrative chapter experience */}
+        <Route path="/story" element={<StoryPage />} />
+        
+        {/* Journey - Visual infographic */}
+        <Route path="/journey" element={<JourneyPage />} />
+        
+        {/* Intelligence Demo - Watch XLR8 Think */}
+        <Route path="/intelligence-demo" element={<IntelligenceDemo />} />
         
         {/* ====== MAIN NAV ====== */}
         
