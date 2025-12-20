@@ -84,14 +84,28 @@ export default function WorkspacePage() {
 
   if (loading) {
     return (
-      <div style={{ textAlign: 'center', padding: '3rem', color: colors.textMuted }}>
+      <div style={{ 
+        padding: '1.5rem', 
+        background: colors.bg, 
+        minHeight: 'calc(100vh - 60px)',
+        fontFamily: "'Inter', system-ui, sans-serif",
+        transition: 'background 0.2s ease',
+        textAlign: 'center',
+        color: colors.textMuted,
+      }}>
         Loading...
       </div>
     );
   }
 
   return (
-    <div>
+    <div style={{ 
+      padding: '1.5rem', 
+      background: colors.bg, 
+      minHeight: 'calc(100vh - 60px)',
+      fontFamily: "'Inter', system-ui, sans-serif",
+      transition: 'background 0.2s ease',
+    }}>
       {/* Header */}
       <div style={{ marginBottom: '1rem' }}>
         <h1 style={{
