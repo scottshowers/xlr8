@@ -800,14 +800,14 @@ class StructuredDataHandler:
         Returns empty list for normal single-table sheets.
         """
         try:
-            logger.info(f"[HORIZONTAL-DETECT] Checking sheet '{sheet_name}' for side-by-side tables")
+            logger.warning(f"[HORIZONTAL-DETECT] Checking sheet '{sheet_name}' for side-by-side tables")
             
             raw_df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
             
-            logger.info(f"[HORIZONTAL-DETECT] Sheet has {len(raw_df)} rows, {raw_df.shape[1]} columns")
+            logger.warning(f"[HORIZONTAL-DETECT] Sheet has {len(raw_df)} rows, {raw_df.shape[1]} columns")
             
             if raw_df.empty or raw_df.shape[1] < 4:
-                logger.info(f"[HORIZONTAL-DETECT] Sheet too small, skipping")
+                logger.warning(f"[HORIZONTAL-DETECT] Sheet too small, skipping")
                 return []
             
             # Find COMPLETELY blank columns (all NaN or empty in data rows)
@@ -821,7 +821,7 @@ class StructuredDataHandler:
                 if is_blank:
                     blank_cols.append(col_idx)
             
-            logger.info(f"[HORIZONTAL-DETECT] Found {len(blank_cols)} blank columns: {blank_cols[:10]}{'...' if len(blank_cols) > 10 else ''}")
+            logger.warning(f"[HORIZONTAL-DETECT] Found {len(blank_cols)} blank columns: {blank_cols[:10]}{'...' if len(blank_cols) > 10 else ''}")
             
             # Find blank columns as separators
             # Only trigger horizontal split if there are multiple separators
@@ -829,10 +829,10 @@ class StructuredDataHandler:
             separators = blank_cols.copy()
             
             if len(separators) < 2:
-                logger.info(f"[HORIZONTAL-DETECT] Less than 2 separators, treating as single table")
+                logger.warning(f"[HORIZONTAL-DETECT] Less than 2 separators, treating as single table")
                 return []  # Need multiple separators to confirm multi-table layout
             
-            logger.info(f"[HORIZONTAL-DETECT] Sheet '{sheet_name}': Found {len(separators)} separator(s) at columns {separators}")
+            logger.warning(f"[HORIZONTAL-DETECT] Sheet '{sheet_name}': Found {len(separators)} separator(s) at columns {separators}")
             
             # Split into regions based on separators
             regions = []
@@ -851,7 +851,7 @@ class StructuredDataHandler:
             if len(regions) < 2:
                 return []  # Need at least 2 real regions to split
             
-            logger.info(f"[HORIZONTAL-DETECT] Sheet '{sheet_name}': Splitting into {len(regions)} tables")
+            logger.warning(f"[HORIZONTAL-DETECT] Sheet '{sheet_name}': Splitting into {len(regions)} tables")
             
             result = []
             for idx, (start_col, end_col) in enumerate(regions):
@@ -878,7 +878,7 @@ class StructuredDataHandler:
                     else:
                         table_name = str(sub_df.columns[0]).strip()[:40] or f"table_{idx + 1}"
                     result.append((table_name, sub_df))
-                    logger.info(f"[HORIZONTAL-DETECT]   Region {idx + 1}: '{table_name}' ({len(sub_df)} rows, {len(sub_df.columns)} cols)")
+                    logger.warning(f"[HORIZONTAL-DETECT]   Region {idx + 1}: '{table_name}' ({len(sub_df)} rows, {len(sub_df.columns)} cols)")
             
             return result
             
@@ -898,15 +898,15 @@ class StructuredDataHandler:
         Returns list of (table_name, dataframe) tuples, or empty list for single-table sheets.
         """
         try:
-            logger.info(f"[VERTICAL-DETECT] Checking sheet '{sheet_name}' for stacked tables")
+            logger.warning(f"[VERTICAL-DETECT] Checking sheet '{sheet_name}' for stacked tables")
             
             # Read full sheet first
             raw_df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
             
-            logger.info(f"[VERTICAL-DETECT] Sheet has {len(raw_df)} rows, {len(raw_df.columns)} columns")
+            logger.warning(f"[VERTICAL-DETECT] Sheet has {len(raw_df)} rows, {len(raw_df.columns)} columns")
             
             if len(raw_df) < 3:
-                logger.info(f"[VERTICAL-DETECT] Sheet too small, skipping")
+                logger.warning(f"[VERTICAL-DETECT] Sheet too small, skipping")
                 return []
             
             separator_rows = set()
@@ -920,7 +920,7 @@ class StructuredDataHandler:
                         ws = wb[sheet_name]
                         
                         merge_count = len(list(ws.merged_cells.ranges))
-                        logger.info(f"[VERTICAL-DETECT] Found {merge_count} merged cell ranges")
+                        logger.warning(f"[VERTICAL-DETECT] Found {merge_count} merged cell ranges")
                         
                         for merged_range in ws.merged_cells.ranges:
                             col_span = merged_range.max_col - merged_range.min_col
@@ -933,12 +933,12 @@ class StructuredDataHandler:
                                     cell_val = ws.cell(merged_range.min_row, merged_range.min_col).value
                                     if cell_val and str(cell_val).strip():
                                         title_rows[row_idx] = str(cell_val).strip()
-                                        logger.info(f"[VERTICAL-DETECT] Merged title at row {row_idx}: {str(cell_val)[:50]}")
+                                        logger.warning(f"[VERTICAL-DETECT] Merged title at row {row_idx}: {str(cell_val)[:50]}")
                         wb.close()
                 except Exception as e:
                     logger.warning(f"Merged cell detection failed for vertical split: {e}")
             
-            logger.info(f"[VERTICAL-DETECT] After merged cell check: {len(separator_rows)} separator rows")
+            logger.warning(f"[VERTICAL-DETECT] After merged cell check: {len(separator_rows)} separator rows")
             
             # Method 2: Find title rows (text in col A only, rest empty or mostly empty)
             for row_idx in range(len(raw_df)):
@@ -966,12 +966,12 @@ class StructuredDataHandler:
                     # Likely a section title
                     separator_rows.add(row_idx)
                     title_rows[row_idx] = first_text
-                    logger.info(f"[VERTICAL-DETECT] Title row {row_idx}: '{first_text[:50]}'")
+                    logger.warning(f"[VERTICAL-DETECT] Title row {row_idx}: '{first_text[:50]}'")
             
-            logger.info(f"[VERTICAL-DETECT] Total separator rows found: {len(separator_rows)}")
+            logger.warning(f"[VERTICAL-DETECT] Total separator rows found: {len(separator_rows)}")
             
             if not separator_rows:
-                logger.info(f"[VERTICAL-DETECT] No separators found, treating as single table")
+                logger.warning(f"[VERTICAL-DETECT] No separators found, treating as single table")
                 return []  # No separators = probably single table
             
             # Find table boundaries
@@ -1015,14 +1015,14 @@ class StructuredDataHandler:
                 table_name = current_title or f"Table_{len(tables)+1}"
                 tables.append((table_name, current_header, current_start, len(raw_df)))
             
-            logger.info(f"[VERTICAL-DETECT] Tables found: {len(tables)}")
+            logger.warning(f"[VERTICAL-DETECT] Tables found: {len(tables)}")
             
             # Only return if we found multiple tables
             if len(tables) < 2:
-                logger.info(f"[VERTICAL-DETECT] Less than 2 tables, treating as single table")
+                logger.warning(f"[VERTICAL-DETECT] Less than 2 tables, treating as single table")
                 return []
             
-            logger.info(f"[VERTICAL-DETECT] Sheet '{sheet_name}': Found {len(tables)} stacked tables")
+            logger.warning(f"[VERTICAL-DETECT] Sheet '{sheet_name}': Found {len(tables)} stacked tables")
             
             result = []
             
@@ -1030,6 +1030,26 @@ class StructuredDataHandler:
                 # Extract this table's data
                 header_vals = raw_df.iloc[header_row].tolist()
                 data_df = raw_df.iloc[data_start:data_end].copy()
+                
+                # CRITICAL: Trim trailing empty columns BEFORE setting names
+                # Each sub-table may have different widths, but raw_df has max width
+                last_real_col = 0
+                for col_idx in range(len(header_vals)):
+                    header_val = header_vals[col_idx]
+                    has_header = pd.notna(header_val) and str(header_val).strip()
+                    
+                    # Check if any data exists in this column
+                    col_data = data_df.iloc[:, col_idx] if col_idx < data_df.shape[1] else pd.Series()
+                    has_data = not col_data.isna().all() and not (col_data.astype(str).str.strip() == '').all()
+                    
+                    if has_header or has_data:
+                        last_real_col = col_idx
+                
+                # Trim to only columns with headers or data
+                if last_real_col < len(header_vals) - 1:
+                    header_vals = header_vals[:last_real_col + 1]
+                    data_df = data_df.iloc[:, :last_real_col + 1]
+                    logger.warning(f"[VERTICAL-DETECT] Trimmed table to {last_real_col + 1} columns")
                 
                 # Set column names from header row
                 data_df.columns = [str(v).strip() if pd.notna(v) else f'col_{i}' for i, v in enumerate(header_vals)]
@@ -1045,7 +1065,7 @@ class StructuredDataHandler:
                         table_name = f"table_{idx + 1}"
                     
                     result.append((table_name, data_df))
-                    logger.info(f"[VERTICAL-DETECT]   Table {idx + 1}: '{table_name}' - header row {header_row}, {len(data_df)} data rows")
+                    logger.warning(f"[VERTICAL-DETECT]   Table {idx + 1}: '{table_name}' - header row {header_row}, {len(data_df)} data rows, {len(data_df.columns)} cols")
             
             return result
             
