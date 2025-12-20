@@ -919,7 +919,7 @@ Analyze the data and provide a clear, direct answer. Focus on the key insight fi
                 if success and response and len(response.strip()) > 50:
                     # Validate response isn't garbage
                     if not self._is_garbage_synthesis(response):
-                        result["response"] = response
+                        result["response"] = self._clean_unprofessional_language(response)
                         result["model_used"] = model
                         result["success"] = True
                         logger.info(f"[SYNTHESIS] {model} succeeded ({len(response)} chars)")
@@ -939,7 +939,7 @@ Analyze the data and provide a clear, direct answer. Focus on the key insight fi
             response, success = self._call_claude(user_prompt, system_prompt)
             
             if success:
-                result["response"] = response
+                result["response"] = self._clean_unprofessional_language(response)
                 result["model_used"] = "claude-sonnet-4-fallback"
                 result["success"] = True
                 logger.info(f"[SYNTHESIS] Claude fallback succeeded ({len(response)} chars)")
@@ -988,3 +988,47 @@ Analyze the data and provide a clear, direct answer. Focus on the key insight fi
             return True
         
         return False
+    
+    def _clean_unprofessional_language(self, response: str) -> str:
+        """
+        Remove unprofessional persona language from LLM responses.
+        This catches cow/farm themed phrases from the 'bessie' persona
+        and other inappropriate casual language for a professional platform.
+        """
+        if not response:
+            return response
+        
+        # Phrases to remove entirely (usually at start or end of response)
+        phrases_to_remove = [
+            # Cow/farm themed
+            "moo-ving", "moooving", "moo-ve", "udderly", "pasture", 
+            "graze", "herd", "stampede", "corral",
+            "anything else i can help you wrangle",
+            "help you wrangle",
+            "wrangle",
+            "howdy partner",
+            "howdy",
+            "yeehaw",
+            "giddy up",
+            # Overly casual greetings/closings
+            "hope you're having a great day",
+            "hope you're doing well",
+            "hello there!",
+        ]
+        
+        result = response
+        for phrase in phrases_to_remove:
+            # Case-insensitive replacement
+            pattern = re.compile(re.escape(phrase), re.IGNORECASE)
+            result = pattern.sub('', result)
+        
+        # Clean up any double spaces or awkward punctuation left behind
+        result = re.sub(r'\s+', ' ', result)
+        result = re.sub(r'\s+([.,!?])', r'\1', result)
+        result = re.sub(r'([.,!?])\s*([.,!?])', r'\1', result)
+        
+        # Remove empty sentences
+        result = re.sub(r'\.\s*\.', '.', result)
+        result = re.sub(r'!\s*!', '!', result)
+        
+        return result.strip()
