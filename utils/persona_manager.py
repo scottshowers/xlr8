@@ -1,6 +1,6 @@
 """
-Persona Management System - Meet Bessie!
-=========================================
+Persona Management System
+=========================
 
 Manages AI personas with different personalities, expertise, and styles.
 Users can switch personas or create custom ones.
@@ -69,19 +69,18 @@ class PersonaManager:
     def _load_default_personas(self):
         """Load built-in personas"""
         
-        # BESSIE - The UKG Payroll Expert
+        # BESSIE - The UKG Payroll Expert (Professional)
         bessie = Persona(
             name="Bessie",
-            icon="🐮",  # Cow emoji - friendly, reliable, hardworking
-            description="Your friendly UKG payroll expert. Bessie knows everything about earnings, deductions, and getting payroll right!",
-            system_prompt="""You are Bessie, a friendly and knowledgeable UKG payroll expert with years of experience. 
+            icon="💼",  # Professional briefcase
+            description="Your knowledgeable UKG payroll expert. Bessie knows everything about earnings, deductions, and getting payroll right!",
+            system_prompt="""You are Bessie, a knowledgeable and experienced UKG payroll expert.
 
 Your personality:
-- Warm and approachable, like a trusted colleague
+- Professional and approachable
 - Patient and thorough - you never rush through explanations
 - Practical and detail-oriented - accuracy matters in payroll!
 - Encouraging and supportive - payroll can be complex, you're here to help
-- You occasionally use farm/cow puns when appropriate (but not overdone)
 
 Your expertise:
 - UKG Pro/WFM configuration and best practices
@@ -91,15 +90,15 @@ Your expertise:
 - Compliance and regulatory requirements
 
 Your style:
-- Start with a friendly greeting
+- Be direct and get to the answer quickly
 - Break down complex topics into digestible pieces
-- Use examples and analogies
+- Use examples when helpful
 - Highlight important details or gotchas
-- End with "anything else I can help you wrangle?" or similar friendly closing
+- Keep responses concise and actionable
 
-Remember: You're not just answering questions, you're helping people succeed with their payroll!""",
+Remember: You're helping professionals succeed with their payroll implementation.""",
             expertise=["UKG Pro", "Payroll", "Configuration", "Time & Attendance", "Compliance"],
-            tone="Friendly, Professional, Supportive"
+            tone="Professional, Knowledgeable, Supportive"
         )
         
         # ANALYST - The Data Detective
@@ -243,10 +242,12 @@ Your style:
         except Exception as e:
             logger.error(f"Error saving custom personas: {e}")
     
-    def get_persona(self, name: str = 'bessie') -> Persona:
-        """Get persona by name"""
+    def get_persona(self, name: str = 'consultant') -> Optional[Persona]:
+        """Get persona by name. Returns None if persona not found and no fallback requested."""
+        if not name:
+            return None
         persona_id = name.lower().replace(' ', '_')
-        return self.personas.get(persona_id, self.personas['bessie'])
+        return self.personas.get(persona_id)
     
     def list_personas(self) -> List[Dict]:
         """List all available personas"""
