@@ -236,12 +236,6 @@ function ProjectRow({ rank, project, colors, onClick, isSelected }) {
           <div style={{ fontSize: '0.65rem', color: colors.textMuted, marginBottom: 2 }}>FILES</div>
           <div style={{ fontSize: '0.9rem', fontWeight: 600, color: colors.text }}>{project.fileCount || 0}</div>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '0.65rem', color: colors.textMuted, marginBottom: 2 }}>FINDINGS</div>
-          <div style={{ fontSize: '0.9rem', fontWeight: 600, color: project.findingsCount > 0 ? colors.amber : colors.textMuted }}>
-            {project.findingsCount || 0}
-          </div>
-        </div>
         <div style={{ width: 60 }}>
           <div style={{ fontSize: '0.65rem', color: colors.textMuted, marginBottom: 4, textAlign: 'right' }}>HEALTH</div>
           <div style={{ 
@@ -355,7 +349,7 @@ export default function DashboardPage() {
   const goals = {
     projects: 10,
     files: 50,
-    playbooks: 20,
+    playbooks: null, // No goal for assigned playbooks
     findings: 0, // lower is better
   };
   
@@ -374,27 +368,58 @@ export default function DashboardPage() {
       const jobsRes = await api.get('/jobs').catch(() => ({ data: { jobs: [] } }));
       const jobs = jobsRes.data.jobs || [];
       
-      // Get structured data
+      // Get structured data and documents
       const structuredRes = await api.get('/status/structured').catch(() => ({ data: { files: [], total_files: 0 } }));
+      const docsRes = await api.get('/status/documents').catch(() => ({ data: { documents: [] } }));
+      
+      const structuredFiles = structuredRes.data.files || [];
+      const documents = docsRes.data.documents || [];
+      
+      // Count files per project
+      const fileCountsByProject = {};
+      
+      // Count structured files per project
+      structuredFiles.forEach(file => {
+        const projId = file.project;
+        if (projId) {
+          fileCountsByProject[projId] = (fileCountsByProject[projId] || 0) + 1;
+        }
+      });
+      
+      // Count documents per project
+      documents.forEach(doc => {
+        const projId = doc.project_id || doc.project;
+        if (projId) {
+          fileCountsByProject[projId] = (fileCountsByProject[projId] || 0) + 1;
+        }
+      });
       
       // Calculate stats
       const totalProjects = realProjects?.length || 0;
-      const filesUploaded = structuredRes.data.total_files || structuredRes.data.files?.length || 0;
+      const totalFiles = structuredFiles.length + documents.length;
+      
+      // Count total assigned playbooks across all projects
+      const totalPlaybooks = (realProjects || []).reduce((sum, p) => {
+        return sum + (p.playbooks?.length || 0);
+      }, 0);
       
       setStats({
         projects: totalProjects,
-        files: filesUploaded,
-        playbooks: 0, // Would come from playbooks endpoint
-        findings: 0,  // Would come from playbooks endpoint
+        files: totalFiles,
+        playbooks: totalPlaybooks,
+        findings: 0,  // Removed for now
       });
       
-      // Build projects list with mock health scores
-      const projectsList = (realProjects || []).map((p, i) => ({
-        ...p,
-        health: 100 - (i * 8), // Mock decreasing health for demo
-        fileCount: Math.floor(Math.random() * 10) + 1,
-        findingsCount: Math.floor(Math.random() * 5),
-      })).sort((a, b) => b.health - a.health);
+      // Build projects list with real file counts
+      const projectsList = (realProjects || []).map((p) => {
+        // Match by id or name
+        const fileCount = fileCountsByProject[p.id] || fileCountsByProject[p.name] || 0;
+        return {
+          ...p,
+          health: fileCount > 0 ? 100 : 50, // Simple: has files = healthy
+          fileCount: fileCount,
+        };
+      }).sort((a, b) => b.fileCount - a.fileCount); // Sort by file count instead of health
       
       setProjectsData(projectsList.slice(0, 5));
       
@@ -534,7 +559,7 @@ export default function DashboardPage() {
           onClick={() => navigate('/data')}
         />
         <StatCard 
-          label="Playbooks" 
+          label="Assigned Playbooks" 
           value={stats.playbooks} 
           goal={goals.playbooks}
           icon={Zap}
