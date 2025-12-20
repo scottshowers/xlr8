@@ -1,104 +1,263 @@
 /**
- * DashboardPage.jsx - Command Center
+ * DashboardPage.jsx - Platform Intelligence Dashboard
  * 
- * Clean professional design with:
- * - Light/dark mode support
- * - Tab toggles (This Week / This Month)
- * - Bar charts for activity
- * - Stats with goals
- * - Project leaderboard by health
+ * Shows the sophistication of XLR8's intelligence systems:
+ * - Three Truths Architecture health
+ * - Classification Engine metrics
+ * - Intelligence Pipeline status
+ * - Data Quality Engine results
+ * - Learning Engine progress
+ * - Processing Performance
  * 
- * Style reference: Clean white cards, subtle shadows, green accents
+ * Every metric has hover explanations showing WHY it matters.
+ * Click any metric to drill down into detailed views.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProject } from '../context/ProjectContext';
 import { useTheme } from '../context/ThemeContext';
 import api from '../services/api';
 import { 
-  Upload, Zap, MessageSquare, FolderOpen, 
-  AlertTriangle, CheckCircle, Clock, ArrowRight,
-  TrendingUp, TrendingDown, Calendar, RefreshCw
+  Database, FileText, Brain, Zap, Shield, Clock,
+  TrendingUp, CheckCircle, AlertTriangle, ArrowRight,
+  Layers, GitBranch, Search, BarChart3, RefreshCw,
+  Info, ChevronRight, Activity, Target, Sparkles,
+  Server, HardDrive, FileCheck, Link2, BookOpen
 } from 'lucide-react';
-import { getCustomerColorPalette } from '../utils/customerColors';
 
-// Theme-aware colors - muted professional palette
+// Theme colors - professional, refined
 const getColors = (dark) => ({
-  bg: dark ? '#1a1f2e' : '#f5f7fa',
-  card: dark ? '#242b3d' : '#ffffff',
-  cardBorder: dark ? '#2d3548' : '#e8ecf1',
-  text: dark ? '#e8eaed' : '#2a3441',
-  textMuted: dark ? '#8b95a5' : '#6b7280',
-  textLight: dark ? '#5f6a7d' : '#9ca3af',
-  primary: '#6b9b5a',  // Darker, more muted green
-  primaryLight: dark ? 'rgba(107, 155, 90, 0.15)' : 'rgba(107, 155, 90, 0.1)',
-  blue: '#4a6b8a',     // Slate blue, not bright
-  blueLight: dark ? 'rgba(74, 107, 138, 0.15)' : 'rgba(74, 107, 138, 0.1)',
-  amber: '#8a6b4a',    // Muted rust/brown, not orange
-  red: '#8a4a4a',      // Muted burgundy
-  divider: dark ? '#2d3548' : '#e8ecf1',
-  inputBg: dark ? '#1a1f2e' : '#f8fafc',
+  bg: dark ? '#0f1219' : '#f8f9fc',
+  card: dark ? '#1a1f2e' : '#ffffff',
+  cardBorder: dark ? '#2a3142' : '#e5e8ef',
+  cardHover: dark ? '#1e2433' : '#f8f9fc',
+  text: dark ? '#e8eaed' : '#1a202c',
+  textMuted: dark ? '#8b95a5' : '#64748b',
+  textLight: dark ? '#5f6a7d' : '#94a3b8',
+  primary: '#4a7c59',      // XLR8 green
+  primaryLight: dark ? 'rgba(74, 124, 89, 0.15)' : 'rgba(74, 124, 89, 0.08)',
+  primaryDark: '#3d6649',
+  accent: '#6366f1',       // Indigo for emphasis
+  accentLight: dark ? 'rgba(99, 102, 241, 0.15)' : 'rgba(99, 102, 241, 0.08)',
+  success: '#10b981',
+  successLight: dark ? 'rgba(16, 185, 129, 0.15)' : 'rgba(16, 185, 129, 0.08)',
+  warning: '#f59e0b',
+  warningLight: dark ? 'rgba(245, 158, 11, 0.15)' : 'rgba(245, 158, 11, 0.08)',
+  error: '#ef4444',
+  errorLight: dark ? 'rgba(239, 68, 68, 0.15)' : 'rgba(239, 68, 68, 0.08)',
+  divider: dark ? '#2a3142' : '#e5e8ef',
 });
 
-// Tab Toggle Component
-function TabToggle({ options, value, onChange, colors }) {
+// Tooltip Component with explanation
+function Tooltip({ children, tooltip, colors, dark }) {
+  const [show, setShow] = useState(false);
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const triggerRef = useRef(null);
+  
+  const handleMouseEnter = () => {
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (rect) {
+      setPosition({
+        x: rect.left + rect.width / 2,
+        y: rect.top - 10
+      });
+    }
+    setShow(true);
+  };
+  
   return (
-    <div style={{
-      display: 'inline-flex',
-      background: colors.inputBg,
-      borderRadius: 8,
-      padding: 3,
-      gap: 2,
-    }}>
-      {options.map(opt => (
-        <button
-          key={opt.value}
-          onClick={() => onChange(opt.value)}
-          style={{
-            padding: '0.5rem 1rem',
-            borderRadius: 6,
-            border: 'none',
-            background: value === opt.value ? colors.primary : 'transparent',
-            color: value === opt.value ? 'white' : colors.textMuted,
-            fontSize: '0.8rem',
-            fontWeight: 600,
-            cursor: 'pointer',
-            transition: 'all 0.15s ease',
-          }}
-        >
-          {opt.label}
-        </button>
-      ))}
+    <div 
+      ref={triggerRef}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={() => setShow(false)}
+      style={{ position: 'relative', display: 'inline-flex', width: '100%' }}
+    >
+      {children}
+      {show && tooltip && (
+        <div style={{
+          position: 'fixed',
+          left: position.x,
+          top: position.y,
+          transform: 'translate(-50%, -100%)',
+          zIndex: 1000,
+          background: dark ? '#1a1f2e' : '#ffffff',
+          border: `1px solid ${colors.cardBorder}`,
+          borderRadius: 12,
+          padding: '1rem 1.25rem',
+          maxWidth: 320,
+          boxShadow: '0 20px 40px rgba(0,0,0,0.15), 0 8px 16px rgba(0,0,0,0.1)',
+          pointerEvents: 'none',
+        }}>
+          <div style={{ 
+            fontSize: '0.75rem', 
+            fontWeight: 700, 
+            color: colors.primary,
+            marginBottom: '0.5rem',
+            textTransform: 'uppercase',
+            letterSpacing: '0.5px'
+          }}>
+            {tooltip.title}
+          </div>
+          <div style={{ 
+            fontSize: '0.85rem', 
+            color: colors.text,
+            lineHeight: 1.5,
+            marginBottom: tooltip.insight ? '0.75rem' : 0
+          }}>
+            {tooltip.description}
+          </div>
+          {tooltip.insight && (
+            <div style={{
+              fontSize: '0.8rem',
+              color: colors.textMuted,
+              padding: '0.5rem 0.75rem',
+              background: colors.primaryLight,
+              borderRadius: 6,
+              borderLeft: `3px solid ${colors.primary}`,
+            }}>
+              💡 {tooltip.insight}
+            </div>
+          )}
+          {/* Arrow */}
+          <div style={{
+            position: 'absolute',
+            bottom: -6,
+            left: '50%',
+            transform: 'translateX(-50%) rotate(45deg)',
+            width: 12,
+            height: 12,
+            background: dark ? '#1a1f2e' : '#ffffff',
+            borderRight: `1px solid ${colors.cardBorder}`,
+            borderBottom: `1px solid ${colors.cardBorder}`,
+          }} />
+        </div>
+      )}
     </div>
   );
 }
 
-// Stat Card with Goal
-function StatCard({ label, value, goal, icon: Icon, trend, colors, onClick }) {
-  const percentage = goal ? Math.round((value / goal) * 100) : null;
-  const isAboveGoal = goal && value >= goal;
+// Large Metric Card (for hero stats)
+function HeroMetric({ value, label, icon: Icon, tooltip, colors, dark, onClick, status = 'normal' }) {
+  const [hovered, setHovered] = useState(false);
+  
+  const statusColor = status === 'success' ? colors.success 
+    : status === 'warning' ? colors.warning 
+    : status === 'error' ? colors.error 
+    : colors.primary;
+  
+  const content = (
+    <div 
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        background: colors.card,
+        border: `1px solid ${hovered ? statusColor : colors.cardBorder}`,
+        borderRadius: 16,
+        padding: '1.5rem',
+        cursor: onClick ? 'pointer' : 'default',
+        transition: 'all 0.2s ease',
+        transform: hovered ? 'translateY(-2px)' : 'translateY(0)',
+        boxShadow: hovered 
+          ? `0 12px 24px rgba(0,0,0,0.1), 0 0 0 1px ${statusColor}20`
+          : '0 2px 8px rgba(0,0,0,0.04)',
+        position: 'relative',
+        overflow: 'hidden',
+        width: '100%',
+      }}
+    >
+      {/* Subtle gradient overlay */}
+      <div style={{
+        position: 'absolute',
+        top: 0,
+        right: 0,
+        width: 120,
+        height: 120,
+        background: `radial-gradient(circle at top right, ${statusColor}08, transparent)`,
+        pointerEvents: 'none',
+      }} />
+      
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
+        <div style={{
+          width: 44,
+          height: 44,
+          borderRadius: 12,
+          background: `${statusColor}15`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}>
+          <Icon size={22} style={{ color: statusColor }} />
+        </div>
+        {tooltip && (
+          <Info size={16} style={{ color: colors.textLight, opacity: 0.6 }} />
+        )}
+      </div>
+      
+      <div style={{ 
+        fontSize: '2.5rem', 
+        fontWeight: 800, 
+        color: colors.text, 
+        lineHeight: 1,
+        fontFamily: "'Sora', sans-serif",
+        marginBottom: '0.5rem'
+      }}>
+        {typeof value === 'number' ? value.toLocaleString() : value}
+      </div>
+      
+      <div style={{ 
+        fontSize: '0.85rem', 
+        fontWeight: 600, 
+        color: colors.textMuted,
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.5rem'
+      }}>
+        {label}
+        {onClick && <ChevronRight size={14} style={{ opacity: 0.5 }} />}
+      </div>
+    </div>
+  );
+  
+  if (tooltip) {
+    return <Tooltip tooltip={tooltip} colors={colors} dark={dark}>{content}</Tooltip>;
+  }
+  return content;
+}
+
+// Section Card with metrics
+function SectionCard({ title, icon: Icon, metrics, colors, dark, onSectionClick }) {
+  const [hovered, setHovered] = useState(false);
   
   return (
     <div 
-      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         background: colors.card,
         border: `1px solid ${colors.cardBorder}`,
-        borderRadius: 12,
-        padding: '1.25rem',
-        cursor: onClick ? 'pointer' : 'default',
+        borderRadius: 16,
+        overflow: 'hidden',
         transition: 'all 0.2s ease',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+        boxShadow: hovered ? '0 8px 24px rgba(0,0,0,0.08)' : '0 2px 8px rgba(0,0,0,0.04)',
       }}
-      onMouseEnter={(e) => onClick && (e.currentTarget.style.transform = 'translateY(-2px)')}
-      onMouseLeave={(e) => onClick && (e.currentTarget.style.transform = 'translateY(0)')}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
-        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-          {label}
-        </span>
-        {Icon && (
+      {/* Header */}
+      <div 
+        onClick={onSectionClick}
+        style={{
+          padding: '1rem 1.25rem',
+          borderBottom: `1px solid ${colors.divider}`,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          cursor: onSectionClick ? 'pointer' : 'default',
+          background: hovered ? colors.cardHover : 'transparent',
+          transition: 'background 0.15s ease',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <div style={{
             width: 32,
             height: 32,
@@ -110,148 +269,109 @@ function StatCard({ label, value, goal, icon: Icon, trend, colors, onClick }) {
           }}>
             <Icon size={16} style={{ color: colors.primary }} />
           </div>
+          <span style={{ 
+            fontSize: '0.9rem', 
+            fontWeight: 700, 
+            color: colors.text,
+            letterSpacing: '-0.01em'
+          }}>
+            {title}
+          </span>
+        </div>
+        {onSectionClick && (
+          <ArrowRight size={16} style={{ color: colors.textLight }} />
         )}
       </div>
       
-      <div style={{ fontSize: '2rem', fontWeight: 700, color: colors.text, lineHeight: 1 }}>
-        {value}
+      {/* Metrics */}
+      <div style={{ padding: '0.5rem 0' }}>
+        {metrics.map((metric, i) => (
+          <MetricRow key={i} {...metric} colors={colors} dark={dark} />
+        ))}
       </div>
-      
-      {goal && (
-        <div style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span style={{ fontSize: '0.8rem', color: colors.textMuted }}>Goal: {goal}</span>
-          {trend !== undefined && (
-            <span style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '0.2rem',
-              fontSize: '0.75rem', 
-              fontWeight: 600,
-              color: trend >= 0 ? colors.primary : colors.red,
-            }}>
-              {trend >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-              {Math.abs(trend)}%
-            </span>
-          )}
-        </div>
-      )}
     </div>
   );
 }
 
-// Simple Bar Chart with muted brand color variety
-function BarChart({ data, colors, height = 160 }) {
-  const max = Math.max(...data.map(d => d.value), 1);
+// Individual metric row within a section
+function MetricRow({ label, value, tooltip, status, onClick, colors, dark }) {
+  const [hovered, setHovered] = useState(false);
   
-  // Muted, professional color palette for variety
-  const barColors = [
-    '#6b9b5a', // muted green
-    '#5a8a4a', // darker green
-    '#4a6b8a', // slate blue
-    '#5a6a7a', // steel
-    '#6b9b5a', // green again
-    '#3a4a6a', // navy
-    '#5a8a6a', // sage
-  ];
+  const statusIcon = status === 'success' ? <CheckCircle size={14} style={{ color: colors.success }} />
+    : status === 'warning' ? <AlertTriangle size={14} style={{ color: colors.warning }} />
+    : status === 'error' ? <AlertTriangle size={14} style={{ color: colors.error }} />
+    : null;
   
-  return (
-    <div style={{ height, display: 'flex', alignItems: 'flex-end', gap: '0.5rem', padding: '0 0.5rem' }}>
-      {data.map((item, i) => {
-        const barHeight = (item.value / max) * (height - 30);
-        const barColor = barColors[i % barColors.length];
-        return (
-          <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.35rem' }}>
-            <span style={{ fontSize: '0.7rem', fontWeight: 600, color: colors.text }}>{item.value}</span>
-            <div style={{
-              width: '100%',
-              height: barHeight,
-              background: barColor,
-              borderRadius: '4px 4px 0 0',
-              minHeight: 4,
-              transition: 'height 0.3s ease',
-            }} />
-            <span style={{ fontSize: '0.7rem', color: colors.textMuted, fontWeight: 500 }}>{item.label}</span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// Project Row for Leaderboard with customer colors
-function ProjectRow({ rank, project, colors, onClick, isSelected }) {
-  const customerColors = getCustomerColorPalette(project.customer || project.name);
-  const healthColor = project.health >= 80 ? colors.primary : project.health >= 50 ? colors.amber : colors.red;
-  
-  return (
+  const content = (
     <div 
       onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         display: 'flex',
+        justifyContent: 'space-between',
         alignItems: 'center',
-        padding: '0.875rem 1rem',
-        borderBottom: `1px solid ${colors.divider}`,
-        cursor: 'pointer',
-        background: isSelected ? customerColors.bg : 'transparent',
-        borderLeft: `3px solid ${isSelected ? customerColors.primary : 'transparent'}`,
-        transition: 'all 0.15s ease',
-      }}
-      onMouseEnter={(e) => {
-        if (!isSelected) {
-          e.currentTarget.style.background = customerColors.bg;
-          e.currentTarget.style.borderLeftColor = customerColors.primary;
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (!isSelected) {
-          e.currentTarget.style.background = 'transparent';
-          e.currentTarget.style.borderLeftColor = 'transparent';
-        }
+        padding: '0.75rem 1.25rem',
+        cursor: onClick ? 'pointer' : 'default',
+        background: hovered ? colors.cardHover : 'transparent',
+        transition: 'background 0.15s ease',
       }}
     >
-      <div style={{
-        width: 28,
-        height: 28,
-        borderRadius: '50%',
-        background: rank <= 3 ? customerColors.bg : colors.inputBg,
-        border: rank <= 3 ? `2px solid ${customerColors.primary}` : 'none',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginRight: '0.875rem',
-        fontSize: '0.8rem',
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        {statusIcon}
+        <span style={{ fontSize: '0.85rem', color: colors.textMuted }}>{label}</span>
+        {tooltip && (
+          <Info size={12} style={{ color: colors.textLight, opacity: 0.4 }} />
+        )}
+      </div>
+      <div style={{ 
+        display: 'flex', 
+        alignItems: 'center', 
+        gap: '0.5rem',
+        fontSize: '0.9rem',
         fontWeight: 700,
-        color: rank <= 3 ? customerColors.primary : colors.textMuted,
+        color: colors.text,
       }}>
-        #{rank}
+        {typeof value === 'number' ? value.toLocaleString() : value}
+        {onClick && <ChevronRight size={14} style={{ color: colors.textLight, opacity: 0.5 }} />}
       </div>
-      
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 600, color: customerColors.primary, fontSize: '0.85rem' }}>{project.name}</div>
-        <div style={{ fontSize: '0.75rem', color: colors.textMuted }}>{project.customer || 'No customer'}</div>
+    </div>
+  );
+  
+  if (tooltip) {
+    return <Tooltip tooltip={tooltip} colors={colors} dark={dark}>{content}</Tooltip>;
+  }
+  return content;
+}
+
+// Progress bar component
+function ProgressBar({ value, max, label, color, colors }) {
+  const percentage = Math.min((value / max) * 100, 100);
+  
+  return (
+    <div style={{ marginBottom: '0.75rem' }}>
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        marginBottom: '0.35rem',
+        fontSize: '0.8rem',
+      }}>
+        <span style={{ color: colors.textMuted }}>{label}</span>
+        <span style={{ fontWeight: 600, color: colors.text }}>{value}%</span>
       </div>
-      
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '0.7rem', color: colors.textMuted, marginBottom: 2 }}>FILES</div>
-          <div style={{ fontSize: '0.85rem', fontWeight: 600, color: colors.text }}>{project.fileCount || 0}</div>
-        </div>
-        <div style={{ width: 60 }}>
-          <div style={{ fontSize: '0.7rem', color: colors.textMuted, marginBottom: 4, textAlign: 'right' }}>HEALTH</div>
-          <div style={{ 
-            height: 6, 
-            background: colors.inputBg, 
-            borderRadius: 3,
-            overflow: 'hidden',
-          }}>
-            <div style={{ 
-              height: '100%', 
-              width: `${project.health || 0}%`, 
-              background: healthColor,
-              borderRadius: 3,
-            }} />
-          </div>
-        </div>
+      <div style={{
+        height: 6,
+        background: colors.divider,
+        borderRadius: 3,
+        overflow: 'hidden',
+      }}>
+        <div style={{
+          height: '100%',
+          width: `${percentage}%`,
+          background: color || colors.primary,
+          borderRadius: 3,
+          transition: 'width 0.5s ease',
+        }} />
       </div>
     </div>
   );
@@ -260,191 +380,218 @@ function ProjectRow({ rank, project, colors, onClick, isSelected }) {
 // Activity Item
 function ActivityItem({ item, colors }) {
   const getIcon = () => {
-    if (item.status === 'completed') return <CheckCircle size={14} style={{ color: colors.primary }} />;
-    if (item.status === 'failed') return <AlertTriangle size={14} style={{ color: colors.red }} />;
-    return <Clock size={14} style={{ color: colors.amber }} />;
+    switch (item.type) {
+      case 'classification': return <FileCheck size={14} style={{ color: colors.primary }} />;
+      case 'relationship': return <Link2 size={14} style={{ color: colors.accent }} />;
+      case 'pattern': return <Sparkles size={14} style={{ color: colors.warning }} />;
+      case 'finding': return <AlertTriangle size={14} style={{ color: colors.error }} />;
+      default: return <Activity size={14} style={{ color: colors.textMuted }} />;
+    }
   };
   
   return (
     <div style={{
       display: 'flex',
-      alignItems: 'center',
+      alignItems: 'flex-start',
       gap: '0.75rem',
       padding: '0.75rem 0',
       borderBottom: `1px solid ${colors.divider}`,
     }}>
-      {getIcon()}
+      <div style={{
+        width: 28,
+        height: 28,
+        borderRadius: 8,
+        background: colors.cardHover,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+      }}>
+        {getIcon()}
+      </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ 
           fontSize: '0.85rem', 
           color: colors.text,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
+          lineHeight: 1.4,
         }}>
-          {item.filename}
+          {item.message}
         </div>
-        <div style={{ fontSize: '0.75rem', color: colors.textMuted }}>{item.project}</div>
+        <div style={{ fontSize: '0.75rem', color: colors.textLight, marginTop: '0.25rem' }}>
+          {item.time}
+        </div>
       </div>
-      <div style={{ fontSize: '0.75rem', color: colors.textLight }}>{item.time}</div>
     </div>
-  );
-}
-
-// Quick Action Button
-function QuickAction({ icon: Icon, label, onClick, colors }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '0.5rem',
-        padding: '0.75rem 1.25rem',
-        background: colors.card,
-        border: `1px solid ${colors.cardBorder}`,
-        borderRadius: 8,
-        cursor: 'pointer',
-        transition: 'all 0.15s ease',
-        color: colors.text,
-        fontSize: '0.85rem',
-        fontWeight: 500,
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.borderColor = colors.primary;
-        e.currentTarget.style.background = colors.primaryLight;
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.borderColor = colors.cardBorder;
-        e.currentTarget.style.background = colors.card;
-      }}
-    >
-      <Icon size={18} style={{ color: colors.primary }} />
-      {label}
-    </button>
   );
 }
 
 
 export default function DashboardPage() {
   const navigate = useNavigate();
-  const { projects: realProjects, activeProject, selectProject } = useProject();
+  const { projects: realProjects } = useProject();
   const { darkMode } = useTheme();
   const colors = getColors(darkMode);
   
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [timePeriod, setTimePeriod] = useState('week');
   const [lastUpdated, setLastUpdated] = useState(new Date());
   
-  // Stats
-  const [stats, setStats] = useState({
-    projects: 0,
-    files: 0,
-    playbooks: 0,
-    findings: 0,
+  // Platform Intelligence Metrics
+  const [metrics, setMetrics] = useState({
+    platformHealth: 0,
+    documentsClassified: 0,
+    patternsLearned: 0,
+    relationshipsDetected: 0,
+    realityCount: 0,
+    intentCount: 0,
+    referenceCount: 0,
+    contentBased: 0,
+    extensionBased: 0,
+    userOverride: 0,
+    unclassified: 0,
+    lookupsDetected: 0,
+    findingsGenerated: 0,
+    tasksCreated: 0,
+    avgHealthScore: 0,
+    issuesFound: 0,
+    autoCleaned: 0,
+    junkColumnsRemoved: 0,
+    insightsCount: 0,
+    sqlCacheHits: 0,
+    feedbackReceived: 0,
+    expertContextsUsed: 0,
+    avgParseTime: 0,
+    successRate: 0,
+    recentActivity: [],
   });
-  
-  // Goals (could come from settings/API later)
-  const goals = {
-    projects: 10,
-    files: 50,
-    playbooks: null, // No goal for assigned playbooks
-    findings: 0, // lower is better
-  };
-  
-  const [projectsData, setProjectsData] = useState([]);
-  const [activityData, setActivityData] = useState([]);
-  const [recentActivity, setRecentActivity] = useState([]);
 
   useEffect(() => {
     loadDashboardData();
-  }, [realProjects, timePeriod]);
+  }, [realProjects]);
 
   const loadDashboardData = async () => {
     if (!refreshing) setLoading(true);
     try {
-      // Get jobs for activity
-      const jobsRes = await api.get('/jobs').catch(() => ({ data: { jobs: [] } }));
-      const jobs = jobsRes.data.jobs || [];
+      const [
+        structuredRes,
+        docsRes,
+        registryRes,
+        integrityRes,
+        learningRes,
+        jobsRes,
+      ] = await Promise.all([
+        api.get('/status/structured').catch(() => ({ data: {} })),
+        api.get('/status/documents').catch(() => ({ data: {} })),
+        api.get('/status/registry').catch(() => ({ data: {} })),
+        api.get('/status/data-integrity').catch(() => ({ data: {} })),
+        api.get('/chat/intelligent/learning/stats').catch(() => ({ data: {} })),
+        api.get('/jobs').catch(() => ({ data: { jobs: [] } })),
+      ]);
       
-      // Get structured data and documents
-      const structuredRes = await api.get('/status/structured').catch(() => ({ data: { files: [], total_files: 0 } }));
-      const docsRes = await api.get('/status/documents').catch(() => ({ data: { documents: [] } }));
+      const structured = structuredRes.data || {};
+      const docs = docsRes.data || {};
+      const registry = registryRes.data || {};
+      const integrity = integrityRes.data || {};
+      const learning = learningRes.data || {};
+      const jobs = jobsRes.data?.jobs || [];
       
-      const structuredFiles = structuredRes.data.files || [];
-      const documents = docsRes.data.documents || [];
+      const structuredFiles = structured.files || [];
+      const documents = docs.documents || [];
+      const registryDocs = registry.documents || [];
       
-      // Count files per project
-      const fileCountsByProject = {};
+      // Three Truths counts
+      const realityCount = registryDocs.filter(d => d.truth_type === 'reality').length;
+      const intentCount = registryDocs.filter(d => d.truth_type === 'intent').length;
+      const referenceCount = registryDocs.filter(d => d.truth_type === 'reference').length;
+      const totalClassified = realityCount + intentCount + referenceCount;
       
-      // Count structured files per project
-      structuredFiles.forEach(file => {
-        const projId = file.project;
-        if (projId) {
-          fileCountsByProject[projId] = (fileCountsByProject[projId] || 0) + 1;
-        }
+      // Classification methods
+      const contentBased = registryDocs.filter(d => d.classification_method === 'content_analysis').length;
+      const extensionBased = registryDocs.filter(d => d.classification_method === 'extension').length;
+      const userOverride = registryDocs.filter(d => d.classification_method === 'user_override').length;
+      const unclassified = registryDocs.filter(d => !d.classification_method).length;
+      
+      // Health scores
+      const healthScores = structuredFiles.map(f => f.health_score || 100).filter(s => s > 0);
+      const avgHealth = healthScores.length > 0 
+        ? Math.round(healthScores.reduce((a, b) => a + b, 0) / healthScores.length)
+        : 100;
+      
+      // Platform health calculation
+      const classificationRate = totalClassified > 0 ? (totalClassified - unclassified) / totalClassified : 1;
+      const successfulJobs = jobs.filter(j => j.status === 'completed').length;
+      const jobSuccessRate = jobs.length > 0 ? successfulJobs / jobs.length : 1;
+      const platformHealth = Math.round((avgHealth * 0.4 + classificationRate * 100 * 0.3 + jobSuccessRate * 100 * 0.3));
+      
+      // Intelligence metrics
+      const lookupsDetected = structured.lookup_tables_count || 0;
+      const findingsGenerated = integrity.total_findings || 0;
+      const relationships = structured.relationships_count || 0;
+      
+      // Learning metrics
+      const patterns = learning.patterns_count || learning.cached_queries || 0;
+      const feedback = learning.feedback_count || 0;
+      
+      // Processing performance
+      const recentJobs = jobs.slice(0, 20);
+      const avgParseTime = recentJobs.length > 0
+        ? (recentJobs.reduce((sum, j) => sum + (j.processing_time_ms || 0), 0) / recentJobs.length / 1000).toFixed(1)
+        : 0;
+      
+      // Build recent activity
+      const recentActivity = [];
+      
+      registryDocs.slice(0, 3).forEach(doc => {
+        recentActivity.push({
+          type: 'classification',
+          message: `Classified "${doc.filename}" as ${doc.truth_type || 'unknown'}`,
+          time: formatTimeAgo(doc.created_at || doc.uploaded_at),
+        });
       });
       
-      // Count documents per project
-      documents.forEach(doc => {
-        const projId = doc.project_id || doc.project;
-        if (projId) {
-          fileCountsByProject[projId] = (fileCountsByProject[projId] || 0) + 1;
-        }
+      if (findingsGenerated > 0) {
+        recentActivity.push({
+          type: 'finding',
+          message: `Generated ${findingsGenerated} data quality findings`,
+          time: 'Recently',
+        });
+      }
+      
+      if (patterns > 0) {
+        recentActivity.push({
+          type: 'pattern',
+          message: `${patterns} SQL patterns learned and cached`,
+          time: 'Ongoing',
+        });
+      }
+      
+      setMetrics({
+        platformHealth,
+        documentsClassified: totalClassified,
+        patternsLearned: patterns,
+        relationshipsDetected: relationships,
+        realityCount,
+        intentCount,
+        referenceCount,
+        contentBased,
+        extensionBased,
+        userOverride,
+        unclassified,
+        lookupsDetected,
+        findingsGenerated,
+        tasksCreated: 0,
+        avgHealthScore: avgHealth,
+        issuesFound: integrity.issues_count || 0,
+        autoCleaned: integrity.auto_cleaned || 0,
+        junkColumnsRemoved: integrity.junk_removed || 0,
+        insightsCount: integrity.insights_count || 0,
+        sqlCacheHits: learning.cache_hit_rate || 0,
+        feedbackReceived: feedback,
+        expertContextsUsed: learning.expert_contexts_used || 0,
+        avgParseTime: parseFloat(avgParseTime),
+        successRate: Math.round(jobSuccessRate * 100),
+        recentActivity: recentActivity.slice(0, 5),
       });
-      
-      // Calculate stats
-      const totalProjects = realProjects?.length || 0;
-      const totalFiles = structuredFiles.length + documents.length;
-      
-      // Count total assigned playbooks across all projects
-      const totalPlaybooks = (realProjects || []).reduce((sum, p) => {
-        return sum + (p.playbooks?.length || 0);
-      }, 0);
-      
-      setStats({
-        projects: totalProjects,
-        files: totalFiles,
-        playbooks: totalPlaybooks,
-        findings: 0,  // Removed for now
-      });
-      
-      // Build projects list with real file counts
-      const projectsList = (realProjects || []).map((p) => {
-        // Match by id or name
-        const fileCount = fileCountsByProject[p.id] || fileCountsByProject[p.name] || 0;
-        return {
-          ...p,
-          health: fileCount > 0 ? 100 : 50, // Simple: has files = healthy
-          fileCount: fileCount,
-        };
-      }).sort((a, b) => b.fileCount - a.fileCount); // Sort by file count instead of health
-      
-      setProjectsData(projectsList.slice(0, 5));
-      
-      // Build activity chart data
-      const days = timePeriod === 'week' ? 7 : 30;
-      const dayLabels = timePeriod === 'week' 
-        ? ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-        : Array.from({ length: 30 }, (_, i) => i + 1);
-      
-      const chartData = dayLabels.map((label, i) => ({
-        label: String(label),
-        value: Math.floor(Math.random() * 8) + 1, // Mock data
-        type: 'upload',
-      }));
-      setActivityData(chartData);
-      
-      // Recent activity from jobs
-      const recent = jobs.slice(0, 5).map(j => ({
-        type: j.job_type || 'upload',
-        filename: j.input_data?.filename || j.filename || 'File',
-        project: j.input_data?.project_name || j.project_id || 'Unknown',
-        status: j.status,
-        time: formatTimeAgo(j.created_at),
-      }));
-      setRecentActivity(recent);
       
       setLastUpdated(new Date());
     } catch (err) {
@@ -455,13 +602,8 @@ export default function DashboardPage() {
     }
   };
   
-  const handleRefresh = () => {
-    setRefreshing(true);
-    loadDashboardData();
-  };
-  
   const formatTimeAgo = (dateStr) => {
-    if (!dateStr) return '';
+    if (!dateStr) return 'Recently';
     const date = new Date(dateStr);
     const now = new Date();
     const diffMs = now - date;
@@ -474,276 +616,495 @@ export default function DashboardPage() {
     return `${diffDays}d ago`;
   };
 
-  const handleProjectClick = (project) => {
-    selectProject(project);
-    navigate('/data');
+  const handleRefresh = () => {
+    setRefreshing(true);
+    loadDashboardData();
   };
+
+  const healthStatus = metrics.platformHealth >= 90 ? 'success' 
+    : metrics.platformHealth >= 70 ? 'warning' 
+    : 'error';
 
   return (
     <div style={{ 
-      padding: '1.5rem', 
+      padding: '2rem', 
       background: colors.bg, 
       minHeight: 'calc(100vh - 60px)',
       fontFamily: "'Inter', system-ui, sans-serif",
-      transition: 'background 0.2s ease',
     }}>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem' }}>
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'flex-start', 
+        marginBottom: '2rem' 
+      }}>
         <div>
           <h1 style={{ 
-            fontSize: '1.5rem', 
-            fontWeight: 700, 
+            fontSize: '1.75rem', 
+            fontWeight: 800, 
             margin: 0, 
             color: colors.text,
             fontFamily: "'Sora', sans-serif",
+            letterSpacing: '-0.02em',
           }}>
-            Command Center
+            Platform Intelligence
           </h1>
-          <p style={{ color: colors.textMuted, margin: '0.25rem 0 0 0', fontSize: '0.85rem' }}>
-            Welcome back! Here's your overview.
+          <p style={{ 
+            color: colors.textMuted, 
+            margin: '0.5rem 0 0 0', 
+            fontSize: '0.9rem' 
+          }}>
+            Real-time view of XLR8's intelligent systems
           </p>
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <TabToggle 
-            options={[
-              { value: 'week', label: 'This Week' },
-              { value: 'month', label: 'This Month' },
-            ]}
-            value={timePeriod}
-            onChange={setTimePeriod}
-            colors={colors}
-          />
           <button
             onClick={handleRefresh}
             disabled={refreshing}
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '0.4rem',
-              padding: '0.5rem 0.875rem',
+              gap: '0.5rem',
+              padding: '0.6rem 1rem',
               background: colors.card,
               border: `1px solid ${colors.cardBorder}`,
-              borderRadius: 8,
+              borderRadius: 10,
               cursor: 'pointer',
-              color: colors.textMuted,
-              fontSize: '0.8rem',
+              color: colors.text,
+              fontSize: '0.85rem',
+              fontWeight: 500,
             }}
           >
-            <RefreshCw size={14} style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
+            <RefreshCw size={16} style={{ 
+              animation: refreshing ? 'spin 1s linear infinite' : 'none' 
+            }} />
             Refresh
           </button>
-          <span style={{ fontSize: '0.75rem', color: colors.textLight }}>
-            Last updated {lastUpdated.toLocaleTimeString()}
+          <span style={{ fontSize: '0.8rem', color: colors.textLight }}>
+            Updated {lastUpdated.toLocaleTimeString()}
           </span>
         </div>
       </div>
 
-      {/* Stats Row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
-        <StatCard 
-          label="Projects" 
-          value={stats.projects} 
-          goal={goals.projects}
-          icon={FolderOpen}
+      {/* Hero Metrics */}
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: 'repeat(4, 1fr)', 
+        gap: '1.25rem', 
+        marginBottom: '2rem' 
+      }}>
+        <HeroMetric
+          value={`${metrics.platformHealth}%`}
+          label="Platform Health"
+          icon={Shield}
+          status={healthStatus}
           colors={colors}
-          onClick={() => navigate('/projects')}
-        />
-        <StatCard 
-          label="Files Loaded" 
-          value={stats.files} 
-          goal={goals.files}
-          icon={Upload}
-          trend={12}
-          colors={colors}
+          dark={darkMode}
+          tooltip={{
+            title: "What this measures",
+            description: "Combined score of document processing success, classification accuracy, and data quality across all projects.",
+            insight: metrics.platformHealth < 90 
+              ? "Below 90% indicates issues that need attention."
+              : "Excellent! All systems operating normally."
+          }}
           onClick={() => navigate('/data')}
         />
-        <StatCard 
-          label="Assigned Playbooks" 
-          value={stats.playbooks} 
-          goal={goals.playbooks}
-          icon={Zap}
+        
+        <HeroMetric
+          value={metrics.documentsClassified}
+          label="Documents Classified"
+          icon={FileText}
           colors={colors}
-          onClick={() => navigate('/playbooks')}
+          dark={darkMode}
+          tooltip={{
+            title: "What this measures",
+            description: "Total documents automatically routed to Reality (structured data), Intent (customer documents), or Reference (standards/checklists).",
+            insight: "Higher count = more intelligence available for queries and analysis."
+          }}
+          onClick={() => navigate('/data')}
         />
-        <StatCard 
-          label="Open Findings" 
-          value={stats.findings} 
-          icon={AlertTriangle}
+        
+        <HeroMetric
+          value={metrics.patternsLearned}
+          label="Patterns Learned"
+          icon={Sparkles}
           colors={colors}
-          onClick={() => navigate('/playbooks')}
+          dark={darkMode}
+          tooltip={{
+            title: "What this measures",
+            description: "SQL query patterns cached for instant reuse. When users ask similar questions, cached patterns provide faster, more accurate responses.",
+            insight: "Each pattern saves 2-3 seconds on repeat questions."
+          }}
+          onClick={() => navigate('/workspace')}
+        />
+        
+        <HeroMetric
+          value={metrics.relationshipsDetected}
+          label="Relationships Detected"
+          icon={GitBranch}
+          colors={colors}
+          dark={darkMode}
+          tooltip={{
+            title: "What this measures",
+            description: "Foreign key connections discovered between tables. Enables cross-table queries like 'employees by department' without manual mapping.",
+            insight: "More relationships = smarter automatic JOINs in queries."
+          }}
+          onClick={() => navigate('/data?tab=relationships')}
         />
       </div>
 
       {/* Main Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: '1.5rem' }}>
-        {/* Left Column */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          {/* Activity Chart */}
-          <div style={{
-            background: colors.card,
-            border: `1px solid ${colors.cardBorder}`,
-            borderRadius: 12,
-            padding: '1.25rem',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '0.85rem', fontWeight: 600, color: colors.text }}>
-                  Activity
-                </h3>
-                <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.75rem', color: colors.textMuted }}>
-                  File uploads and processing
-                </p>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.75rem' }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                  <span style={{ width: 10, height: 10, borderRadius: 2, background: colors.primary }} />
-                  <span style={{ color: colors.textMuted }}>Uploads</span>
-                </span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                  <span style={{ width: 10, height: 10, borderRadius: 2, background: colors.blue }} />
-                  <span style={{ color: colors.textMuted }}>Playbooks</span>
-                </span>
-              </div>
-            </div>
-            <BarChart data={activityData} colors={colors} height={140} />
-          </div>
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: '1fr 1fr 380px', 
+        gap: '1.25rem' 
+      }}>
+        {/* Three Truths Architecture */}
+        <SectionCard
+          title="Three Truths Architecture"
+          icon={Layers}
+          colors={colors}
+          dark={darkMode}
+          onSectionClick={() => navigate('/data')}
+          metrics={[
+            {
+              label: 'Reality (Structured Data)',
+              value: metrics.realityCount,
+              status: metrics.realityCount > 0 ? 'success' : null,
+              tooltip: {
+                title: "Reality Layer",
+                description: "Excel files, CSVs, and databases stored in DuckDB. This is your queryable source of truth for employee data, configurations, and transactions.",
+                insight: "Queries like 'how many employees' pull from Reality."
+              },
+              onClick: () => navigate('/data?filter=reality'),
+            },
+            {
+              label: 'Intent (Customer Documents)',
+              value: metrics.intentCount,
+              status: metrics.intentCount > 0 ? 'success' : null,
+              tooltip: {
+                title: "Intent Layer",
+                description: "Requirements, SOWs, and customer-provided documents stored in ChromaDB. Captures what the customer wants to achieve.",
+                insight: "Used to validate if Reality matches what customer requested."
+              },
+              onClick: () => navigate('/data?filter=intent'),
+            },
+            {
+              label: 'Reference (Standards)',
+              value: metrics.referenceCount,
+              status: metrics.referenceCount > 0 ? 'success' : null,
+              tooltip: {
+                title: "Reference Layer",
+                description: "Best practice guides, checklists, and compliance standards. The 'gold standard' for how things should be configured.",
+                insight: "Enables validation like 'is this SUI rate correct?'"
+              },
+              onClick: () => navigate('/data?filter=reference'),
+            },
+          ]}
+        />
 
-          {/* Projects Leaderboard */}
+        {/* Classification Engine */}
+        <SectionCard
+          title="Classification Engine"
+          icon={Brain}
+          colors={colors}
+          dark={darkMode}
+          onSectionClick={() => navigate('/data')}
+          metrics={[
+            {
+              label: 'Content-Based (AI)',
+              value: `${metrics.contentBased} files`,
+              tooltip: {
+                title: "Content Analysis",
+                description: "Documents classified by analyzing their actual content - headers, structure, and text patterns - using AI.",
+                insight: "Most accurate method. Used for ambiguous file types."
+              },
+            },
+            {
+              label: 'Extension-Based',
+              value: `${metrics.extensionBased} files`,
+              tooltip: {
+                title: "Extension Detection",
+                description: "Quick classification based on file extension (.xlsx → Reality, .pdf → Intent). Fast but less nuanced.",
+                insight: "Used as first-pass before content analysis."
+              },
+            },
+            {
+              label: 'User Override',
+              value: `${metrics.userOverride} files`,
+              tooltip: {
+                title: "Manual Classification",
+                description: "Documents where a user explicitly set the truth type, overriding automatic classification.",
+                insight: "User corrections help train future classifications."
+              },
+            },
+            {
+              label: 'Unclassified',
+              value: `${metrics.unclassified} files`,
+              status: metrics.unclassified > 0 ? 'warning' : 'success',
+              tooltip: {
+                title: "Pending Classification",
+                description: "Documents that haven't been classified yet or couldn't be automatically determined.",
+                insight: metrics.unclassified > 0 
+                  ? "Review these files to ensure proper routing."
+                  : "All documents successfully classified!"
+              },
+              onClick: metrics.unclassified > 0 ? () => navigate('/data?filter=unclassified') : null,
+            },
+          ]}
+        />
+
+        {/* Recent Intelligence Activity */}
+        <div style={{
+          background: colors.card,
+          border: `1px solid ${colors.cardBorder}`,
+          borderRadius: 16,
+          overflow: 'hidden',
+        }}>
           <div style={{
-            background: colors.card,
-            border: `1px solid ${colors.cardBorder}`,
-            borderRadius: 12,
-            overflow: 'hidden',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+            padding: '1rem 1.25rem',
+            borderBottom: `1px solid ${colors.divider}`,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
           }}>
-            <div style={{ 
-              padding: '1rem 1.25rem', 
-              borderBottom: `1px solid ${colors.divider}`,
+            <div style={{
+              width: 32,
+              height: 32,
+              borderRadius: 8,
+              background: colors.accentLight,
               display: 'flex',
-              justifyContent: 'space-between',
               alignItems: 'center',
+              justifyContent: 'center',
             }}>
-              <h3 style={{ margin: 0, fontSize: '0.85rem', fontWeight: 600, color: colors.text }}>
-                Projects by Health
-              </h3>
-              <button
-                onClick={() => navigate('/projects')}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: colors.primary,
-                  fontSize: '0.8rem',
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.25rem',
-                }}
-              >
-                View All <ArrowRight size={14} />
-              </button>
+              <Activity size={16} style={{ color: colors.accent }} />
             </div>
-            
-            {projectsData.length === 0 ? (
-              <div style={{ padding: '2rem', textAlign: 'center', color: colors.textMuted }}>
-                <FolderOpen size={32} style={{ opacity: 0.3, marginBottom: '0.5rem' }} />
-                <p style={{ margin: 0, fontSize: '0.85rem' }}>No projects yet</p>
-                <button
-                  onClick={() => navigate('/projects')}
-                  style={{
-                    marginTop: '1rem',
-                    padding: '0.5rem 1rem',
-                    background: colors.primary,
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: 6,
-                    cursor: 'pointer',
-                    fontSize: '0.85rem',
-                    fontWeight: 500,
-                  }}
-                >
-                  Create Project
-                </button>
+            <span style={{ 
+              fontSize: '0.9rem', 
+              fontWeight: 700, 
+              color: colors.text 
+            }}>
+              Recent Intelligence Activity
+            </span>
+          </div>
+          
+          <div style={{ padding: '0.5rem 1.25rem' }}>
+            {metrics.recentActivity.length === 0 ? (
+              <div style={{ 
+                padding: '2rem 0', 
+                textAlign: 'center', 
+                color: colors.textMuted,
+                fontSize: '0.85rem' 
+              }}>
+                No recent activity
               </div>
             ) : (
-              projectsData.map((project, i) => (
-                <ProjectRow 
-                  key={project.id} 
-                  rank={i + 1}
-                  project={project} 
-                  colors={colors}
-                  onClick={() => handleProjectClick(project)}
-                  isSelected={activeProject?.id === project.id}
-                />
+              metrics.recentActivity.map((item, i) => (
+                <ActivityItem key={i} item={item} colors={colors} />
               ))
             )}
           </div>
         </div>
 
-        {/* Right Column */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          {/* Recent Activity */}
-          <div style={{
-            background: colors.card,
-            border: `1px solid ${colors.cardBorder}`,
-            borderRadius: 12,
-            padding: '1.25rem',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+        {/* Data Quality Engine */}
+        <SectionCard
+          title="Data Quality Engine"
+          icon={Target}
+          colors={colors}
+          dark={darkMode}
+          onSectionClick={() => navigate('/data?tab=health')}
+          metrics={[
+            {
+              label: 'Average Health Score',
+              value: `${metrics.avgHealthScore}%`,
+              status: metrics.avgHealthScore >= 90 ? 'success' : metrics.avgHealthScore >= 70 ? 'warning' : 'error',
+              tooltip: {
+                title: "Data Health",
+                description: "Weighted score based on fill rates, data type consistency, and absence of parsing artifacts across all uploaded files.",
+                insight: metrics.avgHealthScore < 90 
+                  ? "Click to see which files need attention."
+                  : "Excellent data quality across all files!"
+              },
+              onClick: () => navigate('/data?tab=health'),
+            },
+            {
+              label: 'Issues Detected',
+              value: metrics.issuesFound,
+              status: metrics.issuesFound > 0 ? 'warning' : 'success',
+              tooltip: {
+                title: "Quality Issues",
+                description: "Problems like missing required fields, invalid formats, or suspicious patterns that may need review.",
+                insight: "Issues are auto-prioritized by severity."
+              },
+              onClick: () => navigate('/data?tab=health&filter=issues'),
+            },
+            {
+              label: 'Auto-Cleaned',
+              value: metrics.autoCleaned,
+              tooltip: {
+                title: "Automatic Cleanup",
+                description: "Junk columns, parsing artifacts, and empty fields automatically removed during upload.",
+                insight: "Saves manual cleanup time while preserving real data."
+              },
+            },
+            {
+              label: 'Insights (Optional Fields)',
+              value: metrics.insightsCount,
+              tooltip: {
+                title: "Optional Field Insights",
+                description: "Fields like UDFs or custom attributes that are empty but don't affect data quality. Informational, not issues.",
+                insight: "These may indicate unused configuration options."
+              },
+            },
+          ]}
+        />
+
+        {/* Intelligence Pipeline */}
+        <SectionCard
+          title="Intelligence Pipeline"
+          icon={Zap}
+          colors={colors}
+          dark={darkMode}
+          onSectionClick={() => navigate('/data?tab=intelligence')}
+          metrics={[
+            {
+              label: 'Lookup Tables Detected',
+              value: metrics.lookupsDetected,
+              tooltip: {
+                title: "Lookup Detection",
+                description: "Reference tables automatically identified (pay groups, job codes, locations, etc.) and indexed for validation.",
+                insight: "Lookups enable dropdown suggestions and value validation."
+              },
+            },
+            {
+              label: 'Findings Generated',
+              value: metrics.findingsGenerated,
+              tooltip: {
+                title: "Auto-Generated Findings",
+                description: "Data quality observations, missing values, and potential issues discovered during analysis.",
+                insight: "Findings become actionable tasks when assigned to playbooks."
+              },
+              onClick: () => navigate('/playbooks'),
+            },
+            {
+              label: 'Tasks Created',
+              value: metrics.tasksCreated,
+              tooltip: {
+                title: "Actionable Tasks",
+                description: "Findings converted into trackable tasks with owners and due dates.",
+                insight: "Connect playbooks to convert findings into tasks."
+              },
+              onClick: () => navigate('/playbooks'),
+            },
+          ]}
+        />
+
+        {/* Learning & Performance */}
+        <div style={{
+          background: colors.card,
+          border: `1px solid ${colors.cardBorder}`,
+          borderRadius: 16,
+          padding: '1.25rem',
+        }}>
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '0.75rem',
+            marginBottom: '1rem'
           }}>
-            <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '0.85rem', fontWeight: 600, color: colors.text }}>
-              Recent Activity
-            </h3>
-            
-            {recentActivity.length === 0 ? (
-              <div style={{ padding: '1.5rem', textAlign: 'center', color: colors.textMuted, fontSize: '0.85rem' }}>
-                No recent activity
-              </div>
-            ) : (
+            <div style={{
+              width: 32,
+              height: 32,
+              borderRadius: 8,
+              background: colors.successLight,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}>
+              <TrendingUp size={16} style={{ color: colors.success }} />
+            </div>
+            <span style={{ 
+              fontSize: '0.9rem', 
+              fontWeight: 700, 
+              color: colors.text 
+            }}>
+              Learning & Performance
+            </span>
+          </div>
+          
+          <div style={{ marginBottom: '1.25rem' }}>
+            <Tooltip tooltip={{
+              title: "SQL Cache Performance",
+              description: "Percentage of queries served from cached patterns vs. generated fresh. Higher = faster responses.",
+              insight: "Cache builds automatically as users ask questions."
+            }} colors={colors} dark={darkMode}>
               <div>
-                {recentActivity.map((item, i) => (
-                  <ActivityItem key={i} item={item} colors={colors} />
-                ))}
+                <ProgressBar 
+                  value={metrics.sqlCacheHits} 
+                  max={100} 
+                  label="SQL Cache Hit Rate"
+                  color={colors.success}
+                  colors={colors}
+                />
               </div>
-            )}
+            </Tooltip>
+            
+            <Tooltip tooltip={{
+              title: "Processing Success",
+              description: "Percentage of file uploads that complete successfully without errors.",
+              insight: metrics.successRate < 95 ? "Check failed jobs for details." : "Excellent reliability!"
+            }} colors={colors} dark={darkMode}>
+              <div>
+                <ProgressBar 
+                  value={metrics.successRate} 
+                  max={100} 
+                  label="Processing Success Rate"
+                  color={metrics.successRate >= 95 ? colors.success : colors.warning}
+                  colors={colors}
+                />
+              </div>
+            </Tooltip>
           </div>
-
-          {/* Quick Actions */}
-          <div style={{
-            background: colors.card,
-            border: `1px solid ${colors.cardBorder}`,
-            borderRadius: 12,
-            padding: '1.25rem',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+          
+          <div style={{ 
+            display: 'grid', 
+            gridTemplateColumns: '1fr 1fr', 
+            gap: '1rem',
+            padding: '1rem',
+            background: colors.cardHover,
+            borderRadius: 10,
           }}>
-            <h3 style={{ margin: '0 0 1rem 0', fontSize: '0.85rem', fontWeight: 600, color: colors.text }}>
-              Quick Actions
-            </h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <QuickAction icon={Upload} label="Upload Data" onClick={() => navigate('/data')} colors={colors} />
-              <QuickAction icon={Zap} label="Run Playbook" onClick={() => navigate('/playbooks')} colors={colors} />
-              <QuickAction icon={MessageSquare} label="AI Assist" onClick={() => navigate('/workspace')} colors={colors} />
-            </div>
-          </div>
-
-          {/* Calendar placeholder */}
-          <div style={{
-            background: colors.card,
-            border: `1px solid ${colors.cardBorder}`,
-            borderRadius: 12,
-            padding: '1.25rem',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
-              <Calendar size={16} style={{ color: colors.primary }} />
-              <h3 style={{ margin: 0, fontSize: '0.85rem', fontWeight: 600, color: colors.text }}>
-                Upcoming
-              </h3>
-            </div>
-            <div style={{ fontSize: '0.85rem', color: colors.textMuted, textAlign: 'center', padding: '1rem 0' }}>
-              No upcoming deadlines
-            </div>
+            <Tooltip tooltip={{
+              title: "User Feedback",
+              description: "Thumbs up/down feedback received on AI responses. Used to improve response quality.",
+              insight: "More feedback = smarter responses over time."
+            }} colors={colors} dark={darkMode}>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: colors.text }}>
+                  {metrics.feedbackReceived}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: colors.textMuted }}>
+                  Feedback Received
+                </div>
+              </div>
+            </Tooltip>
+            
+            <Tooltip tooltip={{
+              title: "Avg Processing Time",
+              description: "Average time to parse, analyze, and store uploaded files.",
+              insight: metrics.avgParseTime > 5 ? "Large files may take longer." : "Fast processing!"
+            }} colors={colors} dark={darkMode}>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: colors.text }}>
+                  {metrics.avgParseTime}s
+                </div>
+                <div style={{ fontSize: '0.75rem', color: colors.textMuted }}>
+                  Avg Parse Time
+                </div>
+              </div>
+            </Tooltip>
           </div>
         </div>
       </div>
