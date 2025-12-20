@@ -1351,6 +1351,40 @@ async def get_project_relationships(project: str):
         raise HTTPException(500, str(e))
 
 
+@router.post("/status/relationships/{project}/analyze")
+async def analyze_relationships(project: str):
+    """
+    Auto-detect table relationships for a project.
+    
+    This scans all tables looking for:
+    - Common column names (employee_id, company_code, etc.)
+    - Foreign key patterns (_id, _code, _num suffixes)
+    - Key columns identified during upload
+    
+    Returns the detected relationships.
+    """
+    if not STRUCTURED_AVAILABLE:
+        raise HTTPException(503, "Structured data not available")
+    
+    try:
+        handler = get_structured_handler()
+        
+        # Run relationship detection
+        relationships = handler.detect_relationships(project)
+        
+        logger.info(f"[RELATIONSHIPS] Analyzed project {project}, found {len(relationships)} relationships")
+        
+        return {
+            "project": project,
+            "relationships_found": len(relationships),
+            "relationships": relationships,
+            "message": f"Detected {len(relationships)} relationships across tables"
+        }
+    except Exception as e:
+        logger.error(f"Failed to analyze relationships: {e}")
+        raise HTTPException(500, str(e))
+
+
 class RelationshipCreate(BaseModel):
     source_table: str
     source_columns: list
