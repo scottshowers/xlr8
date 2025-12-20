@@ -2667,80 +2667,73 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
         }
         
         try:
-            # Acquire lock for DuckDB access
-            self._db_lock.acquire()
-            
-            # Get row count first
-            row_count = self.conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
-            
-            if row_count == 0:
-                logger.warning(f"[PROFILING-FAST] Table {table_name} is empty")
-                self._db_lock.release()
-                return result
-            
-            # Get column names
-            columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
-            columns = [col[0] for col in columns_result]
-            
-            logger.info(f"[PROFILING-FAST] Table {table_name}: {row_count:,} rows, {len(columns)} columns")
-            
-            # Determine if we need sampling for type inference
-            use_sampling = row_count > LARGE_TABLE_THRESHOLD
-            if use_sampling:
-                logger.info(f"[PROFILING-FAST] Large table - will sample {PROFILE_SAMPLE_SIZE:,} rows for type inference")
-            
-            # Profile each column using SQL
-            for col_idx, col in enumerate(columns):
-                try:
-                    profile = self._profile_column_sql(
-                        table_name, col, project, row_count, use_sampling
-                    )
-                    
-                    # Store in database
-                    self._store_column_profile(profile)
-                    
-                    # Track by type
-                    result['profiles'][col] = profile
-                    result['columns_profiled'] += 1
-                    
-                    if profile['inferred_type'] == 'categorical' or profile.get('is_categorical'):
-                        result['categorical_columns'].append({
-                            'name': col,
-                            'distinct_count': profile['distinct_count'],
-                            'values': profile.get('distinct_values', [])
-                        })
-                    elif profile['inferred_type'] == 'numeric':
-                        result['numeric_columns'].append({
-                            'name': col,
-                            'min': profile.get('min_value'),
-                            'max': profile.get('max_value'),
-                            'mean': profile.get('mean_value')
-                        })
-                    elif profile['inferred_type'] == 'date':
-                        result['date_columns'].append({
-                            'name': col,
-                            'min_date': profile.get('min_date'),
-                            'max_date': profile.get('max_date')
-                        })
+            # Use context manager for thread-safe DuckDB access
+            with self._db_lock:
+                # Get row count first
+                row_count = self.conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+                
+                if row_count == 0:
+                    logger.warning(f"[PROFILING-FAST] Table {table_name} is empty")
+                    return result
+                
+                # Get column names
+                columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
+                columns = [col[0] for col in columns_result]
+                
+                logger.info(f"[PROFILING-FAST] Table {table_name}: {row_count:,} rows, {len(columns)} columns")
+                
+                # Determine if we need sampling for type inference
+                use_sampling = row_count > LARGE_TABLE_THRESHOLD
+                if use_sampling:
+                    logger.info(f"[PROFILING-FAST] Large table - will sample {PROFILE_SAMPLE_SIZE:,} rows for type inference")
+                
+                # Profile each column using SQL
+                for col_idx, col in enumerate(columns):
+                    try:
+                        profile = self._profile_column_sql(
+                            table_name, col, project, row_count, use_sampling
+                        )
                         
-                except Exception as col_e:
-                    logger.warning(f"[PROFILING-FAST] Failed to profile column {col}: {col_e}")
-                    continue
+                        # Store in database
+                        self._store_column_profile(profile)
+                        
+                        # Track by type
+                        result['profiles'][col] = profile
+                        result['columns_profiled'] += 1
+                        
+                        if profile['inferred_type'] == 'categorical' or profile.get('is_categorical'):
+                            result['categorical_columns'].append({
+                                'name': col,
+                                'distinct_count': profile['distinct_count'],
+                                'values': profile.get('distinct_values', [])
+                            })
+                        elif profile['inferred_type'] == 'numeric':
+                            result['numeric_columns'].append({
+                                'name': col,
+                                'min': profile.get('min_value'),
+                                'max': profile.get('max_value'),
+                                'mean': profile.get('mean_value')
+                            })
+                        elif profile['inferred_type'] == 'date':
+                            result['date_columns'].append({
+                                'name': col,
+                                'min_date': profile.get('min_date'),
+                                'max_date': profile.get('max_date')
+                            })
+                            
+                    except Exception as col_e:
+                        logger.warning(f"[PROFILING-FAST] Failed to profile column {col}: {col_e}")
+                        continue
+                
+                logger.info(f"[PROFILING-FAST] Completed {table_name}: {result['columns_profiled']} columns, "
+                           f"{len(result['categorical_columns'])} categorical, "
+                           f"{len(result['numeric_columns'])} numeric")
             
-            logger.info(f"[PROFILING-FAST] Completed {table_name}: {result['columns_profiled']} columns, "
-                       f"{len(result['categorical_columns'])} categorical, "
-                       f"{len(result['numeric_columns'])} numeric")
-            
-            self._db_lock.release()
             return result
             
         except Exception as e:
             logger.error(f"[PROFILING-FAST] Failed for {table_name}: {e}")
             result['error'] = str(e)
-            try:
-                self._db_lock.release()
-            except:
-                pass  # Lock may not have been acquired
             return result
     
     def _profile_column_sql(
@@ -3544,77 +3537,115 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 logger.error(f"Query error: {e}")
                 raise
     
+    def safe_execute(self, sql: str, params: list = None):
+        """
+        Thread-safe SQL execution wrapper.
+        Use this for any external/concurrent access to DuckDB.
+        """
+        with self._db_lock:
+            try:
+                if params:
+                    return self.conn.execute(sql, params)
+                return self.conn.execute(sql)
+            except Exception as e:
+                logger.error(f"[SAFE_EXECUTE] Error: {e}")
+                raise
+    
+    def safe_fetchall(self, sql: str, params: list = None) -> list:
+        """Thread-safe SQL query that returns all rows."""
+        with self._db_lock:
+            try:
+                if params:
+                    return self.conn.execute(sql, params).fetchall()
+                return self.conn.execute(sql).fetchall()
+            except Exception as e:
+                logger.error(f"[SAFE_FETCHALL] Error: {e}")
+                raise
+    
+    def safe_fetchone(self, sql: str, params: list = None):
+        """Thread-safe SQL query that returns one row."""
+        with self._db_lock:
+            try:
+                if params:
+                    return self.conn.execute(sql, params).fetchone()
+                return self.conn.execute(sql).fetchone()
+            except Exception as e:
+                logger.error(f"[SAFE_FETCHONE] Error: {e}")
+                raise
+    
     def get_schema(self, project: str = None) -> Dict[str, Any]:
         """Get schema information for all or specific project"""
-        try:
-            if project:
-                result = self.conn.execute("""
-                    SELECT table_name, columns, row_count, likely_keys, encrypted_columns
-                    FROM _schema_metadata 
-                    WHERE project = ? AND is_current = TRUE
-                """, [project]).fetchall()
-            else:
-                result = self.conn.execute("""
-                    SELECT project, table_name, columns, row_count, likely_keys
-                    FROM _schema_metadata 
-                    WHERE is_current = TRUE
-                """).fetchall()
-            
-            schema = {}
-            for row in result:
+        with self._db_lock:
+            try:
                 if project:
-                    table_name, columns, row_count, keys, encrypted = row
-                    schema[table_name] = {
-                        'columns': json.loads(columns) if columns else [],
-                        'row_count': row_count,
-                        'likely_keys': json.loads(keys) if keys else [],
-                        'encrypted_columns': json.loads(encrypted) if encrypted else []
-                    }
+                    result = self.conn.execute("""
+                        SELECT table_name, columns, row_count, likely_keys, encrypted_columns
+                        FROM _schema_metadata 
+                        WHERE project = ? AND is_current = TRUE
+                    """, [project]).fetchall()
                 else:
-                    proj, table_name, columns, row_count, keys = row
-                    if proj not in schema:
-                        schema[proj] = {}
-                    schema[proj][table_name] = {
-                        'columns': json.loads(columns) if columns else [],
-                        'row_count': row_count,
-                        'likely_keys': json.loads(keys) if keys else []
-                    }
-            
-            return schema
-            
-        except Exception as e:
-            logger.error(f"Error getting schema: {e}")
-            return {}
+                    result = self.conn.execute("""
+                        SELECT project, table_name, columns, row_count, likely_keys
+                        FROM _schema_metadata 
+                        WHERE is_current = TRUE
+                    """).fetchall()
+                
+                schema = {}
+                for row in result:
+                    if project:
+                        table_name, columns, row_count, keys, encrypted = row
+                        schema[table_name] = {
+                            'columns': json.loads(columns) if columns else [],
+                            'row_count': row_count,
+                            'likely_keys': json.loads(keys) if keys else [],
+                            'encrypted_columns': json.loads(encrypted) if encrypted else []
+                        }
+                    else:
+                        proj, table_name, columns, row_count, keys = row
+                        if proj not in schema:
+                            schema[proj] = {}
+                        schema[proj][table_name] = {
+                            'columns': json.loads(columns) if columns else [],
+                            'row_count': row_count,
+                            'likely_keys': json.loads(keys) if keys else []
+                        }
+                
+                return schema
+                
+            except Exception as e:
+                logger.error(f"Error getting schema: {e}")
+                return {}
     
     def get_tables(self, project: str) -> List[Dict[str, Any]]:
         """Get list of tables for a project with detailed info"""
-        try:
-            result = self.conn.execute("""
-                SELECT table_name, sheet_name, columns, row_count, likely_keys, 
-                       encrypted_columns, version, created_at
-                FROM _schema_metadata 
-                WHERE project = ? AND is_current = TRUE
-                ORDER BY table_name
-            """, [project]).fetchall()
-            
-            tables = []
-            for row in result:
-                tables.append({
-                    'table_name': row[0],
-                    'sheet_name': row[1],
-                    'columns': json.loads(row[2]) if row[2] else [],
-                    'row_count': row[3],
-                    'likely_keys': json.loads(row[4]) if row[4] else [],
-                    'encrypted_columns': json.loads(row[5]) if row[5] else [],
-                    'version': row[6],
-                    'created_at': str(row[7]) if row[7] else None
-                })
-            
-            return tables
-            
-        except Exception as e:
-            logger.error(f"Error getting tables: {e}")
-            return []
+        with self._db_lock:
+            try:
+                result = self.conn.execute("""
+                    SELECT table_name, sheet_name, columns, row_count, likely_keys, 
+                           encrypted_columns, version, created_at
+                    FROM _schema_metadata 
+                    WHERE project = ? AND is_current = TRUE
+                    ORDER BY table_name
+                """, [project]).fetchall()
+                
+                tables = []
+                for row in result:
+                    tables.append({
+                        'table_name': row[0],
+                        'sheet_name': row[1],
+                        'columns': json.loads(row[2]) if row[2] else [],
+                        'row_count': row[3],
+                        'likely_keys': json.loads(row[4]) if row[4] else [],
+                        'encrypted_columns': json.loads(row[5]) if row[5] else [],
+                        'version': row[6],
+                        'created_at': str(row[7]) if row[7] else None
+                    })
+                
+                return tables
+                
+            except Exception as e:
+                logger.error(f"Error getting tables: {e}")
+                return []
     
     def get_sample_data(self, table_name: str, limit: int = 10, 
                         decrypt: bool = True) -> List[Dict]:
@@ -3633,14 +3664,15 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
     
     def list_projects(self) -> List[str]:
         """List all projects in the database"""
-        try:
-            result = self.conn.execute("""
-                SELECT DISTINCT project FROM _schema_metadata ORDER BY project
-            """).fetchall()
-            return [r[0] for r in result]
-        except Exception as e:
-            logger.error(f"Error listing projects: {e}")
-            return []
+        with self._db_lock:
+            try:
+                result = self.conn.execute("""
+                    SELECT DISTINCT project FROM _schema_metadata ORDER BY project
+                """).fetchall()
+                return [r[0] for r in result]
+            except Exception as e:
+                logger.error(f"Error listing projects: {e}")
+                return []
     
     def delete_project(self, project: str) -> Dict[str, Any]:
         """Delete all data for a project"""
