@@ -253,7 +253,7 @@ class UnifiedChatRequest(BaseModel):
     Attributes:
         message: The user's question or command
         project: Project identifier (e.g., "TEA1000")
-        persona: Persona to use for response style (default: "bessie")
+        persona: Persona to use for response style (default: None - professional)
         scope: Data scope - "project", "global", or "all"
         mode: Force specific intelligence mode (optional)
         clarifications: Answers to clarification questions
@@ -264,7 +264,7 @@ class UnifiedChatRequest(BaseModel):
     """
     message: str
     project: Optional[str] = None
-    persona: Optional[str] = 'bessie'
+    persona: Optional[str] = None
     scope: Optional[str] = 'project'
     mode: Optional[str] = None
     clarifications: Optional[Dict[str, Any]] = None
@@ -2617,14 +2617,14 @@ async def list_expert_contexts():
 async def list_personas():
     """List all available personas."""
     if not PERSONAS_AVAILABLE:
-        return {"personas": [], "default": "bessie"}
+        return {"personas": [], "default": None}
     
     try:
         pm = get_persona_manager()
-        return {"personas": pm.list_personas(), "default": "bessie"}
+        return {"personas": pm.list_personas(), "default": None}
     except Exception as e:
         logger.error(f"[PERSONAS] List error: {e}")
-        return {"personas": [], "default": "bessie", "error": str(e)}
+        return {"personas": [], "default": None, "error": str(e)}
 
 
 @router.get("/chat/unified/personas/{name}")
