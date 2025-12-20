@@ -1997,6 +1997,39 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
         try:
             report_progress(5, "Analyzing file structure...")
             
+            # =================================================================
+            # CLEANUP: Drop ALL existing tables for this file before re-upload
+            # This handles cases where split detection names things differently
+            # =================================================================
+            try:
+                existing_tables = self.safe_fetchall("""
+                    SELECT table_name FROM _schema_metadata 
+                    WHERE project = ? AND file_name = ?
+                """, [project, file_name])
+                
+                if existing_tables:
+                    logger.warning(f"[STORE_EXCEL] Cleaning up {len(existing_tables)} existing tables for {file_name}")
+                    for (table_name,) in existing_tables:
+                        try:
+                            self.safe_execute(f'DROP TABLE IF EXISTS "{table_name}"')
+                            logger.warning(f"[STORE_EXCEL] Dropped existing table: {table_name}")
+                        except Exception as drop_e:
+                            logger.warning(f"[STORE_EXCEL] Could not drop {table_name}: {drop_e}")
+                    
+                    # Clean up metadata
+                    self.safe_execute("""
+                        DELETE FROM _schema_metadata WHERE project = ? AND file_name = ?
+                    """, [project, file_name])
+                    
+                    # Clean up column profiles
+                    self.safe_execute("""
+                        DELETE FROM _column_profiles WHERE project = ? AND file_name = ?
+                    """, [project, file_name])
+                    
+                    logger.warning(f"[STORE_EXCEL] Cleanup complete for {file_name}")
+            except Exception as cleanup_e:
+                logger.warning(f"[STORE_EXCEL] Cleanup step failed (continuing): {cleanup_e}")
+            
             # Get version number
             version = self._get_next_version(project, file_name)
             results['version'] = version
