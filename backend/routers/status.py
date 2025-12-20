@@ -124,11 +124,11 @@ async def get_structured_data_status(project: Optional[str] = None):
         tables = []
         try:
             logger.info("[STATUS/STRUCTURED] Querying _schema_metadata...")
-            metadata_result = handler.conn.execute("""
+            metadata_result = handler.safe_fetchall("""
                 SELECT table_name, project, file_name, sheet_name, columns, row_count, created_at
                 FROM _schema_metadata 
                 WHERE is_current = TRUE
-            """).fetchall()
+            """)
             logger.info(f"[STATUS/STRUCTURED] _schema_metadata returned {len(metadata_result)} rows")
             
             for row in metadata_result:
@@ -145,7 +145,7 @@ async def get_structured_data_status(project: Optional[str] = None):
                 
                 # Verify table actually exists
                 try:
-                    handler.conn.execute(f'SELECT 1 FROM "{table_name}" LIMIT 1')
+                    handler.safe_execute(f'SELECT 1 FROM "{table_name}" LIMIT 1')
                 except:
                     logger.warning(f"[STATUS] Skipping stale metadata for non-existent table: {table_name}")
                     continue
@@ -177,17 +177,17 @@ async def get_structured_data_status(project: Optional[str] = None):
         # =================================================================
         try:
             # First check if table exists
-            table_check = handler.conn.execute("""
+            table_check = handler.safe_fetchone("""
                 SELECT COUNT(*) FROM information_schema.tables 
                 WHERE table_name = '_pdf_tables'
-            """).fetchone()
+            """)
             logger.info(f"[STATUS] _pdf_tables exists: {table_check[0] > 0}")
             
             if table_check[0] > 0:
-                pdf_result = handler.conn.execute("""
+                pdf_result = handler.safe_fetchall("""
                     SELECT table_name, source_file, project, project_id, row_count, columns, created_at
                     FROM _pdf_tables
-                """).fetchall()
+                """)
                 logger.info(f"[STATUS] _pdf_tables has {len(pdf_result)} rows")
             else:
                 pdf_result = []
@@ -207,7 +207,7 @@ async def get_structured_data_status(project: Optional[str] = None):
                 
                 # Verify table actually exists
                 try:
-                    handler.conn.execute(f'SELECT 1 FROM "{table_name}" LIMIT 1')
+                    handler.safe_execute(f'SELECT 1 FROM "{table_name}" LIMIT 1')
                 except:
                     logger.warning(f"[STATUS] Skipping stale metadata for non-existent PDF table: {table_name}")
                     continue
@@ -241,19 +241,19 @@ async def get_structured_data_status(project: Optional[str] = None):
             logger.warning("No metadata found, falling back to information_schema")
             
             try:
-                table_result = handler.conn.execute("""
+                table_result = handler.safe_fetchall("""
                     SELECT table_name 
                     FROM information_schema.tables 
                     WHERE table_schema = 'main'
                     AND table_name NOT LIKE '_%'
-                """).fetchall()
+                """)
                 
                 for (table_name,) in table_result:
                     try:
-                        count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
+                        count_result = handler.safe_fetchone(f'SELECT COUNT(*) FROM "{table_name}"')
                         row_count = count_result[0] if count_result else 0
                         
-                        col_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
+                        col_result = handler.safe_fetchall(f'PRAGMA table_info("{table_name}")')
                         columns = [col[1] for col in col_result] if col_result else []
                         
                         parts = table_name.split('__')
@@ -1043,11 +1043,11 @@ async def sync_document_registry():
         if STRUCTURED_AVAILABLE:
             try:
                 handler = get_structured_handler()
-                meta_result = handler.conn.execute("""
+                meta_result = handler.safe_fetchall("""
                     SELECT DISTINCT file_name, project
                     FROM _schema_metadata 
                     WHERE is_current = TRUE AND file_name IS NOT NULL
-                """).fetchall()
+                """)
                 
                 for filename, project in meta_result:
                     if filename:
@@ -1064,17 +1064,17 @@ async def sync_document_registry():
         if STRUCTURED_AVAILABLE:
             try:
                 handler = get_structured_handler()
-                table_check = handler.conn.execute("""
+                table_check = handler.safe_fetchone("""
                     SELECT COUNT(*) FROM information_schema.tables 
                     WHERE table_name = '_pdf_tables'
-                """).fetchone()
+                """)
                 
                 if table_check[0] > 0:
-                    pdf_result = handler.conn.execute("""
+                    pdf_result = handler.safe_fetchall("""
                         SELECT DISTINCT source_file, project, project_id
                         FROM _pdf_tables 
                         WHERE source_file IS NOT NULL
-                    """).fetchall()
+                    """)
                     
                     for filename, project, project_id in pdf_result:
                         if filename:
@@ -1358,7 +1358,7 @@ async def create_relationship(project: str, rel: RelationshipCreate):
     
     try:
         handler = get_structured_handler()
-        handler.conn.execute("""
+        handler.safe_execute("""
             INSERT INTO _table_relationships 
             (id, project, source_table, source_columns, target_table, target_columns, relationship_type, confidence)
             VALUES (?, ?, ?, ?, ?, ?, 'manual', 1.0)
@@ -1390,7 +1390,7 @@ async def delete_relationship(project: str, rel: RelationshipDelete):
     
     try:
         handler = get_structured_handler()
-        handler.conn.execute("""
+        handler.safe_execute("""
             DELETE FROM _table_relationships 
             WHERE project = ? AND source_table = ? AND target_table = ?
         """, [project, rel.source_table, rel.target_table])
@@ -1813,25 +1813,25 @@ async def get_table_profile(table_name: str):
         handler = get_structured_handler()
         
         # Get row count
-        row_count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
+        row_count_result = handler.safe_fetchone(f'SELECT COUNT(*) FROM "{table_name}"')
         total_rows = row_count_result[0] if row_count_result else 0
         
         # Get column names
-        columns_result = handler.conn.execute(f"""
+        columns_result = handler.safe_fetchall(f"""
             SELECT column_name FROM information_schema.columns 
             WHERE table_name = '{table_name}'
-        """).fetchall()
+        """)
         
         column_stats = []
         for (col_name,) in columns_result:
             try:
                 # Get distinct count and null count for each column
-                stats = handler.conn.execute(f'''
+                stats = handler.safe_fetchone(f'''
                     SELECT 
                         COUNT(DISTINCT "{col_name}") as distinct_count,
                         SUM(CASE WHEN "{col_name}" IS NULL OR TRIM(CAST("{col_name}" AS VARCHAR)) = '' THEN 1 ELSE 0 END) as null_count
                     FROM "{table_name}"
-                ''').fetchone()
+                ''')
                 
                 distinct_count = stats[0] if stats else 0
                 null_count = stats[1] if stats else 0
@@ -1926,11 +1926,11 @@ async def check_data_integrity(project: Optional[str] = None):
         
         try:
             # Get from _schema_metadata
-            meta_result = handler.conn.execute("""
+            meta_result = handler.safe_fetchall("""
                 SELECT DISTINCT table_name, file_name, project
                 FROM _schema_metadata 
                 WHERE is_current = TRUE
-            """).fetchall()
+            """)
             
             for table_name, file_name, proj in meta_result:
                 # Only include if file is in registry
@@ -1944,16 +1944,16 @@ async def check_data_integrity(project: Optional[str] = None):
             
             # Also check _pdf_tables
             try:
-                table_check = handler.conn.execute("""
+                table_check = handler.safe_fetchone("""
                     SELECT COUNT(*) FROM information_schema.tables 
                     WHERE table_name = '_pdf_tables'
-                """).fetchone()
+                """)
                 
                 if table_check and table_check[0] > 0:
-                    pdf_result = handler.conn.execute("""
+                    pdf_result = handler.safe_fetchall("""
                         SELECT DISTINCT table_name, source_file, project
                         FROM _pdf_tables
-                    """).fetchall()
+                    """)
                     
                     for table_name, source_file, proj in pdf_result:
                         if source_file and source_file.lower() in valid_files:
@@ -1987,10 +1987,10 @@ async def check_data_integrity(project: Optional[str] = None):
             
             # Get columns for this table
             try:
-                cols_result = handler.conn.execute(f"""
+                cols_result = handler.safe_fetchall(f"""
                     SELECT column_name FROM information_schema.columns 
                     WHERE table_name = '{table_name}'
-                """).fetchall()
+                """)
             except Exception as col_e:
                 logger.warning(f"Failed to get columns for {table_name}: {col_e}")
                 continue
@@ -2004,7 +2004,7 @@ async def check_data_integrity(project: Optional[str] = None):
             
             # Get row count
             try:
-                row_count = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
+                row_count = handler.safe_fetchone(f'SELECT COUNT(*) FROM "{table_name}"')[0]
             except Exception as count_e:
                 logger.warning(f"Skipping {table_name} - table doesn't exist: {count_e}")
                 continue
@@ -2047,9 +2047,9 @@ async def check_data_integrity(project: Optional[str] = None):
             if row_count > 0 and column_names:
                 try:
                     first_col = column_names[0]
-                    null_count = handler.conn.execute(f'''
+                    null_count = handler.safe_fetchone(f'''
                         SELECT COUNT(*) FROM "{table_name}" WHERE "{first_col}" IS NULL
-                    ''').fetchone()[0]
+                    ''')[0]
                     fill_rate = round(((row_count - null_count) / row_count) * 100)
                 except:
                     pass
