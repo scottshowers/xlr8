@@ -4294,7 +4294,12 @@ SQL:"""
         return truths
     
     def _gather_intent(self, question: str, analysis: Dict) -> List[Truth]:
-        """Gather INTENT - what customer's DOCUMENTS say."""
+        """
+        Gather INTENT - what customer's DOCUMENTS say.
+        
+        Uses truth_type='intent' filter to only get customer documentation,
+        excluding reference/standards materials.
+        """
         if not self.rag_handler:
             return []
         
@@ -4305,10 +4310,13 @@ SQL:"""
             if not collection_name:
                 return []
             
+            # NEW: Use truth_type filter for precise intent retrieval
+            # This replaces the old logic of manually filtering out global docs
             results = self.rag_handler.search(
                 collection_name=collection_name,
                 query=question,
                 n_results=10,
+                truth_type='intent',  # Only get customer documentation
                 project_id=self.project if self.project else None
             )
             
@@ -4316,10 +4324,6 @@ SQL:"""
                 metadata = result.get('metadata', {})
                 distance = result.get('distance', 1.0)
                 doc = result.get('document', '')
-                
-                project_id = metadata.get('project_id', '').lower()
-                if project_id in ['global', '__global__', 'global/universal']:
-                    continue
                 
                 truths.append(Truth(
                     source_type='intent',
@@ -4363,7 +4367,12 @@ SQL:"""
         return None
     
     def _gather_best_practice(self, question: str, analysis: Dict) -> List[Truth]:
-        """Gather BEST PRACTICE - what UKG docs say."""
+        """
+        Gather BEST PRACTICE - what standards and reference documents say.
+        
+        Uses truth_type='reference' filter to only get standards/checklists,
+        which are always global (not project-specific).
+        """
         if not self.rag_handler:
             return []
         
@@ -4374,11 +4383,13 @@ SQL:"""
             if not collection_name:
                 return []
             
+            # NEW: Use truth_type filter for precise reference retrieval
+            # Reference is always global - no project filter needed
             results = self.rag_handler.search(
                 collection_name=collection_name,
                 query=question,
                 n_results=10,
-                project_id="Global/Universal"
+                truth_type='reference'  # Only get standards/checklists
             )
             
             for result in results:
@@ -4388,7 +4399,7 @@ SQL:"""
                 
                 truths.append(Truth(
                     source_type='best_practice',
-                    source_name=metadata.get('filename', 'UKG Documentation'),
+                    source_name=metadata.get('filename', 'Reference Document'),
                     content=doc,
                     confidence=max(0.3, 1.0 - distance) if distance else 0.7,
                     location=f"Page {metadata.get('page', '?')}"
