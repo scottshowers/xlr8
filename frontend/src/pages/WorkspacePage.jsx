@@ -122,7 +122,7 @@ export default function WorkspacePage() {
           AI Assist
           {hasActiveProject && customerColors && (
             <span style={{
-              fontSize: '1rem',
+              fontSize: '0.85rem',
               fontWeight: 500,
               color: customerColors.primary,
               display: 'flex',
@@ -154,9 +154,6 @@ export default function WorkspacePage() {
         overflow: 'hidden',
         minHeight: '60vh',
         boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-        ...(hasActiveProject && customerColors ? {
-          borderTop: `3px solid ${customerColors.primary}`,
-        } : {}),
       }}>
         {hasActiveProject ? (
           <Chat />
