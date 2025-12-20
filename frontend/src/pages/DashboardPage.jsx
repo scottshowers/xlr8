@@ -417,7 +417,7 @@ function GaugeChart({ value, label, colors }) {
   
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0.5rem 0 1rem' }}>
-      <div style={{ width: 160, height: 90, position: 'relative' }}>
+      <div style={{ width: 160, height: 100, position: 'relative' }}>
         <svg viewBox="0 0 100 55" style={{ width: '100%', height: '100%' }}>
           <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke={colors.cardBorder} strokeWidth="10" />
           <path 
@@ -430,13 +430,23 @@ function GaugeChart({ value, label, colors }) {
             strokeDashoffset={strokeDashoffset}
             style={{ transition: 'stroke-dashoffset 0.5s ease' }}
           />
-        </svg>
-        <div style={{ position: 'absolute', bottom: 0, left: '50%', transform: 'translateX(-50%)', textAlign: 'center' }}>
-          <div style={{ fontSize: '2rem', fontWeight: 800, color: colors.success, fontFamily: "'Sora', 'Inter', sans-serif" }}>
+          {/* Value text inside SVG for proper positioning */}
+          <text x="50" y="42" textAnchor="middle" style={{ 
+            fontSize: '18px', 
+            fontWeight: 800, 
+            fill: colors.success,
+            fontFamily: "'Sora', 'Inter', sans-serif"
+          }}>
             {value}%
-          </div>
-          <div style={{ fontSize: '0.75rem', color: colors.textMuted, fontWeight: 600 }}>{label}</div>
-        </div>
+          </text>
+          <text x="50" y="54" textAnchor="middle" style={{ 
+            fontSize: '7px', 
+            fontWeight: 600, 
+            fill: colors.textMuted 
+          }}>
+            {label}
+          </text>
+        </svg>
       </div>
     </div>
   );
