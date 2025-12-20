@@ -20,6 +20,47 @@ import { UploadStatusIndicator } from '../context/UploadContext';
 import { useOnboarding } from '../context/OnboardingContext';
 import CustomerGenome, { GenomeButton } from './CustomerGenome';
 
+// Sales/Demo page buttons for header
+function SalesButtons() {
+  const [hovered, setHovered] = useState(null);
+  
+  const buttons = [
+    { id: 'story', path: '/story', icon: '📖', title: 'The Story' },
+    { id: 'journey', path: '/journey', icon: '🗺️', title: 'The Journey' },
+    { id: 'demo', path: '/intelligence-demo', icon: '✨', title: 'Watch It Think' },
+  ];
+  
+  return (
+    <div style={{ display: 'flex', gap: '0.25rem' }}>
+      {buttons.map(btn => (
+        <Link
+          key={btn.id}
+          to={btn.path}
+          onMouseEnter={() => setHovered(btn.id)}
+          onMouseLeave={() => setHovered(null)}
+          title={btn.title}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 32,
+            height: 32,
+            background: hovered === btn.id ? '#f0fdf4' : '#f8fafc',
+            border: `1px solid ${hovered === btn.id ? '#83b16d' : '#e1e8ed'}`,
+            borderRadius: 6,
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+            textDecoration: 'none',
+            fontSize: '0.9rem',
+          }}
+        >
+          {btn.icon}
+        </Link>
+      ))}
+    </div>
+  );
+}
+
 const COLORS = {
   grassGreen: '#5a8a4a',
   skyBlue: '#4a6b8a',
@@ -351,6 +392,12 @@ function Navigation({ onOpenGenome }) {
         <div style={styles.rightSection}>
           {/* Upload Status Indicator */}
           <UploadStatusIndicator />
+          
+          {/* Sales/Demo Page Buttons */}
+          <SalesButtons />
+          
+          {/* Divider */}
+          <div style={{ width: 1, height: 20, background: '#e1e8ed' }} />
           
           {/* Customer Genome Button */}
           <GenomeButton onClick={onOpenGenome} />
