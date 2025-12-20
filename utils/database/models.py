@@ -228,15 +228,24 @@ class DocumentModel:
 
 
 class DocumentRegistryModel:
-    """Document Registry - tracks ALL uploaded files in ChromaDB/DuckDB"""
+    """
+    Document Registry - THE SOURCE OF TRUTH for all uploaded files.
     
+    Tracks ALL files in ChromaDB and/or DuckDB with unified metadata.
+    All components should query this registry instead of backends directly.
+    """
+    
+    # Storage types
     STORAGE_CHROMADB = 'chromadb'
     STORAGE_DUCKDB = 'duckdb'
     STORAGE_BOTH = 'both'
     
-    USAGE_RAG_KNOWLEDGE = 'rag_knowledge'
-    USAGE_STRUCTURED_DATA = 'structured_data'
-    USAGE_PLAYBOOK = 'playbook'
+    # Usage types
+    USAGE_RAG_KNOWLEDGE = 'rag_knowledge'      # Unstructured docs for RAG
+    USAGE_STRUCTURED_DATA = 'structured_data'  # Excel/CSV/PDF tables
+    USAGE_PLAYBOOK = 'playbook'                # Playbook-related data
+    USAGE_PLAYBOOK_SOURCE = 'playbook_source'  # Playbook definition doc (e.g., Year-End Checklist)
+    USAGE_TEMPLATE = 'template'                # Reference library templates
     
     @staticmethod
     def create_table_sql() -> str:
@@ -359,19 +368,34 @@ class DocumentRegistryModel:
     
     @staticmethod
     def unregister(filename: str, project_id: str = None) -> bool:
-        """Remove a document from the registry"""
+        """
+        Remove a document from the registry.
+        
+        If project_id is provided, deletes only the matching entry.
+        If project_id is None, first tries to find by filename alone,
+        then deletes any matching entry (project-specific or global).
+        """
         supabase = get_supabase()
         if not supabase:
             return False
         
         try:
-            query = supabase.table('document_registry').delete().eq('filename', filename)
             if project_id:
-                query = query.eq('project_id', project_id)
+                # Delete specific project entry
+                result = supabase.table('document_registry').delete().eq(
+                    'filename', filename
+                ).eq('project_id', project_id).execute()
             else:
-                query = query.is_('project_id', 'null')
-            query.execute()
-            return True
+                # No project_id - delete by filename only
+                # This catches both project-specific (where we don't know the ID)
+                # and global entries
+                result = supabase.table('document_registry').delete().eq(
+                    'filename', filename
+                ).execute()
+            
+            # Check if anything was deleted
+            deleted_count = len(result.data) if result.data else 0
+            return deleted_count > 0 or True  # Return True even if nothing found (idempotent)
         except Exception as e:
             print(f"Error unregistering document: {e}")
             return False
