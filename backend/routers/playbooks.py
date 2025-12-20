@@ -564,122 +564,53 @@ async def get_document_checklist(project_id: str):
     """
     Get the document checklist with real-time upload status.
     Shows which reports are needed per step, matched vs missing.
+    
+    Uses document_registry as source of truth for uploaded files.
     """
     try:
-        from utils.rag_handler import RAGHandler
-        from utils.database.models import ProcessingJobModel
-        from backend.utils.playbook_parser import load_step_documents, match_documents_to_step, get_duckdb_connection
+        from utils.database.models import ProcessingJobModel, DocumentRegistryModel
+        from backend.utils.playbook_parser import load_step_documents, match_documents_to_step
     except ImportError:
         try:
-            from utils.rag_handler import RAGHandler
-            from utils.database.models import ProcessingJobModel
-            from utils.playbook_parser import load_step_documents, match_documents_to_step, get_duckdb_connection
+            from utils.database.models import ProcessingJobModel, DocumentRegistryModel
+            from utils.playbook_parser import load_step_documents, match_documents_to_step
         except ImportError:
             raise HTTPException(status_code=500, detail="Required modules not available")
     
+    # =================================================================
+    # Get uploaded files from REGISTRY (source of truth)
+    # =================================================================
     uploaded_files_list = []
-    seen_files = set()
-    project_name = None
     
-    # SOURCE 1: ChromaDB (vector chunks)
     try:
-        rag = RAGHandler()
-        collection = rag.client.get_or_create_collection(name="documents")
-        all_results = collection.get(include=["metadatas"], limit=1000)
+        # Get files for this project (including global/reference library)
+        registry_entries = DocumentRegistryModel.get_by_project(project_id, include_global=True)
         
-        for metadata in all_results.get("metadatas", []):
-            doc_project_id = metadata.get("project_id", "")
-            doc_project_name = metadata.get("project") or metadata.get("project_name", "")
-            
-            # Find project name for this project_id
-            if not project_name and doc_project_id:
-                if doc_project_id == project_id or doc_project_id.startswith(project_id[:8]) or project_id.startswith(doc_project_id):
-                    project_name = doc_project_name
-            
-            # Include GLOBAL files OR project-specific files
-            is_global = doc_project_name and doc_project_name.lower() in ('global', '__global__', 'global/universal', 'reference library', 'reference_library', '__standards__')
-            is_this_project = (
-                (doc_project_id and (doc_project_id == project_id or doc_project_id.startswith(project_id[:8]) or project_id.startswith(doc_project_id))) or
-                (project_name and doc_project_name and doc_project_name.lower() == project_name.lower())
-            )
-            
-            if is_global or is_this_project:
-                filename = metadata.get("source", metadata.get("filename", ""))
-                if filename and filename.lower() not in seen_files:
-                    uploaded_files_list.append(filename)
-                    seen_files.add(filename.lower())
+        for entry in registry_entries:
+            filename = entry.get('filename')
+            if filename:
+                # Exclude playbook source documents (the checklist itself)
+                usage_type = entry.get('usage_type', '')
+                if usage_type == 'playbook_source':
+                    logger.debug(f"[DOC-CHECKLIST] Skipping playbook source: {filename}")
+                    continue
+                
+                uploaded_files_list.append(filename)
         
-        logger.info(f"[DOC-CHECKLIST] ChromaDB: {len(uploaded_files_list)} files for project {project_id[:8]}")
-    except Exception as e:
-        logger.warning(f"[DOC-CHECKLIST] ChromaDB query failed: {e}")
-    
-    # SOURCE 2: DuckDB _schema_metadata (Excel files)
-    try:
-        conn = get_duckdb_connection()
-        if conn:
-            result = conn.execute("""
-                SELECT DISTINCT file_name, project
-                FROM _schema_metadata
-                WHERE file_name IS NOT NULL
-            """).fetchall()
-            
-            logger.info(f"[DOC-CHECKLIST] DuckDB _schema_metadata returned {len(result)} rows")
-            
-            for row in result:
-                source_file, proj = row
-                is_global = proj and proj.lower() in ('global', '__global__', 'global/universal', 'reference library', 'reference_library', '__standards__')
-                is_this_project = proj and (
-                    proj.lower() in project_id.lower() or
-                    project_id[:8].lower() in proj.lower() or
-                    (project_name and proj.lower() == project_name.lower())
-                )
-                
-                if is_global or is_this_project:
-                    if source_file and source_file.lower() not in seen_files:
-                        uploaded_files_list.append(source_file)
-                        seen_files.add(source_file.lower())
-                        logger.info(f"[DOC-CHECKLIST] DuckDB Excel: {source_file}")
-            
-            conn.close()
-    except Exception as e:
-        logger.warning(f"[DOC-CHECKLIST] DuckDB _schema_metadata query failed: {e}")
-    
-    # SOURCE 3: DuckDB _pdf_tables (PDF files)
-    try:
-        conn = get_duckdb_connection()
-        if conn:
-            table_check = conn.execute("""
-                SELECT COUNT(*) FROM information_schema.tables 
-                WHERE table_name = '_pdf_tables'
-            """).fetchone()
-            
-            if table_check and table_check[0] > 0:
-                result = conn.execute("""
-                    SELECT DISTINCT source_file, project, project_id
-                    FROM _pdf_tables
-                    WHERE source_file IS NOT NULL
-                """).fetchall()
-                
-                logger.info(f"[DOC-CHECKLIST] DuckDB _pdf_tables returned {len(result)} rows")
-                
-                for row in result:
-                    source_file, proj, pid = row
-                    is_global = proj and proj.lower() in ('global', '__global__', 'global/universal', 'reference library', 'reference_library', '__standards__')
-                    is_this_project = (
-                        (pid and (pid == project_id or pid.startswith(project_id[:8]))) or
-                        (proj and project_id[:8].lower() in proj.lower()) or
-                        (proj and project_name and proj.lower() == project_name.lower())
-                    )
-                    
-                    if is_global or is_this_project:
-                        if source_file and source_file.lower() not in seen_files:
-                            uploaded_files_list.append(source_file)
-                            seen_files.add(source_file.lower())
-                            logger.info(f"[DOC-CHECKLIST] DuckDB PDF: {source_file}")
-            
-            conn.close()
-    except Exception as e:
-        logger.warning(f"[DOC-CHECKLIST] DuckDB _pdf_tables query failed: {e}")
+        logger.info(f"[DOC-CHECKLIST] Registry: {len(uploaded_files_list)} files for project {project_id[:8]}")
+        
+    except Exception as reg_e:
+        logger.warning(f"[DOC-CHECKLIST] Registry query failed: {reg_e}")
+        # Return empty if registry unavailable
+        return {
+            "project_id": project_id,
+            "has_step_documents": False,
+            "uploaded_files": [],
+            "step_checklists": [],
+            "stats": {"files_in_project": 0, "total_matched": 0, "total_missing": 0, "required_missing": 0},
+            "processing_jobs": [],
+            "error": f"Registry unavailable: {reg_e}"
+        }
     
     uploaded_files_list.sort()
     logger.info(f"[DOC-CHECKLIST] TOTAL: {len(uploaded_files_list)} files")
