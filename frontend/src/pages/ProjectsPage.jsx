@@ -470,18 +470,20 @@ export default function ProjectsPage() {
                       <span style={{ color: colors.textLight, fontSize: '0.75rem' }}>None assigned</span>
                     )}
                   </div>
-                  <span style={{
-                    display: 'inline-block',
-                    padding: '0.2rem 0.5rem',
-                    borderRadius: 4,
-                    fontSize: '0.75rem',
-                    fontWeight: 600,
-                    background: project.status === 'active' ? colors.primaryLight : colors.inputBg,
-                    color: project.status === 'active' ? colors.primary : colors.textMuted,
-                  }}>
-                    {project.status || 'active'}
-                  </span>
-                  <div style={{ display: 'flex', gap: '0.4rem' }}>
+                  <div style={{ overflow: 'hidden' }}>
+                    <span style={{
+                      display: 'inline-block',
+                      padding: '0.2rem 0.5rem',
+                      borderRadius: 4,
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      background: project.status === 'active' ? colors.primaryLight : colors.inputBg,
+                      color: project.status === 'active' ? colors.primary : colors.textMuted,
+                    }}>
+                      {project.status || 'active'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'flex-start' }}>
                     <button
                       onClick={() => selectProject(project)}
                       style={{
