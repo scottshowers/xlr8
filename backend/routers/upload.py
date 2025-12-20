@@ -576,8 +576,25 @@ def process_file_background(
         logger.warning(f"[BACKGROUND] Detected file extension: '{file_ext}'")
         
         # =================================================================
+        # TIMING TRACKING - Track processing performance
+        # =================================================================
+        import time
+        timing = {
+            'start': time.time(),
+            'classification_start': None,
+            'classification_end': None,
+            'parse_start': None,
+            'parse_end': None,
+            'embedding_start': None,
+            'embedding_end': None,
+            'storage_start': None,
+            'storage_end': None
+        }
+        
+        # =================================================================
         # CLASSIFICATION - Determine truth_type for routing
         # =================================================================
+        timing['classification_start'] = time.time()
         is_global = project.lower() in ['global', '__global__', 'global/universal', 'reference library']
         
         if truth_type:
@@ -603,9 +620,26 @@ def process_file_background(
         if content_domain:
             domain_list = [d.strip() for d in content_domain.split(',') if d.strip()]
         
+        timing['classification_end'] = time.time()
+        
+        # =================================================================
+        # Helper to calculate timing in milliseconds
+        # =================================================================
+        def calc_timing_ms():
+            """Calculate all timing values in milliseconds"""
+            now = time.time()
+            return {
+                'processing_time_ms': int((now - timing['start']) * 1000),
+                'classification_time_ms': int((timing['classification_end'] - timing['classification_start']) * 1000) if timing['classification_end'] else None,
+                'parse_time_ms': int((timing['parse_end'] - timing['parse_start']) * 1000) if timing['parse_end'] and timing['parse_start'] else None,
+                'embedding_time_ms': int((timing['embedding_end'] - timing['embedding_start']) * 1000) if timing['embedding_end'] and timing['embedding_start'] else None,
+                'storage_time_ms': int((timing['storage_end'] - timing['storage_start']) * 1000) if timing['storage_end'] and timing['storage_start'] else None,
+            }
+        
         # ROUTE 1: STRUCTURED DATA (Excel/CSV) → DuckDB
         if file_ext in ['xlsx', 'xls', 'csv'] and STRUCTURED_HANDLER_AVAILABLE:
             ProcessingJobModel.update_progress(job_id, 10, "Detected tabular data - storing for SQL queries...")
+            timing['parse_start'] = time.time()
             
             try:
                 handler = get_structured_handler()
@@ -661,6 +695,10 @@ def process_file_background(
                     f"Created {tables_created} table(s) with {total_rows:,} rows"
                 )
                 
+                timing['parse_end'] = time.time()
+                timing['storage_start'] = time.time()
+                timing['storage_end'] = time.time()  # Storage happens during parse for structured
+                
                 # =====================================================
                 # INTELLIGENCE ANALYSIS - Phase 3
                 # Run Tier 1 + 2 analysis on uploaded data
@@ -713,6 +751,7 @@ def process_file_background(
                 
                 # Register in document registry with classification
                 try:
+                    times = calc_timing_ms()
                     DocumentRegistryModel.register(
                         filename=filename,
                         file_type=file_ext,
@@ -727,6 +766,10 @@ def process_file_background(
                         row_count=total_rows,
                         sheet_count=tables_created,
                         parse_status='success',
+                        processing_time_ms=times['processing_time_ms'],
+                        classification_time_ms=times['classification_time_ms'],
+                        parse_time_ms=times['parse_time_ms'],
+                        storage_time_ms=times['storage_time_ms'],
                         metadata={
                             'project_name': project,
                             'functional_area': functional_area,
@@ -734,7 +777,7 @@ def process_file_background(
                             'intelligence': intelligence_summary
                         }
                     )
-                    logger.info(f"[BACKGROUND] Registered: {filename} as {truth_type} -> DUCKDB")
+                    logger.info(f"[BACKGROUND] Registered: {filename} as {truth_type} -> DUCKDB ({times['processing_time_ms']}ms)")
                 except Exception as e:
                     logger.warning(f"[BACKGROUND] Could not register document: {e}")
                 
@@ -793,6 +836,7 @@ def process_file_background(
         if file_ext == 'pdf' and SMART_PDF_AVAILABLE:
             ProcessingJobModel.update_progress(job_id, 5, "Analyzing PDF structure...")
             logger.warning(f"[BACKGROUND] >>> ENTERING SMART PDF ROUTE for {filename}")
+            timing['parse_start'] = time.time()
             
             try:
                 def status_callback(msg, progress=None):
@@ -836,6 +880,9 @@ def process_file_background(
                     try:
                         duckdb_result = pdf_result.get('duckdb_result', {})
                         analysis = pdf_result.get('analysis', {})
+                        timing['parse_end'] = time.time()
+                        timing['storage_end'] = time.time()
+                        times = calc_timing_ms()
                         
                         DocumentRegistryModel.register(
                             filename=filename,
@@ -850,6 +897,10 @@ def process_file_background(
                             duckdb_tables=duckdb_result.get('tables_created', []),
                             row_count=duckdb_result.get('total_rows', 0),
                             parse_status='success',
+                            processing_time_ms=times['processing_time_ms'],
+                            classification_time_ms=times['classification_time_ms'],
+                            parse_time_ms=times['parse_time_ms'],
+                            storage_time_ms=times['storage_time_ms'],
                             metadata={
                                 'project_name': project,
                                 'functional_area': functional_area,
@@ -938,6 +989,7 @@ def process_file_background(
         if file_ext in ['docx', 'txt', 'md'] and DOCUMENT_ANALYZER_AVAILABLE and STRUCTURED_HANDLER_AVAILABLE:
             logger.warning(f"[BACKGROUND] Route 1.75: Analyzing {file_ext} content structure...")
             ProcessingJobModel.update_progress(job_id, 5, "Analyzing document structure...")
+            timing['parse_start'] = time.time()
             
             try:
                 # Extract text first
@@ -1015,6 +1067,10 @@ def process_file_background(
                                             # Run intelligence analysis
                                             intelligence_summary = run_intelligence_analysis(project, handler, job_id)
                                             
+                                            timing['parse_end'] = time.time()
+                                            timing['storage_end'] = time.time()
+                                            times = calc_timing_ms()
+                                            
                                             # Register in document registry with classification
                                             try:
                                                 DocumentRegistryModel.register(
@@ -1029,6 +1085,10 @@ def process_file_background(
                                                     is_global=is_global,
                                                     row_count=result.get('row_count', 0),
                                                     parse_status='success',
+                                                    processing_time_ms=times['processing_time_ms'],
+                                                    classification_time_ms=times['classification_time_ms'],
+                                                    parse_time_ms=times['parse_time_ms'],
+                                                    storage_time_ms=times['storage_time_ms'],
                                                     metadata={
                                                         'project_name': project,
                                                         'functional_area': functional_area,
@@ -1132,9 +1192,16 @@ def process_file_background(
         
         # ROUTE 2: UNSTRUCTURED DATA (PDF/Word/Text) → ChromaDB
         logger.warning(f"[BACKGROUND] Route 2 check: text is {'set' if text else 'None'}")
+        
+        # Start parse timing if not already started
+        if not timing.get('parse_start'):
+            timing['parse_start'] = time.time()
+        
         if text is None:
             ProcessingJobModel.update_progress(job_id, 5, "Extracting text from file...")
             text = extract_text(file_path)
+        
+        timing['parse_end'] = time.time()
         
         if not text or len(text.strip()) < 10:
             ProcessingJobModel.fail(job_id, "No text could be extracted from file")
@@ -1180,12 +1247,15 @@ def process_file_background(
         
         ProcessingJobModel.update_progress(job_id, 25, "Chunking document...")
         
+        timing['embedding_start'] = time.time()
         success = rag.add_document(
             collection_name="documents",
             text=text,
             metadata=metadata,
             progress_callback=update_progress
         )
+        timing['embedding_end'] = time.time()
+        timing['storage_end'] = time.time()
         
         if not success:
             ProcessingJobModel.fail(job_id, "Failed to add document to vector store")
@@ -1211,6 +1281,7 @@ def process_file_background(
         
         # Register in document registry with classification
         try:
+            times = calc_timing_ms()
             DocumentRegistryModel.register(
                 filename=filename,
                 file_type=file_ext,
@@ -1223,6 +1294,11 @@ def process_file_background(
                 is_global=is_global,
                 chunk_count=len(text) // 500,  # Approximate
                 parse_status='success',
+                processing_time_ms=times['processing_time_ms'],
+                classification_time_ms=times['classification_time_ms'],
+                parse_time_ms=times['parse_time_ms'],
+                embedding_time_ms=times['embedding_time_ms'],
+                storage_time_ms=times['storage_time_ms'],
                 metadata={
                     'project_name': project,
                     'functional_area': functional_area,
@@ -1230,7 +1306,7 @@ def process_file_background(
                     'char_count': len(text)
                 }
             )
-            logger.info(f"[BACKGROUND] Registered: {filename} as {truth_type} -> CHROMADB")
+            logger.info(f"[BACKGROUND] Registered: {filename} as {truth_type} -> CHROMADB ({times['processing_time_ms']}ms)")
         except Exception as e:
             logger.warning(f"[BACKGROUND] Could not register document: {e}")
         
