@@ -10,12 +10,13 @@ ARCHITECTURE:
 - Claude as fallback for complex/edge cases
 - DuckDB storage for chat/intelligence integration
 - Profiling for data quality insights
+- Document Registry integration for classification tracking
 
 Deploy to: backend/routers/register_extractor.py
 Requirements: pip install pymupdf anthropic boto3
 
 Author: XLR8 Team
-Version: 1.0.0 - Rebrand from Vacuum + Local LLM + DuckDB
+Version: 1.1.0 - Added DocumentRegistryModel integration + thread-safe DuckDB
 """
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
@@ -65,6 +66,18 @@ except ImportError:
     except ImportError:
         DUCKDB_AVAILABLE = False
         logger.warning("[REGISTER] Structured data handler not available - no DuckDB storage")
+
+# Document Registry (classification tracking)
+try:
+    from utils.database.models import DocumentRegistryModel
+    REGISTRY_AVAILABLE = True
+except ImportError:
+    try:
+        from backend.utils.database.models import DocumentRegistryModel
+        REGISTRY_AVAILABLE = True
+    except ImportError:
+        REGISTRY_AVAILABLE = False
+        logger.warning("[REGISTER] DocumentRegistryModel not available - no registry tracking")
 
 
 # =============================================================================
@@ -265,7 +278,7 @@ def get_extraction_by_id(extract_id: str) -> Optional[Dict]:
         if duckdb_table and DUCKDB_AVAILABLE:
             try:
                 handler = get_structured_handler()
-                employees_df = handler.conn.execute(f"SELECT * FROM {duckdb_table}").fetchdf()
+                employees_df = handler.query_to_dataframe(f"SELECT * FROM {duckdb_table}")
                 raw_employees = employees_df.to_dict('records')
                 
                 # Transform to match frontend expectations
@@ -340,10 +353,23 @@ def delete_extraction(extract_id: str) -> bool:
             if duckdb_table and DUCKDB_AVAILABLE:
                 try:
                     handler = get_structured_handler()
-                    handler.conn.execute(f"DROP TABLE IF EXISTS {duckdb_table}")
+                    handler.safe_execute(f"DROP TABLE IF EXISTS {duckdb_table}")
                     logger.info(f"Dropped DuckDB table: {duckdb_table}")
                 except Exception as e:
                     logger.warning(f"Could not drop DuckDB table: {e}")
+            
+            # Also remove from document registry if available
+            if REGISTRY_AVAILABLE:
+                try:
+                    # Get the source file from the job to delete registry entry
+                    job_response = supabase.table('extraction_jobs').select('filename').eq('id', extract_id).execute()
+                    if job_response.data:
+                        filename = job_response.data[0].get('filename')
+                        if filename:
+                            DocumentRegistryModel.delete_by_filename(filename)
+                            logger.info(f"Removed from document registry: {filename}")
+                except Exception as reg_e:
+                    logger.warning(f"Could not remove from document registry: {reg_e}")
         
         # Delete from Supabase (CASCADE handles employees/earnings/etc)
         supabase.table('extraction_jobs').delete().eq('id', extract_id).execute()
@@ -451,19 +477,19 @@ def store_to_duckdb(
         # Create DataFrame
         df = pd.DataFrame(flat_records)
         
-        # Store in DuckDB
+        # Store in DuckDB (use safe methods for thread safety)
         if job_id:
             update_job(job_id, message='Writing to DuckDB...', progress=98)
         
-        handler.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+        handler.safe_execute(f"DROP TABLE IF EXISTS {table_name}")
         handler.conn.register('temp_payroll', df)
-        handler.conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM temp_payroll")
+        handler.safe_execute(f"CREATE TABLE {table_name} AS SELECT * FROM temp_payroll")
         handler.conn.unregister('temp_payroll')
         
         # Store metadata
         try:
             columns_info = [{'name': col, 'type': 'VARCHAR'} for col in df.columns]
-            handler.conn.execute("""
+            handler.safe_execute("""
                 INSERT INTO _schema_metadata 
                 (id, project, file_name, sheet_name, table_name, columns, row_count, version, is_current)
                 VALUES (nextval('schema_metadata_seq'), ?, ?, 'payroll', ?, ?, ?, 1, TRUE)
@@ -476,6 +502,36 @@ def store_to_duckdb(
             ])
         except Exception as meta_err:
             logger.warning(f"Could not store metadata: {meta_err}")
+        
+        # =================================================================
+        # REGISTER IN DOCUMENT REGISTRY - Classification & Tracking
+        # =================================================================
+        if REGISTRY_AVAILABLE:
+            try:
+                DocumentRegistryModel.register(
+                    filename=source_file,
+                    file_type='pdf',
+                    truth_type=DocumentRegistryModel.TRUTH_REALITY,  # Payroll data = customer reality
+                    classification_method=DocumentRegistryModel.CLASS_AUTO_DETECTED,
+                    classification_confidence=0.95,  # High confidence - we know it's payroll
+                    content_domain=['payroll'],
+                    storage_type=DocumentRegistryModel.STORAGE_DUCKDB,
+                    project_id=project_id,
+                    is_global=False,
+                    duckdb_tables=[table_name],
+                    row_count=len(df),
+                    parse_status='success',
+                    metadata={
+                        'project_name': project_name,
+                        'vendor_type': vendor_type,
+                        'extraction_method': 'register_extractor',
+                        'employee_count': len(employees),
+                        'columns': list(df.columns)
+                    }
+                )
+                logger.info(f"[REGISTER] Registered in document registry: {source_file} as reality/payroll")
+            except Exception as reg_err:
+                logger.warning(f"[REGISTER] Could not register document: {reg_err}")
         
         logger.info(f"[REGISTER] Stored {len(employees)} employees to DuckDB: {table_name}")
         
