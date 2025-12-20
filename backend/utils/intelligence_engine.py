@@ -1,10 +1,15 @@
 """
-XLR8 INTELLIGENCE ENGINE v5.15.1
+XLR8 INTELLIGENCE ENGINE v5.16.0
 ================================
 
 Deploy to: backend/utils/intelligence_engine.py
 
 UPDATES:
+- v5.16.0: DIRECT NAME MATCH - Critical fix for simple "show me X" queries.
+           When question contains "ale group", tables with "ale_group" in name
+           get +100 boost. Two-word matches (+100), three-word matches (+120).
+           This ensures "what ale groups are setup?" finds ale_group_information
+           instead of random tables like earnings_accumulation.
 - v5.15.1: GROUPINGS IN INTELLIGENCE - Critical groupings now used throughout:
            - SQL hints include KEY GROUPING DIMENSIONS for LLM
            - Expanded by_patterns for filter detection (pay_group, union, FLSA, etc.)
@@ -64,7 +69,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.15.1 GROUPINGS IN SQL HINTS ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.16.0 DIRECT NAME MATCH FIX ======")
 
 
 # =============================================================================
@@ -3100,6 +3105,42 @@ class IntelligenceEngine:
             row_count = table.get('row_count', 0)
             
             score = 0
+            
+            # ============================================================
+            # CRITICAL: DIRECT NAME MATCH - Highest priority boost
+            # If user asks about "ale group" and table contains "ale_group",
+            # that table MUST win. This handles simple "show me X" queries.
+            # ============================================================
+            # Extract potential table-name terms from question
+            # "what ale groups have been setup" -> ["ale", "groups", "ale_group", "ale_groups"]
+            words = re.findall(r'\b[a-z]+\b', q_lower)
+            
+            # Build n-grams and convert to snake_case for matching
+            name_match_found = False
+            for i in range(len(words)):
+                # Single word matches (for short table names like "pto", "unions")
+                if len(words[i]) >= 3 and words[i] in table_name:
+                    # Skip common words that would match too broadly
+                    if words[i] not in ['the', 'and', 'for', 'are', 'have', 'been', 'what', 'which', 'show', 'list', 'all', 'get', 'setup', 'set', 'how', 'many', 'config', 'table']:
+                        score += 30  # Moderate boost for single word match
+                        name_match_found = True
+                
+                # Two-word combinations (e.g., "ale group" -> "ale_group")
+                if i < len(words) - 1:
+                    two_word = f"{words[i]}_{words[i+1]}"
+                    two_word_alt = f"{words[i]}{words[i+1]}"  # Also try without underscore
+                    if two_word in table_name or two_word_alt in table_name:
+                        score += 100  # MASSIVE boost - this is almost certainly the right table
+                        name_match_found = True
+                        logger.warning(f"[SQL-GEN] DIRECT NAME MATCH: '{two_word}' in {table_name[-40:]} (+100)")
+                
+                # Three-word combinations (e.g., "job change reasons" -> "job_change_reasons")
+                if i < len(words) - 2:
+                    three_word = f"{words[i]}_{words[i+1]}_{words[i+2]}"
+                    if three_word in table_name:
+                        score += 120  # Even bigger boost for 3-word match
+                        name_match_found = True
+                        logger.warning(f"[SQL-GEN] DIRECT NAME MATCH: '{three_word}' in {table_name[-40:]} (+120)")
             
             # DEPRIORITIZE lookup/reference tables
             is_lookup = any(indicator in table_name for indicator in LOOKUP_INDICATORS)
