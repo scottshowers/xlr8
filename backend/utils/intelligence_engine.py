@@ -1,10 +1,15 @@
 """
-XLR8 INTELLIGENCE ENGINE v5.16.1
+XLR8 INTELLIGENCE ENGINE v5.16.2
 ================================
 
 Deploy to: backend/utils/intelligence_engine.py
 
 UPDATES:
+- v5.16.2: CONFIG QUESTION FIX - "how many ale groups" no longer triggers
+           employee clarification. Added config_entity_patterns check to
+           _is_employee_question() - if question mentions config entities
+           (ale group, pay group, earnings, deductions, etc.), it's NOT
+           an employee question even if it uses "how many" or "count".
 - v5.16.1: PLURAL HANDLING - Fixed direct name match to handle plurals.
            "ale groups" now matches "ale_group" by trying singular forms.
            Also expanded skip-words list to avoid false matches.
@@ -72,7 +77,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.16.1 PLURAL HANDLING FIX ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.16.2 CONFIG QUESTION FIX ======")
 
 
 # =============================================================================
@@ -873,13 +878,39 @@ class IntelligenceEngine:
         return answer
     
     def _is_employee_question(self, q_lower: str) -> bool:
-        """Check if question is about employees/people."""
+        """
+        Check if question is about employees/people.
+        
+        CRITICAL: Questions about configuration entities (earnings, deductions, 
+        pay groups, ale groups, etc.) should NOT trigger employee clarification
+        even if they use "how many" or "count".
+        """
+        # First check: Is this about a config/setup entity? If so, NOT an employee question
+        config_entity_patterns = [
+            'ale group', 'ale_group', 'pay group', 'pay_group', 'tax group', 'tax_group',
+            'earning', 'deduction', 'benefit', 'job code', 'job_code', 'location',
+            'company', 'department', 'org level', 'bank', 'gl ', 'general ledger',
+            'accrual', 'pto', 'union', 'shift', 'schedule', 'change reason',
+            'termination reason', 'setup', 'configured', 'configuration', 'config',
+            'setting', 'code', 'table', 'lookup', 'rate', 'rule', 'mapping'
+        ]
+        
+        if any(pattern in q_lower for pattern in config_entity_patterns):
+            return False  # Config question - don't ask about employees
+        
+        # Second check: Does it mention employees/people explicitly?
         employee_words = [
             'employee', 'employees', 'worker', 'workers', 'staff', 
-            'people', 'person', 'who ', 'how many', 'count',
-            'headcount', 'roster', 'census'
+            'people', 'person', 'who ', 'headcount', 'roster', 'census',
+            'hire', 'hired', 'terminated', 'active', 'employment'
         ]
-        return any(w in q_lower for w in employee_words)
+        
+        # "how many" and "count" alone don't make it an employee question
+        # They need to be combined with employee-related context
+        if any(w in q_lower for w in employee_words):
+            return True
+        
+        return False
     
     def _detect_status_in_question(self, q_lower: str) -> Optional[str]:
         """
