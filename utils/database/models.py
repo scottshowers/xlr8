@@ -357,6 +357,11 @@ class DocumentRegistryModel:
         parse_status: str = 'success',
         parse_errors: List[str] = None,
         schema_confidence: float = None,
+        processing_time_ms: int = None,
+        classification_time_ms: int = None,
+        parse_time_ms: int = None,
+        embedding_time_ms: int = None,
+        storage_time_ms: int = None,
         metadata: dict = None
     ) -> Optional[Dict[str, Any]]:
         """Register a document in the registry."""
@@ -425,6 +430,11 @@ class DocumentRegistryModel:
                 'citation_count': 0,
                 'positive_feedback': 0,
                 'negative_feedback': 0,
+                'processing_time_ms': processing_time_ms,
+                'classification_time_ms': classification_time_ms,
+                'parse_time_ms': parse_time_ms,
+                'embedding_time_ms': embedding_time_ms,
+                'storage_time_ms': storage_time_ms,
                 'metadata': metadata or {}
             }
             
@@ -834,6 +844,111 @@ class DocumentRegistryModel:
         except Exception as e:
             logger.error(f"[REGISTRY] Error getting files needing review: {e}")
             return []
+    
+    @staticmethod
+    def get_processing_stats(project_id: str = None) -> Dict[str, Any]:
+        """Get processing time statistics for performance monitoring."""
+        supabase = get_supabase()
+        if not supabase:
+            return {}
+        
+        try:
+            files = DocumentRegistryModel.get_by_project(project_id, include_global=True) if project_id else DocumentRegistryModel.get_all()
+            
+            stats = {
+                'total_files': len(files),
+                'files_with_timing': 0,
+                'avg_processing_time_ms': 0,
+                'avg_classification_time_ms': 0,
+                'avg_parse_time_ms': 0,
+                'avg_embedding_time_ms': 0,
+                'avg_storage_time_ms': 0,
+                'max_processing_time_ms': 0,
+                'min_processing_time_ms': None,
+                'by_file_type': {},
+                'by_truth_type': {},
+                'slowest_files': []
+            }
+            
+            processing_times = []
+            classification_times = []
+            parse_times = []
+            embedding_times = []
+            storage_times = []
+            
+            files_with_timing = []
+            
+            for f in files:
+                pt = f.get('processing_time_ms')
+                if pt is not None:
+                    stats['files_with_timing'] += 1
+                    processing_times.append(pt)
+                    files_with_timing.append((pt, f))
+                    
+                    # Track by file type
+                    ft = f.get('file_type', 'unknown')
+                    if ft not in stats['by_file_type']:
+                        stats['by_file_type'][ft] = {'count': 0, 'total_ms': 0, 'avg_ms': 0}
+                    stats['by_file_type'][ft]['count'] += 1
+                    stats['by_file_type'][ft]['total_ms'] += pt
+                    
+                    # Track by truth type
+                    tt = f.get('truth_type', 'unknown')
+                    if tt not in stats['by_truth_type']:
+                        stats['by_truth_type'][tt] = {'count': 0, 'total_ms': 0, 'avg_ms': 0}
+                    stats['by_truth_type'][tt]['count'] += 1
+                    stats['by_truth_type'][tt]['total_ms'] += pt
+                
+                if f.get('classification_time_ms'):
+                    classification_times.append(f['classification_time_ms'])
+                if f.get('parse_time_ms'):
+                    parse_times.append(f['parse_time_ms'])
+                if f.get('embedding_time_ms'):
+                    embedding_times.append(f['embedding_time_ms'])
+                if f.get('storage_time_ms'):
+                    storage_times.append(f['storage_time_ms'])
+            
+            # Calculate averages
+            if processing_times:
+                stats['avg_processing_time_ms'] = int(sum(processing_times) / len(processing_times))
+                stats['max_processing_time_ms'] = max(processing_times)
+                stats['min_processing_time_ms'] = min(processing_times)
+            if classification_times:
+                stats['avg_classification_time_ms'] = int(sum(classification_times) / len(classification_times))
+            if parse_times:
+                stats['avg_parse_time_ms'] = int(sum(parse_times) / len(parse_times))
+            if embedding_times:
+                stats['avg_embedding_time_ms'] = int(sum(embedding_times) / len(embedding_times))
+            if storage_times:
+                stats['avg_storage_time_ms'] = int(sum(storage_times) / len(storage_times))
+            
+            # Calculate per-type averages
+            for ft in stats['by_file_type']:
+                info = stats['by_file_type'][ft]
+                if info['count'] > 0:
+                    info['avg_ms'] = int(info['total_ms'] / info['count'])
+            for tt in stats['by_truth_type']:
+                info = stats['by_truth_type'][tt]
+                if info['count'] > 0:
+                    info['avg_ms'] = int(info['total_ms'] / info['count'])
+            
+            # Get top 5 slowest files
+            files_with_timing.sort(reverse=True, key=lambda x: x[0])
+            stats['slowest_files'] = [
+                {
+                    'filename': f['filename'],
+                    'processing_time_ms': pt,
+                    'file_type': f.get('file_type'),
+                    'truth_type': f.get('truth_type'),
+                    'file_size': f.get('file_size')
+                }
+                for pt, f in files_with_timing[:5]
+            ]
+            
+            return stats
+        except Exception as e:
+            logger.error(f"[REGISTRY] Error getting processing stats: {e}")
+            return {}
     
     # ==========================================================================
     # UTILITY
