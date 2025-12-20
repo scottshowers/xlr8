@@ -2,6 +2,12 @@
 Status Router - Registry-Aware Version
 ======================================
 
+UPDATED December 20, 2025:
+- Thread-safe DuckDB operations (safe_execute, safe_fetchall, safe_fetchone)
+- Data integrity now classifies INSIGHTS vs ISSUES
+- Optional fields (orgudfield*, udf*, report_category) are insights, not issues
+- Health score only affected by actual issues
+
 UPDATED December 19, 2025:
 - Delete endpoints now call DocumentRegistryModel.unregister()
 - Registry is the SOURCE OF TRUTH for all file existence checks
@@ -24,6 +30,7 @@ import sys
 import logging
 import json
 import traceback
+import re
 
 sys.path.insert(0, '/app')
 sys.path.insert(0, '/data')
@@ -1973,17 +1980,35 @@ async def check_data_integrity(project: Optional[str] = None):
             logger.warning(f"[INTEGRITY] Metadata query failed: {meta_e}")
             return {"error": str(meta_e), "tables": [], "total_rows": 0, "health_score": 0, "issues_count": 0}
         
-        # Expanded patterns for bad column detection
-        bad_column_patterns = [
-            'nan', 'unnamed', 'none', 'null',
-            'col_0', 'col_1', 'col_2', 'col_3', 'col_4', 'col_5',
+        # =================================================================
+        # STEP 3: Analyze each table with INSIGHT vs ISSUE classification
+        # =================================================================
+        
+        # Patterns that are ACTUALLY bad (parsing failures)
+        parsing_failure_patterns = [
+            'nan', 'none', 'null', 'unnamed',
             'column0', 'column1', 'column2', 'column_0', 'column_1',
             'field0', 'field1', 'field_0', 'field_1',
             'var0', 'var1', 'var_0', 'var_1',
         ]
         
+        # Patterns that are INSIGHTS (optional fields - not issues)
+        optional_field_patterns = [
+            r'orgud?field\d+',      # orgudfield1-10, orgufield1-10
+            r'udf\d+',              # udf1, udf2, etc.
+            r'custom_?\d+',         # custom1, custom_field_2
+            r'report_category',     # report_category_code, report_category
+            r'user_defined',        # user_defined_*
+            r'flex_?\d*',           # flex1, flex_field
+            r'attribute_?\d*',      # attribute1, attribute_field
+        ]
+        
+        total_insights = 0
+        all_insights = []
+        
         for table_name in tables_to_check:
             table_issues = []
+            table_insights = []
             
             # Get columns for this table
             try:
@@ -2011,25 +2036,47 @@ async def check_data_integrity(project: Optional[str] = None):
             
             total_rows += row_count
             
-            # Check for bad column names
-            bad_cols = []
+            # Analyze each column
             for col in column_names:
                 col_lower = col.lower().strip()
-                if any(pattern in col_lower for pattern in bad_column_patterns):
-                    bad_cols.append(col)
-                elif col_lower.replace('.', '').replace('_', '').replace('-', '').isdigit():
-                    bad_cols.append(col)
-                elif len(col_lower) == 1 and (col_lower.isdigit() or col_lower in 'abcdefghij'):
-                    bad_cols.append(col)
-                elif col_lower.replace('_', '').isdigit() and '_' in col:
-                    bad_cols.append(col)
-            
-            if bad_cols:
-                table_issues.append({
-                    "type": "bad_column_names",
-                    "severity": "high",
-                    "message": f"Suspicious columns: {', '.join(bad_cols[:5])}{'...' if len(bad_cols) > 5 else ''}"
-                })
+                
+                # Check if it's an optional field pattern (INSIGHT, not issue)
+                is_optional = any(re.search(pattern, col_lower) for pattern in optional_field_patterns)
+                
+                if is_optional:
+                    # It's an insight - track it but don't penalize
+                    # We could get fill rate here for richer insights, but skip for now
+                    table_insights.append({
+                        "column": col,
+                        "type": "optional_field",
+                        "message": f"Optional field: {col}"
+                    })
+                    continue
+                
+                # Check for actual parsing failures
+                is_parsing_failure = any(pattern in col_lower for pattern in parsing_failure_patterns)
+                is_purely_numeric = col_lower.replace('.', '').replace('_', '').replace('-', '').isdigit()
+                is_single_char_junk = len(col_lower) == 1 and (col_lower.isdigit() or col_lower in 'abcdefghij')
+                is_numeric_with_underscore = col_lower.replace('_', '').isdigit() and '_' in col_lower
+                
+                # col_X patterns - check if they're junk vs intentional
+                is_col_pattern = re.match(r'^col_\d+$', col_lower)
+                
+                if is_parsing_failure or is_purely_numeric or is_single_char_junk or is_numeric_with_underscore:
+                    table_issues.append({
+                        "column": col,
+                        "type": "bad_column_name",
+                        "severity": "high",
+                        "message": f"Suspicious column: {col}"
+                    })
+                elif is_col_pattern:
+                    # col_X could be junk OR intentional - flag as warning not error
+                    table_issues.append({
+                        "column": col,
+                        "type": "possible_junk",
+                        "severity": "medium",
+                        "message": f"Possible parsing artifact: {col}"
+                    })
             
             # Check first few column names for header detection issues
             if len(column_names) >= 3:
@@ -2055,6 +2102,13 @@ async def check_data_integrity(project: Optional[str] = None):
                     pass
             
             total_issues += len(table_issues)
+            total_insights += len(table_insights)
+            
+            if table_insights:
+                all_insights.append({
+                    "table_name": table_name,
+                    "insights": table_insights
+                })
             
             all_tables.append({
                 "table_name": table_name,
@@ -2062,6 +2116,7 @@ async def check_data_integrity(project: Optional[str] = None):
                 "row_count": row_count,
                 "fill_rate": fill_rate,
                 "issues": table_issues,
+                "insights": table_insights,
                 "status": "unhealthy" if table_issues else "healthy"
             })
         
@@ -2074,16 +2129,18 @@ async def check_data_integrity(project: Optional[str] = None):
         
         overall_status = "healthy" if health_score >= 80 else ("degraded" if health_score >= 50 else "unhealthy")
         
-        logger.info(f"[INTEGRITY] Checked {len(all_tables)} tables, health_score={health_score}%, total_rows={total_rows}")
+        logger.info(f"[INTEGRITY] Checked {len(all_tables)} tables, health_score={health_score}%, total_rows={total_rows}, issues={total_issues}, insights={total_insights}")
         
         return {
             "status": overall_status,
             "tables": all_tables,
             "total_rows": total_rows,
             "health_score": health_score,
-            "issues_count": total_issues
+            "issues_count": total_issues,
+            "insights_count": total_insights,
+            "insights": all_insights
         }
         
     except Exception as e:
         logger.error(f"Data integrity check failed: {e}")
-        return {"error": str(e), "tables": [], "total_rows": 0, "health_score": 0, "issues_count": 0}
+        return {"error": str(e), "tables": [], "total_rows": 0, "health_score": 0, "issues_count": 0, "insights_count": 0}
