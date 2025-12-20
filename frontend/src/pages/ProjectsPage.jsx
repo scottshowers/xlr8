@@ -131,7 +131,7 @@ export default function ProjectsPage() {
         }}>
           Projects
         </h1>
-        <p style={{ color: colors.textMuted, margin: '0.25rem 0 0 0', fontSize: '0.875rem' }}>
+        <p style={{ color: colors.textMuted, margin: '0.25rem 0 0 0', fontSize: '0.85rem' }}>
           Create and manage customer projects
         </p>
       </div>
@@ -152,7 +152,7 @@ export default function ProjectsPage() {
           justifyContent: 'space-between',
           alignItems: 'center',
         }}>
-          <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600, color: colors.text }}>
+          <h3 style={{ margin: 0, fontSize: '0.85rem', fontWeight: 600, color: colors.text }}>
             All Projects
           </h3>
           <button
@@ -195,7 +195,7 @@ export default function ProjectsPage() {
                       padding: '0.6rem',
                       border: `1px solid ${colors.inputBorder}`,
                       borderRadius: 6,
-                      fontSize: '0.9rem',
+                      fontSize: '0.85rem',
                       background: colors.card,
                       color: colors.text,
                       boxSizing: 'border-box',
@@ -216,7 +216,7 @@ export default function ProjectsPage() {
                       padding: '0.6rem',
                       border: `1px solid ${colors.inputBorder}`,
                       borderRadius: 6,
-                      fontSize: '0.9rem',
+                      fontSize: '0.85rem',
                       background: colors.card,
                       color: colors.text,
                       boxSizing: 'border-box',
@@ -237,7 +237,7 @@ export default function ProjectsPage() {
                       padding: '0.6rem',
                       border: `1px solid ${colors.inputBorder}`,
                       borderRadius: 6,
-                      fontSize: '0.9rem',
+                      fontSize: '0.85rem',
                       background: colors.card,
                       color: colors.text,
                       boxSizing: 'border-box',
@@ -262,7 +262,7 @@ export default function ProjectsPage() {
                       padding: '0.6rem',
                       border: `1px solid ${colors.inputBorder}`,
                       borderRadius: 6,
-                      fontSize: '0.9rem',
+                      fontSize: '0.85rem',
                       background: colors.card,
                       color: colors.text,
                       boxSizing: 'border-box',
@@ -285,7 +285,7 @@ export default function ProjectsPage() {
                       padding: '0.6rem',
                       border: `1px solid ${colors.inputBorder}`,
                       borderRadius: 6,
-                      fontSize: '0.9rem',
+                      fontSize: '0.85rem',
                       background: colors.card,
                       color: colors.text,
                       boxSizing: 'border-box',
@@ -387,18 +387,18 @@ export default function ProjectsPage() {
         {projects.length === 0 ? (
           <div style={{ padding: '3rem', textAlign: 'center', color: colors.textMuted }}>
             <FolderOpen size={40} style={{ opacity: 0.3, marginBottom: '1rem' }} />
-            <p style={{ margin: 0, fontSize: '0.95rem' }}>No projects yet. Create one to get started.</p>
+            <p style={{ margin: 0, fontSize: '0.85rem' }}>No projects yet. Create one to get started.</p>
           </div>
         ) : (
           <div>
             {/* Table Header */}
             <div style={{
               display: 'grid',
-              gridTemplateColumns: '1.5fr 1.5fr 1fr 2fr 0.8fr 1fr',
+              gridTemplateColumns: '1.3fr 1.5fr 0.9fr 1.6fr 0.7fr 1.5fr',
               padding: '0.75rem 1rem',
               background: colors.inputBg,
               borderBottom: `1px solid ${colors.divider}`,
-              fontSize: '0.7rem',
+              fontSize: '0.75rem',
               fontWeight: 600,
               color: colors.textMuted,
               textTransform: 'uppercase',
@@ -422,7 +422,7 @@ export default function ProjectsPage() {
                   key={project.id}
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: '1.5fr 1.5fr 1fr 2fr 0.8fr 1fr',
+                    gridTemplateColumns: '1.3fr 1.5fr 0.9fr 1.6fr 0.7fr 1.5fr',
                     padding: '0.875rem 1rem',
                     borderBottom: `1px solid ${colors.divider}`,
                     borderLeft: `3px solid ${isSelected ? customerColors.primary : 'transparent'}`,
@@ -443,8 +443,8 @@ export default function ProjectsPage() {
                     }
                   }}
                 >
-                  <span style={{ fontWeight: 600, color: customerColors.primary }}>{project.name}</span>
-                  <span style={{ color: colors.text }}>{project.customer}</span>
+                  <span style={{ fontWeight: 600, color: customerColors.primary, fontSize: '0.85rem' }}>{project.name}</span>
+                  <span style={{ color: colors.text, fontSize: '0.85rem' }}>{project.customer}</span>
                   <span style={{ color: colors.textMuted, fontSize: '0.85rem' }}>{project.product || '—'}</span>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
                     {(project.playbooks || []).length > 0 ? (
@@ -459,7 +459,7 @@ export default function ProjectsPage() {
                             background: colors.primaryLight,
                             border: `1px solid ${colors.primary}40`,
                             borderRadius: 4,
-                            fontSize: '0.7rem',
+                            fontSize: '0.75rem',
                             color: colors.primary,
                           }}
                         >
@@ -467,14 +467,14 @@ export default function ProjectsPage() {
                         </span>
                       ))
                     ) : (
-                      <span style={{ color: colors.textLight, fontSize: '0.8rem' }}>None assigned</span>
+                      <span style={{ color: colors.textLight, fontSize: '0.75rem' }}>None assigned</span>
                     )}
                   </div>
                   <span style={{
                     display: 'inline-block',
                     padding: '0.2rem 0.5rem',
                     borderRadius: 4,
-                    fontSize: '0.7rem',
+                    fontSize: '0.75rem',
                     fontWeight: 600,
                     background: project.status === 'active' ? colors.primaryLight : colors.inputBg,
                     color: project.status === 'active' ? colors.primary : colors.textMuted,
