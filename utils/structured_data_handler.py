@@ -1,8 +1,22 @@
 """
-Structured Data Handler - DuckDB Storage for Excel/CSV v5.4
+Structured Data Handler - DuckDB Storage for Excel/CSV v5.5
 ===========================================================
 
 Deploy to: utils/structured_data_handler.py
+
+v5.5 CHANGES (Junk Column Removal & Observation Classification):
+- NEW: _remove_junk_columns() - Auto-removes parsing artifacts before storage
+  - Removes: col_X, unnamed, 100% empty columns
+  - Removes: junk-named columns with <5% fill rate
+  - Tracks removed columns in results for transparency
+- NEW: _classify_column_observation() - Classifies findings properly
+  - INSIGHT: Optional fields not in use (UDFs, report_category)
+  - WARNING: Suspicious patterns that might need attention
+  - ERROR: Actual data quality problems
+- UPDATED: _validate_upload_quality() - Returns insights AND issues separately
+  - Health score only affected by actual issues, not insights
+  - Insights tracked for configuration understanding
+- NEW: cleanup_junk_columns() - Utility to clean existing tables
 
 v5.4 CHANGES (Universal Header Detection):
 - NEW: _find_header_row() - Universal function based on ratios, not heuristics
@@ -539,6 +553,182 @@ class StructuredDataHandler:
         if sanitized and sanitized[0].isdigit():
             sanitized = 'col_' + sanitized
         return sanitized or 'unnamed'
+    
+    def _remove_junk_columns(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
+        """
+        Remove junk columns that are parsing artifacts.
+        
+        Identifies and removes:
+        - Columns named 'unnamed', 'col_X' (auto-generated)
+        - Columns that are 100% empty
+        - Columns that are 95%+ empty AND have junk names
+        
+        Returns:
+            Tuple of (cleaned_dataframe, list_of_removed_columns)
+        """
+        removed = []
+        cols_to_drop = []
+        
+        for col in df.columns:
+            col_str = str(col).lower()
+            
+            # Check for junk column patterns
+            is_junk_name = (
+                col_str == 'unnamed' or
+                col_str.startswith('unnamed_') or
+                col_str.startswith('unnamed:') or
+                re.match(r'^col_\d+$', col_str) or  # col_0, col_1, etc.
+                col_str in ['nan', 'none', 'nat', '']
+            )
+            
+            # Check fill rate
+            if len(df) > 0:
+                non_empty = df[col].notna().sum()
+                non_empty_str = (df[col].astype(str).str.strip() != '').sum()
+                fill_rate = max(non_empty, non_empty_str) / len(df)
+            else:
+                fill_rate = 0
+            
+            # Decision logic
+            should_remove = False
+            reason = None
+            
+            if fill_rate == 0:
+                should_remove = True
+                reason = 'completely_empty'
+            elif is_junk_name and fill_rate < 0.05:
+                should_remove = True
+                reason = 'junk_name_mostly_empty'
+            elif is_junk_name and fill_rate < 0.10:
+                # Borderline - check if it's all the same value (often parsing artifact)
+                unique_values = df[col].dropna().astype(str).str.strip().unique()
+                unique_values = [v for v in unique_values if v and v.lower() not in ['nan', 'none', '']]
+                if len(unique_values) <= 1:
+                    should_remove = True
+                    reason = 'junk_name_single_value'
+            
+            if should_remove:
+                cols_to_drop.append(col)
+                removed.append({
+                    'column': str(col),
+                    'reason': reason,
+                    'fill_rate': round(fill_rate, 3)
+                })
+                logger.info(f"[JUNK-REMOVAL] Removing column '{col}': {reason} (fill={fill_rate:.1%})")
+        
+        if cols_to_drop:
+            df = df.drop(columns=cols_to_drop)
+            logger.info(f"[JUNK-REMOVAL] Removed {len(cols_to_drop)} junk column(s)")
+        
+        return df, removed
+    
+    def _classify_column_observation(
+        self, 
+        column_name: str, 
+        fill_rate: float, 
+        table_name: str = None
+    ) -> Optional[Dict]:
+        """
+        Classify a column observation as insight, warning, error, or None.
+        
+        Classification logic:
+        - INSIGHT: Optional fields not in use (UDFs, report categories at 0%)
+        - WARNING: Partially filled required-looking fields
+        - ERROR: Clearly invalid data patterns
+        
+        Returns:
+            Dict with classification info, or None if no observation needed
+        """
+        col_lower = column_name.lower()
+        
+        # Pattern matching for known optional fields
+        OPTIONAL_FIELD_PATTERNS = [
+            r'orgud?field\d+',      # orgudfield1-10, orgufield1-10
+            r'udf\d+',              # udf1, udf2, etc.
+            r'custom_?\d+',         # custom1, custom_field_2
+            r'report_category',     # report_category_code, report_category
+            r'user_defined',        # user_defined_*
+            r'flex_?\d*',           # flex1, flex_field
+            r'attribute_?\d*',      # attribute1, attribute_field
+        ]
+        
+        is_optional_field = any(re.search(pattern, col_lower) for pattern in OPTIONAL_FIELD_PATTERNS)
+        
+        # Classification logic
+        if is_optional_field:
+            if fill_rate == 0:
+                return {
+                    'classification': 'insight',
+                    'column': column_name,
+                    'fill_rate': fill_rate,
+                    'message': f"Not using {column_name}",
+                    'affects_health_score': False,
+                    'insight_type': 'unused_optional_field'
+                }
+            elif fill_rate > 0.9:
+                return {
+                    'classification': 'insight',
+                    'column': column_name,
+                    'fill_rate': fill_rate,
+                    'message': f"Using {column_name} ({fill_rate:.0%} populated)",
+                    'affects_health_score': False,
+                    'insight_type': 'active_optional_field'
+                }
+            else:
+                return {
+                    'classification': 'insight',
+                    'column': column_name,
+                    'fill_rate': fill_rate,
+                    'message': f"Partially using {column_name} ({fill_rate:.0%})",
+                    'affects_health_score': False,
+                    'insight_type': 'partial_optional_field'
+                }
+        
+        # Check for suspicious columns (might indicate parsing issues)
+        SUSPICIOUS_PATTERNS = [
+            r'^col_\d+$',
+            r'^unnamed',
+            r'^\d+$',
+        ]
+        
+        is_suspicious_name = any(re.match(pattern, col_lower) for pattern in SUSPICIOUS_PATTERNS)
+        
+        if is_suspicious_name:
+            return {
+                'classification': 'warning',
+                'column': column_name,
+                'fill_rate': fill_rate,
+                'message': f"Suspicious column name: {column_name}",
+                'affects_health_score': True,
+                'warning_type': 'suspicious_column_name'
+            }
+        
+        # Check for potentially required fields with low fill rates
+        LIKELY_REQUIRED_PATTERNS = [
+            r'employee_?id',
+            r'emp_?id', 
+            r'person_?id',
+            r'ssn',
+            r'social_security',
+            r'hire_date',
+            r'first_?name',
+            r'last_?name',
+        ]
+        
+        is_likely_required = any(re.search(pattern, col_lower) for pattern in LIKELY_REQUIRED_PATTERNS)
+        
+        if is_likely_required and fill_rate < 0.5:
+            return {
+                'classification': 'warning',
+                'column': column_name,
+                'fill_rate': fill_rate,
+                'message': f"Required field {column_name} only {fill_rate:.0%} populated",
+                'affects_health_score': True,
+                'warning_type': 'low_fill_required_field'
+            }
+        
+        # Default: no observation needed
+        return None
     
     def _find_header_row(self, df: pd.DataFrame, max_rows: int = 15) -> int:
         """
@@ -1813,6 +2003,13 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                                     sub_df[col] = sub_df[col].fillna('').astype(str)
                                     sub_df[col] = sub_df[col].replace({'nan': '', 'None': '', 'NaT': ''})
                                 
+                                # Remove junk columns before storage
+                                sub_df, removed_junk = self._remove_junk_columns(sub_df)
+                                if removed_junk:
+                                    if 'junk_columns_removed' not in results:
+                                        results['junk_columns_removed'] = []
+                                    results['junk_columns_removed'].extend([{**j, 'sheet': sheet_name, 'sub_table': sub_table_name} for j in removed_junk])
+                                
                                 # Generate combined sheet name: "Change Reasons - Benefit Change Reasons"
                                 combined_sheet = f"{sheet_name} - {sub_table_name}"
                                 
@@ -1899,6 +2096,13 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                                 for col in sub_df.columns:
                                     sub_df[col] = sub_df[col].fillna('').astype(str)
                                     sub_df[col] = sub_df[col].replace({'nan': '', 'None': '', 'NaT': ''})
+                                
+                                # Remove junk columns before storage
+                                sub_df, removed_junk = self._remove_junk_columns(sub_df)
+                                if removed_junk:
+                                    if 'junk_columns_removed' not in results:
+                                        results['junk_columns_removed'] = []
+                                    results['junk_columns_removed'].extend([{**j, 'sheet': sheet_name, 'sub_table': sub_table_name} for j in removed_junk])
                                 
                                 # Generate combined sheet name: "Organization - Level"
                                 combined_sheet = f"{sheet_name} - {sub_table_name}"
@@ -2022,6 +2226,13 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                         df[col] = df[col].fillna('').astype(str)
                         # Replace string 'nan' and 'None' that result from conversion
                         df[col] = df[col].replace({'nan': '', 'None': '', 'NaT': ''})
+                    
+                    # Remove junk columns before storage
+                    df, removed_junk = self._remove_junk_columns(df)
+                    if removed_junk:
+                        if 'junk_columns_removed' not in results:
+                            results['junk_columns_removed'] = []
+                        results['junk_columns_removed'].extend([{**j, 'sheet': sheet_name} for j in removed_junk])
                     
                     # ENCRYPT PII COLUMNS
                     encrypted_cols = []
@@ -2163,23 +2374,35 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
     
     def _validate_upload_quality(self, results: Dict) -> Dict:
         """
-        Validate uploaded data quality - catches header detection failures.
+        Validate uploaded data quality and classify observations.
         
-        Checks for:
-        - Bad column names (nan, unnamed, numeric)
-        - Very low fill rates suggesting wrong header row
-        - Tables with mostly empty columns
+        Classifications:
+        - INSIGHT: Configuration observations (not issues) - e.g., optional fields not in use
+        - WARNING: Potential concerns worth noting - e.g., suspicious column names
+        - ERROR: Actual data quality problems - e.g., header detection failure
+        
+        Only ERRORS and WARNINGS affect health score.
+        INSIGHTS are tracked but don't reduce score.
         
         Returns:
             {
                 'status': 'healthy' | 'warning' | 'critical',
+                'health_score': int (0-100),
                 'tables_checked': int,
                 'tables_with_issues': int,
-                'issues': [{'table': ..., 'problems': [...]}]
+                'total_issues': int,
+                'total_insights': int,
+                'issues': [...],      # Only actual issues (warnings/errors)
+                'insights': [...],    # Configuration observations
+                'junk_removed': [...] # Columns auto-removed
             }
         """
-        bad_patterns = ['nan', 'unnamed', 'col_0', 'col_1', 'col_2', 'col_3', 'none']
         issues = []
+        insights = []
+        junk_removed = results.get('junk_columns_removed', [])
+        
+        # Bad patterns that indicate parsing problems (NOT optional fields)
+        parsing_problem_patterns = ['nan', 'none']
         
         for sheet_info in results.get('sheets', []):
             table_name = sheet_info.get('table_name', '')
@@ -2189,27 +2412,39 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 continue
             
             table_issues = []
+            table_insights = []
             
-            # Check for bad column names
-            bad_cols = []
+            # Analyze each column
             for col in columns:
                 col_name = col.get('name', col) if isinstance(col, dict) else str(col)
                 col_lower = col_name.lower()
                 
-                # Check against bad patterns
-                if any(pattern in col_lower for pattern in bad_patterns):
-                    bad_cols.append(col_name)
-                # Check for purely numeric column names
-                elif col_lower.replace('.', '').replace('_', '').replace('-', '').isdigit():
-                    bad_cols.append(col_name)
-            
-            if bad_cols:
-                table_issues.append({
-                    'type': 'bad_column_names',
-                    'severity': 'high',
-                    'message': f"Suspicious column names detected: {bad_cols[:5]}{'...' if len(bad_cols) > 5 else ''}",
-                    'count': len(bad_cols)
-                })
+                # Get fill rate if available (default to 1.0 if not tracked)
+                fill_rate = col.get('fill_rate', 1.0) if isinstance(col, dict) else 1.0
+                
+                # Classify the observation
+                observation = self._classify_column_observation(col_name, fill_rate, table_name)
+                
+                if observation:
+                    if observation['classification'] == 'insight':
+                        table_insights.append(observation)
+                    elif observation['classification'] in ['warning', 'error']:
+                        table_issues.append({
+                            'type': observation.get('warning_type', 'data_quality'),
+                            'severity': 'high' if observation['classification'] == 'error' else 'medium',
+                            'message': observation['message'],
+                            'column': col_name,
+                            'fill_rate': fill_rate
+                        })
+                
+                # Check for actual parsing problems (not optional fields)
+                if any(pattern == col_lower for pattern in parsing_problem_patterns):
+                    table_issues.append({
+                        'type': 'parsing_artifact',
+                        'severity': 'high',
+                        'message': f"Column appears to be parsing artifact: {col_name}",
+                        'column': col_name
+                    })
             
             # Check for header detection failure (first few columns are numeric)
             col_names = [c.get('name', c) if isinstance(c, dict) else str(c) for c in columns[:5]]
@@ -2225,26 +2460,49 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             if table_issues:
                 issues.append({
                     'table': table_name,
-                    'sheet': sheet_info.get('sheet_name', ''),
+                    'sheet': sheet_info.get('sheet_name', sheet_info.get('name', '')),
                     'problems': table_issues
+                })
+            
+            if table_insights:
+                insights.append({
+                    'table': table_name,
+                    'sheet': sheet_info.get('sheet_name', sheet_info.get('name', '')),
+                    'observations': table_insights
                 })
         
         tables_checked = len(results.get('sheets', []))
         tables_with_issues = len(issues)
         
-        # Determine overall status
-        if tables_with_issues == 0:
+        # Calculate health score (only issues affect it, not insights)
+        total_issues = sum(len(i['problems']) for i in issues)
+        
+        if total_issues == 0:
+            health_score = 100
             status = 'healthy'
-        elif tables_with_issues < tables_checked * 0.3:
+        elif total_issues <= 2:
+            health_score = 90
+            status = 'healthy'
+        elif total_issues <= 5:
+            health_score = 75
+            status = 'warning'
+        elif total_issues <= 10:
+            health_score = 60
             status = 'warning'
         else:
+            health_score = max(40, 100 - (total_issues * 5))
             status = 'critical'
         
         return {
             'status': status,
+            'health_score': health_score,
             'tables_checked': tables_checked,
             'tables_with_issues': tables_with_issues,
-            'issues': issues
+            'total_issues': total_issues,
+            'total_insights': sum(len(i['observations']) for i in insights),
+            'issues': issues,
+            'insights': insights,
+            'junk_removed': junk_removed
         }
     
     # =========================================================================
@@ -2307,6 +2565,10 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 df[col] = df[col].fillna('').astype(str)
                 df[col] = df[col].replace({'nan': '', 'None': '', 'NaT': ''})
             
+            # Remove junk columns before storage
+            df, removed_junk = self._remove_junk_columns(df)
+            junk_columns_removed = removed_junk if removed_junk else []
+            
             report_progress(40, "Creating DuckDB table...")
             
             table_name = self._generate_table_name(project, file_name, 'data')
@@ -2360,7 +2622,8 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 'row_count': len(df),
                 'likely_keys': likely_keys,
                 'column_profiles': profile_result.get('profiles', {}),
-                'categorical_columns': profile_result.get('categorical_columns', [])
+                'categorical_columns': profile_result.get('categorical_columns', []),
+                'junk_columns_removed': junk_columns_removed
             }
             
         except Exception as e:
@@ -3642,6 +3905,136 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             result['error'] = str(e)
         
         return result
+    
+    def cleanup_junk_columns(self, project: str = None, dry_run: bool = True) -> Dict:
+        """
+        Clean up junk columns from existing DuckDB tables.
+        
+        Identifies and optionally removes:
+        - Columns named 'unnamed', 'col_X' (auto-generated)
+        - Columns that are 100% empty
+        - Columns that are mostly empty AND have junk names
+        
+        Args:
+            project: Optional project filter (None = all projects)
+            dry_run: If True, report what would be cleaned without making changes
+        
+        Returns:
+            {
+                'tables_scanned': int,
+                'tables_with_junk': int,
+                'columns_identified': [...],
+                'columns_removed': [...] (empty if dry_run)
+            }
+        """
+        result = {
+            'tables_scanned': 0,
+            'tables_with_junk': 0,
+            'columns_identified': [],
+            'columns_removed': [],
+            'dry_run': dry_run,
+            'errors': []
+        }
+        
+        try:
+            # Get all tables
+            tables_query = """
+                SELECT DISTINCT table_name, project, file_name
+                FROM _schema_metadata
+                WHERE is_current = TRUE
+            """
+            if project:
+                tables_query += f" AND project = '{project}'"
+            
+            tables = self.conn.execute(tables_query).fetchall()
+            
+            for table_name, proj, file_name in tables:
+                result['tables_scanned'] += 1
+                
+                try:
+                    # Get column info
+                    col_info = self.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
+                    
+                    # Read sample to check fill rates
+                    sample = self.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 1000').fetchdf()
+                    row_count = self.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
+                    
+                    junk_cols = []
+                    for col_row in col_info:
+                        col_name = col_row[1]  # Column name is at index 1
+                        col_lower = str(col_name).lower()
+                        
+                        # Check if junk name
+                        is_junk_name = (
+                            col_lower == 'unnamed' or
+                            col_lower.startswith('unnamed_') or
+                            re.match(r'^col_\d+$', col_lower) or
+                            col_lower in ['nan', 'none', '']
+                        )
+                        
+                        # Check fill rate
+                        if len(sample) > 0 and col_name in sample.columns:
+                            non_empty = sample[col_name].notna().sum()
+                            non_empty_str = (sample[col_name].astype(str).str.strip() != '').sum()
+                            fill_rate = max(non_empty, non_empty_str) / len(sample)
+                        else:
+                            fill_rate = 0
+                        
+                        # Identify as junk
+                        if (fill_rate == 0) or (is_junk_name and fill_rate < 0.05):
+                            junk_cols.append({
+                                'column': col_name,
+                                'fill_rate': round(fill_rate, 4),
+                                'is_junk_name': is_junk_name,
+                                'reason': 'empty' if fill_rate == 0 else 'junk_name_sparse'
+                            })
+                    
+                    if junk_cols:
+                        result['tables_with_junk'] += 1
+                        
+                        for junk in junk_cols:
+                            result['columns_identified'].append({
+                                'table': table_name,
+                                'project': proj,
+                                'file': file_name,
+                                'column': junk['column'],
+                                'fill_rate': junk['fill_rate'],
+                                'reason': junk['reason']
+                            })
+                            
+                            if not dry_run:
+                                try:
+                                    self.conn.execute(f'ALTER TABLE "{table_name}" DROP COLUMN "{junk["column"]}"')
+                                    result['columns_removed'].append({
+                                        'table': table_name,
+                                        'column': junk['column']
+                                    })
+                                    logger.info(f"[CLEANUP] Removed {table_name}.{junk['column']}")
+                                except Exception as drop_e:
+                                    result['errors'].append({
+                                        'table': table_name,
+                                        'column': junk['column'],
+                                        'error': str(drop_e)
+                                    })
+                                    logger.warning(f"[CLEANUP] Could not drop {table_name}.{junk['column']}: {drop_e}")
+                
+                except Exception as table_e:
+                    result['errors'].append({
+                        'table': table_name,
+                        'error': str(table_e)
+                    })
+                    logger.warning(f"[CLEANUP] Error processing {table_name}: {table_e}")
+            
+            if not dry_run:
+                self.conn.commit()
+            
+            logger.info(f"[CLEANUP] Scanned {result['tables_scanned']} tables, found {len(result['columns_identified'])} junk columns")
+            return result
+            
+        except Exception as e:
+            logger.error(f"[CLEANUP] Error: {e}")
+            result['errors'].append({'general': str(e)})
+            return result
     
     def close(self):
         """Close database connection"""
