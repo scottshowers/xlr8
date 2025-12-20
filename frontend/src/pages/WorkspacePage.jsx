@@ -61,7 +61,7 @@ function SelectProjectPrompt({ colors }) {
       </h2>
       <p style={{
         color: colors.textMuted,
-        fontSize: '0.9rem',
+        fontSize: '0.85rem',
         maxWidth: '350px',
         lineHeight: 1.5,
         margin: 0,
@@ -140,7 +140,7 @@ export default function WorkspacePage() {
           )}
         </h1>
         {!hasActiveProject && (
-          <p style={{ color: colors.textMuted, margin: '0.25rem 0 0 0', fontSize: '0.875rem' }}>
+          <p style={{ color: colors.textMuted, margin: '0.25rem 0 0 0', fontSize: '0.85rem' }}>
             Chat with your data and get intelligent insights
           </p>
         )}
